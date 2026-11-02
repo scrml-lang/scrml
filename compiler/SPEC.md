@@ -910,30 +910,30 @@ compiled as a separate worker bundle.
 ```scrml
 <program db="./app.db">
 
-<result> = not
-<loading> = false
+<result> = not;
+<loading> = false;
 
 <program name="heavyCompute">
     // Separate compilation unit — no parent scope access
     ${ type ComputeResult:struct = { value: number, iterations: number } }
 
     ${ function compute(data: number[]) {
-        let sum = 0
-        for (let i = 0; i < data.length; i++) { sum += data[i] * data[i] }
-        return { value: sum, iterations: data.length }
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) { sum += data[i] * data[i]; }
+        return { value: sum, iterations: data.length };
     } }
 
     when message(data) {
-        let result = compute(data)
+        let result = compute(data);
         send(result)
     }
 </>
 
 ${ function runCompute() {
-    @loading = true
+    @loading = true;
     // <#name>.send() returns a Promise resolving to the worker's response
-    @result = <#heavyCompute>.send([1, 2, 3, 4, 5])
-    @loading = false
+    @result = <#heavyCompute>.send([1, 2, 3, 4, 5]);
+    @loading = false;
 } }
 
 <button onclick=runCompute()>Compute</>
@@ -971,7 +971,7 @@ parent's compiled output.
 use foreign:ml { predict }
 
 ${ function getPrediction(features: number[], modelId: string) {
-    return predict({ features, modelId })
+    return predict({ features, modelId });
 } }
 
 </>
@@ -988,12 +988,12 @@ applications with clear scope boundaries.
 
 <program db="postgres://analytics:5432/metrics">
     ${ function getMetrics(period: string) {
-        return ?{`SELECT * FROM daily_metrics WHERE period = ${period}`}.all()
+        return ?{`SELECT * FROM daily_metrics WHERE period = ${period}`}.all();
     } }
 </>
 
 ${ function getUser(id: int) {
-    return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+    return ?{`SELECT * FROM users WHERE id = ${id}`}.get();
 } }
 
 </>
@@ -1170,7 +1170,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 **Worked example — HTML element `:`-shorthand (S159):**
 
 ```scrml
-<label> = "Email"
+<label> = "Email";
 
 <span : @label>                  <!-- renders <span>${@label}</span> (non-void) -->
 <li : "Static item">             <!-- display-text literal body (§4.18.3) -->
@@ -1349,6 +1349,8 @@ Both forms display `<button disabled=${!@signup.isValid}>Submit</button>`.
 Counter is now ${@count}:
 <pre><code>const x = N;  // (display-only)</code></pre>
 ```
+
+**S474 — `${}` in a raw body is an INTERIM limit; a text-only `of=` form is owed (PA rec, veto window).** That a `${…}` inside a `<pre>` / `<code>` body is display text stays the rule **for the body** (S468 "always" is read as "always for the body"). Showing a dynamic value in a `<pre>` or `<code>` element at all is not refused as a language rule: it is not built yet. The owed capable form (`g-pre-code-of-text-form-unbuilt-s474`) is an explicit data form, **`<pre of=e/>` / `<code of=e/>`**: a raw element with `of=` and no body, whose value is inserted as one text node, auto-escaped (§4.18.6), with no structure — as `<md of=>` inserts its source. SEC-03 (raw content cannot execute) is unaffected: the body stays raw and the `of=` value is text. The attribute name and the self-closing form are the PA's rec, not ruled. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors", trailing note — *"Not ruled here, carried as PA recs (veto window): … `${}` in `<pre>`/`<code>` becomes INTERIM, with a text-only `<pre of=…/>` owed."* · dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §5 · supersedes: nothing struck; the "Out-of-band opt-back-in deferred" paragraph above names the surface it defers to · **Direction of change:** inert (no program changes until built). ⚑ PA rec in the veto window — not yet ruled by bryan.)*
 
 **Companion considerations:**
 
@@ -1987,9 +1989,9 @@ A handler that runs several statements does NOT need the expression form: the in
 **Worked example — expression form with closure capture (valid):**
 
 ```scrml
-<items> = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }]
+<items> = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }];
 ${ function deleteItem(id: int) {
-    ?{`DELETE FROM items WHERE id = ${id}`}.run()
+    ?{`DELETE FROM items WHERE id = ${id}`}.run();
 } }
 
 <ul>${
@@ -2102,22 +2104,22 @@ An event-handler attribute value takes one of the following shapes:
 ```scrml
 type Phase:enum = { Idle, Loading }
 
-<count> = 5
-<phase>: Phase = .Loading
-<last> = ""
+<count> = 5;
+<phase>: Phase = .Loading;
+<last> = "";
 
-${ function track(name: string) { @last = name } }
+${ function track(name: string) { @last = name; } }
 
-<button onclick={ @count = 0; @phase = .Idle; track("reset") }>Start over</>
+<button onclick={ @count = 0; @phase = .Idle; track("reset"); }>Start over</>
 ```
 
 The three statements run in order on each click. A multi-line block is the same form:
 
 ```scrml
 <button onclick={
-    const next = @count + 1
-    @count = next
-    if (next > 2) { @msg = "big" }
+    const next = @count + 1;
+    @count = next;
+    if (next > 2) { @msg = "big"; }
 }>Add</>
 ```
 
@@ -2323,7 +2325,7 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
 **Worked example — valid:**
 
 ```scrml
-<name> = ""
+<name> = "";
 <input bind:value=@name>
 <p>Hello, ${@name}!</>
 ```
@@ -2334,7 +2336,7 @@ Typing in the input updates `@name` reactively. The `<p>` re-renders on each cha
 **Worked example — valid (checkbox):**
 
 ```scrml
-<agreed> = false
+<agreed> = false;
 <input type="checkbox" bind:checked=@agreed>
 <button disabled=@agreed if=@agreed>Proceed</>
 ```
@@ -2342,7 +2344,7 @@ Typing in the input updates `@name` reactively. The `<p>` re-renders on each cha
 **Worked example — valid (radio group):**
 
 ```scrml
-<color> = "red"
+<color> = "red";
 <input type="radio" name="color" value="red" bind:group=@color>
 <input type="radio" name="color" value="blue" bind:group=@color>
 <input type="radio" name="color" value="green" bind:group=@color>
@@ -2352,7 +2354,7 @@ Typing in the input updates `@name` reactively. The `<p>` re-renders on each cha
 **Worked example — invalid (plain variable):**
 
 ```scrml
-let name = ""
+let name = "";
 <input bind:value=name>
 ```
 
@@ -2403,7 +2405,7 @@ Use `@name` or change `bind:value` to `value=name`.
 **Worked example — text input dispatch:**
 
 ```scrml
-<userName req length(>=2)> = <input type="text"/>
+<userName req length(>=2)> = <input type="text"/>;
 
 <form>
     <userName/>     // expands to <input type="text" bind:value=@userName .../>
@@ -2413,7 +2415,7 @@ Use `@name` or change `bind:value` to `value=name`.
 **Worked example — checkbox dispatch:**
 
 ```scrml
-<agreed req> = <input type="checkbox"/>
+<agreed req> = <input type="checkbox"/>;
 
 <form>
     <agreed/>       // expands to <input type="checkbox" bind:checked=@agreed/>
@@ -2423,7 +2425,7 @@ Use `@name` or change `bind:value` to `value=name`.
 **Worked example — file dispatch:**
 
 ```scrml
-<photo req> = <input type="file"/>
+<photo req> = <input type="file"/>;
 
 <form>
     <photo/>        // expands to <input type="file" bind:files=@photo/>
@@ -2480,7 +2482,7 @@ class-expr       ::= '@' identifier             // reactive variable
 **Example:**
 
 ```scrml
-<isActive> = false
+<isActive> = false;
 <button class:active=@isActive onclick=toggle()>Toggle</>
 ```
 
@@ -2524,8 +2526,8 @@ full re-render.
 **Worked example — multiple conditional classes:**
 
 ```scrml
-<loading>  = false
-<hasError> = false
+<loading>  = false;
+<hasError> = false;
 
 <div class="status" class:loading=@loading class:error=@hasError>
     ${@loading ? "Loading..." : @hasError ? "Error" : "OK"}</>
@@ -2537,7 +2539,7 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — combined with bind:checked:**
 
 ```scrml
-<agreed> = false
+<agreed> = false;
 <label class:agreed=@agreed>
     <input type="checkbox" bind:checked=@agreed>
     I agree to the terms
@@ -2547,7 +2549,7 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — property access expression:**
 
 ```scrml
-<todo> = { completed: false, text: "Buy milk" }
+<todo> = { completed: false, text: "Buy milk" };
 <li class:done=todo.completed>${@todo.text}</>
 ```
 
@@ -2556,8 +2558,8 @@ The `status` class is always present. The `loading` and `error` classes toggle i
 **Worked example — parenthesized expression:**
 
 ```scrml
-<index>         = 0
-<selectedIndex> = 2
+<index>         = 0;
+<selectedIndex> = 2;
 
 <ul>
     // for each item...
@@ -2586,7 +2588,7 @@ class="<static-prefix>${<expression>}<static-suffix>"
 **Example:**
 
 ```scrml
-<status> = "active"
+<status> = "active";
 <div class="item-${@status}">content</>
 ```
 
@@ -2631,7 +2633,7 @@ called.
 **Worked example — prefix and reactive suffix:**
 
 ```scrml
-<theme> = "dark"
+<theme> = "dark";
 <div class="card card-${@theme}">content</>
 ```
 
@@ -2641,8 +2643,8 @@ Renders `class="card card-dark"` initially. Changing `@theme` to `"light"` updat
 **Worked example — multiple reactive parts:**
 
 ```scrml
-<size>    = "md"
-<variant> = "primary"
+<size>    = "md";
+<variant> = "primary";
 <button class="btn btn-${@size} btn-${@variant}">Click</>
 ```
 
@@ -2663,7 +2665,7 @@ class-expr ::= 'class=' ( '(' js-expression ')' | '{' js-expression '}' )
 **Example:**
 
 ```scrml
-<mode> = "a"
+<mode> = "a";
 <button class=(@mode == "a" ? "tab active" : "tab")>A</button>
 ```
 
@@ -2747,10 +2749,10 @@ call site, the class binding targets the root element of the component.
 // Definition
 const Card = <div class="card">
     ${children}
-</>
+</>;
 
 // Usage
-<featured> = true
+<featured> = true;
 <Card class="featured-card" class:featured=@featured>
     Content
 /Card>
@@ -2803,14 +2805,14 @@ The structural form uses tag syntax. It appears in three distinct positions:
 
 1. **Declaration site** — where the cell is created and given its initial value:
    ```scrml
-   <count> = 0
-   <name>  = ""
-   <items> = []
+   <count> = 0;
+   <name>  = "";
+   <items> = [];
    ```
 
 2. **Render-by-tag in markup** — when the cell has a render-spec (see §6.2 Shape 2), using the tag causes the compiler to expand it into the bound element with reactive wiring:
    ```scrml
-   <userName req length(>=2)> = <input type="text"/>
+   <userName req length(>=2)> = <input type="text"/>;
 
    // In markup body:
    <label>Username:</>
@@ -2844,7 +2846,7 @@ The canonical form uses the `@` sigil. It appears in expression positions — in
 - **NOT a declaration:** `@varname = expr` is a WRITE to a pre-declared cell. A structural `<varname>` declaration (§6.1.1) SHALL exist in scope; otherwise the write is `E-STATE-UNDECLARED` (per §6.1.1 V-kill statement). The compiler does NOT silently synthesise a cell from a bare write — that pre-v0.next auto-synth path was retired at S123.
 
 ```scrml
-${ function increment() { @count = @count + 1 } }
+${ function increment() { @count = @count + 1; } }
 ${ if (@count > 10) { ... } }
 ```
 
@@ -2859,13 +2861,13 @@ In attribute positions:
 Bare names in expressions are LOCAL identifiers. They do NOT resolve to reactive state cells.
 
 ```scrml
-<count> = 0
+<count> = 0;
 
 ${ function example() {
-    let count = 5      // ERROR: E-NAME-COLLIDES-STATE
+    let count = 5;      // ERROR: E-NAME-COLLIDES-STATE
                        // 'count' is a registered state name; cannot use as local
-    let x = count      // ERROR: E-NAME-COLLIDES-STATE (same reason)
-    let x = @count     // CORRECT: canonical form reads the cell
+    let x = count;      // ERROR: E-NAME-COLLIDES-STATE (same reason)
+    let x = @count;     // CORRECT: canonical form reads the cell
 } }
 ```
 
@@ -2935,10 +2937,10 @@ A state cell declaration (`<name> = ...`) has three possible right-hand-side sha
 The RHS is a literal, expression, or constructor call. No render-spec.
 
 ```scrml
-<count> = 0
-<name>  = ""
-<items> = []
-<flags> = { active: false, loading: false }
+<count> = 0;
+<name>  = "";
+<items> = [];
+<flags> = { active: false, loading: false };
 ```
 
 - `@count` reads the cell's value (a number, string, array, object, etc.)
@@ -2949,13 +2951,13 @@ The RHS is a literal, expression, or constructor call. No render-spec.
 The RHS is bindable markup — an `<input>`, `<select>`, `<textarea>`, or other form element to which the cell's value should be bound.
 
 ```scrml
-<userName req length(>=2)>       = <input type="text"/>
-<agree    req>                   = <input type="checkbox"/>
-<birthDate req>                  = <input type="date"/>
+<userName req length(>=2)>       = <input type="text"/>;
+<agree    req>                   = <input type="checkbox"/>;
+<birthDate req>                  = <input type="date"/>;
 <status>                         = <select>
                                      <option value="active">Active</>
                                      <option value="inactive">Inactive</>
-                                   </>
+                                   </>;
 ```
 
 Validators (e.g., `req`, `length(>=2)`, `pattern(...)`) are bare attributes on the declaration tag. They constrain the bound value and contribute to the auto-synthesized validity surface (§6.11).
@@ -2969,9 +2971,9 @@ Validators (e.g., `req`, `length(>=2)`, `pattern(...)`) are bare attributes on t
 The RHS is an expression marked with `const`. The cell recomputes whenever its dependencies change. It is read-only.
 
 ```scrml
-const <doubled>   = @count * 2
-const <greeting>  = "Hello, " + @userName
-const <badge>     = <span class="badge">${@userName}</span>    // markup-typed derived
+const <doubled>   = @count * 2;
+const <greeting>  = "Hello, " + @userName;
+const <badge>     = <span class="badge">${@userName}</span>;    // markup-typed derived
 ```
 
 - `@doubled`, `@greeting`, `@badge` read the current derived value.
@@ -3028,9 +3030,9 @@ The cell starts absent (`pre`); a read before a `T`-shaped value is assigned fir
 All three RHS shapes take a **bare expression** as the right-hand side. Wrapping the RHS in a `${ }` logic block is **non-canonical** and SHALL be compile error **E-DECL-RHS-INTERP-WRAPPED** (§34):
 
 ```scrml
-<bad>         = ${ @names.length }          // E-DECL-RHS-INTERP-WRAPPED — write  <bad> = @names.length
-const <bad>   = ${ @names.filter(...) }     // E-DECL-RHS-INTERP-WRAPPED — write  const <bad> = @names.filter(...)
-const <bad>: number = ${ @count * 2 }       // E-DECL-RHS-INTERP-WRAPPED — write  const <bad>: number = @count * 2
+<bad>         = ${ @names.length };          // E-DECL-RHS-INTERP-WRAPPED — write  <bad> = @names.length
+const <bad>   = ${ @names.filter(...) };     // E-DECL-RHS-INTERP-WRAPPED — write  const <bad> = @names.filter(...)
+const <bad>: number = ${ @count * 2 };       // E-DECL-RHS-INTERP-WRAPPED — write  const <bad>: number = @count * 2
 ```
 
 There is ONE canonical RHS form (the bare expression); the `${ }` interpolation wrapper belongs to markup/interpolation contexts (§3.3, §10.2), not to a declaration RHS — admitting it here would be a redundant second form (`limit-the-primitive`, §14.1.1). The diagnostic fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural declarations and recovers by unwrapping (so no spurious `E-SCOPE-001` on the orphaned `$`).
@@ -3054,7 +3056,7 @@ A reactive cell may hold structured (compound) state. The structural form uses n
 #### 6.3.1 Tier 1 — Plain Cell (Degenerate)
 
 ```scrml
-<count> = 0       // single-value cell; no fields
+<count> = 0;       // single-value cell; no fields
 ```
 
 Access: `@count` reads the value. No field access.
@@ -3065,9 +3067,9 @@ Access: `@count` reads the value. No field access.
 
 ```scrml
 <formRes>
-  <name>  = ""
-  <email> = ""
-  <error> = ""
+  <name>  = "";
+  <email> = "";
+  <error> = "";
 </>
 ```
 
@@ -3077,7 +3079,7 @@ The cell `formRes` has three fields declared as structural children. Each field 
 ```scrml
 @formRes.name     // reads the 'name' field
 @formRes.error    // reads the 'error' field
-@formRes.name = "Alice"   // writes to 'name'
+@formRes.name = "Alice";   // writes to 'name'
 ```
 
 **Structural form for field declarations:** inside the compound body, each field uses the structural form `<fieldName> = init`.
@@ -3095,7 +3097,7 @@ When the compound cell's shape is fixed by a predefined type, positional binding
 ```scrml
 type UserInfo:struct = { name: string, age: number, active: bool }
 
-<userInfo>: UserInfo = ("alice", 30, true)    // positional sugar
+<userInfo>: UserInfo = ("alice", 30, true);    // positional sugar
 ```
 
 **Tier ladder rule:** positional binding `<x> = (a, b, c)` is legal ONLY when the structure is fixed by a predefined type. Ad-hoc compound state MUST use the structural-children form (Tier 2).
@@ -3152,7 +3154,7 @@ The developer cannot override the render-spec at a particular use site. If alter
 
 For Shape 3 cells with markup RHS:
 ```scrml
-const <badge> = <span class="badge">${@userName}</span>
+const <badge> = <span class="badge">${@userName}</span>;
 ```
 
 `${@badge}` in markup interpolates the markup value at read time. The markup recomputes reactively when `@userName` changes. `<badge/>` as a tag in markup is NOT supported (use interpolation).
@@ -3184,9 +3186,9 @@ There is no syntax to override a cell's render-spec at a particular render site.
 A reactive array is declared with the V-kill structural form like any other reactive cell (§6.1.5):
 
 ```scrml
-<items> = []
-<items> = [1, 2, 3]
-<items> = ["alice", "bob", "carol"]
+<items> = [];
+<items> = [1, 2, 3];
+<items> = ["alice", "bob", "carol"];
 ```
 
 The array is a first-class reactive value. Any write to `@items` — whether by full
@@ -3215,8 +3217,8 @@ The following mutating methods are valid on reactive array variables:
 **Canonical update pattern (DQ-2):** Array mutation methods (`.push()`, `.splice()`, `.pop()`, etc.) do NOT trigger reactivity on their own. To update a reactive array, reassign it:
 
 ```scrml
-@arr = [...@arr, newItem]              // canonical — always triggers reactivity
-@arr = @arr.filter(x => x.id !== id)   // canonical removal
+@arr = [...@arr, newItem];              // canonical — always triggers reactivity
+@arr = @arr.filter(x => x.id !== id);   // canonical removal
 ```
 
 The compiler rewrites `@arr.push(x)` to the clone-mutate-replace pattern in development mode (described in the normative rule below), but this rewrite is NOT guaranteed in production builds. Code that relies on mutation interception for reactive updates is undefined behavior in production. Reassignment is the only guaranteed reactive update pattern.
@@ -3247,7 +3249,7 @@ element(s) in standard JavaScript. When used on a reactive array, the compiler p
 return value. Example:
 
 ```scrml
-${ let removed = @items.pop() }
+${ let removed = @items.pop(); }
 ```
 
 Compiles to:
@@ -3272,14 +3274,14 @@ They return new arrays and do NOT trigger subscribers of the source array.
 Non-mutating methods are valid on reactive arrays and return plain (non-reactive) values:
 
 ```scrml
-${ let active = @items.filter(i => i.done === false) }
+${ let active = @items.filter(i => i.done === false); }
 ```
 
 This does not trigger reactive updates. If the derived value must be reactive, declare it
 with `const <name>` (§6.6):
 
 ```scrml
-const <active> = @items.filter(i => i.done === false)
+const <active> = @items.filter(i => i.done === false);
 ```
 
 `@active` is a derived reactive value that re-evaluates whenever `@items` changes, per
@@ -3357,9 +3359,9 @@ This re-renders whenever `@items` is written — including after any mutating me
 A reactive array may be replaced in full at any time:
 
 ```scrml
-@items = newArray
-@items = []
-@items = fetchedData.map(d => ({ id: d.id, name: d.name }))
+@items = newArray;
+@items = [];
+@items = fetchedData.map(d => ({ id: d.id, name: d.name }));
 ```
 
 Full replacement uses standard reactive assignment and triggers all subscribers of `@items`
@@ -3377,13 +3379,13 @@ reactive. Mutating an inner array does NOT trigger subscribers of the outer vari
 the outer array is explicitly written:
 
 ```scrml
-<matrix> = [[1, 2], [3, 4]]
+<matrix> = [[1, 2], [3, 4]];
 
 ${ function addToRow(rowIdx: int, val: int) {
-    const newRow = @matrix[rowIdx].concat(val)
-    const newMatrix = @matrix.slice()
-    newMatrix[rowIdx] = newRow
-    @matrix = newMatrix
+    const newRow = @matrix[rowIdx].concat(val);
+    const newMatrix = @matrix.slice();
+    newMatrix[rowIdx] = newRow;
+    @matrix = newMatrix;
 } }
 ```
 
@@ -3400,7 +3402,7 @@ A reactive array may contain state objects:
 <todos> = [
     { id: 1, text: "Buy groceries", done: false },
     { id: 2, text: "Walk the dog", done: true }
-]
+];
 ```
 
 Mutating a field of an object inside a reactive array does NOT trigger subscribers. Only
@@ -3408,7 +3410,7 @@ writes to the array itself trigger subscribers. To update a field reactively:
 
 ```scrml
 ${ function toggleDone(id: int) {
-    @todos = @todos.map(t => t.id === id ? { ...t, done: !t.done } : t)
+    @todos = @todos.map(t => t.id === id ? { ...t, done: !t.done } : t);
 } }
 ```
 
@@ -3423,16 +3425,16 @@ plain JavaScript expression; the compiler does not intercept it (non-mutating, �
 
 ```scrml
 <program>
-    <todos>   = []
-    <newText> = ""
+    <todos>   = [];
+    <newText> = "";
 
     ${ function addTodo() {
-        @todos.push({ id: Date.now(), text: @newText, done: false })
-        @newText = ""
+        @todos.push({ id: Date.now(), text: @newText, done: false });
+        @newText = "";
     } }
 
     ${ function removeTodo(id: int) {
-        @todos = @todos.filter(t => t.id !== id)
+        @todos = @todos.filter(t => t.id !== id);
     } }
 
     <input bind:value=@newText placeholder="New todo"/>
@@ -3457,8 +3459,8 @@ array, pushes the new item, and writes back via `_scrml_reactive_set("todos", ..
 
 ```scrml
 <program>
-    <items> = []
-    const <doneCount> = @items.filter(i => i.done).length
+    <items> = [];
+    const <doneCount> = @items.filter(i => i.done).length;
 
     <p>Done: ${@doneCount} of ${@items.length}</>
 </>
@@ -3472,10 +3474,10 @@ in the same flush after any mutation to `@items`.
 
 ```scrml
 <program>
-    <names> = ["Charlie", "Alice", "Bob"]
+    <names> = ["Charlie", "Alice", "Bob"];
 
     ${ function sortNames() {
-        @names.sort()
+        @names.sort();
     } }
 
     <button onclick=sortNames()>Sort</>
@@ -3507,8 +3509,8 @@ variable using the `@`-call syntax is a programmer error. The compiler SHALL det
 Example:
 
 ```scrml
-let items = [1, 2, 3]
-@items.push(4)     // Error E-REACTIVE-006: `items` is not a reactive variable.
+let items = [1, 2, 3];
+@items.push(4);     // Error E-REACTIVE-006: `items` is not a reactive variable.
                    // Declare it as `@items = [...]` or use `items.push(4)` without `@`.
 ```
 
@@ -3595,12 +3597,12 @@ notifications and two potential re-renders.
 ```scrml
 ${ function removeTwo(i: int, j: int) {
     // One reactive write. Subscribers see only the final state.
-    let lo = min(i, j)              // `min` / `max` from scrml:math (§41.18; no ambient `Math`, Appendix D)
-    let hi = max(i, j)
-    let tmp = @arr.slice()          // plain clone; does NOT trigger subscribers
-    tmp.splice(hi, 1)               // plain JS splice on non-reactive variable
-    tmp.splice(lo, 1)               // plain JS splice on non-reactive variable
-    @arr = tmp                      // single reactive write; one subscriber notification
+    let lo = min(i, j);              // `min` / `max` from scrml:math (§41.18; no ambient `Math`, Appendix D)
+    let hi = max(i, j);
+    let tmp = @arr.slice();          // plain clone; does NOT trigger subscribers
+    tmp.splice(hi, 1);               // plain JS splice on non-reactive variable
+    tmp.splice(lo, 1);               // plain JS splice on non-reactive variable
+    @arr = tmp;                      // single reactive write; one subscriber notification
 } }
 ```
 
@@ -3611,9 +3613,9 @@ single `@arr = tmp` assignment is the only reactive write.
 **Worked example — two separate updates (non-atomic, sequential):**
 ```scrml
 ${ function swap(i: int, j: int) {
-    let vi = @arr[i]
-    @arr.splice(i, 1, @arr[j])   // reactive write 1: subscribers see intermediate state
-    @arr.splice(j, 1, vi)        // reactive write 2: subscribers see final state
+    let vi = @arr[i];
+    @arr.splice(i, 1, @arr[j]);   // reactive write 1: subscribers see intermediate state
+    @arr.splice(j, 1, vi);        // reactive write 2: subscribers see final state
 } }
 ```
 Subscribers re-render twice. If the intermediate state is visually incorrect or the
@@ -3650,9 +3652,9 @@ derived-decl ::= 'const' '<' identifier '>' '=' expression
 **Examples:**
 
 ```scrml
-const <total>   = @price * @quantity
-const <taxed>   = @total * 1.08
-const <display> = @taxed > 0 ? @taxed.toFixed(2) : "0.00"
+const <total>   = @price * @quantity;
+const <taxed>   = @total * 1.08;
+const <display> = @taxed > 0 ? @taxed.toFixed(2) : "0.00";
 ```
 
 The `const` keyword signals immutability of the binding. The `<>` declaration form signals
@@ -3769,12 +3771,12 @@ A diamond dependency arises when two derived values share a common upstream `@va
 and a third derived value depends on both of them:
 
 ```scrml
-<price>    = 10
-<quantity> = 3
+<price>    = 10;
+<quantity> = 3;
 
-const <subtotal> = @price * @quantity         // depends on @price and @quantity
-const <discount> = @price * 0.05              // depends on @price only
-const <total>    = @subtotal - @discount      // depends on both @subtotal and @discount
+const <subtotal> = @price * @quantity;         // depends on @price and @quantity
+const <discount> = @price * 0.05;              // depends on @price only
+const <total>    = @subtotal - @discount;      // depends on both @subtotal and @discount
 ```
 
 When `@price` changes, both `@subtotal` and `@discount` are marked dirty (Phase 2). When
@@ -3829,9 +3831,9 @@ flush site.
 > refusal pointing at pull-on-read may be owed under D28.)*
 
 ```scrml
-@price = newPrice
-flush()                            // RETIRED (S473 D22) — forces re-evaluation of all dirty derived nodes
-let display = @display             // reads the updated (post-flush) value
+@price = newPrice;
+flush();                            // RETIRED (S473 D22) — forces re-evaluation of all dirty derived nodes
+let display = @display;             // reads the updated (post-flush) value
 ```
 
 ~~**Normative statements:**~~
@@ -3928,10 +3930,10 @@ A `const <name>` binding is immutable. The compiler SHALL reject any attempt to 
 new value to a derived reactive variable after its declaration.
 
 ```scrml
-const <total> = @price * @quantity
+const <total> = @price * @quantity;
 
 ${ function reset() {
-    @total = 0    // Error E-DERIVED-WRITE
+    @total = 0;    // Error E-DERIVED-WRITE
 } }
 ```
 
@@ -4074,8 +4076,8 @@ The compiler constructs the static dependency graph for all `const <name> = expr
 declarations during graph construction (§31). A cycle in this graph is a compile error.
 
 ```scrml
-const <a> = @b + 1    // @a depends on @b
-const <b> = @a + 1    // @b depends on @a — cycle!
+const <a> = @b + 1;    // @a depends on @b
+const <b> = @a + 1;    // @b depends on @a — cycle!
 ```
 
 The dependency graph is directed. A cycle exists when any node is reachable from itself by
@@ -4110,8 +4112,8 @@ code generation begins.
 **Worked example — invalid (two-node cycle):**
 
 ```scrml
-const <a> = @b + 1
-const <b> = @a + 1
+const <a> = @b + 1;
+const <b> = @a + 1;
 ```
 
 Expected compiler output:
@@ -4127,7 +4129,7 @@ by introducing a mutable @variable as an intermediate value.
 **Worked example — invalid (self-reference):**
 
 ```scrml
-const <counter> = @counter + 1
+const <counter> = @counter + 1;
 ```
 
 Expected compiler output:
@@ -4149,7 +4151,7 @@ with no dependencies. Its value never changes after initial evaluation. This is 
 error but is almost certainly a mistake.
 
 ```scrml
-const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equivalent to const x = 8
+const <x> = 5 + 3;    // W-DERIVED-001: no reactive dependencies; this is equivalent to const x = 8
 ```
 
 **Normative statements:**
@@ -4185,9 +4187,9 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 
 ```scrml
 <program>
-    <price>    = 10
-    <quantity> = 3
-    const <total> = @price * @quantity
+    <price>    = 10;
+    <quantity> = 3;
+    const <total> = @price * @quantity;
 
     <p>Total: ${@total}</>
     <input type="number" bind:value=@price>
@@ -4213,12 +4215,12 @@ _scrml_derived_subscribe("total", "quantity");
 
 ```scrml
 <program>
-    <price>    = 100
-    <quantity> = 2
+    <price>    = 100;
+    <quantity> = 2;
 
-    const <subtotal> = @price * @quantity          // depends on @price, @quantity
-    const <discount> = @price * 0.1                // depends on @price only
-    const <total>    = @subtotal - @discount        // depends on @subtotal, @discount
+    const <subtotal> = @price * @quantity;          // depends on @price, @quantity
+    const <discount> = @price * 0.1;                // depends on @price only
+    const <total>    = @subtotal - @discount;        // depends on @subtotal, @discount
 
     <p>Subtotal: ${@subtotal}</>
     <p>Discount: ${@discount}</>
@@ -4266,12 +4268,12 @@ _scrml_derived_subscribe("total", "discount");
 **Invalid — assignment to derived value (E-REACTIVE-002):**
 
 ```scrml
-<price>    = 10
-<quantity> = 3
-const <total> = @price * @quantity
+<price>    = 10;
+<quantity> = 3;
+const <total> = @price * @quantity;
 
 ${ function clearCart() {
-    @total = 0    // Error E-REACTIVE-002
+    @total = 0;    // Error E-REACTIVE-002
 } }
 ```
 
@@ -4284,8 +4286,8 @@ are immutable. To change the displayed total, modify one of its upstream depende
 **Invalid — circular dependency (E-REACTIVE-005):**
 
 ```scrml
-const <a> = @b * 2
-const <b> = @a + 1
+const <a> = @b * 2;
+const <b> = @a + 1;
 ```
 
 ```
@@ -4298,11 +4300,11 @@ Cycle: @a → @b → @a
 **Invalid — reading a client cell in a wholly-server function (E-REACTIVE-003):**
 
 ```scrml
-<price> = 10
-const <total> = @price * 3
+<price> = 10;
+const <total> = @price * 3;
 
 ${ function saveOrder() {
-    ?{`INSERT INTO orders (amount) VALUES (${@total})`}.run()   // Error E-REACTIVE-003
+    ?{`INSERT INTO orders (amount) VALUES (${@total})`}.run();   // Error E-REACTIVE-003
 } }
 ```
 
@@ -4324,11 +4326,11 @@ the server computes the value itself (e.g. read the source inside the `?{}` quer
 **Valid — the escape hatch (pass the value as an argument):**
 
 ```scrml
-<price> = 10
-const <total> = @price * 3
+<price> = 10;
+const <total> = @price * 3;
 
 ${ function saveOrder(total: number) {
-    ?{`INSERT INTO orders (amount) VALUES (${total})`}.run()   // reads the param — marshalled
+    ?{`INSERT INTO orders (amount) VALUES (${total})`}.run();   // reads the param — marshalled
 } }
 ```
 ```scrml
@@ -4338,14 +4340,14 @@ ${ function saveOrder(total: number) {
 **Valid — the CPS marshal (a client fn with an embedded server round-trip):**
 
 ```scrml
-<price> = 10
-const <total> = @price * 3
-<lastId> = 0
+<price> = 10;
+const <total> = @price * 3;
+<lastId> = 0;
 
 ${ function saveOrder() {
     // `@lastId = …` is a reactive assignment ⇒ CPS-split ⇒ the round-trip's inputs
     // are MARSHALLED. `@total` crosses the wire; W-SERVER-DERIVED-MARSHAL warns (derived).
-    @lastId = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}.one()
+    @lastId = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}.one();
 } }
 ```
 The client stub sends `{ "total": _scrml_derived_get("total") }`; the server reads
@@ -4414,17 +4416,17 @@ Derived reactive values may be declared INSIDE a compound state block using the 
 **Syntax:**
 ```scrml
 <signup>
-  <name req>  = <input type="text"/>
-  <email req> = <input type="email"/>
-  const <displayName> = @signup.name.toUpperCase()
-  const <isReady>     = @signup.name.length >= 2 && @signup.email.includes("@")
+  <name req>  = <input type="text"/>;
+  <email req> = <input type="email"/>;
+  const <displayName> = @signup.name.toUpperCase();
+  const <isReady>     = @signup.name.length >= 2 && @signup.email.includes("@");
 </>
 ```
 
 **Access from outside:**
 ```scrml
 ${ if (@signup.isReady) { ... } }
-${ let label = @signup.displayName }
+${ let label = @signup.displayName; }
 ```
 
 **Read via:** `@parent.derivedName` — canonical dot-path form.
@@ -4449,12 +4451,12 @@ ${ let label = @signup.displayName }
 Both top-level `const <name>` and in-compound `const <name>` may have markup on the right-hand side. The result is a markup-typed derived cell: a reactive cell whose value IS a markup expression.
 
 ```scrml
-const <badge>  = <span class="badge">${@signup.name}</span>
+const <badge>  = <span class="badge">${@signup.name}</span>;
 
 // In-compound:
 <signup>
-  <name req> = <input type="text"/>
-  const <nameTag> = <span class="name-tag">${@signup.name}</span>
+  <name req> = <input type="text"/>;
+  const <nameTag> = <span class="name-tag">${@signup.name}</span>;
 </>
 ```
 
@@ -4489,10 +4491,10 @@ const <badge>  = <span class="badge">${@signup.name}</span>
 The motivating case is in-place mutation through a method call or property write that would otherwise lower (per §6.5.1) to the clone-mutate-replace pattern — i.e., a hidden `_scrml_reactive_set("name", ...)` write. That write is logically the same write the developer was already forbidden from making explicitly via `@name = newval`. Allowing the implicit form is incoherent: it bypasses §6.6.8 syntactically while producing the same semantic write, and the mutation is then silently clobbered the next time the upstream dependencies of the derivation fire.
 
 ```scrml
-const <filteredItems> = @items.filter(i => i.active)
+const <filteredItems> = @items.filter(i => i.active);
 
 ${ function addItem(x: Item) {
-    @filteredItems.push(x)        // Error E-DERIVED-VALUE-MUTATE
+    @filteredItems.push(x);        // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
 
@@ -4529,11 +4531,11 @@ ${ function addItem(x: Item) {
 **Worked example — invalid (array mutating method):**
 
 ```scrml
-<items> = []
-const <activeItems> = @items.filter(i => i.active)
+<items> = [];
+const <activeItems> = @items.filter(i => i.active);
 
 ${ function tryAdd(item: Item) {
-    @activeItems.push(item)   // Error E-DERIVED-VALUE-MUTATE
+    @activeItems.push(item);   // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
 
@@ -4549,22 +4551,22 @@ Error E-DERIVED-VALUE-MUTATE: In-place mutation of derived cell `@activeItems` v
 **Worked example — invalid (object property write on derived):**
 
 ```scrml
-<formData> = { firstName: "", lastName: "" }
-const <formCopy> = { ...@formData, full: @formData.firstName + " " + @formData.lastName }
+<formData> = { firstName: "", lastName: "" };
+const <formCopy> = { ...@formData, full: @formData.firstName + " " + @formData.lastName };
 
 ${ function setFull(s: string) {
-    @formCopy.full = s   // Error E-DERIVED-VALUE-MUTATE
+    @formCopy.full = s;   // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
 
 **Worked example — valid (mutate upstream, derived re-fires):**
 
 ```scrml
-<items> = []
-const <activeItems> = @items.filter(i => i.active)
+<items> = [];
+const <activeItems> = @items.filter(i => i.active);
 
 ${ function add(item: Item) {
-    @items = [...@items, item]   // OK — upstream write; @activeItems recomputes
+    @items = [...@items, item];   // OK — upstream write; @activeItems recomputes
 } }
 ```
 
@@ -4604,11 +4606,11 @@ ${ function add(item: Item) {
 **Worked example — invalid:**
 
 ```scrml
-${ import { hashPassword } from 'scrml:auth' }
+${ import { hashPassword } from 'scrml:auth'; }
 
-<pw> = "secret"
+<pw> = "secret";
 
-const <hashed> = hashPassword(@pw)    // Error E-DERIVED-SERVER-ONLY-REACH
+const <hashed> = hashPassword(@pw);    // Error E-DERIVED-SERVER-ONLY-REACH
 ```
 
 Expected compiler output:
@@ -4626,16 +4628,16 @@ module from the same client-side position and is refused too (E-STDLIB-CLIENT-CH
 **Worked example — valid (the resolution the message names):**
 
 ```scrml
-${ import { hashPassword } from 'scrml:auth' }
+${ import { hashPassword } from 'scrml:auth'; }
 
-<pw> = "secret"
-<hashed> = ""
+<pw> = "secret";
+<hashed> = "";
 
 ${ function computeHash(pw: string) {       // escalates server-side per §12.2 Trigger 3
-    return hashPassword(pw)
+    return hashPassword(pw);
 } }
 
-<button onclick={ @hashed = computeHash(@pw) }>Hash</button>
+<button onclick={ @hashed = computeHash(@pw); }>Hash</button>
 <div>${@hashed}</div>
 ```
 
@@ -4890,7 +4892,7 @@ additive to `<onMount>`, covering only element-bound jobs.
 #### Worked example — a map widget, focus, a page view
 
 ```scrml
-${ import { createRouteMap } from './js/route-map.js' }          // §21.3 relative .js import: the widget's glue
+${ import { createRouteMap } from './js/route-map.js'; }          // §21.3 relative .js import: the widget's glue
 let <center:LatLng={ lat: 35.47, lng: -97.52 }/>
 let <mapEl:HTMLElement|not=not/>
 let <noteBox:HTMLElement|not=not/>
@@ -5047,7 +5049,7 @@ an `<onMount>`'s owner, initialized to `not`. It is not a cell.
 - ⚑ **Not specified here:** the static type of a host object. Typing host values is dpa-075 F3, which is not ruled. *(S473: ruled; drafted as §21.3.3 — a mount handle is typed `H | not` with `H` a user-declared `:host` handle type, rule 15; member access on a `ref=` DOM element is unchanged, rule 16. This ⚑ is replaced when §21.3.3 leaves DRAFT.)*
 
 ```scrml
-${ import { Chart } from './js/chart.esm.js' }            // §21.3 relative .js import
+${ import { Chart } from './js/chart.esm.js'; }            // §21.3 relative .js import
 let <series:number[]=[]/>
 ${ let chart = not; }                                     // the mount handle: not a cell
 <onMount>${
@@ -7335,10 +7337,10 @@ teardown function. Instead of `cleanup(() => close())`, the developer writes:
 Any state-cell declaration (Shape 1, Shape 2, or Shape 3 derived) MAY carry an optional `default=` attribute. This attribute specifies the value the cell should revert to when `reset(@cell)` is called.
 
 ```scrml
-<startTime default=not>    = Date.now()
-<retries   default=0>      = nextRetryCount()
-<token     default=not>    = generateUUID()
-<query     default="">     = ""
+<startTime default=not>    = Date.now();
+<retries   default=0>      = nextRetryCount();
+<token     default=not>    = generateUUID();
+<query     default="">     = "";
 ```
 
 When `default=` is absent, calling `reset(@cell)` re-evaluates the init expression and sets the cell to the result.
@@ -7362,9 +7364,9 @@ When `default=` is present, calling `reset(@cell)` evaluates the `default=` expr
 
 **Syntax:**
 ```scrml
-reset(@cell)              // reset a top-level cell
-reset(@compound.field)    // reset a field within a compound cell
-reset(@compound)          // reset all fields of a compound cell
+reset(@cell);              // reset a top-level cell
+reset(@compound.field);    // reset a field within a compound cell
+reset(@compound);          // reset all fields of a compound cell
 ```
 
 **Behavior:**
@@ -7410,11 +7412,11 @@ The cancel-then-apply ordering from §6.8.2 (debounced/throttled interaction pre
 **Worked example — presence-progression `(not to T)`:**
 
 ```scrml
-<state>: (not to User) = not
-@state = someUser                    // transition fires; per-access: pre → post
-const shown = @state.name            // OK (post-transitioned)
+<state>: (not to User) = not;
+@state = someUser;                    // transition fires; per-access: pre → post
+const shown = @state.name;            // OK (post-transitioned)
 reset(@state)                        // writes `not`; satisfies pre-type → per-access reverts to pre
-const shownAgain = @state.name       // E-TYPE-001 (pre-transition again)
+const shownAgain = @state.name;       // E-TYPE-001 (pre-transition again)
 ```
 
 **No-RHS implicit-`(not to T)` cell (Shape 4, §6.2).** For a no-RHS typed cell that defaulted to `not` with an *implicit* `(not to T)` lifecycle (`<user>: User` with no `= …`), the "re-evaluated init expression result" above is the SYNTHESIZED `not` (there is no written init expression). It satisfies the pre-type, so `reset(@user)` reverts the per-access state to `pre` exactly as for an explicit `<user>: (not to User) = not`. The implicit and explicit forms behave identically under reset.
@@ -7422,16 +7424,16 @@ const shownAgain = @state.name       // E-TYPE-001 (pre-transition again)
 **Composition with `default=` (matching pre-type — common case):**
 
 ```scrml
-<state default=.Idle>: (.Idle to .Active) = .Idle
-@state = .Active                     // transition: pre → post
+<state default=.Idle>: (.Idle to .Active) = .Idle;
+@state = .Active;                     // transition: pre → post
 reset(@state)                        // writes default (.Idle); pre-type → revert to pre
 ```
 
 **Composition with `default=` (matching post-type — unusual but legal):**
 
 ```scrml
-<state default=.Active>: (.Idle to .Active) = .Idle
-@state = .Active                     // transition: pre → post
+<state default=.Active>: (.Idle to .Active) = .Idle;
+@state = .Active;                     // transition: pre → post
 reset(@state)                        // writes default (.Active); post-type → stays post
 ```
 
@@ -7473,7 +7475,7 @@ write, of one fixed kind. It is deliberately not a general "when X changes, set 
 **Syntax.** A valued modifier on a cell declaration:
 
 ```scrml
-<page reset-on=[@query, @category]> = 1                    // legacy cell form (§6.2)
+<page reset-on=[@query, @category]> = 1;                    // legacy cell form (§6.2)
 let <page:int=1 reset-on=[@query, @category]/>             // §66 form
 ```
 
@@ -7560,10 +7562,10 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
    `reset-on=`. A reset of shared state belongs in the server function that changes the trigger — the writer.
    ```scrml
    <channel name="dispatch" topic="yard-3">
-       <yardFilter> = "all"
-       <boardPage reset-on=[@yardFilter]> = 1    // E-RESET-ON-SHARED-CELL — a synced cell cannot reset itself
+       <yardFilter> = "all";
+       <boardPage reset-on=[@yardFilter]> = 1;    // E-RESET-ON-SHARED-CELL — a synced cell cannot reset itself
    </>
-   <boardPage reset-on=[@yardFilter]> = 1        // legal: each dispatcher's own page resets on the shared filter
+   <boardPage reset-on=[@yardFilter]> = 1;        // legal: each dispatcher's own page resets on the shared filter
    ```
 10. **No per-instance resets yet (S449, rec pack item 6 = (a)).** An entry is a cell, never a field path or a row
    alias (rule 2, as for `<effect>` deps — §6.7.4). A child field's `reset-on=` naming a sibling field
@@ -7618,9 +7620,9 @@ Within a structural scope, ALL state cell declarations (`<name> = init`) are col
 **Example (hoisting within file scope):**
 ```scrml
 // Read before declaration in source order — VALID at file scope
-${ function greet() { return "Hello, " + @name } }
+${ function greet() { return "Hello, " + @name; } }
 
-<name> = "world"    // declared after use but hoisted to file scope
+<name> = "world";    // declared after use but hoisted to file scope
 ```
 
 #### 6.9.3 Interaction With `pinned`
@@ -7641,8 +7643,8 @@ The `pinned` keyword is a per-declaration attribute that opts a state declaratio
 #### 6.10.1 Syntax
 
 ```scrml
-<count pinned> = 0
-<result pinned> = computeExpensiveThing()
+<count pinned> = 0;
+<result pinned> = computeExpensiveThing();
 ```
 
 #### 6.10.2 Semantics
@@ -7673,8 +7675,8 @@ The `pinned` keyword itself embodies the lint policy principle (S55): "lint rule
 A V-kill structural decl MAY carry both the `server` flag (§52.4 — Tier 2 server-authoritative cell) and the `pinned` flag (§6.10) at once:
 
 ```scrml
-<cards server pinned>: Card[] = []
-<currentUser server pinned> = not
+<cards server pinned>: Card[] = [];
+<currentUser server pinned> = not;
 ```
 
 **Normative composition rule.** When both `server` and `pinned` appear on the same decl, the `pinned` semantic applies to the **PLACEHOLDER** value — the right-hand-side expression that the compiler displays on the client before the server-fetch completes (§52.4.3). Specifically:
@@ -7693,18 +7695,18 @@ The placeholder pinning composes the static-surface invariant of `pinned` (§6.1
 ```scrml
 <program db="sqlite:./shop.db">
 
-    <cards server pinned>: Card[] = []     // placeholder pinned
+    <cards server pinned>: Card[] = [];     // placeholder pinned
 
     function loadCards() {
-        return ?{`SELECT * FROM cards`}.all()
+        return ?{`SELECT * FROM cards`}.all();
     }
 
     function addCard(c: Card) {
-        @cards = [...@cards, c]            // optimistic update + server write
+        @cards = [...@cards, c];            // optimistic update + server write
     }
 
     function clearLocalCache() {
-        reset(@cards)                      // NO-OP for the placeholder restoration;
+        reset(@cards);                      // NO-OP for the placeholder restoration;
                                            // cell continues to hold the last-fetched server value
     }
 
@@ -7801,7 +7803,7 @@ State-cell declarations (§6.2 Shape 1 and Shape 2) MAY carry one of two reactiv
 #### 6.13.1 `debounced=DURATION` — Debounced Writes
 
 ```scrml
-<searchTerm debounced=300ms> = ""
+<searchTerm debounced=300ms> = "";
 ```
 
 Writes to `@searchTerm` are coalesced into a single trailing write that fires `DURATION` after the most recent write request. Each new write within the window restarts the timer; the cell's value updates exactly once, after the window of silence. Subscribers (`when @searchTerm changes {}`, derived cells, render-by-tag, etc.) fire on the debounced write.
@@ -7819,7 +7821,7 @@ write to the same cell (§6.7.7.3 rule 6 — closed S449, ruling:user-voice-scrm
 #### 6.13.2 `throttled=DURATION` — Throttled Writes
 
 ```scrml
-<scrollY throttled=100ms> = 0
+<scrollY throttled=100ms> = 0;
 ```
 
 Writes to `@scrollY` are throttled. The first write in any window emits immediately; subsequent writes within `DURATION` of the last emit are suppressed but the most recent suppressed value is held. At the end of the window a single trailing write emits with the held value. Subscribers see leading-fire + at-most-one-trailing-fire per window. (Standard leading+trailing throttle semantics.)
@@ -7849,7 +7851,7 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 
 ```scrml
 <channel name="chat" topic="lobby">
-  <draft debounced=500ms> = ""
+  <draft debounced=500ms> = "";
   // wire-shared draft buffer, debounced 500ms — broadcasts only after typing pause.
 </>
 ```
@@ -7896,8 +7898,8 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 Browser persistence is a **lifetime** property of a client-owned cell, orthogonal to authority (§52). It is **not** a §52 authority value: a persisted cell is still client-local for every §52 / E-AUTH rule. The attribute sits in the same slot as `debounced=` / `throttled=` (§6.13).
 
 ```scrml
-<recent persist="local" key="myapp.recent">: string[] = []     // survives reload; synced across tabs
-<tabFilter persist="session" key="myapp.filter"> = "all"       // survives reload in this tab only
+<recent persist="local" key="myapp.recent">: string[] = [];     // survives reload; synced across tabs
+<tabFilter persist="session" key="myapp.filter"> = "all";       // survives reload in this tab only
 ```
 
 #### 6.14.1 Surface
@@ -7961,8 +7963,8 @@ The problem this section solves: a persisted cell restores in client code (§6.1
 ```scrml
 type SidebarMode:enum = { Open, Collapsed }
 
-<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open   // REFLECT
-<recent persist="local" key="myapp.recent">: string[] = []
+<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open;   // REFLECT
+<recent persist="local" key="myapp.recent">: string[] = [];
 
 <aside class:collapsed=(@sidebar == .Collapsed)>…</aside>   // covered (STAMP)
 <div show=(@sidebar == .Open)>panel</div>                   // covered (CSS-keyed)
@@ -8152,7 +8154,7 @@ of `@page`"*, *"the formula of derived `@total`"*, *"the interpolation at line 1
 
 ```scrml
 let <count:int=0/>
-function bump() { @count = @count + 1; return @count }
+function bump() { @count = @count + 1; return @count; }
 
 let <seed:int=bump()/>                 // E-VALUE-WRITES-STATE — the initializer of `@seed` writes `@count` (bump())
 <total:int=(bump() * 2)/>              // E-VALUE-WRITES-STATE — the formula of derived `@total` writes `@count`
@@ -8258,11 +8260,11 @@ The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. 
 type Counter:struct = { n: number }
 
 fn stepped(c: Counter) -> Counter {
-    return { n: c.n + 1 }
+    return { n: c.n + 1 };
 }
 
-let c: Counter = { n: 0 }
-c = stepped(c)
+let c: Counter = { n: 0 };
+c = stepped(c);
 ```
 
 **Normative statements:**
@@ -8283,7 +8285,7 @@ c = stepped(c)
 
 **Status.** The BOOTSTRAP enforces rules 1–3 and the comma list by construction (s469-boot-semicolons, #1510: `compiler/self-host-v2/parse.scrml` `parseTermStmt` / `termAfter` / `missingSemi`, `parseArms` / `missingArmComma`). It still reads a line break in a few places — each listed, and labelled, under "Remaining newline-sensitive readings" below. impl#1 does not enforce `;` and keeps its pre-S446 termination heuristic: a carried, impl#1-labelled divergence (dpa-073 F5; `g-dpa063-termination-unbuilt-impl1-legacy`). (`--parser=scrml-native` is retired, S449 — `compiler/src/commands/compile.js` refuses the flag — so the native parser runs only at its fixed internal call sites.)
 
-**Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). *(Unchanged from S446.)*
+**Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6) — except a one-expression brace in a value position, which is a single expression (rule 3, S474); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). *(Unchanged from S446.)*
 
 **Normative statements:**
 
@@ -8295,7 +8297,9 @@ c = stepped(c)
      > **Provenance:** ruling:user-voice-scrml.md S472 "1 yes, 2 agree, 3 start it" — item 2, *"keep refusing, and add a §7.2.2 sentence saying so"* (gap g-spec-stray-semicolon-after-closer-item-s471). Newly-rejecting on paper only: the bootstrap already refused these (S471 review F2), and impl#1 is outside the S471 policy.
    - A braceless body is a statement and takes its own `;` (`if (c) x = 1;`).
    - `lift <…>` is a statement and takes `;` *(F6, confirmed — ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1: *"`lift <…>` takes `;`"*)*. A value declaration whose initializer is a block-like expression still ends with `;` (`const xs = for (…) { lift e; };`, §49.6).
-3. **Single-expression positions are unchanged.** A `:`-shorthand body (§4.14), a bare handler value `onclick=expr` (§5.2.3 — a top-level `;` there is still `E-MULTI-STATEMENT-HANDLER`), a markup `${ … }` interpolation in a render position (§17.6.10), and a single-expression arm body (`.A :> expr`, ended by its `,` or the list's `}`, §18.2) hold one expression and take no `;`.
+3. **Single-expression positions are unchanged.** A `:`-shorthand body (§4.14), a bare handler value `onclick=expr` (§5.2.3 — a top-level `;` there is still `E-MULTI-STATEMENT-HANDLER`), a markup `${ … }` interpolation in a render position (§17.6.10), and a single-expression arm body (`.A :> expr`, ended by its `,` or the list's `}`, §18.2) hold one expression and take no `;`. So does a **one-expression brace in a value position**: a `{ … }` holding exactly ONE expression and no `;` at its own top level, written as the body of a `match` or `!{}` arm whose value is used (§18.5) or as a branch of a value-form / if-as-expression `if` (§17.6.10), is that expression — `.Circle(r) :> { r * r * 3.14159 }`, `const v = if (c) { 2 } else { 3 };`. The expression MAY span lines and carry comments (rule 4: a newline is whitespace). `{ e; }` is the same arm (one expression statement, §18.5). A brace that holds a statement, a second item or a top-level `;` before its expression is a statement list, and rule 1 applies to each of its statements (`.B :> { log(); 2 }` is E-STMT-MISSING-SEMICOLON after `2`, and — in a value position — E-ARM-TAIL-VALUE, the ruling's code for a bare tail after a statement (§18.5); with the `;` it is E-ARM-TAIL-VALUE alone); a declaration, `return`, `fail` or `lift` is a statement, not an expression (`{ lift 2 }` owes its `;`, rule 2). In a STATEMENT position — a statement `match` / `!{}`, whose arms yield nothing — the arm's `{ … }` is a statement list, and `.A :> { f() }` there is E-STMT-MISSING-SEMICOLON. Two readings of an arm's brace body come first and are unchanged (§18.5): an object-literal body is that object (not yet built in the bootstrap, which refuses it — `g-bootstrap-object-literal-arm-body-refused-s474`), and a lone shorthand name `{ name }` is E-MATCH-ARM-SHORTHAND-AMBIGUOUS. An empty `{}` holds no expression.
+
+   > **Amendment (S474, #1512 review) — the one-expression brace is a single-expression position.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `{ e }` in a value-position match arm is that expression" — *"Allow { e } in arms too (Recommended)"* (*"Same as if-branches: a brace holding ONE expression is that expression. `lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — if-branch: *"Keep { e }, lift once a statement (Rec)"* (*"A braced value-form `if` branch holding ONE expression is that expression. Once the branch holds a statement, it must `lift` (the same rule as block arms; a bare tail is E-ARM-TAIL-VALUE)."*) · **supersedes:** the S469 reading of "Terms" above that counted every arm block and value-form `if` branch as a statement list, so that rule 1 required `{ e; }` — which contradicted both rulings and §18.5's own example. **Direction of change:** **newly-accepting** — `.B :> { 2 }` and a `{ e }` value-`if` branch with no `;` (the bootstrap reported E-STMT-MISSING-SEMICOLON; impl#1, which does not enforce `;`, already accepted it). *(PA reading, not the rulings' words: the statement-position arm keeps rule 1, since both rulings speak of a value — "a value-position match arm", "a braced value-form `if` branch".)* **Status:** built in the bootstrap (s474-boot-one-expr-brace: `compiler/self-host-v2/parse.scrml` `parseArmBlock` (the `bare` arm), `armTails` / `bareArmSemi` (the statement-position report), `parseValueIf` / `parseValueBranch`). The value-form `if` itself is still refused by the bootstrap (E-BOOTSTRAP-UNSUPPORTED); a `{ e }` branch no longer draws a second, wrong E-STMT-MISSING-SEMICOLON beside that refusal.
 4. **A newline is whitespace.** In logic, a line break SHALL NOT end, continue or separate a statement or an arm: it is whitespace to the grammar of an accepted program. *(F1 (a): "newlines carry no grammar".)* Its only lexical job is ending a `//` comment. So a line that starts with an operator, `.`, `?.`, `?` or `:` continues the expression on the line above — the leading-dot chain needs no parentheses (`o.items⏎    .map(f)⏎    .reduce(g, 0);`) and a leading ternary is legal. **Line starts (RULED):** `!{ … }`, `is given` / `is not` and `?` cannot start a statement, so on a new line each continues the expression before it — `x⏎!{ … }` handles `x`, and `x⏎is given` tests `x`. A `?` is decided by adjacency only: glued (`x?`) it is the §19.5 propagation operator, spaced it is the conditional; whether a line ends after it plays no part. *(ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 2 — *"Attach to the line above"*; it confirms S447 reading 2's adjacency rule and drops the end-of-line test.)* **Hazard (accepted by the ruling):** a forgotten `;` before a line that starts with `-`, `+`, `/` or `.` joins the two lines into one expression (`console.log("m")⏎-3102;` is `console.log("m") - 3102`); dd §4.1 measured 0 such non-test sites, and F4 (iii), which would have made `-` / `+` / `/` errors, was not chosen. Rule 5 is the one exception.
 5. **A continuation into `(`, `[` or a template is an error.** An expression SHALL NOT continue across a line break into a line that starts with `(`, `[` or a template literal: `let b = a⏎(a + 1).toString();` is a compile error, not the call `a(a + 1)`. This keeps S440 JS-WAT #6's guarantee as a diagnostic, not as a grammar rule. The error SHALL be **`E-STMT-SPLIT-CONTINUATION`** (§34), message *"add `;` to the line above, or join the lines"*. *(F4 (ii), RULED; the code and message: ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4.)* **Status:** built in the bootstrap (s469-boot-termination-rulings: `compiler/self-host-v2/parse.scrml` `splitContinuesAt` / `splitContinuation`), reported at the empty span ending the line above (where the `;` goes); a line that starts `( … ) :>` is an arm head, not a continuation. impl#1 does not emit it (it keeps its pre-S446 termination heuristic — the carried divergence above).
 6. **`;` is never text and never "source formatting".** It is legal between two statements on one line (`@a = 1; @b = 2;`). At a `<program>` / `<page>` / `<channel>` body top it is this terminator (§40.8). *(Restated from S446 rule 6, which F6 does not list as replaced; "a formatter MAY strip a line-final `;`" is struck — `;` is required.)*
@@ -8501,11 +8505,11 @@ Function declarations inside `${}` logic blocks MAY be nested. An inner function
 
 ```scrml
 ${ function tokenize(input: string) {
-    let pos = 0
-    function advance() { pos = pos + 1 }  // closes over `pos`
-    function peek() { return input[pos] }  // closes over `input`, `pos`
+    let pos = 0;
+    function advance() { pos = pos + 1; }  // closes over `pos`
+    function peek() { return input[pos]; }  // closes over `input`, `pos`
     while (pos < input.length) {
-        advance()
+        advance();
     }
 } }
 ```
@@ -8520,13 +8524,13 @@ Both `function` and `fn` declarations support default parameter values using the
 
 ```scrml
 ${ function advance(n: int = 1) {
-    for (let i = 0; i < n; i++) { pos = pos + 1 }
+    for (let i = 0; i < n; i++) { pos = pos + 1; }
 } }
 
 ${ fn clamp(value: number, min: number = 0, max: number = 100) {
-    if (value < min) { return min }
-    if (value > max) { return max }
-    return value
+    if (value < min) { return min; }
+    if (value > max) { return max; }
+    return value;
 } }
 ```
 
@@ -8678,7 +8682,7 @@ The L1 pillar (§1.4) raises markup to a first-class value type in scrml. `let a
 **The interpolation form.** Inside a markup body, `${expr}` is a value-interpolation site. The expression `expr` is evaluated and its string representation is rendered at that position in the DOM.
 
 ```scrml
-const VERSION = "v0.3.0"
+const VERSION = "v0.3.0";
 <span class="version-pill">${VERSION}</span>
 ```
 
@@ -8705,7 +8709,7 @@ const VERSION = "v0.3.0"
 
 **Compile-time-known constant — folded inline (the v0.3.x-canonical shape for version pills, footer years, env config):**
 ```scrml
-const VERSION = "v0.3.0"
+const VERSION = "v0.3.0";
 <span class="version-pill">${VERSION}</span>
 ```
 Compiler MAY emit:
@@ -8716,7 +8720,7 @@ Zero placeholder, zero runtime cost.
 
 **Reactive cell — reactive subscription:**
 ```scrml
-<count> = 0
+<count> = 0;
 <span>Count: ${@count}</span>
 ```
 Compiler SHALL emit a placeholder + reactive subscription. The span text updates whenever `@count` changes.
@@ -8729,7 +8733,7 @@ Compiler SHALL emit a placeholder + one-shot textContent write at `DOMContentLoa
 
 **Tilde accumulator in interpolation body (multi-statement form):**
 ```scrml
-<span>${ const result = computeValue(); ~ = result }</span>
+<span>${ const result = computeValue(); ~ = result; }</span>
 ```
 The `~` accumulator inside `${...}` follows §32 semantics. The final `~` reference is the interpolation value; the surrounding statements are evaluation context. The compiler SHALL produce correct textContent emission for the final `~` value.
 
@@ -8832,7 +8836,7 @@ rest parameter is annotated like any other (`...xs: int[]`).
 **Return type annotation.** `->` annotates function return types:
 
 ```scrml
-function add(a: number, b: number) -> number { return a + b }
+function add(a: number, b: number) -> number { return a + b; }
 ```
 
 #### Normative Statements
@@ -8851,12 +8855,12 @@ function add(a: number, b: number) -> number { return a + b }
 #### Worked Examples
 
 ```scrml
-<count>: number = 0
-<items>: string[] = []
-<selected>: string? = not
+<count>: number = 0;
+<items>: string[] = [];
+<selected>: string? = not;
 function greet(name: string, formal?: bool) -> string {
-    if (formal) { return "Good day, " + name }
-    return "Hey, " + name
+    if (formal) { return "Good day, " + name; }
+    return "Hey, " + name;
 }
 ```
 
@@ -9073,12 +9077,12 @@ stated at §66.3: an own value is a declaration whose type is its write contract
 
   ```scrml
   ${
-      let x = 1
+      let x = 1;
       const r = match x {
           1 :> 10
           else :> 20
-      }
-      print(r)
+      };
+      print(r);
   }
   ```
 
@@ -9168,10 +9172,10 @@ coverage invariant is checked by a type checker rather than by a reviewer's atte
 Variables declared in a file-level `${}` block are accessible to all subsequent markup and nested `${}` blocks within the same file. `${}` blocks do not create isolated scopes — each `${}` block participates in the file's shared scope.
 
 ```scrml
-${ let greeting = "Hello" }
+${ let greeting = "Hello"; }
 
 <p>${greeting}</>               // accessible
-${ let loud = greeting.toUpperCase() }
+${ let loud = greeting.toUpperCase(); }
 <p>${loud}</>
 ```
 
@@ -9187,7 +9191,8 @@ ${ let loud = greeting.toUpperCase() }
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6) — *"duplicate top-level `function` → E-SCOPE-010, §7.6 text fixed to name `function`"*.
 - **A file-scope name is bound once in its file, whatever it names (S473).** A `let` / `const`, a `function`, a `type` and a user declaration (`<card>`) bound at file scope share one namespace. A second binding, in the same file, of a name already bound at file scope — of the same kind or of another (`<card>` beside `function card`, `type T` beside `function T`, a `const` beside a `type` of its name, two declarations of one name) — SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope). A program cell (`<count:int=0/>`) is a file-scope binding too (§7.6.1), so a cell beside a `function` or a `type` of its name in its file is the same error. Across files, only EXPORTED names can collide (next statement). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `fileNameClashes`, `dupConsts`); Nominal on impl#1, which carries it (§34.0).
   > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 — *"Same-name components across files, and `<card>` beside `fn card`: REFUSED."* The question it answers (docs/known-gaps.md `g-boot-decl-fn-same-name-one-file-s472`, filed S472): *"one file may declare a user declaration `<card>` and a function `card` (or a type and a function of one name) with no diagnostic … the question is whether one file-scope name may denote two kinds"* — so a type beside a function of its name is ruled, not inferred. Two types of one name in one file were already refused (bootstrap-local `E-BOOTSTRAP-REDECLARE`); this sentence names their code. **Direction of change:** newly-rejecting (`<card>` beside `function card`, a type beside a function or a declaration of its name, compiled with no diagnostic before).
-- **One name per program, for exported names (S473 ruling).** Two user files of one program SHALL NOT export the same name: a name exported by one user file (a `const`, a `function`, a `type` or a user declaration) and exported again by another, of the same kind or another, is a compile error (E-SCOPE-010). A non-exported (private) name never collides with a name in another file: two files may each keep a private `helper`, and a private name may share its spelling with another file's exported name, which it does not import. A file that imports a name and also declares it is E-SCOPE-010 (the import-vs-local rule above, whatever the import's source, a stdlib module included). The program is every file the compiler links into it: the entry and every file the entry reaches through imports. Two components of one name in two files stay `E-COMPONENT-NAME-DUPLICATE` (§9.1), exported or not. A stdlib module's names are not user declarations and are not compared with other files' names. Names resolve per file (§21.3). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `fileNameClashes`, `dupDecls`); Nominal on impl#1, which carries it (§34.0).
+- **~~One name per program, for exported names (S473 ruling).~~ Names are per file; output names are qualified per file (S474).** ~~Two user files of one program SHALL NOT export the same name: a name exported by one user file (a `const`, a `function`, a `type` or a user declaration) and exported again by another, of the same kind or another, is a compile error (E-SCOPE-010).~~ Two user files of one program MAY declare, and MAY export, the same name — of the same kind or another, a component or not, exported or not. Every emitted name a user file declares — its module-level JS names, a component's CSS scope key and `<template>` ids (§9.1 DQ-7) — SHALL be qualified by its declaring file, **always**, not only on a collision, so two files' same-spelled names never meet in the output. An importer resolves each name to the file it imports it from (§21.3). Binding two different declarations to one local name by import — two user files' same-named exports among them — is E-SCOPE-010 at the later import (§41.7) — alias one: `import { name as other }`. Unchanged: a file-scope name is bound once in its file (E-SCOPE-010, the bullet above), so two same-named declarations in ONE file, and `<card>` beside `function card` in one file, stay refused; a file that imports a name and also declares it is E-SCOPE-010 (the import-vs-local rule above, whatever the import's source, a stdlib module included). A stdlib module's names are not user declarations. Names resolve per file (§21.3). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `fileNameClashes`, `dupDecls`, `linkage`; the qualifier is `compiler/self-host-v2/core.scrml` `scopeKey`); Nominal on impl#1 (§34.0) — not measured there.
+  > **Provenance (S474):** ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3 — *"**Same-name components across files, and two files exporting one name: INTERIM.** The CSS scope key and output names are **always per-file qualified**, not only on a collision."* (PA: *"3. Per-file CSS scope keys, always or only when names collide: always."* — bryan: *"your recs on the four one-way doors. go"*) · built by the bootstrap in #1706 (lane `s474-boot-per-file-scope-keys`), so the interim refusal is withdrawn there · the §41.7 two-user-file import refusal is a PA ruling (S474 dispatch), not in the four-doors text · supersedes: *"Two user files of one program SHALL NOT export the same name … is a compile error (E-SCOPE-010)."* and *"Two components of one name in two files stay `E-COMPONENT-NAME-DUPLICATE` (§9.1), exported or not."* · **Direction of change:** newly-accepting (two files exporting, or declaring, one name); the import of two same-named user exports into one file moves from W-IMPORT-001 "later wins" (and, under S473, E-SCOPE-010 at the second exporter) to E-SCOPE-010 at the later import. *(Not ruled, carried as a PA rec in the veto window: `<card>` beside `function card` in ONE file stays PERMANENT — the cost is a rename.)*
   > **Provenance:** ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5 (*"One name per program for every user declaration (extends the §7.6 uniform E-SCOPE-010 ruling past file scope)."*), as narrowed by ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names" (S473): *"The program-wide one-name rule covers only names a file exports: two user files exporting the same name is E-SCOPE-010. A non-exported (private) name never collides with a name in another file, so two libraries may each keep a private `helper`. Unchanged: within one file, §7.6 file scope stays uniform (one name per file, #1636), and an imported name colliding with a local declaration stays E-SCOPE-010."* **Direction of change:** newly-rejecting. Before this, two user files exporting one name compiled; so did a program cell beside a function or a type of its name in one file, and a cell beside a stdlib import of its name. W-IMPORT-001 (§41.7) can no longer come from two user files that both export the imported name.
 - A declaration in a `${…lift…}` block nested inside an `if=` element is a file-scope declaration: it runs ONCE, at file init — not once per mount of the `if=` scope. The block's `lift` statements run per mount (§6.7.2.1). **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs".
 
@@ -9216,13 +9221,13 @@ ${ let loud = greeting.toUpperCase() }
 
 ```scrml
 <program>
-    ${ <count> = 0 }
-    ${ function increment() { @count = @count + 1 } }
+    ${ <count> = 0; }
+    ${ function increment() { @count = @count + 1; } }
 
     <h1>Counter</h1>
     <p>Count: ${@count}</p>
 
-    ${ const <doubled> = @count * 2 }
+    ${ const <doubled> = @count * 2; }
 
     <p>Doubled: ${@doubled}</p>
     <button onclick=increment()>+</button>
@@ -9293,6 +9298,7 @@ compiler's codegen target shape (tagged-template, async, `.unsafe()`), see §44.
 | `db=` value prefix | Backing driver | Notes |
 |--------------------|---------------|-------|
 | `sqlite:./path` | `bun:sqlite` via Bun.SQL | Local SQLite file |
+| `sqlite://path` or `sqlite:///abs/path` | `bun:sqlite` via Bun.SQL | Local SQLite file; the `//` after `sqlite:` is optional and is dropped (S474): `sqlite://app.db` is `sqlite:app.db`, `sqlite:///abs/a.db` is `/abs/a.db` |
 | `./path` or `./path.db` | `bun:sqlite` via Bun.SQL | Default; implicit `sqlite:` prefix |
 | `:memory:` | `bun:sqlite` via Bun.SQL | In-memory SQLite |
 | `postgres://...` or `postgresql://...` | PostgreSQL via Bun.SQL | Connection string forwarded |
@@ -9391,6 +9397,7 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   ~~, `mongo:`, `mongodb:`~~). *(record-lag, S473 D31: `mongo:` / `mongodb:` are NOT valid for `?{}` — the
   prefix table above and §44 — so they are struck from this list.)*
 - A plain path without prefix (e.g., `db="./app.db"`) SHALL be treated as `sqlite:./app.db`.
+- **`sqlite:` takes an optional `//` (S474 ruling 7).** After the `sqlite:` prefix, one `//` MAY follow; it SHALL be dropped and the rest read as the path. So `sqlite://app.db` names `app.db` beside the declaring file (a relative path, by the resolution base below), and `sqlite:///abs/a.db` names the absolute path `/abs/a.db`. Only one `//` is dropped: `sqlite:////a.db` names `//a.db`. A `sqlite:` or `sqlite://` value with no path after it SHALL be E-SQL-005. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 7 — *"**`sqlite://` follows impl#1: an optional `//`.** `sqlite://app.db` = `app.db` beside the declaring file; `sqlite:///abs` = `/abs`; `sqlite://` with no path is E-SQL-005. Closes g-spec-sqlite-url-form-unspecified-s474 once the §8.1.1 sentence lands."* · supersedes: nothing written (the table and this list named only `sqlite:./path`) · **Direction of change:** inert for impl#1 (`compiler/src/db-target.ts` `classifyDbTarget`, `/^sqlite:(?:\/\/)?/`) and for the bootstrap since #1699 r2 (analyze.scrml `sqlitePathOf`). **Newly-rejecting** for a bare `sqlite:` / `sqlite://`: impl#1's `classifyDbTarget` reads it as a SQLite file with an empty path (read from the source, not executed), not E-SQL-005 — `g-sqlite-empty-path-not-e-sql-005-s474`; the bootstrap emits E-SQL-005 (`compiler/self-host-v2/analyze.scrml` `dbRefusal`: "`sqlite:` names no path"). *(PA readings: "only one `//` is dropped" and the bare `sqlite:` case follow from "an optional `//`"; the ruling names `sqlite://`.)*)*
 - **Resolution base.** A relative SQLite file path in a `db=` or `<db src=>` value (with or
   without the `sqlite:` prefix) SHALL resolve against the directory of the `.scrml` file that
   declares it. The process working directory SHALL NOT affect which file it names. The
@@ -9474,7 +9481,7 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 ```scrml
 <program db="postgres://user:pass@localhost:5432/myapp">
     ${ function getUsers(role: string) {
-        return ?{`SELECT id, name FROM users WHERE role = ${role}`}.all()
+        return ?{`SELECT id, name FROM users WHERE role = ${role}`}.all();
     } }
 </>
 ```
@@ -9488,7 +9495,7 @@ driver's rows-returning method.
 ```scrml
 <program>
     ${ function getUsers() {
-        return ?{`SELECT * FROM users`}.all()   // Error E-SQL-004
+        return ?{`SELECT * FROM users`}.all();   // Error E-SQL-004
     } }
 </>
 ```
@@ -9507,14 +9514,14 @@ Error E-SQL-004 at line 3: `?{}` block has no `db=` declaration in any ancestor 
     ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
   </schema>
   <db src="app.db" protect="passwordHash" tables="users">
-    ${ function noop() { return 1 } }
+    ${ function noop() { return 1; } }
   </db>
   <channel name="chat" topic="lobby">
     ${
-      <messages> = []
+      <messages> = [];
       function pushUser(id: int) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // runs on app.db
-        broadcast(u)                                             // passwordHash stripped (§14.8.9)
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get();   // runs on app.db
+        broadcast(u);                                             // passwordHash stripped (§14.8.9)
       }
     }
   </>
@@ -9534,7 +9541,7 @@ and the row `broadcast` publishes is stripped of `passwordHash` (§14.8.9 channe
 <program>
   <db src="a.db" tables="users"> ${ … ?{`SELECT … FROM users`} … } </db>   // runs on a.db
   <db src="b.db" tables="items"> ${ … ?{`SELECT … FROM items`} … } </db>   // runs on b.db
-  ${ function f() { return ?{`SELECT 1`}.get() } }                         // Error E-SQL-004
+  ${ function f() { return ?{`SELECT 1`}.get(); } }                         // Error E-SQL-004
 </program>
 ```
 
@@ -9879,11 +9886,11 @@ When the same SQL pattern (e.g., a shared WHERE clause) needs to appear across m
 
 ```scrml
 function activeUsers(filter: string)! -> AppError {
-    return ?{ select * from users where active = true and ${filter} }
+    return ?{ select * from users where active = true and ${filter} };
 }
 // Use across queries:
-const admins = activeUsers("role = 'admin'") !{ ... }
-const editors = activeUsers("role = 'editor'") !{ ... }
+const admins = activeUsers("role = 'admin'") !{ ... };
+const editors = activeUsers("role = 'editor'") !{ ... };
 ```
 
 The function call IS the reuse boundary. scrml does NOT provide fragment-as-value composition (no `sql\`\`` tagged template; no `?if` directive; no `scrml:sql` query builder) — these were evaluated 2026-03-30 + re-evaluated 2026-05-08 (Insight 27) and ratified as Pillar-5 violations or otherwise structurally inappropriate. Fragment-reuse via call-graph extraction is structurally sufficient: the function-extraction boundary subsumes the fragment-extraction shape under §12.2 route inference (the extracted function escalates to server via Trigger 1 — the `?{}` block — and is called from server-classified callers, also Trigger 5).
@@ -9922,8 +9929,8 @@ write outcome is needed.
 ```scrml
 <db src="./app.db" tables="users">
     ${ function createUser(name: string, email: string) {
-        let [row] = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email}) RETURNING id`}.all()
-        return row.id
+        let [row] = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email}) RETURNING id`}.all();
+        return row.id;
     } }
 </>
 ```
@@ -9932,7 +9939,7 @@ write outcome is needed.
 
 ```scrml
 ${ function deleteSession(token: string) {
-    ?{`DELETE FROM sessions WHERE token = ${token}`}.run()
+    ?{`DELETE FROM sessions WHERE token = ${token}`}.run();
 } }
 ```
 
@@ -9948,7 +9955,7 @@ statement across iterations:
 ```scrml
 ${ function bulkInsert(users: User[]) {
     for (u of users) {
-        ?{`INSERT INTO users (name, email) VALUES (${u.name}, ${u.email})`}.run()
+        ?{`INSERT INTO users (name, email) VALUES (${u.name}, ${u.email})`}.run();
     }
 } }
 ```
@@ -9960,17 +9967,19 @@ Write operations that must succeed or fail atomically are wrapped in a `transact
 ```scrml
 ${ function transferFunds(fromId: int, toId: int, amount: number) {
     transaction {
-        ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${fromId}`}.run()
-        ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${toId}`}.run()
+        ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${fromId}`}.run();
+        ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${toId}`}.run();
     }
 } }
 ```
 
 **Normative statements:**
 
-- A `transaction` block SHALL be compiled to BEGIN/COMMIT/ROLLBACK wrapping (emitted as
-  `await _scrml_sql.unsafe("BEGIN DEFERRED")` etc. per §44). On any exception thrown from
-  within the block, the compiler-generated catch clause SHALL execute ROLLBACK and re-throw.
+- **Inside an open envelope a `transaction` block is a SAVEPOINT (S474).** In a `!` server body where the §8.9.2 implicit envelope is open, the block SHALL compile to a savepoint: `SAVEPOINT` at its start, `RELEASE` on normal completion, and `ROLLBACK TO` then `RELEASE` on every rollback ending (§8.9.2 "Amendment S474" item 3; §19.10.6 "Nesting"). The envelope is open in every `!` body whose transitive query set is non-empty ("Amendment S474" item 1), and any `transaction` block with a query makes the set non-empty. The block does not commit or end the envelope.
+- **The outermost case keeps the top-level form.** A `transaction` block that is the outermost transaction on its connection, with no envelope open, SHALL be compiled to BEGIN/COMMIT/ROLLBACK wrapping as the next bullet states, and the BEGIN IMMEDIATE reading there applies to it. Under E-ERROR-001 (a `transaction` block only in a `!` function) and item 1, a source program reaches this case only on a compiler that does not yet open the S474 envelope for its function: impl#1 today (`g-impl1-implicit-envelope-lexical-count-s474`). So `g-transaction-block-begin-immediate-s474` stays live there and is not moot.
+- In that outermost case, a `transaction` block SHALL be compiled to BEGIN/COMMIT/ROLLBACK wrapping (emitted as
+  `await _scrml_sql.unsafe("BEGIN DEFERRED")` etc. per §44). *(S474, ⚑ PA reading in the veto window: on SQLite a `transaction { }` block opens with `BEGIN IMMEDIATE` when the queries it reaches contain a write, and `BEGIN DEFERRED` otherwise — the §8.9.2 rule for the implicit envelope (S474 ruling 5), whose reason, surfacing a second-process write conflict before any work, applies equally to an explicit block; Postgres / MySQL keep plain `BEGIN`. Ruling 5 names only the implicit envelope. Unbuilt on both compilers: impl#1 emits `BEGIN DEFERRED`, and the bootstrap refuses `transaction { }` — `g-transaction-block-begin-immediate-s474`.)* On any exception thrown from
+  within the block, the compiler-generated catch clause SHALL execute ROLLBACK (`ROLLBACK TO` the block's savepoint inside an envelope) and re-throw.
 - All SQL statements inside a `transaction` block use the same `_scrml_sql` Bun.SQL handle.
 - `transaction` blocks, like all `?{}` SQL operations, are server-side constructs.
   A `transaction` block in a client-boundary function is E-CG-006.
@@ -9999,11 +10008,11 @@ read/write distinction.
 | E-SQL-008 | `?{` SQL block has no matching `}` — unterminated SQL template, unterminated backtick template literal, or unmatched `${` interpolation inside the SQL body (F-SQL-001, parser-stage hard error replacing prior silent data loss) | Error |
 | E-SQL-MULTIPLE-STATEMENTS | A program-body `?{}` in a compilation with a database holds more than one SQL statement (§8.1.2, S456) — statement or expression position, including expression text held unparsed. Emitted by `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements`. | Error |
 | E-SQL-QUERY-NOT-READABLE | A `?{` in expression text the compiler holds unparsed (an `if` / `while` condition, a template-literal slot, a raw `match` arm) that codegen's text path does not lower — no backtick template, a backtick inside the body, or no `}` after it — so no check can read it (§8.1.2, S456 fix round F2/F4). Emitted by `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` via `compiler/src/sql-in-expression-text.ts` `scanExpressionTextForSql`. | Error |
-| E-BATCH-001 | Explicit `transaction { }` composed with an implicit per-handler transaction (§8.9.3 / §19.10.5) | Error |
+| E-BATCH-001 | **Retired from the language (S474)**: a `transaction { }` block inside a `!` server body now runs as a savepoint within the implicit envelope (§8.9.2 "Amendment S474" item 3). Formerly: explicit `transaction { }` composed with an implicit per-handler transaction (§8.9.3 / §19.10.5). impl#1 still emits it (§34); emitted at `compiler/src/batch-planner.ts`. | Error (impl#1 only; retired from the language) |
 | E-BATCH-002 | Batched `IN (...)` parameter count exceeds `SQLITE_MAX_VARIABLE_NUMBER` and chunking is not applicable | Error |
 | E-PROTECT-003 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that appears in the handler's client-visible return type (§8.10.7) | Error |
 | D-BATCH-001 | For-loop nearly matches the Tier 2 syntactic template but was not rewritten; diagnostic lists the near-miss reason | Info |
-| W-BATCH-001 | Explicit `?{BEGIN}` in a `!` function suppresses implicit per-handler transaction; use `transaction { }` or `.nobatch()` for clarity. Not emitted outside a `!` function, where the `?{BEGIN}` is E-ERROR-015 (S451). Emitted at `compiler/src/batch-planner.ts:660`. | Warning |
+| W-BATCH-001 | **Retired from the language (S474)**: an explicit `?{BEGIN}` in a `!` server body opens a savepoint within the implicit envelope and suppresses nothing (§8.9.2 "Amendment S474" item 3); impl#1 still emits it (§34). Formerly: explicit `?{BEGIN}` in a `!` function suppresses implicit per-handler transaction; use `transaction { }` or `.nobatch()` for clarity. Not emitted outside a `!` function, where the `?{BEGIN}` is E-ERROR-015 (S451). Emitted at `compiler/src/batch-planner.ts:660`. | Warning (impl#1 only; retired from the language) |
 | E-ERROR-015 | Manual transaction control (`?{BEGIN}`, `?{COMMIT}`, `?{ROLLBACK}`, `?{SAVEPOINT}`, …) where no enclosing function is declared `!` — §19.10.4 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 
 ### 8.7 Runtime Errors
@@ -10034,7 +10043,7 @@ See §19.8 for the full `SqlError` type definition and propagation rules.
 
 **Added:** 2026-04-14. Resolves SQL batching design insight (S16) Alpha/Gamma clusters F4.A + F1.A.
 
-Independent `?{}` queries within a single server handler SHALL share a prepare/lock cycle. In `!` handlers, ~~two or more `?{}` queries (none counted that carries `.nobatch()`), independent or not,~~ *(the lexical count is superseded S473 review-surfaced 1, refined S473: the trigger is the TRANSITIVE query set — §8.9.2 amendment)* two or more `?{}` queries in the function's transitive query set (none `.nobatch()`) SHALL execute under a single implicit transactional envelope (§8.9.2, S451 R9 — supersedes: "Independent `?{}` queries within a single server handler SHALL share a prepare/lock cycle and, in `!` handlers, execute under a single implicit transactional envelope.").
+Independent `?{}` queries within a single server handler SHALL share a prepare/lock cycle. In `!` handlers, ~~two or more `?{}` queries (none counted that carries `.nobatch()`), independent or not,~~ *(the lexical count is superseded S473 review-surfaced 1, refined S473: the trigger is the TRANSITIVE query set — §8.9.2 amendment)* ~~two or more `?{}` queries in the function's transitive query set (none `.nobatch()`)~~ *(S474: every `!` server body — §8.9.2, "Amendment S474")* the body of every `!` server function whose transitive query set is non-empty SHALL execute under a single implicit transactional envelope (§8.9.2, S474 "envelope every `!` server body"; S451 R9 — supersedes: "Independent `?{}` queries within a single server handler SHALL share a prepare/lock cycle and, in `!` handlers, execute under a single implicit transactional envelope.").
 
 #### 8.9.1 Coalescing Candidate Set
 
@@ -10049,21 +10058,22 @@ The Batch Planner (PIPELINE.md Stage 7.5) computes this set from the finalized D
 
 #### 8.9.2 Coalescing Envelope
 
-When two or more `?{}` calls in a server handler are coalescing candidates, the compiler SHALL coalesce their prepare/lock cycle. Separately, ~~**when a `!` server function body contains two or more `?{}` queries that do not carry `.nobatch()`**~~ *(the lexical count is superseded S473 review-surfaced 1, refined S473: the trigger is the TRANSITIVE query set — §8.9.2 amendment)* **when a `!` server function's transitive query set contains two or more `?{}` queries that do not carry `.nobatch()`** *(through non-`!` and `!` callees, a query counted once per time it is reached — S473 #1690 review F10, amendment below)*, the compiler SHALL wrap the handler body in `?{BEGIN DEFERRED}` / `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit) — the implicit per-handler transaction. The trigger is stated in source terms on purpose: whether two queries share a prepare/lock cycle depends on the §8.9.1 candidate set (dependency-graph `'awaits'` edges), but that sharing is not observable, while the envelope is; so the envelope does not depend on the candidate set, and a data dependency between two queries does not remove it.
+When two or more `?{}` calls in a server handler are coalescing candidates, the compiler SHALL coalesce their prepare/lock cycle. Separately, ~~**when a `!` server function body contains two or more `?{}` queries that do not carry `.nobatch()`**~~ *(the lexical count is superseded S473 review-surfaced 1, refined S473: the trigger is the TRANSITIVE query set — §8.9.2 amendment)* ~~**when a `!` server function's transitive query set contains two or more `?{}` queries that do not carry `.nobatch()`**~~ *(S474: superseded — "Amendment S474" below)* **when a `!` server function's transitive query set is non-empty** *(every `?{}` reached from the body, through non-`!` and `!` callees — S473 #1690 review F10; `.nobatch()` ones included — S474, amendment below)*, the compiler SHALL wrap the handler body in ~~`?{BEGIN DEFERRED}`~~ an opening statement / `?{COMMIT}` (`?{ROLLBACK}` on an exception or a `fail` exit) — the implicit per-handler transaction. **The opening statement (S474 ruling 5):** on SQLite the envelope SHALL open with `BEGIN IMMEDIATE` when its transitive query set contains a write, and with `BEGIN DEFERRED` otherwise. A **write** is the §6.7.7.1 rule 1(a) test used by E-SQL-011 below — a `?{}` whose SQL is not a `SELECT`, a query the compiler cannot classify counting as a write; the set is every query the envelope reaches, `.nobatch()` ones included ~~(§8.9.5 opts a query out of the count, not out of the envelope)~~ (§8.9.5: `.nobatch()` has no effect on the envelope — S474). `BEGIN IMMEDIATE` takes the database's write lock when the transaction opens, so a write conflict with another process or connection fails the call before the body has done any work, instead of failing at its first write after its reads have run. Nested savepoints (an inner `!` function inside an outer envelope, §19.10.6) are unchanged: a savepoint opens with `SAVEPOINT`, whatever the outer envelope's opening statement. ~~*(S474, ⚑ PA reading: a client-placed `!` function's composed server batch opens its own envelope when its query set writes or reaches two or more queries — §19.10.5, "A composed batch's envelope".)*~~ *(S474, #1732: a client-placed `!` function's composed server batch opens its own envelope when its transitive query set is non-empty — §19.10.5, "A composed batch's envelope".)* The trigger is stated in source terms on purpose: whether two queries share a prepare/lock cycle depends on the §8.9.1 candidate set (dependency-graph `'awaits'` edges), but that sharing is not observable, while the envelope is; so the envelope does not depend on the candidate set, and a data dependency between two queries does not remove it.
 
-> **Provenance:** ruling:user-voice-scrml.md S451 "yes on all seven" — R9: *"§8.9.1's implicit-envelope trigger restated in language terms: two or more `?{}` in one `!` server body, none `.nobatch()`."* · design §10 R9 (*"the data-dependency clause only changes the prepare/lock sharing, which is not observable"*) · supersedes: *"When two or more `?{}` calls in a server handler are coalescing candidates, … In `!` handlers ONLY, the compiler SHALL additionally wrap the handler body …"* (the envelope keyed on the candidate set) and §19.10.5's *"An implicit per-handler transaction SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)."* · **Direction of change: semantics-changed** — a `!` body whose two queries depend on each other (`const a = ?{SELECT …}.get()` then `?{UPDATE … ${a.id}}.run()`) now always runs them in one transaction. impl#1 (probed S451 on `b490f3b75`, a `server function f()! -> SqlError` with that dependent pair) already emits the envelope for that shape; its known envelope holes are the existing `g-implicit-envelope-requires-explicit-server-modifier` and `g-implicit-envelope-only-on-baseline-csrf-arm`, both measured against this trigger. `BEGIN DEFERRED` is the SQLite spelling; on a Postgres or MySQL database (§44.2) the opening statement SHALL be a plain `BEGIN`, which those databases accept and which opens the same lazily-locking transaction. *(PA reading, S449: Postgres rejects `BEGIN DEFERRED` as a syntax error — measured on PG16 — so the literal text made the envelope unusable there.)*
+> **Provenance:** ruling:user-voice-scrml.md S451 "yes on all seven" — R9: *"§8.9.1's implicit-envelope trigger restated in language terms: two or more `?{}` in one `!` server body, none `.nobatch()`."* · design §10 R9 (*"the data-dependency clause only changes the prepare/lock sharing, which is not observable"*) · supersedes: *"When two or more `?{}` calls in a server handler are coalescing candidates, … In `!` handlers ONLY, the compiler SHALL additionally wrap the handler body …"* (the envelope keyed on the candidate set) and §19.10.5's *"An implicit per-handler transaction SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)."* · **Direction of change: semantics-changed** — a `!` body whose two queries depend on each other (`const a = ?{SELECT …}.get()` then `?{UPDATE … ${a.id}}.run()`) now always runs them in one transaction. impl#1 (probed S451 on `b490f3b75`, a `server function f()! -> SqlError` with that dependent pair) already emits the envelope for that shape; its known envelope holes are the existing `g-implicit-envelope-requires-explicit-server-modifier` and `g-implicit-envelope-only-on-baseline-csrf-arm`, both measured against this trigger. ~~`BEGIN DEFERRED` is the SQLite spelling;~~ `BEGIN IMMEDIATE` / `BEGIN DEFERRED` are the SQLite spellings (S474 ruling 5, above); on a Postgres or MySQL database (§44.2) the opening statement SHALL be a plain `BEGIN`, which those databases accept and which opens the same lazily-locking transaction as `BEGIN DEFERRED` (ruling 5 changes the SQLite spelling only; a Postgres / MySQL envelope with a write still opens with plain `BEGIN` — PA reading, the ruling names SQLite's statements). *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 5 — *"**The implicit envelope opens with `BEGIN IMMEDIATE` when its transitive query set contains a write**, `BEGIN DEFERRED` otherwise. Changes the §8.9.2 spelling; surfaces a second-process write conflict before any work."* · supersedes: *"`BEGIN DEFERRED` is the SQLite spelling"* and the trigger sentence's *"`?{BEGIN DEFERRED}`"* · **Direction of change:** semantics-changed (timing only): a read-only envelope is unchanged; an envelope with a write now takes the write lock at its start, so under contention it fails earlier, with no work done, and a second envelope waits (busy-timeout) or fails at BEGIN rather than at its first write. No acceptance status moves. **Built by the bootstrap** (#1703: `compiler/self-host-v2/analyze.scrml` `envelopeOf` decides write-ness at compile time, `compiler/self-host-v2/core.scrml` `Envelope.writes`, `server-runtime.js` `envelope`; `g-boot-envelope-begin-deferred-late-conflict-s474` resolved). **Nominal on impl#1**, which opens every SQLite envelope `BEGIN DEFERRED` (`g-impl1-envelope-begin-immediate-when-writing-s474`). The "a write" reading — §6.7.7.1's test over every reached query, `.nobatch()` included — is a PA reading: the ruling says "contains a write".)* *(PA reading, S449: Postgres rejects `BEGIN DEFERRED` as a syntax error — measured on PG16 — so the literal text made the envelope unusable there.)*
 
 > **Amendment S473 (review-surfaced 1, refined) — the trigger is the TRANSITIVE query set.** A `!` function's
 > all-or-nothing guarantee covers the writes of every non-`!` function it calls, transitively — the same reach
 > E-SQL-011 already has. The implicit-envelope trigger above is therefore read over the function's **transitive
 > query set**: every `?{}` reached from the `!` body — its own and those of every non-`!` function it reaches —
-> reads included, as S451 R9 counted queries (lexically). Two or more such queries (none `.nobatch()`) open the
-> implicit per-handler transaction, so a read-then-write (one SELECT and one UPDATE, directly or through callees)
+> reads included, as S451 R9 counted queries (lexically). ~~Two or more such queries (none `.nobatch()`) open the
+> implicit per-handler transaction~~ *(S474: any such query opens it — "Amendment S474" below)*, so a read-then-write (one SELECT and one UPDATE, directly or through callees)
 > sees one snapshot. ~~"when a `!` server function body
-> contains two or more `?{}` queries"~~ as a LEXICAL count of the body is superseded. **Interim (bootstrap):** until
+> contains two or more `?{}` queries"~~ as a LEXICAL count of the body is superseded. ~~**Interim (bootstrap):** until
 > the bootstrap builds the envelope, it SHALL refuse — `E-BOOTSTRAP-UNSUPPORTED`, naming this section — a `!`
 > function whose transitive query set has two or more queries, or one inside a loop; it SHALL NOT compile it
-> without the guarantee (S473 D1). **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."* · supersedes: the lexical
+> without the guarantee (S473 D1).~~ *(Withdrawn: the bootstrap builds the envelope since U1e, #1699 — §19.10.5;
+> currency correction, S474.)* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."* · supersedes: the lexical
 > reading of the S451 R9 trigger · refined by ruling:user-voice-scrml.md S473 "⭐ RULED — S473: the transitive `!` envelope counts QUERIES, not writes" ("your recs") — *"The §8.9.2 / §19.10.5 implicit-envelope trigger is the **transitive QUERY set**: every `?{}` reached from the `!` function body, its own and its non-`!` callees', as S451 R9 counted queries lexically. It is not the transitive write set. A `!` body with one SELECT and one UPDATE (directly or through callees) gets the envelope, so a read-then-write sees one snapshot. The bootstrap's interim refusal fires on two or more transitively reached queries (or one inside a loop), until the envelope is built."* **Direction of change:** the trigger still counts QUERIES, as
 > S451 R9 did, but over the transitive set: a `!` body whose queries are split across non-`!` callees newly gets the
 > envelope; a body with one SELECT plus one UPDATE keeps it. Newly-rejecting on the bootstrap until built (the interim
@@ -10090,15 +10100,237 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 > callees'"). **Direction of change:** newly-rejecting on the bootstrap until the envelope is built (the interim
 > refusal now also counts a `!` callee's queries and a query reached more than once). Emitted by the bootstrap
 > (`compiler/self-host-v2/analyze.scrml` `txQuerySets`); Nominal on impl#1, which carries it (§34.0).
+>
+> **Amendment S474 — every `!` server body runs in the envelope.** The implicit per-handler transaction is the
+> meaning of `!` on a server body: a `!` function placed on the server that fails leaves no writes.
+>
+> 1. **Trigger.** The body of every `!` function placed on the server (§12; placement is inferred, §12.2, and
+>    the deprecated `server` modifier, §52.10, is not needed) whose transitive query set (above: every `?{}`
+>    reached from the body, its own and every function's it calls, `!` or not) is **non-empty** SHALL run inside
+>    the implicit per-handler transaction. This holds whatever its error type (not only `! -> SqlError`) and
+>    however many queries it reaches (one is enough). A `fail` at any depth of the body (a `?` that propagates a
+>    callee's failure included, §19.5.2) or a host throw out of the body SHALL roll back every write the body
+>    made, through the rollback bullet below. A `!` body whose transitive query set is empty opens no envelope: it
+>    has no write to undo. *(impl#1 keys its envelope on the explicit modifier and misses an escalated function:
+>    `g-implicit-envelope-requires-explicit-server-modifier`.)*
+>    **A read-only set takes no write lock (⚑ PA reading, for bryan's veto).** When no query in the transitive
+>    query set is a write (the §6.7.7.1 test used by ruling 5 above), the envelope SHALL open with `BEGIN
+>    DEFERRED` on SQLite, which takes no write lock until a write. On Postgres / MySQL it opens with plain
+>    `BEGIN`, as ruling 5 states. It is not opened `READ ONLY`, because a statement that passes the lexical read
+>    test can still write (`SELECT nextval(…)`, `SELECT pg_advisory_xact_lock(…)`, a data-modifying `WITH`), and
+>    a read-only transaction would refuse it at run time. A single read therefore costs no write lock. It still
+>    passes the §19.10.6 one-transaction-per-connection gate for the body's whole run, including any outbound
+>    call the body awaits. That cost is the one the ruling tracks ("whole-body lock hold"):
+>    `g-envelope-lock-hold-cost-s474`.
+>    **A failure of the envelope itself is a server error (⚑ PA reading, for bryan's veto).** If the envelope's
+>    own opening statement fails (for example `BEGIN IMMEDIATE` returning SQLITE_BUSY after the busy timeout,
+>    ruling 5), or its `COMMIT` fails, or the release or rollback-to of a savepoint it opened (items 3, 4 and
+>    6 below) fails, the call SHALL NOT report success, whatever the function's declared error type. It SHALL
+>    be answered as a server error, mirroring §19.10.6's left-open rule. For a route that is HTTP 500, never the
+>    handler's success response. For a call made in-process, the failure is thrown to the caller, whose own
+>    envelope it then rolls back. For a streamed response, the stream ends with its terminal `error` event
+>    (§19.10.6). The failed `COMMIT` is followed by the `ROLLBACK` §19.10.6 requires.
+> 2. **`.nobatch()` keeps only its batching meaning (§8.9.5).** It excludes a query from §8.9.1 candidate sets and
+>    from §8.10 loop hoisting. It SHALL NOT remove the query from the transitive query set, and it SHALL NOT
+>    suppress, narrow or end the envelope. No source form removes the envelope from a `!` server body today.
+>    *(**INTERIM** — ⚑ PA reading on the ruling, for bryan's veto. The capable form is an explicit opt-out
+>    spelling, a source form that marks a `!` server body or a write as outside the envelope: owed, not designed.
+>    Today's alternative is to make a write that need not be atomic in a server function that is not `!`, and
+>    call it after the `!` function returns. **Its limit:** that works only when the caller at the top of the
+>    chain is not `!`. A `!` server caller puts the non-`!` function in its own transitive query set (item 1),
+>    and a client-placed `!` caller composes both server calls into one envelope (§19.10.5), so the write is
+>    enveloped either way. A write that must persist when a `!` body fails (an audit-on-failure row) has no
+>    spelling inside a failing `!` call chain until the capable form exists.)*
+> 3. **An author's transaction nests as a SAVEPOINT.** A `transaction { }` block (§19.10.2) or an explicit
+>    `?{BEGIN}` … `?{COMMIT}` (§19.10.1) inside a `!` server body, written in the body or in any function the body
+>    calls, SHALL run as a savepoint within the envelope (§19.10.6, "Nesting"). Its commit releases the
+>    savepoint. Its rollback (a `fail`, an error, or an early exit out of the block, §19.10.3) rolls back to the
+>    savepoint. Neither commits, ends or releases the envelope. A later failure of the body still rolls back
+>    everything, the savepoint's released writes included. This replaces E-BATCH-001 (an implicit envelope
+>    composed with a `transaction { }` block) and W-BATCH-001 (an explicit `?{BEGIN}` that suppressed the
+>    envelope); both are retired from the language (§34). **Every savepoint the compiler opens has a
+>    compiler-owned name:** for a `transaction { }` block or a paired `?{BEGIN}` (this item), for a nested `!`
+>    call, and for a statement handled at its site (item 4). Author SQL cannot see or name these savepoints.
+>    An author's `?{RELEASE name}` / `?{ROLLBACK TO name}` names only a savepoint the author opened.
+>    **E-ERROR-007 stays lexical — INTERIM.** A `transaction` block written inside another `transaction` block
+>    stays E-ERROR-007, and the implicit envelope is not a `transaction` block for it (§19.10.5). The capable
+>    form is the savepoint meaning: an inner block as a savepoint inside the outer one, as a block reached
+>    through a call already runs. Today's alternative is to move the inner block into a function the outer block
+>    calls, or to use a named savepoint (`?{SAVEPOINT name}`, below), which E-ERROR-007's message names.
+>    **Manual transaction control is accepted when it is path-paired (⚑ PA reading, for bryan's veto).**
+>    Inside a `!` body, `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` lower to `SAVEPOINT` / `RELEASE` /
+>    `ROLLBACK TO` (then `RELEASE`) of a compiler-owned savepoint. A `?{BEGIN}` (any form) in a `!` server body
+>    is **path-paired** when every control path from it reaches its own ending (`?{COMMIT}` / `?{END}` /
+>    `?{ROLLBACK}`) exactly once before the path leaves the `?{BEGIN}`'s block or the function. The rule is
+>    defined by these points:
+>    - **Failing exits are exempt.** A path that leaves the function by an exit that already fails the call
+>      needs no ending: a `fail`, a `?` (§19.5.2), the implicit `SqlError` propagation of an unhandled `?{}`
+>      (§19.8.2), or a throw. On such an exit the open savepoint is rolled back as part of the failure,
+>      silently. It is not a §19.10.6 R6 "left open" case and writes no report.
+>    - **Every other exit needs its ending first.** A `return`, a `break` / `continue` that leaves the block,
+>      and normal fall-through to the end of the block each need the ending before them.
+>    - **Branches and arms are paths.** Each branch of an `if` / `else`, each `match` arm and each `!{}`
+>      handler arm is its own path. A value-position arm is part of the enclosing statement's path.
+>    - **Endings pair LIFO.** A `?{BEGIN}` written while another is open opens an inner savepoint. An ending
+>      closes the innermost open `?{BEGIN}`, and "exactly once" counts only the ending matched to this
+>      `?{BEGIN}`.
+>
+>    So §19.10.1's `transferFunds` is valid: its `if` path runs `?{ROLLBACK}` and then `fail`, and its other
+>    path reaches `?{COMMIT}`.
+>    **Author savepoints.** The compiler's savepoint names never collide with any savepoint name written in
+>    the compilation. An author's `?{SAVEPOINT name}` / `?{RELEASE name}` / `?{ROLLBACK TO name}` stay valid
+>    and nest inside the envelope. Author savepoints and compiler savepoint regions (a paired `?{BEGIN}`, a
+>    `transaction { }` block, a statement or call savepoint) SHALL nest properly along every path. The reason
+>    is SQLite's cascade: a `RELEASE name` or `ROLLBACK TO name` also releases or rewinds every savepoint
+>    opened after `name`. So an interleaving such as `?{SAVEPOINT a}; ?{BEGIN}; ?{RELEASE a}; ?{COMMIT};` would
+>    destroy the compiler's savepoint before its ending runs.
+>    **Refused.** Every shape that is not provably path-paired and properly nested SHALL be a compile error,
+>    **E-TX-UNMATCHED-END** (§34), naming the statement and the remedy (pair it on every path, or use
+>    `transaction { }`). This is an **INTERIM** refusal. It covers:
+>    - a `return`, a `break` / `continue` out of the block, or a fall-through to the block's end that some
+>      path from a `?{BEGIN}` reaches without its ending;
+>    - a path that reaches its `?{BEGIN}`'s ending twice;
+>    - an ending reached on some path with no `?{BEGIN}` open, which would end the envelope or a caller's
+>      savepoint;
+>    - a loop that crosses a `?{BEGIN}` or its ending (one inside the loop, the other outside it);
+>    - a `?{RELEASE name}` / `?{ROLLBACK TO name}` reached on some path without its `?{SAVEPOINT name}`;
+>    - an author savepoint and a compiler savepoint region that do not nest properly on some path.
+>
+>    The capable form is matching these shapes too, with savepoint release / rollback semantics for each:
+>    owed, not designed. Because every provable shape is paired, R6's return-time "rolled back and
+>    reported" backstop (§19.10.6) applies in a `!` body only to a shape the compiler could not prove. On a
+>    conforming compiler that is a shape E-TX-UNMATCHED-END refuses.
+> 4. **A nested `!` call is a SAVEPOINT.** A `!` function placed on the server, called while an envelope is open
+>    (in-process, from a `!` body or anything it calls), SHALL run its body as a savepoint within that envelope.
+>    When the callee fails, its savepoint SHALL be rolled back before the failure value reaches the caller. A
+>    caller that HANDLES the failure (a `!{}` arm, an error arm of a `match`, `_ e`) keeps its own writes and
+>    continues inside its envelope: only the callee's writes are undone. A caller that propagates it (`?`), fails
+>    itself, or throws rolls back the whole envelope.
+>    **A query handled at its site runs under its own statement savepoint.** Inside an envelope, a `?{}` whose
+>    failure is handled where it is written (a `!{}` on the query, or a `match` on its result, §19.8.3) SHALL run
+>    under a statement savepoint of its own. When the query fails, the handler runs after a rollback to that
+>    savepoint, and the envelope survives with every earlier write intact. On Postgres a failed statement aborts
+>    the whole transaction, so without this savepoint every later query would fail and the envelope's `COMMIT`
+>    would silently end as a `ROLLBACK`, reporting success with every write gone. The insert-or-ignore idiom
+>    `?{INSERT …}.run() !{ .ConstraintViolation :> not };` is the shape this keeps correct. A query that is not
+>    handled at its site needs no savepoint: its failure fails the body, which rolls back the envelope.
+>    The statement savepoint is taken once per **executed** handled statement. A handled query in a loop takes
+>    one savepoint and one release per iteration. Where §8.10 hoists a loop's handled query into one batched
+>    statement, that one statement takes one savepoint, and a failure is handled per §8.10's attribution. Where
+>    §8.9.4 coalesces handled sites into one prepare, each executed site still takes its own savepoint, and
+>    `BatchPrepareFailed` is raised before any of them opens. On Postgres each savepoint costs about two extra
+>    round trips (`g-envelope-lock-hold-cost-s474`). A SQLite error that rolls back the whole transaction
+>    (`SQLITE_FULL`, `SQLITE_IOERR`, `SQLITE_NOMEM`) destroys the statement savepoint with it. The envelope's
+>    later `COMMIT` then fails, which item 1 makes a server error, never a reported success.
+> 5. **One database.** The envelope covers its own database only (the cross-database bullet below). A write to a
+>    second `<db>` reached inside the envelope is NOT covered atomically. Such a write in a `!` function stays
+>    **E-SQL-011**, whose fix text is amended here, since there is no envelope to remove.
+>    - **PERMANENT (semantic) when either database is SQLite.** A SQLite connection has no prepare phase, so no
+>      protocol can make a commit across two independent connections crash-atomic: a crash between the two
+>      commits leaves one committed and the other not.
+>    - **INTERIM for a Postgres / MySQL pair**, where two-phase commit exists (`PREPARE TRANSACTION` / XA). The
+>      capable form is a two-phase envelope across the pair: owed, not designed.
+>    impl#1 does not emit E-SQL-011 (`g-impl1-cross-database-write-in-envelope-s451`, open). *(⚑ PA reading:
+>    the envelope's database is the function's nearest database scope (§8.1.1) when the function has its own
+>    `?{}` sites. A `!` function with none, all of whose queries are in callees, takes the database of the first
+>    query in its transitive query set, as the bootstrap's `envelopeOf` does.)*
+> 6. **Every surface that runs a `!` server body.** The rule follows the `!` body, not the route that invokes it.
+>    An `<endpoint>` arm (§61) and a channel `onserver:` handler (§38.6.1) call a named function; when that
+>    function is `!`, its body runs in its envelope like any other `!` server body. The envelope holds its
+>    database for the body's whole run (§19.10.6, "Not covered"; `g-envelope-lock-hold-cost-s474`).
+>    **⚑ OPEN (owner): `server function*` SSE generators (§37) declared `!`.** Neither whether nor how such a
+>    generator's writes are undone by a failure is decided. One envelope held for the whole stream would hold the
+>    database for the stream's life (a `while (true)` generator would never commit) and would send each event
+>    before the commit that backs it. The candidates are:
+>    - **(a) per-`yield` commit segments.** Each stretch between `yield`s commits before its event is sent, so a
+>      later failure undoes only the open segment.
+>    - **(b) an INTERIM refusal of a `!` generator that writes**, with (a) or another extent as the capable form.
+>    Until it is ruled, the SPEC states no envelope rule for a `!` generator.
+>
+> ```scrml
+> ${
+>     type AuditError:enum = { Full }
+>
+>     function audit(id: int)! -> AuditError {
+>         ?{`INSERT INTO audit (order_id) VALUES (${id})`}.run() !{ _ e :> not };
+>         fail AuditError::Full;
+>     }
+>
+>     function ship(id: int)! -> SqlError {
+>         ?{`UPDATE orders SET shipped = 1 WHERE id = ${id}`}.run();
+>         audit(id) !{ _ e :> not };   // handled: audit's INSERT is rolled back to its savepoint; the UPDATE stays
+>     }
+> }
+> ```
+>
+> *(Compiled clean on the bootstrap and impl#1, S474. `audit` handles its own query at the site, as §19.8.2
+> requires of an error type without the `SqlError` variants. `ship`'s error type is `SqlError`, so its query
+> propagates. Placement is inferred: both functions run `?{}` and are placed on the server. A `transaction { }`
+> block in `ship` would be a savepoint inside the envelope (item 3); the bootstrap refuses it today with
+> E-BOOTSTRAP-UNSUPPORTED, so the example leaves it out.)*
+>
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body" — PA rec: *"Should
+> every `!` server function roll back its writes when it fails? Today only `! -> SqlError` functions do. My
+> recommendation is yes, because the SPEC already says a `fail` exit rolls back. The cost is that each `!` call
+> holds the database lock for its whole body."* — bryan: *"your rec on the envelope."* → *"Every `!` server body
+> runs in the §8.9.2 envelope (gate change in impl#1 `_bangEnvelopeOpen`), not only `! -> SqlError`. Closes the
+> `fail` half of g-implicit-envelope-only-on-baseline-csrf-arm (S449). Cost tracked: whole-body lock hold (#1704
+> N4 gap, incl. the self-HTTP deadlock measurement)."* Items 1–6 are PA derivations from "every `!` server body"
+> (S474 dispatch, #1732 rounds 1–2).
+>
+> **Supersedes:**
+> - the trigger "two or more `?{}` queries … that do not carry `.nobatch()`" (§8.9 preamble, the trigger
+>   sentence above, §19.10.5);
+> - §8.9.5's "opts a query out of the count, not out of the envelope";
+> - "An implicit handler transaction SHALL NOT compose with an explicit `transaction { }` block … SHALL produce
+>   **E-BATCH-001**" (here and §19.10.5);
+> - "An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001**" (here
+>   and §19.10.5);
+> - §19.10.5's "Users MAY suppress the implicit envelope at a single query site with `.nobatch()`" and "Nesting
+>   rules of §19.10.4 (E-ERROR-007) SHALL treat the implicit envelope as a transaction block";
+> - E-SQL-011's fix "remove the envelope ('.nobatch()' on the queries)";
+> - E-SQL-011's reason "no two-phase commit" (item 5);
+> - inside a `!` body, §8.5.3's and §19.10.3's top-level BEGIN/COMMIT reading of `transaction { }` and
+>   `?{BEGIN}`.
+>
+> **Direction of change:**
+> - semantics-changed toward atomicity: a `!` body that reaches one query, or whose error type is not `SqlError`,
+>   now has its writes undone by a `fail`, and a `.nobatch()` query no longer escapes it;
+> - newly-accepting: a `transaction { }` block in an enveloped `!` body (was E-BATCH-001) now compiles, as a
+>   savepoint;
+> - possibly newly-rejecting: E-SQL-011 now reaches a `!` body whose set had fewer than two queries that did not
+>   carry `.nobatch()` (for example a `.nobatch()` read of A plus a write of B);
+> - newly-rejecting: manual transaction control in a `!` body that is not provably path-paired
+>   (E-TX-UNMATCHED-END, item 3; INTERIM).
+>
+> **Status:**
+> - **impl#1: Nominal.**
+>   - Its envelope opens only for a `! -> SqlError` body (`_bangEnvelopeOpen` in
+>     `compiler/src/codegen/emit-server.ts`, gated on `sqlFailurePropagates`) or a lexical count of two or more
+>     (`g-impl1-implicit-envelope-lexical-count-s474`).
+>   - It still emits E-BATCH-001 and W-BATCH-001 (`compiler/src/batch-planner.ts`), which three conformance cases
+>     and two unit-test files pin (`g-impl1-retired-batch-codes-still-emitted-s474`,
+>     `g-retired-batch-codes-unit-test-pins-s474`).
+> - **Bootstrap: Nominal** for a body that reaches one query once, and for a set of `.nobatch()` queries only.
+>   - Its trigger counts no `.nobatch()` query (`compiler/self-host-v2/analyze.scrml` `envelopeOf` requires two
+>     counted queries, a repeat or a loop).
+>   - Its E-SQL-011 and pooled-database messages still offer the `.nobatch()` remedy
+>     (`g-boot-envelope-nobatch-count-and-remedy-s474`).
+>   - It refuses `transaction { }` and manual transaction control in a `!` function with
+>     `E-BOOTSTRAP-UNSUPPORTED`. That is an INTERIM refusal; the capable form is item 3's savepoint.
+> - **E-TX-UNMATCHED-END** is emitted by neither compiler (`g-tx-unmatched-end-unbuilt-s474`). The statement
+>   savepoint for a handled query (item 4) and the server-error rule for envelope failures (item 1) are unbuilt
+>   on both and are owed with the envelope (`g-impl1-envelope-site-handled-pg-abort-s474`,
+>    `g-impl1-envelope-failure-reported-success-s474`).
 
 **Normative statements:**
 
 - An implicit handler transaction SHALL apply only to server handlers whose signature declares `!`. A non-`!` handler SHALL NOT be implicitly wrapped; coalescing in a non-`!` handler shares only the prepare/lock cycle. *(Preserves §19.10.4 — transactions remain `!`-gated.)*
-- An implicit handler transaction SHALL NOT compose with an explicit `transaction { }` block (§19.10.2). A handler containing both SHALL produce **E-BATCH-001**. Resolution: either `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`.
-- An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001**; outside a `!` function the explicit `?{BEGIN}` is **E-ERROR-015** instead (§19.10.4 — there is no implicit envelope there to suppress). *(S451 "your recs on all of them" item 2(c) — supersedes: "An explicit `?{BEGIN}` inside the handler suppresses the implicit envelope and emits **W-BATCH-001**.")* The manual transaction is then held by the invocation of the function that issued the `BEGIN`, and one still open at that function's return is rolled back and reported (§19.10.6, S451 R6).
-- Compiler diagnostics SHALL name the implicit envelope "implicit per-handler transaction (§8.9.2)" so users faced with E-BATCH-001 understand the source.
+- ~~An implicit handler transaction SHALL NOT compose with an explicit `transaction { }` block (§19.10.2). A handler containing both SHALL produce **E-BATCH-001**. Resolution: either `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`.~~ **An explicit `transaction { }` block (§19.10.2) inside a `!` server body SHALL run as a SAVEPOINT within the implicit envelope (S474, amendment item 3):** its commit releases the savepoint, its rollback rolls back to it, and a later failure of the body rolls back both. E-BATCH-001 is retired from the language.
+- ~~An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001**;~~ **An explicit `?{BEGIN}` inside a `!` server body SHALL open a SAVEPOINT within the implicit envelope, not a second transaction, and SHALL NOT suppress the envelope (S474, amendment item 3; §19.10.6 "Nesting"); W-BATCH-001 is retired from the language.** Outside a `!` function the explicit `?{BEGIN}` is **E-ERROR-015** (§19.10.4). *(S451 "your recs on all of them" item 2(c) — supersedes: "An explicit `?{BEGIN}` inside the handler suppresses the implicit envelope and emits **W-BATCH-001**.")* The manual transaction (the savepoint) is held by the invocation of the function that issued the `BEGIN`. It must be path-paired (S474, amendment item 3): on a failing exit it is rolled back silently with the failure, and the R6 return-time rollback-and-report (§19.10.6) is left only for a shape the compiler could not prove.
+- Compiler diagnostics SHALL name the implicit envelope "implicit per-handler transaction (§8.9.2)" so users faced with a diagnostic about it (E-SQL-011, E-SQL-JOURNAL-OFF) understand the source. *(S474: ~~"faced with E-BATCH-001"~~ — retired.)*
 - The implicit handler transaction SHALL COMMIT only when the handler completes successfully. It SHALL ROLL BACK when the handler throws AND when it exits through `fail` — at any depth of the body — including a `?` that propagates a callee's failure (§19.5.2: `?` is a `fail` of the callee's variant). The failure value is returned to the caller unchanged; only its writes are undone. This matches the explicit `transaction { }` block (§19.10.3), which already rolls back on `fail`. *(Provenance: ruling:user-voice-scrml.md S449 "your recs. but on C, lets keep b as a possible opt in when adopters use PG." — item **D = (a)**: "`fail` rolls back the implicit per-handler transaction too — amend §8.9.2 to 'ROLLBACK on exception or `fail`'". Supersedes the S2026-04-14 text "`?{ROLLBACK}` on exception", under which a handler that failed after two writes committed both — g-implicit-handler-tx-commits-on-fail. Cross-reference §19.10.5.)*
-- **An envelope covers its own database only — no cross-database atomicity (S451 ruling 4a).** A transaction envelope is on ONE database: the implicit per-handler transaction and a `transaction { }` block (§19.10.2) are on the database of their function's `?{}` sites — the function's nearest database scope (§8.1.1) — and a manual `?{BEGIN}` (§19.10.1) is on the database its own `?{BEGIN}` resolves to. Its `COMMIT` and `ROLLBACK` reach that database and no other. scrml offers no atomicity across two databases (no two-phase commit): a write to another database made while the envelope is open is not undone by its `ROLLBACK`, so "a `fail` rolls back the handler's writes" could not be kept for it. Therefore, in a `!` function whose implicit or explicit envelope is on database A, a **write** to a database B other than A that the envelope's extent can reach — by the function's own `?{}`, or through a call, **transitively** through every function the body calls (an in-process server function, a function imported from a module-with-db-context, §44.7.1) — SHALL be a compile error: **E-SQL-011** — `'{fn}' holds a transaction on {A} (§8.9.2), and {path} writes {B}. A transaction covers one database: a 'fail' or an error would roll back {A} and leave the write to {B} in place. Move the write to {B} out of '{fn}' (call it after '{fn}' returns), or remove the envelope ('.nobatch()' on the queries, §8.9.5) if the writes need not be atomic.` A **write** is a `?{}` whose SQL is not a `SELECT` — the §6.7.7.1 rule 1(a) test; a query the compiler cannot classify counts as a write (fails closed). Reading database B inside the envelope is allowed: a read changes nothing a rollback must undo. "B other than A" compares databases, not spellings: scopes naming the same database are the same database, but a module-with-db-context owns its own connection (§44.7.1), so a write through it is outside the envelope's connection even when it names the same file, and counts as B.
+- **An envelope covers its own database only — no cross-database atomicity (S451 ruling 4a).** A transaction envelope is on ONE database: the implicit per-handler transaction and a `transaction { }` block (§19.10.2) are on the database of their function's `?{}` sites — the function's nearest database scope (§8.1.1) — and a manual `?{BEGIN}` (§19.10.1) is on the database its own `?{BEGIN}` resolves to. Its `COMMIT` and `ROLLBACK` reach that database and no other. scrml offers no atomicity across two databases (~~no two-phase commit~~ — S474: PERMANENT (semantic) when either database is SQLite, which has no prepare phase; INTERIM for a Postgres / MySQL pair — "Amendment S474" item 5): a write to another database made while the envelope is open is not undone by its `ROLLBACK`, so "a `fail` rolls back the handler's writes" could not be kept for it. Therefore, in a `!` function whose implicit or explicit envelope is on database A, a **write** to a database B other than A that the envelope's extent can reach — by the function's own `?{}`, or through a call, **transitively** through every function the body calls (an in-process server function, a function imported from a module-with-db-context, §44.7.1) — SHALL be a compile error: **E-SQL-011** — `'{fn}' holds a transaction on {A} (§8.9.2), and {path} writes {B}. A transaction covers one database: a 'fail' or an error would roll back {A} and leave the write to {B} in place. Move the write to {B} out of '{fn}' (call it after '{fn}' returns).` *(S474 — supersedes the fix clause ", or remove the envelope ('.nobatch()' on the queries, §8.9.5) if the writes need not be atomic": `.nobatch()` no longer touches the envelope, and every `!` server body with a query has one — amendment items 2 and 5. A write to {B} that must happen whether or not '{fn}' fails is also moved out, into a function called after '{fn}' returns.)* A **write** is a `?{}` whose SQL is not a `SELECT` — the §6.7.7.1 rule 1(a) test; a query the compiler cannot classify counts as a write (fails closed). Reading database B inside the envelope is allowed: a read changes nothing a rollback must undo. "B other than A" compares databases, not spellings: scopes naming the same database are the same database, but a module-with-db-context owns its own connection (§44.7.1), so a write through it is outside the envelope's connection even when it names the same file, and counts as B.
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4: *"**(a):** a `!` function whose implicit/explicit envelope is on database A and which calls (transitively) a function that writes database B is a compile error — §8.9.2's rollback promise may not be silently partial."* · question source: `docs/changes/s451-impl1-db-nearest/progress.md` Open question 0 (MED-1: *"a `fail` exit rolls back the §8.9.2 implicit envelope on database A. It does NOT roll back a write the handler made by calling a function that runs on database B"*) · **supersedes:** nothing written — the SPEC was silent on which database an envelope covers (§19.10.6 "Not covered" named only the cross-database deadlock). *(PA readings: (i) the function's OWN `?{}` writing B is the same hazard as a callee's and gets the same code — **confirmed S451**; (ii) "writes" uses the §6.7.7.1 read-only test, fail-closed — still flagged; (iii) a module-with-db-context's own connection to the same file counts as another database — **confirmed S451**. (Confirmation: ruling:user-voice-scrml.md S451 "your recs on all of them" item 3: *"#1266 (… a function's own `?{}` on another database counts for 4a; a module's own connection is a different database)"*.) ~~A manual `?{BEGIN}` in a function NOT declared `!` has the same hazard but is outside the ruling's "`!` function" and is not covered here.~~ Covered S451 by refusing the form: manual transaction control outside a `!` function is **E-ERROR-015** (§19.10.4; ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c)).)* **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts it (measured on `25677da72`: `<program db=":memory:">` declaring `server function logB(msg)! -> SqlError { ?{INSERT …}.run() }`, and a nested `<program db="./b.db">` whose `server function transfer(id)! -> SqlError` runs two `UPDATE`s and then `logB("moved")?` → exit 0; the server module opens `BEGIN DEFERRED` on the b.db handle and the in-process `logB` writes through the other handle inside it, outside the rollback). Corpus measured (`examples/`, `samples/`, `conformance/cases/`): no file declares two different databases — seven declare one database twice (`./app.db` beside `app.db`), and the 14 trucking-dispatch pages that carry their own `<db src=>` all name the same `dispatch.db` — so no measured program changes (`g-impl1-cross-database-write-in-envelope-s451`). **Nominal / not yet emitted by impl#1** for this trigger.
 
@@ -10125,7 +10357,7 @@ This mode-split preserves §8.7 pointwise for misses while accepting bundled att
 A `?{}` chain may include `.nobatch()` to exclude that query from any coalescing candidate set:
 
 ```scrml
-let stale = ?{`SELECT snapshot FROM cache WHERE k = ${k}`}.nobatch().get()
+let stale = ?{`SELECT snapshot FROM cache WHERE k = ${k}`}.nobatch().get();
 ```
 
 **Normative statements:**
@@ -10133,6 +10365,7 @@ let stale = ?{`SELECT snapshot FROM cache WHERE k = ${k}`}.nobatch().get()
 - `.nobatch()` SHALL be valid at any chain position; it is a compile-time marker with no runtime effect on the individual query.
 - A query marked `.nobatch()` SHALL be excluded from §8.9.1 candidate sets and from §8.10 loop hoisting.
 - The SQL-comment form `?{`--@no-batch\nSELECT ...`}` SHALL NOT be recognized as an opt-out. `.nobatch()` is the sole opt-out vector.
+- **`.nobatch()` is a batching opt-out only (S474).** It SHALL NOT affect the implicit per-handler transaction (§8.9.2): a `.nobatch()` query stays in its `!` function's transitive query set and runs inside the envelope, and no `.nobatch()` placement suppresses or narrows the envelope. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body", derivation 2 — §8.9.2 "Amendment S474" item 2 · supersedes: §8.9.2's "§8.9.5 opts a query out of the count, not out of the envelope" and §19.10.5's "Users MAY suppress the implicit envelope at a single query site with `.nobatch()`" · direction of change: semantics-changed toward atomicity.)*
 
 #### 8.9.6 Interaction with Lin
 
@@ -10176,16 +10409,16 @@ The compiler SHALL rewrite a Tier 2 candidate as follows (schematic):
 ```scrml
 // source
 for (let x of xs) {
-    let row = ?{`SELECT ... FROM t WHERE id = ${x.id}`}.get()
+    let row = ?{`SELECT ... FROM t WHERE id = ${x.id}`}.get();
     ...
 }
 
 // rewritten (conceptual; actual emit uses encoded names)
-let _keys = xs.map(x => x.id)
-let _rows = ?{`SELECT ... FROM t WHERE id IN (${_keys})`}.all()
-let _byKey = new Map(_rows.map(r => [r.id, r]))
+let _keys = xs.map(x => x.id);
+let _rows = ?{`SELECT ... FROM t WHERE id IN (${_keys})`}.all();
+let _byKey = new Map(_rows.map(r => [r.id, r]));
 for (let x of xs) {
-    let row = _byKey.get(x.id) ?? not
+    let row = _byKey.get(x.id) ?? not;
     ...
 }
 ```
@@ -10264,14 +10497,14 @@ Valid inside markup and state contexts, and at program scope (top-level in the p
 
 **Normative statements (DQ-7 — CSS Scoping):**
 
-- `#{}` inside a **state type constructor** compiles to a native CSS `@scope ([data-scrml="ConstructorName"]) to ([data-scrml]) { ... }` block in the page's stylesheet. Class names are NOT mangled. **Either output shape conforms:** a separate `.css` file the page links, or an inline `<style>` in the page; every `<` in a `#{}` block is `E-CSS-SYNTAX` whatever the shape (§65.2.5), and an inline `<style>` SHALL additionally re-encode any `<` that reaches it as the CSS escape `\3c`, so no text can end the element.
+- `#{}` inside a **state type constructor** compiles to a native CSS `@scope ([data-scrml="<scope key>"]) to ([data-scrml]) { ... }` block (the scope key is the constructor name qualified by its declaring file, S474 — below) in the page's stylesheet. Class names are NOT mangled. **Either output shape conforms:** a separate `.css` file the page links, or an inline `<style>` in the page; every `<` in a `#{}` block is `E-CSS-SYNTAX` whatever the shape (§65.2.5), and an inline `<style>` SHALL additionally re-encode any `<` that reaches it as the CSS escape `\3c`, so no text can end the element.
   > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — runtime ratchet, scope root, engine in `<empty>`, CSS output" (scrml-support `0908198`) — item 4 (*"Either shape conforms"*). Replaces "in the output `.css` file". **Direction of change:** inert (widening of an output shape; no program's meaning changes).
 - **Where a component's `#{}` goes (§66 dialect):** inside the component's `renders` element, or inside a field's variant body there; it is scoped to that component. A `#{}` written in the §66 declaration body itself (between the opener and its closer, outside `renders`) is not a stylesheet position: it is `E-PARSE-DECL-BODY` (a declaration body holds child declarations and state-children only, §66.4 rule 4).
   > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) — item 3 (*"Inside `renders`"*).
 - **A component's `#{}` styles its own root as well as its subtree.** A rule's selector matches the constructor's root element (the scope root) as well as the elements below it, inside the donut. Because a selector inside `@scope` matches only DESCENDANTS of the scope root in browsers, the emitter SHALL also emit each scoped selector root-anchored (its leftmost compound matching `:scope`, adding no specificity), and the behaviour SHALL be pinned by a real-browser check.
   > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — runtime ratchet, scope root, engine in `<empty>`, CSS output" (scrml-support `0908198`) — item 2 (*"Yes, include the root"*). **Direction of change:** newly-matching (a rule that names the root's own class now applies to the root).
-- The constructor's root element SHALL carry the attribute `data-scrml="ConstructorName"` in the emitted HTML.
-- **One component of each name in a program (S473).** A component's name is its scope key (`data-scrml="ConstructorName"`), so two components (declarations with `renders`, §66.15.1) of one name in one program SHALL be a compile error (`E-COMPONENT-NAME-DUPLICATE`), whichever files declare them; rename one. Exporting a component does not qualify its name (§21.2). In one file the pair is already a duplicate binding (E-SCOPE-010, §7.6). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `dupDecls`); Nominal on impl#1 (§34.0).
+- The constructor's root element SHALL carry the attribute ~~`data-scrml="ConstructorName"`~~ `data-scrml="<scope key>"` in the emitted HTML, where the **scope key** is the constructor's name qualified by its declaring file, always (S474): `<name>~<file tag>`, e.g. `data-scrml="card~<16 hex>"` — the readable name first, then a tag derived from the declaring file's path relative to the project root, which does not reveal the file layout. The `@scope` rule (§25.6) names the same key. A program's own declaration and the predefined declarations keep their bare names *(PA reading ⚑: an exception to the ruling's "always"; there is one of each, so no collision exists)*. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3 · supersedes: `data-scrml="ConstructorName"` · direction of change: semantics-changed for emitted output (the attribute value), inert for author code: no author selector may name the key. PA reading: the exact tag (today 16 hex digits — two independent 32-bit hashes, FNV-1a 32 and a polynomial modulo 4294967291, of the declaring file's path relative to the project root: the nearest `scrml.toml` / `.git` above the sources, else the source root; `compiler/self-host-v2/core.scrml` `fileTag` / `declScopeKey`, #1706 r1) is an output encoding, not normative — the SPEC fixes only that the key is the name qualified by a per-file tag, stable across machines for one relative path. Two same-named declarations in two files whose tags collide SHALL be refused rather than share a key (the bootstrap: E-BOOTSTRAP-UNSUPPORTED).)*
+- **~~One component of each name in a program (S473).~~ Components of one name in different files are legal; the scope key is per file (S474).** ~~Two components (declarations with `renders`, §66.15.1) of one name in one program SHALL be a compile error (`E-COMPONENT-NAME-DUPLICATE`), whichever files declare them; rename one.~~ Two components (declarations with `renders`, §66.15.1) of one name declared in two different files SHALL both compile: each has its own scope key, qualified by its declaring file (next bullets), so each gets its own style scope. In one file the pair is a duplicate binding (E-SCOPE-010, §7.6), as is `<card>` beside `function card`. `E-COMPONENT-NAME-DUPLICATE` is retired. Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `dupDecls`); Nominal on impl#1 (§34.0). *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3 — *"**Same-name components across files, and two files exporting one name: INTERIM.** The CSS scope key and output names are **always per-file qualified**, not only on a collision."* (PA: *"3. Per-file CSS scope keys, always or only when names collide: always."* — bryan: *"your recs on the four one-way doors. go"*) · supersedes: *"A component's name is its scope key (`data-scrml=\"ConstructorName\"`), so two components … of one name in one program SHALL be a compile error (`E-COMPONENT-NAME-DUPLICATE`), whichever files declare them; rename one."* · direction of change: newly-accepting · built by the bootstrap in #1706.)*
   > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 — *"Same-name components across files, and `<card>` beside `fn card`: REFUSED."* **Direction of change:** none in acceptance on the bootstrap (it refused the pair as a bootstrap limit, `E-BOOTSTRAP-UNSUPPORTED`); the refusal is now the language rule.
 - **Flat-declaration `#{}` blocks** (blocks containing only bare `property: value;` pairs with no selectors) inside a constructor scope compile to inline `style="prop: value; ..."` on the containing element. They do NOT appear in the CSS file.
 - **Donut scope** is implicit. The `@scope` block uses `to ([data-scrml])` as its limit — constructor CSS does not bleed into nested constructors.
@@ -10610,9 +10843,9 @@ sequentially. This is the correct pattern (§10.5.3).
 
 ```scrml
 <ul>${
-    getListA()             // node N_A, server call A; result discarded (sets ~)
+    getListA();             // node N_A, server call A; result discarded (sets ~)
     lift <li>${~}/;        // lift after A — N_A.hasLift === true
-    getListB()             // node N_B, server call B; result discarded (sets ~)
+    getListB();             // node N_B, server call B; result discarded (sets ~)
     lift <li>${~}/;        // lift after B — N_B.hasLift === true
 </>
 ```
@@ -10961,10 +11194,10 @@ The compiler-generated fetch wrapper deserializes the JSON response and returns 
 
 ```scrml
 ${ function getUser(id: int) {
-    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get()
+    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get();
 } }
 
-${ let user = getUser(userId) }   // `user` is the struct | not, deserialized
+${ let user = getUser(userId); }   // `user` is the struct | not, deserialized
 ```
 
 The compiler inserts `await` automatically per §13.
@@ -11034,13 +11267,13 @@ The compiler SHALL:
   **Why a data dependency is not enough.** Two calls that share no scrml value can still depend on each other through the database: a write and a read of the same table. The client-side dependency graph cannot see that edge, so the only parallelism it may introduce is between calls that write nothing.
 
   ```scrml
-  ${ function reserve(id: int)! -> SqlError { ?{`UPDATE seats SET held = held + 1 WHERE show_id = ${id}`}.run() }
-     function count(id: int)! -> SqlError   { return ?{`SELECT held FROM seats WHERE show_id = ${id}`}.get() }
+  ${ function reserve(id: int)! -> SqlError { ?{`UPDATE seats SET held = held + 1 WHERE show_id = ${id}`}.run(); }
+     function count(id: int)! -> SqlError   { return ?{`SELECT held FROM seats WHERE show_id = ${id}`}.get(); }
 
      function book(id: int)! -> SqlError {
-         const a = reserve(id)?    // UPDATE seats — not read-only
-         const b = count(id)?      // SELECT seats — read-only
-         @held = b.held
+         const a = reserve(id)?;    // UPDATE seats — not read-only
+         const b = count(id)?;      // SELECT seats — read-only
+         @held = b.held;
      } }
   ```
 
@@ -11101,9 +11334,9 @@ The compiler SHALL:
 **Developer writes (synchronous-looking):**
 ```scrml
 ${ function loadDashboard() {
-    let user = getUser(userId) !{ _ :> { return } };
-    let items = getItems(userId) !{ _ :> { return } };
-    let stats = getStats(userId) !{ _ :> { return } };
+    let user = getUser(userId) !{ _ :> { return; } };
+    let items = getItems(userId) !{ _ :> { return; } };
+    let stats = getStats(userId) !{ _ :> { return; } };
 } }
 ```
 
@@ -11145,15 +11378,15 @@ inlined into the caller's server handler.
 
 ```scrml
 ${ function validateUser(id: int) {
-    let user = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-    if (not user) { throw "User not found" }
-    return user
+    let user = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
+    if (not user) { throw "User not found"; }
+    return user;
 } }
 
 ${ function getOrderHistory(userId: int) {
-    let user = validateUser(userId)   // calls another server function
-    let orders = ?{`SELECT * FROM orders WHERE user_id = ${userId}`}.all()
-    return { user, orders }
+    let user = validateUser(userId);   // calls another server function
+    let orders = ?{`SELECT * FROM orders WHERE user_id = ${userId}`}.all();
+    return { user, orders };
 } }
 ```
 
@@ -11216,16 +11449,16 @@ ${
         }
     }
 
-    <usersState> = UsersState.NotAsked
+    <usersState> = UsersState.NotAsked;
 
     function fetchUsers() {
-        return ?{`SELECT id, name, email FROM users`}.all()
+        return ?{`SELECT id, name, email FROM users`}.all();
     }
 
     function loadUsers() {
-        @usersState = UsersState.Loading
-        let result = fetchUsers()
-        @usersState = UsersState.Ready(result)
+        @usersState = UsersState.Loading;
+        let result = fetchUsers();
+        @usersState = UsersState.Ready(result);
     }
 }
 
@@ -11237,7 +11470,7 @@ match @usersState {
     .Ready(users) :> {
         <ul>
             ${ for (user of users) {
-                lift <li>${user.name} (${user.email})</>
+                lift <li>${user.name} (${user.email})</>;
             }}
         </>
     }
@@ -11284,22 +11517,22 @@ ${
         }
     }
 
-    <submitState> = OrderSubmit.Idle
-    <orders>      = []
+    <submitState> = OrderSubmit.Idle;
+    <orders>      = [];
 
     function createOrder(product: string, qty: int) {
-        ?{`INSERT INTO orders (product, qty) VALUES (${product}, ${qty})`}.run()
-        return ?{`SELECT * FROM orders ORDER BY id DESC`}.all()
+        ?{`INSERT INTO orders (product, qty) VALUES (${product}, ${qty})`}.run();
+        return ?{`SELECT * FROM orders ORDER BY id DESC`}.all();
     }
 
     function handleSubmit() {
-        let optimistic = { id: -1, product: @product, qty: @qty }
-        @submitState = OrderSubmit.Saving(optimistic)
+        let optimistic = { id: -1, product: @product, qty: @qty };
+        @submitState = OrderSubmit.Saving(optimistic);
 
-        let freshOrders = createOrder(@product, @qty)
-        @submitState = OrderSubmit.Committed(freshOrders[0])
-        @orders = freshOrders
-        @submitState = OrderSubmit.Idle
+        let freshOrders = createOrder(@product, @qty);
+        @submitState = OrderSubmit.Committed(freshOrders[0]);
+        @orders = freshOrders;
+        @submitState = OrderSubmit.Idle;
     }
 }
 ```
@@ -11322,18 +11555,18 @@ ${
         transitions { .Loading => .Ready; .Loading => .Failed; .Ready => .Loading; .Failed => .Loading }
     }
 
-    <usersState>   = UsersState.Loading
-    <metricsState> = MetricsState.Loading
+    <usersState>   = UsersState.Loading;
+    <metricsState> = MetricsState.Loading;
 
     function loadDashboard() {
-        @usersState = UsersState.Loading
-        @metricsState = MetricsState.Loading
+        @usersState = UsersState.Loading;
+        @metricsState = MetricsState.Loading;
 
-        let users = fetchUsers()
-        @usersState = UsersState.Ready(users)
+        let users = fetchUsers();
+        @usersState = UsersState.Ready(users);
 
-        let metrics = fetchMetrics()
-        @metricsState = MetricsState.Ready(metrics)
+        let metrics = fetchMetrics();
+        @metricsState = MetricsState.Ready(metrics);
     }
 }
 
@@ -11374,32 +11607,32 @@ The local-not-viral property is what earns generators the full-vocabulary dispos
 ```scrml
 ${
     function* fibonacci() {
-        let a = 0
-        let b = 1
+        let a = 0;
+        let b = 1;
         while (true) {
-            yield a
-            let next = a + b
-            a = b
-            b = next
+            yield a;
+            let next = a + b;
+            a = b;
+            b = next;
         }
     }
 
     function takeN(gen: asIs, n: int) {
-        let out = []
-        let iter = gen.next()
+        let out = [];
+        let iter = gen.next();
         for (let i = 0; i < n; i++) {
-            if (iter.done) break
-            out.push(iter.value)
-            iter = gen.next()
+            if (iter.done) break;
+            out.push(iter.value);
+            iter = gen.next();
         }
-        return out
+        return out;
     }
 
     function showFirstTen() {
-        let gen = fibonacci()
-        let first10 = takeN(gen, 10)
+        let gen = fibonacci();
+        let first10 = takeN(gen, 10);
         // first10 == [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
-        return first10
+        return first10;
     }
 }
 ```
@@ -11412,13 +11645,13 @@ The caller `takeN` is NOT a generator — it consumes the generator via ordinary
 ${
     function* chunkArray(arr: Item[], size: int) {
         for (let i = 0; i < arr.length; i += size) {
-            yield arr.slice(i, i + size)
+            yield arr.slice(i, i + size);
         }
     }
 
     function processInChunks(items: Item[]) {
         for (chunk of chunkArray(items, 100)) {
-            handleChunk(chunk)        // synchronous caller; for...of consumes generator inline
+            handleChunk(chunk);        // synchronous caller; for...of consumes generator inline
         }
     }
 }
@@ -11480,6 +11713,12 @@ All four are one rule, not four: each is an expression that is async-colored in 
 has no statement boundary at which the compiler could await it. *(S451 "your recs on all five" item 3 — provenance
 below, under "Resolved S451".)*
 
+**S474 — display positions are an INTERIM refusal; decision positions are PERMANENT (security).** The rule above is two rules with two statuses:
+- **Display positions — INTERIM (refused until built).** A markup text interpolation `${e}`, and the head of an `<each in=e>` or of a `${ for (x of e) … }` loop, where `e` is a handled waiting call (`f(x) !{ … }`), optionally followed by member reads (`.length`, `.name`) *(the `for … of` head and the member reads: dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §1 Alternative A, carried by the ruling — its text names "text, `<each in=>`")*. Until the capable form is built these stay E-VALUE-SERVER-CALL. The capable form is owed (`g-display-position-pending-value-unbuilt-s474`): such a position means a **per-site pending value** — exactly the §13.9.2 desugar applied once per site, a compiler-named pending cell `(not to T)` initialized by the handled call (its dependencies the `@` reads of `e`; supersede, teardown and keep-stale from §13.9.2 / §13.9.4) read at the site. **A pending display slot renders empty unless the author gives a fallback:** a text slot renders nothing and an `<each>` renders no rows (not its `<empty>` — pending is not empty). Failure is handled at the site by the required `!{}` (E-ERROR-002), whose value is written into the cell (§13.9.5). No new run-time structure is added. *(PA reading: how an author spells the fallback is not ruled — the ruling says only that one may be given; the deep-dive's "fixed placeholder" alternative was not taken.)*
+- **Decision positions and attribute values — PERMANENT (security).** An `if=` / `else-if=` / `show=` gate, every markup attribute value, a `<match on=>` subject, a `${ match … }` or ternary over the waiting value, and a derived-cell formula SHALL stay E-VALUE-SERVER-CALL. Reason: a pending value in a gate has no safe default. Read as false, `if=${allowed(@pw)}` fails closed but `if=${!allowed(@pw)}` and the chain's `else` arm open — a pending `!allowed()` gate must not open (the S469 wrong-password case). The author names a pending cell (§13.9) and discriminates it, as today.
+
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 1 — *"**S470 render-position server calls: display positions become INTERIM** (text, `<each in=>`: a per-site pending value, the §13.9 rewrite). A pending display slot renders **empty unless the author gives a fallback**. Gates and attributes stay refused, **reclassed PERMANENT (security)**: a pending `!allowed()` gate must not open (S469 wrong-password case)."* (PA: *"1. What a pending display slot shows: empty, unless the author gives a fallback."* — bryan: *"your recs on the four one-way doors. go"*) · dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §1 alternative A · supersedes: S470 "uniform refusal" as a permanent rule for display positions (*"`${serverFn()}` one-shot display is refused too. There is no carve-out."*) — it stands as the interim behaviour · **Direction of change:** inert now (every position is still refused); newly-accepting for display positions when the capable form is built. impl#1 keeps its refusal (`compiler/src/codegen/render-waiting-calls.ts`); no impl#1 work is owed (S471 policy).
+
 **What is not affected.**
 - **§52 `<x server>` declarations.** The right-hand side of a `<x server>` declaration is governed by §52 — its
   placeholder value (§52.4.3) and its hydration load (§52.6.5 Patterns A–C) — not by this section.
@@ -11503,26 +11742,26 @@ fix · Nominal with §13.9.)*
 ```scrml
 <program db="sqlite:./app.db">
   ${ function userCount() {
-      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }
-      return row is not ? 0 : row.n
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not };
+      return row is not ? 0 : row.n;
   } }
 
-  <n> = userCount()                                   // E-VALUE-SERVER-CALL — the initializer of `@n` calls `userCount`
-  const <label> = `Users: ${userCount()}`             // E-VALUE-SERVER-CALL — the formula of derived `@label`
+  <n> = userCount();                                   // E-VALUE-SERVER-CALL — the initializer of `@n` calls `userCount`
+  const <label> = `Users: ${userCount()}`;             // E-VALUE-SERVER-CALL — the formula of derived `@label`
   <p>${userCount()}</p>                               // E-VALUE-SERVER-CALL — the interpolation
   <p class=${userCount() > 10 ? "busy" : ""}>…</p>    // E-VALUE-SERVER-CALL — the `class=` value
 
-  ${ function usersLabel() { return `Users: ${userCount()}` } }   // a client function that reaches userCount
+  ${ function usersLabel() { return `Users: ${userCount()}`; } }   // a client function that reaches userCount
   <p>${usersLabel()}</p>                              // E-VALUE-SERVER-CALL (item 2) — usersLabel reaches userCount
-  <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
-  <about> = fetch("/about.txt")                       // E-VALUE-SERVER-CALL (item 4) — `fetch` returns a Promise
+  <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not };   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
+  <about> = fetch("/about.txt");                       // E-VALUE-SERVER-CALL (item 4) — `fetch` returns a Promise
 
   // The fix: load into a cell with a <request>, read the cell.
-  <users> = 0
+  <users> = 0;
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>
   <p class=${@users > 10 ? "busy" : ""}>Users: ${@users}</p>
   <button onclick=${<#usersLoad>.refetch()}>Refresh</button>   // legal: a handler is an action position
-  <button onclick={ @users = userCount() !{ _ :> @users } }>Recount</button>   // legal too: the call is handled (§19.9.10)
+  <button onclick={ @users = userCount() !{ _ :> @users }; }>Recount</button>   // legal too: the call is handled (§19.9.10)
 </program>
 ```
 
@@ -11689,26 +11928,26 @@ E-ERROR-002 under (i), and under (ii) §13.9.5 requires the failure to be handle
 ```scrml
 <program db="sqlite:./app.db">
 ${
-  import { verifyPassword } from "scrml:auth"
+  import { verifyPassword } from "scrml:auth";
   function teamCount(team: string)! -> LoadError {
-    return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
+    return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n;
   }
   function anyMatch(pw: string, hashes: string[]) {
-    for (const h of hashes) { if (verifyPassword(pw, h)) return true }   // (i) a function body: awaited
-    return false
+    for (const h of hashes) { if (verifyPassword(pw, h)) return true; }   // (i) a function body: awaited
+    return false;
   }
   function slowest(hashes: string[], pw: string) {
-    return hashes.sort((a, b) => verifyPassword(pw, a) ? 1 : -1)   // E-ASYNC-STDLIB-IN-SYNC-CALLBACK
+    return hashes.sort((a, b) => verifyPassword(pw, a) ? 1 : -1);   // E-ASYNC-STDLIB-IN-SYNC-CALLBACK
   }
-  function lookup(team: string = teamCount("core")) { return team }   // E-PARAM-DEFAULT-AWAIT
+  function lookup(team: string = teamCount("core")) { return team; }   // E-PARAM-DEFAULT-AWAIT
 }
-<team> = "core"
-<n> = 0
-<shown> = false
-<members>: int = teamCount(@team) !{ _ :> 0 }          // E-VALUE-SERVER-CALL: no marker, a value position
-<loaded>: (not to int) = teamCount(@team) !{ _ :> not } // (ii): a declared pending cell (§13.9)
+<team> = "core";
+<n> = 0;
+<shown> = false;
+<members>: int = teamCount(@team) !{ _ :> 0 };          // E-VALUE-SERVER-CALL: no marker, a value position
+<loaded>: (not to int) = teamCount(@team) !{ _ :> not }; // (ii): a declared pending cell (§13.9)
 <p>${teamCount(@team)}</p>                              // E-VALUE-SERVER-CALL: an interpolation (§13.9.3)
-<button onclick={ @n = teamCount(@team) !{ _ :> @n }; @shown = true }>Count</button>   // (i) a handler
+<button onclick={ @n = teamCount(@team) !{ _ :> @n }; @shown = true; }>Count</button>   // (i) a handler
 </program>
 ```
 
@@ -11771,11 +12010,11 @@ The §66 dialect spells the same declaration in an opener: `<users:(not to User[
 ```scrml
 <program db="sqlite:./app.db">
 ${ function teamCount(team: string)! -> LoadError {
-     return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
+     return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n;
    } }
-<team> = "core"
-<members>: (not to int) = teamCount(@team) !{ _ :> not }   // legal: a pending cell, deps [@team]
-<total>: int = teamCount(@team) !{ _ :> 0 }                // E-VALUE-SERVER-CALL: no marker (F1)
+<team> = "core";
+<members>: (not to int) = teamCount(@team) !{ _ :> not };   // legal: a pending cell, deps [@team]
+<total>: int = teamCount(@team) !{ _ :> 0 };                // E-VALUE-SERVER-CALL: no marker (F1)
 </program>
 ```
 
@@ -11786,10 +12025,10 @@ body is the declared initializer assigned to the cell:
 
 ```scrml
 // written
-<users>: (not to User[]) = loadUsers() !{ _ :> not }
+<users>: (not to User[]) = loadUsers() !{ _ :> not };
 
 // means exactly
-<users>: (not to User[]) = not
+<users>: (not to User[]) = not;
 <request id="‹compiler-internal›">${ @users = loadUsers() !{ _ :> not } }</>
 ```
 
@@ -11829,7 +12068,7 @@ suspension point ends every reactive cell's narrowing (§42.3.5), so inside a ha
 discriminates again.
 
 **Render positions do not get pending (F3).** A waiting value written directly in a markup interpolation or an
-attribute value stays **E-VALUE-SERVER-CALL** (§13.7). Waiting data enters markup only through a pending cell or a
+attribute value stays **E-VALUE-SERVER-CALL** (§13.7). *(S474: for DISPLAY positions — a text interpolation, an `<each in=>` / `for … of` head — this is an INTERIM refusal, and the owed capable form is a per-site pending value that is this section's desugar once per site, rendering empty while pending unless the author gives a fallback; gates and attribute values stay refused, PERMANENT (security). §13.7, "S474 — display positions"; ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 1.)* Waiting data enters markup only through a pending cell or a
 `<request>`. There is no boundary element that holds an anonymous pending state, and no Suspense-style re-suspend.
 
 > **Provenance:** ruling:user-voice-scrml.md S467 F1 (quoted in §13.9.1) — *"reads before discrimination are
@@ -11846,13 +12085,13 @@ attribute value stays **E-VALUE-SERVER-CALL** (§13.7). Waiting data enters mark
 // lib/users.scrml
 ${
   export function isTaken(name: string)! -> LoadError {
-    return ?{`SELECT 1 FROM users WHERE name = ${name}`}.get() is given
+    return ?{`SELECT 1 FROM users WHERE name = ${name}`}.get() is given;
   }
 }
 // app.scrml
-${ import { isTaken } from "./lib/users.scrml" }
-<name> = ""
-<taken>: (not to bool) = isTaken(@name) !{ _ :> not }      // deps [@name]
+${ import { isTaken } from "./lib/users.scrml"; }
+<name> = "";
+<taken>: (not to bool) = isTaken(@name) !{ _ :> not };      // deps [@name]
 <p if=(@taken is given && !@taken)>available</p>           // discriminated: legal
 <p else>checking…</p>
 <p>${@taken ? "taken" : "free"}</p>                        // E-TYPE-001: read before discrimination
@@ -11880,8 +12119,8 @@ itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point 
 > **Direction of change: inert** (it follows from §13.9.2 and §13.8 (i)).
 
 ```scrml
-<team> = "core"
-<members>: (not to int) = teamCount(@team) !{ _ :> not }
+<team> = "core";
+<members>: (not to int) = teamCount(@team) !{ _ :> not };
 <select bind:value=@team><option>core</option><option>infra</option></select>
 <p if=@members>Members: ${@members}</p>   // switching team keeps the old count until the new one arrives
 <p else>Loading…</p>
@@ -11908,8 +12147,8 @@ declared type or leave (E-ERROR-012). `not` is a value of `(not to T)`: it retur
 > F7 ruling. If that branch words the declaration rule differently, this sentence is reconciled to it.
 
 ```scrml
-<members>: (not to int) = teamCount(@team) !{ _ :> not }          // legal: a failed load goes back to `not`
-<members2>: (not to int) = teamCount(@team)                       // E-ERROR-002: the failure is not handled
+<members>: (not to int) = teamCount(@team) !{ _ :> not };          // legal: a failed load goes back to `not`
+<members2>: (not to int) = teamCount(@team);                       // E-ERROR-002: the failure is not handled
 ```
 
 #### 13.9.6 A waiting function is bound only by a `function` declaration
@@ -11980,20 +12219,20 @@ lambda the awaited combinator consumes in place. The mechanical rewrite is `cons
 
 ```scrml
 ${
-  import { verifyPassword } from "scrml:auth"
+  import { verifyPassword } from "scrml:auth";
 
   // refused — each binding holds a waiting function
-  const check = (p, h) => verifyPassword(p, h)                          // E-ASYNC-FN-ESCAPES-AS-VALUE
-  export const check2 = strict ? (p, h) => verifyPassword(p, h) : (p, h) => true   // E-ASYNC-FN-ESCAPES-AS-VALUE
-  const mk = (p) => (h) => verifyPassword(p, h)                         // E-ASYNC-FN-ESCAPES-AS-VALUE
-  const vp = verifyPassword                                             // E-ASYNC-FN-ESCAPES-AS-VALUE (alias)
+  const check = (p, h) => verifyPassword(p, h);                          // E-ASYNC-FN-ESCAPES-AS-VALUE
+  export const check2 = strict ? (p, h) => verifyPassword(p, h) : (p, h) => true;   // E-ASYNC-FN-ESCAPES-AS-VALUE
+  const mk = (p) => (h) => verifyPassword(p, h);                         // E-ASYNC-FN-ESCAPES-AS-VALUE
+  const vp = verifyPassword;                                             // E-ASYNC-FN-ESCAPES-AS-VALUE (alias)
 
   // legal
-  export function check3(p: string, h: string) { return verifyPassword(p, h) }
+  export function check3(p: string, h: string) { return verifyPassword(p, h); }
   function anyOk(p: string, hashes: string[]) {
-    return hashes.some((h) => verifyPassword(p, h))   // a waiting lambda as the direct argument of `.some`
+    return hashes.some((h) => verifyPassword(p, h));   // a waiting lambda as the direct argument of `.some`
   }
-  const double = (n) => n * 2                         // a synchronous lambda: unaffected
+  const double = (n) => n * 2;                         // a synchronous lambda: unaffected
 }
 ```
 
@@ -12097,11 +12336,19 @@ type user:struct = {
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Close it" (the closure-array entry — a value built by a callback that returns functions is refused).
 
-A NAME counts as the function it may hold: an alias (`const g = twice`), a binding any of whose writes may hold one (an initializer, a reassignment, a destructuring or parameter default, a function-typed parameter, a parameter a call site hands a function), and a call of a file function that may return one (`id(twice)`) — fail closed: a binding that MAY hold a function is treated as holding one. Each is the hard error `E-VALUE-FUNCTION-STORED` (§34). A function still flows PASSED (an argument, a callback, a component prop or attribute — wiring) and CALLED (a handler); it is never stored. **Host boundary:** an object/array literal written DIRECTLY as the argument of a host-JS call (a JS global, an `import:host` / `.js` binding, or a method reached from one) is at the boundary and is not judged — scrml does not dictate a foreign API's shape — but the same literal stored in a scrml variable or cell first is refused. **The exemption holds ONLY while the host call's RESULT is not kept as a scrml value:** a host call in statement position (`console.log({ f })`, `el.addEventListener("x", f, { once: true })`, `setTimeout(f, 10)`) stays legal, but a host call whose result is bound, assigned, stored or returned as scrml data (`const o = Object.freeze({ f: twice })`, `Object.fromEntries([["d", twice]])`) is `E-VALUE-FUNCTION-STORED` for the function its argument literal held. This fails closed. A field write whose target is rooted in a host binding (`el.onclick = tick`) is likewise at the boundary.
+**S469 R2′ — bindings (reconciled, S474).** *A local binding MAY hold ANY function value, pure or impure (`const g = twice`, a parameter, a destructuring) — R2′'s "may be bound, passed, returned, called". This is INTERIM until built on each compiler: until then a binding is refused as this paragraph says. A derived cell reading through such a binding takes the call's dependencies from the function value's type (§6.6.3: *"the union of all reactive cell reads transitively reachable through the call"*) — for a binding that holds a returned closure (`const g = make(); const <x> = g()`), through its type's effect record; *(PA reading: that this covers every impure closure a binding can hold is not yet verified on either compiler — INTERIM until verified)*. The door-4 pure / impure line (below) applies ONLY to storing a function value in a CELL or a STRUCT FIELD, where a stored closure's cell reads are invisible to that graph. Whatever a binding holds, the sinks — `==` / ordering, a map key, serialization — refuse any function-holding value, and the rest of this paragraph then decides what such a sink receives.* A NAME counts as the function it may hold: an alias (`const g = twice`), a binding any of whose writes may hold one (an initializer, a reassignment, a destructuring or parameter default, a function-typed parameter, a parameter a call site hands a function), and a call of a file function that may return one (`id(twice)`) — fail closed: a binding that MAY hold a function is treated as holding one. Each is the hard error `E-VALUE-FUNCTION-STORED` (§34). A function still flows PASSED (an argument, a callback, a component prop or attribute — wiring) and CALLED (a handler); it is never stored. **Host boundary:** an object/array literal written DIRECTLY as the argument of a host-JS call (a JS global, an `import:host` / `.js` binding, or a method reached from one) is at the boundary and is not judged — scrml does not dictate a foreign API's shape — but the same literal stored in a scrml variable or cell first is refused. **The exemption holds ONLY while the host call's RESULT is not kept as a scrml value:** a host call in statement position (`console.log({ f })`, `el.addEventListener("x", f, { once: true })`, `setTimeout(f, 10)`) stays legal, but a host call whose result is bound, assigned, stored or returned as scrml data (`const o = Object.freeze({ f: twice })`, `Object.fromEntries([["d", twice]])`) is `E-VALUE-FUNCTION-STORED` for the function its argument literal held. This fails closed. A field write whose target is rooted in a host binding (`el.onclick = tick`) is likewise at the boundary.
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Close it" (a host call's RESULT kept as a scrml value is judged; rejected: (b) leave the exemption). There is no carve-out for host-protocol shapes (a `then` / `toString` / `Symbol.iterator` method on a scrml value is a stored function like any other). `E-STRUCT-FUNCTION-FIELD` stays the code for a function-TYPED field annotation; `E-VALUE-FUNCTION-STORED` fires on the stored VALUE.
 
 > **Provenance:** ruling:user-voice-scrml.md S462 "a" (no value holds a function) + S462 "go on the package" (item 3 host boundary, item 5 the code) + S464 "(a) Migrate the tests" / "Yes, maps too (Recommended)" (map literals are values too; rejected: a host-protocol carve-out for then/toString/iterator shapes).
+
+**S469 R2′ and S474 — what a function value may be (record-lag correction; governs where the two bullets above differ).** The two bullets above state S462's every-value rule. S469 re-ruled it (R2′): *function-holding* is a transitive type property (through tapes, maps, optionals, `T ! E`, enum payloads). A function-holding value MAY be bound, passed, returned and called. It SHALL NOT reach a cell, a struct field, `==` / ordering, a map key, any serialization (wire, `persist=`, channel, server cell, `send`), an `asIs` position, a type parameter, or a host-JS value slot other than a declared callback parameter; every one of those sinks fails closed on a type not proven function-free. S474 then splits the cell and struct-field sinks by purity:
+
+- **A PURE function value MAY be stored in a cell or a struct field — INTERIM until built.** A value whose function parts are all `fn` (pure, §48: no implicit reactive dependencies) is the owed capable form (`g-pure-fn-values-in-cells-unbuilt-s474`). Until it is built, storing one stays refused with the codes above (`E-VALUE-FUNCTION-STORED`, `E-STRUCT-FUNCTION-FIELD`); the refusal is reversible.
+- **An IMPURE function value in a cell or a struct field — INTERIM (refused until built).** ~~An IMPURE function value SHALL NOT be stored in a cell or a struct field — PERMANENT.~~ Until built, storing a `function` value (or a value whose function parts include one) in a cell or struct field stays refused (`E-VALUE-FUNCTION-STORED`, `E-STRUCT-FUNCTION-FIELD`). The capable form is owed (`g-impure-fn-values-in-cells-effect-typed-s474`): **effect-typed function values** — a function value's type records the cells it reads, so the §6.6.3 dependency graph can see through a stored closure. The refusal's present reason is the dependency-graph blind spot: §6.6.3's graph is static — the compiler extracts `@` reads as edges at compile time, and a call's dependencies are the cell reads transitively reachable through it — and without effect types a `function` value held in a cell can read cells the compiler cannot see at the read site, so a derived cell over it (`const <x> = @f(3)`) would go stale. A pure `fn` reads no cell and carries no hidden edge, so it is the nearer form (the bullet above). *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT" — *"**Impure function values in cells and struct fields become INTERIM**: the capable form is effect-typed function values that the §6.6.3 dependency graph can see through. That is still \"refused until built\", consistent with door 4's \"stays refused\"."* · supersedes: the PERMANENT tag this bullet carried (from dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §4 Recommendation) · direction of change: inert now; newly-accepting when built.)*
+- **`==` / ordering, map keys, and every serialization sink stay refused for any function-holding value, pure or not — PERMANENT.** **Reason — a semantic impossibility:** structural `==` on functions is undecidable (whether two functions compute the same thing cannot be decided), so a function value has no `==`, no ordering (§45.2), and cannot be a map key (§59.4); and a closure cannot be serialized — its code and captured environment have no wire form. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT" — *"A PERMANENT language refusal is allowed for exactly two reasons: (1) a proven exploit (security), or (2) a **semantic impossibility**, meaning no meaning can be given to the form."* … *"The SPEC must state that reason (for example: a closure cannot be serialized; structural `==` on functions is undecidable, so functions cannot be map keys …)"* · dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §4 Recommendation; ledger PS-12 · alternative: compare or key by an enum tag, serialize the tag.)*
+
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RE-RULED after the live panel — what may a function be" R2 — *"**R2 — R2′ adopted, FAIL CLOSED.** \"Function-holding\" is a transitive type property (through arrays, maps, optionals, `T ! E`, enum payloads). Such values may be bound, passed, returned, called. They SHALL NOT reach a cell, struct field, `==`/ordering, map key, any serialization (wire, `persist=`, channel, server cell, `send`), an `asIs` position, a type parameter, or a host-JS value slot other than a declared callback parameter. EVERY value-graph sink fails closed on an Unproven type, not just serialization. impl#1 keeps E-VALUE-FUNCTION-STORED, relabelled."* · ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4 — *"**R2′: PURE `fn` values may be stored in cells and struct fields** (INTERIM until built). Impure functions stay refused: the static dependency graph (§6.6.3) cannot see a stored closure's cell reads. `==`, map-key and serialization uses of function values stay refused."* (PA: *"4. Pure functions as the line for storing functions in cells: yes."* — bryan: *"your recs on the four one-way doors. go"*) · supersedes: S462's *"No value holds a function"* as the language rule — for binding, passing and returning (R2′, S469) and for pure values in cells and fields (S474, once built) · **Direction of change:** inert now (the refusals stand until built); newly-accepting for pure function values in cells and struct fields when built. impl#1 keeps `E-VALUE-FUNCTION-STORED` (`compiler/src/value-function-stored.ts`) as an impl#1 limit. The bootstrap has no function values yet (a function named without a call is `E-BOOTSTRAP-UNSUPPORTED`). *(Bindings: R2′'s "may be bound, passed, returned, called" is reconciled with the NAME paragraph above — a local binding may hold any function value, pure or impure (INTERIM until built on each compiler); the pure / impure line governs only cells and struct fields.)*
 
 
 **Structs are assigned NOMINALLY.** Two structs with identical fields but different declared
@@ -12138,9 +12385,9 @@ type:struct Token {
 When a struct instance is created with `<Token>`, optional fields are initialized to `not`. They may be assigned normally:
 
 ```scrml
-let tok = <Token>
-tok.kind = "BLOCK_REF"
-tok.block = someBlock    // optional field assigned
+let tok = <Token>;
+tok.kind = "BLOCK_REF";
+tok.block = someBlock;    // optional field assigned
 ```
 
 Optional fields have type `T | not` — they can hold either a value of type `T` or the absence value `not`. Code that reads an optional field must handle the `not` case:
@@ -12291,13 +12538,13 @@ at runtime. The issue is type clarity and developer intent, not runtime correctn
 type TaskStatus:enum = { Todo | InProgress | Done }
 
 <db src="./app.db" tables="tasks">
-    <tasks> = ?{`SELECT * FROM tasks`}.all()
+    <tasks> = ?{`SELECT * FROM tasks`}.all();
 </>
 
 ${ @tasks = @tasks.map(row => ({
     ...row,
     status: TaskStatus.parse(row.status) ?? row.status
-})) }
+})); }
 ```
 
 The `?? row.status` fallback preserves the raw string if the DB contains an unrecognized
@@ -12313,7 +12560,7 @@ ${ @issues = ?{`SELECT * FROM issues`}.all().map(row => ({
     ...row,
     priority: Priority.parse(row.priority) ?? row.priority,
     status: Status.parse(row.status) ?? row.status
-})) }
+})); }
 ```
 
 **Normative statements:**
@@ -12774,7 +13021,7 @@ type LoadCardRow:struct = {
 }
 export const LoadCard = <a props={ load: LoadCardRow, customerName?: string } ...>
     ... ${load.origin_city}, ${load.origin_state} ...
-</>
+</>;
 ```
 A board page's `SELECT l.id, ..., l.status, c.name AS customer_name FROM loads l LEFT JOIN
 customers c ...` projects a 13-column row that carries **all ten** `LoadCardRow` fields (plus
@@ -13309,7 +13556,7 @@ halves, and a conformant implementation SHALL enforce both:
 **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the
 client **iff** it is explicitly declassified via the field-level `reveal` construct at the value:
 ```scrml
-return u.reveal("passwordHash")   // admits the passwordHash column past the egress sink — here only
+return u.reveal("passwordHash");   // admits the passwordHash column past the egress sink — here only
 ```
 `reveal("col")` stamps the named column's provenance descriptor as declassified-at-this-value; the
 serializer admits a protected-origin column **only** when its descriptor bears a `reveal` stamp at
@@ -15071,12 +15318,12 @@ A `snippet`-typed value is invoked with the `render` keyword. `render` is valid 
 ```scrml
 type MarioState:enum = { Small, Big, Fire, Cape, Tanooki }
 
-<marioState>: MarioState = .Small      // bare variant — LHS type fixes the qualifier
-@marioState = .Big                     // bare variant — cell type fixes the qualifier
+<marioState>: MarioState = .Small;      // bare variant — LHS type fixes the qualifier
+@marioState = .Big;                     // bare variant — cell type fixes the qualifier
 
 function applyMushroom(state: MarioState) -> MarioState {
-    if (state == .Small) return .Big   // bare variant — return type fixes the qualifier
-    return state
+    if (state == .Small) return .Big;   // bare variant — return type fixes the qualifier
+    return state;
 }
 
 applyMushroom(.Small)                   // bare variant — parameter type fixes the qualifier
@@ -15116,7 +15363,7 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 
 ```scrml
 type UserInfo:struct = { name: string, age: number, active: bool }
-<userInfo>: UserInfo = ("alice", 30, true)        // positional — type fixes the field order
+<userInfo>: UserInfo = ("alice", 30, true);        // positional — type fixes the field order
 ```
 
 The positional initialiser `("alice", 30, true)` binds positionally to the struct's declared field order: `name = "alice"`, `age = 30`, `active = true`.
@@ -15133,7 +15380,7 @@ The positional initialiser `("alice", 30, true)` binds positionally to the struc
 
 ```scrml
 type Point:struct = { x: number, y: number }
-<origin>: Point = (0, 0)
+<origin>: Point = (0, 0);
 @origin.x  // 0
 @origin.y  // 0
 ```
@@ -15142,8 +15389,8 @@ type Point:struct = { x: number, y: number }
 
 ```scrml
 <formRes>
-    <name>  = ""
-    <email> = ""
+    <name>  = "";
+    <email> = "";
 </>
 // <formRes> = ("", "")  // E-TYPE-001 — Variant C compound has no positional form
 ```
@@ -15238,7 +15485,7 @@ type Phase:enum = { Idle, Loading, Done }
   <Done : "done">
 </>
 
-<phase>: (Idle to Done) = .Idle              // E-TYPE-LIFECYCLE-ON-ENGINE-CELL
+<phase>: (Idle to Done) = .Idle;              // E-TYPE-LIFECYCLE-ON-ENGINE-CELL
                                               // `@phase` is the engine's auto-declared cell;
                                               // engine `rule=` already owns the progression.
 ```
@@ -15248,9 +15495,9 @@ type Phase:enum = { Idle, Loading, Done }
 ```scrml
 type Phase:enum = { Idle, Loading, Done }
 
-<phase>: (Idle to Done) = .Idle              // Shape 1 plain reactive cell — lifecycle permitted.
+<phase>: (Idle to Done) = .Idle;              // Shape 1 plain reactive cell — lifecycle permitted.
                                               // No engine declaration exists for the `phase` name.
-@phase = .Done                                // legal — transition fires; subsequent reads pass.
+@phase = .Done;                                // legal — transition fires; subsequent reads pass.
 ```
 
 The carve-out is detected at type-resolution time: the compiler classifies a state-decl as an "engine cell" iff a sibling `<engine>` declaration in the same enclosing scope's `engineMeta.varName` (or `var=` override) matches the state-decl's name. The classification is unambiguous — engine declarations are syntactic constructs (`<engine for=...>` element), not user-named conventions.
@@ -15289,21 +15536,21 @@ The callee declares a `(not to T)` return type. The caller receives a value type
 
 ```scrml
 function loadUser(id: number) -> (not to User) {
-    const row = ?{ select * from users where id = ${id} }.get()
-    return row     // returns `User | not`; lifecycle declares the post-transition contract
+    const row = ?{ select * from users where id = ${id} }.get();
+    return row;     // returns `User | not`; lifecycle declares the post-transition contract
 }
 ```
 
 **Caller form 1 — `given` presence-guard (§42.2.3):**
 
 ```scrml
-const u = loadUser(42)
+const u = loadUser(42);
 
 given u :> {
     // INSIDE this block: u is typed as User AND lifecycle-transitioned.
     // The act of discriminating proves presence; the lifecycle transition is implicit.
-    const name = u.name  // OK — post-transition access
-    const email = u.email
+    const name = u.name;  // OK — post-transition access
+    const email = u.email;
 }
 // OUTSIDE: u remains `User | not`. Direct access fires E-TYPE-001.
 ```
@@ -15311,23 +15558,23 @@ given u :> {
 **Caller form 2 — `if (u is not)` early-return:**
 
 ```scrml
-const u = loadUser(42)
-if (u is not) return     // discrimination: the `not` arm exits
+const u = loadUser(42);
+if (u is not) return;     // discrimination: the `not` arm exits
 // After the early-return discrimination, u is narrowed to User
 // AND lifecycle-transitioned. Subsequent access passes.
-const name = u.name      // OK — post-transition access
+const name = u.name;      // OK — post-transition access
 ```
 
 **Caller form 3 — `match u { ... }` (§18):**
 
 ```scrml
-const u = loadUser(42)
+const u = loadUser(42);
 
 match u {
     not :> handleAbsence()         // the `not` arm — u is `not`
     given u :> {
         // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
-        const name = u.name         // OK — post-transition access
+        const name = u.name;         // OK — post-transition access
     }
 }
 ```
@@ -15337,8 +15584,8 @@ In all three forms, the act of discriminating the `not` variant IS the transitio
 **Pre-transition access — fires E-TYPE-001:**
 
 ```scrml
-const u = loadUser(42)
-const name = u.name           // E-TYPE-001 — u was not discriminated; still pre-transition
+const u = loadUser(42);
+const name = u.name;           // E-TYPE-001 — u was not discriminated; still pre-transition
 ```
 
 **E-TYPE-001 vs E-TYPE-046 (S237).** E-TYPE-001 above is the **lifecycle** guard: `u` carries a `(not to T)` annotation, so its `not` is a *pre-transition* state and a discrimination *transitions it away* (subsequent unguarded access is then fine). A **plain-optional** receiver (`<x>: T | not` / `T?`, §42.3.1 — no lifecycle) is different: its `not` is a legitimate *steady-state* value that has to be handled at *every* access, so an unguarded member access there fires **E-TYPE-046** (§42.3.5), not E-TYPE-001. Both demand the same handling (optional-chain `?.` or narrow via `if=` / `given` / `is not` / `match`); a receiver fires exactly one of the two, keyed on whether it is lifecycle-annotated.
@@ -15356,27 +15603,27 @@ type Article:enum = {
 }
 
 function publish(id: number) -> (.Draft to .Published) {
-    const a = ?{ select * from articles where id = ${id} }.get()
-    return a as .Published    // callee transitions; returns Published-shape
+    const a = ?{ select * from articles where id = ${id} }.get();
+    return a as .Published;    // callee transitions; returns Published-shape
 }
 
-const a = publish(42)
+const a = publish(42);
 
 if (a is .Draft) {
     // SOURCE variant discriminated. The lifecycle says (.Draft to .Published);
     // calling transition() advances per-access state.
-    transition(a)
-    const publishedAt = a.publishedAt  // OK — post-transition access of B-shape field
+    transition(a);
+    const publishedAt = a.publishedAt;  // OK — post-transition access of B-shape field
 }
 ```
 
 **Missing-transition fires `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`:**
 
 ```scrml
-const a = publish(42)
+const a = publish(42);
 
 if (a is .Draft) {
-    const publishedAt = a.publishedAt  // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED:
+    const publishedAt = a.publishedAt;  // E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED:
                                 //   accessed .Published-shape field `publishedAt`
                                 //   after discriminating .Draft but without
                                 //   calling transition(a).
@@ -15423,7 +15670,7 @@ Lifecycle annotation on **channel cells** (state declared inside a `<channel>` b
 
 ```scrml
 <channel name="presence">
-  <userInfo>: (not to User) = not              // lifecycle on a channel cell — per-client replicated
+  <userInfo>: (not to User) = not;              // lifecycle on a channel cell — per-client replicated
 </>
 ```
 
@@ -15525,7 +15772,11 @@ no format specifier inside `${}`: formatting is a call (§41.22) whose result is
   Q3).
 - **Refused:** a struct, a tape, a tuple, a map or set, a payload enum value, a function, ~~a markup value,~~ and a
   value whose type the compiler cannot resolve *(the unresolved-type limb is a PA derivation: fail closed, as the
-  ruled principle admits only a known primitive)*. *(S469 r2: a markup value is struck from this list — in markup
+  ruled principle admits only a known primitive)*. ⚑ **INTERIM (S474, FORK RULE row C; dpa-072 row 0):** the
+  unresolved-type limb refuses because inference did not reach the value, not because of the value, so it holds
+  only until the compiler resolves the type of every value reaching a text sink. After that a resolved primitive is
+  accepted and anything else is refused as non-primitive. Until then the message names an annotation or a
+  conversion (`T.parse`, §14.13) as the fix (`g-text-sink-unresolved-type-capable-form-owed-s474`; capability ledger IN-45). *(S469 r2: a markup value is struck from this list — in markup
   text it is not text and renders as markup, §7.4.2; in a quoted attribute or a logic template it is refused as any
   other non-primitive.)* In markup text, a quoted attribute or a logic template this SHALL
   be compile error **`E-TEXT-NON-PRIMITIVE`** (§34); the message names a field read, a `scrml:format` call or
@@ -15647,7 +15898,7 @@ A component is defined with a `const` assignment to a markup expression:
 ```scrml
 const name = <element prop1 prop2="default">
     children
-</element>
+</element>;
 ```
 
 - `name` — the component identifier. SHALL begin with an uppercase letter to distinguish it from HTML elements.
@@ -15678,7 +15929,7 @@ Props MAY carry explicit type annotations and constraints:
 ```scrml
 const card = <div title:String using (length > 0)>
     <h2>${title}</>
-</>
+</>;
 ```
 
 - `:String` — type annotation on the prop.
@@ -15750,7 +16001,7 @@ const card = <div class="card">
     <div class="card__footer" fixed>
         <p>Footer content that cannot be overridden</>
     </>
-</>
+</>;
 ```
 
 ### 15.8 Component Usage
@@ -15770,7 +16021,7 @@ const card = <div class="card">
 `${prop}` inside component markup text interpolates the value of a prop or variable.
 
 ```scrml
-const greeting = <p>Hello, ${name}!</>
+const greeting = <p>Hello, ${name}!</>;
 ```
 
 ### 15.10 Typed Props Declaration Block
@@ -15797,7 +16048,7 @@ const UserCard = <div props={ name: string, avatar: string, role: UserRole }>
     <img src=avatar>
     <h3>${name}</>
     <span>${role}</>
-</>
+</>;
 ```
 
 **Rules:**
@@ -15833,7 +16084,7 @@ const UserCard = <div props={ name: string, avatar: string, role: UserRole }>
   a prop's value on its root writes the attribute there explicitly:
 
   ```scrml
-  const Link = <a class="link" href=${href} props={ href: string, label: string }>${label}</>
+  const Link = <a class="link" href=${href} props={ href: string, label: string }>${label}</>;
 
   <Link href=@docsUrl label="Docs"/>     // <a class="link" href="…the value of @docsUrl…">Docs</a>
   ```
@@ -15873,7 +16124,7 @@ const UserCard = <div class="card" props={ name: string, role: UserRole, size?: 
     <h3>${name}</>
     <span class="role">${role}</>
     <span class="size">${size ?? "medium"}</>
-</>
+</>;
 
 // Call site
 <UserCard name="Alice" role=::Admin>
@@ -15885,7 +16136,7 @@ const UserCard = <div class="card" props={ name: string, role: UserRole, size?: 
 
 ```scrml
 const Badge = <span props={ label: string, color: string }>
-    ${label}</>
+    ${label}</>;
 
 <Badge label="Admin">
 ```
@@ -15967,10 +16218,10 @@ semantics.
 ```scrml
 const Greeter = <div props={ name: string }>
     ${
-      const greeting = "Hello, " + name + "!"
+      const greeting = "Hello, " + name + "!";
     }
     <p>${greeting}</p>
-</>
+</>;
 
 // Call site
 <Greeter name="Ada">
@@ -15988,9 +16239,9 @@ ${
 ```scrml
 const Wrapper = <div props={ name: string }>
     ${
-      const fn = (name) => name + "!"
+      const fn = (name) => name + "!";
     }
-</>
+</>;
 ```
 
 Inside the lambda body, `name` refers to the parameter (NOT the prop). After
@@ -16001,10 +16252,10 @@ expansion, the lambda is unchanged: `(name) => name + "!"`.
 ```scrml
 const Demo = <div props={ name: string }>
     ${
-      const name = "shadow"
-      const greeting = name      // refers to local, not prop
+      const name = "shadow";
+      const greeting = name;      // refers to local, not prop
     }
-</>
+</>;
 ```
 
 After expansion: `const name = "shadow"; const greeting = name`. Neither
@@ -16105,11 +16356,11 @@ export const Modal = <div class="modal" props={ bind visible: bool, title: strin
         <button onclick=${ visible = false }>Close</>
     </>
     ${...}
-</>
+</>;
 
 // Parent
 <program>
-    <showModal> = false
+    <showModal> = false;
 
     <button onclick=${ @showModal = true }>Open settings</>
     <Modal bind:visible=@showModal title="Settings">
@@ -16126,7 +16377,7 @@ no reactive guard needed. The compiler generates all subscription wiring.
 
 ```scrml
 const Tag = <span props={ label: string }>
-    ${label}</>
+    ${label}</>;
 
 <Tag bind:label=@tagText>
 ```
@@ -16249,11 +16500,11 @@ export const ContactForm = <form
 
     ${
         function submitForm() {
-            event.preventDefault()
-            result.submitted = true
+            event.preventDefault();
+            result.submitted = true;
         }
     }
-</>
+</>;
 
 // Parent
 <program>
@@ -16290,7 +16541,7 @@ export const FilterPanel = <div class="filters" props={ filters: filterState }>
         <input type="checkbox" bind:checked=filters.showArchived>
         Show archived
     </>
-</>
+</>;
 
 <program>
     <filterState id="search">
@@ -16311,7 +16562,7 @@ export const FilterPanel = <div class="filters" props={ filters: filterState }>
 
 export const ContactForm = <form props={ result: formResult }>
     // ...
-</>
+</>;
 
 <otherState>
     value: number = 0
@@ -16382,7 +16633,7 @@ export const NotificationItem = <div
     <p>${message}</>
     <button onclick=onDismiss()>Dismiss</>
     <button onclick=${ if (onRead) { onRead() } }>Mark read</>
-</>
+</>;
 ```
 
 At the call site, a function reference is passed as an unquoted attribute value:
@@ -16423,11 +16674,11 @@ export const Tabs = <div class="tabs"
 >
     ${
         function selectTab(tab: string) {
-            if (onTabChange) { onTabChange(tab) }
+            if (onTabChange) { onTabChange(tab); }
         }
     }
     // ...
-</>
+</>;
 ```
 
 W-COMPONENT-001 is emitted for `onTabChange` at the component definition site. Compilation
@@ -16441,10 +16692,10 @@ export const Tabs = <div class="tabs"
 >
     ${
         function selectTab(tab: string) {
-            onTabChange(tab)   // Error: onTabChange is (fn | not), not callable without guard
+            onTabChange(tab);   // Error: onTabChange is (fn | not), not callable without guard
         }
     }
-</>
+</>;
 ```
 
 Error E-TYPE-031: `onTabChange` has type `((tab: string) => void) | not`. Calling a
@@ -16482,7 +16733,7 @@ explicitly:
 > **A function may be PASSED (a component prop) or CALLED (an event handler, inline), but it
 > SHALL NEVER be STORED as value data (a struct field or a state cell).**
 
-**Every value, not only fields and cells (S462 / S464).** "STORED" covers every value: an object,
+*(S469 R2′ / S474 — §14.3 "what a function value may be": a function-holding value MAY be bound, passed, returned and called, a local binding holding any function value being INTERIM until built; it is refused where it reaches a cell or struct field (INTERIM: a pure `fn` there awaits the function-types slice, an impure one effect-typed function values), `==` / ordering, a map key or a serialization sink. The every-value reading in this paragraph is S462's and governs only where §14.3's R2′ paragraph agrees.)* **Every value, not only fields and cells (S462 / S464).** "STORED" covers every value: an object,
 array or map literal (§59.3) holding a function in a field, element or entry, a spread into one,
 and a storing method that puts a function into a scrml value are all STORED, and are refused with
 `E-VALUE-FUNCTION-STORED` (§14.3, §34). A literal written DIRECTLY as the argument of a host-JS
@@ -16584,12 +16835,12 @@ Components are instantiated using their PascalCase name as an HTML-like tag: `<M
 Component definitions capture reactive bindings from the enclosing scope. When a component instance is used, reactive variables (`@var`) referenced in the component body maintain their reactivity — changes to `@var` in the parent scope re-render the component's dependent elements.
 
 ```scrml
-<count> = 0
+<count> = 0;
 
 const Counter = <div>
     <p>Count: ${@count}</>
     <button onclick=${() => @count = @count + 1}>+</>
-</>
+</>;
 
 <Counter/>
 ```
@@ -16936,7 +17187,7 @@ const Card = <div class="card" props={
     <div class="card__header">${render header()}</>
     <div class="card__body">${render body() ?? <p>No content provided./}</>
     <div class="card__actions" if=actions>${render actions()}</>
-</>
+</>;
 ```
 
 - `header` is required. Omitting it at the call site is E-COMPONENT-010.
@@ -17001,9 +17252,9 @@ const TabStrip = <div class="tabs" props={
     tabs: Tab[],
     tabPanel: snippet(tab: Tab)
 }>
-    <nav>${ for (t of tabs) { lift <button onclick=setActive(t)>${t.label}/ } }</>
+    <nav>${ for (t of tabs) { lift <button onclick=setActive(t)>${t.label}/; } }</>
     <div class="tab-content">${render tabPanel(activeTab)}</>
-</>
+</>;
 
 <TabStrip
     tabs=@myTabs
@@ -17020,7 +17271,7 @@ const TabStrip = <div class="tabs" props={
 
 | Code | Trigger | Raised By | Severity |
 |---|---|---|---|
-| E-COMPONENT-020 | More than one `${...}` or `${children}` spread in a component body; **S473 D11:** also more than one unnamed `<slot/>` on one render path of a §66 declaration's `renders` — one per exclusive branch is legal (§66.15.2, S474 F7; emitted at `compiler/src/component-expander.ts` for the legacy form; the §66 trigger is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`), Nominal on impl#1, which does not implement §66) | CE | Error |
+| E-COMPONENT-020 | More than one `${...}` or `${children}` spread in a component body; **S473 D11:** also more than one unnamed `<slot/>` on one render path of a §66 declaration's `renders` — one per exclusive branch is legal (§66.15.2, S474 F7; emitted at `compiler/src/component-expander.ts` for the legacy form; the §66 trigger is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`), Nominal on impl#1, which does not implement §66) **S474:** a `<slot/>` in an `<each>` / `for … lift` row — INTERIM; per-row slot owed (g-slot-per-row-scoped-unbuilt-s474). | CE | Error |
 | E-COMPONENT-021 | Caller provides unslotted children but component has no spread; **S473 D11:** also a §66 use with children whose declaration's `renders` holds no `<slot/>` (§66.15.2; emitted at `compiler/src/component-expander.ts` for the legacy form; the §66 trigger is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`), Nominal on impl#1, which does not implement §66) | CE | Error |
 | E-COMPONENT-022 | `slot=` on element not a direct child of a component call, OR inside a `lift` block | CE | Error |
 | E-COMPONENT-023 | `slot="name"` or `render name` targets a prop not declared as `snippet`-typed | CE | Error |
@@ -17095,7 +17346,7 @@ const Card = <div class="card" props={
 }>
     <div class="card__header">${render header()}</>
     <div class="card__body">${render body() ?? <p>No content./}</>
-</>
+</>;
 ```
 
 **Worked example — invalid optional without absence-check (E-TYPE-073):**
@@ -17103,7 +17354,7 @@ const Card = <div class="card" props={
 ```scrml
 const Panel = <div props={ actions?: snippet }>
     <footer>${render actions()}</>
-</>
+</>;
 ```
 
 ```
@@ -17143,10 +17394,10 @@ and pass a lambda at the call site:
 ```scrml
 <Card>
     <div slot="featured">
-        ${ for (item of items) { if (item.important) { lift <li>${item}/ } } }
+        ${ for (item of items) { if (item.important) { lift <li>${item}/; } } }
     </>
     <div slot="body">
-        ${ for (item of items) { if (!item.important) { lift <li>${item}/ } } }
+        ${ for (item of items) { if (!item.important) { lift <li>${item}/; } } }
     </>
 </>
 ```
@@ -17329,14 +17580,14 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 
 **Worked example:**
 ```scrml
-<errorMessage>: string | not = not
+<errorMessage>: string | not = not;
 
 <div class="error-banner" if=@errorMessage>${@errorMessage}</>
 ```
 
 Equivalent to:
 ```scrml
-${ if (@errorMessage) { lift <div class="error-banner">${@errorMessage}/ } }
+${ if (@errorMessage) { lift <div class="error-banner">${@errorMessage}/; } }
 ```
 
 `@errorMessage` is `string | not`, so `if=@errorMessage` is a presence test: the banner renders whenever a message is set — the empty string `""` included, because `""` is a defined value (§42.1.1) — and is removed when the cell is `not`. Were the cell a plain `string` (`""` meaning "no message"), `if=@errorMessage` would be E-COND-NOT-BOOLEAN (a string has no truthiness, §42.4); write the comparison: `<div class="error-banner" if=(@errorMessage != "")>`.
@@ -17420,9 +17671,9 @@ Desugars to:
 ```scrml
 ${
   if (@loggedIn) {
-    lift <div>Welcome</>
+    lift <div>Welcome</>;
   } else {
-    lift <div>Please log in</>
+    lift <div>Please log in</>;
   }
 }
 ```
@@ -17915,7 +18166,7 @@ The slight verbosity of this form is accepted for clarity. Keeping iteration out
 
 ```scrml
 ${ for x of @items {        ⟵ E-FOR-UNPARENTHESIZED-HEAD
-    lift <li>${x}</>
+    lift <li>${x}</>;
 } }
 ```
 
@@ -18119,20 +18370,20 @@ The **binding site** is the variable declaration that receives the if-as-express
 ```scrml
 const a = if (cond) {
     // do work
-    lift 3
-}
+    lift 3;
+};
 ```
 
 Here `const a` is the binding site. `a` has type `number | not` (no `else` arm, so the false path yields `not`).
 
 ```scrml
 const b = if (x > 3) {
-    lift "high"
+    lift "high";
 } else if (x > 0) {
-    lift "mid"
+    lift "mid";
 } else {
-    lift "low"
-}
+    lift "low";
+};
 ```
 
 Here `const b` is the binding site. All branches covered, all lift values are `string`, so `b` has type `string`.
@@ -18148,7 +18399,7 @@ Here `const b` is the binding site. All branches covered, all lift values are `s
 When an if-as-expression has no `else` arm, the false-path result is `not`. The `not` type is the scrml absence primitive (§7.5 grammar, §42).
 
 ```scrml
-const a = if (cond) { lift 3 }
+const a = if (cond) { lift 3; };
 // type of a: number | not
 // a is 3 when cond is true, not when cond is false
 ```
@@ -18212,8 +18463,8 @@ const dbl = ~ * 2;     // valid: both arms lift, ~ is always initialized
 Or capture explicitly and avoid `~`:
 
 ```scrml
-const a = if (cond) { lift a }   // a is number | not
-const dbl = (a ?? 0) * 2         // ?? fallback handles not
+const a = if (cond) { lift a; };   // a is number | not
+const dbl = (a ?? 0) * 2;         // ?? fallback handles not
 ```
 
 #### 17.6.7 Interaction with Ternary
@@ -18222,7 +18473,7 @@ Both forms coexist. Neither replaces the other.
 
 ```scrml
 // Ternary — valid, idiomatic for simple inline choices
-const a = (cond) ? 1 : 2
+const a = (cond) ? 1 : 2;
 ```
 
 Ternary as an unbound expression statement:
@@ -18279,12 +18530,12 @@ const b = x > 3 ? "high" : x > 0 ? "mid" : "low";
 ```scrml
 ${
     const status = if (@count > 10) {
-        lift "high"
+        lift "high";
     } else if (@count > 0) {
-        lift "medium"
+        lift "medium";
     } else {
-        lift "low"
-    }
+        lift "low";
+    };
     // status: string (all arms covered, all lift string)
 }
 ```
@@ -18293,7 +18544,7 @@ ${
 
 ```scrml
 ${
-    const a = if (cond) { lift 3 }
+    const a = if (cond) { lift 3; };
     // type of a: number | not
 }
 ```
@@ -18312,11 +18563,11 @@ ${
 ```scrml
 ${
     const label = if (@user.role is .Admin) {
-        const prefix = getOrgName(@user.orgId)
-        lift prefix + " Admin"
+        const prefix = getOrgName(@user.orgId);
+        lift prefix + " Admin";
     } else {
-        lift @user.displayName
-    }
+        lift @user.displayName;
+    };
 }
 ```
 
@@ -18325,11 +18576,11 @@ ${
 ```scrml
 ${
     const label = if (@n > 0) {
-        auditTrail("checked")   // side effect. NOT a ~ initialization (§32.2.1). Not E-TILDE-002.
-        lift "pos"              // the only designating statement
+        auditTrail("checked");   // side effect. NOT a ~ initialization (§32.2.1). Not E-TILDE-002.
+        lift "pos";              // the only designating statement
     } else {
-        lift "neg"
-    }
+        lift "neg";
+    };
     // label: string
 }
 ```
@@ -18357,7 +18608,7 @@ ${
         lift 2;    // Error E-LIFT-002
     } else {
         lift 3;
-    }
+    };
 }
 ```
 
@@ -18366,10 +18617,10 @@ ${
 ```scrml
 <div>${
     const label = if (@count > 0) {
-        lift `Items: ${@count}`                  // S469: `+` takes two strings; a template interpolates (§14.13)
+        lift `Items: ${@count}`;                  // S469: `+` takes two strings; a template interpolates (§14.13)
     } else {
-        lift "No items"
-    }
+        lift "No items";
+    };
     lift <p class="label">${label}</>;
 </>
 ```
@@ -18396,7 +18647,7 @@ to a branch body whose sole statement is `lift` of that expression:
 
 ```scrml
 ${ if @isAdmin { "Admin" } else { "User" } }          // value-form
-${ if @isAdmin { lift "Admin" } else { lift "User" } } // the form it desugars to
+${ if @isAdmin { lift "Admin"; } else { lift "User"; } } // the form it desugars to
 ```
 
 Both produce the same rendered result. They are NOT required to lower to the same JavaScript —
@@ -18469,7 +18720,7 @@ or an effect context, not in `${…}`.
 **Worked example — no `else` (the form this amendment settles):**
 
 ```scrml
-<shown> = true
+<shown> = true;
 <p>${ if @shown { "YES" } }</p>
 ```
 
@@ -18813,7 +19064,7 @@ The expression is evaluated once per iteration and SHALL produce a value that is
 
 ```scrml
 type Contact:struct = { id: string, name: string, email: string }
-<contacts>: Contact[] = []
+<contacts>: Contact[] = [];
 
 <each in=@contacts>
     <li : @.name>
@@ -18826,7 +19077,7 @@ No `key=` attribute on the opener. The compiler reads the declared type of `@con
 
 ```scrml
 type Tag:struct = { name: string, color: string }
-<tags>: Tag[] = []
+<tags>: Tag[] = [];
 
 <each in=@tags>
     <li : @.name>
@@ -19017,7 +19268,7 @@ of an enum-typed reactive cell. It is the Tier 1 wrapper of the §17.0 case-anal
 <match for=LoadPhase [on=@loadPhase]>
   <NotAsked><p>Press to load.</p></>
   <Loading><p>Loading…</p></>
-  <Ready(rows)><ul>${ for (let r of rows) { lift <li>${r.name}</li> } }</ul></>
+  <Ready(rows)><ul>${ for (let r of rows) { lift <li>${r.name}</li>; } }</ul></>
   <Failed(msg)><p class="error">${msg}</p></>
 </>
 ```
@@ -19376,8 +19627,8 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   and as the `<match>` structural element (§18.0.1). Everywhere else `match` SHALL be a legal
   identifier. In particular the conventional regex-result binding SHALL compile without change:
   ```scrml
-  const match = raw.match(/(\d+)/)
-  const first = match is given ? match[1] : "fallback"   // `match` is the identifier; `is given` is §42
+  const match = raw.match(/(\d+)/);
+  const first = match is given ? match[1] : "fallback";   // `match` is the identifier; `is given` is §42
   ```
   `match` used as a member (`obj.match`), a call (`raw.match(re)`), an index (`match[1]`), a function
   or object-method name (`function match(a, b) { … }`), a parameter, or an assignment target is the
@@ -19410,8 +19661,8 @@ match shape {
 ```scrml
 match shape {
     .Circle(r) :> {
-        let area = r * r * 3.14159
-        let perimeter = 2 * r * 3.14159
+        let area = r * r * 3.14159;
+        let perimeter = 2 * r * 3.14159;
         lift area + perimeter;              // S469: a value-position block arm yields with `lift` (§18.5)
     }
     .Rectangle(w, h) :> w * h
@@ -19453,7 +19704,7 @@ ${ function getLabel(status: LoadStatus) {
         .Success :> "Done!"
         .Error   :> "Failed"
         else     :> "Unknown"
-    }
+    };
 } }
 ```
 
@@ -19470,7 +19721,7 @@ ${ function logStatus(status: LoadStatus) {
         .Success :> console.log("done")
         .Error   :> console.log("error")
         else     :> console.log("unknown")
-    }
+    };
 } }
 ```
 
@@ -19512,7 +19763,7 @@ let label:string = match status {
     .Active  :> "active"
     .Pending :> "pending"
     .Closed  :> "closed"
-}
+};
 ```
 All arms produce `string`. Result type is `string`.
 
@@ -19521,7 +19772,7 @@ All arms produce `string`. Result type is `string`.
 let x = match flag {
     .On  :> "yes"
     .Off :> 42        // Error: string vs number
-}
+};
 ```
 Error E-TYPE-001: match arm at `.Off` produces `number`; earlier arms produce `string`.
 Arms must produce the same type or types that unify to a common supertype.
@@ -19584,10 +19835,18 @@ arm's value at most once on any path (E-LIFT-002, §10.1).
 > expression statement — holds one expression, because under dpa-073 F1 `;` ends every statement.)*
 > **supersedes:** the "A bare expression as the block's last statement is not the arm's value" reading for a block
 > of exactly one expression, which the r2 text applied to every block arm (struck above). **Direction of change:**
-> newly-accepting (`.A :> { e }` in a value position, which the r2 text refused). **No compiler change is owed:**
+> newly-accepting (`.A :> { e }` in a value position, which the r2 text refused). ~~**No compiler change is owed:**
 > impl#1 already accepts the form (it reads a brace body's last expression as the arm's value — the pre-S469
 > reading, which agrees with this rule for a one-expression body), and the bootstrap's value-arm path already reads a
-> one-expression brace body as its expression (`analyze.scrml` `plainValueBlock`).
+> one-expression brace body as its expression (`analyze.scrml` `plainValueBlock`).~~ *(struck S474, #1512 review:
+> false for the bootstrap — its parser read the brace as a statement list under §7.2.2 rule 1 and refused
+> `.B :> { 2 }` with E-STMT-MISSING-SEMICOLON; only `{ 2; }` reached `plainValueBlock`.)* **Status (S474):** impl#1
+> accepts the form (it reads a brace body's last expression as the arm's value — the pre-S469 reading, which agrees
+> with this rule for a one-expression body). The bootstrap accepts it since s474-boot-one-expr-brace: §7.2.2 rule 3
+> now lists the one-expression brace as a single-expression position (no `;`), and the parser
+> (`compiler/self-host-v2/parse.scrml` `parseArmBlock`) reads `{ e }` as the arm `{ e; }`, which `plainValueBlock`
+> already yields. In a statement-position `match` / `!{}` the brace stays a statement list (§7.2.2 rule 3; a PA reading, not the rulings' words). The
+> provenance and direction of that change are recorded at §7.2.2 rule 3.
 
 
 **Normative statements:**
@@ -19649,9 +19908,13 @@ arm's value at most once on any path (E-LIFT-002, §10.1).
 > product arm's `{ … }` body is read by the same `parseArmBraceBody` (S469 r4 — it had been kept
 > as text, so `(1, 2) :> { ok }` was neither refused nor classified). A scrml keyword that is a
 > JS shorthand name (`{ type }`, `{ undefined }`) is refused too (S469 r4: before it, such a
-> body read as a block). Not yet
-> emitted by the bootstrap. A `!{}` handler arm body is outside this rule today (impl#1 reads
-> `!{ .E :> { foo } }` as a block whose result is `foo`).
+> body read as a block). ~~Not yet
+> emitted by the bootstrap.~~ *(stale, struck S474 — #1722 review: the bootstrap emits it, at
+> `compiler/self-host-v2/parse.scrml` `parseArmBody`, for a `match` arm and a `!{}` handler arm alike, a
+> keyword shorthand name such as `{ type }` included.)* A `!{}` handler arm body is outside this rule
+> today on impl#1 (impl#1 reads `!{ .E :> { foo } }` as a block whose result is `foo`). The bootstrap
+> does not yet read an object-literal arm body as the object (it refuses it, fails closed —
+> `g-bootstrap-object-literal-arm-body-refused-s474`).
 
 ---
 
@@ -19699,6 +19962,61 @@ type" means the SUBSET variant set (§18.8.1); W-MATCH-001 therefore fires on a 
 - `_` is a VALID ALIAS for `else` in match arm default position. Both `_` and `else` are
   accepted as the default/wildcard match arm. The canonical form is `else`. The compiler
   preference setting controls which form the formatter normalizes to.
+- *(S474, PERMANENT — security.)* In a `match` whose subject is a failable result (§19.7.1),
+  `else` (and its alias `_`) SHALL match the success value `.Ok` only, never an error variant.
+  A `match` on a failable result whose `else` / `_` arm would otherwise take an error variant
+  that no earlier arm names SHALL be a compile error (**E-MATCH-ELSE-ABSORBS-ERROR**); it is not
+  reported as E-TYPE-020. The message SHALL name every error variant the arm would have taken
+  and SHALL offer `_ e :>` (§18.6.1), which takes every remaining error in one arm. This does not
+  apply to a `!{}` handler's arms (§19.4.5), whose `else` / `_` takes the remaining error
+  variants as before.
+
+**`else` on a failable result (S474, PERMANENT — security).** The rule above closes a proven
+exploit. `function check(pw: string)! AuthErr` fails with `.Denied` on a wrong password, and
+
+```scrml
+@msg = match check(pw) { .Locked :> "locked", else :> "LOGGED IN" };
+```
+
+compiled, and on `.Denied` its `else` ran: a wrong password logged in. An `else` written to finish
+a `match` reads as "everything else that can come back", and on a failable result that includes the
+errors the author did not list. So on a failable result `else` is the success value's arm. Every
+error variant SHALL be handled by an arm that names it, by the whole-error binder `_ e` (§18.6.1),
+or by handling the call with `!{}` instead of `match`. Nothing becomes impossible to write: `.Ok(v)
+:> …, _ e :> …` handles every error in one arm, and explicit error arms followed by `else` are
+accepted, because then the `else` takes only the success value. *Capable alternative:* `_ e :>`.
+*Cost:* one extra arm, paid by the author. *Who loses:* nobody can write the error-absorbing form;
+its meaning was the exploit.
+
+The rule is on the subject's TYPE, not on how the call is spelled. It covers every way a failable
+result reaches a `match`: a call of a `!` function; a client call of a server function, whose
+failure set includes `.Transport` (§19.9.10; a server→server call owes only the callee's own
+variants); a `?{}` query (`SqlError`, §19.8.3); an optional call (`check?.(pw)`) or a call through a
+failable function value (§19.4.3, S469), which are failable exactly as the direct call is. It holds
+in every position: a value position, a statement, `return match …`, and a `match` nested inside
+another arm, `!{}` arms included. Two things are NOT a `match` on a failable result, so `else`
+keeps its ordinary meaning there: (1) a `!{}` handler's own arm list — every arm of a `!{}` is a
+failure, the success value never reaches it, so its `else` cannot be read as the success arm and is
+the explicit catch-all over the errors §19.4.5 gives it; (2) a later `match` over an error VALUE —
+`_ err :> { match err { … else :> … } }` matches an ordinary enum whose every value is an error
+(§18.6.1), and its subject is not a failable result.
+
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466 readings" item 1 — PA rec: *"on a failable subject, `else` covers success variants only. Errors need an explicit arm, `_ e`, or `!{}`, and an `else` that would absorb errors gets a compile error that names the uncovered error variants. Nothing becomes impossible to write, since every error can still be handled in one arm with `_ e`. This fits the existing rule that errors are always handled explicitly. Tag: PERMANENT, because the alternative is a proven exploit, a wrong password logging in. The cost falls on authors, who write one extra `_ e` arm."* · bryan: *"your recs on both. go"* · *"(1) PERMANENT (security, proven exploit: `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` logs in on `.Denied`). SPEC + bootstrap now; impl#1 deferred (S471) as a gap."* · **supersedes:** §19.7.3's *"A `_` wildcard arm SHALL satisfy
+> exhaustiveness for remaining unmatched variants, per existing §18.6 rules"* for a `match` (struck
+> there; it stands for a `!{}`), and E-TYPE-020's failable-match hint that offered *"or ends with
+> `else :>` / `_ :>`"*. **Direction of change (pa-base §8): newly-rejecting**, PERMANENT (FORK RULE
+> row C, `scrml-support/pa-core-scrml.md`: a proven-exploit security refusal; the capable form is
+> `_ e :>`). **Decided here (PA reading):** the `!{}` arm list is outside the rule — the ruling names
+> `!{}` as one of the three explicit forms, and its arms are failures only (§19.4.5). **Emitted by the
+> bootstrap** (`compiler/self-host-v2/analyze.scrml` `coverDiags`, with `resolveArms` — the one choke
+> point every failable-subject `match` goes through; the bootstrap refuses an optional call `?.` and
+> a call of a function value by name, E-BOOTSTRAP-UNSUPPORTED, so neither reaches the rule there).
+> **impl#1 carries it** (§34.0): it accepts the
+> exploit and runs the `else` on an error, `g-impl1-else-absorbs-error-variants-s474` (HIGH; deferred
+> under the S471 impl#1 policy). **Corpus measured** (text scan of `conformance/cases/`, `examples/`,
+> `samples/`, `stdlib/` for a failable-subject `match` with a `_` / `else` arm): one case,
+> `conformance/cases/server-db/sql-handled-match-scrutinee-rt` (four `_ :> "other"` arms after
+> `.QueryFailed`), migrated to `_ e :>`; and §19.8.3's own example, migrated below.
 
 #### 18.6.1 The Whole-Error Binder — `_ <name>` (S451)
 
@@ -19712,12 +20030,12 @@ author's; `err` is the usual choice (`e` reads as an event to most JS developers
 ```scrml
 type SaveError:enum = { Conflict(id: string), Offline }
 type DraftState:enum = { Idle, Saving, Failed(error: SaveError) }
-<state> = DraftState.Idle
+<state> = DraftState.Idle;
 
 function saveDraft()! SaveError { … }
 
 function save() {
-    saveDraft() !{ _ err :> { @state = .Failed(err) } }   // err: SaveError — the whole value
+    saveDraft() !{ _ err :> { @state = .Failed(err) } };   // err: SaveError — the whole value
 }
 ```
 
@@ -19896,11 +20214,11 @@ single `fail` never fires both.
 ```scrml
 type MyError:enum = { NotFound(id:string), Timeout }
 
-fail MyError.Timeout("oops")   // Error E-TYPE-082: `.Timeout` is a unit variant
+fail MyError.Timeout("oops");   // Error E-TYPE-082: `.Timeout` is a unit variant
                                // (no payload fields), but 1 argument was supplied.
-fail MyError.NotFound()        // Error E-TYPE-082: `.NotFound` has 1 payload field
+fail MyError.NotFound();        // Error E-TYPE-082: `.NotFound` has 1 payload field
                                // (id), but 0 arguments were supplied.
-let e = MyError.NotFound("a", "b")  // Error E-TYPE-082: 2 args for 1 field.
+let e = MyError.NotFound("a", "b");  // Error E-TYPE-082: 2 args for 1 field.
 ```
 
 **Worked example — valid, named form:**
@@ -19954,7 +20272,7 @@ present.
   be covered by explicit arms or by an `else` arm.
 - A `match` that is not exhaustive SHALL be a compile error (E-TYPE-020). The error message
   SHALL list the missing variant names.
-- An `else` arm covers all remaining variants for the purpose of exhaustiveness.
+- An `else` arm covers all remaining variants for the purpose of exhaustiveness — except on a failable result, where it covers the success value `.Ok` only and an error variant it would take is E-MATCH-ELSE-ABSORBS-ERROR (§18.6, S474).
 - Duplicate variant arms (two arms for the same variant) SHALL be a compile error
   (E-TYPE-023: duplicate match arm). The second arm is unreachable.
 
@@ -19973,7 +20291,7 @@ fn label(p: Post) -> string {
     .Admin  => "Admin"
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
-  }
+  };
 }
 ```
 
@@ -20148,7 +20466,7 @@ match expr {
         let leftVal = match left {
             .Lit(v)    :> v
             .Add(l, r) :> l + r   // recursive; here simplified
-        }
+        };
         lift leftVal + evalExpr(right);   // S469: `lift` (§18.5)
     }
     .Lit(v) :> v
@@ -20278,6 +20596,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | ~~E-TYPE-026~~ | ~~Match expression in invalid context (markup, SQL, CSS, attribute)~~ **Retired S473 (D19)** | — |
 | E-TYPE-027 | Shorthand pattern used when enum type cannot be inferred | Error |
 | E-SYNTAX-010 | `else` default arm is not the last arm | Error |
+| E-MATCH-ELSE-ABSORBS-ERROR | On a failable result, an `else` / `_` arm would take an error variant no earlier arm names — `else` covers `.Ok` only; fix: name the variant or write `_ e :>` (§18.6, S474, PERMANENT — security). Emitted at `compiler/self-host-v2/analyze.scrml` (`coverDiags`, the bootstrap); **Nominal / not yet emitted** by impl#1. | Error |
 | E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, in a `match` or a `!{}`; also the legacy `\| err :>` in a `!{}`) — fix: `_ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 | E-SYNTAX-011 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
 | E-SYNTAX-012 | Nested pattern in binding position — not supported in v1 | Error |
@@ -20398,34 +20717,34 @@ accessible by the `is` expression itself.
 
 **Worked example — conditional:**
 ```scrml
-<filter>: FilterMode = .All
+<filter>: FilterMode = .All;
 
 ${ if (@filter is .Active) {
-    loadActiveItems()
+    loadActiveItems();
 } }
 ```
 
 **Worked example — in markup attribute:**
 ```scrml
-<button class=selected(@filter is .All) onclick={@filter = .All}>All</>
-<button class=selected(@filter is .Active) onclick={@filter = .Active}>Active</>
+<button class=selected(@filter is .All) onclick={@filter = .All;}>All</>
+<button class=selected(@filter is .Active) onclick={@filter = .Active;}>Active</>
 ```
 
 **Worked example — with reactive variable:**
 ```scrml
 type Tab:enum = { Overview, Activity, Settings }
-<tab>: Tab = .Overview
+<tab>: Tab = .Overview;
 
 <nav>
-    <a class=active(@tab is .Overview) onclick={@tab = .Overview}>Overview</>
-    <a class=active(@tab is .Activity) onclick={@tab = .Activity}>Activity</>
-    <a class=active(@tab is .Settings) onclick={@tab = .Settings}>Settings</>
+    <a class=active(@tab is .Overview) onclick={@tab = .Overview;}>Overview</>
+    <a class=active(@tab is .Activity) onclick={@tab = .Activity;}>Activity</>
+    <a class=active(@tab is .Settings) onclick={@tab = .Settings;}>Settings</>
 </>
 ```
 
 **Worked example — invalid (not an enum type):**
 ```scrml
-let name = "Alice"
+let name = "Alice";
 if (name is .Admin) { ... }   // Error E-TYPE-062
 ```
 
@@ -20457,7 +20776,7 @@ It is defined on every variant, unit variants included.
 
 ```scrml
 type Access:enum = { Granted(user: string), Gone }
-function label(a: Access) { return a.variant }   // "Granted" or "Gone"
+function label(a: Access) { return a.variant; }   // "Granted" or "Gone"
 ```
 
 **Normative statements:**
@@ -20696,7 +21015,7 @@ achievable at no additional cost.
         Active, Pending, Failed(err: Error), Timeout, Cancelled
     }
 
-    <status>: PaymentStatus = .Active
+    <status>: PaymentStatus = .Active;
 
     ${ function handleTerminalStates() {
         partial match @status {
@@ -20716,13 +21035,13 @@ are intentionally unhandled.
 ```scrml
 <program>
     type Status:enum = { Active, Inactive }
-    <status>: Status = .Active
+    <status>: Status = .Active;
 
     <div>
         ${
             lift partial match @status {
                 .Active :> <p>Active</>
-            }
+            };
         }
     </>
 </>
@@ -20743,7 +21062,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
 
 ```scrml
 type Mode:enum = { Dark, Light }
-<mode>: Mode = .Light
+<mode>: Mode = .Light;
 
 ${ function applyMode() {
     partial match @mode {
@@ -20829,7 +21148,7 @@ fn step(st: LexState): LexState {
         (.InTemplateBody, .SawInterpClose)  :> closeInterp(st)
         (_, .SawEof)                        :> emitEof(st)
         _                                   :> advanceOne(st)
-    }
+    };
 }
 ```
 
@@ -21006,10 +21325,10 @@ The `enum-type` MAY be omitted (the bare form, §19.3.3); the variant then resol
 **Syntax:**
 
 ```scrml
-fail PaymentError::InvalidAmount("Amount must be positive")
-fail PaymentError::CustomerNotFound(customerId)
-fail PaymentError::ExpiredCard
-fail .ExpiredCard                    // bare form — resolves against the declared `! PaymentError`
+fail PaymentError::InvalidAmount("Amount must be positive");
+fail PaymentError::CustomerNotFound(customerId);
+fail PaymentError::ExpiredCard;
+fail .ExpiredCard;                    // bare form — resolves against the declared `! PaymentError`
 ```
 
 #### 19.3.2 Semantics
@@ -21049,18 +21368,18 @@ failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) 
 ```scrml
 // Explicit error type — arrow form
 function processPayment(amount: number, customerId: string)! -> PaymentError {
-    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
+    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive");
     // ... success path
 }
 
 // Explicit error type — bare form (S137 ratification; equivalent to arrow form; §41.14 canon-shown)
 function processPayment(amount: number, customerId: string)! PaymentError {
-    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
+    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive");
 }
 
 // Default error type (uses built-in Error enum)
 function quickCheck(value: bool)! {
-    if (!value) fail Error::Generic("Check failed")
+    if (!value) fail Error::Generic("Check failed");
 }
 ```
 
@@ -21089,6 +21408,16 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 **A `?{}` query is a failable expression too (S451 R11).** Outside a `!` function, a `?{}` query is handled like a call to a `!` function whose error type is `SqlError` — with `!{}` or `match` at the site — and an unhandled one is E-ERROR-002 (§19.8.3, which states the forms that apply). Inside a `!` function it propagates implicitly (§19.8.2, unchanged). *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: §19.8.3's backwards-compatible mode, quoted there · newly-rejecting.)*
 
 **A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and its failure set: the callee's declared variants, if any, plus `Transport(t: ServerCallError)` (S454 — supersedes "(its exact shape is OPEN for the bootstrap's U1b design pass)"; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
+
+**`else` on a failable `match` covers the success value only (S474, PERMANENT — security).** In
+handling form 1, a `match` on the result, an `else` / `_` arm SHALL take the success value `.Ok`
+only. Every error variant SHALL be handled by an arm that names it, by `_ e :>` (§18.6.1), or by
+handling the call with `!{}` (form 3) instead. A `match` whose `else` / `_` would take an error
+variant is **E-MATCH-ELSE-ABSORBS-ERROR** (§18.6, which states the exploit, the scope and the
+`!{}` exception). `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` is that error:
+it named `.Locked` and nothing else, so on `.Denied` it would log in. *(Provenance:
+ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466
+readings" item 1, quoted in §18.6 · newly-rejecting.)*
 
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
@@ -21134,9 +21463,9 @@ function loadItem(id: string)! LoadError { … }        // success type: Item
 function itemOrPlaceholder(id: string) {
     const item = loadItem(id) !{
         .NotFound(mid) :> placeholderItem(mid)       // yields a value
-        .Timeout       :> { @phase = .TimedOut; return placeholderItem(id) }   // leaves
-    }
-    return item
+        .Timeout       :> { @phase = .TimedOut; return placeholderItem(id); }   // leaves
+    };
+    return item;
 }
 
 // VALID — statement position: the arms only write, nothing reads a result
@@ -21144,7 +21473,7 @@ function refresh(id: string) {
     loadItem(id) !{
         .NotFound(mid) :> @phase = .Missing(mid)
         .Timeout       :> @phase = .TimedOut
-    }
+    };
 }
 
 // INVALID — value position, the arms fall through
@@ -21152,8 +21481,8 @@ function show(id: string) {
     let item = loadItem(id) !{
         .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
         .Timeout       :> @phase = .TimedOut         // E-ERROR-012
-    }
-    @phase = .Loaded(item)                             // on failure `item` would hold nothing
+    };
+    @phase = .Loaded(item);                             // on failure `item` would hold nothing
 }
 
 // VALID — `match` in a value position: every arm, `.Ok` included, yields a string
@@ -21162,7 +21491,7 @@ function label(id: string) {
         .Ok(item)        :> item.title
         .NotFound(mid)   :> "missing " + mid
         .Timeout         :> "timed out"
-    }
+    };
 }
 ```
 
@@ -21183,11 +21512,11 @@ function label(id: string) {
 **A `!{}` handler on something that cannot fail is an error (S451 ruling 3).** A `!{}` handler SHALL be attached only to an expression that can fail: a call to a function declared `!` (§19.4.1), a call the compiler treats as `!` (a CPS body-split function, §19.9.5; a built-in failable such as `parseVariant`, §41.13), or a `?{}` query (§19.8.3). On anything else — a call to an ordinary function, or an expression that is not a call (`let data = not !{ … }`) — no arm can ever run, and the handler would tell a reader there is a failure path where there is none. That SHALL be a compile error: **E-ERROR-013** — `'!{}' handler on '{name}(…)', which cannot fail: '{name}' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare '{name}' with '!' if it can fail.` (For a handler on a non-call expression the message names the expression instead.) It is the `!{}` sibling of **E-ERROR-004** (`?` on a non-failable call, §19.5.4); a `match` on a non-failable value is an ordinary `match` (§18) and is not affected.
 
 ```scrml
-function parseCount(src: string) { return src.length }        // not failable
+function parseCount(src: string) { return src.length; }        // not failable
 
 function show(src: string) {
-    let n = parseCount(src) !{ _ :> 0 }   // E-ERROR-013: parseCount cannot fail
-    let m = parseCount(src)                  // VALID — nothing to handle
+    let n = parseCount(src) !{ _ :> 0 };   // E-ERROR-013: parseCount cannot fail
+    let m = parseCount(src);                  // VALID — nothing to handle
 }
 ```
 
@@ -21239,6 +21568,7 @@ The message SHALL say that a handler follows the call it handles, and offer `cal
   `catch`, SHALL be a compile error (**E-ERROR-014**, §19.4.3). *(S470 #1568 PA narrow-class ruling; S471 item 7, PA-drafted.)*
 - An arm whose whole pattern is a bare identifier (`err :>`, or the legacy `| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `_ err :>`.
 - In a `!{}` arm or a `match` on a failable result, `_ <name>` SHALL match every error variant not matched by an earlier arm (never `.Ok`) and SHALL bind the whole error value, typed as the failure's error type (§18.6.1). *(S451 "a", the whole-error binder.)*
+- In a `match` on a failable result, `else` / `_` SHALL match the success value `.Ok` only. An `else` / `_` arm that would take an error variant no earlier arm names SHALL be a compile error (**E-MATCH-ELSE-ABSORBS-ERROR**, §18.6); its message names those variants and offers `_ e :>`. A `!{}` handler's `else` / `_` is unaffected. *(S474 "`else` on a failable match" item 1; PERMANENT — security.)*
 - A `!{}` handler's arms SHALL be §18.2 `match-arm`s (§19.4.5). A `|`-led arm, and a paren-free binder after it (`| .V m :>`), SHALL parse identically to the canonical arm (`.V(m) :>`) and surface **W-ARM-PIPE-LEGACY**; `E-ARM-PIPE-LEGACY` is reserved. *(S452 "c looks right".)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
@@ -21314,11 +21644,11 @@ function load(id: string)! LoadError { … }
 
 function show(id: string) {
     const item = load(id) !{
-        .Network(msg) :> { @phase = .Failed(msg); return }
+        .Network(msg) :> { @phase = .Failed(msg); return; }
         .Timeout      :> placeholderItem(id)
-        _ err         :> { @phase = .Failed(describe(err)); return }
-    }
-    @phase = .Loaded(item)
+        _ err         :> { @phase = .Failed(describe(err)); return; }
+    };
+    @phase = .Loaded(item);
 }
 ```
 
@@ -21448,10 +21778,10 @@ propagation-expr ::= expression '?'
 
 ```scrml
 function processOrder(orderId: int)! -> OrderError {
-    let customer = loadCustomer(orderId)?    // propagates CustomerError
-    let payment = chargeCard(customer.card)?  // propagates PaymentError
-    let receipt = generateReceipt(payment)?   // propagates ReceiptError
-    return receipt
+    let customer = loadCustomer(orderId)?;    // propagates CustomerError
+    let payment = chargeCard(customer.card)?;  // propagates PaymentError
+    let receipt = generateReceipt(payment)?;   // propagates ReceiptError
+    return receipt;
 }
 ```
 
@@ -21467,7 +21797,7 @@ The `?` operator is postfix. When applied to the result of a `!` function call:
 ```scrml
 match riskyFunction() {
     ::Ok(val) :> val
-    ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args) }
+    ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args); }
 }
 ```
 
@@ -21512,13 +21842,13 @@ ${
     }
     // A CLIENT `!` function: no server call, so it may be called while rendering.
     function checkCode(text: string)! -> CodeError {
-        if (text == "") fail CodeError::Empty
-        if (text.length > 8) fail CodeError::TooLong(text)
-        return text.toUpperCase()
+        if (text == "") fail CodeError::Empty;
+        if (text.length > 8) fail CodeError::TooLong(text);
+        return text.toUpperCase();
     }
 }
 
-<entry> = ""
+<entry> = "";
 
 <errorBoundary fallback={<div>Something went wrong/}>
     // content that may contain render-time calls to CLIENT failable functions
@@ -21531,7 +21861,7 @@ ${
 **Server data is loaded, not rendered through a boundary.** A server call in the boundary's content (`${loadUser(42)}`, where `loadUser` reads the database — §19.9.3) is E-VALUE-SERVER-CALL (§13.7). Load it with a `<request>` and read the failure from `<#id>.error`:
 
 ```scrml
-<user> = not
+<user> = not;
 
 // loadUser is the server `!` function of §19.9.3. The request handles its failure (§19.4.3 item 5).
 <request id="userLoad" deps=[]>${ @user = loadUser(42) }</>
@@ -21539,11 +21869,11 @@ ${
 <div>
     ${
         if (<#userLoad>.error is given) {
-            lift <div>Could not load the user</>
+            lift <div>Could not load the user</>;
         } else if (@user is given) {
-            lift <h1>${@user.name}</h1>
+            lift <h1>${@user.name}</h1>;
         } else {
-            lift <p>Loading…</p>
+            lift <p>Loading…</p>;
         }
     }
 </div>
@@ -21620,6 +21950,7 @@ When an error variant with a `renders` clause is caught by an `<errorBoundary>`,
 When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which the caller's handling sees a failure is **per-batch**, not per-function:
 
 - Batch 1 commits stand if batch 1 succeeded; batch 2's failure does NOT roll batch 1 back. (No 2PC / saga is performed; per S72 body-split soundness verdict, that path is deliberately out-of-scope.)
+- **A `!` function's plan has at most one batch that reaches a query (S474).** For a function declared `!`, the per-batch commit above SHALL NOT arise: its plan SHALL have at most one server batch whose transitive query set (§8.9.2) is non-empty, so all of its queries run in one request, inside one implicit envelope (§19.10.5). A `!` function whose plan would need two or more such batches — server calls separated by browser work that cannot move (§19.9.9.8 rule 3) — SHALL be **E-TX-CLIENT-MULTI-CALL** (§19.10.5) — INTERIM (design owed, not planned): the capable form is a transaction held open across the client round trip (the server keeps the transaction while the browser step runs, as Firestore's `runTransaction` keeps one client-side) — dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §2 Alternative C; the cost that blocks it today is that it holds the database's §19.10.6 per-connection gate (on SQLite, the whole database) across a network round trip and the user's think-time, stalling every other request (`g-tx-across-client-roundtrip-undesigned-s474`). Under ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT" cost never makes a refusal PERMANENT (§19.10.5; ledger PS-72; alternative today: move the browser work before the first or after the last server call, or split the function). Batches that reach no query (a server call that runs no `?{}`) are not counted. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 2 — *"**F11 becomes INTERIM: a client `!`'s server calls compose into one request with one envelope** (planner composition, per §19.9.9.8 rule 1). §19.6.7 gains the matching sentence: a `!` function's plan has at most one batch that reaches a query. Only calls separated by browser work that cannot move stay refused."* · supersedes: nothing struck; the bullet above now applies to a non-`!` split function only · **Direction of change:** newly-rejecting for a `!` split function whose plan has two query-reaching batches (the per-batch commit made it non-atomic), which §19.10.5 F11 already refused in the narrower client-placed case. impl#1: not measured — its batch planner (`compiler/src/cps-batch-planner.ts`) has no `!` check; Nominal there.)*
 - The caller receives batch K's failure as a tagged scrml-error variant, and handles it as §19.4.3 says: `match`, `?`, `!{}`, or — when the call loads data for markup — a `<request>` body, where the failure sets `<#id>.error` (§6.7.7). An `<errorBoundary>` does not receive it: a CPS-split function is async-colored (§13.2), so it cannot be called while rendering (§13.7).
 - Recovery from a non-tail batch failure is **idempotency-key replay** of batch K (A9 Ext 5; future scope, per S72 body-split integration ratification).
 
@@ -21695,6 +22026,21 @@ match processPayment(100, 42) {
 }
 ```
 
+*(S474, PERMANENT — security.)* `else` (or `_`) does NOT cover the error variants here: on a
+failable result it is the success value's arm (§18.6). An `else` that would take an error variant
+no earlier arm names is **E-MATCH-ELSE-ABSORBS-ERROR**, not E-TYPE-020:
+
+```scrml
+match processPayment(100, 42) {
+    ::InvalidAmount(reason) :> …
+    else                    :> …     // E-MATCH-ELSE-ABSORBS-ERROR: would take CustomerNotFound, ExpiredCard, NetworkError
+}
+```
+
+Explicit error arms followed by `else` are accepted: the `else` then takes `.Ok` only. The fix an
+E-TYPE-020 message offers on a failable result is the missing arm by name, or `_ e :>` for the
+remaining errors — never `else`.
+
 #### 19.7.2 Markup Context with `<errorBoundary>`
 
 Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary handles error variants via `renders` clauses or `fallback`. The developer MAY still use explicit `match` inside a boundary for finer control.
@@ -21704,7 +22050,7 @@ Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary h
 - In logic context, matching a `!` function result SHALL require exhaustive coverage of all variants (success and error). Missing variants SHALL trigger E-TYPE-020.
 - In markup context inside an `<errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
 - The `::Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `::Ok(value)` to access the success case in logic context.
-- A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.
+- ~~A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.~~ *(Superseded S474 for a `match`, ruling:user-voice-scrml.md S474 "`else` on a failable match" item 1, §18.6.)* In a `!{}` handler, a `_` / `else` wildcard arm SHALL satisfy exhaustiveness for the remaining unmatched error variants (§18.6). In a `match` on a failable result, a plain `_` / `else` arm SHALL cover `.Ok` only; the error variants SHALL be covered by arms that name them or by `_ e :>` (§18.6.1), and a `_` / `else` that would take one is **E-MATCH-ELSE-ABSORBS-ERROR** (PERMANENT — security).
 - In a value position (§19.4.3), every arm of a `match` on a `!` function result — the `.Ok` arm and every error arm — SHALL yield a value of the call's success type or leave (`return` / `fail`); an arm that falls through SHALL be **E-ERROR-012**. In a statement position an arm MAY fall through. For a `match` on a failable result this is the answer §18.3 / §18.4 leave open for a mix of value and void arms; E-TYPE-001 still reports an arm whose value has the wrong type, and the two never fire for the same arm. *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 1 (a), quoted in §19.4.3 · supersedes: nothing written — §19.7 was silent on arms that yield nothing · newly-rejecting; measured in §19.4.3.)*
 
 ---
@@ -21733,10 +22079,10 @@ When a `?{}` query is executed inside a `!` function, SQL errors are propagated 
 
 ```scrml
 function loadUser(id: int)! -> UserError {
-    let row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+    let row = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
     // If the query fails, SqlError is propagated via implicit ?
-    if (!row) fail UserError::NotFound(id)
-    return row
+    if (!row) fail UserError::NotFound(id);
+    return row;
 }
 ```
 
@@ -21754,12 +22100,12 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function userName(id: int) {
        const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
-           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?" }
-           .ConstraintViolation(f) :> { return "?" }
-           .ConnectionLost         :> { return "?" }
-           _                       :> { return "?" }
-       }
-       return row is not ? "(none)" : row.name
+           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?"; }
+           .ConstraintViolation(f) :> { return "?"; }
+           .ConnectionLost         :> { return "?"; }
+           _                       :> { return "?"; }
+       };
+       return row is not ? "(none)" : row.name;
    }
    ```
    `.QueryFailed(m) :>` binds the variant's payload, the `message: string` (§18.7; §19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"* — this example was then written `| ::QueryFailed m :>`, the spelling S452 soft-deprecates, §19.4.5); `.ConstraintViolation(f) :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows.
@@ -21769,18 +22115,18 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
            ::Ok(found)       :> found
            ::QueryFailed(m)  :> { log(m); lift []; }
-           _                 :> []
-       }
-       return rows
+           _ e               :> []    // S474: `_ e`, not `_` — on a failable result `_` covers `.Ok` only (§18.6)
+       };
+       return rows;
    }
    ```
 3. **Moving the query into a `!` function** — §19.8.2 then applies (implicit propagation), and the CALLER handles the function's result under §19.4.3 (`match`, `?`, `!{}`, or — when the result loads data for markup — a `<request>` body, whose failure is `<#id>.error`; S451: the function is server-placed by its `?{}`, so it cannot be called while rendering, §13.7):
    ```scrml
    function loadUser(id: int)! -> SqlError {
-       return ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // a failure propagates (§19.8.2)
+       return ?{`SELECT * FROM users WHERE id = ${id}`}.get();   // a failure propagates (§19.8.2)
    }
    function showUser(id: int) {
-       @user = loadUser(id) !{ _ :> not }                    // the caller handles it
+       @user = loadUser(id) !{ _ :> not };                    // the caller handles it
    }
    ```
 
@@ -21805,6 +22151,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
 - Inside a `!` function, a `?{}` query that fails at runtime SHALL produce a `SqlError` variant. This variant SHALL be propagated if the enclosing function's error type is compatible, or SHALL be a compile error if incompatible.
 - A `?{}` query SHALL be a failable expression in every context. Outside a `!` function it SHALL be handled at the site with a `!{}` handler or a `match` (§19.8.3); an unhandled `?{}` there SHALL be E-ERROR-002. *(S451 R11 — supersedes: "Outside a `!` function, a `?{}` query that fails at runtime SHALL return `not` (for `.get()`) or `[]` (for `.all()`). No error SHALL be raised.")*
 - A query that runs and matches no row SHALL NOT be a failure: `.get()` SHALL return `not` and `.all()` SHALL return `[]`.
+- When a `SqlError` from a failed query is delivered to the client, a production build SHALL withhold its unchanged driver text from the delivered value and a dev build (the output of `scrml dev` / `scrml-boot dev`; every other build counts as production here) SHALL deliver it; `ConstraintViolation`'s `field` carries the column name only, in every build and for server code too (⚑ PA ruling); the server SHALL log the full text in both; server code handling the `?{}` where it is written sees the full driver message (§19.9.1, S474 ruling 2 as amended).
 - The right-hand side of a `<x server>` declaration that IS its compiler-generated hydration load (§52.6.5 Pattern C), and the compiler-generated call to a load function, SHALL NOT be E-ERROR-002. Their failure SHALL be reported by §52.6.8 (a server log line, the placeholder kept, `@x.error`). *(S451 "your recs on all five" item 2.)*
 - *(Informative.)* The migration for code the R11 bullet above newly rejects is the `scrml fix` rule `sql-failable` (built S455: provable reads rewritten, writes listed; tooling, not language — §19.8.3).
 
@@ -21820,6 +22167,12 @@ When a server `!` function fails:
 
 1. The server serializes the error variant as a tagged JSON object: `{ __scrml_error: true, type: "EnumType", variant: "VariantName", data: { ... } }` — the canonical `fail`-expression envelope (the shared emitter at `compiler/src/codegen/emit-logic.ts`); every reader keys on `.__scrml_error` (the `<errorBoundary>` gate, the CPS continuation, the client arm-dispatch) and reads `.variant` + `.data`. *(S232 currency fix — corrected from the stale `{ __variant, __data }`, a shape the implementation never emitted or read; `g-server-error-wire-spec-impl-divergence`. The §19.12 test-mode `{ __ok: false, __variant }` assertion shape at §19.12 is a SEPARATE test-harness representation, not this wire.)*
    **S451 R8 — one shape for values and errors.** The envelope's `variant` and `data` are the §57.8 payload-enum shape, so an error variant crosses the wire exactly as the same variant would as a returned value, plus the two error keys (`__scrml_error`, `type`): `data` is an object keyed by the variant's declared field names, each value encoded per §57 (`{}` for a variant with no fields). *(Provenance: ruling:user-voice-scrml.md S451 "yes on all seven" — R8: *"payload-enum wire shape = `{"variant": "V", "data": {…}}` — one shape for values and `fail` errors (§19.9.1 generalized)."* · supersedes: nothing struck — this item defined `data` only as `{ ... }` · direction of change: semantics-changed (stated); impl#1 already keys `fail` data by declared field name (`compiler/src/codegen/emit-logic.ts`), except a variant with no declared field schema given one argument, where it puts the bare value on `.data` — filed `g-impl1-payload-enum-wire-shape-s451`.)*
+   **S474 — a failed query's driver text does not cross the wire in a production build.** When the error value a server function sends to the client carries the text of a failed `?{}` (§19.8.1, §19.8.4), a **production** build SHALL withhold that driver text from the value delivered to the client, and a **dev** build SHALL deliver it. In both builds the server SHALL log the full driver text when the query fails. Server code that handles the `?{}` where it is written (§19.8.3 — a `!{}` or `match` on the query) sees the full driver MESSAGE (`QueryFailed`'s `message`); a `ConstraintViolation`'s `field` is the column, as below. The rule otherwise governs only what the client receives. Reason: driver text names tables, columns and constraints, so it exposes the schema.
+   - **Withheld, in a production build:** a string of the delivered failure payload is blanked (the empty string) when it contains a whole driver message the request's failed queries produced, or equals one of their non-column driver tokens (a CHECK constraint name, a Postgres constraint name). That covers `QueryFailed`'s `message` delivered by `?` or the implicit propagation of §19.8.2, and the author re-failing with that text unchanged or embedded whole (`fail .Bad(m)`, `fail .Bad("db: " + m)`). The variant and the payload's shape are kept, so the client's arms (`.QueryFailed(m) :>`) still match. A token is never matched as a substring of the author's own text.
+   - **`ConstraintViolation`'s `field` is the COLUMN name only, in both builds** *(⚑ PA ruling in the veto window — narrower than ruling 2 (server code) and amendment 3 (dev build): the field is cut to the column for every reader, server code included. Reason: one field contract across builds, so a client written against dev (`field == "email"`) behaves the same in production; the full driver text is in the server log)* — `email`, not `users.email`; a composite UNIQUE gives `a, b`. A client needs the column to say "that email is taken". A field that is not exactly a `table.col` list — a CHECK constraint's name or expression, an expression index, a Postgres constraint name — is not a column: server code still sees it, and a production build blanks it in the delivered value.
+   - **The author's text is the author's.** Text the author derives from the driver text (`m.slice(16)`, `f.toUpperCase()`) or writes themselves is delivered as written; the guarantee is that the compiler and runtime never deliver UNCHANGED driver text by themselves.
+   - **Dev vs production.** A dev build is the output of `scrml dev` (on the bootstrap, `scrml-boot dev`). Every other build — plain `scrml compile` and `scrml build` included — counts as production for driver text, so a build carrying no dev marker withholds it (fails closed). This is separate from the `--production` flag that strips `log()` (§20.6.5): that flag does not decide driver text.
+   *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 2 — *"**A failed query's error text does not cross the wire.** The client receives the error variant with its message blanked; the server logs the full driver text. (Driver text exposes the schema.) A `?{}` handled where it is written still sees the driver text in server code."* — as amended by ruling:user-voice-scrml.md S474 "⭐ RULED — capability over limitation: interim vs permanent refusals" item 3 — *"**Amends S474 ruling 2:** a dev build keeps the full driver text in the value delivered to the client; a production build blanks it (the server logs it either way)."* · the dev/production definition, the `ConstraintViolation` column rule and the "author's text" rule are **PA rulings** (S474 dispatch, #1703 r1), consistent with both compilers · supersedes: nothing written (§19.9.1 serialized `data` as declared) · **Direction of change:** semantics-changed for a production build (the client sees `""` where it saw driver text, and a bare column where it saw `table.col`); inert for a dev build except the column rule. **Built by the bootstrap** (#1703: `server-runtime.js` `withholdDriverText`, `constraintField`); a transformed driver text is not tracked (best effort, `g-boot-wire-driver-text-transformed-not-tracked-s474`). impl#1: in flight, #1704.)*
 2. The HTTP response carries an appropriate status code (see §19.9.2).
 3. The client CPS continuation deserializes the tagged object back into the error enum variant.
 4. The client code handles the error via match, `?`, `!{}`, or a `<request>` body (the failure is `<#id>.error`, §6.7.7). It reaches an `<errorBoundary>` only through the `<formFor>` submit route (§19.6.6) — a server call is never made while rendering (§13.7). *(S451 — supersedes "or `<errorBoundary>`". Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
@@ -21865,9 +22218,9 @@ If a server function is declared with `!`, the CPS-generated client wrapper SHAL
 ```scrml
 // Developer writes:
 function loadUser(id: int)! -> UserError {
-    const row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // ?{} escalates to server
-    if (!row) fail UserError::NotFound(id)
-    return row
+    const row = ?{`SELECT * FROM users WHERE id = ${id}`}.get();   // ?{} escalates to server
+    if (!row) fail UserError::NotFound(id);
+    return row;
 }
 
 // Compiler generates client wrapper (conceptual):
@@ -21897,7 +22250,7 @@ A function whose body mixes a server-trigger statement with a reactive-assignmen
 ```scrml
 // Developer writes:
 function loadProfile(id: number) {
-    @profile = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+    @profile = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
 }
 
 // Compiler treats this AS IF it were declared `!`; its client call's failure set is
@@ -21935,17 +22288,17 @@ function loadProfile(id: number) {
 // path is out-of-scope.)
 function notifyOrder(orderId: number) {
     // Batch 1 — server: durable log write
-    ?{`INSERT INTO order_log (order_id, event, ts) VALUES (${orderId}, 'notified', NOW())`}.run()
+    ?{`INSERT INTO order_log (order_id, event, ts) VALUES (${orderId}, 'notified', NOW())`}.run();
 
     // Client tail: read log to format message
-    @msg = `Order #${orderId} notification logged`
+    @msg = `Order #${orderId} notification logged`;
 
     // Batch 2 — server: email send (would be rejected at compile time today
     // by E-CPS-MULTIBATCH-REORDER if the batches were dependency-ordered
     // across durable writes; this example uses independent batches per
     // §19.6.7's admissible-case framing).
-    scrml:email.send(@msg)
-    return orderId
+    scrml:email.send(@msg);
+    return orderId;
 }
 
 // The call is a <request>'s body (S451 — a server call cannot be rendered, §13.7).
@@ -21954,13 +22307,13 @@ function notifyOrder(orderId: number) {
 // developer recovers via <#notify>.refetch() (retry; Ext 5 replay safety).
 // notifyOrder provably writes (its INSERT), so the request does not run on mount; it
 // runs when the user's own edit changes @currentOrderId, or on refetch() (§6.7.7.3).
-<notifiedId> = not
+<notifiedId> = not;
 <request id="notify" deps=[@currentOrderId]>${ @notifiedId = notifyOrder(@currentOrderId) }</>
 <div>
     ${
         if (<#notify>.error is given) {
-            lift <div>Notification failed; logged but email pending</>
-            lift <button onclick=${<#notify>.refetch()}>Retry</>
+            lift <div>Notification failed; logged but email pending</>;
+            lift <button onclick=${<#notify>.refetch()}>Retry</>;
         }
     }
 </div>
@@ -21973,11 +22326,11 @@ function notifyOrder(orderId: number) {
 1. **A `<request>` load** (markup-context callers; canonical pattern). The load is a `<request>` body's assignment, and its failure is read from `<#id>.error` (§6.7.7, §19.4.3 item 5). The body needs a returned value to assign, so the cell write moves out of the function into the request:
    ```scrml
    function fetchProfile(id: number)! -> SqlError {
-       return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+       return ?{`SELECT * FROM users WHERE id = ${id}`}.get();
    }
    <request id="profileLoad" deps=[@currentUserId]>${ @profile = fetchProfile(@currentUserId) }</>
    <div>
-       ${ if (<#profileLoad>.error is given) { lift <div>Failed to load profile</> } }
+       ${ if (<#profileLoad>.error is given) { lift <div>Failed to load profile</>; } }
    </div>
    ```
    *(S451 — supersedes path 1 "**`<errorBoundary>` markup wrapper**: `<errorBoundary fallback={<div>Failed to load profile</>}> ${loadProfile(@currentUserId)} </>`": a render-time server call is E-VALUE-SERVER-CALL (§13.7). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
@@ -21985,7 +22338,7 @@ function notifyOrder(orderId: number) {
    ```scrml
    type ReloadError:enum = { Transport(t: ServerCallError) }
    function reloadProfile(id: int)! ReloadError {
-       loadProfile(id)?  // ? propagates the call's Transport failure up the call stack
+       loadProfile(id)?;  // ? propagates the call's Transport failure up the call stack
    }
    ```
 3. **Explicit match on result** (most-precise control):
@@ -22046,12 +22399,12 @@ TTL eviction is lazy on read: an expired entry is treated as a miss and re-execu
   <!-- "auto" resolves to: postgres shadow table _scrml_idempotency_keys -->
 
   ${ function approveOrder(id: number) {
-      ?{`UPDATE orders SET status = 'approved' WHERE id = ${id}`}.run()
+      ?{`UPDATE orders SET status = 'approved' WHERE id = ${id}`}.run();
       // Monotone (assignment is independent of prior value) → no key emitted.
   } }
 
   ${ function incrementView(id: number) {
-      ?{`UPDATE counters SET val = val + 1 WHERE id = ${id}`}.run()
+      ?{`UPDATE counters SET val = val + 1 WHERE id = ${id}`}.run();
       // Non-monotone (val + 1 reads prior value) → idempotency-key emitted;
       // server stores key+result in _scrml_idempotency_keys (postgres).
   } }
@@ -22071,7 +22424,7 @@ A function declaration MAY carry the `.idempotent()` modifier as a developer-ass
 ```scrml
 function upsertProfile(userId: number, email: string).idempotent() {
   ?{`INSERT INTO profiles (user_id, email) VALUES (${userId}, ${email})
-     ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email`}.run()
+     ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email`}.run();
   // Classifier flags non-monotone (ON CONFLICT not in monotone whitelist);
   // .idempotent() asserts the SQL is monotone-by-construction at this site;
   // no idempotency key emitted; D-CPS-IDEMPOTENT-OVERRIDE fires (informational).
@@ -22177,13 +22530,13 @@ Admissible cross-batch parameter forwarding marshals the depended-upon value as 
   ${ function checkout(cartId: number) {
       // --- batch 0 (server): reserve inventory -------------------------
       let reserved = ?{`UPDATE inventory SET held = held + 1
-                        WHERE cart_id = ${cartId} RETURNING held`}.get()
+                        WHERE cart_id = ${cartId} RETURNING held`}.get();
 
       // --- client-observable work forces a batch boundary --------------
-      @reservationShown = reserved.held    // reactive write — client tier
+      @reservationShown = reserved.held;    // reactive write — client tier
 
       // --- batch 1 (server): charge + record ---------------------------
-      ?{`INSERT INTO charges (cart_id, amount) VALUES (${cartId}, 4200)`}.run()
+      ?{`INSERT INTO charges (cart_id, amount) VALUES (${cartId}, 4200)`}.run();
   } }
 </program>
 ```
@@ -22216,13 +22569,13 @@ A server batch runs its statements in source order, and a cell read inside it SH
 
 ```scrml
 <program db="sqlite:./shop.db">
-  <total> = 0
+  <total> = 0;
   ${ function snapshotTotal(orderId: int)! -> SqlError {
       // one server batch: both statements are server work, nothing client-tier between them
-      @total = ?{`SELECT count(*) AS n FROM items WHERE order_id = ${orderId}`}.get().n
-      ?{`INSERT INTO totals (order_id, total) VALUES (${orderId}, ${@total})`}.run()
+      @total = ?{`SELECT count(*) AS n FROM items WHERE order_id = ${orderId}`}.get().n;
+      ?{`INSERT INTO totals (order_id, total) VALUES (${orderId}, ${@total})`}.run();
   } }
-  <button onclick={ snapshotTotal(7) !{ _ :> log("snapshot failed") } }>Snapshot</button>
+  <button onclick={ snapshotTotal(7) !{ _ :> log("snapshot failed") }; }>Snapshot</button>
   <p>${@total}</p>
 </program>
 ```
@@ -22441,11 +22794,11 @@ added — S454 F7):
 ${
     function save() {
         @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
-            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return }
-            .Storage       :> { @status = "the server could not store it"; return }
-            .Transport(t)  :> { @status = callProblem(t); return }
-        }
-        @status = "saved"
+            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return; }
+            .Storage       :> { @status = "the server could not store it"; return; }
+            .Transport(t)  :> { @status = callProblem(t); return; }
+        };
+        @status = "saved";
     }
 
     fn callProblem(t: ServerCallError) -> string {
@@ -22454,11 +22807,11 @@ ${
             .Refused(s)     :> `the server refused the save (${s}) — sign in again`
             .ServerFault(s) :> `the server failed (${s}) — try again later`
             .Malformed(r)   :> "the server's answer could not be read"
-        }
+        };
     }
 
     function recount() {
-        @words = wordCount("n1") !{ .Transport(t) :> @words }   // wordCount: server-placed, not declared `!`
+        @words = wordCount("n1") !{ .Transport(t) :> @words };   // wordCount: server-placed, not declared `!`
     }
 }
 ```
@@ -22486,8 +22839,8 @@ ${
         Transport(t: ServerCallError)       // one line covers the boundary, whatever variants ServerCallError gains
     }
     function syncAll()! SyncError {
-        @version = saveNote("n1", @body, @version)?
-        @words = wordCount("n1")?
+        @version = saveNote("n1", @body, @version)?;
+        @words = wordCount("n1")?;
     }
 }
 ```
@@ -22537,22 +22890,22 @@ second synthetic enum exists; `CpsError` is retired (§19.9.5).
 
 ```scrml
 <program db="sqlite:./app.db">
-  <users> = 0
+  <users> = 0;
   ${ function userCount() {                                  // server-placed (?{}), not declared `!`
-      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }
-      return row is not ? 0 : row.n
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not };
+      return row is not ? 0 : row.n;
   } }
   ${ function refresh() {
-      @users = userCount()                                   // E-ERROR-002 — the call can fail on the wire
+      @users = userCount();                                   // E-ERROR-002 — the call can fail on the wire
   } }
   ${ function refreshOrKeep() {
-      @users = userCount() !{ _ :> @users }                // VALID — on failure keep the old count
+      @users = userCount() !{ _ :> @users };                // VALID — on failure keep the old count
   } }
   ${ function refreshNamed() {
-      @users = userCount() !{ .Transport(t) :> @users }    // VALID — the one variant a non-`!` callee's call has (S454)
+      @users = userCount() !{ .Transport(t) :> @users };    // VALID — the one variant a non-`!` callee's call has (S454)
   } }
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>   // VALID — the request handles it (<#usersLoad>.error)
-  <button onclick={ userCount() }>Count</button>             // E-ERROR-002 — a handler call is a client call
+  <button onclick={ userCount(); }>Count</button>             // E-ERROR-002 — a handler call is a client call
   <button onclick=${<#usersLoad>.refetch()}>Refresh</button> // VALID — reload through the request
 </program>
 ```
@@ -22615,18 +22968,29 @@ reached only through an alias or a cell is not counted, and nor is a call inside
 SQL transactions are expressed using explicit `?{}` blocks:
 
 ```scrml
+type TransferError:enum = {
+    InsufficientFunds(balance: number)
+    QueryFailed(message: string)          // the SqlError variants (§19.8.1), so the queries propagate (§19.8.2)
+    ConstraintViolation(field: string)
+    ConnectionLost
+}
+
 function transferFunds(from: int, to: int, amount: number)! -> TransferError {
-    ?{BEGIN}
-    let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get()
+    ?{`BEGIN`}.run();
+    let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get();
     if (fromBalance.balance < amount) {
-        ?{ROLLBACK}
-        fail TransferError::InsufficientFunds(fromBalance.balance)
+        ?{`ROLLBACK`}.run();
+        fail TransferError::InsufficientFunds(fromBalance.balance);
     }
-    ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run()
-    ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run()
-    ?{COMMIT}
+    ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run();
+    ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run();
+    ?{`COMMIT`}.run();
 }
 ```
+
+*(S474, #1732 round 4: rewritten as a valid whole program. Each transaction statement is a backtick template, as §8.1 requires. `TransferError` carries the `SqlError` variants, because §19.8.2 requires them and union error types are not in the language (Appendix C); the queries therefore propagate. The function is path-paired, so it is valid under §8.9.2 "Amendment S474" item 3. Inside the envelope its three transaction statements lower to a compiler-owned savepoint. Measured S474:
+- impl#1 compiles it clean.
+- The bootstrap still refuses it, with two remaining blockers, both bootstrap limits rather than language rules. `.balance` on an untyped query row is E-BOOTSTRAP-UNSUPPORTED (bootstrap slice M2; a `<schema>` does not help, since `<schema>` is itself not in the bootstrap). Manual transaction control in a `!` function is E-BOOTSTRAP-UNSUPPORTED by name (INTERIM; the capable form is this savepoint lowering).)*
 
 #### 19.10.2 The `transaction` Block
 
@@ -22635,13 +22999,13 @@ The `transaction` keyword provides a scoped alternative that auto-rolls-back on 
 ```scrml
 function transferFunds(from: int, to: int, amount: number)! -> TransferError {
     transaction {
-        let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get()
+        let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get();
         if (fromBalance.balance < amount) {
-            fail TransferError::InsufficientFunds(fromBalance.balance)
+            fail TransferError::InsufficientFunds(fromBalance.balance);
             // transaction auto-rolls-back because fail exited the block
         }
-        ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run()
-        ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run()
+        ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run();
+        ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run();
         // transaction auto-commits if block completes without fail
     }
 }
@@ -22649,8 +23013,8 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 
 #### 19.10.3 Semantics
 
-- `?{BEGIN}`, `?{COMMIT}`, `?{ROLLBACK}` are direct bun:sqlite passthrough (per project decision: SQL is bun:sqlite passthrough).
-- `transaction { }` is syntactic sugar. The compiler SHALL emit `?{BEGIN}` at the start of the block, `?{COMMIT}` at the end of normal completion, and `?{ROLLBACK}` before any `fail` statement within the block.
+- `?{BEGIN}`, `?{COMMIT}`, `?{ROLLBACK}` are direct bun:sqlite passthrough (per project decision: SQL is bun:sqlite passthrough) **when no transaction is open on the connection**. *(S474: inside an open envelope, which every `!` server body with a non-empty transitive query set has (§8.9.2 "Amendment S474" item 1), they are not passthrough. The runtime turns a paired `?{BEGIN}` into a savepoint, its `?{COMMIT}` into a release, and its `?{ROLLBACK}` into a rollback to that savepoint (§19.10.6 "Nesting"). Item 3 also limits manual control there to path-paired shapes (E-TX-UNMATCHED-END).)*
+- `transaction { }` is syntactic sugar. The compiler SHALL emit `?{BEGIN}` at the start of the block, `?{COMMIT}` at the end of normal completion, and `?{ROLLBACK}` before any `fail` statement within the block. *(S474: inside an open envelope, those three are the savepoint, its release and its rollback-to (§8.5.3, §8.9.2 "Amendment S474" item 3). Outside one, where the block is the outermost transaction on its connection, they are the top-level statements written here.)*
 - **Only normal completion COMMITs (S453).** A `return`, or a `break` / `continue` whose target is outside the `transaction` block, SHALL roll the transaction back before the exit proceeds: the block's four endings are therefore **normal completion → COMMIT**, and **`fail` · a SQL error · a `return` / `break` / `continue` out of the block → ROLLBACK**. The exit itself is not suppressed — the `return` returns, the `break` / `continue` reaches its target — and the return expression SHALL be evaluated **before** the rollback, so a `?{}` read inside `return <expr>` still executes within the transaction. A `break` / `continue` whose loop is inside the block does not leave it and is not an exit for this purpose; neither is a `return` after the block, which runs once the block has committed. A `yield` is a suspension rather than an exit and is not governed here (§19.10.4).
 - If a `fail` occurs inside a `transaction` block, the compiler SHALL insert a `?{ROLLBACK}` before the fail's return. The `fail` then returns the error variant to the caller.
 - **`navigate()` reached from inside a `transaction` block (written in it, or in a function it calls) is a compile error (S473 review-surfaced 4):** `E-TRANSACTION-CONTROL-FLOW` (§19.10.4, §20.3) — a refused navigation, refused under the same code as the block's refused exits *(PA reading: reuse over a new code)*. The block would roll back while the user gets a success redirect. The author moves the `navigate` after the block. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4 — *"**`navigate()` inside a `transaction { }` block is a compile error (from #1679).** Today it rolls the block back while the user gets a success redirect, which silently loses data. The author moves the `navigate` after the block."*
@@ -22661,9 +23025,17 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 
 - `transaction { }` SHALL be valid only inside `!` functions. A `transaction` block **outside a `!` function** — in a function not declared `!`, **or at the top level of a `${}` logic block, outside any function (S453)** — SHALL be a compile error (E-ERROR-001 applies -- `fail` inside the transaction requires `!`). A block's commit-or-rollback promise is a failure-handling promise, and outside a `!` function a failure inside it has nowhere to go; this is the same reason manual transaction control is refused there (the S451 bullet below, E-ERROR-015). *(S453 — supersedes "Using `transaction` in a non-`!` function SHALL be a compile error", which named only the non-`!` FUNCTION and left the top level unstated.)*
 - The compiler SHALL guarantee that every `transaction` block either commits (on success) or rolls back (on `fail`, a SQL error, or — **S453** — a `return` / `break` / `continue` out of the block; see §19.10.3). No transaction SHALL be left open. *(S453 — supersedes "(on `fail` or SQL error)", which predated the ruling and, read alone, contradicted §19.10.3's exit list.)*
-- `transaction` blocks SHALL NOT nest. A `transaction` inside another `transaction` SHALL be a compile error: **E-ERROR-007** -- `Nested 'transaction' blocks are not supported. Use savepoints via '?{SAVEPOINT name}' for nested transaction semantics.`
-- Explicit `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` SHALL remain valid **inside a `!` function** for developers who need manual transaction control (e.g., savepoints, deferred transactions). A manual transaction is held by the invocation of the function that opened it and SHALL NOT outlive that invocation: one still open at the function's return is rolled back and reported (§19.10.6, S451 R6). *(S451 — supersedes "SHALL remain valid for developers who need manual transaction control (e.g., savepoints, deferred transactions)." — now limited to `!` functions by the next bullet.)*
-- **Manual transaction control outside a `!` function is an error (S451).** A `?{}` whose statement is transaction control — `BEGIN` (in any form: `BEGIN DEFERRED`, `BEGIN IMMEDIATE`, `BEGIN TRANSACTION`, …), `COMMIT`, `END`, `ROLLBACK` (including `ROLLBACK TO`), `SAVEPOINT`, or `RELEASE`, recognized after any leading comments (§19.10.6) — written where no enclosing function is declared `!` (in a function without `!`, or at a body top) SHALL be a compile error: **E-ERROR-015** — `Manual transaction control '{statement}' in '{fn}', which is not declared '!'. A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. Declare '{fn}' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit.` The same rule already holds for `transaction { }` (first bullet, through E-ERROR-001): a transaction is a failure-handling construct, and outside a `!` function a failure inside it has nowhere to go — the transaction is left to the return-time backstop (§19.10.6, S451 R6) and the caller sees no failure, and the cross-database check that keeps a rollback whole (E-SQL-011, §8.9.2) covers only `!` functions. In a `!` function, an explicit `?{BEGIN}` stays valid and keeps its warning **W-BATCH-001** (§8.9.2, §19.10.5) where it suppresses the implicit envelope; outside a `!` function there is no implicit envelope to suppress (§8.9.2: it applies only to `!` handlers), so W-BATCH-001 SHALL NOT be emitted there — E-ERROR-015 is the one diagnostic.
+- `transaction` blocks SHALL NOT nest — **INTERIM (S474)**. A `transaction` inside another `transaction` SHALL be a compile error: **E-ERROR-007** -- `Nested 'transaction' blocks are not supported yet. Move the inner block into a function the outer block calls (it runs as a savepoint), or use '?{SAVEPOINT name}' … '?{RELEASE name}' inside the block.` *(S474: the capable form is the savepoint meaning, the inner block as a savepoint inside the outer one, owed (§8.9.2 "Amendment S474" item 3). Supersedes the message "Use savepoints via '?{SAVEPOINT name}' for nested transaction semantics.", which gave no call-based form.)*
+- Explicit `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` SHALL remain valid **inside a `!` function** for developers who need manual transaction control (e.g., savepoints, deferred transactions), **when path-paired** (S474, bullet below; E-TX-UNMATCHED-END otherwise). Inside the implicit envelope they lower to a compiler-owned savepoint, and an author's named savepoints nest inside it (§8.9.2 "Amendment S474" item 3). A manual transaction is held by the invocation of the function that opened it and SHALL NOT outlive that invocation: one still open at the function's return is rolled back and reported (§19.10.6, S451 R6). *(S451 — supersedes "SHALL remain valid for developers who need manual transaction control (e.g., savepoints, deferred transactions)." — now limited to `!` functions by the next bullet.)*
+- **Manual transaction control in a `!` body is accepted when path-paired (S474, ⚑ PA reading for bryan's veto; §8.9.2 "Amendment S474" item 3 states the rule in full).** Inside a `!` body, `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` lower to `SAVEPOINT` / `RELEASE` / `ROLLBACK TO` of a compiler-owned savepoint. A `?{BEGIN}` is accepted when every control path from it reaches its own ending exactly once before leaving its block or the function. The rule's points:
+  - A path that leaves by an exit that already fails the call needs no ending: `fail`, `?`, the implicit `SqlError` propagation of an unhandled `?{}`, or a throw. The savepoint is rolled back silently as part of that failure, with no R6 report.
+  - A `return`, a `break` / `continue` out of the block, and fall-through to the block's end each need the ending first.
+  - Each `if` / `else` branch, `match` arm and `!{}` arm is a path.
+  - Endings pair LIFO with nested `?{BEGIN}`s.
+  - The compiler's savepoint names never collide with author savepoint names. An author's `?{SAVEPOINT name}` / `?{RELEASE name}` / `?{ROLLBACK TO name}` stay valid, but SHALL nest properly with the compiler's savepoint regions along every path, because SQLite's `RELEASE` / `ROLLBACK TO` cascades over every later savepoint.
+
+  Every shape that is not provably path-paired and properly nested SHALL be **E-TX-UNMATCHED-END**, an **INTERIM** refusal. That covers a `return`, `break` / `continue` or fall-through reached without the ending; two endings on one path; an ending reached with no `?{BEGIN}` open; a loop crossing a `?{BEGIN}` or its ending; a `RELEASE name` / `ROLLBACK TO name` without its `SAVEPOINT name`; and an author savepoint interleaved with a compiler region. The capable form is matching those shapes too: owed, not designed (`g-tx-unmatched-end-unbuilt-s474`).
+- **Manual transaction control outside a `!` function is an error (S451).** A `?{}` whose statement is transaction control — `BEGIN` (in any form: `BEGIN DEFERRED`, `BEGIN IMMEDIATE`, `BEGIN TRANSACTION`, …), `COMMIT`, `END`, `ROLLBACK` (including `ROLLBACK TO`), `SAVEPOINT`, or `RELEASE`, recognized after any leading comments (§19.10.6) — written where no enclosing function is declared `!` (in a function without `!`, or at a body top) SHALL be a compile error: **E-ERROR-015** — `Manual transaction control '{statement}' in '{fn}', which is not declared '!'. A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. Declare '{fn}' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit.` The same rule already holds for `transaction { }` (first bullet, through E-ERROR-001): a transaction is a failure-handling construct, and outside a `!` function a failure inside it has nowhere to go — the transaction is left to the return-time backstop (§19.10.6, S451 R6) and the caller sees no failure, and the cross-database check that keeps a rollback whole (E-SQL-011, §8.9.2) covers only `!` functions. In a `!` function, an explicit `?{BEGIN}` stays valid ~~and keeps its warning **W-BATCH-001** (§8.9.2, §19.10.5) where it suppresses the implicit envelope~~ and, inside the implicit envelope, opens a savepoint (S474 — §8.9.2 "Amendment S474" item 3; W-BATCH-001 is retired from the language); outside a `!` function there is no implicit envelope (§8.9.2: it applies only to `!` handlers), so W-BATCH-001 SHALL NOT be emitted there — E-ERROR-015 is the one diagnostic.
 
   > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" — item 2(c): *"a manual `?{BEGIN}` (raw transaction SQL) inside a non-`!` function — use `transaction {}` inside a `!` function (the 4a partial-rollback hazard)."* · **supersedes:** the clause struck in the bullet above; §8.9.2's 4a provenance note *"A manual `?{BEGIN}` in a function NOT declared `!` has the same hazard but is outside the ruling's \"`!` function\" and is not covered here."* (now covered — by refusing the form); and W-BATCH-001's firing outside a `!` function (§8.6, §34 — the row's trigger is narrowed to `!` functions). *(Readings, flagged: (i) "raw transaction SQL" is read as every transaction-control statement — `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE` / `END` as well as `BEGIN`, since each opens, ends or rewinds a transaction the function does not own a failure path for; (ii) "inside a non-`!` function" is read as "where no enclosing function is declared `!`", which includes a body top — the §19.8.3 reading of "outside a `!` function".)* **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts it (measured on `dbb671c2d`: a `function plain()` holding `?{BEGIN}` / an `UPDATE` / `?{COMMIT}` compiles with no E-ERROR-015; `conformance/cases/sql/batch-warn-info` — a non-`!` `server function loadPair` with `?{BEGIN}` … `?{COMMIT}` — compiles with W-BATCH-001). **Corpus measured** (impl#1 AST, `sql` nodes whose statement is transaction control, plus a text scan): 4 statements in 2 files, both `conformance/cases/` — `error/implicit-tx-explicit-begin` (2, in a `!` function: valid, W-BATCH-001 stays) and `sql/batch-warn-info` (2, in a non-`!` function: newly E-ERROR-015, so that case's W-BATCH-001 pin becomes an E-ERROR-015 pin, or the function gains `!`); 0 in `examples/` and `samples/`. **Nominal / not yet emitted by impl#1** (frozen; `g-impl1-manual-tx-outside-failable-s451`).
 
@@ -22678,19 +23050,26 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 
 **Added:** 2026-04-14. Cross-reference: §8.9.2.
 
-The compiler MAY synthesize an implicit transactional envelope around the body of a server handler that declares `!`, as specified in §8.9.2. This implicit envelope is distinct from the explicit `transaction { }` block (§19.10.2) and the explicit `?{BEGIN}/?{COMMIT}/?{ROLLBACK}` pattern (§19.10.1).
+~~The compiler MAY synthesize an implicit transactional envelope around the body of a server handler that declares `!`, as specified in §8.9.2.~~ The compiler SHALL wrap the body of every server function that declares `!` and whose transitive query set is non-empty in an implicit transactional envelope, as specified in §8.9.2 (S474, "Amendment S474"). This implicit envelope is distinct from the explicit `transaction { }` block (§19.10.2) and the explicit `?{BEGIN}/?{COMMIT}/?{ROLLBACK}` pattern (§19.10.1).
 
 **Normative statements:**
 
-- An implicit per-handler transaction SHALL apply only when the `!` server function's ~~body contains~~ **transitive query set (every `?{}` reached from its body — its own and ~~every non-`!` function's~~ every function's it reaches, through non-`!` and `!` callees; an inner `!` runs as a nested savepoint, §19.10.6; a query counted once per time it is reached — S473 #1690 review F10) contains** two or more `?{}` queries that do not carry `.nobatch()` (§8.9.2, S451 R9 as amended S473 review-surfaced 1 and refined S473 (queries, not writes) — supersedes: "SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)" and the lexical body count). Until built, the bootstrap refuses such a function — and one whose transitive query set has a query inside a loop — with `E-BOOTSTRAP-UNSUPPORTED`. **Provenance (refinement):** ruling:user-voice-scrml.md S473 "⭐ RULED — S473: the transitive `!` envelope counts QUERIES, not writes" ("your recs") — *"The §8.9.2 / §19.10.5 implicit-envelope trigger is the **transitive QUERY set**: every `?{}` reached from the `!` function body, its own and its non-`!` callees', as S451 R9 counted queries lexically. It is not the transitive write set. A `!` body with one SELECT and one UPDATE (directly or through callees) gets the envelope, so a read-then-write sees one snapshot. The bootstrap's interim refusal fires on two or more transitively reached queries (or one inside a loop), until the envelope is built."* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."*
-- **A client-placed `!` function SHALL NOT make two or more server calls (S473 #1690 review F11).** A `!` function placed on the client (§12) whose body calls server functions two or more times — two calls, a call inside a loop, or calls reached through the client-side functions it calls — SHALL be compile error **`E-TX-CLIENT-MULTI-CALL`** (§34). Each server call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold. This is a permanent rule, not an interim refusal. The message SHALL name the fix: compose the calls in one server `!` function and call that once. *(The code name is a PA reading.)* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client multi-call `!` is a permanent refusal" ("your recs") item 2 — *"**F11 — a client-placed `!` function that calls two or more server functions is a PERMANENT named refusal**, not an interim one: no transaction can span two requests. The message hints "compose the calls in one server `!` function". The SPEC records it in §19.10.5 with a §34 code (name: PA reading)."* · supersedes: nothing written (§19.10.5 spoke only of a server handler). **Direction of change:** newly-rejecting. Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `envelopeDiags`); Nominal on impl#1, which carries it (§34.0).
+- An implicit per-handler transaction SHALL apply only when the `!` server function's ~~body contains~~ **transitive query set (every `?{}` reached from its body — its own and ~~every non-`!` function's~~ every function's it reaches, through non-`!` and `!` callees; an inner `!` runs as a nested savepoint, §19.10.6; a query counted once per time it is reached — S473 #1690 review F10) contains** ~~two or more `?{}` queries that do not carry `.nobatch()`~~ **at least one `?{}` query, `.nobatch()` ones included (S474 "envelope every `!` server body" — §8.9.2 "Amendment S474" items 1–2; supersedes the two-query, non-`.nobatch()` count)** (§8.9.2, S451 R9 as amended S473 review-surfaced 1 and refined S473 (queries, not writes) — supersedes: "SHALL apply only when two or more `?{}` queries in the handler form a coalescing candidate set (§8.9.1)" and the lexical body count). ~~Until built, the bootstrap refuses such a function — and one whose transitive query set has a query inside a loop — with `E-BOOTSTRAP-UNSUPPORTED`.~~ *(Built on the bootstrap by U1e, #1699 — `compiler/self-host-v2/analyze.scrml` `envelopePass` / `envelopeOf`, a query in a loop included; the interim refusal is withdrawn. Currency correction, S474; direction of change: inert.)* **Provenance (refinement):** ruling:user-voice-scrml.md S473 "⭐ RULED — S473: the transitive `!` envelope counts QUERIES, not writes" ("your recs") — *"The §8.9.2 / §19.10.5 implicit-envelope trigger is the **transitive QUERY set**: every `?{}` reached from the `!` function body, its own and its non-`!` callees', as S451 R9 counted queries lexically. It is not the transitive write set. A `!` body with one SELECT and one UPDATE (directly or through callees) gets the envelope, so a read-then-write sees one snapshot. The bootstrap's interim refusal fires on two or more transitively reached queries (or one inside a loop), until the envelope is built."* **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 1 — *"**`!` atomicity is TRANSITIVE (from #1675 review F5).** A `!` function's all-or-nothing guarantee covers the writes of the non-`!` functions it calls, the same way E-SQL-011 is already transitive. The §8.9.2 / §19.10.5 implicit-envelope trigger is the transitive write set, not the lexical count of `?{}` in the body. Until the envelope is built, the bootstrap refuses a `!` function whose transitive write set has two or more writes (or a write in a loop)."*
+- **A client-placed `!` function's server calls compose into one request with one envelope (S474; S473 F11 superseded).** ~~A client-placed `!` function SHALL NOT make two or more server calls (S473 #1690 review F11).~~ The §19.9.9 planner places a client-placed (§12) `!` function's server calls in one server batch (§19.9.9.8 rule 1: *"the callee runs in the same request"*), which runs inside one implicit envelope over its transitive query set, an inner `!` callee as a nested savepoint (§19.10.6) — the capable form: built on the bootstrap (#1713, `g-client-bang-server-calls-compose-unbuilt-s474`, resolved); owed on impl#1, where it is Nominal (`g-impl1-client-bang-server-calls-compose-s474`, open, deferred under the S471 impl#1 policy). **Until this is built on a compiler, a client-placed `!` function that makes two or more server calls — two calls, a call inside a loop, or calls reached through the client-side functions it calls — SHALL be `E-TX-CLIENT-MULTI-CALL` (§34) there: an INTERIM refusal.** *(Built on the bootstrap by #1713: `compiler/self-host-v2/analyze.scrml` (`composePass`), which composes the calls and refuses only the residue below, at (`composeOne`); the shapes it still refuses by name are `g-boot-client-bang-composition-residue-s474`. impl#1: Nominal.)* ~~Each server call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold. This is a permanent rule, not an interim refusal.~~ **Residue:** a plan that needs two batches that each reach a query — server calls separated by browser work that cannot move (§19.6.7, "A `!` function's plan has at most one batch that reaches a query") — stays `E-TX-CLIENT-MULTI-CALL` after the capable form is built: **INTERIM (design owed, not planned):** the capable form is a transaction held open across the client round trip (the server keeps the transaction while the browser step runs, as Firestore's `runTransaction` keeps one client-side) — dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §2 Alternative C; the cost that blocks it today is that it holds the database's §19.10.6 per-connection gate (on SQLite, the whole database) across a network round trip and the user's think-time, stalling every other request (`g-tx-across-client-roundtrip-undesigned-s474`). Under ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT" cost never makes a refusal PERMANENT. *(Supersedes the S474 PERMANENT (semantic impossibility) tag, a PA error: dd:`scrml-support/docs/deep-dives/permanent-restrictions-rereview-2026-10-31.md` §2 gives the form a meaning and rejected it for cost. Ledger PS-72. Alternative today: move the browser work before the first or after the last server call, or split the function.)* The message SHALL name the fix available today: compose the calls in one server `!` function and call that once. *(The code name is a PA reading.)* **Provenance (S474):** ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 2 (quoted in §19.6.7) · supersedes: the S473 headline *"A client-placed `!` function SHALL NOT make two or more server calls"*, its reason *"Each server call is its own request, and no transaction can span two requests, so its all-or-nothing guarantee cannot hold"*, and *"This is a permanent rule, not an interim refusal."* (S473 F11) · **Direction of change:** inert now (the bootstrap refuses the same programs); newly-accepting for one-batch plans when the capable form is built. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client multi-call `!` is a permanent refusal" ("your recs") item 2 — *"**F11 — a client-placed `!` function that calls two or more server functions is a PERMANENT named refusal**, not an interim one: no transaction can span two requests. The message hints "compose the calls in one server `!` function". The SPEC records it in §19.10.5 with a §34 code (name: PA reading)."* · supersedes: nothing written (§19.10.5 spoke only of a server handler). **Direction of change:** newly-rejecting. Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` `envelopeDiags`); Nominal on impl#1, which carries it (§34.0).
+- **A composed batch's envelope (S474, ⚑ PA reading in the veto window).** When a client-placed `!` function's server calls compose into one server batch (above), that batch SHALL open its own implicit envelope when its transitive query set is non-empty (S474 "envelope every `!` server body" — §8.9.2 "Amendment S474" item 1); ~~when its transitive query set contains a write or reaches two or more queries; a read-only batch that reaches one query gets none~~ *(S474 — superseded; a batch that reaches one read opens `BEGIN DEFERRED`, ruling 5)*. A `fail` or `?` written after the server calls that can move into the batch (it needs no browser work, reads no cell and calls no client function) joins it, so it rolls the batch's writes back. This is the reading of `!` as "a `!` function that fails leaves no writes". It narrows nothing: it makes programs atomic that were not. A `fail` / `?` after the batch that cannot join it fails AFTER the batch has committed: **W-TX-FAIL-AFTER-COMMIT** (§34), whose message names the fix (move the check before the first server call, or into the server function). A `.Transport` arm on a `!` call inside the composed batch cannot run, since the call is now server-to-server: **W-TX-ARM-UNREACHABLE** (§34). *(Provenance: PA reading, S474 dispatch, from the #1713 review, on ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 2 (*"a client `!`'s server calls compose into one request with one envelope"*) · supersedes: nothing written · **Direction of change:** semantics-changed toward atomicity (writes a later movable `fail` used to leave behind are rolled back); no acceptance status moves. Built by the bootstrap by #1713 (`compiler/self-host-v2/analyze.scrml` (`composePass`)); Nominal on impl#1.)*
+- **A client-placed `!` function whose one server call goes to a non-`!` server function running two or more queries is refused until built — an INTERIM refusal (S474 ruling 4, amended).** A `!` function placed on the client (§12) that makes one server call (two are `E-TX-CLIENT-MULTI-CALL`, above), to a server function NOT declared `!` whose transitive query set needs an envelope (~~two or more `?{}` not carrying `.nobatch()`, or one reached more than once~~ a non-empty transitive query set — the §8.9.2 trigger as amended S474, item 1), would run those queries with no transaction: §8.9.2 wraps only a `!` server function, and no client-side transaction spans the request. Until the capable form is built on a compiler, such a function SHALL be refused there — an interim refusal, reversible — and the message SHALL name the remedy: declare the server function `!` (with an error type), so its own implicit envelope holds its queries. *(Built on the bootstrap by #1713 — the one call is composed into the caller's server batch like any other (`compiler/self-host-v2/analyze.scrml` (`composePass`)); the bootstrap's former `E-BOOTSTRAP-UNSUPPORTED` refusal is withdrawn. impl#1: Nominal.)* The capable form — built on the bootstrap (#1713); owed on impl#1 — is: **the compiler wraps that server call in the transaction envelope when the caller is `!`** — the server runs the non-`!` callee's queries inside an envelope opened for that call (`g-client-bang-envelopes-non-bang-callee-unbuilt-s474`). It is the one-call case of the composition in the bullet above (S474 four doors item 2): the caller's one server batch runs inside one envelope over the batch's transitive query set, whether or not the callee is `!`. On a compiler that builds it this refusal is withdrawn. **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 4 — *"**A client `!` whose one server call is a non-`!` server function running two queries stays refused.** The SPEC wraps only `!` server functions; the remedy is to make the server function `!`."* — as amended by ruling:user-voice-scrml.md S474 "⭐ RULED — capability over limitation: interim vs permanent refusals" item 2 — *"**Amends S474 ruling 4:** a client `!` whose one server call is a non-`!` server function running two queries is an INTERIM refusal. The capable form is owed: the compiler wraps that server call in the transaction envelope when the caller is `!`."* · supersedes: nothing written (§19.10.5 was silent on a client `!` with one call). **Direction of change:** newly-accepting on the bootstrap since #1713 (it refused the shape before, at `envelopeOf`, S474 U1e); impl#1 not measured for this shape (Nominal, §34.0). *(PA reading: "two queries" is read as the §8.9.2 envelope trigger on the callee's transitive query set — the condition the bootstrap checks — not a literal count of two statements. S474: that trigger is now a non-empty set, so one query is enough.)*
+- **The envelope's opening statement (S474 ruling 5).** On SQLite the implicit envelope opens with `BEGIN IMMEDIATE` when its transitive query set contains a write, and `BEGIN DEFERRED` otherwise (§8.9.2, which states the rule). Savepoints are unchanged.
 - An implicit per-handler transaction SHALL apply only inside `!` handlers. This preserves §19.10.4 (transactions require `!`).
-- An implicit per-handler transaction SHALL NOT compose with an explicit `transaction { }` block in the same handler. The compiler SHALL emit **E-BATCH-001** when both are present.
-- An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001** advising the developer to use `transaction { }` or `.nobatch()` for clarity. Outside a `!` function the explicit `?{BEGIN}` is **E-ERROR-015** (§19.10.4) and W-BATCH-001 is not emitted. *(S451 "your recs on all of them" item 2(c) — supersedes: "An explicit `?{BEGIN}` inside the handler suppresses the implicit envelope and emits **W-BATCH-001** …".)*
-- Users MAY suppress the implicit envelope at a single query site with `.nobatch()` (§8.9.5).
-- Nesting rules of §19.10.4 (E-ERROR-007) SHALL treat the implicit envelope as a transaction block for the purpose of detecting illegal nesting.
+- ~~An implicit per-handler transaction SHALL NOT compose with an explicit `transaction { }` block in the same handler. The compiler SHALL emit **E-BATCH-001** when both are present.~~ **An explicit `transaction { }` block in a `!` server body — written there or in a function it calls — SHALL run as a SAVEPOINT within the implicit envelope (S474, §8.9.2 "Amendment S474" item 3).** Its commit releases the savepoint and its rollback rolls back to it; neither ends the envelope. E-BATCH-001 is retired from the language (§34).
+- ~~An explicit `?{BEGIN}` inside a `!` handler suppresses the implicit envelope and emits **W-BATCH-001** advising the developer to use `transaction { }` or `.nobatch()` for clarity.~~ **An explicit `?{BEGIN}` inside a `!` server body SHALL open a SAVEPOINT within the implicit envelope and SHALL NOT suppress it (S474, §8.9.2 "Amendment S474" item 3; §19.10.6 "Nesting").** W-BATCH-001 is retired from the language (§34). Outside a `!` function the explicit `?{BEGIN}` is **E-ERROR-015** (§19.10.4) and W-BATCH-001 is not emitted. *(S451 "your recs on all of them" item 2(c) — supersedes: "An explicit `?{BEGIN}` inside the handler suppresses the implicit envelope and emits **W-BATCH-001** …".)*
+- ~~Users MAY suppress the implicit envelope at a single query site with `.nobatch()` (§8.9.5).~~ **`.nobatch()` SHALL NOT suppress or narrow the implicit envelope (S474, §8.9.5): it keeps only its batching meaning.** No source form removes the envelope from a `!` server body today — **INTERIM**, ⚑ PA reading for bryan's veto (§8.9.2 "Amendment S474" item 2). The capable form is an explicit opt-out spelling (owed, not designed). Today's alternative is a non-`!` server function, called after the `!` function returns. It works only when the caller at the top of the chain is not `!`: a `!` server caller or a client-placed `!` caller envelopes that function too (item 2 states the limit).
+- ~~Nesting rules of §19.10.4 (E-ERROR-007) SHALL treat the implicit envelope as a transaction block for the purpose of detecting illegal nesting.~~ **The implicit envelope SHALL NOT count as a `transaction` block for §19.10.4's E-ERROR-007 (S474).** E-ERROR-007 stays lexical — **INTERIM**: it covers a `transaction` block written inside another `transaction` block. The capable form is the savepoint meaning: the inner block as a savepoint inside the outer one, as a block reached through a call already is. Today's alternative is to move the inner block into a called function. A `transaction` block inside the envelope is a savepoint (above).
 - The implicit envelope SHALL roll back on a `fail` exit (including `?` propagation) as well as on an exception, and commit only on successful completion (§8.9.2, S449 D).
-- The implicit envelope SHALL cover its own database only. A write to another database that the `!` function reaches while the envelope is open — its own `?{}` or, transitively, through any function it calls — SHALL be **E-SQL-011** (§8.9.2). The same holds for an explicit envelope in a `!` function (a `transaction { }` block or a manual `?{BEGIN}`). Cross-database atomicity is not offered. *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4 (a), quoted in §8.9.2 · supersedes: nothing written — SPEC was silent · newly-rejecting.)*
+- **A nested `!` call is a SAVEPOINT (S474, §8.9.2 "Amendment S474" item 4).** A `!` server function called while an envelope is open SHALL run its body as a savepoint within it. A callee failure SHALL roll back to the callee's savepoint before its failure value reaches the caller; a caller that handles that failure keeps its own writes and only the callee's writes are undone. A caller that propagates the failure or fails itself rolls back the whole envelope.
+- **Every surface that runs a `!` server body (S474, §8.9.2 "Amendment S474" item 6).** A `!` function called by an `<endpoint>` arm (§61) or a channel `onserver:` handler (§38.6.1) runs in its envelope like any other `!` server body. **⚑ OPEN (owner):** for a `server function*` SSE generator declared `!`, neither whether nor how a failure undoes its writes is decided. The candidates are (a) per-`yield` commit segments or (b) an INTERIM refusal of a `!` generator that writes (§8.9.2 "Amendment S474" item 6).
+- **A query handled at its site runs under a statement savepoint (S474, §8.9.2 "Amendment S474" item 4).** Inside an envelope, a `?{}` whose failure is handled at its site SHALL run under its own statement savepoint. Its failure rolls back to that savepoint, and the envelope survives (the Postgres aborted-transaction case).
+- **A failure of the envelope itself is a server error (S474, §8.9.2 "Amendment S474" item 1).** A failure of the envelope's own opening statement, its `COMMIT`, or a savepoint release or rollback-to SHALL NOT report success. It is a server error, mirroring §19.10.6: HTTP 500 for a route, a thrown failure for an in-process call, a terminal `error` event for a stream.
+- The implicit envelope SHALL cover its own database only. A write to another database that the `!` function reaches while the envelope is open — its own `?{}` or, transitively, through any function it calls — SHALL be **E-SQL-011** (§8.9.2). The same holds for an explicit envelope in a `!` function (a `transaction { }` block or a manual `?{BEGIN}`). Cross-database atomicity is not offered (§8.9.2 "Amendment S474" item 5). It is **PERMANENT (semantic)** when either database is SQLite: SQLite has no prepare phase, so no protocol makes a commit across two independent connections crash-atomic. It is **INTERIM** for a Postgres / MySQL pair, where two-phase commit exists; the capable form is a two-phase envelope across the pair, owed and not designed. A write to a second `<db>` inside an envelope is not covered atomically; under S474 every `!` server body with a query has an envelope, so this reaches every such body (§8.9.2 "Amendment S474" item 5). impl#1 does not emit E-SQL-011 for it: `g-impl1-cross-database-write-in-envelope-s451` (open). *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4 (a), quoted in §8.9.2 · supersedes: nothing written — SPEC was silent · newly-rejecting.)*
 
 #### 19.10.6 Concurrent Requests — One Transaction per Connection
 
@@ -22705,10 +23084,10 @@ A server program serves many requests at once, and a database transaction belong
 - **The gate covers every statement on the connection (S451 R5).** The one-at-a-time rule is a gate on the CONNECTION, not only on transaction envelopes. Every statement issued on a database's connection passes through it — a statement inside an envelope, an autocommit `?{}` outside any transaction, a manual `?{BEGIN}` / `?{COMMIT}`, and a statement from code outside any request (module initialisation, `scrml:cron` jobs, timers). A statement from another owner SHALL NOT run on the connection while a transaction holds it, and a transaction SHALL NOT begin on the connection while another owner's statement is still executing on it. On a pooled driver the gate is per connection: a statement on a different pool connection does not pass through this transaction's gate (the pooled bullet below). *(Provenance: ruling:user-voice-scrml.md S451 "yes on all seven" — R5: *"ruling C's per-connection gate covers EVERY statement on the connection, not only transaction envelopes."* · supersedes: nothing struck — the bullets above stated the rule for statements inside or waiting on a transaction; this bullet states it for every statement · direction of change: semantics-changed (stated) — impl#1's guard (`compiler/src/codegen/sql-tx-guard.ts`, S449 #1251) already routes every SQLite statement, inside a transaction or not, through the same mutex, so it conforms.)*
 - A statement issued by the request that owns the transaction — including from a server function that request calls in-process — SHALL run inside the transaction without waiting. A transaction that awaits such a call SHALL NOT deadlock.
 - The connection SHALL be released on every exit path: after `COMMIT` or `ROLLBACK`, after a `BEGIN` that fails, and when the request's handler returns. A transaction still open when the handler returns or throws (an explicit `?{BEGIN}` with no `COMMIT` on some path) SHALL be rolled back and its connection released, and the request SHALL fail: its writes are gone, so it SHALL be answered as a server error (HTTP 500), never with the handler's success response. A streamed response (§37) keeps its transactions past the handler's return; when the stream ends — completed, failed, or torn down by the client mid-transaction — a transaction it left open SHALL be rolled back and its connection released, and, because a stream's status is fixed when it starts, the stream SHALL end with a terminal `error` event (`kind: "TransactionLeftOpen"`) if the client is still connected. *(S449 re-review nit 1: the backstop had rolled the writes back after a 200 was already decided.)*
-- **A manual `?{BEGIN}` is held by the function that issued it (S451 R6).** A transaction opened by an explicit `?{BEGIN}` (§19.10.1) belongs to the invocation of the function whose body issued it: that invocation holds the gate from the `BEGIN` until its matching `COMMIT` / `ROLLBACK`, and no longer than the invocation itself. If the transaction is still open when the function returns — normally, through `fail`, or by throwing — it SHALL be rolled back at that return and the connection released, and this SHALL be reported: a server log line naming the function, and the call SHALL NOT report success (its writes are gone), exactly as the request-level rule above answers a handler. The request-end backstop above remains for transactions no function return closes (a streamed response, code outside any request). *(Provenance: ruling:user-voice-scrml.md S451 "yes on all seven" — R6: *"a manual `?{BEGIN}` — the function holds the gate for its invocation; a transaction still open at return is rolled back and reported."* · design §10 R6 · supersedes: nothing struck — the bullet above bounded a left-open transaction by the request's handler; this bounds a manual one by its own function's invocation · direction of change: semantics-changed — a server function called in-process that leaves its `?{BEGIN}` open no longer leaks the open transaction into the rest of the caller's request. "Reported" as a log line plus a failed call is this section's reading of the ruling (flagged). impl#1 divergence: its backstop fires only at request end (`compiler/src/codegen/sql-tx-guard.ts` `_scrml_db_scope_end`) — filed `g-impl1-manual-begin-open-at-function-return-s451`.)*
+- **A manual `?{BEGIN}` is held by the function that issued it (S451 R6).** A transaction opened by an explicit `?{BEGIN}` (§19.10.1) belongs to the invocation of the function whose body issued it: that invocation holds the gate from the `BEGIN` until its matching `COMMIT` / `ROLLBACK`, and no longer than the invocation itself. If the transaction is still open when the function returns — normally, through `fail`, or by throwing — it SHALL be rolled back at that return and the connection released, and this SHALL be reported: a server log line naming the function, and the call SHALL NOT report success (its writes are gone), exactly as the request-level rule above answers a handler. The request-end backstop above remains for transactions no function return closes (a streamed response, code outside any request). *(S474: in a `!` server body the static path-pairing rule (§8.9.2 "Amendment S474" item 3) pairs every provable shape. A failing exit (`fail`, `?`, implicit `SqlError` propagation, a throw) rolls a paired savepoint back silently, as part of the failure. This return-time rollback-and-report applies only to a shape the compiler could not prove, which a conforming compiler refuses as E-TX-UNMATCHED-END.)* *(Provenance: ruling:user-voice-scrml.md S451 "yes on all seven" — R6: *"a manual `?{BEGIN}` — the function holds the gate for its invocation; a transaction still open at return is rolled back and reported."* · design §10 R6 · supersedes: nothing struck — the bullet above bounded a left-open transaction by the request's handler; this bounds a manual one by its own function's invocation · direction of change: semantics-changed — a server function called in-process that leaves its `?{BEGIN}` open no longer leaks the open transaction into the rest of the caller's request. "Reported" as a log line plus a failed call is this section's reading of the ruling (flagged). impl#1 divergence: its backstop fires only at request end (`compiler/src/codegen/sql-tx-guard.ts` `_scrml_db_scope_end`) — filed `g-impl1-manual-begin-open-at-function-return-s451`.)*
 - A failed `COMMIT` SHALL NOT release the connection: the transaction may still be open, and the `ROLLBACK` that follows releases it (the compiler's envelopes always issue one).
 - **A transaction is on one database (S451 ruling 4a).** Every rule in this section is per database: a transaction holds one database's connection, and its `COMMIT` / `ROLLBACK` reach that database only. A request that also writes a second database while the transaction is open is not made atomic across the two — the language offers no cross-database transaction. In a `!` function such a write is refused at compile time, **E-SQL-011** (§8.9.2). *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4: *"§8.9.2's rollback promise may not be silently partial."* · supersedes: nothing written — SPEC was silent · newly-rejecting, measured in §8.9.2.)*
-- **Nesting.** A `BEGIN` issued by a request that already owns an open transaction on that database — for example a server function with its own `?{BEGIN}` … `?{COMMIT}` (or `transaction { }`) called from inside the implicit envelope — SHALL open a savepoint, not a second transaction: its `COMMIT` releases the savepoint and its `ROLLBACK` rolls back to it, and neither commits, ends, or releases the enclosing transaction. A later `fail` or exception in the enclosing handler therefore still rolls back everything (§8.9.2). *(S449 review F3: Postgres had committed the envelope at the inner `COMMIT`; SQLite refused the inner `BEGIN`.)*
+- **Nesting.** A `BEGIN` issued by a request that already owns an open transaction on that database — for example a server function with its own `?{BEGIN}` … `?{COMMIT}` (or `transaction { }`) called from inside the implicit envelope — SHALL open a savepoint, not a second transaction: its `COMMIT` releases the savepoint and its `ROLLBACK` rolls back to it, and neither commits, ends, or releases the enclosing transaction. A later `fail` or exception in the enclosing handler therefore still rolls back everything (§8.9.2). *(S449 review F3: Postgres had committed the envelope at the inner `COMMIT`; SQLite refused the inner `BEGIN`.)* **The same holds for every transaction a `!` server body opens inside its own envelope, and for a nested `!` call (S474, §8.9.2 "Amendment S474" items 3–4):** a `transaction { }` block or `?{BEGIN}` in the body opens a savepoint, and a `!` callee's body runs as one; a callee failure the caller handles rolls back to the callee's savepoint only.
 - Transaction control is recognized after any leading comments. A `SAVEPOINT` issued with no transaction open on a SQLite database opens one (SQLite's own rule) and holds the connection until the matching `RELEASE`, `COMMIT`, or `ROLLBACK`. `COMMIT AND CHAIN` / `ROLLBACK AND CHAIN` do not end the transaction.
 - **Pooled drivers (Postgres, MySQL — §44.2).** A transaction SHALL run on one connection taken from the pool for it alone, and every statement of the owning request SHALL run on that connection until the transaction ends. A statement from another request runs on another pool connection and SHALL NOT wait. Under the default, a database's transactions still run one at a time.
 - **Opt-in — a connection per transaction (`transactions="concurrent"`).** On a `<program>` whose `db=` names a Postgres or MySQL database, `transactions="concurrent"` SHALL lift the one-at-a-time rule for that database: each transaction runs on its own pool connection, concurrently with the others, isolated by the database's own isolation level. `transactions="serialized"` is the default spelled out. `transactions="concurrent"` on a SQLite database SHALL be a compile error (**E-SQL-010**): a SQLite database is one connection, so its transactions always run one at a time. *(PA reading, open to bryan's veto: the spelling — a `<program>` attribute beside `db=`, following the per-database `idempotency-store=` precedent (§19.9.6) — and the value names `concurrent` / `serialized` are the PA's; the ruling fixed only that the opt-in exists, for Postgres.)*
@@ -22730,7 +23109,7 @@ A server program serves many requests at once, and a database transaction belong
 Error values from `!` functions can be stored in reactive cells (§6):
 
 ```scrml
-<error> = not
+<error> = not;
 
 ${
     function handlePayment() {
@@ -22779,8 +23158,8 @@ A failable call's result reaches a cell only through a handling form (§19.4.3):
 value position"). To keep the error for display, an arm writes it to its own cell and leaves:
 
 ```scrml
-<receipt> = not
-<paymentError> = not
+<receipt> = not;
+<paymentError> = not;
 
 ${
     function attemptPayment() {
@@ -22789,8 +23168,8 @@ ${
             .CustomerNotFound(id)  :> { @paymentError = PaymentError.CustomerNotFound(id); return; }
             .ExpiredCard           :> { @paymentError = PaymentError.ExpiredCard; return; }
             .NetworkError(detail)  :> { @paymentError = PaymentError.NetworkError(detail); return; }
-        }
-        @paymentError = not
+        };
+        @paymentError = not;
     }
 }
 ```
@@ -22816,16 +23195,16 @@ The `~{}` test context (test context draft) provides assertions for testing `!` 
 ```scrml
 ~{ "payment error handling"
     test "rejects negative amount" {
-        assert.fails processPayment(-1, 42)
+        assert.fails processPayment(-1, 42);
     }
 
     test "rejects negative amount with specific variant" {
-        assert.fails.with processPayment(-1, 42) ::InvalidAmount
+        assert.fails.with processPayment(-1, 42) ::InvalidAmount;
     }
 
     test "succeeds for valid amount" {
-        let result = processPayment(100, 42)
-        assert result is ::Ok
+        let result = processPayment(100, 42);
+        assert result is ::Ok;
     }
 }
 ```
@@ -22915,8 +23294,8 @@ test-bind-decl ::= 'test-bind' identifier '=' expression
 
 ```scrml
 ~{ "engine reaches .Success given synthetic HTTP, no real network"
-    test-bind fetchUser  = (id) => { id, name: "Alice", email: "a@b.com" }
-    test-bind fetchPosts = []
+    test-bind fetchUser  = (id) => { id, name: "Alice", email: "a@b.com" };
+    test-bind fetchPosts = [];
 
     test "user load drives engine to .Success" {
         // ... test body that exercises the engine + asserts state transition.
@@ -22953,7 +23332,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
-| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450). It is the ONE diagnostic for the inner block: since S453 the outer block's own placement error (E-ERROR-001, if it is outside a `!` function) is not repeated on each nested level (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
+| E-ERROR-007 | §19.10.4 | **INTERIM (S474; capable form: the inner block as a savepoint inside the outer, §8.9.2 "Amendment S474" item 3).** Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450). It is the ONE diagnostic for the inner block: since S453 the outer block's own placement error (E-ERROR-001, if it is outside a `!` function) is not repeated on each nested level (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
 | E-TRANSACTION-CONTROL-FLOW | §19.10.4 | An exit from a `transaction { }` block that §19.10.3 does not govern. THREE limbs, all fail-closed (the third added S473). **(1) A `yield`** inside the block, in a function: a `yield` SUSPENDS the block rather than leaving it, so neither of §19.10.3's endings applies — rolling back would discard work the block is about to continue, and committing would end a transaction that is still open. **(2) An exit inside a `match` arm**, where the block's own ending may not be reached: impl#1's `emitMatchExpr` / `emitMultiScrutineeMatch` emit an arm set as an IIFE, so an exit in such an arm returns from the ARM only. Covers a `fail` / `?` inside an arm of a STATEMENT-position `match` within the block (S450 fix round — the rollback runs but the exit leaves only the arm, and the statements after the `match` then run outside any transaction), a `transaction` block INSIDE an arm of a statement-position `match`, whose `fail` / `?` would be swallowed by the arm (S450 re-review), and — **S453** — a `return`, or a `break` / `continue` whose target is outside the block, inside an arm of **either** match position (`g-stmt-match-block-return-falls-through`). ⛑ **The S453 limb exists because its absence was MEASURED:** against an implementation of B1a without it, a `return` in a statement-`match` arm inside a transaction compiled clean, the author's `return` was SWALLOWED (the function returned its own tail value), the post-`match` write RAN, and every row PERSISTED — no rollback at any point. ⛑ **The refusal is on the UNION of arm positions and is coarser than the defect.** A DECL-position `let v = match … { … }` lowers INLINE (`emitMatchExprDecl`, `compiler/src/codegen/emit-logic.ts:5669`, dispatched from the let-decl handler `:2174` and the const-decl handler `:2322`) with no function boundary, so an exit in one of its arms is refused although that lowering may be sound. This validator does not distinguish arm lowerings and fails closed on all of them; narrowing it is `g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`, which names the runtime proof required. An exit whose target is INSIDE the arm (a `break` of a loop declared there) never crosses the arm boundary and is unaffected, as is a `fail` / `?` in an EXPRESSION-position arm (governed, runtime-verified S450). ⛑ **STRUCK AT S453 — no longer this code:** a plain `return`, or a `break` / `continue` whose target is outside the block, anywhere else in the block. Those were the S450 interim refusal and are now RULED: they roll the block back and the exit proceeds (§19.10.3, §19.10.4). Direction of change: **newly-accepting** for those three exits (and **semantics-changed** for what a `transaction` does on them); the two limbs above are **inert**. Provenance: ruling:user-voice-scrml.md S449 (B1a) — *"replace the interim E-TRANSACTION-CONTROL-FLOW refusal for those exits with the rollback"*; the `yield` limb, the widening of the arm limb to those exits, and §19.10.3's evaluation-order SHALL are PA READINGS, flagged as such at §19.10.4, not rulings (emitted at `compiler/src/validators/lint-transaction.ts`.) **(3) S473 (review-surfaced 4) — a refused navigation: `navigate(…)`** reached from inside a `transaction { }` block (written in it, or in a function it calls) is this code — not a block exit, but refused under it: its redirect reaches the user while the block rolls back, silently losing data; move the `navigate` after the block (§20.3, §19.10.3). PA reading: reuse of this code over a new one (one code per rule). **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4. (The written case is emitted by impl#1 at `compiler/src/validators/lint-transaction.ts` (PR #1679); the reached-through-a-call case is `g-impl1-navigate-via-peer-inside-transaction-not-refused-s473`; Nominal on the bootstrap.) | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
@@ -23038,25 +23417,25 @@ type PaymentError:enum = {
 ```scrml
 ${
     function processPayment(amount: number, customerId: string)! -> PaymentError {
-        if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive")
-        if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum")
+        if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive");
+        if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum");
 
-        let customer = ?{`SELECT * FROM customers WHERE id = ${customerId}`}.get()
-        if (!customer) fail PaymentError::CustomerNotFound(customerId)
-        if (customer.cardExpiry < now()) fail PaymentError::ExpiredCard
+        let customer = ?{`SELECT * FROM customers WHERE id = ${customerId}`}.get();
+        if (!customer) fail PaymentError::CustomerNotFound(customerId);
+        if (customer.cardExpiry < now()) fail PaymentError::ExpiredCard;
 
-        let balance = ?{`SELECT balance FROM accounts WHERE customerId = ${customerId}`}.get()
+        let balance = ?{`SELECT balance FROM accounts WHERE customerId = ${customerId}`}.get();
         if (balance.balance < amount) {
-            fail PaymentError::InsufficientFunds(balance.balance, amount)
+            fail PaymentError::InsufficientFunds(balance.balance, amount);
         }
 
         transaction {
-            ?{`UPDATE accounts SET balance = balance - ${amount} WHERE customerId = ${customerId}`}.run()
-            ?{`INSERT INTO transactions (customerId, amount, date) VALUES (${customerId}, ${amount}, ${now()})`}.run()
+            ?{`UPDATE accounts SET balance = balance - ${amount} WHERE customerId = ${customerId}`}.run();
+            ?{`INSERT INTO transactions (customerId, amount, date) VALUES (${customerId}, ${amount}, ${now()})`}.run();
         }
 
-        let txn = ?{`SELECT * FROM transactions WHERE customerId = ${customerId} ORDER BY date DESC LIMIT 1`}.get()
-        return txn
+        let txn = ?{`SELECT * FROM transactions WHERE customerId = ${customerId} ORDER BY date DESC LIMIT 1`}.get();
+        return txn;
     }
 }
 ```
@@ -23067,10 +23446,10 @@ ${
 <div class="payment-form">
     <h2>Process Payment</>
     <errorBoundary>
-        <receipt> = not
+        <receipt> = not;
         ${
             function handleSubmit() {
-                @receipt = processPayment(@amount, @customerId)
+                @receipt = processPayment(@amount, @customerId);
             }
         }
         <form onsubmit=handleSubmit()>
@@ -23104,18 +23483,18 @@ type AuthError:enum = {
 
 ${
     function register(email: string, password: string)! -> AuthError {
-        if (!isValidEmail(email)) fail AuthError::InvalidEmail(email)
-        if (password.length < 8) fail AuthError::WeakPassword("Password must be at least 8 characters")
+        if (!isValidEmail(email)) fail AuthError::InvalidEmail(email);
+        if (password.length < 8) fail AuthError::WeakPassword("Password must be at least 8 characters");
 
-        let existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-        if (existing) fail AuthError::EmailTaken(email)
+        let existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get();
+        if (existing) fail AuthError::EmailTaken(email);
 
         transaction {
-            ?{`INSERT INTO users (email, passwordHash) VALUES (${email}, ${hashPassword(password)})`}.run()
+            ?{`INSERT INTO users (email, passwordHash) VALUES (${email}, ${hashPassword(password)})`}.run();
         }
 
-        let user = ?{`SELECT * FROM users WHERE email = ${email}`}.get()
-        return user
+        let user = ?{`SELECT * FROM users WHERE email = ${email}`}.get();
+        return user;
     }
 }
 
@@ -23145,28 +23524,28 @@ type CrudError:enum = {
 ${
     function updateUserProfile(userId: string, updates: ProfileUpdate)! -> CrudError {
         transaction {
-            let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
-            if (!current) fail CrudError::NotFound("User", userId)
+            let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get();
+            if (!current) fail CrudError::NotFound("User", userId);
 
-            let version = ?{`SELECT version FROM users WHERE id = ${userId}`}.get()
+            let version = ?{`SELECT version FROM users WHERE id = ${userId}`}.get();
             if (version.version !== updates.expectedVersion) {
-                fail CrudError::ConcurrencyConflict
+                fail CrudError::ConcurrencyConflict;
             }
 
             if (updates.email) {
-                let emailCheck = ?{`SELECT id FROM users WHERE email = ${updates.email} AND id != ${userId}`}.get()
-                if (emailCheck) fail CrudError::ConstraintFailed("email")
+                let emailCheck = ?{`SELECT id FROM users WHERE email = ${updates.email} AND id != ${userId}`}.get();
+                if (emailCheck) fail CrudError::ConstraintFailed("email");
             }
 
             ?{`UPDATE users SET
                 name = COALESCE(${updates.name}, name),
                 email = COALESCE(${updates.email}, email),
                 version = version + 1
-                WHERE id = ${userId}`}.run()
+                WHERE id = ${userId}`}.run();
         }
 
-        let updated = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
-        return updated
+        let updated = ?{`SELECT * FROM users WHERE id = ${userId}`}.get();
+        return updated;
     }
 }
 ```
@@ -23387,7 +23766,7 @@ them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bo
 **Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
 `string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
 be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
-method may be admitted later, and an admitted one may be deprecated later (§63). impl#1 still passes these to
+method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
 JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
 `E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
 refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
@@ -23463,7 +23842,7 @@ The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is a
 ```scrml
 type LoadError:enum = { NotFound(id: string) renders <p>No item #${id}.</p>, Network(msg: string) renders <p>Network: ${msg}.</p> }
 type Phase:enum = { Idle, Loading, Loaded(title: string), Failed(err: LoadError) }
-<phase>: Phase = .Idle
+<phase>: Phase = .Idle;
 <match for=Phase on=@phase>
   <Loading>    <p>Loading…</p>  </>
   <Failed err> <render of=err/> </>
@@ -23566,13 +23945,13 @@ of the reserved word meets a reserved position.)
 
 ```scrml
 function save(doc: Doc) {
-    @busy = true
-    defer @busy = false                 // single-statement form
+    @busy = true;
+    defer @busy = false;                 // single-statement form
     defer {                             // block form — one deferred body
-        log("save done")
-        @saves = @saves + 1
+        log("save done");
+        @saves = @saves + 1;
     }
-    persist(doc)
+    persist(doc);
 }
 ```
 
@@ -23801,19 +24180,19 @@ which scrml does not have. With `defer`:
 
 ```scrml
 export function runPA(input: string) {
-    const views = new Map()
-    const errors = []
-    let cache = openSchemaCache()
-    defer closeAll(cache)                 // runs on EVERY exit below, after the return value is built
+    const views = new Map();
+    const errors = [];
+    let cache = openSchemaCache();
+    defer closeAll(cache);                 // runs on EVERY exit below, after the return value is built
 
     for (const fileAST of input.files) {
-        const nodes = fileAST.ast ? fileAST.ast.nodes : []
-        const createTableMap = extractCreateTableStatements(nodes)
+        const nodes = fileAST.ast ? fileAST.ast.nodes : [];
+        const createTableMap = extractCreateTableStatements(nodes);
         for (const block of collectDbBlocks(nodes)) {
-            processDbBlock(block, fileAST.filePath, cache, views, errors, createTableMap)
+            processDbBlock(block, fileAST.filePath, cache, views, errors, createTableMap);
         }
     }
-    return { protectAnalysis: { views: views }, errors: errors }
+    return { protectAnalysis: { views: views }, errors: errors };
 }
 ```
 
@@ -23826,12 +24205,12 @@ A body-split function (§19.9.9) — the deferred clear runs after BOTH batches,
 
 ```scrml
 function save(id: number) {
-    @busy = true
-    defer @busy = false                   // client-tier; runs after the LAST continuation
-    ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()        // batch 0
-    @trace = @trace + "mid;"              // client work — closes batch 0
-    ?{`INSERT INTO log (msg) VALUES ('saved')`}.run()             // batch 1
-    @trace = @trace + "end;"
+    @busy = true;
+    defer @busy = false;                   // client-tier; runs after the LAST continuation
+    ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();        // batch 0
+    @trace = @trace + "mid;";              // client work — closes batch 0
+    ?{`INSERT INTO log (msg) VALUES ('saved')`}.run();             // batch 1
+    @trace = @trace + "end;";
 }
 ```
 
@@ -24287,8 +24666,8 @@ The tags a `guarded(inert-receiver)` entry may mutate, and `createElement` may m
 The developer MAY override the inferred navigation type:
 
 ```scrml
-navigate(path, .Hard)   // always 302 redirect
-navigate(path, .Soft)   // always history push
+navigate(path, .Hard);   // always 302 redirect
+navigate(path, .Soft);   // always history push
 ```
 
 `.Hard` and `.Soft` are built-in enum variants of the navigation type.
@@ -24324,7 +24703,7 @@ file compiled as a page.
 **Syntax (developer writes):**
 
 ```scrml
-${ let userId = route.params.id }
+${ let userId = route.params.id; }
 ```
 
 `route` is a compiler-provided scope binding. The developer SHALL NOT declare a
@@ -24395,14 +24774,14 @@ ambient `parseInt`, Appendix D).
 **Worked example — valid:**
 
 ```scrml
-${ let userId = route.params.id }
+${ let userId = route.params.id; }
 <db src="db.sql" tables="users">
     ${ function loadProfile() {
-        let user = ?{`SELECT name, avatar FROM users WHERE id = ${userId}`}.get()
+        let user = ?{`SELECT name, avatar FROM users WHERE id = ${userId}`}.get();
         lift <div>
             <img src=user.avatar>
             <h1>${user.name}</>
-        </>
+        </>;
     } }
     ${ loadProfile() }
 </>
@@ -24411,7 +24790,7 @@ ${ let userId = route.params.id }
 **Worked example — invalid (reserved binding):**
 
 ```scrml
-let route = { params: {} }   // Error E-SCOPE-010
+let route = { params: {} };   // Error E-SCOPE-010
 ```
 
 Error E-SCOPE-010: `route` is a reserved compiler scope binding and cannot be
@@ -24426,7 +24805,7 @@ provides access to the authenticated session for the current request.
 
 ```scrml
 ${ server function getProfile() {
-    let currentUser = session.userId
+    let currentUser = session.userId;
 } }
 ```
 
@@ -24702,11 +25081,11 @@ session.
 
 ```scrml
 ${ server function authenticate(email: string, password: string) {
-    let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get()
+    let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get();
     if (!user || !verifyPassword(password, user.password_hash))
-        fail AuthError::InvalidCredentials
-    session.set("userId", user.id)   // mints scrml_sid + writes the record +
-    session.set("role", user.role)   // one Set-Cookie: scrml_sid=…; HttpOnly
+        fail AuthError::InvalidCredentials;
+    session.set("userId", user.id);   // mints scrml_sid + writes the record +
+    session.set("role", user.role);   // one Set-Cookie: scrml_sid=…; HttpOnly
 } }
 ```
 
@@ -24715,9 +25094,9 @@ ${ server function authenticate(email: string, password: string) {
 ```scrml
 ${ server function checkAuth() {
     if (!session.isAuth) {
-        navigate("/login")
+        navigate("/login");
     }
-    let uid = session.userId   // string | not, narrowed by isAuth check above
+    let uid = session.userId;   // string | not, narrowed by isAuth check above
 } }
 ```
 
@@ -24725,7 +25104,7 @@ ${ server function checkAuth() {
 
 ```scrml
 ${ function getUser() {
-    let uid = session.userId   // Error E-SCOPE-012
+    let uid = session.userId;   // Error E-SCOPE-012
 } }
 ```
 
@@ -24834,8 +25213,8 @@ This guarantees zero disruption to existing source that declared a local `log` (
 #### 20.7.1 Signature and Semantics
 
 ```scrml
-print(...args)      // writes args to stdout, NO trailing newline
-println(...args)    // writes args to stdout, then a single "\n"
+print(...args);      // writes args to stdout, NO trailing newline
+println(...args);    // writes args to stdout, then a single "\n"
 ```
 
 - Both accept zero or more argument expressions. Arguments are **space-joined** (`println("a", "b")` emits `a b\n`) — the conventional print / `console.log` shape. `print()` with no args emits the empty string; `println()` with no args emits a bare newline.
@@ -25102,7 +25481,7 @@ This form lives at the top level of a `.scrml` file (i.e., NOT inside a `${ }`
 logic context). It is the canonical form for exporting components introduced
 by Phase P2 of the state-as-primary unification (§15.15, 2026-04-30).
 
-**An exported component's name is not qualified by its module (S473).** A program holds one component of each name across all its files: a component declared in two files of one program is `E-COMPONENT-NAME-DUPLICATE` (§9.1 DQ-7). Importing a name and declaring it in the same file is E-SCOPE-010 (§7.6). Two user files exporting one name are E-SCOPE-010 (§7.6, S473); a private name never collides across files.
+**~~An exported component's name is not qualified by its module (S473).~~ Exported names are qualified per file in the output (S474).** ~~A program holds one component of each name across all its files: a component declared in two files of one program is `E-COMPONENT-NAME-DUPLICATE` (§9.1 DQ-7).~~ Two files of one program may each declare and export a component, or any name, of one spelling: every user declaration's output name and scope key is qualified by its declaring file (§7.6, §9.1 DQ-7), and an importer resolves each name to the file it imports from. Importing a name and declaring it in the same file is E-SCOPE-010 (§7.6). Importing two different declarations of one name into one file (two user files' exports, or a user and a stdlib export) is E-SCOPE-010 at the later import (§41.7); alias one. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3 · supersedes the S473 sentence above and *"Two user files exporting one name are E-SCOPE-010 (§7.6, S473); a private name never collides across files."* · direction of change: newly-accepting.)*
 > **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4 — *"Same-name components across files, and `<card>` beside `fn card`: REFUSED."*
 
 **Form 2 (transitional, in-logic)** — `export` before declaration keywords:
@@ -25113,7 +25492,7 @@ ${ export type Config:struct = { timeout: number, retries: number } }
 ${ export function formatDate(ts: int) { ... } }
 ${ export const UserCard = <div props={ name: string, role: UserRole }>
      ...
-   </> }
+   </>; }
 ```
 
 Form 2 lives inside a `${ }` logic context. The `export const ComponentName = <markup>`
@@ -25139,14 +25518,14 @@ export <Greeting props={ name: string }>
 ${
   export const Greeting = <p props={ name: string }>
     Hello, ${name}!
-  </>
+  </>;
 }
 ```
 
 A consumer of either file writes:
 
 ```scrml
-${ import { Greeting } from './a-or-b.scrml' }
+${ import { Greeting } from './a-or-b.scrml'; }
 <Greeting name="Ada"/>
 ```
 
@@ -25181,7 +25560,7 @@ export <UserBadge props={ name: string }>
 </>
 
 // Equivalent to Form 2 after desugaring
-export const UserBadge = <span class="badge" props={ name: string }>${name}</>
+export const UserBadge = <span class="badge" props={ name: string }>${name}</>;
 ```
 
 ```scrml
@@ -25191,7 +25570,7 @@ export <Card class="component" props={ title: string }>
 </>
 
 // Equivalent (after class merge)
-export const Card = <div class="card-body" class="component" props={ title: string }>${title}</>
+export const Card = <div class="card-body" class="component" props={ title: string }>${title}</>;
 ```
 
 **Normative statements:**
@@ -25285,16 +25664,16 @@ export const Card = <div class="card-body" class="component" props={ title: stri
 Imports use ES module `import` syntax inside a `${ }` logic context:
 
 ```scrml
-${ import { UserRole } from './types.scrml' }
-${ import { formatDate } from './utils.scrml' }
-${ import { UserCard } from './components/user-card.scrml' }
+${ import { UserRole } from './types.scrml'; }
+${ import { formatDate } from './utils.scrml'; }
+${ import { UserCard } from './components/user-card.scrml'; }
 ```
 
 Imports from plain `.js` files are also valid and follow standard ES module
 semantics:
 
 ```scrml
-${ import { helper } from './helper.js' }
+${ import { helper } from './helper.js'; }
 ```
 
 **Normative statements:**
@@ -25302,8 +25681,10 @@ ${ import { helper } from './helper.js' }
 - `import` SHALL be valid inside a `${ }` logic context at the top level of a
   scrml file. Imports inside function bodies SHALL be a compile error (E-IMPORT-003:
   imports must be at file top level).
-- Named imports (`{ name }`) and default imports (`name`) from `.scrml` files SHALL
+- Named imports (`{ name }`) ~~and default imports (`name`)~~ from `.scrml` files SHALL
   be resolved by the compiler against the exporting file's export list.
+- **A default import from a `.scrml` file SHALL be E-IMPORT-004 (S474).** No `.scrml` form exports a default (§21.2 has no `export default`), so `import name from './x.scrml'` names an export that cannot exist. ⚑ PA ruling in the veto window — INTERIM while §21.2 has no `export default`: if a default export is added, a default import resolves to it. *(PA ruling, S474 dispatch, from the #1715 review · supersedes: "default imports (`name`)" in the bullet above, which named a form no file can satisfy · direction of change: inert — such an import already found no export. A default import from a `.js` file keeps ES semantics.)*
+- **`import * as m from './x.scrml'` is not defined — INTERIM, design owed (S474).** A namespace import of a `.scrml` file is refused until designed and built (`g-boot-namespace-import-unbuilt-s474`). ⚑ Owner fork: how a namespaced component is spelled in markup (`<m.card/>`, or another form) is not ruled. A namespace import of a `.js` file keeps ES semantics.
 - Importing a name that is not exported by the target file SHALL be a compile error
   (E-IMPORT-004: `Name` is not exported by `./file.scrml`).
 - Circular imports SHALL be a compile error (E-IMPORT-002). The compiler SHALL
@@ -25364,10 +25745,10 @@ The `host-tag` SHALL be `host` for v1. Future host-tag values (`wasm`, `wat`, `c
 **Worked example — valid (in `scrml/stdlib/compiler/cg.scrml`):**
 
 ```scrml
-import:host { runCG as _runCG, CGError as _CGError } from "../../compiler/src/codegen/index.ts"
+import:host { runCG as _runCG, CGError as _CGError } from "../../compiler/src/codegen/index.ts";
 
-export const runCG = _runCG
-export const CGError = _CGError
+export const runCG = _runCG;
+export const CGError = _CGError;
 ```
 
 The bindings `_runCG` and `_CGError` are resolved at compile time from the named exports of the TypeScript module at the specified path. The `as` rename is OPTIONAL — use when the imported name needs to be re-exported under a different scrml-side identifier.
@@ -26029,7 +26410,7 @@ position codes. The design's `E-HOST-DUPLICATE` is not minted: rule 9 reports a 
 A file MAY re-export bindings from another file:
 
 ```scrml
-${ export { UserRole } from './types.scrml' }
+${ export { UserRole } from './types.scrml'; }
 ```
 
 Re-export follows standard ES module `export { name } from 'source'` syntax.
@@ -26039,12 +26420,12 @@ A file MAY also re-export every name another file exports:
 ```scrml
 // lib/index.scrml
 ${
-    export * from './types.scrml'
-    export * from './utils.scrml'
+    export * from './types.scrml';
+    export * from './utils.scrml';
 }
 
 // page.scrml
-${ import { UserRole, formatDate } from './lib/index.scrml' }
+${ import { UserRole, formatDate } from './lib/index.scrml'; }
 ```
 
 **Normative statements:**
@@ -26089,25 +26470,25 @@ ${ import { UserRole, formatDate } from './lib/index.scrml' }
 
 ```scrml
 // c.scrml
-${ export fn w() -> string { return "c" } }
+${ export fn w() -> string { return "c"; } }
 
 // d.scrml
-${ export fn w() -> string { return "d" } }
+${ export fn w() -> string { return "d"; } }
 
 // b.scrml — exports neither `w`
 ${
-    export * from './c.scrml'
-    export * from './d.scrml'
+    export * from './c.scrml';
+    export * from './d.scrml';
 }
 
 // page.scrml
-${ import { w } from './b.scrml' }   // E-IMPORT-004: `w` is ambiguous in `./b.scrml`
+${ import { w } from './b.scrml'; }   // E-IMPORT-004: `w` is ambiguous in `./b.scrml`
 
 // Fix — pick one in b.scrml (an explicit re-export wins over the stars)
 ${
-    export { w } from './c.scrml'
-    export * from './c.scrml'
-    export * from './d.scrml'
+    export { w } from './c.scrml';
+    export * from './c.scrml';
+    export * from './d.scrml';
 }
 ```
 
@@ -26315,7 +26696,7 @@ export <engine for=Phase initial=.Idle var=appPhase>
 ```scrml
 // app.scrml — imports + mounts
 ${
-  import { Phase } from './engines.scrml'
+  import { Phase } from './engines.scrml';
   // The engine is auto-imported alongside its type when the consumer references the engine's variable.
   // Explicit form (also legal): import { Phase, appPhase } from './engines.scrml'
 }
@@ -26343,9 +26724,9 @@ ${
 The `pinned` modifier (§6.10) on an imported engine or imported state cell makes the cell's identity-stability into a hard contract for the importing file:
 
 ```scrml
-import { appPhase pinned } from './engines.scrml'
+import { appPhase pinned } from './engines.scrml';
 // or
-import { Phase, appPhase pinned } from './engines.scrml'
+import { Phase, appPhase pinned } from './engines.scrml';
 ```
 
 **Normative statements:**
@@ -26576,7 +26957,7 @@ escape-sequence normalization.
 
 ```scrml
 ^{
-  emit("<p>Line 1\\nLine 2</p>")
+  emit("<p>Line 1\\nLine 2</p>");
 }
 ```
 
@@ -26587,7 +26968,7 @@ the `\n` position), producing two lines for parsing.
 
 ```scrml
 ^{
-  emit.raw("<pre>literal\\nbackslash-n</pre>")
+  emit.raw("<pre>literal\\nbackslash-n</pre>");
 }
 ```
 
@@ -26599,7 +26980,7 @@ the two-character sequence `\n`, not a newline.
 
 ```scrml
 ^{
-  emit("<pre>regex: \\n+</pre>")
+  emit("<pre>regex: \\n+</pre>");
 }
 ```
 
@@ -26682,8 +27063,8 @@ type User:struct = {
 }
 
 ^{
-  const info = reflect(User)
-  emit(`<p>Type has ${info.fields.length} fields</p>`)
+  const info = reflect(User);
+  emit(`<p>Type has ${info.fields.length} fields</p>`);
 }
 ```
 
@@ -26703,10 +27084,10 @@ type User:struct = {
   age:  number
 }
 
-<selectedType> = "User"
+<selectedType> = "User";
 
 ^{
-  const info = reflect(@selectedType)
+  const info = reflect(@selectedType);
   if info is not {
     meta.emit("<p>Unknown type</p>")
   } else {
@@ -26741,7 +27122,7 @@ _scrml_meta_effect(
 **Worked example — invalid (outside `^{}`):**
 
 ```scrml
-const info = reflect(User)   // Error: reflect() outside ^{} block
+const info = reflect(User);   // Error: reflect() outside ^{} block
 ```
 
 Compiler error E-META-008: `reflect()` is only valid inside a `^{}` meta block.
@@ -26973,10 +27354,10 @@ type User:struct = {
   age:  number
 }
 
-<selectedType> = "User"
+<selectedType> = "User";
 
 ^{
-  const info = meta.types.reflect(meta.get("selectedType"))
+  const info = meta.types.reflect(meta.get("selectedType"));
   if info is not {
     // type not found
   } else {
@@ -27469,8 +27850,8 @@ scrml local:
       await new Response(
         Bun.spawn(["claude","-p",prompt,"--output-format","text"], { cwd: path }).stdout
       ).text()
-    }=
-    return out
+    }=;
+    return out;
   }
 </program>
 ```
@@ -27542,8 +27923,8 @@ arbitrary statements means.
       const dir  = `${root}/${hash.slice(0,2)}`;
       await Bun.write(`${dir}/${hash}.bin`, bytes);
       return hash;
-    }=
-    return digest
+    }=;
+    return digest;
   }
 </program>
 ```
@@ -27735,7 +28116,7 @@ character to the nested program for invocation.
 
     ${ extern g computeFFT(data: number[]) -> number[] }
 
-    ${ const <spectrum> = g{ computeFFT(@audioData) } }
+    ${ const <spectrum> = g{ computeFFT(@audioData) }; }
 </>
 ```
 
@@ -27778,10 +28159,10 @@ generate WASM binding glue (type marshaling, WASM memory management, result dese
     ${ extern r applyFilter(params: FilterParams, imageData: number[]) -> FilterResult }
     ${ extern r grayscale(imageData: number[]) -> number[] }
 
-    <brightness> = 1.0
-    <imageData>  = []
+    <brightness> = 1.0;
+    <imageData>  = [];
 
-    ${ const <filtered> = r{ applyFilter({ brightness: @brightness, contrast: 1.0, saturation: 1.0 }, @imageData) } }
+    ${ const <filtered> = r{ applyFilter({ brightness: @brightness, contrast: 1.0, saturation: 1.0 }, @imageData) }; }
 </>
 ```
 
@@ -27824,10 +28205,10 @@ generate WASM binding glue (type marshaling, WASM memory management, result dese
 
     ${ extern r applyFilter(brightness: number, pixels: number[]) -> number[] }
 
-    <brightness> = 1.0
-    <rawPixels>  = []
+    <brightness> = 1.0;
+    <rawPixels>  = [];
 
-    ${ const <filtered> = r{ applyFilter(@brightness, @rawPixels) } }
+    ${ const <filtered> = r{ applyFilter(@brightness, @rawPixels) }; }
 
     <input type="range" bind:value=@brightness min=0 max=2 step=0.1/>
     <canvas width=800 height=600/>
@@ -27894,7 +28275,7 @@ declaration inside the nested `<program>`).
     use foreign:ml { predict }
 
     ${ function getPrediction(features: number[], modelId: string) {
-        return predict({ features, modelId })
+        return predict({ features, modelId });
     } }
 </>
 ```
@@ -28192,6 +28573,34 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 - §61 — `<endpoint>` semantics; `path=`/`method=`/`accepts=` attributes; the arm form + exhaustiveness; the decode + envelope (S219; the typed-inbound mirror of §60 `<api>`).
 - §65 — `<theme>` / `<defaults>` semantics; token/variant body-forms; `<defaults>` bare-element rules; the `@layer` order; program-scope placement; lowering to §25 custom properties (the scrml-native CSS model; **Nominal**).
 
+### 24.5 Markup the HTML parser restructures (S474)
+
+A page's markup is read by the browser's HTML parser, and the parser does not always build the tree that was written. Some nestings it **restructures**: it ends an element early, moves an element out of its parent, inserts an element around it, or drops a tag. Markup the parser restructures can never appear on the page as written, so a compiler cannot give it its written meaning. Separately, the compiled code finds the nodes it updates (a `show=` element, an `if=` marker, a `${}` text) by their position in the tree as written; once a node has moved, every position after it names the wrong node. Measured in Chromium: `<svg><p>x</p></svg><div show=(@pw == "secret")>SECRET</div>` hid the wrong element, and the secret was visible at first paint with the wrong password.
+
+So such markup SHALL be a compile error. This is a **PERMANENT** refusal on semantic-impossibility grounds: the browser restructures the markup, so no meaning can be given to it as written. It is not configurable (unlike a §24.2 content-model violation, which the page still holds as written).
+
+1. **`E-HTML-FOREIGN-BREAKOUT`: an HTML element as a child of SVG or MathML content.** This covers any element written where the parser builds SVG or MathML elements: the children of an SVG element other than `foreignObject`, `desc` and `title`, and the children of a MathML element other than `mi`, `mo`, `mn`, `ms`, `mtext` and an `annotation-xml` whose static `encoding` is `text/html` or `application/xhtml+xml`. In that position it is an error to write either of the following, gated (`if=`, an arm, an `<each>` row) or not:
+   - a "breakout" start tag (HTML Living Standard §13.2.6.5, "the rules for parsing tokens in foreign content"): `b` `big` `blockquote` `body` `br` `center` `code` `dd` `div` `dl` `dt` `em` `embed` `h1`–`h6` `head` `hr` `i` `img` `li` `listing` `menu` `meta` `nobr` `ol` `p` `pre` `ruby` `s` `small` `span` `strong` `strike` `sub` `sup` `table` `tt` `u` `ul` `var`, and `font` with a static `color`, `face` or `size`. The parser ends the foreign content at that tag and builds it, and the markup after it, outside the `<svg>` / `<math>`;
+   - an HTML void element name (`area` `base` `col` `input` `link` `source` `track` `wbr`). There it is not an HTML element and has no end tag, so the elements after it are built inside it.
+
+   The same holds for a declaration's renders where the declaration is **used** in such a position. That fault is reported at the use, because the renders are inserted, and parsed, in the use's context. **Remedy:** put the HTML inside `<foreignObject>` (SVG) or a text element such as `<mtext>` (MathML), or use the SVG / MathML element for the job (`<text>`, `<tspan>`, `<g>`, `<mrow>`).
+
+2. **`E-HTML-PARSER-REPAIR`: an HTML nesting the "in body" or "in table" rules repair** (HTML §13.2.6.4.7, §13.2.6.4.9–15). The rule applies within one template's static markup: an `if=` arm, an `<each>` row, a `${ for … lift }` row, a declaration's renders and a use's slot content are each parsed apart and inserted by DOM calls, which repair nothing. The repairs refused:
+   - an element that closes an open `<p>` ("close a p element": `address` `article` `aside` `blockquote` `center` `details` `dialog` `dir` `div` `dl` `fieldset` `figcaption` `figure` `footer` `form` `h1`–`h6` `header` `hgroup` `hr` `li` `dd` `dt` `listing` `main` `menu` `nav` `ol` `p` `plaintext` `pre` `search` `section` `summary` `table` `ul` `xmp`) inside one, with no scope boundary between;
+   - a child of `<table>` other than `caption` `colgroup` `thead` `tbody` `tfoot`, a child of `tbody` / `thead` / `tfoot` other than `tr`, a child of `tr` other than `td` / `th`, a child of `colgroup` other than `col` (the parser moves it out of the table, or inserts a `tbody` / `tr` / `colgroup` around it), and non-whitespace text directly inside any of them;
+   - an `<a>` inside an `<a>`; an `<li>` inside an open `<li>`, or a `<dd>` / `<dt>` inside an open `<dd>` / `<dt>`, with no list between; a heading directly inside a heading; a `<button>` inside a `<button>`; a `<nobr>` inside a `<nobr>`; an `<option>` directly inside an `<option>`, an `<optgroup>` directly inside an `<option>` / `<optgroup>`; a ruby `rt` / `rp` directly inside `rb` / `rp` / `rt`, an `rb` / `rtc` directly inside `rb` / `rp` / `rt` / `rtc`;
+   - `<html>`, `<head>`, `<body>` or `<frameset>` in markup;
+   - an element (with any hole in it) inside an HTML raw-text or RCDATA element, `textarea` `title` `xmp` `iframe` `noembed` `noframes` `noscript` `plaintext`: the parser reads that content as text (an interpolated value inside one stays legal);
+   - a raw U+0000 (NUL) in markup text, which the parser drops or replaces.
+
+   A body of `<pre>` / `<listing>` / `<textarea>` that starts with a line ending is not refused, and it renders as HTML renders it: the parser drops ONE line ending (LF, CRLF or a lone CR) right after the start tag (HTML §13.2.6.4.7), so `<pre>` + newline + code shows no blank first line and a `<textarea>`'s value does not begin with it. A compiler SHALL treat the body as the written one without that line ending, both for what it prints and for every position it addresses in the body (S474 r3; PA ruling: match HTML and base — the r2 doubling, which kept the line ending, is withdrawn).
+
+   **Remedy:** the message names the change: write the `<tbody>` / `<tr>`, use a `<div>` for the outer element (or a `<span>` for the inner), or nest a list.
+
+3. **A compiler SHALL NOT mount a template the parser restructured.** When the markup is not refused, the runtime compares what the parser actually built with the tree that was compiled, before using any position in it. The comparison covers every node a position counts: elements, comments, and the presence of each run of text (never its content). On a difference it throws and does not mount that template. A rule the compiler does not model therefore fails closed, and holes are never misaddressed. A thrown render SHALL NOT stop the other updates of the same change: every update that change queued still runs, so a gate that closes in it closes.
+
+> **Provenance (S474):** the rule for classing a refusal PERMANENT is ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT": *"A PERMANENT language refusal is allowed for exactly two reasons: (1) a proven exploit (security), or (2) a **semantic impossibility**, meaning no meaning can be given to the form."* Classing this refusal PERMANENT under (2), and the two codes, are a PA reading: the S474 review of #1727 (F1–F3), reproduced in Chromium, and the coordinator's round-1 dispatch. The measured cases are `~/.cache/scrml/review/s474-1727/review.md`. **Direction of change:** newly-rejecting. **Emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (`markupParseDiags`). The runtime check (item 3) is `compiler/self-host-v2/slice-m1/runtime/runtime.js` (`template`, `checkShape`, `drainQueues`). **impl#1: Nominal** (it carries the divergence, `g-impl1-markup-parser-restructure-unrefused-s474`).
+
 ---
 
 ## 25. CSS Variable Syntax
@@ -28235,11 +28644,11 @@ scrml compiles constructor-level `#{}` CSS to native CSS `@scope` blocks. Class 
 
 1. **Selector-based `#{}` inside a constructor** compiles to:
    ```css
-   @scope ([data-scrml="ConstructorName"]) to ([data-scrml]) {
+   @scope ([data-scrml="<scope key>"]) to ([data-scrml]) {   /* the per-file key, §9.1 DQ-7 (S474) */
      /* original rules unchanged */
    }
    ```
-   The constructor's root element carries `data-scrml="ConstructorName"` in the emitted HTML. The rules style the root as well as its subtree, so each selector is also emitted root-anchored (§9.1 DQ-7, ruled S469 — scrml-support `0908198`).
+   The constructor's root element carries `data-scrml="<scope key>"` (its name qualified by its declaring file, §9.1 DQ-7, S474) in the emitted HTML. The rules style the root as well as its subtree, so each selector is also emitted root-anchored (§9.1 DQ-7, ruled S469 — scrml-support `0908198`).
 
 2. **Flat-declaration `#{}` blocks** (containing only `property: value;` pairs, no selectors) inside a constructor compile to `style="prop: value;"` on the containing element. They do not appear in the `.css` file.
 
@@ -28830,8 +29239,8 @@ A validator predicate may take expression arguments that reference other reactiv
 
 ```scrml
 <signup>
-    <password req length(>=8)> = <input type="password"/>
-    <confirm  req eq(@signup.password)> = <input type="password"/>
+    <password req length(>=8)> = <input type="password"/>;
+    <confirm  req eq(@signup.password)> = <input type="password"/>;
 </>
 ```
 
@@ -28888,15 +29297,15 @@ The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. Wh
 1. **Unassigned expression statement.** Any expression whose value is not captured by a `let`, `const`, variable assignment, or other explicit binding. The expression value is placed into `~`. **This construct does not reach inside an if-as-expression arm body — see the arm-body carve-out below.**
 
    ```scrml
-   fetchUser(id)             // fetchUser's return value initializes ~
-   let user = fetchUser(id)  // captured in `user`; ~ is NOT initialized
+   fetchUser(id);             // fetchUser's return value initializes ~
+   let user = fetchUser(id);  // captured in `user`; ~ is NOT initialized
    ```
 
 2. **`lift` statement.** Each `lift` call, in either accumulation mode or value-lift mode (§10.7, §17.6), initializes `~` to the lifted value, in addition to its mode-specific action (accumulating or designating a result).
 
    ```scrml
    lift <li>${item.name}/;                         // accumulation mode — lifts to parent AND initializes ~
-   if (cond) { lift 3 } else { lift 4 }           // value-lift mode — designates result AND initializes ~
+   if (cond) { lift 3; } else { lift 4; }           // value-lift mode — designates result AND initializes ~
    ```
 
 **Declarations do not initialize `~`.** `let x = expr` captures the value in `x`; `~` is unaffected. `~` initialization is a property of unassigned expression position, not of expression evaluation in general.
@@ -28919,11 +29328,11 @@ The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. Wh
 ```scrml
 ${
     const label = if (@n > 0) {
-        note("a")          // side effect. Does NOT initialize ~. Not E-TILDE-002.
-        lift "pos"         // the ONLY designating statement; initializes ~ per item 2 above
+        note("a");          // side effect. Does NOT initialize ~. Not E-TILDE-002.
+        lift "pos";         // the ONLY designating statement; initializes ~ per item 2 above
     } else {
-        lift "neg"
-    }
+        lift "neg";
+    };
 }
 ```
 
@@ -28935,13 +29344,13 @@ The carve-out is about **initialization only**. It is not a `~` context boundary
 
 ```scrml
 ${
-    loadUser(id)                      // initializes ~ in the ENCLOSING context
+    loadUser(id);                      // initializes ~ in the ENCLOSING context
     const label = if (@n > 0) {
-        record(~)                     // reads the ENCLOSING ~ — loadUser's result
-        lift "ok"                     // designates the arm's result. A DIFFERENT slot.
+        record(~);                     // reads the ENCLOSING ~ — loadUser's result
+        lift "ok";                     // designates the arm's result. A DIFFERENT slot.
     } else {
-        lift "neg"
-    }
+        lift "neg";
+    };
 }
 ```
 
@@ -28985,10 +29394,10 @@ ${
 
 ```scrml
 const label = if (@n > 0) {
-    step1(2)                          // side effect. Does NOT initialize ~.
-    record(~)                         // E-TILDE-001 — ~ is not initialized here.
-    lift "ok"
-}
+    step1(2);                          // side effect. Does NOT initialize ~.
+    record(~);                         // E-TILDE-001 — ~ is not initialized here.
+    lift "ok";
+};
 ```
 
 That is E-TILDE-001 by §32.5 — **Nominal / spec-ahead: the code is named, its fire site is not yet implemented (see the normative statements below), so today this shape silently yields `null` rather than erroring.** Capture it explicitly (`let v = step1(2)`) or initialize `~` before the if-as-expression. Whether an arm body should additionally become a §32.4 boundary is a separate question and is NOT settled here.
@@ -29040,12 +29449,12 @@ body is not an initialization and therefore does not start an exactly-once oblig
 
 ```scrml
 <div>${
-    fetchUser(id)   // initializes ~ in this outer context
+    fetchUser(id);   // initializes ~ in this outer context
     ${
         // ~ is NOT initialized here — this is a new nested context
         // referencing ~ here is E-TILDE-001
     }
-    process(~)      // valid: consumes ~ from the outer context
+    process(~);      // valid: consumes ~ from the outer context
 </>
 ```
 
@@ -29089,8 +29498,8 @@ Triggers:
 
 ```scrml
 ${
-    fetchUser(id)    // initializes ~
-    fetchOrder(id)   // Error E-TILDE-002: ~ was initialized but not consumed before this reinit
+    fetchUser(id);    // initializes ~
+    fetchOrder(id);   // Error E-TILDE-002: ~ was initialized but not consumed before this reinit
 }
 ```
 
@@ -29127,8 +29536,8 @@ If `~` IS referenced anywhere in the current `${ }` body, ALL `lift` calls in th
 
 // Invalid: ~ referenced somewhere in context body; now all lift calls must be consumed
 <ul>${
-    getHeader()
-    let hdr = ~               // ~ referenced — obligation is now active for ALL ~ in this context
+    getHeader();
+    let hdr = ~;               // ~ referenced — obligation is now active for ALL ~ in this context
     for (item of items) {
         lift <li>${item.name}/;   // Error E-TILDE-002: lift reinitializes ~ but it was not consumed
     }
@@ -29155,8 +29564,8 @@ If `~` IS referenced anywhere in the current `${ }` body, ALL `lift` calls in th
 **Valid — simple pipeline:**
 ```scrml
 ${
-    fetchUser(id)            // initializes ~
-    let result = process(~)  // consumes ~; result captured in variable
+    fetchUser(id);            // initializes ~
+    let result = process(~);  // consumes ~; result captured in variable
 }
 ```
 `fetchUser(id)` initializes `~`. `process(~)` consumes `~`. `~` is consumed exactly once. Valid.
@@ -29174,7 +29583,7 @@ ${
 **Invalid — `~` used without initialization (E-TILDE-001):**
 ```scrml
 ${
-    let result = transform(~)   // Error E-TILDE-001
+    let result = transform(~);   // Error E-TILDE-001
 }
 ```
 `~` is referenced but no unassigned expression or `lift` precedes it in this scope.
@@ -29184,10 +29593,10 @@ ${
 **Invalid — reinitialization without consumption (E-TILDE-002):**
 ```scrml
 ${
-    fetchUser(id)    // initializes ~
-    process(~)       // consumes ~ — valid so far
-    fetchOrder(id)   // initializes ~ again
-    fetchInvoice(id) // Error E-TILDE-002: previous ~ (from fetchOrder) not consumed
+    fetchUser(id);    // initializes ~
+    process(~);       // consumes ~ — valid so far
+    fetchOrder(id);   // initializes ~ again
+    fetchInvoice(id); // Error E-TILDE-002: previous ~ (from fetchOrder) not consumed
 }
 ```
 `fetchOrder(id)` initializes `~`. Before `~` is consumed, `fetchInvoice(id)` reinitializes it.
@@ -29408,8 +29817,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
-| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. | Error |
-| E-VALUE-FUNCTION-STORED | §14.3, §15.11.5.1, §59.3 | A VALUE stores a function: an object, array or map literal holds a function in a field, element or entry (directly, through a spread, a method / getter, or a ternary / `??` / logical-or choosing one); a state cell is initialised or assigned one (`<f> = g`, `@f = g`); a field / element write puts one into a value (`o.f = g`, `@o["k"] = g`, `@fs[0] = g`); an enum payload holds one (`Op.Apply(g)`); a method puts one into a scrml value (on a known scrml value every method except the closed calling set `map` / `filter` / `forEach` / `then` / … / `update` / `sortedBy`; on a receiver of unknown provenance the storing methods `push` / `concat` / `with` / `insert` / `add` / …); a host call whose argument literal held one has its RESULT kept as a scrml value (`const o = Object.freeze({ f: g })`, `Array.of(g)`, `new Set().add(g)`); a host call writes one into a scrml value (`Object.assign(o, { f: g })`, `Object.defineProperty`, `Reflect.set`); a value is BUILT FROM a callback that returns functions (`xs.map(() => g)`, `Array.from(xs, f)`, `m.update(k, f)` — S464 "(a) Close it", the closure-array entry); the dot-shorthand enum payload (`.Apply(g)`); or a known host callable is stored (`{ f: Math.max }`). A `match` arm value, a value-form `if` lift and a `for` lift count as the value. Function facts cross imports, re-exports (`export … from`, `export *`) and local export lists, and are read for `scrml:` stdlib modules from their source; an unknown cross-module value name fails closed. Function-ness is read from the tree and solved to a fixpoint over the file, failing closed: an arrow / `fn` / `function` expression (block bodies included), or a name that may hold one — an alias, a reassigned binding, a destructuring / parameter default, a function-typed parameter, a parameter a call site hands a function — or a call of a file function that may return one. NOT fired for a function PASSED as an argument or callback, wired as a prop / event handler, CALLED, or bound to a local name; nor for a literal handed to a host-JS call in statement position (the host boundary), nor for a write or method whose target is rooted in a host binding. The sibling of `E-STRUCT-FUNCTION-FIELD` (which stays the type-annotation code). Fix: pass the function instead (hand it to the call that uses it), wire it as a prop / handler, or store an enum tag and `match` on it. Partitions into `result.errors`. (Ruling S462 "a" + S464; emitted at `compiler/src/value-function-stored.ts` via `compiler/src/type-system.ts` `checkValueFunctionStored`.) | Error |
+| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. **S474 (§14.3, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a field whose function parts are all pure `fn` is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474); an impure function-typed field is INTERIM too, until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474; ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). (Emitted at `compiler/src/type-system.ts` (`checkFunctionTypedStructFields`).) | Error |
+| E-VALUE-FUNCTION-STORED | §14.3, §15.11.5.1, §59.3 | A VALUE stores a function: an object, array or map literal holds a function in a field, element or entry (directly, through a spread, a method / getter, or a ternary / `??` / logical-or choosing one); a state cell is initialised or assigned one (`<f> = g`, `@f = g`); a field / element write puts one into a value (`o.f = g`, `@o["k"] = g`, `@fs[0] = g`); an enum payload holds one (`Op.Apply(g)`); a method puts one into a scrml value (on a known scrml value every method except the closed calling set `map` / `filter` / `forEach` / `then` / … / `update` / `sortedBy`; on a receiver of unknown provenance the storing methods `push` / `concat` / `with` / `insert` / `add` / …); a host call whose argument literal held one has its RESULT kept as a scrml value (`const o = Object.freeze({ f: g })`, `Array.of(g)`, `new Set().add(g)`); a host call writes one into a scrml value (`Object.assign(o, { f: g })`, `Object.defineProperty`, `Reflect.set`); a value is BUILT FROM a callback that returns functions (`xs.map(() => g)`, `Array.from(xs, f)`, `m.update(k, f)` — S464 "(a) Close it", the closure-array entry); the dot-shorthand enum payload (`.Apply(g)`); or a known host callable is stored (`{ f: Math.max }`). A `match` arm value, a value-form `if` lift and a `for` lift count as the value. Function facts cross imports, re-exports (`export … from`, `export *`) and local export lists, and are read for `scrml:` stdlib modules from their source; an unknown cross-module value name fails closed. Function-ness is read from the tree and solved to a fixpoint over the file, failing closed: an arrow / `fn` / `function` expression (block bodies included), or a name that may hold one — an alias, a reassigned binding, a destructuring / parameter default, a function-typed parameter, a parameter a call site hands a function — or a call of a file function that may return one. NOT fired for a function PASSED as an argument or callback, wired as a prop / event handler, CALLED, or bound to a local name; nor for a literal handed to a host-JS call in statement position (the host boundary), nor for a write or method whose target is rooted in a host binding. The sibling of `E-STRUCT-FUNCTION-FIELD` (which stays the type-annotation code). Fix: pass the function instead (hand it to the call that uses it), wire it as a prop / handler, or store an enum tag and `match` on it. Partitions into `result.errors`. (Ruling S462 "a" + S464; emitted at `compiler/src/value-function-stored.ts` via `compiler/src/type-system.ts` `checkValueFunctionStored`.) **S474 (§14.3; S469 R2′, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a pure `fn` value in a cell or struct field is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474), and so is a local binding holding any function value (R2′); an impure function value in a cell or field is INTERIM until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474); any function-holding value at `==` / ordering, a map key or a serialization sink stays refused, PERMANENT (semantic impossibility: function `==` is undecidable; a closure cannot be serialized — ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). | Error |
 | E-TIMER-STRUCT-MISUSE | §41.21 | A `scrml:time` `Debouncer` / `Throttler` (a name or state cell initialised by `debounce(…)` / `throttle(…)` imported from `scrml:time`) is CALLED (`d(q)`, `@d(q)`) or has a method called on it (`d.cancel()`, `d.flush()`, `d.run()`). The struct is data, not a function: the message names the free function to use — `run(d, …)`, `cancel(d)`, `flush(d)`. Retires the pre-S464 callable-with-methods shape at compile time (it threw at run time). Partitions into `result.errors`. (Ruling S464 "(a) Struct + free fns" / "(a) Fix + land + type rule"; emitted at `compiler/src/value-function-stored.ts` via `checkTimerMisuse`.) | Error |
 | E-STRUCT-DUPLICATE-KEY | §14.3, §66.11.3 | A struct literal names the same key twice — a plain literal (`{ x: 5, x: 6 }`), a nested one, or the spread-override shape (`{ ...@g, phase: .Gone, phase: .Live }`). Not a map literal (that is `W-MAP-DUPLICATE-LITERAL-KEY`, §59.3). **Provenance:** ruling:user-voice-scrml.md S440 — "duplicate keys are an error in ANY struct literal" + the six-open-questions "all recs" (S440, second entry), item 2. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). | Error |
 | E-PRINT-NON-PRIMITIVE | §20.7.2 | A `print()` / `println()` argument is not a `string` / ~~`number` / `boolean`~~ `int` / `number` / `bool` / unit enum value *(S469)* — a struct, ~~enum, array~~ payload enum value, tape *(S469)*, value-native map (§59), markup-as-value, or the absence value `not`. `print` / `println` write RAW stdout (§20.7), machine-parsed program output, so structured data SHALL be serialized explicitly (a JSON or custom serializer of the author's choosing) rather than rendered to a human-readable projection — the deliberate divergence from `log()`'s value-faithful §20.6.4 render (a *human* projection, the wrong shape for a consumed stream). The typer classifier is conservative: it flags only positively-provable non-primitive shapes (a collection/markup/`not` literal, or an identifier bound to a non-primitive-typed decl); an unresolvable expression (member access, a call result, `asIs`) is left unflagged so the check never false-positives. Partitions into `result.errors`. (S241 — SPEC §20.7 fork B(i); emitted at `compiler/src/type-system.ts` `checkPrintArgs`.) **(S469)** The accepted set is `string`, `int`, `number`, `bool` and a unit enum value (§20.7.2, §14.13.2): `int` and the unit enum are newly accepted — **Nominal on impl#1** for the unit enum (ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*; direction of change: newly-accepting). | Error |
@@ -29418,7 +29827,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
 | W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts` as `CGError(…, "warning")`. S260 §34-vs-impl audit: severity corrected Info→Warning — the impl explicitly emits a warning, so no case could ever pin it as "info".) | Warning |
 | E-SQL-004 | §8.1.1 | `?{}` block has no database scope — no `<program db=>`, no `<program>` whose database a single direct-child `<db src=>` supplies (S451 "a for the channel Q"), and no `<db src=>` — in any ancestor, and the file is not a module-with-db-context (§44.7.1). The nearest scope of any kind resolves the `?{}` (S451 "your recs on both"). Emitted by `compiler/src/codegen/emit-server.ts` `generateServerJs` (per site, for an unscoped `?{}` in a file declaring two or more databases; and once per file when the file declares no scope for a handle it uses) and `compiler/src/codegen/emit-tool.ts` `generateToolJs` (a `kind="tool"` program). impl#1 divergence: in a file with ONE database an unscoped `?{}` runs on it instead of firing this code — `g-impl1-unscoped-sql-single-db-accepted-s451`. *(Provenance: spec:§8.1.1 currency correction, S452 — supersedes the stale cite `emit-server.ts:7000` / `emit-tool.ts:746` and the parenthetical "impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`", a gap #1264 resolved; direction of change: inert.)* | Error |
-| E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
+| E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute; also an empty `sqlite:` / `sqlite://` path (S474 ruling 7) and a `file:` URI (Emitted at `compiler/src/codegen/db-driver.ts` (`resolveDbDriver`) and by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`dbRefusal`).) | Error |
 | E-SERVER-FN-IN-SYNC-CALLBACK | §13.2, §13.8 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a lambda's parameter default (a function declaration's own parameter default is E-PARAM-DEFAULT-AWAIT, s466). scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) **§13.8 cross-reference (S467):** an instance of §13.8's one rule — a waiting value (here a peer server-function call) standing where no `await` can be inserted (a synchronous callback in server code). Cross-reference only; the trigger is unchanged. Provenance: spec:§13.8 (S467 dpa-023 Phase 1b — a restatement; existing code names kept, per dd:dpa-023-build-arc-scoping §Q6 *"Keeping the existing code names rather than minting one umbrella code"*) · ruling:user-voice-scrml.md S467 "(a) Opt-in marker" (F1, which gives §13.8 item (ii)). | Error |
 | E-PARAM-DEFAULT-AWAIT | §7.3.2, §13.8 | **(s466; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four".)** A function declaration's own parameter default needs an `await`: it runs a `?{}` query (directly or through a function it calls), calls a server function, a Promise-returning stdlib export, or a function the compiler emits `async`. A default is evaluated before the body, where the compiler cannot insert `await`, so the parameter would hold an unfinished Promise. Reported once per parameter (however many emitted copies of the function lower it), at the default; not reported when the only async callee is a function already refused for reading client state (E-REACTIVE-003 and siblings — one root cause). Resolution: compute the value in the function body (default the parameter to `not` and use the computed value when the argument is `not`). Emitted by `compiler/src/codegen/emit-logic.ts` `emitParamDefault` — the one lowering of every function's defaults. Provenance: dispatch:s466-server-param-defaults fix round 1. **§13.8 cross-reference (S467):** an instance of §13.8's one rule — a waiting value standing in a function declaration's own parameter default, which is evaluated before the body where no `await` can be inserted. Cross-reference only; the trigger is unchanged. Provenance: spec:§13.8 (S467 dpa-023 Phase 1b — a restatement; existing code names kept, per dd:dpa-023-build-arc-scoping §Q6 *"Keeping the existing code names rather than minting one umbrella code"*) · ruling:user-voice-scrml.md S467 "(a) Opt-in marker" (F1, which gives §13.8 item (ii)). | Error |
 | E-PARAM-DEFAULT-UNSUPPORTED | §7.3.2 | **(s466 fix rounds 3–5; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four"; scope: server-placed functions only — PA reading, owner veto.)** The default of a SERVER-PLACED function (wholly-server, CPS-split, SSE, `onserver:*`, nested in server code, an exported library function server code in the compilation reaches — or any exported function of a library no file in the compilation imports; fix round 5: being emitted into the server bundle is not placement) contains an assignment or update (`k = (m = "z")`, `k = m++`, `k = (m += "z")`, `delete` — the route handler binds parameters with `const`, so the server module failed to LOAD and every route in it was down; fix round 4) or a construct outside the closed set of expression kinds every default check understands (`DEFAULT_EXPR_KINDS`, `compiler/src/at-refs.ts`): a block-bodied function, an escape-hatch (text the compiler keeps unparsed), markup, a multi-subject or `given`-led match, a block-bodied or unparseable match arm. FAIL-CLOSED: such a default could hide an identity read, a client-state read or an un-awaitable call from the checks (S239 round 3: a `match` default's raw arms were never read — `uid = match m { "a" => session.userId … }` compiled clean). A single-subject `match` with expression arms IS supported (its arms are parsed and checked). A regular-expression literal is a leaf and is accepted. Does NOT fire for a client-only function's default (lowered as written). Resolution: compute the value in the body. Emitted by `compiler/src/codegen/emit-logic.ts` `emitParamDefault`. Provenance: dispatch:s466-server-param-defaults fix rounds 3–5. | Error |
@@ -29494,7 +29903,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SCOPE-001 | §5.2, §15.10.1 | Unquoted identifier not resolvable in scope. Includes a component prop referenced in component-body text the compiler cannot parse: the prop cannot be substituted there (§15.10.1), so it would reach the page unbound (emitted at `compiler/src/component-expander.ts`, `expandComponentNode`). Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes". | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
-| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files. Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.1): a `type Name:host` line naming an Appendix H interface (a built-in host type) — emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (hostTypeLine; s473-host-allowlist-b); a user struct or enum of such a name shadows the built-in instead (ruling: user-voice-scrml.md S473 D34). | Error |
+| E-SCOPE-010 | §7.6, §20.4, §21.3.1.1, §21.3.3, §41.7 | **Duplicate binding in file scope.** A name already bound at file scope is bound again in the same file, whatever the two bindings name — a `let` / `const`, a `function`, a `type`, a user declaration (`<card>`), or an import of the name — in any pairing (S440 ruling #6: two top-level `function`s; S473: across kinds, `<card>` beside `function card`, a type beside a function of its name). ~~ALSO (S473 round 2, narrowed, §7.6): one name EXPORTED by two user files of one program; a private name never collides across files.~~ (Withdrawn S474, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3: two user files may export one name; output names are per-file qualified.) ALSO (S474, §41.7): two different declarations bound to one local name by import — user + user, user + stdlib, stdlib + stdlib, or within one import list — at the later import; PERMANENT (semantic impossibility) (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`linkage`), #1706; PA ruling). Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; ruling:user-voice-scrml.md "⭐ RULED — S473 owner questions round 2, PA recs" item 5; ruling:user-voice-scrml.md "⭐ RULED — 'one name per program' narrowed to exported names". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (its `fileNameClashes`, `dupDecls`, `dupFns`, `dupFields` and `linkage` passes). impl#1 emits it for a duplicate file-scope `let` / `const` only and carries the S440 / S473 cases (Nominal, §34.0). ALSO (§20.4): a variable named with a reserved binding name (`route`, `session`) — that trigger is spec-ahead (S265), not emitted by either compiler. ALSO (S473, §21.3.1.1, §41.7): a host-import name collision — an `import:host` binding name also bound by a plain `import`, another `import:host`, the same `import:host` twice, or a declaration of its file (emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` hostImportClash; Nominal on impl#1); and a `<host>` binding name also bound in its file as a value — by another binding, a declaration, a plain `import` or an `import:host` (DRAFT §21.3.3 rule 9 — emitted by the bootstrap, where a binding is an ordinary file-scope function item, s473-boot-host-block-f3; Nominal on impl#1; extends item 2 to `<host>`, ratified by ruling:user-voice-scrml.md S473 "⭐ RULED — S473 owner questions round 2, PA recs" item 8). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2. ALSO (S473 allowlist, DRAFT §21.3.3 rule 8.1): a `type Name:host` line naming an Appendix H interface (a built-in host type) — emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (hostTypeLine; s473-host-allowlist-b); a user struct or enum of such a name shadows the built-in instead (ruling: user-voice-scrml.md S473 D34). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
@@ -29535,7 +29944,10 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TENANT-UNDECLARED | §14.8.10 | A relation carrying a `tenant_id` column is not in the compilation's tenant set (no `<schema>` in any form and no `<db src=… tables=…>` registry declares it), where the compiler can see it: (1) an ADMITTED program-body `?{}` statement (§14.8.10 item (1) — `.acrossTenants()` or not) gives one a `tenant_id` column — a spelled `CREATE [TEMP] TABLE`, one `ALTER TABLE … ADD COLUMN`, an fts5 table (a `tenant_id` column, or `content =` a tenant-scoped table), any case or quoting, a generated column included; (2) a relation of a SQLite file a `<db src=…>` opens at compile time — every table and view in the file, not only `tables=` — carries `tenant_id`, generated and hidden columns included (`table_xinfo`; an fts4 `languageid=`), or its columns cannot be read. The floor scopes only declared tables, so its rows would reach every request unscoped. The message names the relation and the fix: declare it in `<schema>` so the tenant floor scopes it (a temporary table cannot be declared — keep the rows in a declared table; a view — drop it); no opt-out: a `tenant_id` column IS the declaration, so a table meant to stay unscoped renames the column. A program-body statement off the allow-list is `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`; a database unreadable at compile time is checked at server startup (`E-DEPLOY-DB-TENANT-UNDECLARED`). **Provenance:** ruling:user-voice-scrml.md S456 "b, startup check lands with it" + "a, fix F7/F9 too" · supersedes: spec:§14.8.10 "A table whose `tenant_id` exists only in a live `<program db=>` file … is NOT tenant-scoped", and the S456 round-2 "known columns" trigger · Direction of change: newly-rejecting (corpus: 2428 single-file compiles + ex22 / ex23 / flogence multi-file, 0 newly failing). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-undeclared.ts` `programBodyUndeclaredTenantTables` (over `compiler/src/schema-differ.js` `programStatementVerdicts`) / `liveUndeclaredTenantTables`; the live relations from `compiler/src/protect-analyzer.ts` `collectLiveTenantRelations`.) | Error |
 | E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED | §14.8.10 | In a compilation with a database, a program-body `?{}` statement (outside `<schema>`, statement or expression position — including expression text held unparsed, S456 fix round F2 — `.acrossTenants()` or not; each `;`-separated statement judged) is not on the CLOSED allow-list — DML led by `SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE` with no `INTO` at any depth other than the statement's own `INSERT` / `REPLACE` target; `CREATE [TEMP] TABLE [IF NOT EXISTS] name (col type, …)` (one name, a spelled column list, optional `WITHOUT ROWID` / `STRICT`); one `ALTER TABLE name ADD [COLUMN] col type`; `CREATE VIRTUAL TABLE name USING fts5(…)` whose options are on the closed list (`content`, `content_rowid`, `tokenize`, `prefix`, `columnsize`, `detail`, `contentless_delete`, `contentless_unindexed`, `locale`, `tokendata`); `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE`; `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`; `PRAGMA table_info` / `table_xinfo` / `index_list` / `index_info` / `foreign_key_list` / `busy_timeout` / `journal_mode` — or it does not begin with a keyword, or it is UNREADABLE: outside the closed lexical subset (S456 round 4) — outside a literal or comment only space / tab / LF / CR LF, ASCII identifiers, printable-ASCII `"…"` identifiers (`""` escape only), standard `'…'` strings (`''` escape only, no backslash, no prefix), unsigned numbers, `-- ` and non-nested, non-executable `/* */` comments, `${…}` slots and the punctuation `( ) , ; . * + - / % = < > ! | & ~ ^ ::`; anything else (a `$` outside `${`, non-ASCII, `U&` / `E'` / `B'` / `X'` / `N'`, a backslash, `#`, backticks, `[…]`, `@` / `?` / `:` parameters, `/*!`, a lone carriage return) is refused, whatever the database. Everything else is refused whatever it would create — `CREATE VIEW` / `SCHEMA` / `FUNCTION` / `TABLE … AS`, other virtual-table modules, `ALTER` other than `ADD COLUMN`, `DROP`, `EXPLAIN`, other `PRAGMA`s, `ATTACH`, `VACUUM`, `DO`, `CALL`, `SET`. A body of `${…}` slots alone stays E-SQL-003's (a bare-identifier body draws both codes). Resolution: declare the relation in `<schema>`. **Provenance:** ruling:user-voice-scrml.md S456 "a, fix F7/F9 too" (the allow-list; "The S452 durable at the DDL layer: allow-list, not classify") + S456 "your recs, go" (transaction control, `CREATE INDEX`, the closed `PRAGMA` list) · supersedes: the S456 round-2 "known columns" reader and (round 4, S239 r4 review, executed on PG16 / Bun.SQL sqlite) the round-3 enumerated disagreement list · Direction of change: newly-rejecting (corpus: 2430 single-file compiles + ex22 / ex23 / flogence multi-file, 0 newly failing; the S239 r3 and r4 reviews' executed shapes now refused). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-undeclared.ts` `programBodyUndeclaredTenantTables` over `compiler/src/schema-differ.js` `programStatementVerdicts`.) | Error |
 | E-SQL-JOURNAL-OFF | §8.9.2, §14.8.10 | `?{PRAGMA journal_mode = OFF}` inside a `!` function, or anywhere its connection is one a `!` function's envelope uses (a program-body statement or a non-`!` function on a database a `!` function writes): the setting disables the journal rollback needs. Other `journal_mode` values stay admitted per the S456 allow-list. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 2. Code name: PA reading, for bryan's veto. **Nominal / not yet emitted** by either compiler. | Error |
-| E-TX-CLIENT-MULTI-CALL | §19.10.5 | A `!` function placed on the client makes two or more server calls (two calls, one inside a loop, or calls through the client-side functions it calls): each is its own request, and no transaction spans two requests. Permanent (not an interim refusal); the message names the fix — compose the calls in one server `!` function. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client multi-call `!` is a permanent refusal" ("your recs") item 2. Code name: PA reading. Emitted by the bootstrap; Nominal on impl#1, which carries it (§34.0). | Error |
+| E-TX-CLIENT-MULTI-CALL | §19.10.5, §19.6.7 | Until built on a compiler (INTERIM since S474; built on the bootstrap by #1713, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 2): a `!` function placed on the client makes two or more server calls (two calls, one inside a loop, or calls through the client-side functions it calls) — the owed capable form composes them into one request with one envelope (g-client-bang-server-calls-compose-unbuilt-s474). After it is built: only a `!` function whose plan has two batches that each reach a query (browser work that cannot move between the calls, §19.6.7) — INTERIM (design owed, not planned: a transaction held across the client round trip, dd §2 Alternative C, blocked today by holding the §19.10.6 gate across a network round trip; g-tx-across-client-roundtrip-undesigned-s474), ledger PS-72. The message names the fix — compose the calls in one server `!` function. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 #1690 review: `!` callees count toward the envelope; client multi-call `!` is a permanent refusal" ("your recs") item 2. Code name: PA reading. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`composeOne`) — since #1713 for the residue only, the composition being built; Nominal on impl#1, which carries it (§34.0). | Error |
+| W-TX-FAIL-AFTER-COMMIT | §19.10.5 | A `fail` or `?` written after a client-placed `!` function's composed server batch that cannot join the batch — it needs the browser, reads a cell, or calls a client function. When it fails, the caller is told the function failed, but the batch's writes are already committed and are not rolled back. The message names the fix: move the check before the first server call, or into the server function. **Provenance:** PA reading, S474 dispatch (#1713 review), on the four-doors ruling item 2. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`lateExits`), built by #1713; Nominal on impl#1. | Warning |
+| E-TX-UNMATCHED-END | §8.9.2, §19.10.4 | **INTERIM (S474, ⚑ PA reading for bryan's veto; code name is the PA's).** In a `!` server body, manual transaction control that is not provably path-paired and properly nested (§8.9.2 "Amendment S474" item 3). Accepted shapes: every control path from a `?{BEGIN}` (any form) reaches its own `?{COMMIT}` / `?{END}` / `?{ROLLBACK}` exactly once before it leaves the block or the function. Endings pair LIFO with nested `?{BEGIN}`s, and each `if` / `else` branch, `match` arm and `!{}` arm is a path. A path that leaves by an exit that already fails the call (`fail`, `?`, implicit `SqlError` propagation, a throw) needs none; its savepoint is rolled back silently, with no R6 report. So §19.10.1's `transferFunds` (a conditional `?{ROLLBACK}` before `fail`, `?{COMMIT}` on the other path) is valid. An author's `?{SAVEPOINT name}` / `?{RELEASE name}` / `?{ROLLBACK TO name}` stay valid. Compiler savepoint names never collide with author names. Refused: a `return`, a `break` / `continue` out of the block, or a fall-through reached without the ending; two endings on one path; an ending reached with no `?{BEGIN}` open, which would end the envelope or a caller's savepoint; a loop crossing a `?{BEGIN}` or its ending; a `RELEASE name` / `ROLLBACK TO name` reached without its `SAVEPOINT name`; an author savepoint and a compiler savepoint region that do not nest properly on some path (SQLite's `RELEASE` / `ROLLBACK TO` cascades over every later savepoint). Under ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body" the body runs inside the implicit envelope. The message names the statement and the remedy: pair it on every path, or use `transaction { }`. Capable form, owed and not designed: matching the refused shapes too. Direction of change: newly-rejecting. **Nominal / not yet emitted** by impl#1 or the bootstrap (`g-tx-unmatched-end-unbuilt-s474`; the bootstrap refuses all manual transaction control in a `!` function with `E-BOOTSTRAP-UNSUPPORTED`). | Error |
+| W-TX-ARM-UNREACHABLE | §19.10.5 | A `.Transport` arm on a `!` call inside a client-placed `!` function's composed server batch: the call is now server-to-server inside one request, so a wire failure cannot reach this arm (it reaches the caller of the client function as its own `Transport` variant). Use `?` or a `_` arm instead. **Provenance:** PA reading, S474 dispatch (#1713 review), on the four-doors ruling item 2. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`composeOne`), built by #1713; Nominal on impl#1. | Warning |
 | E-SQL-SLOT-IN-LITERAL | §8.1 | A `${…}` slot inside a quoted SQL string literal (`'…'` / `"…"`) or a SQL comment (`--` / `/* … */`) in a `?{}` template: a bound parameter stands for a whole value, so the slot cannot be bound. The message names the bound form (`LIKE ${"%" + q + "%"}`). **Provenance:** ruling:user-voice-scrml.md S468 "⭐ RULED — "safe ints only, your recs"" item 2 — *"**`E-SQL-SLOT-IN-LITERAL`** — a `${…}` inside a quoted SQL literal or SQL comment is a compile error; the message names the bound form (`LIKE ${"%" + q + "%"}`). §8 sentence + §34 row; the bootstrap emits it (it refuses today with E-BOOTSTRAP-UNSUPPORTED)."* · landed S473 D31. **Not yet emitted under this name:** the bootstrap refuses the slot today as `E-BOOTSTRAP-UNSUPPORTED` (re-code owed, `g-boot-sql-slot-in-literal-code-s473`); impl#1 silently drops it (carried, `g-impl1-sql-slot-inside-quoted-literal-dropped-s468`). | Error |
 | E-SQL-MULTIPLE-STATEMENTS | §8.1.2, §14.8.10, §14.8.11 | In a compilation with a database, a program-body `?{}` (outside `<schema>`, statement or expression position — including a `?{}` inside expression text held unparsed: an `if` / `while` condition, a template-literal slot, a raw `match` arm (S456 fix round F2) — any chain, `.acrossTenants()` included) holds more than one SQL statement: read with the §14.8.10 item (1) token walk, a `;` outside a string literal, quoted identifier, comment or `${…}` slot is followed by any further token (a word, literal, slot, punctuation or another `;`; a `;` inside parentheses counts). A single trailing `;` followed only by whitespace and comments is allowed; a `<schema>` body is not governed; a body outside the closed lexical subset is `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`'s. The message names the fix: one `?{}` per statement, and a `transaction { }` block (§8.5.3, §19.10) when they must be atomic. The slot extents are the emitter's (one reader, JS-aware — §8.1.2; S456 fix round F1). Codegen defence in depth: the emitted driver call is read with a JavaScript parser and a site whose SQL text holds more than one statement throws `E-SQL-MULTIPLE-STATEMENTS` at run time instead of sending it (Postgres runs every statement of `unsafe("…")` without parameters; SQLite runs the statements after a row-less first one on EVERY path — tagged, parameterized, `unsafe` — so on SQLite the token walk is the only protection). **Provenance:** ruling:user-voice-scrml.md S456 "one statement per seams reasonable. push" · resolves `g-tenant-set-config-in-program-body-s456` (S239 r5, executed on PG16: `SELECT set_config('scrml.tenant','B',true); select …` re-pinned the tenant inside the §14.8.11 tier transaction; `set_config('role','none',true)` read every tenant) · Direction of change: newly-rejecting (corpus: 1331 program-body `?{}` bodies in 2581 files incl. flogence/src, 0 hold more than one statement). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` over `compiler/src/schema-differ.js` `programStatementCount`; the codegen guard is `compiler/src/codegen/sql-one-statement-guard.ts`, called from `emit-logic.ts` `case "sql"` and `rewrite.ts` `rewriteSqlRefs`.) | Error |
 | E-SQL-QUERY-NOT-READABLE | §8.1.2, §14.8.10 | In a compilation with a database, a `?{` inside expression text the compiler holds unparsed — an `if` / `while` condition the expression parser did not structure, a template-literal `${…}` slot, a raw `match` arm — that codegen's text path does not lower: not written `?{` + backtick template + `}` (an unbackticked `?{ … }` the parser could not structure), a backtick inside the body, or no `}` right after the closing backtick. No check (one statement per `?{}` — §8.1.2; the program-body allow-list — §14.8.10) can read it, so it is refused at compile; before S456 it was emitted unrewritten (invalid JavaScript) with no diagnostic. A `?{` inside a JS string or comment in that text is data, not a query. Fix: the backtick form, or bind the query to a local first (`const row = ?{`…`}.get()`). **Provenance:** review:s456-S239-one-statement-F2/F4 under ruling:user-voice-scrml.md S456 "one statement per seams reasonable. push" · Direction of change: newly-rejecting (corpus: 0 newly rejected). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/sql-one-statement.ts` `programBodyMultipleStatements` over `compiler/src/sql-in-expression-text.ts` `scanExpressionTextForSql`.) | Error |
@@ -29580,6 +29992,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-HTML-001 | §23.2 | Invalid attribute on known HTML element | Error |
 | E-HTML-002 | §24.2 | Content model violation (only in `strict` mode) | Error |
 | E-HTML-003 | §24.2 | Wrong type for HTML attribute | Error |
+| E-HTML-FOREIGN-BREAKOUT | §24.5 | (S474, PERMANENT: semantic impossibility.) An HTML element is written as a child of SVG or MathML content, gated or not: a breakout start tag (HTML §13.2.6.5; `font` with a static `color` / `face` / `size` included) or an HTML void element name. The case includes a declaration's renders where the declaration is used there, reported at the use. The parser builds such an element outside the `<svg>` / `<math>`. Remedy: `<foreignObject>` / `<mtext>`. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`markupParseDiags` / `mkElem`). Nominal on impl#1. | Error |
+| E-HTML-PARSER-REPAIR | §24.5 | (S474, PERMANENT: semantic impossibility.) An HTML nesting, within one template's static markup, that the "in body" / "in table" rules restructure (HTML §13.2.6.4.7, §13.2.6.4.9–15): a `<p>`-closing element in an open `<p>`; a non-table child of `table` / `tbody` / `thead` / `tfoot` / `tr` / `colgroup`, or text there; a nested `<a>` / `<li>` / `<dd>` / `<dt>` / `<button>` / `<nobr>` / heading / `<option>` / ruby part; `<html>` / `<head>` / `<body>` / `<frameset>`; an element inside an HTML raw-text / RCDATA element (`textarea`, `title`, `xmp`, `iframe`, `noembed`, `noframes`, `noscript`, `plaintext`); a raw U+0000 in markup text. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`markupParseDiags` / `mkRepair`). Nominal on impl#1. | Error |
 | W-HTML-001 | §28.1 | Content model violation under `warn` mode | Warning |
 | ~~W-MACRO-001~~ | §4.9 | **Retired 2026-06-19 (S209 — state-as-primary unification follow-through).** Premised on a macro expansion altering block type at a `<` boundary via whitespace; under NR (§15.15.6) whitespace never reclassifies an opener (P1, 2026-04-30), so the trigger cannot occur. Macro-inserted leading whitespace surfaces W-WHITESPACE-001 (§15.15.5) instead. Spec-only — never implemented. | — |
 | ~~W-PROTECT-001~~ | §11.4 | **Retired 2026-08-01 (S310) — fold-orphan.** Twin of the retired `E-PROTECT-002`: §11 is *"Reserved — Folded"* and §11.4 no longer exists as normative text. Searched §11.4, §52, §14.8.9, §12.2 and the whole SPEC — **no normative definition survives**; index row only, no emitter. Its premise is also superseded by design: server placement is INFERRED (§12.2), not annotated, so "not `server`-annotated" is no longer a meaningful condition — the `server function` modifier is itself deprecated (`W-DEPRECATED-SERVER-MODIFIER`). Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
@@ -29603,7 +30017,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
-| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450). It is the ONE diagnostic for the inner block: since S453 the outer block's own placement error (E-ERROR-001, if it is outside a `!` function) is not repeated on each nested level (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
+| E-ERROR-007 | §19.10.4 | **INTERIM (S474; capable form: the inner block as a savepoint inside the outer, §8.9.2 "Amendment S474" item 3).** Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450). It is the ONE diagnostic for the inner block: since S453 the outer block's own placement error (E-ERROR-001, if it is outside a `!` function) is not repeated on each nested level (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
 | E-TRANSACTION-CONTROL-FLOW | §19.10.4 | An exit from a `transaction { }` block that §19.10.3 does not govern. THREE limbs, all fail-closed (the third added S473). **(1) A `yield`** inside the block, in a function: a `yield` SUSPENDS the block rather than leaving it, so neither of §19.10.3's endings applies — rolling back would discard work the block is about to continue, and committing would end a transaction that is still open. **(2) An exit inside a `match` arm**, where the block's own ending may not be reached: impl#1's `emitMatchExpr` / `emitMultiScrutineeMatch` emit an arm set as an IIFE, so an exit in such an arm returns from the ARM only. Covers a `fail` / `?` inside an arm of a STATEMENT-position `match` within the block (S450 fix round — the rollback runs but the exit leaves only the arm, and the statements after the `match` then run outside any transaction), a `transaction` block INSIDE an arm of a statement-position `match`, whose `fail` / `?` would be swallowed by the arm (S450 re-review), and — **S453** — a `return`, or a `break` / `continue` whose target is outside the block, inside an arm of **either** match position (`g-stmt-match-block-return-falls-through`). ⛑ **The S453 limb exists because its absence was MEASURED:** against an implementation of B1a without it, a `return` in a statement-`match` arm inside a transaction compiled clean, the author's `return` was SWALLOWED (the function returned its own tail value), the post-`match` write RAN, and every row PERSISTED — no rollback at any point. ⛑ **The refusal is on the UNION of arm positions and is coarser than the defect.** A DECL-position `let v = match … { … }` lowers INLINE (`emitMatchExprDecl`, `compiler/src/codegen/emit-logic.ts:5669`, dispatched from the let-decl handler `:2174` and the const-decl handler `:2322`) with no function boundary, so an exit in one of its arms is refused although that lowering may be sound. This validator does not distinguish arm lowerings and fails closed on all of them; narrowing it is `g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`, which names the runtime proof required. An exit whose target is INSIDE the arm (a `break` of a loop declared there) never crosses the arm boundary and is unaffected, as is a `fail` / `?` in an EXPRESSION-position arm (governed, runtime-verified S450). ⛑ **STRUCK AT S453 — no longer this code:** a plain `return`, or a `break` / `continue` whose target is outside the block, anywhere else in the block. Those were the S450 interim refusal and are now RULED: they roll the block back and the exit proceeds (§19.10.3, §19.10.4). Direction of change: **newly-accepting** for those three exits (and **semantics-changed** for what a `transaction` does on them); the two limbs above are **inert**. Provenance: ruling:user-voice-scrml.md S449 (B1a) — *"replace the interim E-TRANSACTION-CONTROL-FLOW refusal for those exits with the rollback"*; the `yield` limb, the widening of the arm limb to those exits, and §19.10.3's evaluation-order SHALL are PA READINGS, flagged as such at §19.10.4, not rulings (emitted at `compiler/src/validators/lint-transaction.ts`.) **(3) S473 (review-surfaced 4) — a refused navigation: `navigate(…)`** reached from inside a `transaction { }` block (written in it, or in a function it calls) is this code — not a block exit, but refused under it: its redirect reaches the user while the block rolls back, silently losing data; move the `navigate` after the block (§20.3, §19.10.3). PA reading: reuse of this code over a new one (one code per rule). **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 4. (The written case is emitted by impl#1 at `compiler/src/validators/lint-transaction.ts` (PR #1679); the reached-through-a-call case is `g-impl1-navigate-via-peer-inside-transaction-not-refused-s473`; Nominal on the bootstrap.) | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
@@ -29850,6 +30264,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2, §19.4.5 | **Meaning changed S469 (dpa-073 F2 — arms are a comma list).** An arm list that does not separate its arms with `,` (PA derivation; the ruling retires the old meaning and names no new one). The BOOTSTRAP enforces it on every missing `,` (dpa-073 F5(4)); only impl#1 keeps reading a wholly newline-separated list. ~~During the dpa-073 F5 migration a wholly newline-separated list is still read;~~ ~~Today the bootstrap still reads a wholly newline-separated list and reports only a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`, the arm-list parser) — owed, `g-bootstrap-newline-arm-lists-accepted-s469`.~~ *(Resolved S469, s469-boot-semicolons #1510:)* emitted by the bootstrap once per missing `,`, at the end of the arm before it (`compiler/self-host-v2/parse.scrml`, its `missingArmComma`), including a `!{}` list separated only by leading `\|` (§19.4.5). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*). ~~impl#1 still emits the OLD meaning (it refuses a `,`) — an owed impl#1 change, `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`.~~ impl#1 no longer emits this code (S469, s469-impl1-arm-commas — `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469` resolved): it ACCEPTS `,` between arms and never enforces it (dpa-073 F5(1)); a `,` that separates nothing is E-PARSE-001. ~~A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.)~~ | Error |
 | E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match` or a `!{}` handler (in a `!{}`, also its soft-deprecated `\| err :> …` spelling, §19.4.5). In a `!{}` arm or a `match` on a failable result the fix is `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`; in a `!{}` also the soft-deprecated `\| .V x :>`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
+| E-MATCH-ELSE-ABSORBS-ERROR | §18.6, §19.4.3, §19.7.1 | **(S474, PERMANENT — security.)** In a `match` whose subject is a failable result — a call of a `!` function, a client call of a server function (its failure set includes `.Transport`, §19.9.10), a `?{}` query — an `else` / `_` arm would take an error variant that no earlier arm names. On a failable result `else` covers the success value `.Ok` only. The exploit it closes: `match check(pw) { .Locked :> "locked", else :> "LOGGED IN" }` logged in on `.Denied`. The message names every error variant the arm would have taken and offers `_ e :>` (§18.6.1), which takes every remaining error in one arm; explicit error arms followed by `else` are accepted. Reported instead of E-TYPE-020 for that `match`. Does NOT fire for a `!{}` handler's arms (§19.4.5: every arm there is a failure) or for a `match` over an error value. **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix` S466 readings" item 1. *Code name: PA reading.* Emitted by the bootstrap: `compiler/self-host-v2/analyze.scrml` `coverDiags` (with `resolveArms`). **Nominal / not yet emitted** by impl#1, which carries it (§34.0; `g-impl1-else-absorbs-error-variants-s474`, HIGH, deferred under the S471 impl#1 policy). | Error |
 | E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`) is exempt — it covers every position at once. *(S452 currency correction, spec: §18.2 / §18.19 grammar — struck "optionally `\| _`"; impl#1 still accepts it, `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`.)* Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted at `compiler/src/type-system.ts:19159` (`checkMatchDiagnostics`).) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
@@ -30041,9 +30456,9 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SQL-008 | §8.1.1, §44.8 | `?{` SQL block has no matching `}` — unterminated SQL template, unterminated backtick template literal, or unmatched `${` interpolation inside the SQL body. Parser-stage hard error (F-SQL-001) replacing the prior silent-data-loss behaviour. (Catalog addition S78 audit; emitted at `compiler/src/expression-parser.ts`; surfaced via `compiler/src/ast-builder.js`.) | Error |
 | E-COMPONENT-013 | §15.10 | `bind:propName` at the call site where `propName` is not declared as a `bind` prop in the target component's `props` block. Resolution: declare the prop with `bind`, or remove the `bind:` prefix at the call site. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
 | E-COMPONENT-PROP-WRITE | §15.11.1, §15.13.2 | A component body writes (assignment, compound assignment, `++` / `--`, a forwarded `bind:value=propName`) a prop the call site did not bind with `bind:propName=@var` — a by-value prop, or a bindable prop passed by value or omitted. The prop is passed by value; bind it with `bind:` at the call site to write back, or copy it into a component-owned cell. The write is never lowered onto the caller's cell. (Emitted at `compiler/src/component-expander.ts`, `expandComponentNode`. Provenance: ruling:user-voice-scrml.md S458 "your recs on both D1 codes" — replaces the interim reuse of E-ASSIGN-004.) | Error |
-| E-COMPONENT-NAME-DUPLICATE | §9.1, §21.2 | Two components (declarations with `renders`) of one name in one program, declared in two files. A component's name is its CSS scope key (`data-scrml="ConstructorName"`, §9.1 DQ-7), so the two would share one style scope; exporting does not qualify the name. Rename one. (In one file the pair is E-SCOPE-010, §7.6.) Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`dupDecls`); Nominal on impl#1 (§34.0). | Error |
+| ~~E-COMPONENT-NAME-DUPLICATE~~ | §9.1, §21.2 | **Retired S474** (ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 3): two components of one name in two files are legal, each with its own per-file scope key (§9.1 DQ-7); in one file the pair is E-SCOPE-010 (§7.6). Was (S473): two components of one name in one program, declared in two files. Not emitted by either compiler (the bootstrap stopped emitting it in #1706; impl#1 never did). | Error |
 | E-COMPONENT-014 | §15.10 | `bind` prop declared with a non-primitive type (struct or state type). `bind` props must be primitive types; for non-primitive cross-component state use state projection (§15.11.2) instead. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Error |
-| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** more than one unnamed `<slot/>` in a declaration's `renders` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"), counted **per render path** since S474 F7 — one unnamed slot in each branch of an exclusive set (an `if=` chain, a lifting `if`, the arms of one `match`) is legal (ruling:user-voice-scrml.md S474 item 2); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`). | Error |
+| E-COMPONENT-020 | §15.14, §16.4 | More than one `${...}` or `${children}` spread node in a component body. A component body has at most one spread fill-site; multiple spreads have no defined semantics. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** more than one unnamed `<slot/>` in a declaration's `renders` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"), counted **per render path** since S474 F7 — one unnamed slot in each branch of an exclusive set (an `if=` chain, a lifting `if`, the arms of one `match`) is legal (ruling:user-voice-scrml.md S474 item 2); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`). **S474 (§66.15.2):** a `<slot/>` in an `<each>` row or a `${ for … lift }` row is this code too — an INTERIM refusal; the per-row (scoped) slot is owed (g-slot-per-row-scoped-unbuilt-s474). | Error |
 | E-COMPONENT-021 | §16.4 | Caller provides unslotted children but the target component has no `${...}` spread in its body — the children have nowhere to go. Resolution: add a spread in the component body, or remove the unslotted children. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) **S473 D11 — carried into §66.15.2:** a §66 use with children whose declaration's `renders` holds no `<slot/>` is this code too (ruling:user-voice-scrml.md S473 D11 "your recs on all"); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`) (`g-boot-slot-count-unchecked-s473`, resolved by s473-boot-ruled-refusals). | Error |
 | W-COMPONENT-001 | §15.11 | Component declares a function-typed prop. Function props are an escape hatch (advisory): prefer `bind` props or state projection for typical cross-component data flow. The function-typed prop continues to work; this warning surfaces the escape-hatch nature so developers don't pick it by accident. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts`.) | Warning |
 | E-CTRL-001 | §17.5, §17.1.1, §17.1.2.2 | `else` attribute appears on an element without a preceding `if=` or `else-if=` sibling at the same level — or on an element that is not part of a LOWERED `if=` chain: a structural element (`<engine>` / `<match>` / `<each>`, an `<each>`'s `<empty>`), an `<onTimeout>` / `<onIdle>` / `<onTransition>`, markup in an `<each>` row or lifted markup. `else` only makes sense as a continuation of an `if=` chain; where impl#1 builds none it is refused rather than rendered ungated (S469). (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js` (`collapseIfChains`, `refuseUnconsumedStructuralChainAttrs`), `compiler/src/codegen/refused-lowering-errors.ts` (`refuseUnloweredElseChain`), `compiler/src/symbol-table.ts` (`timerGateAttrDiagnostic`), `compiler/src/type-system.ts` (the `<onTransition>` check).) | Error |
@@ -30136,9 +30551,9 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SYNTAX-044 | §17.6, §42.2.3 | A `given` head that is not an identifier-list followed by `:>` (or the legacy `=>`): a property path (`given obj.field :>`), a comparison, call or other expression (`given id < 0 :> fail …`, `given f(x) :>`), no name (`given (c) :>`), or no separator (`given n { … }`, `given n -> …` in a STANDALONE guard — on a `given` ARM of a `match`, `->` is the §18.2 deprecated arm-separator alias and is accepted, S462) — and a STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :> return 1`: a `given` guard must be `given <names> :> { … }`; a `given x :> expr` match ARM is a different production and is not refused) — in logic and markup-`${}` contexts alike. §42.2.3: "A `given` head SHALL contain only an identifier-list"; `given-guard ::= 'given' identifier-list (':>' | '=>') block`. The message names the fix: a condition is `if (<cond>) { … }`; presence is `if (x is given) { … }`. One error per head; the refused head surfaces neither W-GIVEN-PRESENCE-DEPRECATED nor E-SYNTAX-045 (the rebind head `given c = <expr> :>` keeps E-SYNTAX-045). **S462 widening — direction of change: newly-rejecting** (conformance restoration: before it, impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and ran the `fail` unconditionally, `g-given-bool-expr-fail-runs-unconditionally-s460`). **Provenance:** ruling:user-voice-scrml.md S462 "a" · supersedes (text): *"Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers."* (Catalog addition S78 audit.) The brace-less body (S462 fix round 1, pa-ruled under §42.2.3's grammar; corpus measured — see `docs/changes/s462-given-presence-deprecate/progress.md`) is emitted at `compiler/src/type-system.ts:14251` (the `given-guard` case, where the match-arm context is known). Emitted at `compiler/src/ast-builder.js:11604` and `compiler/src/ast-builder.js:16815` (the head check after the name list in both `given` parsers; message via `givenHeadError`), and at `compiler/src/ast-builder.js:11548` / `:16758` (the property path); also by the bootstrap's in-place guard parser in `compiler/self-host-v2/parse.scrml` (logic context). | Error |
 | E-SYNTAX-045 | §17.6, §42.2.3 | Rebind form `given <name> = <expr> :>` used in a `given` presence guard. `given` narrows in place — no variable is rebound to a new name (§42.2.3: “No variable is rebound to a new name; each identifier is narrowed in place”). The sibling shape of the property-path reject (E-SYNTAX-044): both reject a non-bare-identifier in `given` head position. Bare `=` is the trigger; `==` / `=>` / `:>` (equality, deprecated separator, canonical separator) do NOT fire. Resolution: declare the value first (`let n = <expr>` then `given n :> { ... }`), or narrow an existing variable in place (`given <existingVar> :> { ... }`). Fires for BOTH logic-context and markup-${}-context given-guards (previously logic emitted E-CODEGEN-INVALID-LOGIC and markup silently compiled). (Catalog addition S189 g-given-rebind dog-food; emitted at `compiler/src/ast-builder.js` both given-guard parse sites.) | Error |
 | E-SYNTAX-064 | §17.7.3, §3.4 | The `@.` contextual iteration sigil ("the current iteration value" / `@.field` for a field of the current item) appears OUTSIDE any `<each>` body scope, where it has no referent. Fires at every reachable `@.`-bearing position outside an each-body: an attribute value (`<li title=@.name>` / `class:done=@.done`), a Tier-0 `${for (it of @items) { lift ... }}` handler-call arg (`onclick=ping(@.id)`), and a Tier-0 lifted interpolation (`lift <li>${@.name}</li>`). A Tier-0 `${for...lift}` is NOT an `<each>` body scope — use the bare loop variable (`it.field`) there; in a `<each>` element use `@.` inside the body or bind an alias with `as name` (`<each in=@items as item>` → `item.field`). Replaces the prior confusing leak (raw `@.` reaching codegen → `E-CODEGEN-INVALID-LOGIC`) and the misleading `E-SCOPE-001` on the base `@` token. (Catalog addition S157 Bug 70 — wired the previously-queued code; emitted at `compiler/src/type-system.ts` visitAttr + lift-expr scan.) | Error |
-| E-BATCH-001 | §8.9.3, §19.10.5 | Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error |
+| E-BATCH-001 | §8.9.3, §19.10.5 | **Retired from the language (S474; ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body", PA derivation 3).** A `transaction { }` block inside a `!` server body now runs as a savepoint within the implicit envelope (§8.9.2 "Amendment S474" item 3), so the two compose and no source shape has the language trigger. Supersedes: *"Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`."* Direction of change: newly-accepting. impl#1 still emits it (`conformance/cases/error/implicit-tx-explicit-transaction-block` still pins it) — an impl#1 divergence, not a language rule (`g-impl1-retired-batch-codes-still-emitted-s474`; unit pins `g-retired-batch-codes-unit-test-pins-s474`). (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error (impl#1 only; retired from the language) |
 | E-BATCH-002 | §8.10 | Batched `IN (...)` parameter count exceeds `SQLITE_MAX_VARIABLE_NUMBER` (32766) and chunking is not statically applicable (e.g., hoisted-loop form). Runtime over-limit also throws this code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-control-flow.ts`.) | Error |
-| W-BATCH-001 | §8.9.3 | Explicit `?{BEGIN}` inside a `!` handler suppresses the implicit per-handler transaction envelope. Use `transaction { }` or `.nobatch()` for clarity. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:660`.) **S451 — narrowed to `!` functions** (ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c); supersedes the trigger *"inside a handler"*): outside a `!` function there is no implicit envelope to suppress, and the `?{BEGIN}` is E-ERROR-015 (§19.10.4); impl#1 still emits this warning there (`conformance/cases/sql/batch-warn-info`; frozen, `g-impl1-manual-tx-outside-failable-s451`). | Warning |
+| W-BATCH-001 | §8.9.3 | **Retired from the language (S474; ruling:user-voice-scrml.md S474 "⭐ RULED — envelope every `!` server body", PA derivation 3):** an explicit `?{BEGIN}` inside a `!` server body opens a savepoint within the implicit envelope and suppresses nothing (§8.9.2 "Amendment S474" item 3), so the warning's premise is gone. impl#1 still emits it (`compiler/src/batch-planner.ts`; `conformance/cases/error/implicit-tx-explicit-begin`, `conformance/cases/sql/batch-warn-info`) — an impl#1 divergence (`g-impl1-retired-batch-codes-still-emitted-s474`; unit pins `g-retired-batch-codes-unit-test-pins-s474`). Formerly: Explicit `?{BEGIN}` inside a `!` handler suppresses the implicit per-handler transaction envelope. Use `transaction { }` or `.nobatch()` for clarity. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:660`.) **S451 — narrowed to `!` functions** (ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c); supersedes the trigger *"inside a handler"*): outside a `!` function there is no implicit envelope to suppress, and the `?{BEGIN}` is E-ERROR-015 (§19.10.4); impl#1 still emits this warning there (`conformance/cases/sql/batch-warn-info`; frozen, `g-impl1-manual-tx-outside-failable-s451`). | Warning (impl#1 only; retired from the language) |
 | ~~E-MW-001~~ | §40, §52.13 | **Retired 2026-05-11 (S80).** The prior pairing requirement (`csrf="on"` ⟹ `auth=`) was retired alongside the `csrf="on"` value. The canonical value set is `csrf="auto" \| "off"` per §52.13; invalid `csrf=` literals now emit `W-ATTR-002` instead. (Catalog addition S84 Wave 2 #5 — reconciles S78 audit residual.) | — |
 | D-BATCH-001 | §8.6, §8.10.1 | For-loop nearly matches the Tier 2 syntactic batching template but was not rewritten; the diagnostic message lists the specific near-miss reason (e.g., two equality predicates, `.run()` terminator, `.forEach`, tuple-WHERE). Informational only — the loop continues to compile as a row-by-row SQL pattern. Closes the coverage gap between pure-syntactic detection and dataflow-based detection. (Catalog addition S84 Wave 2 #5; emitted at `compiler/src/batch-planner.ts`. SPEC body table at §8.6 line 5752.) | Info |
 | E-SYNTAX-DURATION | §6.13.3, §51.0.M | A `debounced=` or `throttled=` reactivity attribute value (or other `after=`-grammar-shaped duration) is malformed — neither literal-form (`Nms` / `Ns` / `Nm` / `Nh`) nor computed-form (`${expr}<unit>`) parses cleanly. Same grammar as `<onTimeout after=>`; the parser is the shared `parseAfterDuration` helper. (Catalog addition S84 Wave 2 #5; emitted at `compiler/src/type-system.ts`.) | Error |
@@ -30159,7 +30574,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
 | E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
 | E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
-| E-VALUE-SERVER-CALL | §13.7, §6.15, §13.8, §13.9.1 | An expression the program would have to wait for appears in a **value position** (§6.15) — a call whose callee is server-placed (§12.2); a call to an async-colored client function (§13.2 — one that reaches a server call or a Promise-returning standard-library call); a `?{}` query; or a call to a Promise-returning standard-library function (`fetch`, the `scrml:http` functions). *(The last three limbs: ruling:user-voice-scrml.md S451 "your recs on all five" item 3 — O-R1-1 / O-R1-2 = yes. An `<errorBoundary>` does not exempt the position — item 1.)* The value positions: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation, a display-text-literal interpolation, a `renders` body, a markup attribute value). A value position has no statement boundary to suspend at, so it cannot wait for the round trip. Not this code: the right-hand side of a §52 `<x server>` declaration (its placeholder and hydration load, §52.4.3 / §52.6.5), the initializer of a Shape-1 cell DECLARED `(not to T)` — a pending cell (§13.9.1; S467) — and every §6.15 action position (handlers, `bind:`, function bodies, lifecycle element bodies incl. `<request>`, engine `effect=` / `<onTransition>`, body-top statement lists). The pending-cell exemption is narrow: a cell with any other declared type or none, a derived cell (`const <x>: (not to T) = f(@id)`), and a waiting value written directly in a markup interpolation or attribute value all stay this code; the compiler does not infer `(not to T)`. The message SHALL name the position, what would wait, and the fix: load the value with a `<request>` (§6.7.7) into a cell and read the cell, or declare the cell `(not to T)` (§13.9). This code is the value-position instance of §13.8's one rule. **Provenance (S467 pending-cell exemption and second fix):** ruling:user-voice-scrml.md S467 "(a) Opt-in marker" (dpa-023 F1: *"a cell with no marker whose initializer waits keeps E-VALUE-SERVER-CALL"*) · ruling:user-voice-scrml.md S467 "(a) Cells only" (F3: *"a server call in an interpolation or attribute stays E-VALUE-SERVER-CALL"*) · ruling:user-voice-scrml.md S467 "three §13.9 pending-cell details" (*"No — keep it refused"* — the derived cell). Nominal like the rest of this row (§13.9 is Nominal). **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R1 = (a): *"a server call in a value position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`"*). Newly-rejecting. **Nominal** for the language as a whole; lands with the bootstrap. **impl#1 emits it at the render positions (impl#1-provisional, partial):** a server call rendered inside an `<errorBoundary>` (`compiler/src/type-system.ts` `boundaryHandlesCall`, S468), and every render position — a markup interpolation, an attribute value, a derived formula, an `<each>` / `<match>` head or arm body, an engine `derived=` — holding a call the file's async set colours waiting, a `?{}`, or text naming one (`compiler/src/codegen/render-waiting-calls.ts`, S470) — and, since S470 `s470-render-residue-host-promises`, a call of the host `fetch` (item 4; also `globalThis.` / `window.` / `self.fetch`) or of a file function that reaches it (item 2), unless the file binds `fetch` itself or a local shadows it (`compiler/src/codegen/host-promise-globals.ts`). impl#1 has no async render path, so such a position held a pending Promise (always truthy) and a gate opened on a wrong password. **Provenance (S470 impl#1 emission):** ruling:user-voice-scrml.md S469 item 1 (*"A server/async call in a render position … Refuse in impl#1 (Recommended)"*). A cell initializer (`<n> = f()`) is NOT refused by impl#1 (carried as `g-impl1-value-server-call-s451`, narrowed to that position). | Error |
+| E-VALUE-SERVER-CALL | §13.7, §6.15, §13.8, §13.9.1 | An expression the program would have to wait for appears in a **value position** (§6.15) — a call whose callee is server-placed (§12.2); a call to an async-colored client function (§13.2 — one that reaches a server call or a Promise-returning standard-library call); a `?{}` query; or a call to a Promise-returning standard-library function (`fetch`, the `scrml:http` functions). *(The last three limbs: ruling:user-voice-scrml.md S451 "your recs on all five" item 3 — O-R1-1 / O-R1-2 = yes. An `<errorBoundary>` does not exempt the position — item 1.)* The value positions: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation, a display-text-literal interpolation, a `renders` body, a markup attribute value). A value position has no statement boundary to suspend at, so it cannot wait for the round trip. Not this code: the right-hand side of a §52 `<x server>` declaration (its placeholder and hydration load, §52.4.3 / §52.6.5), the initializer of a Shape-1 cell DECLARED `(not to T)` — a pending cell (§13.9.1; S467) — and every §6.15 action position (handlers, `bind:`, function bodies, lifecycle element bodies incl. `<request>`, engine `effect=` / `<onTransition>`, body-top statement lists). The pending-cell exemption is narrow: a cell with any other declared type or none, a derived cell (`const <x>: (not to T) = f(@id)`), and a waiting value written directly in a markup interpolation or attribute value all stay this code; the compiler does not infer `(not to T)`. The message SHALL name the position, what would wait, and the fix: load the value with a `<request>` (§6.7.7) into a cell and read the cell, or declare the cell `(not to T)` (§13.9). This code is the value-position instance of §13.8's one rule. **Provenance (S467 pending-cell exemption and second fix):** ruling:user-voice-scrml.md S467 "(a) Opt-in marker" (dpa-023 F1: *"a cell with no marker whose initializer waits keeps E-VALUE-SERVER-CALL"*) · ruling:user-voice-scrml.md S467 "(a) Cells only" (F3: *"a server call in an interpolation or attribute stays E-VALUE-SERVER-CALL"*) · ruling:user-voice-scrml.md S467 "three §13.9 pending-cell details" (*"No — keep it refused"* — the derived cell). Nominal like the rest of this row (§13.9 is Nominal). **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R1 = (a): *"a server call in a value position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`"*). Newly-rejecting. **Nominal** for the language as a whole; lands with the bootstrap. **impl#1 emits it at the render positions (impl#1-provisional, partial):** a server call rendered inside an `<errorBoundary>` (`compiler/src/type-system.ts` `boundaryHandlesCall`, S468), and every render position — a markup interpolation, an attribute value, a derived formula, an `<each>` / `<match>` head or arm body, an engine `derived=` — holding a call the file's async set colours waiting, a `?{}`, or text naming one (`compiler/src/codegen/render-waiting-calls.ts`, S470) — and, since S470 `s470-render-residue-host-promises`, a call of the host `fetch` (item 4; also `globalThis.` / `window.` / `self.fetch`) or of a file function that reaches it (item 2), unless the file binds `fetch` itself or a local shadows it (`compiler/src/codegen/host-promise-globals.ts`). impl#1 has no async render path, so such a position held a pending Promise (always truthy) and a gate opened on a wrong password. **Provenance (S470 impl#1 emission):** ruling:user-voice-scrml.md S469 item 1 (*"A server/async call in a render position … Refuse in impl#1 (Recommended)"*). A cell initializer (`<n> = f()`) is NOT refused by impl#1 (carried as `g-impl1-value-server-call-s451`, narrowed to that position). **S474 (§13.7, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 1):** display positions (a text `${}` interpolation, an `<each in=>` / `for … of` head) are INTERIM (g-display-position-pending-value-unbuilt-s474); gates (`if=` / `else-if=` / `show=`), attribute values, `<match on=>` / match / ternary subjects and derived formulas are PERMANENT (security). | Error |
 | E-SERVER-CELL-RESERVED-NAME | §52.6.8 | `error` used as (1) the name of a child field or an attribute of a `<x server>` declaration, or (2) the name of a field of a struct type that is the type of a `<x server>` cell. Either would hide the compiler-synthesized load-failure state `@x.error` (§52.6.8). The message names the field and the property it hides. Not affected: a client-local cell, a top-level declaration named `error`, a struct type never used as a `<x server>` cell's type, an array element type. The §55.5.3 precedent (E-VALIDITY-RESERVED-NAME) applied to the one name §52.6.8 synthesizes. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all five" item 2 (`@x.error`, *"mirroring `<request>.error`"*); the reserved name and this code are the SPEC landing's resolution of the collision (**confirmed S451** — ruling:user-voice-scrml.md S451 "your recs on all of them" item 3: *"`error` reserved on server cells"*). Newly-rejecting; corpus impact measured zero (`docs/changes/s451-spec-open-items/progress.md`). **Nominal / spec-ahead — not yet emitted; lands with the bootstrap.** | Error |
 | E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
 | E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
@@ -30196,7 +30611,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CTRL-010 | §17.2 | An `else` body appears on a bare `for` loop (one without `lift`). `else` on a `for/lift` loop fires when the source iterable is empty; on a plain `for` loop the else has no defined semantics. Resolution: convert to `for/lift`, or replace `else` with a post-loop conditional. (Catalog addition S84 Wave 2 #5; full prose at §17.2 line 9101.) | Error |
 | W-CHANNEL-001 | §38.11 | A `<channel>`'s `topic=@var` (or `topic=not` literal) can be statically proven to always be `not` at the call site, so `broadcast()` calls will always be a no-op. Resolution: provide a non-`not` topic value, or remove the broadcast site. The warning is NOT emitted when the `not` state is dynamic (i.e., `@var` can hold `not` at some runtime states but a topic value at others). (Catalog addition S84 Wave 2 #5; full prose at §38.11 lines 16148-16210.) | Warning |
 | W-USE-001 | §41.5 | Two `use` declarations bring the same name into markup scope. The later declaration wins; the warning surfaces the silent shadowing so the developer can confirm intent or rename. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17371, 17466.) | Warning |
-| W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) | Warning |
+| W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) **S474 (§41.7):** only when the two imports bring the SAME declaration; two DIFFERENT declarations on one local name (user + user, user + stdlib, stdlib + stdlib, one import list) are E-SCOPE-010 at the later import, PERMANENT (semantic impossibility). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`linkage`).) | Warning |
 | ~~E-EXHAUST-001~~ | §18 | **Retired 2026-03-27 (§18 TS-C-gate review).** The PIPELINE.md Stage 6 alias for the non-exhaustive-match-over-union case is now `E-TYPE-020`. All references replaced. (Catalog addition S84 Wave 2 #5; retirement note at §18 line 10023.) | — |
 | E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (an `<effect>` body — formerly a `when` body, S447 §6.7.4 — a `<timer>` body, a `<timeout>` body, an `animationFrame` callback, or — S449 §6.7.1a, Nominal / not yet emitted — an `<onMount>` body whose owner can mount more than once: an `if=` scope, an `<each>` row, a route region). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) (Emitted at `compiler/src/type-system.ts`.)| Error |
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
@@ -30264,14 +30679,14 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SQL-007 | §44.4 | A `?{}` SQL block appears in a non-async context (e.g., inside a `fn` body, top-level synchronous markup attribute value). SQL queries return promises; they require an async-capable surrounding context. (Catalog addition S84 Wave 2 #5; full prose at §44.4; row at §8.7 line 5747 + §44.7 line 18131.) | Error |
 | E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `<db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `<db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
 | E-SQL-010 | §19.10.6, §44.7 | `transactions="concurrent"` is declared for a SQLite database. The opt-in runs each transaction on its own connection from a Postgres / MySQL connection pool; a SQLite database is one connection, so its transactions always run one at a time. Resolution: remove the attribute, or use a `postgres://` / `mysql://` database. (Catalog addition S449 — ruling C opt-in (b); emitted at `compiler/src/codegen/emit-server.ts:6956` `concurrentTransactionsFor`.) | Error |
-| E-SQL-011 | §8.9.2, §19.10.5, §19.10.6, §8.1.1, §44.7 | A transaction spans two databases. **Language trigger (S451 ruling 4a):** a `!` function holds a transaction envelope on database A — the implicit per-handler transaction, a `transaction { }` block, or a manual `?{BEGIN}` — and, while it is open, writes a database B other than A, by its own `?{}` or transitively through any function it calls. A write is a non-`SELECT` `?{}` (unclassifiable = write); reads of B are allowed. The envelope covers its own database only, so its rollback could not undo the write to B; cross-database atomicity is not offered. The message names the function, both databases, the call path to the write, and the fixes (move the write out of the function, or drop the envelope with `.nobatch()`). **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 4. **Nominal / not yet emitted** by impl#1 for this trigger (frozen; `g-impl1-cross-database-write-in-envelope-s451`); lands with the bootstrap. **impl#1 also emits this code** for two shapes that are implementation limits, not language rules: one server function whose own `?{}` sites resolve to two databases, enveloped or not (emitted at `compiler/src/codegen/emit-server.ts:1828`; reachable only from a synthetic tree — a function body declares no database scope), and a file whose `watches=` channels sit in two database scopes (emitted at `compiler/src/codegen/emit-server.ts:6652`; change capture runs on one connection per file). (Catalog addition S451 — the code was emitted by the S451 nearest-scope fix with no row.) | Error |
+| E-SQL-011 | §8.9.2, §19.10.5, §19.10.6, §8.1.1, §44.7 | A transaction spans two databases. **Language trigger (S451 ruling 4a):** a `!` function holds a transaction envelope on database A — the implicit per-handler transaction, a `transaction { }` block, or a manual `?{BEGIN}` — and, while it is open, writes a database B other than A, by its own `?{}` or transitively through any function it calls. A write is a non-`SELECT` `?{}` (unclassifiable = write); reads of B are allowed. The envelope covers its own database only, so its rollback could not undo the write to B; cross-database atomicity is not offered — PERMANENT (semantic) when either database is SQLite (no prepare phase, so no protocol makes a commit across two independent connections crash-atomic), INTERIM for a Postgres / MySQL pair where two-phase commit exists (S474, §8.9.2 "Amendment S474" item 5). The message names the function, both databases, the call path to the write, and the fix: move the write out of the function (call it after the function returns). *(S474 — supersedes "the fixes (move the write out of the function, or drop the envelope with `.nobatch()`)": `.nobatch()` no longer touches the envelope, and every `!` server body with a query has one, §8.9.2 "Amendment S474" items 2 and 5.)* **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 4. **Nominal / not yet emitted** by impl#1 for this trigger (frozen; `g-impl1-cross-database-write-in-envelope-s451`); lands with the bootstrap. **impl#1 also emits this code** for two shapes that are implementation limits, not language rules: one server function whose own `?{}` sites resolve to two databases, enveloped or not (emitted at `compiler/src/codegen/emit-server.ts:1828`; reachable only from a synthetic tree — a function body declares no database scope), and a file whose `watches=` channels sit in two database scopes (emitted at `compiler/src/codegen/emit-server.ts:6652`; change capture runs on one connection per file). (Catalog addition S451 — the code was emitted by the S451 nearest-scope fix with no row.) | Error |
 | E-CELL-OUT-OF-SCOPE | §51.0.Q | Reading a nested engine's auto-declared variable from outside the outer engine's composite state-child. The inner variable is reachable by canonical `@` access only while the outer is in the composite state-child. Deferred to A1c codegen for runtime-guard implementation; not yet fired in v0.next P1. (Catalog addition S84 Wave 2 #5; full prose at §51.0.Q line 21617.) | Error |
 | E-MW-003 | §40 | `resolve(request)` is called zero times or more than once in a `handle()` middleware body on a single execution path. `resolve` invokes the rest of the pipeline and MUST run exactly once per request. An early-return branch that does NOT call `resolve` is valid; the rule applies only to paths that DO call it. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17225, 17264, 17305.) | Error |
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
 | E-TYPE-043 | §17.6, §33, §42.3.3, §48 | **Widened S469.** (1) A function with a non-optional declared return type has a code path that returns `not` (the absence sentinel) ~~— directly via `return not` or implicitly by falling off the end of the function body~~ via `return not`. Resolution: include `\| not` in the declared return type, or return a non-`not` value. (2) **(S469)** A function with ANY declared return type — `-> T \| not` included — has a path that does not end in `return <expr>;`: it can reach the end of its body, has a bare `return;`, or ends in a tail expression it does not `return`. Falling off is never `not` and never JS `undefined`; write `return not;` (`-> T \| not`) or `return <value>;`. ~~Server functions that fall through implicitly are subject to the same rule.~~ Server functions are subject to the same rule (falling off no longer means `not`, §42.9). Provenance of (2): ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with a declared return type, `-> T \| not` included, MUST `return` on every path; falling off is a compile error, so you write `return not;`."*); bare `return`: the PA application recorded there. Limb (2) is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** for `-> T \| not` (impl#1 carries it, §34.0). (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 17901, 17928, 17988.) | Error |
 | E-RETURN-INCOMPLETE | §48, §48.8, §48.13 | A function with NO declared return type (or a `!` function, which has no success-type slot, §19.4.1) returns a value on some path (`return <expr>;`) and on another path falls off the end of its body or has a bare `return;`. If any path returns a value, every path SHALL (§48 "The return rule", rule 3). Resolution: end every path with `return <value>;`, or declare the return type. **Code name provisional** (named by the bootstrap, S469; not yet among the S469 confirmed names). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with no return type returns nothing, and if any path returns a value, every path must (error)."*). Direction of change: newly-rejecting. | Error |
 | E-PARAM-TYPE-REQUIRED | §7.5, §7.3.4, §48.2.2, §35.2.1 | A parameter of a `function` / `fn` declaration or expression (named or anonymous; `server`, `pure`, `export`, generator, nested, `lin`) written without `: T`. A default does not stand in for the type (`n = 1` → `n: int = 1`). Also a bare parameter of a lambda outside the three inferring positions (a standalone `const f = (x) => …`, a lambda passed to a host call). NOT fired for a lambda that is a tape method's callback, an event handler, or an argument to a parameter whose type spells the function signature (§7.5; ruling:user-voice-scrml.md S469 "⭐ RULED — lambda parameters inferred when the position fixes the type" — *"Infer when the position fixes it (Rec)"*). Reported once per parameter, naming it; the fix-it writes `: T`. Calls of a refused declaration are not checked again (no cascade). ~~**Code name provisional (PA, S469).**~~ **Code name confirmed S469** (ruling:user-voice-scrml.md S469 "⭐ RULED — O61 reach and the page/theme half; impl#1 divergences; code names" — *"Code names confirmed: E-IMPL1-RULED-FORM-UNSUPPORTED and E-PARAM-TYPE-REQUIRED."*). **Nominal / spec-ahead — not yet emitted under this name:** the bootstrap refuses an unannotated parameter today as `E-BOOTSTRAP-UNSUPPORTED` (re-code owed — the bootstrap SHALL report it as `E-PARAM-TYPE-REQUIRED`, `g-boot-param-type-required-code-s473`; ruling:user-voice-scrml.md S473 D31 "your recs on all" — *"landing the two rulings that never reached the SPEC: S468 E-SQL-SLOT-IN-LITERAL, and the §7.5 E-PARAM-TYPE-REQUIRED re-code"*); impl#1 accepts it (impl#1 carries the rule, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"* (*"`function f(x: int)` is required; an unannotated parameter is an error."*). Direction of change: newly-rejecting. | Error |
-| E-ARM-TAIL-VALUE | §18.5, §17.6.10 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. **(S469 r5)** Only after a statement: a brace holding exactly ONE expression (`.A :> { e }`) is that expression and is not this code (ruling:user-voice-scrml.md S469 "⭐ RULED — `{ e }` in a value-position match arm is that expression" — *"Allow { e } in arms too (Recommended)"* (*"a brace holding ONE expression is that expression. `lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE."*)). **(S469)** Also a value-form / if-as-expression `if` branch that holds a statement and ends in a bare expression (a branch of exactly one expression is that expression — ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Keep { e }, lift once a statement (Rec)"*). A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted.**~~ Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` for `match` and `!{}` block arms (s469-boot-ruled-backlog); the value-form `if` branch limb (§17.6.10) is **not yet emitted** by either compiler; **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
+| E-ARM-TAIL-VALUE | §18.5, §17.6.10 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. **(S469 r5)** Only after a statement: a brace holding exactly ONE expression (`.A :> { e }`) is that expression and is not this code (ruling:user-voice-scrml.md S469 "⭐ RULED — `{ e }` in a value-position match arm is that expression" — *"Allow { e } in arms too (Recommended)"* (*"a brace holding ONE expression is that expression. `lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE."*)). **(S469)** Also a value-form / if-as-expression `if` branch that holds a statement and ends in a bare expression (a branch of exactly one expression is that expression — ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Keep { e }, lift once a statement (Rec)"*). A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted.**~~ Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` for `match` and `!{}` block arms (s469-boot-ruled-backlog); the value-form `if` branch limb (§17.6.10) is **not yet emitted** by either compiler; **Nominal on impl#1** (impl#1 carries it, §34.0; carried gap `g-impl1-arm-tail-value-unemitted-s474`, pinned by `match-block/s474-arm-tail-value-after-statement`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | E-TYPE-044 | §17.6 | `given` (presence-guard) is applied to a variable whose declared type does not include `\| not`. The guard has nothing to refine — the variable is already known to be non-`not`. Resolution: drop the `given` guard, or widen the variable's type. (Catalog addition S84 Wave 2 #5; full prose at §17.6 line 17929.) | Error |
 | E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point (§42.3.5, S462 "b"). A provably present write narrows again; a suspension point (a server call, a body-split boundary, a `yield`) ends every reactive cell's narrowing; a function body (a lambda, an event handler, a nested function) created in a narrowed scope re-tests reactive cells unless a known built-in calls it synchronously (§42.3.5, S462 "a"); an event handler inside an `if=` / `else-if=` gate keeps the narrowing that gate gives its cell when it handles a user-input event (an allow-list, §42.3.5: `click`, `input`, `keydown`, … — not `focus` / `blur` / `change` / leave / cancel / animation / custom events) (S462 "a", Q18). (Emitted at `compiler/src/type-system.ts` `checkOptionalMemberAccess`.) An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) | Error |
 | E-CONTRACT-002-RT | §53.11 | **Reserved.** Named shape registry lookup is fully resolved at compile time; this runtime form SHALL NOT be emitted by the runtime. Preserved for forensic search-hit stability and to mirror the runtime/compile-time naming convention used elsewhere in the contract family. (Catalog addition S84 Wave 2 #5; full prose at §53.11 lines 25028-25030.) | Runtime |
@@ -30345,7 +30760,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 
 ### 34.1 Native-Parser Parse Diagnostics
 
-*The 82 live codes in this sub-section (31 expression-grammar, 49 statement-grammar, 2 `I-NATIVE-BLOCK-*`; one further row, `E-MARKUP-VALUE-UNCLOSED`, is struck) are **parse diagnostics of the reference implementation (impl#1), emitted by its native parser (`compiler/native-parser/`) on the paths where impl#1 routes source through that parser**: re-parsing a component body (component-expander passes the native errors through unchanged), re-parsing `^{}` emit output and `<match>` arm markup, the `defer` / `yield` structure lint, and the E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML pass. They are **informative for other implementations**: no other implementation is required to emit these codes, and an implementation's own parse-error codes get their own rows when it lands them. **Status (S449, `scrml-support/user-voice-scrml.md` §S449 item 6):** the native parser is frozen as part of impl#1 (security fixes only; a divergence from impl#1's default block-splitter + Acorn front end is filed, not fixed). It is NOT the front end that replaces the legacy pipeline: M5/M6 was not pursued (S249; see §22.12), and the full-pipeline `--parser=scrml-native` mode is retired. The 80 expression- and statement-grammar codes are hard errors, severity carried by the `E-` prefix per the §34 diagnostic-stream convention. The 2 `I-NATIVE-BLOCK-*` FileAST-assembler codes (last sub-table below) are info-level — non-fatal, partitioning into `result.warnings`. The `Section` column references the scrml construct whose grammar the code guards (the native parser has no dedicated per-code prose section, mirroring how `E-PARSE-001`/`E-PARSE-002` already cite §4). These codes are distinct from the default front end's family (`E-PARSE-*`, `E-CTX-*`, `E-MARKUP-*`). (Catalog history: S117 M5-swap Unit R4 — DD #27 — catalogued the 66 codes the native parser emitted at that time. M5-swap Wave 1 — S118 — appended 8 statement-grammar codes for the core-scrml declaration productions: `E-STMT-LIN-*` ×2 (B4 — `lin`), `E-STMT-TYPE-*` ×3 (B5 — `type`), `E-STMT-FN-*` ×3 (B6 — `fn`/`server`/`pure` modifiers). M5-swap Wave 2 appended 5 more for the scrml-extension expression/statement productions: `E-EXPR-GUARDED-UNCLOSED` ×1 (B2 — `!{}` guarded-expression), `E-STMT-TILDE-*` ×2 (B3 — `~` tilde-declaration), and the forbidden-vocabulary rejections `E-THROW-NOT-IN-SCRML` + `E-TRY-NOT-IN-SCRML` ×2 (B7 — mirroring `E-ASYNC-NOT-IN-SCRML`). B1 — the `?` propagate operator — added a production but no new diagnostic code: a `?` not followed by a ternary consequent is the propagate form, and a malformed ternary continues to surface `E-EXPR-TERNARY-COLON`. M5-swap Unit C2 — S119 — appended the 2 info-level FileAST-assembler codes (`I-NATIVE-BLOCK-DROPPED`, `I-NATIVE-BLOCK-UNMAPPED`) emitted by `nativeParseFile` (`compiler/native-parser/parse-file.js`) when a native block-stream kind has no `ASTNode` mapping. The earlier intro said "81"; the table carried 82 live rows — corrected S449.)*
+*The 82 live codes in this sub-section (31 expression-grammar, 49 statement-grammar, 2 `I-NATIVE-BLOCK-*`; one further row, `E-MARKUP-VALUE-UNCLOSED`, is struck) are **parse diagnostics of the reference implementation (impl#1), emitted by its native parser (`compiler/native-parser/`) on the paths where impl#1 routes source through that parser**: re-parsing a component body (component-expander passes the native errors through unchanged), re-parsing `^{}` emit output and `<match>` arm markup, the `defer` / `yield` structure lint, and the E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML pass. They are **informative for other implementations**: no other implementation is required to emit these codes, and an implementation's own parse-error codes get their own rows when it lands them. **Exception — three normative rows (S474 review 1512-4):** `E-STMT-MISSING-SEMICOLON`, `E-STMT-SPLIT-CONTINUATION` and `E-STMT-NO-EFFECT` sit in this table because their `E-STMT-*` family began here, but they are NOT informative: §7.2.2 rules 1, 5 and 9 make each one the code every conforming implementation SHALL report. The bootstrap emits all three; impl#1 carries them as divergences (dpa-073 F5, §34.0). Each row's own text gives its emitters. The rest of this paragraph applies to the other 79 codes. **Status (S449, `scrml-support/user-voice-scrml.md` §S449 item 6):** the native parser is frozen as part of impl#1 (security fixes only; a divergence from impl#1's default block-splitter + Acorn front end is filed, not fixed). It is NOT the front end that replaces the legacy pipeline: M5/M6 was not pursued (S249; see §22.12), and the full-pipeline `--parser=scrml-native` mode is retired. The 80 expression- and statement-grammar codes are hard errors, severity carried by the `E-` prefix per the §34 diagnostic-stream convention. The 2 `I-NATIVE-BLOCK-*` FileAST-assembler codes (last sub-table below) are info-level — non-fatal, partitioning into `result.warnings`. The `Section` column references the scrml construct whose grammar the code guards (the native parser has no dedicated per-code prose section, mirroring how `E-PARSE-001`/`E-PARSE-002` already cite §4). These codes are distinct from the default front end's family (`E-PARSE-*`, `E-CTX-*`, `E-MARKUP-*`). (Catalog history: S117 M5-swap Unit R4 — DD #27 — catalogued the 66 codes the native parser emitted at that time. M5-swap Wave 1 — S118 — appended 8 statement-grammar codes for the core-scrml declaration productions: `E-STMT-LIN-*` ×2 (B4 — `lin`), `E-STMT-TYPE-*` ×3 (B5 — `type`), `E-STMT-FN-*` ×3 (B6 — `fn`/`server`/`pure` modifiers). M5-swap Wave 2 appended 5 more for the scrml-extension expression/statement productions: `E-EXPR-GUARDED-UNCLOSED` ×1 (B2 — `!{}` guarded-expression), `E-STMT-TILDE-*` ×2 (B3 — `~` tilde-declaration), and the forbidden-vocabulary rejections `E-THROW-NOT-IN-SCRML` + `E-TRY-NOT-IN-SCRML` ×2 (B7 — mirroring `E-ASYNC-NOT-IN-SCRML`). B1 — the `?` propagate operator — added a production but no new diagnostic code: a `?` not followed by a ternary consequent is the propagate form, and a malformed ternary continues to surface `E-EXPR-TERNARY-COLON`. M5-swap Unit C2 — S119 — appended the 2 info-level FileAST-assembler codes (`I-NATIVE-BLOCK-DROPPED`, `I-NATIVE-BLOCK-UNMAPPED`) emitted by `nativeParseFile` (`compiler/native-parser/parse-file.js`) when a native block-stream kind has no `ASTNode` mapping. The earlier intro said "81"; the table carried 82 live rows — corrected S449.)*
 
 #### Expression-grammar codes (`E-EXPR-*`)
 
@@ -30388,7 +30803,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-STMT-UNEXPECTED-TOKEN | §4 | Unexpected token — no statement begins here. Core statement-grammar parse error. | Error |
-| E-STMT-MISSING-SEMICOLON | §4, §7.2.2 | ~~Expected `;` or a newline to end the statement.~~ **S469 — THE termination code (dpa-073 F1 (a), F3 (i); F6, confirmed):** *"Expected `;` to end the statement"* — a statement that is not block-like, with no `;` after it (§7.2.2 rule 1), reported at its end, where the `;` goes; this includes two statements on one line (`let a = 1 let b = 2;`, rule 7). The bootstrap also reports the split `return⏎expr` / `lift⏎expr` (rule 8, the INTERIM refusal of a RULED reading) and a statement cut short by a line-sensitive reading (§7.2.2 "Remaining newline-sensitive readings") under this code. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`missingSemi`, and the split-`return` / `lift` refusals; s469-boot-semicolons, #1510). impl#1 does not enforce `;` (dpa-073 F5, carried divergence): its emit sites `compiler/native-parser/parse-stmt.js` (native, internal call sites only) and `compiler/src/ast-builder.js` (default parser — body-top and statement-run cases) report only the S284 shape, two bare calls on one line (`go() go();`); impl#1 compiles `let a = n let b = 2;` at exit 0 (probed s469-spec-small). ~~*(S446, dpa-063 — §7.2.2 rule 7 makes this THE code for two statements on one line with no `;` between them (`let a = 1 let b = 2`), in every statement list and every front end.)* … **Spec-ahead for the remaining loci** — the bootstrap accepts the same-line pair silently (`g-bootstrap-two-statements-one-line-accepted`); lands with the §7.2.2 build.~~ Provenance: ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1 (*"Confirm all four"*); — *"`E-STMT-MISSING-SEMICOLON` becomes THE termination code ("Expected `;` to end the statement")"*. **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S284 (conformant reject). | Error |
+| E-STMT-MISSING-SEMICOLON | §4, §7.2.2 | ~~Expected `;` or a newline to end the statement.~~ **S469 — THE termination code (dpa-073 F1 (a), F3 (i); F6, confirmed):** *"Expected `;` to end the statement"* — a statement that is not block-like, with no `;` after it (§7.2.2 rule 1), reported at its end, where the `;` goes; this includes two statements on one line (`let a = 1 let b = 2;`, rule 7). **Not** a one-expression brace in a value position (`.B :> { 2 }`, a `{ e }` value-`if` branch — a single-expression position, rule 3; S474, newly-accepting); a statement-position arm `{ e }` still is (rule 3; a PA reading, not the rulings' words). The bootstrap also reports the split `return⏎expr` / `lift⏎expr` (rule 8, the INTERIM refusal of a RULED reading) and a statement cut short by a line-sensitive reading (§7.2.2 "Remaining newline-sensitive readings") under this code. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`missingSemi`, and the split-`return` / `lift` refusals; s469-boot-semicolons, #1510). impl#1 does not enforce `;` (dpa-073 F5, carried divergence): its emit sites `compiler/native-parser/parse-stmt.js` (native, internal call sites only) and `compiler/src/ast-builder.js` (default parser — body-top and statement-run cases) report only the S284 shape, two bare calls on one line (`go() go();`); impl#1 compiles `let a = n let b = 2;` at exit 0 (probed s469-spec-small). ~~*(S446, dpa-063 — §7.2.2 rule 7 makes this THE code for two statements on one line with no `;` between them (`let a = 1 let b = 2`), in every statement list and every front end.)* … **Spec-ahead for the remaining loci** — the bootstrap accepts the same-line pair silently (`g-bootstrap-two-statements-one-line-accepted`); lands with the §7.2.2 build.~~ Provenance: ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1 (*"Confirm all four"*); — *"`E-STMT-MISSING-SEMICOLON` becomes THE termination code ("Expected `;` to end the statement")"*. **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S284 (conformant reject). | Error |
 | E-STMT-SPLIT-CONTINUATION | §7.2.2 rule 5 | An expression that continues across a line break into a line starting with `(`, `[` or a template literal (`let b = a⏎(a + 1).toString();`) — reported instead of reading the call / index / tagged template. Message: *"add `;` to the line above, or join the lines"*. Keeps S440 JS-WAT #6 as a diagnostic. **Emitted by the bootstrap** (s469-boot-termination-rulings — emitted at `compiler/self-host-v2/parse.scrml:585` (fn `splitContinuation`), at the empty span ending the line above; was E-STMT-MISSING-SEMICOLON, or E-PARSE-TEMPLATE for a template); **not emitted by impl#1**, which carries it (§34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii), all as recommended" — *"F4 "Error on ( [ ` (Recommended)""* · ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4 — *"Build both"* (*"Mint E-STMT-SPLIT-CONTINUATION for F4(ii), with the message "add `;` to the line above, or join the lines"."*). | Error |
 | ~~E-STMT-LEADING-OPERATOR~~ | §7.2.2 | **DELETED S469 — never emitted.** Under dpa-073 F1 (a) a newline is whitespace (§7.2.2 rule 4), so a line that starts with an operator continues the expression above and there is nothing for this code to report. It was Nominal (no emitter), so its removal is not a §63 deprecation. Provenance: ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — *"`E-STMT-LEADING-OPERATOR` deleted (never emitted)"*, confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1 · ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)". The three S437 round-4 pins it was to flip stay positive. ~~(S446, dpa-063.) At statement level, a line STARTS with a token that can only continue an expression — a binary operator (incl. `+` / `-`; not `/`, which starts a regex, nor `<`, which starts markup), `.`, `?.`, `?`, `:`, `=` / a compound assignment, `,`, `=>`, `:>`. The line is never joined to the one above and never read as a new statement. The message SHALL suggest: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. **Does NOT fire:** inside an open `(` / `[` / expression-position `{` / template literal / markup-as-value element (newlines are whitespace there, §7.2.2 rule 4); on an arm head (`.Variant :>`, `| ::E`) directly inside a `match` / `!{}` body (arm level, decided by position); on a line-leading `else` after an `if` body's `}`; inside `?{}` / `_{}` / `#{}`. **Nominal / spec-ahead — not yet emitted by any front end**; lands with the §7.2.2 build (`g-dpa063-termination-unbuilt-bootstrap`, `…-impl1-legacy`, `…-impl1-native`). Pins that flip to negatives of this code: `conformance/cases/markup-handler/s437-r4-continuation-leading-plus`, `…-expr-form-leading-plus`, `…-leading-question-colon`; two further positive cases carry leading-operator lines and must be rewritten to the trailing form (or flipped) when this lands: `markup-handler/s437-handler-shape-ternary-continuation-lines` (leading `?` / `:`) and `markup-handler/s437-handler-shape-member-continuation-line` (leading `.concat`). **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · S446 "dpa-063 Call 4" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. …"* (4a (i): a leading `.` / `?.` is an error, no named exception) · S446 "dpa-063 Call 5" — *"(i), your rec, and yes on +/-"* (leading `+` / `-` in the set) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md`.~~ | — |
 | E-STMT-NO-EFFECT | §40.8, §7.2.2 rule 9 | (S445 item 2; **language-wide since S446, dpa-063 Call 5**.) An expression statement in ANY statement list (§7.2.2 "Terms": a function / `fn` body, an inline handler block, a `${ … }` logic block, a `^{ … }` body, a `when` / `on mount` body, a code-default body, an arm or if-as-expression block, a `<program>` / `<page>` / `<channel>` body top) has **no effect** — it contains no call (any call, a pure function's too), no assignment, no `++` / `--`, no `send` (nor S445's listed equivalents: `new`, a tagged template, `delete`, a `?{ … }` block, `reset(…)`) — e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`. It is valid code that does nothing, so it is reported as that; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). **Does NOT fire:** on a statement whose value the NEXT statement reads through `~` (§32.2 — used, not dead; `E-TILDE-002` is suppressed on a statement this code fires on); on a value position, which is not an expression statement — a markup `${expr}` interpolation in a render position (§17.6.10), a §18.5 arm result, a value-form arm, a `:`-shorthand body, a bare handler value, a `lift` / `return` / `fail` operand. A `${ @count }` logic block read as statements is NOT a value position and fires (S445 #2's reach: everywhere). **Body top vs elsewhere:** at a `<program>` / `<page>` / `<channel>` body top a literal-only statement (`404`) and an untargeted label are `E-UNQUOTED-DISPLAY-TEXT` (undeclared display text), not this code; in every other statement list both ARE this code (the label is reported on the label). An effectful statement after a `return` (`return; f();`) is not this code; whether it is an error stays OPEN (§7.2.2 rule 8). *(S469: ~~`return⏎f()`~~ is no longer an orphan — it returns `f()`, rule 8.)* **Status:** emitted at the body top — `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. **Spec-ahead in every other statement list** — lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`). **Provenance:** ruling:user-voice-scrml.md S445 item 2 · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (supersedes the body-top-only scope of S445 #2) · ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (readings 7, 8, 9 — value positions incl. the `${ @count }` reach, literal / label outside the body top, `return⏎f()` OPEN). **S469 — RULED to be built in the bootstrap** for a pure expression statement on either line, including after a block-like `}` (§7.2.2 rule 9; ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4, *"Build both"*); **emitted by the bootstrap** in every statement list it parses (s469-boot-termination-rulings — emitted at `compiler/self-host-v2/parse.scrml:1851` (fns `stmtChecks` / `noEffectStmt`); the bootstrap has no `~`, so the `~` exemption has nothing to apply to). | Error |
@@ -31084,12 +31499,12 @@ After declaration, the keyboard state is accessible via `<#id>`:
 
 ${
     function gameLoop() {
-        if (<#keys>.pressed("ArrowLeft"))  @x = @x - 5
-        if (<#keys>.justPressed("Space"))  jump()
-        if (<#keys>.justReleased("Shift")) endSprint()
-        animationFrame(gameLoop)
+        if (<#keys>.pressed("ArrowLeft"))  @x = @x - 5;
+        if (<#keys>.justPressed("Space"))  jump();
+        if (<#keys>.justReleased("Shift")) endSprint();
+        animationFrame(gameLoop);
     }
-    animationFrame(gameLoop)
+    animationFrame(gameLoop);
 }
 ```
 
@@ -31122,11 +31537,11 @@ one frame per event):
 
 ${
     function gameLoop() {
-        <#keys>._clearFrameState()          // reset just-state for this frame
-        if (<#keys>.justPressed("Space")) shoot()
-        animationFrame(gameLoop)
+        <#keys>._clearFrameState();          // reset just-state for this frame
+        if (<#keys>.justPressed("Space")) shoot();
+        animationFrame(gameLoop);
     }
-    animationFrame(gameLoop)
+    animationFrame(gameLoop);
 }
 ```
 
@@ -31166,13 +31581,13 @@ When `target` is absent, events are captured on `document`.
 
 ${
     function gameLoop() {
-        const mx = <#cursor>.x
-        const my = <#cursor>.y
-        if (<#cursor>.pressed(0)) @dragging = true   // left button
-        if (<#cursor>.pressed(2)) openContextMenu()  // right button
-        animationFrame(gameLoop)
+        const mx = <#cursor>.x;
+        const my = <#cursor>.y;
+        if (<#cursor>.pressed(0)) @dragging = true;   // left button
+        if (<#cursor>.pressed(2)) openContextMenu();  // right button
+        animationFrame(gameLoop);
     }
-    animationFrame(gameLoop)
+    animationFrame(gameLoop);
 }
 ```
 
@@ -31228,16 +31643,16 @@ is active.
 ${
     function gameLoop() {
         if (<#pad>.connected) {
-            const lx = <#pad>.axes[0]   // left stick X, range [-1, 1]
-            const ly = <#pad>.axes[1]   // left stick Y, range [-1, 1]
-            @playerX = @playerX + lx * @speed
-            @playerY = @playerY + ly * @speed
+            const lx = <#pad>.axes[0];   // left stick X, range [-1, 1]
+            const ly = <#pad>.axes[1];   // left stick Y, range [-1, 1]
+            @playerX = @playerX + lx * @speed;
+            @playerY = @playerY + ly * @speed;
 
-            if (<#pad>.pressed(0)) fire()  // A button (Xbox) / Cross (PS)
+            if (<#pad>.pressed(0)) fire();  // A button (Xbox) / Cross (PS)
         }
-        animationFrame(gameLoop)
+        animationFrame(gameLoop);
     }
-    animationFrame(gameLoop)
+    animationFrame(gameLoop);
 }
 ```
 
@@ -31300,24 +31715,24 @@ Input state types are designed to be read in animation loops. The typical patter
 
 <canvas ref=@canvas width="800" height="600">
     ${
-        const ctx = @canvas.getContext('2d')
+        const ctx = @canvas.getContext('2d');
 
         function gameLoop() {
-            <#keys>._clearFrameState()    // optional: frame-accurate justPressed
-            <#cursor>._clearFrameState()  // optional: per-frame wheel delta
+            <#keys>._clearFrameState();    // optional: frame-accurate justPressed
+            <#cursor>._clearFrameState();  // optional: per-frame wheel delta
 
             // Read input state
-            if (<#keys>.pressed("ArrowRight")) @x = @x + 5
-            if (<#keys>.justPressed("Space"))  jump()
-            const mouseX = <#cursor>.x
+            if (<#keys>.pressed("ArrowRight")) @x = @x + 5;
+            if (<#keys>.justPressed("Space"))  jump();
+            const mouseX = <#cursor>.x;
 
             // Render
-            ctx.clearRect(0, 0, 800, 600)
-            ctx.fillRect(@x, @y, 32, 32)
+            ctx.clearRect(0, 0, 800, 600);
+            ctx.fillRect(@x, @y, 32, 32);
 
-            animationFrame(gameLoop)
+            animationFrame(gameLoop);
         }
-        animationFrame(gameLoop)
+        animationFrame(gameLoop);
     }
 </>
 ```
@@ -31434,22 +31849,22 @@ ${
     // Simple counter stream
     server function* countdown(from: int) {
         for (let i = from; i >= 0; i--) {
-            yield i
+            yield i;
         }
     }
 
     // Live data feed
     server function* livePrices() {
         while (true) {
-            let price = ?{ SELECT price FROM stocks WHERE symbol = "AAPL" }
-            yield price
+            let price = ?{ SELECT price FROM stocks WHERE symbol = "AAPL" };
+            yield price;
         }
     }
 
     // Named events with structured payloads
     server function* activityFeed(userId: int) {
         for await (let event of watchUser(userId)) {
-            yield { event: "activity", data: event, id: event.id }
+            yield { event: "activity", data: event, id: event.id };
         }
     }
 }
@@ -31460,7 +31875,7 @@ ${
 ```scrml
 ${
     function badFn() {
-        yield 1     // Error E-SSE-001: yield outside generator
+        yield 1;     // Error E-SSE-001: yield outside generator
     }
 }
 ```
@@ -31518,7 +31933,7 @@ The SSE handler exposes `route.lastEventId` (from the HTTP `Last-Event-ID` heade
 
 ```scrml
 server function* resumableStream() {
-    let cursor = route.lastEventId ?? 0
+    let cursor = route.lastEventId ?? 0;
     // resume from cursor
 }
 ```
@@ -31532,7 +31947,7 @@ On the client, calling a `server function*` by name creates an `EventSource` con
 Assigning the result of a generator call to an `@` reactive variable binds the variable to the stream. Each SSE event updates the variable and triggers reactive re-render.
 
 ```scrml
-<latestPrice> = livePrices()
+<latestPrice> = livePrices();
 <p>Current price: ${@latestPrice}</>
 ```
 
@@ -31545,7 +31960,7 @@ A generator call used as the iterable in `for/lift` re-lifts the body on each SS
 ```scrml
 ${
     for (let update of activityFeed(@userId)) {
-        lift <div class="update">${update.text}</>
+        lift <div class="update">${update.text}</>;
     }
 }
 ```
@@ -31610,15 +32025,15 @@ The same security invariants that apply to standard server functions apply to SS
 
 ```scrml
 <program>
-<count> = 0
+<count> = 0;
 ${
     server function* countdown(from: int) {
         for (let i = from; i >= 0; i--) {
-            yield i
+            yield i;
         }
     }
 
-    @count = countdown(10)
+    @count = countdown(10);
 }
 <p>Count: ${@count}</>
 ```
@@ -31631,9 +32046,9 @@ Compiles to client: EventSource stub; `@count` updated on each event.
 ```scrml
 ${
     server function* activityFeed() {
-        let cursor = route.lastEventId ?? ""
+        let cursor = route.lastEventId ?? "";
         for await (let item of db.watchActivity(cursor)) {
-            yield { event: "activity", data: item, id: item.id }
+            yield { event: "activity", data: item, id: item.id };
         }
     }
 }
@@ -31659,27 +32074,27 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
 ```scrml
 <program>
   <channel name="chat" topic="lobby">
-    <messages> = []                            // V5-strict declaration; auto-syncs across clients
+    <messages> = [];                            // V5-strict declaration; auto-syncs across clients
 
     function postMessage(author: string, body: string) {
-      @messages = [...@messages, { author, body, ts: Date.now() }]
+      @messages = [...@messages, { author, body, ts: Date.now() }];
     }
   </>
 
   ${
-    <username> = ""
-    <draft>    = ""
+    <username> = "";
+    <draft>    = "";
 
     function send() {
-      if (@username.trim() == "" || @draft.trim() == "") return
-      postMessage(@username, @draft)
-      @draft = ""
+      if (@username.trim() == "" || @draft.trim() == "") return;
+      postMessage(@username, @draft);
+      @draft = "";
     }
   }
 
   <input bind:value=@username placeholder="Your name"/>
   <ul>
-    ${ for (let m of @messages) { lift <li><strong>${m.author}</strong>: ${m.body}</li> } }
+    ${ for (let m of @messages) { lift <li><strong>${m.author}</strong>: ${m.body}</li>; } }
   </ul>
   <form onsubmit=send()>
     <input bind:value=@draft placeholder="Message"/>
@@ -31711,11 +32126,11 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
            onclient:close=onDisconnected()
            onclient:error=onError(err)>
 
-    <count> = 0                              // V5-strict declaration; auto-syncs across clients
-    <messages> = []
+    <count> = 0;                              // V5-strict declaration; auto-syncs across clients
+    <messages> = [];
 
     function postMessage(body: string) {
-      @messages = [...@messages, { body, ts: Date.now() }]
+      @messages = [...@messages, { body, ts: Date.now() }];
     }
   </>
 
@@ -31791,12 +32206,12 @@ Reactive variables declared inside a `<channel>` body are **automatically synchr
 
 ```scrml
 <channel name="chat" topic="lobby">
-  <messages> = []                            // auto-synced — declared inside channel body
-  <count>    = 0                             // auto-synced
+  <messages> = [];                            // auto-synced — declared inside channel body
+  <count>    = 0;                             // auto-synced
 
   function postMessage(body: string) {
-    @messages = [...@messages, { body, ts: Date.now() }]
-    @count    = @count + 1
+    @messages = [...@messages, { body, ts: Date.now() }];
+    @count    = @count + 1;
   }
 </>
 ```
@@ -31820,13 +32235,13 @@ On every local write to a channel-declared cell, the compiler emits a sync messa
 ```scrml
 <program>
   <channel name="chat">
-    <messages> = []
+    <messages> = [];
   </>
 
   ${
     function send() {
-      const count = @messages.length             // canonical @ read across scopes
-      console.log(`There are ${count} messages`)
+      const count = @messages.length;             // canonical @ read across scopes
+      console.log(`There are ${count} messages`);
     }
   }
 </program>
@@ -31881,11 +32296,11 @@ Independently of `auth=`, every channel upgrade in a web-application program ref
 
 ```scrml
 <channel name="chat" topic=@room>
-  <count> = 0                                 // V5-strict; auto-synced
+  <count> = 0;                                 // V5-strict; auto-synced
 
   function sendMessage(text: string) {
-    ?{`INSERT INTO messages (body) VALUES (${text})`}.run()
-    broadcast({ type: "new_message", body: text })
+    ?{`INSERT INTO messages (body) VALUES (${text})`}.run();
+    broadcast({ type: "new_message", body: text });
   }
 </>
 ```
@@ -31897,7 +32312,7 @@ within the `<channel name="chat">` lexical scope.
 
 ```scrml
 function sendGlobal(text: string) {
-  broadcast({ type: "msg", body: text })   // E-CHANNEL-004
+  broadcast({ type: "msg", body: text });   // E-CHANNEL-004
 }
 
 <channel name="chat" topic=@room>
@@ -31939,7 +32354,7 @@ in the call expression names the value the compiler will inject, not a variable 
          onserver:message=handleMessage(msg)>
   ${
     function handleMessage(msg: ChatMessage) {
-      broadcast({ type: "echo", body: msg.text })
+      broadcast({ type: "echo", body: msg.text });
     }
   }
 </>
@@ -31989,7 +32404,7 @@ When `topic=@var` and `@var` evaluates to `not`, the `<channel>` element behaves
 </>
 
 <program>
-  ${ <selectedRoom> = not }
+  ${ <selectedRoom> = not; }
   <!-- ... user picks a room, sets @selectedRoom = "room-42" ... -->
 </program>
 ```
@@ -32074,16 +32489,16 @@ If the call expression contains no parameter (e.g., `onclient:open=handleOpen()`
          onclient:open=handleOpen(e)
          onclient:close=handleClose(e)
          onclient:error=handleError(err)>
-  <connectionStatus> = "connecting"            // V5-strict; auto-synced
+  <connectionStatus> = "connecting";            // V5-strict; auto-synced
 
   function handleOpen(e: asIs) {
-    @connectionStatus = "connected"
+    @connectionStatus = "connected";
   }
   function handleClose(e: asIs) {
-    @connectionStatus = "disconnected"
+    @connectionStatus = "disconnected";
   }
   function handleError(err: asIs) {
-    @connectionStatus = "error"
+    @connectionStatus = "error";
   }
 </>
 
@@ -32114,7 +32529,7 @@ The compiler generates `ws.onopen = () => { markConnected(); }` and
          onclient:open=handleOpen(e)>
   ${
     server function handleOpen(e: asIs) {   // ERROR: onclient:* handlers run on client only
-      broadcast({ type: "join" })
+      broadcast({ type: "join" });
     }
   }
 </>
@@ -32125,9 +32540,9 @@ The compiler generates `ws.onopen = () => { markConnected(); }` and
 
 ```scrml
 <channel name="c" onclient:open=onOpen(e)>
-    <joined> = 0
+    <joined> = 0;
     function onOpen(e: asIs) {      // ERROR: broadcast() places onOpen on the server (§12.2 Trigger 7)
-        broadcast({ joined: true })
+        broadcast({ joined: true });
     }
 </>
 // E-CHANNEL-006: onOpen is placed on the server; an onclient:* handler runs in the browser
@@ -32187,9 +32602,9 @@ payload at receive time:
 
 ```scrml
 <channel name="driver-events">
-  <events> = []                              // V5-strict; auto-synced
+  <events> = [];                              // V5-strict; auto-synced
   function postEvent(driverId: int, body: string) {
-    broadcast({ targetDriverId: driverId, body, ts: Date.now() })
+    broadcast({ targetDriverId: driverId, body, ts: Date.now() });
   }
 </>
 
@@ -32197,7 +32612,7 @@ payload at receive time:
   <!-- Subscriber side (client): -->
   ${ for (let e of @events) {
     if (e.targetDriverId == @currentDriver.id) {
-      lift <li>${e.body}</li>
+      lift <li>${e.body}</li>;
     }
   } }
 </program>
@@ -32289,31 +32704,31 @@ being declared inside a channel body, see §38.4.)
 ```scrml
 // channels/dispatch.scrml — PURE-CHANNEL-FILE (see §38.12.6)
 export <channel name="chat" topic="lobby">
-  <messages> = []                              // V5-strict; auto-synced via channel body
+  <messages> = [];                              // V5-strict; auto-synced via channel body
   function postMessage(author: string, body: string) {
-    @messages = [...@messages, { author, body, ts: Date.now() }]
+    @messages = [...@messages, { author, body, ts: Date.now() }];
   }
 </>
 ```
 
 ```scrml
 // pages/page-a.scrml — page A
-${ import { chat } from '../channels/dispatch.scrml' }
+${ import { chat } from '../channels/dispatch.scrml'; }
 <chat/>
 
 <program>
   <button onclick=postMessage("user-a", "hello")>Send</button>
-  <ul>${ for (let m of @messages) { lift <li>${m.author}: ${m.body}</li> } }</ul>
+  <ul>${ for (let m of @messages) { lift <li>${m.author}: ${m.body}</li>; } }</ul>
 </program>
 ```
 
 ```scrml
 // pages/page-b.scrml — page B (independent consumer)
-${ import { chat } from '../channels/dispatch.scrml' }
+${ import { chat } from '../channels/dispatch.scrml'; }
 <chat/>
 
 <program>
-  <ul>${ for (let m of @messages) { lift <li>${m.author}: ${m.body}</li> } }</ul>
+  <ul>${ for (let m of @messages) { lift <li>${m.author}: ${m.body}</li>; } }</ul>
 </program>
 ```
 
@@ -32335,7 +32750,7 @@ to match the WebSocket route convention. Kebab-case names are NOT valid
 JS identifiers, so the import specifier MAY quote the imported name:
 
 ```scrml
-${ import { "dispatch-board" as dispatchBoard } from './channels.scrml' }
+${ import { "dispatch-board" as dispatchBoard } from './channels.scrml'; }
 <dispatchBoard/>
 ```
 
@@ -32346,7 +32761,7 @@ markup. The wire-layer identity is the original `name=` value
 For PascalCase / camelCase channel names, the quoting is unnecessary:
 
 ```scrml
-${ import { chat } from './channels.scrml' }
+${ import { chat } from './channels.scrml'; }
 <chat/>
 ```
 
@@ -32632,7 +33047,7 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 
 <db src="./app.db" protect="password_hash" tables="users, posts">
     ${ function getUser(id: int) {
-        return ?{`SELECT id, email, name FROM users WHERE id = ${id}`}.get()
+        return ?{`SELECT id, email, name FROM users WHERE id = ${id}`}.get();
     } }
 </>
 
@@ -33234,8 +33649,8 @@ INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; c
 <program db="sqlite:./app.db" idempotency-store="auto">
   <!-- "auto" + db=sqlite resolves to: SQLite shadow table. -->
   ${ function transferFunds(from: number, to: number, amount: number) {
-      ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run()
-      ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run()
+      ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run();
+      ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run();
       // Non-monotone (balance ± amount reads prior value) → idempotency-key
       // emitted; server stores key+result in _scrml_idempotency_keys (sqlite).
   } }
@@ -33255,13 +33670,13 @@ INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; c
 
 ${ function handle(request: Request, resolve: (req: Request) => Response) {
     // Pre-middleware: runs before the matched route handler
-    const start = Date.now()
+    const start = Date.now();
 
-    const response = resolve(request)
+    const response = resolve(request);
 
     // Post-middleware: runs after the route handler returns
-    response.headers.set("X-Response-Time", `${Date.now() - start}ms`)
-    return response
+    response.headers.set("X-Response-Time", `${Date.now() - start}ms`);
+    return response;
 } }
 
 </program>
@@ -33309,9 +33724,9 @@ The compiler-auto middleware order relative to `handle()` is fixed. If the devel
 ```scrml
 ${ function handle(request: Request, resolve: (req: Request) => Response) {
     if (!isAllowedIP(request)) {
-        return new Response("Forbidden", { status: 403 })
+        return new Response("Forbidden", { status: 403 });
     }
-    return resolve(request)
+    return resolve(request);
 } }
 ```
 
@@ -33331,10 +33746,10 @@ The developer MAY combine `<program>` attributes with `handle()`. They are not m
 
 ${ function handle(request: Request, resolve: (req: Request) => Response) {
     // Add request ID before dispatch
-    const reqId = crypto.randomUUID()
-    const response = resolve(request)
-    response.headers.set("X-Request-Id", reqId)
-    return response
+    const reqId = crypto.randomUUID();
+    const response = resolve(request);
+    response.headers.set("X-Request-Id", reqId);
+    return response;
 } }
 
 </program>
@@ -33403,7 +33818,7 @@ A `<program>` element MAY carry the following documentary attributes. Each attri
          author="Bryan MacLee"
          license="MIT">
 
-${ <count> = 0 }
+${ <count> = 0; }
 
 <button onclick=${@count = @count + 1}>+</button>
 <span>${@count}</span>
@@ -33515,13 +33930,13 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 <program title="My App" db="./app.db" cors="*" log="structured">
   <!-- App-wide channel (inside <program>, not inside <page>) -->
   <channel name="presence">
-    <online> = []
+    <online> = [];
   </>
 
   <!-- Per-route attribute containers -->
   <page auth="required">
     <!-- Routes living in entry file's <page> body -->
-    ${ <home> = "Welcome" }
+    ${ <home> = "Welcome"; }
     <h1>${@home}</h1>
   </page>
 </program>
@@ -33531,7 +33946,7 @@ Adjacent route files (e.g. `pages/customer/loads.scrml`) declare their `<page>` 
 
 ```scrml
 <page auth="required" ratelimit="100/min">
-  ${ <q> = "" }
+  ${ <q> = ""; }
   <!-- ... route content ... -->
 </page>
 ```
@@ -33542,7 +33957,7 @@ The compiler infers the route URL `/customer/loads` from the filesystem path `pa
 
 ```scrml
 <program title="Counter">
-  ${ <count> = 0 }
+  ${ <count> = 0; }
   <button onclick=${@count = @count + 1}>+</button>
   <span>${@count}</span>
 </program>
@@ -33823,7 +34238,7 @@ Consider an entry file under the v0.3 multi-page-app shape, with a small truckin
   type UserRole:enum = { Anonymous, Driver, Dispatcher, Admin }
 
   <channel name="presence">
-    <online> = []
+    <online> = [];
   </>
 
   <page auth="required">
@@ -33843,7 +34258,7 @@ Consider an entry file under the v0.3 multi-page-app shape, with a small truckin
 </block>
 
 <block Dashboard>
-  <state count> = 0
+  <state count> = 0;
   <button onclick=${@count = @count + 1}
           class="px-3 py-1 rounded bg-slate-100">
     ${@count}
@@ -33854,7 +34269,7 @@ Consider an entry file under the v0.3 multi-page-app shape, with a small truckin
 </block>
 
 <block ProfileWidget>
-  <state user> = ^server fetchUser()
+  <state user> = ^server fetchUser();
   <p class="text-sm text-slate-700">${@user.name}</p>
 </block>
 ```
@@ -33964,9 +34379,9 @@ use scrml:chart { LineChart, BarChart }
 use scrml:auth
 use vendor:my-date-picker { DatePicker }
 
-${ import { formatCurrency } from './utils.scrml' }
+${ import { formatCurrency } from './utils.scrml'; }
 
-<count> = 0
+<count> = 0;
 
 <div>
     <Button onclick=${() => @count++}>Increment</>
@@ -34005,12 +34420,12 @@ The `import` syntax from §21 is retained exactly. This section adds the `scrml:
 
 ```scrml
 // Local file import (unchanged from §21)
-${ import { UserRole } from './types.scrml' }
-${ import { formatDate } from './utils.scrml' }
+${ import { UserRole } from './types.scrml'; }
+${ import { formatDate } from './utils.scrml'; }
 
 // Stdlib value import (new in §40)
-${ import { formatCurrency, parseDate } from 'scrml:utils' }
-${ import { session } from 'scrml:auth' }
+${ import { formatCurrency, parseDate } from 'scrml:utils'; }
+${ import { session } from 'scrml:auth'; }
 ```
 
 **Normative statements:**
@@ -34094,7 +34509,7 @@ When names are brought into scope from multiple `use` declarations or `import` s
 - Names from `use` declarations are in markup scope. Names from `import` statements are in logic scope. These are different scopes; a component name from `use scrml:ui` does not shadow a value named `Button` in a `${ import }` logic context.
 - When two `use` declarations bring the same component name into markup scope, the later declaration WINS and a W-USE-001 warning is emitted.
 - When a `use` declaration brings a name into scope that collides with a built-in HTML element name (e.g., `use scrml:ui { button }`), this SHALL be a compile error (E-USE-006). User-defined components that shadow HTML element names are never valid (existing rule from §15.6 / E-NAME-001).
-- When an `import` statement imports a name that is already in scope from another `import` statement in the same file, the later import WINS and a W-IMPORT-001 warning is emitted.
+- When an `import` statement imports a name that is already in scope from another `import` statement in the same file, the later import WINS and a W-IMPORT-001 warning is emitted. ~~**Exception (S474):** when the two imports bring same-named exports of two different USER files, the later import SHALL be **E-SCOPE-010** …~~ **S474 — "later wins" applies only to the SAME declaration.** W-IMPORT-001 and "later wins" apply only when the two imports bring the SAME declaration (the same name imported twice from one file, or through two paths that resolve to the one declaration). Binding two DIFFERENT declarations to one local name SHALL be **E-SCOPE-010** at the later import, everywhere: two user files' exports, a user export and a stdlib export, two stdlib modules' exports, and two entries of one import list. The message SHALL name both sources and suggest aliasing one (`import { name as other } from …`). **PERMANENT (semantic impossibility):** one local name cannot bind two declarations — no meaning can be given to the name. *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT", which names this example (*"one local name cannot bind two declarations"*) · ⚑ the rule's reach (user + stdlib, stdlib + stdlib, one import list) is a PA ruling in the veto window, S474 dispatch, from the #1715 review · supersedes: the S474 user-file-only exception, and "later wins" for two different declarations · **Direction of change:** newly-rejecting for a pair of different declarations that W-IMPORT-001 accepted (a user + stdlib pair, two stdlib modules). The remedy is the alias, which costs nothing; on the bootstrap `as` is in flight in #1715 (`g-boot-import-codes-and-alias-s471`). Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` (`linkage`)); Nominal on impl#1 (§34.0).)*
 - This rule does not cover host imports. An `import:host` binding whose name is also bound by a plain `import`, another `import:host`, or a declaration in its file is `E-SCOPE-010` (§21.3.1.1), and so is a `<host>` binding name also bound as a value in its file (DRAFT §21.3.3 rule 9 — a PA reading extending the ruling to `<host>`). *(ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 2 — *"Host-import name collision is E-SCOPE-010 (§21.3.1.1), not W-IMPORT-001 (§41.7)."*)*
 
 ### 41.8 `use` Declarations in Worker Programs
@@ -34140,7 +34555,7 @@ This section (§41) extends §21 without removing it. Specifically:
 | E-IMPORT-005 | `import` specifier uses an unrecognized protocol prefix or bare npm-style specifier | Error |
 | E-IMPORT-006 | `scrml:` import specifier does not resolve to any module | Error |
 | W-USE-001 | Two `use` declarations bring the same name into markup scope (later wins) | Warning |
-| W-IMPORT-001 | Two `import` statements import the same name into logic scope (later wins) | Warning |
+| W-IMPORT-001 | Two `import` statements import the same name into logic scope (later wins) (S474: only for the SAME declaration imported twice; two different declarations are E-SCOPE-010, §41.7) (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`linkage`).) | Warning |
 
 ### 41.12 `scrml:data` `registerMessages` — project-level error message registration (Stage 0b D4 — L12)
 
@@ -34158,14 +34573,14 @@ This section (§41) extends §21 without removing it. Specifically:
 
 ```scrml
 ${
-  import { registerMessages } from 'scrml:data'
+  import { registerMessages } from 'scrml:data';
 
   registerMessages({
     .Required:        "Please fill in {field}.",
     .LengthFailed:    "{field} must have a length {predicate}.",
     .MinFailed:       "{field} must be at least {threshold}.",
     .OneOfFailed:     "{field} must be one of: {set}.",
-  })
+  });
 }
 ```
 
@@ -34259,20 +34674,20 @@ The `scrml:data` module exports a sibling helper `messageFor` that performs the 
 **The API:**
 
 ```scrml
-import { parseVariant } from 'scrml:data'
+import { parseVariant } from 'scrml:data';
 
 type LoadResult:enum = { Success(rows: int), Empty, Failed(reason: string) }
 type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 
 function loadResult()! -> LoadError {
-    const raw = fetch("https://api.example.com/results")
+    const raw = fetch("https://api.example.com/results");
     const result = parseVariant(raw, LoadResult) !{
-        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator") }
-        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag) }
-        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason) }
-        .Malformed(reason)             :> { fail LoadError::Malformed(reason) }
-    }
-    return result    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
+        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); }
+        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); }
+        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); }
+        .Malformed(reason)             :> { fail LoadError::Malformed(reason); }
+    };
+    return result;    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
 }
 ```
 
@@ -34335,7 +34750,7 @@ Variant semantics:
 **The API:**
 
 ```scrml
-import { formFor } from 'scrml:data'
+import { formFor } from 'scrml:data';
 
 type Signup:struct = {
     name:    string req length(>=2)
@@ -34344,7 +34759,7 @@ type Signup:struct = {
 }
 
 function persistSignup(values: Signup) ! SignupError {
-    ?{ insert into users { ${values} } }
+    ?{ insert into users { ${values} } };
 }
 
 <formFor for=Signup onsubmit=persistSignup/>
@@ -34481,7 +34896,7 @@ Codegen emits the equivalent Shape 2 + `<errors of=>` + `<form action=...>` mark
 **The API:**
 
 ```scrml
-import { schemaFor } from 'scrml:data'
+import { schemaFor } from 'scrml:data';
 
 type User:struct = {
     email:    string req length(<=120) pattern(/^[^@]+@[^@]+$/)
@@ -34655,7 +35070,7 @@ Codegen (`emit-schema-for.ts`) emits the equivalent `<schema>` `table-declaratio
 **The API:**
 
 ```scrml
-import { tableFor } from 'scrml:data'
+import { tableFor } from 'scrml:data';
 
 type User:struct = {
     id:        integer
@@ -34667,8 +35082,8 @@ type User:struct = {
 
 type UserRole:enum = { Admin, Editor, Viewer }
 
-<users> = []
-<selectedIds>: int[] = []
+<users> = [];
+<selectedIds>: int[] = [];
 
 <tableFor for=User rows=@users selectable=@selectedIds>
     <column field="email"/>
@@ -35037,7 +35452,7 @@ behaviour")*.
 
 ### 41.21 `scrml:time` `debounce` / `throttle` — a Debouncer / Throttler struct + free functions
 
-`debounce(fn, delay)` returns a **`Debouncer`** and `throttle(fn, limit)` returns a **`Throttler`** — structs, DATA (`{ id: number, delay: number }` / `{ id: number, limit: number }`), never a function with methods hung on it: no value holds a function (§14.3, `E-VALUE-FUNCTION-STORED`). The function being timed is PASSED once, to `debounce` / `throttle`, and kept by the module; the caller drives the struct with free functions:
+`debounce(fn, delay)` returns a **`Debouncer`** and `throttle(fn, limit)` returns a **`Throttler`** — structs, DATA (`{ id: number, delay: number }` / `{ id: number, limit: number }`), never a function with methods hung on it: no value holds a function (§14.3, `E-VALUE-FUNCTION-STORED`; S462's reading — under S469 R2′ / S474 a function-holding value may be bound locally, INTERIM, and stored in a cell or struct field only once built — INTERIM, §14.3). The function being timed is PASSED once, to `debounce` / `throttle`, and kept by the module; the caller drives the struct with free functions:
 
 - `run(t, …args)` — a `Debouncer`: (re)start the `delay`-ms timer; the function runs once, with the LAST `run`'s arguments, when `delay` ms pass with no further `run`. A `Throttler`: run the function at once (leading edge), then at most once per `limit` ms; a `run` inside the window is kept and runs when the window closes (trailing edge, last arguments win).
 - `cancel(t)` — drop the pending call and clear the timer (a `Throttler`'s window reopens).
@@ -35184,14 +35599,14 @@ The canonical rule (§42.1) forbids the absence tokens `null` and `undefined` an
 #### 42.2.1 Assigning Absence
 
 ```scrml
-${ let x = not }
-${ @name = not }
+${ let x = not; }
+${ @name = not; }
 ```
 
 #### 42.2.2 Checking for Absence — `is not`
 
 ```scrml
-${ if (x is not) { handleAbsence() } }
+${ if (x is not) { handleAbsence(); } }
 ```
 
 `is not` is a two-keyword operator parsed as a single boolean test.
@@ -35212,7 +35627,7 @@ ${ if (x is not) { handleAbsence() } }
 `expr is given` — written `expr is some` in its soft-deprecated spelling — is the positive counterpart to `expr is not`. It evaluates to `true` when `expr` is not the absence value `not`, and `false` when `expr` is `not`.
 
 ```scrml
-${ if (@name is given) { displayName(@name) } }
+${ if (@name is given) { displayName(@name); } }
 ```
 
 **Normative statements:**
@@ -35281,7 +35696,7 @@ The `given` keyword is the presence guard for `T | not` variables. It replaces t
 ${
     given x :> {
         // x is narrowed from T | not to T inside this block
-        use(x)
+        use(x);
     }
 }
 ```
@@ -35294,7 +35709,7 @@ ${
         // x is narrowed from T1 | not to T1
         // y is narrowed from T2 | not to T2
         // body executes only when ALL listed variables are present
-        use(x, y)
+        use(x, y);
     }
 }
 ```
@@ -35339,8 +35754,8 @@ A `given` head SHALL be `given` followed by an identifier-list and then the sepa
 
 ```scrml
 if ((arr.find(x => x.id == id)) is given) { ... }
-if ((regex.exec(str)) is not) { handleNoMatch() }
-if ((getUser(id)) is given) { renderUser() }
+if ((regex.exec(str)) is not) { handleNoMatch(); }
+if ((getUser(id)) is given) { renderUser(); }
 ```
 
 **Normative statements:**
@@ -35371,7 +35786,7 @@ if ((getUser(id)) is given) { renderUser() }
 
 ```scrml
 <signup>
-  <name> = ""                     // user hasn't typed yet
+  <name> = "";                     // user hasn't typed yet
 </>
 
 ${
@@ -35403,9 +35818,9 @@ These are NOT synonyms in 2-way redundancy. They are **native vocabularies in th
 Any type may be made optional by forming the union `T | not`:
 
 ```scrml
-${ let x: string | not = not }     // valid
-${ let x: string | not = "hello" } // valid
-${ let x: string = not }           // compile error E-TYPE-041
+${ let x: string | not = not; }     // valid
+${ let x: string | not = "hello"; } // valid
+${ let x: string = not; }           // compile error E-TYPE-041
 ```
 
 The compiler SHALL infer `T | not` when a variable is initialized with `not` and later assigned a value of type `T`.
@@ -35530,10 +35945,10 @@ A **condition** is the test of an `if` / `else if` statement, a `while` / `do �
 
 ```scrml
 type User:struct = { name: string }
-<user>: User | not = not
-<count>: int = 0
-<notify>: bool | not = not
-<greeting>: string = ""
+<user>: User | not = not;
+<count>: int = 0;
+<notify>: bool | not = not;
+<greeting>: string = "";
 
 <main>
   <p if=@user>Hello, ${@user.name}</p>              // presence test; @user narrowed inside
@@ -35544,7 +35959,7 @@ type User:struct = { name: string }
 
 ${
   function greet(u: asIs) {                         // `u` is `asIs`: its type is unresolved
-    if (u) { @greeting = u.name }                   // E-COND-NOT-BOOLEAN — type it `u: User | not`, or write `u is given`
+    if (u) { @greeting = u.name; }                   // E-COND-NOT-BOOLEAN — type it `u: User | not`, or write `u is given`
   }
 }
 ```
@@ -35728,9 +36143,9 @@ By default, a nested program starts when its enclosing scope mounts and stops wh
 
 ```scrml
 <program name="compute">
-    ${ export function add(a: number, b: number) -> number { return a + b } }
+    ${ export function add(a: number, b: number) -> number { return a + b; } }
 </>
-${ const result = await <#compute>.add(1, 2) }
+${ const result = await <#compute>.add(1, 2); }
 ```
 
 Cross-program calls return `Promise<T>`. Unawaited cross-program calls SHALL be compile error E-PROG-004.
@@ -35745,9 +36160,9 @@ Cross-program calls return `Promise<T>`. Unawaited cross-program calls SHALL be 
 #### 43.5.3 Lifecycle Events (Parent-Side)
 
 ```scrml
-when message from <#worker> (data) { @price = data }
-when error from <#worker> (e) { @status = .Crashed }
-when terminate from <#worker> { @status = .Terminated }
+when message from <#worker> (data) { @price = data; }
+when error from <#worker> (e) { @status = .Crashed; }
+when terminate from <#worker> { @status = .Terminated; }
 ```
 
 No shared reactive state across program boundaries. State changes must be sent explicitly.
@@ -36005,7 +36420,7 @@ Either form is canonical; the compiler lowers word-form to symbol-form at the JS
 const <visible> = @items.filter(t =>
     (@filter is .All or t.kind == @filter)
     and (@search == "" or t.name.includes(@search))
-)
+);
 ```
 
 **Codegen.** Two lowering sites in the compiler ensure end-to-end coverage:
@@ -36459,9 +36874,9 @@ The `protect=` attribute (§11.3) designates database fields that SHALL NOT be a
 
 ```scrml
 ${
-  let user = getUser()       // User struct — encoded _s<hashU>0
-  let name = user.name       // primitive string — encoded _p<hashS>0
-  let user2 = getUser()      // User struct again — encoded _s<hashU>1  (seq=1)
+  let user = getUser();       // User struct — encoded _s<hashU>0
+  let name = user.name;       // primitive string — encoded _p<hashS>0
+  let user2 = getUser();      // User struct again — encoded _s<hashU>1  (seq=1)
 }
 ```
 
@@ -36919,11 +37334,11 @@ site — top-level and nested (`${ }`-scoped). (Before the reject, the shorthand
 
 ```scrml
 let makePoint = fn(x: number, y: number) {
-    let p = <Point>
-    p.x = x
-    p.y = y
-    return p
-}
+    let p = <Point>;
+    p.x = x;
+    p.y = y;
+    return p;
+};
 ```
 
 All constraints of §48.3 through §48.6 apply to anonymous `fn` expressions identically to named declarations.
@@ -36934,10 +37349,10 @@ All constraints of §48.3 through §48.6 apply to anonymous `fn` expressions ide
 
 ```scrml
 fn buildUser(name: string, age: int) {
-    let u = <User>
-    u.name = name
-    u.age  = age
-    return u
+    let u = <User>;
+    u.name = name;
+    u.age  = age;
+    return u;
 }
 ```
 
@@ -36952,10 +37367,10 @@ The following five constructs SHALL NOT appear anywhere inside a `fn` body, incl
 ```scrml
 // Invalid — E-FN-001
 fn buildProfile(id: int) {
-    let row = ?{ SELECT * FROM users WHERE id = $id }
-    let p = <Profile>
-    p.name = row.name
-    return p
+    let row = ?{ SELECT * FROM users WHERE id = $id };
+    let p = <Profile>;
+    p.name = row.name;
+    return p;
 }
 ```
 
@@ -36982,10 +37397,10 @@ The compiler detects DOM mutation via a known-identifier list at the TS stage. U
 ```scrml
 // Invalid — E-FN-002
 fn buildWidget() {
-    let el = document.createElement("div")   // Error
-    let w = <Widget>
-    w.el = el
-    return w
+    let el = document.createElement("div");   // Error
+    let w = <Widget>;
+    w.el = el;
+    return w;
 }
 ```
 
@@ -37003,15 +37418,15 @@ Local `let`/`const`/`lin` variables declared inside the `fn` body may be freely 
 
 ```scrml
 ${ 
-    let counter = 0
+    let counter = 0;
 
     // Invalid — E-FN-003
     fn buildItem(name: string) {
-        counter = counter + 1   // mutation of outer variable
-        let item = <Item>
-        item.name = name
-        item.seq  = counter
-        return item
+        counter = counter + 1;   // mutation of outer variable
+        let item = <Item>;
+        item.name = name;
+        item.seq  = counter;
+        return item;
     }
 }
 ```
@@ -37036,10 +37451,10 @@ This list is exhaustive for the initial version. Future amendments MAY extend it
 ```scrml
 // Invalid — E-FN-004
 fn buildSession(userId: int) {
-    let s = <Session>
-    s.userId = userId
-    s.token  = crypto.randomUUID()   // Error
-    return s
+    let s = <Session>;
+    s.userId = userId;
+    s.token  = crypto.randomUUID();   // Error
+    return s;
 }
 ```
 
@@ -37070,9 +37485,9 @@ A `fn` that requires asynchronous data (e.g., a server call result) SHALL receiv
 ```scrml
 // Invalid — E-FN-005: async fn declaration
 async fn buildProfile(id: int) {
-    let p = <Profile>
-    p.data = await fetchData(id)   // also E-FN-005
-    return p
+    let p = <Profile>;
+    p.data = await fetchData(id);   // also E-FN-005
+    return p;
 }
 ```
 
@@ -37094,15 +37509,15 @@ If branches produce incompatible types and no explicit union return type is decl
 // Invalid — E-FN-007: branches return different types, no union declared
 fn buildEntity(kind: string) {
     if (kind == "user") {
-        let u = <User>
-        u.name = "anon"
-        u.age  = 0
-        return u
+        let u = <User>;
+        u.name = "anon";
+        u.age  = 0;
+        return u;
     } else {
-        let a = <Admin>
-        a.name  = "anon"
-        a.level = 1
-        return a
+        let a = <Admin>;
+        a.name  = "anon";
+        a.level = 1;
+        return a;
     }
 }
 ```
@@ -37114,15 +37529,15 @@ fn buildEntity(kind: string) {
 ```scrml
 fn buildEntity(kind: string) -> User | Admin {
     if (kind == "user") {
-        let u = <User>
-        u.name = "anon"
-        u.age  = 0
-        return u
+        let u = <User>;
+        u.name = "anon";
+        u.age  = 0;
+        return u;
     } else {
-        let a = <Admin>
-        a.name  = "anon"
-        a.level = 1
-        return a
+        let a = <Admin>;
+        a.name  = "anon";
+        a.level = 1;
+        return a;
     }
 }
 ```
@@ -37141,11 +37556,11 @@ Attempting to `lift` a value past the `fn` boundary (i.e., lifting in a way that
 ${
     fn buildItems(names: string[]) {
         for (name of names) {
-            let item = <Item>
-            item.name = name
-            lift item      // lifts to fn body scope — this initializes ~ inside fn
+            let item = <Item>;
+            item.name = name;
+            lift item;      // lifts to fn body scope — this initializes ~ inside fn
         }
-        return ~           // returns the accumulated list from fn body
+        return ~;           // returns the accumulated list from fn body
     }
 }
 ```
@@ -37173,13 +37588,13 @@ Capturing a reactive reference as a live subscription (i.e., in a way that would
 If a `fn` body contains an expression that would create a live reactive dependency on an `@variable` declared outside the `fn` boundary — such as wrapping the call in a reactive observer or registering a watcher — the compiler emits E-FN-009.
 
 ```scrml
-<count> = 0
+<count> = 0;
 ${ 
     // Invalid — E-FN-009
     fn buildSnapshot() {
-        let s = <Snapshot>
-        s.value = meta.subscribe("count", () => { ... })   // live subscription capture
-        return s
+        let s = <Snapshot>;
+        s.value = meta.subscribe("count", () => { ... });   // live subscription capture
+        return s;
     }
 }
 ```
@@ -37194,18 +37609,18 @@ A `fn` body MAY call other `fn`-declared functions. The transitivity of `fn` con
 
 ```scrml
 fn buildAddress(city: string, country: string) {
-    let a = <Address>
-    a.city    = city
-    a.country = country
-    return a
+    let a = <Address>;
+    a.city    = city;
+    a.country = country;
+    return a;
 }
 
 fn buildUser(name: string, city: string, country: string) {
-    let u    = <User>
-    let addr = buildAddress(city, country)   // valid: fn calling fn
-    u.name    = name
-    u.address = addr
-    return u
+    let u    = <User>;
+    let addr = buildAddress(city, country);   // valid: fn calling fn
+    u.name    = name;
+    u.address = addr;
+    return u;
 }
 ```
 
@@ -37219,9 +37634,9 @@ A `fn` body SHALL NOT call a `function`-declared callable (§7.3), because `func
 pure function double(x: number) { return x * 2; }
 
 fn buildScaled(value: number) {
-    let s = <Scaled>
-    s.value = double(value)   // valid: pure function call from fn
-    return s
+    let s = <Scaled>;
+    s.value = double(value);   // valid: pure function call from fn
+    return s;
 }
 ```
 
@@ -37229,10 +37644,10 @@ fn buildScaled(value: number) {
 function effectfulHelper() { @counter = @counter + 1; }   // mutates reactive state
 
 fn buildItem(name: string) {
-    let i = <Item>
-    i.name = name
-    effectfulHelper()   // Invalid — E-FN-003: calls a non-pure function
-    return i
+    let i = <Item>;
+    i.name = name;
+    effectfulHelper();   // Invalid — E-FN-003: calls a non-pure function
+    return i;
 }
 ```
 
@@ -37259,26 +37674,26 @@ When a `fn` is stored in a `<state>` field, the field's type annotation carries 
 // Source order is non-load-bearing; any permutation type-checks identically.
 
 fn parseExpression(cursor: Cursor) {
-    return parseAssignment(cursor)            // forward reference — valid (hoisted)
+    return parseAssignment(cursor);            // forward reference — valid (hoisted)
 }
 
 fn parseAssignment(cursor: Cursor) {
-    let left = parseConditional(cursor)       // forward reference — valid (hoisted)
+    let left = parseConditional(cursor);       // forward reference — valid (hoisted)
     // ...
-    return left
+    return left;
 }
 
 fn parseConditional(cursor: Cursor) {
-    let cond = parseBinary(cursor)            // forward reference — valid (hoisted)
+    let cond = parseBinary(cursor);            // forward reference — valid (hoisted)
     // ...
-    return cond
+    return cond;
 }
 
 fn parseBinary(cursor: Cursor) {
     // May recurse back into parseExpression — valid (hoisted)
-    let right = parseExpression(cursor)
+    let right = parseExpression(cursor);
     // ...
-    return right
+    return right;
 }
 ```
 
@@ -37300,11 +37715,11 @@ A single `fn` body MAY construct multiple `<state>` objects. **Amended 2026-04-2
 
 ```scrml
 fn buildPair(aName: string, bName: string) {
-    let a = <Item>
-    let b = <Item>
-    a.name = aName
-    b.name = bName
-    return { first: a, second: b }   // both fully loaded — valid
+    let a = <Item>;
+    let b = <Item>;
+    a.name = aName;
+    b.name = bName;
+    return { first: a, second: b };   // both fully loaded — valid
 }
 ```
 
@@ -37415,15 +37830,15 @@ newly-rejecting, as §48's amendment states.)
 </>
 
 fn makePoint(x: number, y: number) {
-    let p = <Point>
-    p.x = x
-    p.y = y
-    return p
+    let p = <Point>;
+    p.x = x;
+    p.y = y;
+    return p;
 }
 
 ${
-    let origin = makePoint(0, 0)
-    let corner = makePoint(100, 200)
+    let origin = makePoint(0, 0);
+    let corner = makePoint(100, 200);
 }
 ```
 
@@ -37439,11 +37854,11 @@ Expected: Compiles without error. `makePoint` constructs fully-initialized `Poin
 </>
 
 fn makeRect(x1: number, y1: number, x2: number, y2: number, label: string) {
-    let r           = <Rect>
-    r.topLeft       = makePoint(x1, y1)
-    r.bottomRight   = makePoint(x2, y2)
-    r.label         = label
-    return r
+    let r           = <Rect>;
+    r.topLeft       = makePoint(x1, y1);
+    r.bottomRight   = makePoint(x2, y2);
+    r.label         = label;
+    return r;
 }
 ```
 
@@ -37459,12 +37874,12 @@ Expected: Compiles without error. `makeRect` calls `fn makePoint` (valid), assig
 
 fn buildTags(names: string[]) {
     for (name of names) {
-        let t      = <Tag>
-        t.name     = name
-        t.priority = 0
-        lift t
+        let t      = <Tag>;
+        t.name     = name;
+        t.priority = 0;
+        lift t;
     }
-    return ~
+    return ~;
 }
 ```
 
@@ -37484,14 +37899,14 @@ Expected: Compiles without error. `lift t` inside the `for` loop hoists each ful
 
 fn buildUser(isAdmin: bool, name: string) -> AdminUser | GuestUser {
     if (isAdmin) {
-        let u  = <AdminUser>
-        u.name  = name
-        u.level = 1
-        return u
+        let u  = <AdminUser>;
+        u.name  = name;
+        u.level = 1;
+        return u;
     } else {
-        let u  = <GuestUser>
-        u.name = name
-        return u
+        let u  = <GuestUser>;
+        u.name = name;
+        return u;
     }
 }
 ```
@@ -37510,11 +37925,11 @@ Expected: Compiles without error. Explicit `-> AdminUser | GuestUser` return typ
 </>
 
 fn buildProduct(name: string, price: number) {
-    let p  = <Product>
-    p.name  = name
-    p.price = price
+    let p  = <Product>;
+    p.name  = name;
+    p.price = price;
     // p.sku never assigned
-    return p
+    return p;
 }
 ```
 
@@ -37531,11 +37946,11 @@ E-STATE-COMPLETE: field 'sku' of <Product> is unassigned at literal close.
 
 ```scrml
 fn buildUserFromDb(id: int) {
-    let row = ?{ SELECT name, age FROM users WHERE id = $id }
-    let u   = <User>
-    u.name  = row.name
-    u.age   = row.age
-    return u
+    let row = ?{ SELECT name, age FROM users WHERE id = $id };
+    let u   = <User>;
+    u.name  = row.name;
+    u.age   = row.age;
+    return u;
 }
 ```
 
@@ -37553,11 +37968,11 @@ E-FN-001: `fn buildUserFromDb` contains a `?{}` SQL access at line 2.
 
 ```scrml
 fn buildSession(userId: int) {
-    let s     = <Session>
-    s.userId  = userId
-    s.id      = crypto.randomUUID()
-    s.created = Date.now()
-    return s
+    let s     = <Session>;
+    s.userId  = userId;
+    s.id      = crypto.randomUUID();
+    s.created = Date.now();
+    return s;
 }
 ```
 
@@ -37576,16 +37991,16 @@ Two errors reported in one pass; compilation continues to find all violations.
 ```scrml
 fn buildEntity(kind: string) {
     if (kind == "product") {
-        let p    = <Product>
-        p.name   = "Widget"
-        p.price  = 9.99
-        p.sku    = "W-001"
-        return p
+        let p    = <Product>;
+        p.name   = "Widget";
+        p.price  = 9.99;
+        p.sku    = "W-001";
+        return p;
     } else {
-        let c    = <Category>
-        c.name   = "Widgets"
-        c.count  = 0
-        return c
+        let c    = <Category>;
+        c.name   = "Widgets";
+        c.count  = 0;
+        return c;
     }
 }
 ```
@@ -38904,7 +39319,7 @@ The assigned value is produced exactly once. The right-hand side expression is e
 Assignment to a reactive cell as an expression is valid (the `<x>` cell is assumed declared elsewhere — §6.1.5):
 
 ```scrml
-@x = computeValue()
+@x = computeValue();
 ```
 
 When `@x = computeValue()` is used as an expression:
@@ -38955,14 +39370,14 @@ Assignment to variables declared inside a `fn` body is valid as an expression. T
 
 ```scrml
 fn scanMatches(str: string, re: asIs) {
-    let results = []
-    let m = not
+    let results = [];
+    let m = not;
     while ((m = re.exec(str)) is given) {
-        results.push(m[0])
+        results.push(m[0]);
     }
-    let out = <ScanResult>
-    out.matches = results
-    return out
+    let out = <ScanResult>;
+    out.matches = results;
+    return out;
 }
 ```
 
@@ -38974,15 +39389,15 @@ Assignment-as-expression to a variable declared outside the `fn` boundary is E-F
 
 ```scrml
 ${
-    let log = []
+    let log = [];
 
     // Invalid — E-FN-003
     fn buildItem(name: string) {
-        let i = <Item>
-        i.name = name
+        let i = <Item>;
+        i.name = name;
         // assignment-as-expression to outer-scope `log` — still E-FN-003
-        log = [...log, name]
-        return i
+        log = [...log, name];
+        return i;
     }
 }
 ```
@@ -38992,8 +39407,8 @@ ${
 Assignment to a `lin` variable as an expression is not the consumption event. A `lin` variable's single consumption is always a read (§35.3). Re-assigning a `lin` variable is illegal regardless of form (statement or expression). Use E-LIN-004 for this case.
 
 ```scrml
-lin token = acquireToken()
-token = refreshToken()   // E-LIN-004: re-assignment of lin variable
+lin token = acquireToken();
+token = refreshToken();   // E-LIN-004: re-assignment of lin variable
 ```
 
 ### 50.7 Codegen
@@ -39098,33 +39513,33 @@ Worked examples — all six of these are E-ASSIGN-004:
 
 ```scrml
 ${
-    const a = 1
-    a = 2                  // explicit const, plain assignment
+    const a = 1;
+    a = 2;                  // explicit const, plain assignment
 }
 
 ${
-    const b = 1
-    b += 1                 // explicit const, compound assignment (§50.12)
+    const b = 1;
+    b += 1;                 // explicit const, compound assignment (§50.12)
 }
 
 ${
-    const c = 1
-    c = c + 1              // explicit const, self-referencing
+    const c = 1;
+    c = c + 1;              // explicit const, self-referencing
 }
 
 ${
-    d = 1                  // bare naming — declares `d` as const
-    d = 2                  // ...so this is a reassignment
+    d = 1;                  // bare naming — declares `d` as const
+    d = 2;                  // ...so this is a reassignment
 }
 
 ${
-    e = 1
-    e += 1
+    e = 1;
+    e += 1;
 }
 
 ${
-    f = 1
-    f = f + 1
+    f = 1;
+    f = f + 1;
 }
 ```
 
@@ -39133,11 +39548,11 @@ And the escape, which is `let` and only `let`:
 ```scrml
 ${
     function accumulate(items: number[]) {
-        let total = 0
+        let total = 0;
         for (item of items) {
-            total = total + item    // legal, and legal on every iteration
+            total = total + item;    // legal, and legal on every iteration
         }
-        return total
+        return total;
     }
 }
 ```
@@ -39149,7 +39564,7 @@ A `let` binding stays mutable for its whole lifetime. Reassigning it any number 
 ```scrml
 ${
     for (it of @xs) {
-        it = it + 1        // E-ASSIGN-004 — `it` is a keywordless loop binder, so `const`
+        it = it + 1;        // E-ASSIGN-004 — `it` is a keywordless loop binder, so `const`
     }
 }
 ```
@@ -39188,13 +39603,13 @@ ${
 ```scrml
 ${
     function extractAll(str: string, pattern: string) {
-        const re = new RegExp(pattern, "g")
-        let results = []
-        let m = not
+        const re = new RegExp(pattern, "g");
+        let results = [];
+        let m = not;
         while ((m = re.exec(str)) is given) {
-            results.push(m[0])
+            results.push(m[0]);
         }
-        return results
+        return results;
     }
 }
 ```
@@ -39214,9 +39629,9 @@ while ((m = re.exec(str), m !== null && m !== undefined)) {
 
 ```scrml
 ${
-    let a = 0
-    let b = 0
-    a = b = 0
+    let a = 0;
+    let b = 0;
+    a = b = 0;
 }
 ```
 
@@ -39225,10 +39640,10 @@ Expected (S473 D10): `E-ASSIGN-POSITION` at `b = 0`. ~~Compiles without error. `
 ```scrml
 // In a single expression context:
 ${
-    let x = 0
-    let y = 0
-    let z = 0
-    x = y = z = computeValue()
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    x = y = z = computeValue();
 }
 ```
 
@@ -39240,8 +39655,8 @@ Expected (S473 D10): `E-ASSIGN-POSITION`. ~~Compiles without error. All three va
 
 ```scrml
 ${
-    let flag = false
-    let result = (flag = computeFlag()) ? "yes" : "no"
+    let flag = false;
+    let result = (flag = computeFlag()) ? "yes" : "no";
 }
 ```
 
@@ -39255,7 +39670,7 @@ Note: This is a dense expression. Its clarity in real code depends on context. W
 
 ```scrml
 ${
-    let x = 0
+    let x = 0;
     if (x = 5) {
         // ...
     }
@@ -39279,16 +39694,16 @@ The program compiles with the assignment semantics (assigns `5` to `x`, then eva
 
 ```scrml
 fn parseTokens(input: string) {
-    const tokenRe = /\w+/g
-    let tokens = []
-    let m = not
+    const tokenRe = /\w+/g;
+    let tokens = [];
+    let m = not;
     while ((m = tokenRe.exec(input)) is given) {
-        let t   = <Token>
-        t.value = m[0]
-        t.start = m.index
-        lift t
+        let t   = <Token>;
+        t.value = m[0];
+        t.start = m.index;
+        lift t;
     }
-    return ~
+    return ~;
 }
 ```
 
@@ -39298,8 +39713,8 @@ Expected: Compiles without error. `m` is local to the `fn` body. Assignment to i
 
 ```scrml
 ${
-    function process(val: int) { return val + 1 }
-    const result = process(let x = 10)   // Error: let in expression position
+    function process(val: int) { return val + 1; }
+    const result = process(let x = 10);   // Error: let in expression position
 }
 ```
 
@@ -39346,8 +39761,8 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 Under the L1 pillar (§1.4), markup is a first-class value type. Assignment-as-expression composes cleanly:
 
 ```scrml
-<currentView> = <p>Hello</>           // markup value as RHS of assignment
-${ const refreshed = (@currentView = <p>Refreshed at ${Date.now()}</>) }
+<currentView> = <p>Hello</>;           // markup value as RHS of assignment
+${ const refreshed = (@currentView = <p>Refreshed at ${Date.now()}</>); }
                                       // assignment-expression evaluates to the assigned markup value
 ```
 
@@ -39838,7 +40253,7 @@ The `<engine>` element's body is the rendered fragment at the source position.
 identifier (Move 18):
 
 ```scrml
-${ import { MarioMachine } from './engines.scrml' }
+${ import { MarioMachine } from './engines.scrml'; }
 
 <page>
   <header>Welcome</header>
@@ -39940,7 +40355,7 @@ type HOSStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
 
 <!-- @persistedStatus is resolved AT CONSTRUCTION (e.g. server-side ?{} SSR, or a
      synchronous localStorage read). Its value is a HOSStatus variant NAME. -->
-<persistedStatus> : string = serverLoadedHosStatus
+<persistedStatus> : string = serverLoadedHosStatus;
 
 <engine for=HOSStatus initial=@persistedStatus>
   <OffDuty rule=(.Driving | .OnDuty | .Sleeper) : "Off duty">
@@ -40006,7 +40421,7 @@ type DriverStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
      that hydrates @driver on mount. It may NOT be resolved at construction
      (fetch-on-mount); the engine sits at the initial=.Literal placeholder until
      it resolves. The engine RIDES this cell's load — it does NOT self-load. -->
-<driver server> : Driver = ?{ `SELECT * FROM drivers WHERE id = 1` }.get()
+<driver server> : Driver = ?{ `SELECT * FROM drivers WHERE id = 1` }.get();
 <!-- The PARAM-BEARING variant `?{ ... WHERE id = ${@driverId} }` is a bounded
      follow-on (POST-body param-passing on /__serverLoad/<var>, W-AUTH-004 until
      shipped — §52.6.5 Pattern C). For a param-bearing load today, use a
@@ -40102,8 +40517,8 @@ Three accepted forms:
 is intercepted and validated against the FROM-state's `rule=`:
 
 ```scrml
-@marioState = .Big           // legal from .Small
-@marioState = .Fire          // illegal from .Small (E-ENGINE-INVALID-TRANSITION)
+@marioState = .Big;           // legal from .Small
+@marioState = .Fire;          // illegal from .Small (E-ENGINE-INVALID-TRANSITION)
 ```
 
 **Compile-time validation when from-state is statically known.** Inside a state-child
@@ -40250,7 +40665,7 @@ during S55 deliberation. Silent failures hide bugs. For "transition only if curr
 some state" intent, use:
 
 ```scrml
-if (@marioState == .Small) @marioState = .Big       // explicit-conditional intent
+if (@marioState == .Small) @marioState = .Big;       // explicit-conditional intent
 ```
 
 This makes the gating condition visible at the call site.
@@ -40323,7 +40738,7 @@ INTERPOLATED` (§34), NOT a silent no-op. Wrap it: `effect=${ playSound("grow") 
 
 ```scrml
 <Big rule=(.Fire | .Cape | .Small)>
-  <onTransition to=.Fire>${ playSound("fire"); animateFlame() }</>
+  <onTransition to=.Fire>${ playSound("fire"); animateFlame(); }</>
   <onTransition to=.Cape once>${ playSound("cape") }</>
   <onTransition to=.Small if=(@gameOver == false)>${ log("regression") }</>
   "🧍 🧍"
@@ -40356,7 +40771,7 @@ transition**, co-located with the engine declaration exactly as Elm co-locates
 <engine for=Phase initial=.Loading effect=${
     // runs ONCE on boot into .Loading — the implicit init→.Loading edge's effect
     @tasks = loadTasks() !{
-        .Network(msg) :> { @phase = .ErrorState(msg); return }
+        .Network(msg) :> { @phase = .ErrorState(msg); return; }
     }
     @phase = @tasks.length == 0 ? .Empty : .Editing   // checked against .Loading.rule
 }>
@@ -40731,12 +41146,12 @@ lowering-shape extension, not new runtime infrastructure.
 type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: string) }
 
 function load() {
-  @loadPhase = .Loading
+  @loadPhase = .Loading;
   const result = fetchItems() !{
-    .Network(msg) :> { @loadPhase = .Error(msg); return }
-    .Empty        :> { @loadPhase = .Done(0);    return }
-  }
-  @loadPhase = .Done(result.length)
+    .Network(msg) :> { @loadPhase = .Error(msg); return; }
+    .Empty        :> { @loadPhase = .Done(0);    return; }
+  };
+  @loadPhase = .Done(result.length);
 }
 
 <engine for=LoadPhase initial=.Idle>
@@ -41306,7 +41721,7 @@ fires `E-IDLE-MISPLACED`. For per-state timer-fire-on-state-entry semantics, use
 ```scrml
 ${
   type Phase:enum = { Active, Idle }
-  function refresh() { @phase = Phase.Active }
+  function refresh() { @phase = Phase.Active; }
 }
 
 <engine for=Phase initial=.Active>
@@ -41890,14 +42305,14 @@ type OrderStatus:enum = {
     }
 }
 
-<status> = OrderStatus.Pending
+<status> = OrderStatus.Pending;
 
 ${ function advance() {
-    @status = OrderStatus.Processing   // legal: .Pending => .Processing
+    @status = OrderStatus.Processing;   // legal: .Pending => .Processing
 } }
 
 ${ function complete() {
-    @status = OrderStatus.Delivered    // compile error if @status is known to not be .Shipped
+    @status = OrderStatus.Delivered;    // compile error if @status is known to not be .Shipped
 } }
 ```
 
@@ -41911,10 +42326,10 @@ type OrderStatus:enum = {
     }
 }
 
-<status> = OrderStatus.Delivered
+<status> = OrderStatus.Delivered;
 
 ${ function reopen() {
-    @status = OrderStatus.Pending   // E-ENGINE-001: illegal transition .Delivered => .Pending;
+    @status = OrderStatus.Pending;   // E-ENGINE-001: illegal transition .Delivered => .Pending;
                                      // no rule permits this move
 } }
 ```
@@ -42159,7 +42574,7 @@ A reactive variable is bound to a machine at its declaration site using the type
 syntax:
 
 ```scrml
-<status>: UserFlow = OrderStatus.Pending
+<status>: UserFlow = OrderStatus.Pending;
 ```
 
 This syntax is an extension of the existing type annotation form `@var: Type = val` (§6.1,
@@ -42236,26 +42651,26 @@ type Column:enum = {
 }
 </>
 
-<currentUser> = { name: "alice", isAdmin: false }
-<auditLog>    = []
+<currentUser> = { name: "alice", isAdmin: false };
+<auditLog>    = [];
 
 // Regular user — governed by UserFlow
-<cardColumn>:  UserFlow  = Column.Todo
+<cardColumn>:  UserFlow  = Column.Todo;
 
 // Admin — governed by AdminFlow
-<adminColumn>: AdminFlow = Column.Todo
+<adminColumn>: AdminFlow = Column.Todo;
 ```
 
 Transition attempt by regular user:
 ```scrml
-${ @cardColumn = Column.InProgress }  // legal — .Todo => .InProgress in UserFlow
-${ @cardColumn = Column.Todo }        // E-ENGINE-001: no rule .InProgress => .Todo in UserFlow
+${ @cardColumn = Column.InProgress; }  // legal — .Todo => .InProgress in UserFlow
+${ @cardColumn = Column.Todo; }        // E-ENGINE-001: no rule .InProgress => .Todo in UserFlow
 ```
 
 Transition attempt by admin:
 ```scrml
-${ @adminColumn = Column.Done }       // legal — .InProgress => .Done in AdminFlow
-${ @adminColumn = Column.Todo }       // runtime check: .Done => .Todo given @currentUser.isAdmin
+${ @adminColumn = Column.Done; }       // legal — .InProgress => .Done in AdminFlow
+${ @adminColumn = Column.Todo; }       // runtime check: .Done => .Todo given @currentUser.isAdmin
                                        // If isAdmin is false: E-ENGINE-001-RT at runtime
 ```
 
@@ -42279,21 +42694,21 @@ type OrderStatus:enum = {
             @deliveryLog = [...@deliveryLog, {
                 orderId: event.from,
                 deliveredAt: Date.now()
-            }]
+            }];
         }
     }
 }
 
-<deliveryLog> = []
-<order>       = OrderStatus.Pending
+<deliveryLog> = [];
+<order>       = OrderStatus.Pending;
 
 ${ function shipOrder() {
-    @order = OrderStatus.Processing   // .Pending => .Processing — legal
-    @order = OrderStatus.Shipped      // .Processing => .Shipped — legal
+    @order = OrderStatus.Processing;   // .Pending => .Processing — legal
+    @order = OrderStatus.Shipped;      // .Processing => .Shipped — legal
 } }
 
 ${ function markDelivered() {
-    @order = OrderStatus.Delivered    // .Shipped => .Delivered — legal; effect fires
+    @order = OrderStatus.Delivered;    // .Shipped => .Delivered — legal; effect fires
 } }
 ```
 
@@ -42319,10 +42734,10 @@ type AuthState:enum = {
     }
 }
 
-<authState> = AuthState.Locked
+<authState> = AuthState.Locked;
 
 ${ function unlockAccount() {
-    @authState = AuthState.Anonymous   // E-ENGINE-001: .Locked is terminal in AuthState
+    @authState = AuthState.Anonymous;   // E-ENGINE-001: .Locked is terminal in AuthState
 } }
 ```
 
@@ -42377,9 +42792,9 @@ type TaskStatus:enum = {
 }
 </>
 
-<devTask>: DeveloperFlow = TaskStatus.Backlog
-<qaTask>:  QAFlow        = TaskStatus.InReview
-<pmTask>:  PMFlow        = TaskStatus.Backlog
+<devTask>: DeveloperFlow = TaskStatus.Backlog;
+<qaTask>:  QAFlow        = TaskStatus.InReview;
+<pmTask>:  PMFlow        = TaskStatus.Backlog;
 ```
 
 **Normative statement:**
@@ -42689,7 +43104,7 @@ projection-rule      ::= variant-ref-list '=>' variant-ref                -- map
     .Delivered | .Cancelled | .Refunded     => .Terminal
 </>
 
-<order>: OrderMachine = OrderState.Draft
+<order>: OrderMachine = OrderState.Draft;
 // No @ui declaration required — the compiler synthesizes it from the derived machine.
 // Reading @ui: resolves via the projection. Writing @ui: compile error (E-ENGINE-017).
 ```
@@ -42746,19 +43161,19 @@ exhaustiveness and write-blocking, prefer a derived machine.
 Before (observed in `samples/gauntlet-r11/rust-state-machine.scrml`):
 
 ```scrml
-<state>: FetchState = FetchState.Idle
-<isIdle>    = true
-<isLoading> = false
-<isSuccess> = false
-<isError>   = false
+<state>: FetchState = FetchState.Idle;
+<isIdle>    = true;
+<isLoading> = false;
+<isSuccess> = false;
+<isError>   = false;
 
 ${
   function setState(next: FetchState) {
-    @state = next
-    @isIdle    = next == FetchState.Idle
-    @isLoading = next == FetchState.Loading
-    @isSuccess = next == FetchState.Success
-    @isError   = next == FetchState.Error
+    @state = next;
+    @isIdle    = next == FetchState.Idle;
+    @isLoading = next == FetchState.Loading;
+    @isSuccess = next == FetchState.Success;
+    @isError   = next == FetchState.Error;
   }
 }
 ```
@@ -42766,7 +43181,7 @@ ${
 After (with derived machine):
 
 ```scrml
-<state>: FetchMachine = FetchState.Idle
+<state>: FetchMachine = FetchState.Idle;
 
 <engine name=FetchMachine for=FetchState>
     .Idle    => .Loading
@@ -42867,10 +43282,10 @@ transition rules).
 **Worked example:**
 
 ```scrml
-<auditLog> = []
-<order>: OrderFlow = OrderStatus.Pending
+<auditLog> = [];
+<order>: OrderFlow = OrderStatus.Pending;
 ${
-    function advance() { @order = OrderStatus.Processing }
+    function advance() { @order = OrderStatus.Processing; }
 }
 
 <engine name=OrderFlow for=OrderStatus>
@@ -43071,9 +43486,9 @@ optional binding-list) and the `=>` arrow. It is optional — rules without
 
 ```scrml
 ${ type Fetch:enum = { Idle, Loading, Done, TimedOut } }
-<fetch>: FetchMachine = Fetch.Idle
+<fetch>: FetchMachine = Fetch.Idle;
 ${
-    function start() { @fetch = Fetch.Loading }
+    function start() { @fetch = Fetch.Loading; }
 }
 
 <engine name=FetchMachine for=Fetch>
@@ -43397,13 +43812,13 @@ Three arguments:
 
 ```scrml
 ${ type S:enum = { Pending, Processing, Shipped, Delivered } }
-<order>: OrderFlow = S.Pending
-<log> = []
+<order>: OrderFlow = S.Pending;
+<log> = [];
 ${
-    function advance() { @order = S.Processing }
-    function seekStart() { replay(@order, @log, 0) }
-    function seekAfter(n: int) { replay(@order, @log, n) }
-    function rewindToLatest() { replay(@order, @log) }
+    function advance() { @order = S.Processing; }
+    function seekStart() { replay(@order, @log, 0); }
+    function seekAfter(n: int) { replay(@order, @log, n); }
+    function rewindToLatest() { replay(@order, @log); }
 }
 
 <engine name=OrderFlow for=S>
@@ -43562,9 +43977,9 @@ Mismatches emit **E-STATE-MACHINE-DIVERGENCE**.
 **Case 1: state-local transition on a machine-bound variable.**
 
 ```scrml
-<sub>: Submission = <Draft> ...</>
+<sub>: Submission = <Draft> ...</>;
 bind @sub -> <engine SubmissionFlow>
-@sub = @sub.validate(now)
+@sub = @sub.validate(now);
 ```
 
 The state-local transition body runs (produces the new `<Validated>` value). The machine's assignment check validates the result against `SubmissionFlow`'s rules. Both layers run.
@@ -43572,8 +43987,8 @@ The state-local transition body runs (produces the new `<Validated>` value). The
 **Case 2: state-local transition on a non-machine-bound variable.**
 
 ```scrml
-<sub>: Submission = <Draft> ...</>
-@sub = @sub.validate(now)
+<sub>: Submission = <Draft> ...</>;
+@sub = @sub.validate(now);
 ```
 
 The state-local transition body runs. No machine rules apply. The assignment is authorized by state-local declaration only.
@@ -43583,9 +43998,9 @@ The state-local transition body runs. No machine rules apply. The assignment is 
 **Case 3: direct reassignment on a machine-bound variable (bypassing state-local).**
 
 ```scrml
-<sub>: Submission = <Draft> ...</>
+<sub>: Submission = <Draft> ...</>;
 bind @sub -> <engine SubmissionFlow>
-@sub = <Validated> id=..., title=..., body=..., validatedAt=now </>
+@sub = <Validated> id=..., title=..., body=..., validatedAt=now </>;
 ```
 
 No state-local transition is invoked. The machine's assignment check validates the move. This is legal if `SubmissionFlow` permits `Draft => Validated`. State-local transition bodies are NOT run (no method was called).
@@ -43668,9 +44083,9 @@ ${
 
 ```scrml
 // pages/driver/hos.scrml
-${ import { DriverStatus } from '../../schema.scrml' }
+${ import { DriverStatus } from '../../schema.scrml'; }
 
-<status>: DriverStatus = .OffDuty
+<status>: DriverStatus = .OffDuty;
 
 <engine name=HOSMachine for=DriverStatus>
   .OffDuty      => .OnDuty | .SleeperBerth
@@ -43858,33 +44273,33 @@ ${
 
     // Derived values (§6.6) are always local and always consistent with the
     // server-authoritative source they derive from.
-    const <todoCards> = @cards.filter(c => c.column == Column.Todo)
+    const <todoCards> = @cards.filter(c => c.column == Column.Todo);
 
     function createCard(title: string, desc: string, col: string) {
         ?{`INSERT INTO cards (title, description, column_name, position)
-           VALUES (${title}, ${desc}, ${col}, ${@cards.length})`}.run()
-        return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
+           VALUES (${title}, ${desc}, ${col}, ${@cards.length})`}.run();
+        return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get();
     }
 
     function updateCard(id: int, title: string, desc: string) {
-        ?{`UPDATE cards SET title = ${title}, description = ${desc} WHERE id = ${id}`}.run()
+        ?{`UPDATE cards SET title = ${title}, description = ${desc} WHERE id = ${id}`}.run();
     }
 
     function addCard() {
-        @cards = [...@cards, createCard(@ui.draftTitle, @ui.draftDescription, @ui.addingToColumn)]
-        @ui.draftTitle = ""
-        @ui.draftDescription = ""
+        @cards = [...@cards, createCard(@ui.draftTitle, @ui.draftDescription, @ui.addingToColumn)];
+        @ui.draftTitle = "";
+        @ui.draftDescription = "";
     }
 
     function startEdit(card: Card) {
-        @ui.editingId = card.id
-        @ui.draftTitle = card.title
-        @ui.draftDescription = card.description
+        @ui.editingId = card.id;
+        @ui.draftTitle = card.title;
+        @ui.draftDescription = card.description;
     }
 
     function commitEdit() {
-        updateCard(@ui.editingId, @ui.draftTitle, @ui.draftDescription)
-        @ui.editingId = not
+        updateCard(@ui.editingId, @ui.draftTitle, @ui.draftDescription);
+        @ui.editingId = not;
     }
 }
 
@@ -43936,13 +44351,13 @@ This restriction prevents a single type from appearing in two authority contexts
 
 // The authority boundary is explicit: submitDraft is the crossing point.
 function submitDraft(draft: CardDraft): Card {
-    ?{`INSERT INTO cards (title, column_name) VALUES (${draft.title}, ${draft.column})`}.run()
-    return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
+    ?{`INSERT INTO cards (title, column_name) VALUES (${draft.title}, ${draft.column})`}.run();
+    return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get();
 }
 
 function submit() {
-    @cards = [...@cards, submitDraft(@draft)]
-    @draft = { title: "", column: "Todo" }
+    @cards = [...@cards, submitDraft(@draft)];
+    @draft = { title: "", column: "Todo" };
 }
 ```
 
@@ -43990,8 +44405,8 @@ When the right-hand side of a `<varName server> = expr` declaration is a **liter
 A `<varName server>` with a literal-value RHS of `not` (§42) means "no placeholder — render nothing until the server responds."
 
 ```scrml
-<userProfile server> = not     // renders nothing until profile loads
-<count server>       = 0       // renders 0 until server responds with authoritative count
+<userProfile server> = not;     // renders nothing until profile loads
+<count server>       = 0;       // renders 0 until server responds with authoritative count
 ```
 
 The "NOT sent to the server" clause applies to the **placeholder VALUE** shown in-flight — it does NOT govern whether an inline `?{}` on the RHS may *define the load query*. When the RHS is an inline `?{}` (§52.6.5 **Pattern C**), that `?{}` IS the cell's mount-load query: it runs server-side via the compiler-generated `/__serverLoad/<varName>` route, and the in-flight placeholder VALUE the client displays is absence (`not`) until the query resolves. The query (the `?{}`) defines the load; the placeholder (`not`) is what shows while it loads. These are distinct — see §52.6.5 Pattern C.
@@ -44016,33 +44431,33 @@ The "NOT sent to the server" clause applies to the **placeholder VALUE** shown i
 // Tier 2: server-authoritative primitive var.
 // Compiler generates initial load on mount + SSR pre-render.
 // Assignment lands locally; the persist is the dev's ?{} server fn (§52.6.2).
-<cards server> = []
+<cards server> = [];
 
 // Client-local vars: no sync, no server interaction.
-<editingId>        = not
-<draftTitle>       = ""
-<draftDescription> = ""
-<addingToColumn>   = "Todo"
+<editingId>        = not;
+<draftTitle>       = "";
+<draftDescription> = "";
+<addingToColumn>   = "Todo";
 
 // Derived values are local by definition.
-const <todoCards> = @cards.filter(c => c.column == "Todo")
+const <todoCards> = @cards.filter(c => c.column == "Todo");
 
 ${
     function loadCards() {
-        return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
+        return ?{`SELECT * FROM cards ORDER BY position ASC`}.all();
     }
 
     function createCard(title: string, desc: string, col: string, pos: int) {
         ?{`INSERT INTO cards (title, description, column_name, position)
-           VALUES (${title}, ${desc}, ${col}, ${pos})`}.run()
-        return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
+           VALUES (${title}, ${desc}, ${col}, ${pos})`}.run();
+        return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get();
     }
 
     function addCard() {
-        let newCard = createCard(@draftTitle, @draftDescription, @addingToColumn, @cards.length)
-        @cards = [...@cards, newCard]    // immediate-local landing; the write was createCard()'s INSERT above (§52.6.2)
-        @draftTitle = ""
-        @draftDescription = ""
+        let newCard = createCard(@draftTitle, @draftDescription, @addingToColumn, @cards.length);
+        @cards = [...@cards, newCard];    // immediate-local landing; the write was createCard()'s INSERT above (§52.6.2)
+        @draftTitle = "";
+        @draftDescription = "";
     }
 }
 
@@ -44056,7 +44471,7 @@ Expected compiler output: no errors. `@cards` is server-authoritative (instance-
 ```scrml
 <program db="sqlite:./kanban.db">
 
-<editingId> = not    // client-local
+<editingId> = not;    // client-local
 
 ${
     // ERROR: @editingId is client-local. It cannot appear as a bound
@@ -44085,8 +44500,8 @@ E-AUTH-001: '@editingId' is client-local and cannot be used as a bound parameter
 ```scrml
 <program db="sqlite:./kanban.db">
 
-<localCount>                = 0                    // client-local
-<doubleCount server>        = @localCount * 2      // ERROR: server cell derives from local cell
+<localCount>                = 0;                    // client-local
+<doubleCount server>        = @localCount * 2;      // ERROR: server cell derives from local cell
 
 </program>
 ```
@@ -44138,7 +44553,7 @@ The initial value in the declaration is displayed while the fetch is in flight (
 When client code assigns to a server-authoritative variable:
 
 ```scrml
-@cards = addCard(@draftTitle)   // addCard is a server fn: it ?{} INSERTs, then returns the re-fetched rows
+@cards = addCard(@draftTitle);   // addCard is a server fn: it ?{} INSERTs, then returns the re-fetched rows
 ```
 
 The compiler's behavior is:
@@ -44192,14 +44607,14 @@ For a `<var server>` declaration to generate an initial load, the compiler needs
 **Pattern A — Inferred from assignment:**
 
 ```scrml
-<cards server> = []
+<cards server> = [];
 
 ${
     // Somewhere in the logic block:
-    @cards = loadCards()
+    @cards = loadCards();
 
     function loadCards() {
-        return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
+        return ?{`SELECT * FROM cards ORDER BY position ASC`}.all();
     }
 }
 ```
@@ -44209,9 +44624,9 @@ The compiler detects that `@cards` is assigned from `loadCards()` — a server f
 **Pattern B — a `<request>` that assigns the cell (§6.7.7):**
 
 ```scrml
-<cards server> = []
+<cards server> = [];
 
-function loadCards() { return ?{`SELECT * FROM cards ORDER BY position ASC`}.all() }
+function loadCards() { return ?{`SELECT * FROM cards ORDER BY position ASC`}.all(); }
 <request id="cardsLoad" deps=[]>${ @cards = loadCards() }</>
 ```
 
@@ -44232,7 +44647,7 @@ type Driver:struct = { id: number, current_status: string }
 
 // The inline ?{} IS the load. The compiler emits /__serverLoad/driver running the
 // SELECT server-side; the client fetches it on mount. `not` shows in-flight.
-<driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get()
+<driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get();
 ```
 
 The `server @var = ?{}` form (the `@`-prefixed declaration inside a `${...}` logic block) is identical — both carry the same structured `?{}` query and load the same way.
@@ -44258,18 +44673,18 @@ authoritative value, assigned to the cell.
 **Pattern — dev-supplied write fn:**
 
 ```scrml
-<count server> = 0                          // placeholder; §52 auto-loads via the §52.6.5 convention
+<count server> = 0;                          // placeholder; §52 auto-loads via the §52.6.5 convention
 
 // LOAD (§52.6.5 Pattern B): a <request> assigns the cell → that fn is the mount load.
-function loadCount() { return ?{`SELECT n FROM counters WHERE id = 1`}.get().n }
+function loadCount() { return ?{`SELECT n FROM counters WHERE id = 1`}.get().n; }
 <request id="countLoad" deps=[]>${ @count = loadCount() }</>   // S449: was `on mount { @count = loadCount() }`
 
 // WRITE (this convention): the dev's server fn does the ?{}; the assignment lands the result.
 function bumpCount() {
-    ?{`UPDATE counters SET n = n + 1 WHERE id = 1`}.run()
-    return ?{`SELECT n FROM counters WHERE id = 1`}.get().n
+    ?{`UPDATE counters SET n = n + 1 WHERE id = 1`}.run();
+    return ?{`SELECT n FROM counters WHERE id = 1`}.get().n;
 }
-function onClick() { @count = bumpCount() }   // §52 gives the immediate-local landing (§52.6.2)
+function onClick() { @count = bumpCount(); }   // §52 gives the immediate-local landing (§52.6.2)
 ```
 
 The cell's `<count server> = 0` initializer is the placeholder (§52.4.3); the dev's `?{}` writes into the
@@ -44347,8 +44762,8 @@ with an explicit `?{}` UPDATE, then fans the batch out with **one** `broadcast()
           // server fn does NOT read the client-held @cells cell (§38.4 / RULING A: a
           // server-context fn SHALL NOT read a client cell).
           function worldTick() {
-              ?{`UPDATE cells SET nonce = nonce + 1 WHERE locked_by = 0`}.run()   // §52.6.2 dev-owned persist (one batched write)
-              broadcast({ type: "world_roll", tick: Date.now() })                 // §38.6 explicit fan-out (one per tick)
+              ?{`UPDATE cells SET nonce = nonce + 1 WHERE locked_by = 0`}.run();   // §52.6.2 dev-owned persist (one batched write)
+              broadcast({ type: "world_roll", tick: Date.now() });                 // §38.6 explicit fan-out (one per tick)
           }
       }
   </channel>
@@ -44450,16 +44865,16 @@ sense: the author wrote it, and its failure is `<#id>.error` (§6.7.7); `@x.erro
   type Driver:struct = { id: number, current_status: string }
 
   // Pattern C: the inline ?{} IS the load — no handler (rule 1).
-  <driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get()
+  <driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get();
 
   <div>
     ${
       if (@driver.error is given) {
-        lift <p class="error">Could not load the driver</p>     // the placeholder (not) stayed — rule 3
+        lift <p class="error">Could not load the driver</p>;     // the placeholder (not) stayed — rule 3
       } else if (@driver is given) {
-        lift <p>${@driver.current_status}</p>
+        lift <p>${@driver.current_status}</p>;
       } else {
-        lift <p>Loading…</p>
+        lift <p>Loading…</p>;
       }
     }
   </div>
@@ -44737,12 +45152,12 @@ This decomposition follows the same shape as scrml's other type-vs-instance bina
 
 <program db="sqlite:./app.db">
 
-    <currentUserId server>: number = 0       // singleton, server-authoritative
-    <cartItemCount server>: number = 0       // independent singleton
-    <draftMessage>: string = ""              // client-local for comparison
+    <currentUserId server>: number = 0;       // singleton, server-authoritative
+    <cartItemCount server>: number = 0;       // independent singleton
+    <draftMessage>: string = "";              // client-local for comparison
 
     function loadCurrentUser() {
-        return ?{`SELECT id FROM users WHERE session = ${@sessionToken}`}.get().id
+        return ?{`SELECT id FROM users WHERE session = ${@sessionToken}`}.get().id;
     }
 
 </program>
@@ -44773,7 +45188,7 @@ This decomposition follows the same shape as scrml's other type-vs-instance bina
     <Card> @templateCards       // and again
 
     function loadCards() {
-        return ?{`SELECT * FROM cards`}.all()
+        return ?{`SELECT * FROM cards`}.all();
     }
 
 </program>
@@ -44942,7 +45357,7 @@ closing parenthesis. The name is used in error messages only — it has no effec
 semantics.
 
 ```scrml
-<price>: number(>0 && <10000) [valid_price] = userInput
+<price>: number(>0 && <10000) [valid_price] = userInput;
 ```
 
 If the constraint is violated, the error message SHALL include the label name.
@@ -45076,9 +45491,9 @@ type. The following rules apply:
 
 ```scrml
 fn discountAmount(amount: number(>0 && <10000)) {
-    let discounted = amount * 0.9     // type: number (constraint not propagated)
+    let discounted = amount * 0.9;     // type: number (constraint not propagated)
     // E-CONTRACT boundary check emitted on next line:
-    let safe: number(>0 && <10000) = discounted
+    let safe: number(>0 && <10000) = discounted;
 }
 ```
 
@@ -45145,11 +45560,11 @@ of its lexical scope, unless it is:
 
 ```scrml
 fn process(rawAmount: number) {
-    let amount: number(>0 && <10000) = rawAmount  // BOUNDARY CHECK — runtime check emitted
+    let amount: number(>0 && <10000) = rawAmount;  // BOUNDARY CHECK — runtime check emitted
     // From here, `amount` is in the trusted zone.
     // No further checks on `amount` in this scope.
-    doSomething(amount)   // callee has: fn doSomething(a: number(>0 && <10000)) — NO check
-    doSomethingElse(amount)  // callee has: fn doSomethingElse(a: number) — no check needed
+    doSomething(amount);   // callee has: fn doSomething(a: number(>0 && <10000)) — NO check
+    doSomethingElse(amount);  // callee has: fn doSomethingElse(a: number) — no check needed
 }
 ```
 
@@ -45286,7 +45701,7 @@ in all three loci (state-cell validator, refinement type, schema column); the di
 is the enforcement context.
 
 ```scrml
-let name: string.req.length(>=2) = "Bryan"
+let name: string.req.length(>=2) = "Bryan";
 fn process(amount: number.min(0).max(10000)) { ... }
 type Email:struct = { addr: string.pattern(/^[^@]+@[^@]+$/) }
 ```
@@ -45306,7 +45721,7 @@ A refinement-type predicate and a state-cell validator MAY compose on the same c
 enforcement layers stack:
 
 ```scrml
-<email>: string.pattern(/^[^@]+@[^@]+$/) req = <input type="email"/>
+<email>: string.pattern(/^[^@]+@[^@]+$/) req = <input type="email"/>;
 ```
 
 - The **type predicate** (`pattern(...)`) is a compile-time + runtime boundary on every assignment — a value that doesn't match the regex cannot be assigned to `@email`.
@@ -45341,7 +45756,7 @@ predicate.
 Where ε is `1` for integer constraints and the smallest step value for floating point.
 
 ```scrml
-<amount>: number(>0 && <10000) = 0
+<amount>: number(>0 && <10000) = 0;
 
 <input type="number" bind:value=@amount>
 // Compiled HTML: <input type="number" min="1" max="9999" ...>
@@ -45357,7 +45772,7 @@ Where ε is `1` for integer constraints and the smallest step value for floating
 | `.length <= N` | `maxlength="N"` |
 
 ```scrml
-<password>: string(.length > 7 && .length < 255) = ""
+<password>: string(.length > 7 && .length < 255) = "";
 
 <input type="password" bind:value=@password>
 // Compiled HTML: <input type="password" minlength="8" maxlength="254" ...>
@@ -45378,7 +45793,7 @@ A named shape with a corresponding HTML type SHALL emit that type attribute, ove
 attribute, the compiler SHALL emit a warning and use the shape-derived type.
 
 ```scrml
-<email>: string(email) = ""
+<email>: string(email) = "";
 
 <input bind:value=@email>
 // Compiled HTML: <input type="email" ...>
@@ -45427,7 +45842,7 @@ type Booking:struct = {
 }
 </>
 
-<booking>: ValidBooking = { start: "2026-06-01", end: "2026-06-08", nights: 7 }
+<booking>: ValidBooking = { start: "2026-06-01", end: "2026-06-08", nights: 7 };
 ```
 
 ### §53.8.2 Execution Order
@@ -45452,7 +45867,7 @@ use `<machine>` instead.
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
-<hp>: number(>=0 && <=@maxMana) = 100
+<hp>: number(>=0 && <=@maxMana) = 100;
 // E-CONTRACT-003: predicate references external reactive variable '@maxMana'.
 // Inline predicates must be stateless.
 // For constraints that reference reactive state, use <machine>.
@@ -45504,10 +45919,10 @@ expressions satisfy the constraint, applying the three-zone model to each return
 
 ```scrml
 fn computeTax(amount: number(>0 && <10000)) number(>0 && <1000) {
-    let tax = amount * 0.08
+    let tax = amount * 0.08;
     // `tax` is `number` (unconstrained — arithmetic strips constraint)
     // The return site is a boundary zone: runtime check emitted
-    return tax
+    return tax;
 }
 ```
 
@@ -45522,7 +45937,7 @@ constraint cannot be bypassed by raw HTTP requests.
 function submitPayment(amount: number(>0 && <10000)) {
     // Compiler emits server-side boundary check at function entry
     // This check runs even if the client has already validated the value
-    ?{`INSERT INTO payments (amount) VALUES (${amount})`}.run()
+    ?{`INSERT INTO payments (amount) VALUES (${amount})`}.run();
 }
 ```
 
@@ -45547,7 +45962,7 @@ The interaction is fully composable:
         // protect= enforced: caller must have permission to call this server function
         // predicate enforced: amount must satisfy (>0 && <10000)
         // Both are compiler-generated, not developer-written
-        ?{`INSERT INTO payments (amount) VALUES (${amount})`}.run()
+        ?{`INSERT INTO payments (amount) VALUES (${amount})`}.run();
     }
 </>
 ```
@@ -45712,10 +46127,10 @@ Normative statements:
 <program>
 
 function submitInvoice(amount: number(>0 && <10000) [invoice_amount]) {
-    ?{`INSERT INTO invoices (amount) VALUES (${amount})`}.run()
+    ?{`INSERT INTO invoices (amount) VALUES (${amount})`}.run();
 }
 
-<invoiceAmount>: number(>0 && <10000) = 0
+<invoiceAmount>: number(>0 && <10000) = 0;
 
 markup {
     <form>
@@ -45746,8 +46161,8 @@ Expected compiler output: No errors. Compiled HTML includes `min="1" max="9999"`
 ```scrml
 <program>
 
-<username>: string(.length > 2 && .length < 32) = ""
-<email>:    string(email) = ""
+<username>: string(.length > 2 && .length < 32) = "";
+<email>:    string(email) = "";
 
 markup {
     <input bind:value=@username placeholder="Username">
@@ -45778,14 +46193,14 @@ fn computeShipping(weight: number(>0 && <500), baseRate: number(>0)) number(>0) 
     // weight: proven at parameter boundary (trusted zone)
     // baseRate: proven at parameter boundary (trusted zone)
     
-    let rate = weight * baseRate          // arithmetic: result is `number` (constraint lost)
-    let shipping: number(>0) = rate       // BOUNDARY CHECK emitted here — rate is unconstrained
+    let rate = weight * baseRate;          // arithmetic: result is `number` (constraint lost)
+    let shipping: number(>0) = rate;       // BOUNDARY CHECK emitted here — rate is unconstrained
     
-    return shipping                       // return type is number(>0)
+    return shipping;                       // return type is number(>0)
                                           // shipping is proven at this point — no additional check
 }
 
-let result: number(>0) = computeShipping(10, 1.5)
+let result: number(>0) = computeShipping(10, 1.5);
 // Call site: 10 is a literal, 10 > 0 && 10 < 500 — static zone, no check
 // Call site: 1.5 is a literal, 1.5 > 0 — static zone, no check
 // result: proven at function boundary (return type) — no check
@@ -45809,8 +46224,8 @@ Expected compiler output: No errors. Single runtime check emitted at `shipping` 
 ```scrml
 <program>
 
-<maxScore>: number = 100
-<playerScore>: number(>=0 && <=@maxScore) = 0
+<maxScore>: number = 100;
+<playerScore>: number(>=0 && <=@maxScore) = 0;
 // ERROR
 ```
 
@@ -45841,7 +46256,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
 ```scrml
 <program>
 
-<ssn>: string(ssn) = ""
+<ssn>: string(ssn) = "";
 // ERROR
 ```
 
@@ -45864,7 +46279,7 @@ E-CONTRACT-002: Named shape 'ssn' not found in the shape registry.
 ```scrml
 <program>
 
-let taxRate: number(>0 && <=1) = 1.5
+let taxRate: number(>0 && <=1) = 1.5;
 // ERROR
 ```
 
@@ -45903,7 +46318,7 @@ HTML mapping behavior, and conflict resolution when two shapes with the same nam
 
 Currently (§53.3.4), arithmetic on constrained types produces unconstrained types. This means:
 ```scrml
-let discounted: number(>0 && <9000) = amount * 0.9   // runtime check
+let discounted: number(>0 && <9000) = amount * 0.9;   // runtime check
 ```
 is always a boundary zone, even when the compiler could prove that `amount * 0.9 < 9000` when
 `amount < 10000`.
@@ -46048,7 +46463,7 @@ type Post:struct = {
   role:  Role oneOf([.Admin, .Editor]),     // subset refinement on a struct field
 }
 
-<currentRole>: Role notIn([.Viewer]) = .Admin    // complement form — equivalent subset {Admin,Editor}
+<currentRole>: Role notIn([.Viewer]) = .Admin;    // complement form — equivalent subset {Admin,Editor}
 fn assignRole() -> Role oneOf([.Admin, .Editor]) { … }   // subset return type
 fn promote(r: Role oneOf([.Editor]))           { … }   // subset parameter type
 ```
@@ -46074,12 +46489,12 @@ base-enum churn (§53.15.2.2). A range form in enum-subset position SHALL be rej
 | **Trusted** | a value already proven `∈ subset` in scope, not re-sourced. | No check. |
 
 ```scrml
-const ok  = Post { title: "x", role: .Admin }    // static: OK, no runtime check
-const bad = Post { title: "x", role: .Viewer }   // static: COMPILE ERROR (.Viewer ∉ subset)
+const ok  = Post { title: "x", role: .Admin };    // static: OK, no runtime check
+const bad = Post { title: "x", role: .Viewer };   // static: COMPILE ERROR (.Viewer ∉ subset)
 
 function loadPost(id: number) Post {
-  const row = ?{`SELECT title, role FROM posts WHERE id = ${id}`}.one()
-  return Post { title: row.title, role: row.role }   // boundary: runtime check → E-CONTRACT-001-RT if .Viewer
+  const row = ?{`SELECT title, role FROM posts WHERE id = ${id}`}.one();
+  return Post { title: row.title, role: row.role };   // boundary: runtime check → E-CONTRACT-001-RT if .Viewer
 }
 ```
 
@@ -46117,7 +46532,7 @@ fn label(p: Post) -> string {
     .Admin  => "Admin"
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
-  }
+  };
 }
 ```
 
@@ -46348,11 +46763,11 @@ state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '<
 **Usage:**
 
 ```scrml
-<sub>: Submission = <Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>
+<sub>: Submission = <Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>;
 
 ${ function flow() {
-    @sub = @sub.validate(Date.now())   // legal; Draft declares validate()
-    @sub = @sub.submit(Date.now())     // legal; Validated declares submit()
+    @sub = @sub.validate(Date.now());   // legal; Draft declares validate()
+    @sub = @sub.submit(Date.now());     // legal; Validated declares submit()
 } }
 ```
 
@@ -46616,10 +47031,10 @@ Bare-attribute syntax on the structural decl (cross-ref §6 for Shape 1/2/3):
 
 ```scrml
 <signup>
-  <name      req length(>=2)>           = <input type="text"/>
-  <email     req>                       = <input type="email"/>
-  <password  req length(>=8)>           = <input type="password"/>
-  <confirm   req eq(@signup.password)>  = <input type="password"/>
+  <name      req length(>=2)>           = <input type="text"/>;
+  <email     req>                       = <input type="email"/>;
+  <password  req length(>=8)>           = <input type="password"/>;
+  <confirm   req eq(@signup.password)>  = <input type="password"/>;
 </>
 ```
 
@@ -46651,7 +47066,7 @@ Refinement types use the same predicate vocabulary inside type annotations to co
 the inhabitable values of a type:
 
 ```scrml
-let age: number(>=18 && <=120) = readAge()
+let age: number(>=18 && <=120) = readAge();
 
 type Email = string.pattern(/^[^@]+@[^@]+$/)
 
@@ -46796,12 +47211,12 @@ S447 — Edge A is reversed; see §55.5.1.**
     let <q:string="" length(>=2)/>
     let <count:int=0/>                                       // no validators: no surface
 
-    function register() { createAccount(@email) }           // runs only on a valid submit (§55.17)
+    function register() { createAccount(@email); }           // runs only on a valid submit (§55.17)
 
     <main>
         <form onsubmit=register()>                           // compiler: novalidate + the submit gate (§55.17)
             <label>Email <input type="email" bind:value=@email/></label>   // → required minlength="5"
-            ${ if (@email.touched) { lift <errors of=@email/> } }          // §55.8 accepts a top-level value
+            ${ if (@email.touched) { lift <errors of=@email/>; } }          // §55.8 accepts a top-level value
             <button type="submit">Create account</button>
         </form>
         <p>${@q.isValid ? "" : "type at least 2 characters"}</p>         // legal: q carries a validator
@@ -47042,7 +47457,7 @@ Resolution order when rendering an error tag to a user-facing string:
 **Level 1 — Inline override on field declaration** (highest priority, static-string only):
 
 ```scrml
-<name req("Please enter your name") length(>=2, "Name must be at least 2 chars")> = <input/>
+<name req("Please enter your name") length(>=2, "Name must be at least 2 chars")> = <input/>;
 ```
 
 Per-field, per-validator. Static-string only (per L12 Edge F — no expression
@@ -47053,13 +47468,13 @@ extractable for i18n tooling; expressions defeat that.
 
 ```scrml
 ${
-  import { registerMessages } from 'scrml:data'
+  import { registerMessages } from 'scrml:data';
   registerMessages({
     .Required:        "Please fill in {field}.",
     .LengthFailed:    "{field} must have a length {predicate}.",
     .PatternMismatch: "{field} doesn't match the expected pattern.",
     ...
-  })
+  });
 }
 ```
 
@@ -47110,8 +47525,8 @@ args contain expressions referencing other cells:
 
 ```scrml
 <signup>
-  <password req length(>=8)>           = <input type="password"/>
-  <confirm  req eq(@signup.password)>  = <input type="password"/>
+  <password req length(>=8)>           = <input type="password"/>;
+  <confirm  req eq(@signup.password)>  = <input type="password"/>;
 </>
 ```
 
@@ -47270,8 +47685,8 @@ the relevant sections; §34 indexes them.
 A V-kill structural decl MAY carry validator-attrs (§55.1 universal-core vocabulary) alongside the `server` flag (§52.4 — Tier 2 server-authoritative cell):
 
 ```scrml
-<cards server req length(>=1)>: Card[] = []
-<username server req length(>=2)> = ""
+<cards server req length(>=1)>: Card[] = [];
+<username server req length(>=2)> = "";
 ```
 
 **Normative firing rule.** The validator chain on a `<x server>` cell SHALL run at BOTH points:
@@ -47295,27 +47710,27 @@ Two rejected alternatives:
 ```scrml
 <program db="sqlite:./shop.db">
 
-    <cards server req length(>=1)>: Card[] = []
+    <cards server req length(>=1)>: Card[] = [];
 
     function loadCards() {
-        return ?{`SELECT * FROM cards`}.all()
+        return ?{`SELECT * FROM cards`}.all();
     }
 
     function addCard(c: Card) {
-        @cards = [...@cards, c]
+        @cards = [...@cards, c];
     }
 
     function removeAll() {
-        @cards = []
+        @cards = [];
     }
 
     <div>
         ${ if (@cards.isValid) {
             lift <ul>${ for (card of @cards) {
-                lift <li>${card.title}</>
-            } }</>
+                lift <li>${card.title}</>;
+            } }</>;
         } else {
-            lift <p>Loading or empty: ${@cards.errors[0]}</>
+            lift <p>Loading or empty: ${@cards.errors[0]}</>;
         } }
     </>
 
@@ -47524,18 +47939,18 @@ the default button. An author who wants a disabled button writes it in the `<but
     let <password:string="" req length(>=8)/>
     let <confirm:string="" req eq(@password)/>
 
-    function register() { createAccount(@email, @password) }   // runs only when all three are valid
-    function saveDraft() { storeDraft(@email) }
+    function register() { createAccount(@email, @password); }   // runs only when all three are valid
+    function saveDraft() { storeDraft(@email); }
 
     <main>
         // compiler: novalidate + the gate + data-scrml-gated="email password confirm"
         // I-FORM-SUBMIT-GATED: "this form's submit is gated by: email, password, confirm"
         <form onsubmit=register()>
             <label>Email <input type="email" bind:value=@email/></label>             // required minlength="5"
-            ${ if (@email.touched) { lift <errors of=@email/> } }
+            ${ if (@email.touched) { lift <errors of=@email/>; } }
             <label>Password <input type="password" bind:value=@password/></label>    // required minlength="8"
             <label>Confirm <input type="password" bind:value=@confirm/></label>      // required (eq is not lowered)
-            ${ if (@confirm.touched) { lift <errors of=@confirm/> } }
+            ${ if (@confirm.touched) { lift <errors of=@confirm/>; } }
             <button type="submit">Create account</button>                            // gated
             <button type="button" onclick=saveDraft()>Save draft</button>            // never submits: not gated
         </form>
@@ -48339,7 +48754,7 @@ A nested `<program>` MAY declare a `story=` attribute to compile under a non-def
 
 <program title="Logistics Dashboard" db="./app.db">
 
-  <count> = 0
+  <count> = 0;
   <button onclick=${@count = @count + 1}>+1</button>
   <span>${@count}</span>
 
@@ -48347,9 +48762,9 @@ A nested `<program>` MAY declare a `story=` attribute to compile under a non-def
   # reproducible under a closure the rest of the app has moved past.
   <program name="riskModel" story="legacy-ml">
     ${ export function score(features: number[]) -> number {
-        let acc = 0
-        for (let i = 0; i < features.length; i++) { acc = acc + features[i] }
-        return acc
+        let acc = 0;
+        for (let i = 0; i < features.length; i++) { acc = acc + features[i]; }
+        return acc;
     } }
   </>
 
@@ -48467,9 +48882,9 @@ A map is a **value**, not an object with identity (§45.6): two maps with the sa
 A map type is written `[KeyT: ValT]` — a concrete type affix, **not** a generic (scrml has no type parameters, §10/PRIMER §10). `KeyT` is the key type (§59.4 constrains it); `ValT` is the value type.
 
 ```scrml
-<fareByLane>:   [string: Money] = [:]
-<userById>:     [int: User]     = [:]
-<priceByRoute>: [Route: Money]  = [:]      // struct key — §45 structural ==
+<fareByLane>:   [string: Money] = [:];
+<userById>:     [int: User]     = [:];
+<priceByRoute>: [Route: Money]  = [:];      // struct key — §45 structural ==
 ```
 
 The `@ordered` affix (§59.8) requests insertion-order iteration at a stated cost: `<ranked>: [string: Money]@ordered = [:]`. `@ordered` is a **postfix TYPE affix** (it modifies the map type, like the `[]` array affix) — it is **not** an attribute, and the leading `@` here is **not** the §6 reactive-`@`-sigil; it is part of the affix spelling on the type.
@@ -48506,7 +48921,7 @@ A malformed map literal (a depth-1 colon with a missing key or value, an odd/eve
 (§14.3): a map literal entry whose VALUE is a function (`["k": twice]`, `[k: (x) => x + 1]`), and
 a §59.7 write that puts one in (`m.insert("k", twice)`, `@m = @m.insert("k", twice)`), are the hard
 error `E-VALUE-FUNCTION-STORED` (§34). (A function KEY is already refused by the key domain, §59.4.)
-To choose behaviour by key, store an enum tag as the value and `match` on it.
+To choose behaviour by key, store an enum tag as the value and `match` on it. *(S469 R2′ / S474 — §14.3 "what a function value may be": a function-holding value MAY be bound, passed, returned and called, a local binding holding any function value being INTERIM until built; it is refused where it reaches a cell or struct field (INTERIM: a pure `fn` there awaits the function-types slice, an impure one effect-typed function values), `==` / ordering, a map key or a serialization sink. This section's every-value reading is S462's and governs only where §14.3's R2′ paragraph agrees.)*
 
 > **Provenance:** ruling:user-voice-scrml.md S462 "a" (no value holds a function) + S462 "go on the package" (item 3 host boundary, item 5 the code) + S464 "(a) Migrate the tests" / "Yes, maps too (Recommended)" (map literals are values too; rejected: a host-protocol carve-out for then/toString/iterator shapes).
 
@@ -48535,10 +48950,10 @@ Maps need O(1)-ish key lookup, which requires hashing the **runtime key value**.
 Reading is **bracket-native** (allocation-free, terse, composes with existing absence machinery):
 
 ```scrml
-const fare = @fareByLane["DAL-001"]              // -> Money | not   (key-miss yields not)
-given f = @fareByLane["DAL-001"] { use(f) }      // composes with given / is given — ZERO new rules
-const f2 = @fareByLane.getOr("DAL-001", 0)       // fallback-read in one expression
-const have = @fareByLane.has("DAL-001")          // -> bool
+const fare = @fareByLane["DAL-001"];              // -> Money | not   (key-miss yields not)
+given f = @fareByLane["DAL-001"] { use(f); }      // composes with given / is given — ZERO new rules
+const f2 = @fareByLane.getOr("DAL-001", 0);       // fallback-read in one expression
+const have = @fareByLane.has("DAL-001");          // -> bool
 ```
 
 - `@m[k]` evaluates to **`ValT | not`** (§42): a present key yields its value; a key-miss yields `not`. This composes with `given` / `is given` / `match` and with `(not to T)` narrowing — no new discrimination rules.
@@ -48553,10 +48968,10 @@ const have = @fareByLane.has("DAL-001")          // -> bool
 Writes and removals are **method-native** and **reassignment-canonical** — each returns a new map, reassigned to the cell, exactly as array updates reassign (`@arr = [...@arr, x]`, §6.5 DQ-2):
 
 ```scrml
-@fareByLane = @fareByLane.insert("DAL-001", 4500)              // add/overwrite one entry
-@fareByLane = @fareByLane.remove("DAL-001")                    // remove a key (distinct verb)
-@fareByLane = @fareByLane.update("DAL-001", f => (f ?? 0) + 100) // upsert via fn, no read-modify-write race
-@fareByLane = @fareByLane.insertAll(more)                      // BULK — one clone (defuses O(n^2) loop)
+@fareByLane = @fareByLane.insert("DAL-001", 4500);              // add/overwrite one entry
+@fareByLane = @fareByLane.remove("DAL-001");                    // remove a key (distinct verb)
+@fareByLane = @fareByLane.update("DAL-001", f => (f ?? 0) + 100); // upsert via fn, no read-modify-write race
+@fareByLane = @fareByLane.insertAll(more);                      // BULK — one clone (defuses O(n^2) loop)
 ```
 
 - `.insert(k, v)` returns a new map with `k → v` (overwriting any prior `k`).
@@ -48571,12 +48986,12 @@ Writes and removals are **method-native** and **reassignment-canonical** — eac
 **Nested maps — reassignment-canonical at every level.** When the value type is itself a map, an inner-map update rebuilds the inner map and `.insert`s it back into the outer map — there is no in-place deep write, and `E-MAP-BRACKET-WRITE` applies at **every** level (you cannot `@outer[k1][k2] = v`):
 
 ```scrml
-<feeByLaneByCarrier>: [string: [string: Money]] = [:]
+<feeByLaneByCarrier>: [string: [string: Money]] = [:];
 // set carrier "ACME" lane "DAL-001" -> 4500, rebuilding the inner map:
-const inner = @feeByLaneByCarrier["ACME"] ?? [:]          // read inner (or empty), -> [string: Money]
+const inner = @feeByLaneByCarrier["ACME"] ?? [:];          // read inner (or empty), -> [string: Money]
 @feeByLaneByCarrier = @feeByLaneByCarrier.insert(
     "ACME", inner.insert("DAL-001", 4500)                 // rebuild inner, re-insert into outer
-)
+);
 ```
 
 ### 59.8 Iteration — unordered by default + loud
@@ -48719,7 +49134,7 @@ A declared endpoint is invoked through `<request>` (§6.7.7), which gains an `ap
   // request shape checked against UserQuery; response decoded via parseVariant against User
 </>
 
-${ @name = <#profile>.data.name }      // .data : User (decoded)
+${ @name = <#profile>.data.name; }      // .data : User (decoded)
 ```
 
 **Normative statements:**
@@ -49416,20 +49831,41 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   impl#1 this is the `<machine>` → `<engine>` migration and E-DEPRECATED-001. Over a directory, a refused file is
   skipped and listed, and the other files are processed. The exit status is non-zero when any file
   was refused (impl#1: 3, ahead of `--check`'s 1 and 2).
+  *(S474)* **A file already in the §66 dialect is not refused under `--s66`.** It is reported
+  "already in §66, skipped", left byte-identical, and does not make the exit status non-zero: a
+  `--s66` run whose only skipped files are such files exits 0. The §66 rules have nothing to do to
+  it, so there is no rewrite to verify; the compile-failure refusal above does not apply to it.
+  *(impl#1 status: not built — impl#1 still refuses such a file, and a `--s66` re-run exits 3.
+  Built on demand: `g-impl1-fix-s66-already-migrated-exit-s474`.)*
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "your recs" — *"The client-server-call / sql-failable / s66 `scrml fix` rules SHALL refuse (no rewrite, a message naming the compile errors) any file that does not compile before the rewrite — a rewrite of a file the compiler cannot fully read cannot be verified (matches the S462 markup-given migration's verify-fail-closed)."* Extended from the three named rules to every rule by the ruling's stated reason (PA reading, bryan's veto window): measured S464, the `unwrap-logic` rule deleted the `${` / `}` lines of a file whose other function emits invalid JS.
 
-> **PA reading (S466, owner veto):** three refinements above follow from the ruling's reason rather
-> than its text. First, "does not compile" is judged per application, as `scrml compile` judges it
+> **RULED (S474) — the three S466 refinements.** Three refinements above follow from the ruling's
+> reason rather than its text; first written S466 as a PA reading under owner veto, and RULED S474.
+> First, "does not compile" is judged per application, as `scrml compile` judges it
 > (S466 review: a component module compiles inside its project but not alone). Compiling a whole
 > directory of unrelated programs as one compile is not used: measured S466, it reported
 > cross-program protect and route conflicts, errors with no file, and a crash. Second, a scratch-copy
 > divergence is reported as "cannot verify", not as a compile failure (S466 review: a `../app.db`
 > page). Third, the removed-form exception exists because the round-1 gate refused every `<machine>`
-> file, blocking the migration `scrml fix` exists to perform. Not settled: a file already rewritten
-> to the §66 dialect does not compile on impl#1 by design (§66 is Nominal there), and impl#1 reports
-> generic codes for it (E-SCOPE-001, E-STATE-UNDECLARED) rather than a §66 class. Such a file is
-> refused, which makes `--s66` re-runs exit 3. Owner decision owed.
+> file, blocking the migration `scrml fix` exists to perform. The question the S466 reading left
+> open is also ruled: a file already rewritten to the §66 dialect does not compile on impl#1 by
+> design (§66 is Nominal there), and impl#1 reports generic codes for it (E-SCOPE-001,
+> E-STATE-UNDECLARED) rather than a §66 class; under `--s66` such a file is reported "already in
+> §66, skipped" with exit 0, not refused (the *(S474)* paragraph above).
+> **Provenance:** ruling:user-voice-scrml.md S474 "⭐ RULED — `else` on a failable match; `scrml fix`
+> S466 readings" item 2 — PA rec: *"ratify all three [S466 `scrml fix` PA readings: compile failure
+> judged per application; scratch-copy divergence reports 'cannot verify'; the `<machine>` →
+> `<engine>` exception], and have an already-migrated file report 'already in §66, skipped' with
+> exit 0. That's impl#1 work, so I'd only record the ruling and build it if you actually use
+> `scrml fix`."* · bryan: *"your recs on both. go"* · *"(2) The three S466 readings are RULED (drop
+> "owner veto"). An already-§66 file under `--s66`: "already in §66, skipped", exit 0 — SPEC text
+> now; impl#1 build only on demand (gap)."* · **supersedes:** *"Such a file is refused, which makes
+> `--s66` re-runs exit 3. Owner decision owed."* and the block's *"PA reading (S466, owner veto)"*
+> status. **Direction of change (pa-base §8):** the three refinements are inert (already the
+> stated behaviour); the already-§66 rule is newly-accepting for a tool, not for any program —
+> no program's meaning or acceptance moves, so it is not a §62 version event. impl#1 carries the
+> old exit 3 until built (`g-impl1-fix-s66-already-migrated-exit-s474`, LOW, build on demand).
 
 ### 63.5 Conformance interaction
 
@@ -49766,9 +50202,9 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 // fleet.ts → fleet.scrml — run-and-exit CLI, db-bound
 <program kind="tool" lang="ts" db="./flogence.db">
     function main(args: string[]): number {
-        if args.length == 0 { _={ console.error("usage: fleet <cmd>") }= ; return 2 }
+        if args.length == 0 { _={ console.error("usage: fleet <cmd>") }= ; return 2; }
         … ?{ SELECT … }.all() …
-        return 0
+        return 0;
     }
 </program>
 ```
@@ -49788,7 +50224,7 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
     ${
         server function* fspDeltas() route="/fsp/deltas" {
             for (let row of ?{`SELECT seq, kind FROM delta_log WHERE seq > ${route.query.since}`}.all()) {
-                yield { event: "delta", id: row.seq, data: row }
+                yield { event: "delta", id: row.seq, data: row };
             }
         }
     }
@@ -50043,7 +50479,7 @@ A `#{}` bound to a name is a first-class **style VALUE** — the styling analog 
 A `#{}` in **statement position** (bare in a component body / at program level) is a **stylesheet block** — the existing §9.1 behavior, unchanged (scoped inside a component; global at program level). A `#{}` in **expression position** (RHS of `=`, inside a `style=` attribute, inside a `[…]` list) is a **style value**:
 
 ```scrml
-const chrome = #{ padding: @space-4; border: 1px solid @line; }   // a named style VALUE
+const chrome = #{ padding: @space-4; border: 1px solid @line; };   // a named style VALUE
 ```
 
 This is the identical grammar lever that distinguishes `const x = <div/>` (a markup value) from a bare `<div/>` (rendered markup) — "expression position vs statement position." The existing §9.1 **flat-declaration `#{}`** (the dominant corpus pattern) is thereby **re-explained, not changed**: an inline flat `#{}` on an element is an **anonymous** style-value applied once; `const chrome = #{…}` is the same thing *named* for reuse. **Zero migration** — a conceptual unification (§65.14 migration).
@@ -50088,7 +50524,7 @@ const field = #{
     &[busy]    { opacity: 0.6; }            // this element's own attr — a layer
     &::before  { content: ""; }             // this element's own pseudo-element
     @media (min-width: 700px) { padding: @space-6; }
-}
+};
 ```
 
 A **descendant** selector inside a `#{}`-value (`.title { … }`, `& > div { … }` — a selector that reaches into a child the element does not own) SHALL emit `E-STYLE-VALUE-DESCENDANT`, with the message routing the author to **make a component** (owned subtree) or **use a content-treatment** (un-owned subtree — OQ-6). This is the same cut vanilla-extract's `style()` draws (self-target only; descendants throw → `globalStyle()`), arrived at independently and validated in production. A descendant-bearing style-value would be a *half-component* — a strictly weaker, blurrier component that cannot add structure but can reach into it: a god-ification of the treatment primitive (limit-primitives-not-godify). The sharper cut is *more* powerful because it is unambiguous — at any `<x style=v>` you know `v` touches only `<x>`, never its children.
@@ -50131,7 +50567,7 @@ applied style=  >  class / id / specific author rule (component-scope `#{}`)  > 
 `<theme>` tokens are **reactive**. Theming is a **named-variant reactive selector** (§Rulings row 3): the `<theme>` block declares named **variant sub-blocks** (`.Light`, `.Dark`, …) that each re-bind a subset of tokens **over the shared base**, and binds to an **ordinary adopter-named reactive cell** via **`<theme for=@cell>`** — mirroring the engine `for=` binding. The variant set (`.Light`/`.Dark`) is an **enum-like type**; the bound cell holds the active variant. **`@mode` is a convention, NOT a reserved name** — the adopter names the cell.
 
 ```scrml
-<mode> = .Light                   // ordinary reactive cell; variant type flows from <theme for=@mode> below
+<mode> = .Light;                   // ordinary reactive cell; variant type flows from <theme for=@mode> below
 
 <theme for=@mode>                 // bind the theme to that cell (mirrors engine for=)
     ink   = #0f172a;              // shared base tokens
@@ -50242,7 +50678,7 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
 ```scrml
 <program>
 
-  <mode> = .Light                             // §65.6 — theme-variant cell; type flows from <theme for=@mode> (bare-variant inference §14.10; @mode is a convention, NOT reserved)
+  <mode> = .Light;                             // §65.6 — theme-variant cell; type flows from <theme for=@mode> (bare-variant inference §14.10; @mode is a convention, NOT reserved)
 
   <theme for=@mode>                           // §65.3.2 — named values; lower to :root custom properties; bound to @mode
       brand   = #2563eb;
@@ -50269,7 +50705,7 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
       padding: @space-4; border: 1px solid @line; border-radius: 6px;
       &:focus  { border-color: @brand; }       // this input's OWN state — a deterministic layer (§65.2.2)
       &[busy]  { opacity: 0.6; }
-  }
+  };
 
   const SignupForm = <form props={ onsubmit: fn }>
       #{                                       // §9.1 component-scope stylesheet — @scope donut, :where()-flat
@@ -50289,7 +50725,7 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
       //                    ↑ Tailwind utilities (utilities layer, §65.8 — BELOW author)
       //                                          ↑ §65.4.4 ordered style-values; primaryButton wins ties
       <button onclick=(@mode = @mode == .Dark ? .Light : .Dark)>Toggle theme</button>   // §65.6 — one :root write
-  </form>
+  </form>;
 
 </program>
 ```
@@ -50946,7 +51382,7 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 
    // app.scrml
    <toggle as=notify label="Email me" checked=true/> // a use-site attribute still sets the child (O43)
-   function muteAll() { @notify.checked = false }     // a cross-file write to an EXPORTED field (§66.14)
+   function muteAll() { @notify.checked = false; }     // a cross-file write to an EXPORTED field (§66.14)
    ```
 
    **The cost, stated:** a component with writable state now has a body. A declaration whose only fields were
@@ -51295,8 +51731,8 @@ An `as=` handle to an instance that is conditionally mounted (under `if=`, an en
 be narrowed first** — a compile-time proof, not a runtime drop:
 
 ```scrml
-@country.open = .Closed                       // error: `country` may be not (it is behind if=)
-given c = @country :> { c.open = .Closed }    // fine: only runs while mounted
+@country.open = .Closed;                       // error: `country` may be not (it is behind if=)
+given c = @country :> { c.open = .Closed; }    // fine: only runs while mounted
 ```
 
 A write through an un-narrowed `T | not` handle is `E-DECL-HANDLE-NOT-NARROWED` (§66.20). **Provenance:
@@ -51362,7 +51798,7 @@ sees the live instance — never `not` — even when it runs before the first re
 document order than the instance's use:
 
 ```scrml
-function closeCountry() { @country.open = .Closed }   // `@country` is `dropdown` (not `dropdown | not`)
+function closeCountry() { @country.open = .Closed; }   // `@country` is `dropdown` (not `dropdown | not`)
                                                        // — valid even if called before the first render
 <main>
     <dropdown as=country label="Country" options=(["US", "CA", "MX"]) value="US"/>   // always mounted
@@ -51745,8 +52181,8 @@ let <order:struct>                       // `let` on the struct as a whole: the 
 </>
 
 // with @order.status == .Placed:
-@order.status = .Shipped                 // off the graph → E-ENGINE-INVALID-TRANSITION
-@order = { ...@order, status: .Shipped } // the spread-override shape: an edit of `status` — the SAME check and
+@order.status = .Shipped;                 // off the graph → E-ENGINE-INVALID-TRANSITION
+@order = { ...@order, status: .Shipped }; // the spread-override shape: an edit of `status` — the SAME check and
                                          // the same error as the line above
 ```
 
@@ -51917,8 +52353,8 @@ parameter type grants, checked at each call.
 fn pushEdit(s: Edit[end], e: Edit) -> Edit[end] { ... }
 <undo:Edit[end]=[]>
 <log:Edit[any]=[]>
-@undo = pushEdit(@undo, e)     // fine
-@log  = pushEdit(@log, e)      // on the TYPE: fine (any ⊇ end) — the function still can't shift it
+@undo = pushEdit(@undo, e);     // fine
+@log  = pushEdit(@log, e);      // on the TYPE: fine (any ⊇ end) — the function still can't shift it
 ```
 
 with *"permission sets need a subset check at every call"*. So — ruling:S435 (PA proposal text answered "type") —
@@ -52751,15 +53187,26 @@ Exclusivity **nests**: a branch may hold another exclusive set, and each path ta
 `<div if=@a><slot/></div><div else><b if=@b><slot/></b><i else><slot/></i></div>` holds three slots and every
 path renders one: legal. Adding a `<slot/>` beside the outer chain puts two on every path: E-COMPONENT-020.
 
-A `<slot/>` inside a **repeating** region — an `<each>` row (§17.7) or a `${ for … lift }` row (§17.4) — renders
-once per row, so no branch makes it count once; it is rule 2's error even when it is the only slot.
-*(⚑ The repeating-region sentence is NOT ruled: it is a PA reading of rule 2's "would render more than once"
-(S473 D11), pending bryan — neither the S473 D11 text nor S474 item 2 names loops. The
-bootstrap has refused a slot lifted in a `${ for … lift }` since #1690 review F6, and a slot in an `<each>` row since
-s474-slot-exclusive-branches.)*
+A `<slot/>` inside a **repeating** region — an `<each>` row (§17.7) or a `${ for … lift }` row (§17.4) — would
+render the caller's children once per row, duplicating their ids and handlers, so no branch makes it count once.
+**Until the per-row slot is built, such a `<slot/>` SHALL be refused** — rule 2's error, E-COMPONENT-020, even when it
+is the only slot. This is an **INTERIM** refusal (refused until built; reversible), not a permanent restriction. The
+capable form is owed: a **per-row slot** that gives the caller's children the row's data (the scoped-slot shape;
+`g-slot-per-row-scoped-unbuilt-s474`), whose spelling is not ruled (it meets O9's parametric slots, below). When it is
+built, this refusal is withdrawn for the form it provides. *(The bootstrap has refused a slot
+lifted in a `${ for … lift }` since #1690 review F6, and a slot in an `<each>` row since
+s474-slot-exclusive-branches; impl#1 does not implement §66.)*
+> **Provenance (repeating regions):** ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7"
+> item 1 — *"**A `<slot/>` inside a repeating row is an error** (`<each>`, `${ for … lift }`): the caller's children
+> would render once per row, duplicating ids and handlers. Ratifies the #1697 PA reading."* — as amended by
+> ruling:user-voice-scrml.md S474 "⭐ RULED — capability over limitation: interim vs permanent refusals" item 1 —
+> *"**Amends S474 ruling 1:** a `<slot/>` inside a repeating row is an INTERIM refusal. The capable form is owed: a
+> per-row slot that gives the caller's children the row's data (scoped-slot shape)."* · supersedes: the ⚑ PA-reading
+> mark (*"The repeating-region sentence is NOT ruled: it is a PA reading … pending bryan"*) · **Direction of change:**
+> inert (the bootstrap already refuses both forms; the ruling makes the reading normative, as an interim refusal).
 > **Provenance:** ruling:user-voice-scrml.md S474 item 2 · supersedes: ruling:user-voice-scrml.md S473 D11 (count rule only)
-> — for the exclusive-branch count (cases (a)–(c), nesting) only. The repeating-region sentence: ⚑ PA reading (rationale:
-> D11 "would render more than once"), pending bryan — not covered by S474 item 2. Ruling text: *"**F7: one unnamed `<slot/>` per exclusive branch is legal.** Two unnamed slots in the two arms of an `if/else`
+> — for the exclusive-branch count (cases (a)–(c), nesting) only (the repeating-region sentence has its own provenance
+> above). Ruling text: *"**F7: one unnamed `<slot/>` per exclusive branch is legal.** Two unnamed slots in the two arms of an `if/else`
 > (or exclusive `match` arms) count as one, because only one can render. Refines D11; non-exclusive duplicates stay an
 > error."* (PA: *"(2) F7 slot if/else — rec allow one slot per exclusive branch"* — bryan: *"your recs on both. go"*.)
 > **Direction of change:** newly-admitting (a `renders` with one unnamed slot in each branch of an exclusive set,
@@ -52965,8 +53412,8 @@ is otherwise fully determined by the rulings.
     <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
     <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
 
-    function bump()    { @count = @count + @step }   // a replace on a `let` scalar — granted
-    function restart() { reset(@count) }             // `reset` is a replace (§66.11.2) — granted by `let`
+    function bump()    { @count = @count + @step; }   // a replace on a `let` scalar — granted
+    function restart() { reset(@count); }             // `reset` is a replace (§66.11.2) — granted by `let`
 
     <main>
         <p>Count ${@count} (doubled ${@doubled})</p>
@@ -53007,9 +53454,9 @@ is otherwise fully determined by the rulings.
     </form>
 
     function save() {
-        if (!@signup.agree) return                            // top level: @signup = the shared instance (§66.7.1)
-        @saveState = .Saving                                  // along the rule= graph
-        @saveState = .Saved
+        if (!@signup.agree) return;                            // top level: @signup = the shared instance (§66.7.1)
+        @saveState = .Saving;                                  // along the rule= graph
+        @saveState = .Saved;
     }
 
     <main>
@@ -53037,7 +53484,7 @@ renders <div class="dropdown">
             onclick=(@dropdown.open = open == .Closed ? .Opened : .Closed)>${label}: ${value}</button>
     <ul class="dropdown__menu" if=(open == .Opened)>
         <each in=options as opt>
-            <li onclick={ @dropdown.value = opt; @dropdown.open = .Closed }>${opt}</li>
+            <li onclick={ @dropdown.value = opt; @dropdown.open = .Closed; }>${opt}</li>
         </each>
     </ul>
     <slot/>                                                   // use-site children, if any (§66.15.2)
@@ -53046,16 +53493,16 @@ renders <div class="dropdown">
 
 ```scrml
 // app.scrml
-${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }
 
 <program>
     type Line:struct = { id: int, name: string }
     <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>   // locked: no grants (§66.12.1)
     let <showColor:bool=false/>
 
-    function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
+    function closeCountry() { @country.open = .Closed; }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
     function clearColor() {
-        given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
+        given c = @color :> { c.value = ""; }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
     }
 
     <main class="filters">
@@ -53108,16 +53555,16 @@ renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
 export <accent:swatch label="Accent" hex=@brand/>              // named shared instances (§66.8.2) (a declaration per the #16 ruling, §66.2.2)
 export <warn:swatch label="Warn" hex="#FF6600"/>
 
-export function toggleMode() { @mode = @mode == .Dark ? .Light : .Dark }   // writes stay in the defining file (§66.14; ⚑ O39)
+export function toggleMode() { @mode = @mode == .Dark ? .Light : .Dark; }   // writes stay in the defining file (§66.14; ⚑ O39)
 export function useWarnAsAccent() {
-    @accent.label = "Warn"
-    @accent.hex = "#FF6600"
+    @accent.label = "Warn";
+    @accent.hex = "#FF6600";
 }
 ```
 
 ```scrml
 // app.scrml
-${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml" }
+${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml"; }
 
 <program>
     <main>
@@ -53217,7 +53664,7 @@ Before (§51.0, the form that retires — §66.21):
         <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
     </>
 
-    function load() { @phase = .Loading }
+    function load() { @phase = .Loading; }
     <button onclick=load()>Load</button>
 </program>
 ```
@@ -53246,8 +53693,8 @@ After:
     </>
     renders <article><h3>${title}</h3><p>${status}</p></article>
 
-    function load()   { @phase = .Loading }         // along an edge of the graph
-    function finish() { @phase = .Done }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
+    function load()   { @phase = .Loading; }         // along an edge of the graph
+    function finish() { @phase = .Done; }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
 
     <main>
         <p><*phase/></p>                            // ⚑ O5: how the state-child bodies render

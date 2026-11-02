@@ -1,0 +1,24 @@
+{
+  "id": "match-block-s474-arm-tail-value-after-statement",
+  "description": "A value-position block arm that holds a statement yields only by `lift`: in `.B :> { one(); 2; }` the bare `2` after the statement is E-ARM-TAIL-VALUE (once), not the arm's value. Every statement has its `;`, so no termination code is involved.",
+  "language-version": "1.0",
+  "spec": "§18.5, §34",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — block arms yield with `lift`\" — \"Block arms yield with lift (Recommended)\" · ruling:user-voice-scrml.md S469 \"⭐ RULED — `{ e }` in a value-position match arm is that expression\" — \"Allow { e } in arms too (Recommended)\" (\"`lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE\") · S474 #1722 review F3",
+  "rationale": "§18.5 (S469 r5): once the arm's block holds a statement, a bare expression after it SHALL be E-ARM-TAIL-VALUE in a value position; the fix-it is `lift 2;`. The one-expression brace `{ 2 }` / `{ 2; }` is not this code. impl#1 never emits E-ARM-TAIL-VALUE and yields `2` (the pre-S469 reading) — carried, g-impl1-arm-tail-value-unemitted-s474; the bootstrap emits it.",
+  "expect": {
+    "codes": ["E-ARM-TAIL-VALUE"],
+    "codeCounts": { "E-ARM-TAIL-VALUE": 1 },
+    "notCodes": ["E-STMT-MISSING-SEMICOLON"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-arm-tail-value-unemitted-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-ARM-TAIL-VALUE' fired 0 time(s), expected exactly 1",
+          "missing:E-ARM-TAIL-VALUE"
+        ]
+      }
+    }
+  }
+}

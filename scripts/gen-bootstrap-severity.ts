@@ -60,14 +60,10 @@ export function bootstrapCodes(): string[] {
  * yet. Each carries its intended severity here until the SPEC follow-up adds its row; once the row
  * exists `resolveSeverities` throws (agreeing or not) until the entry is removed, so this table can
  * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
- *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup)
+ *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup; W-TX-FAIL-AFTER-COMMIT /
+ *   W-TX-ARM-UNREACHABLE left when their §34 rows landed, s474-spec-rulings-1-7)
  */
-export const PROVISIONAL: Record<string, CompileSeverity> = {
-  // s474-boot-client-bang-composition r1 (PA ruling on review M2 / L1 of #1713): the §34 rows are owed
-  // by the SPEC lane (#1711) — both warnings name a composed client `!` function's batch
-  "W-TX-FAIL-AFTER-COMMIT": "Warning",
-  "W-TX-ARM-UNREACHABLE": "Warning",
-};
+export const PROVISIONAL: Record<string, CompileSeverity> = {};
 
 export type SeverityEntry = { code: string; severity: CompileSeverity; line: number; provisional?: boolean };
 export type CatalogGap = { code: string; why: string };

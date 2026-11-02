@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1813 of 1813 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1827 of 1827 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 283 | 15.6% |
+| PASS | 297 | 16.3% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 241 | 13.3% |
+| FAIL | 239 | 13.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 685 | 37.8% |
-| UNSUPPORTED | 604 | 33.3% |
+| NOT-TWINNED | 685 | 37.5% |
+| UNSUPPORTED | 606 | 33.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 524; of those, 283 hold (54.0%). Runtime half executed on the bootstrap for 100 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 536; of those, 297 hold (55.4%). Runtime half executed on the bootstrap for 104 case(s).
 
-- **Vacuous** passes: 17 of 283 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **266**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 76 of 241; the other 165 are implemented checks that answered wrong.
+- **Vacuous** passes: 17 of 297 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **280**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 239; the other 164 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 604.
+UNSUPPORTED by reason: bootstrap-unsupported 606.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 175 · FAIL 205 · UNSUPPORTED 413. Twin holds 175 (non-vacuous 162). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 180 · FAIL 203 · UNSUPPORTED 415. Twin holds 180 (non-vacuous 167). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -112,12 +112,12 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | defer | 51 | 15 | · | 11 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
-| element-refusal | 34 | 7 | · | 12 | · | 11 | 4 | · | · |
+| element-refusal | 39 | 12 | · | 12 | · | 11 | 4 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
 | engine | 92 | 6 | · | 14 | · | 50 | 22 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 73 | 32 | · | 12 | · | 5 | 24 | · | · |
+| error | 78 | 37 | · | 12 | · | 5 | 24 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | 6 | · | 5 | · | 1 | 7 | · | · |
@@ -131,14 +131,14 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 16 | · | 19 | · | 40 | 14 | · | · |
-| match-block | 18 | · | · | 3 | · | 9 | 6 | · | · |
+| match-block | 22 | 4 | · | 3 | · | 9 | 6 | · | · |
 | match-codes | 25 | 4 | · | 10 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 16 | · | 5 | · | 12 | 13 | · | · |
 | md | 18 | · | · | 1 | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 9 | · | 20 | · | 8 | 8 | · | · |
+| module | 45 | 9 | · | 18 | · | 8 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 3 | 22 | · | · |
 
-### FAIL (241)
+### FAIL (239)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -841,10 +841,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - missing E-IMPORT-006
   - forbidden E-IMPORT-004 fired
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `*` (other statements at logic-block level are not in the bootstrap)
-- `module/e-import-pinned-const-clean` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `module/e-import-pinned-invalid-reject` (twin · codes; not in the bootstrap: E-IMPORT-PINNED-INVALID)
-  - missing E-IMPORT-PINNED-INVALID
 - `module/e-scope-010-filescope-distinct-clean` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `2`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -1094,7 +1090,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (283)
+### PASS / CODES-ONLY (297)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1190,6 +1186,11 @@ none
 - `element-refusal/raw-noscript-attr-style-pos` — PASS
 - `element-refusal/raw-textarea-attr-breakout-pos` — PASS
 - `element-refusal/raw-xmp-comment-breakout-pos` — PASS
+- `element-refusal/s474-foreign-breakout-svg-p-neg` — PASS
+- `element-refusal/s474-foreign-breakout-use-in-svg-neg` — PASS
+- `element-refusal/s474-foreign-integration-points-pos` — PASS
+- `element-refusal/s474-parser-repair-p-div-neg` — PASS
+- `element-refusal/s474-parser-repair-table-foster-neg` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
@@ -1211,9 +1212,14 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
+- `error/failable-match-else-absorbs-error-neg` — PASS · TWIN
+- `error/failable-match-else-after-error-arms-rt` — PASS · TWIN
 - `error/failable-match-nonexhaustive-err` — PASS · TWIN
 - `error/failable-match-nonexhaustive-ok` — PASS · TWIN
+- `error/failable-match-whole-error-binder-rt` — PASS · TWIN
+- `error/failable-match-wildcard-absorbs-error-neg` — PASS · TWIN
 - `error/for-await-not-in-scrml` — PASS · TWIN
+- `error/handler-else-covers-errors-rt` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
 - `error/handler-recovery-into-cell` — PASS · TWIN
@@ -1279,6 +1285,10 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `markup-handler/s457-user-function-named-event-pos` — PASS · TWIN
+- `match-block/s474-arm-tail-value-after-statement` — PASS
+- `match-block/s474-one-expr-brace-arm-value-pos` — PASS
+- `match-block/s474-one-expr-brace-statement-arm-needs-semicolon` — PASS
+- `match-block/s474-one-expr-brace-tail-after-statement-needs-semicolon` — PASS
 - `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
@@ -1380,7 +1390,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (604)
+### UNSUPPORTED (606)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1774,6 +1784,8 @@ none
 - `module/e-import-004-stdlib-name-not-exported-reject` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `module/e-import-004-stdlib-submodule-only-name-reject` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `module/e-import-004-stdlib-subpath-name-clean` — twin · bootstrap-unsupported: `scrml:auth/jwt` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling
+- `module/e-import-pinned-const-clean` — twin · bootstrap-unsupported: `pinned` on an import (§21.8.1) is not in the bootstrap yet — drop it, or declare the cell in this file
+- `module/e-import-pinned-invalid-reject` — twin · bootstrap-unsupported: `pinned` on an import (§21.8.1) is not in the bootstrap yet — drop it, or declare the cell in this file
 - `module/e-use-001-use-inside-logic-reject` — twin · bootstrap-unsupported: `use` (§41.2) is not in the bootstrap yet; it is refused here by name rather than misread — import the names you need: `import { … } from "scrml:…"` (§41.3)
 - `navigate/explicit-variants` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `navigate/no-path-error` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -2419,13 +2431,13 @@ none
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
-- `match-leave/arm-body-ends-at-line-break-neg` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends an arm body at a line break in a comma-less arm list with no `;` — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR / E-STMT-MI
+- `match-leave/arm-body-ends-at-line-break-neg` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends a single-expression arm body at a line break. The arm `.A :> return;` is followed by an orphan `"orphan",` line at arm level, which impl#1 reports 
 - `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/dpa068-stmt-bare-return-newline-list` — excluded (dialect.s66): impl#1-only guard (s469-impl1-arm-commas): the arm list is written NEWLINE-separated on purpose, to keep impl#1's carried newline-list reading covered after the conformance comma migration; the bootstrap enforces the
 - `match-leave/engine-msg-arm-break-continue-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
-- `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's rule-2 continuation of an arm body in a comma-less arm list — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR). Kept unmigrated so im
+- `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's continuation of a single-expression arm body past a line break that ends in `+` (`.Boom(m) :> "a:" +⏎ m,`). The arm-comma codemod (f0c9d4bb7) gave the arm
 - `match-leave/given-arm-in-derived-match` — not mechanical: rhs-decl: type `number | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against impl#1's 
 - `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped

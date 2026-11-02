@@ -106,7 +106,34 @@ ${
     fn elemText(tag: string, attrs: HAttr[], kids: HNode[]) -> string {
         const open: string = "<" + tag + attrsText(attrs) + ">"
         if (isVoid(tag)) return open
-        return open + printNodes(kids) + "</" + tag + ">"
+        const body: string = printNodes(kids)
+        // s474 r3: print.scrml buildEl has already cut the ONE line ending the parser drops after a
+        // `<pre>` / `<listing>` / `<textarea>` start tag, so these kids are what the page must hold; when
+        // they still start with a line ending, one more is printed for the parser to drop.
+        if (dropsLeadingLf(tag) && startsWithNewline(body)) return open + "\n" + body + "</" + tag + ">"
+        return open + body + "</" + tag + ">"
+    }
+
+    fn startsWithNewline(t: string) -> boolean {
+        if (t.length == 0) return false
+        const c0: int = t.charCodeAt(0)
+        return c0 == 10 || c0 == 13
+    }
+
+    // s474 r3 (re-review of #1727, S1 / S2; PA ruling: match HTML and base): the HTML parser drops ONE
+    // line ending right after a `<pre>` / `<listing>` / `<textarea>` start tag (HTML §13.2.6.4.7; a CRLF
+    // or a lone CR is normalized to LF first). `t` without that one line ending.
+    export fn cutNewline(t: string) -> string {
+        if (t.length == 0) return t
+        const c0: int = t.charCodeAt(0)
+        if (c0 == 13 && t.length > 1 && t.charCodeAt(1) == 10) return t.substring(2, t.length)   // CR LF
+        if (c0 == 10 || c0 == 13) return t.substring(1, t.length)                              // LF, or a lone CR
+        return t
+    }
+
+    export fn dropsLeadingLf(tag: string) -> boolean {
+        const t: string = tag.toLowerCase()
+        return t == "pre" || t == "listing" || t == "textarea"
     }
 
     export fn printNodes(ns: HNode[]) -> string {

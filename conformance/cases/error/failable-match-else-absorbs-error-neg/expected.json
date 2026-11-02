@@ -1,0 +1,34 @@
+{
+  "id": "error-failable-match-else-absorbs-error-neg",
+  "description": "§19.7.1 / §18.6 (S474, PERMANENT — security) — the exploit: `@msg = match check(\"wrong\") { .Locked :> \"locked\", else :> \"LOGGED IN\" }`. The `else` would take the error variant `.Denied`, so a wrong password would log in. On a failable result `else` covers the success value only; an `else` that would absorb an error variant is E-MATCH-ELSE-ABSORBS-ERROR (and not E-TYPE-020).",
+  "language-version": "1.0",
+  "spec": "§19.7.1",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match; `scrml fix` S466 readings\" item 1 — \"an `else` that would absorb errors gets a compile error that names the uncovered error variants\" · review:s474-backfill old4 (#1444) `~/.cache/scrml/review/s474-backfill/old4/p1444/m2.scrml`",
+  "rationale": "§19.7.1 (S474): a plain `_` / `else` arm in a `match` on a failable result covers `.Ok` only; an error variant no arm names makes it E-MATCH-ELSE-ABSORBS-ERROR. `.Denied` is named by no arm here.",
+  "expect": {
+    "codes": [
+      "E-MATCH-ELSE-ABSORBS-ERROR"
+    ],
+    "notCodes": [
+      "E-TYPE-020"
+    ],
+    "severity": {
+      "E-MATCH-ELSE-ABSORBS-ERROR": "error"
+    },
+    "codeCounts": {
+      "E-MATCH-ELSE-ABSORBS-ERROR": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-else-absorbs-error-variants-s474",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-MATCH-ELSE-ABSORBS-ERROR' fired 0 time(s), expected exactly 1",
+          "missing:E-MATCH-ELSE-ABSORBS-ERROR",
+          "severity:code 'E-MATCH-ELSE-ABSORBS-ERROR' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

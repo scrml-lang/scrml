@@ -1,9 +1,9 @@
 {
   "id": "server-db-sql-handled-match-scrutinee-rt",
-  "description": "§19.8.3 handling form 2 (S451 R11) — a `?{}` query handled by a `match` on its result, as a declaration's right-hand side in a server function (RUNTIME, sqlEngine:\"real\"). The function must be SERVER-placed and the query must run: `notes` has a row → `::Ok(row)`; `empties` is empty → `::Ok(not)`; `gone` is declared but never created, so the query fails to run → `::QueryFailed(m)` with the driver's message bound to `m`. Pre-S454 this compiled at exit 0 but SILENTLY moved each function to the CLIENT, where the query emitted as `null /* sql-ref unresolved */.get()` (route inference never saw the `?{}` in the `match` scrutinee).",
+  "description": "§19.8.3 handling form 2 (S451 R11) — a `?{}` query handled by a `match` on its result, as a declaration's right-hand side in a server function (RUNTIME, sqlEngine:\"real\"). The function must be SERVER-placed and the query must run: `notes` has a row → `::Ok(row)`; `empties` is empty → `::Ok(not)`; `gone` is declared but never created, so the query fails to run → `::QueryFailed(m)` with the driver's message bound to `m`. Pre-S454 this compiled at exit 0 but SILENTLY moved each function to the CLIENT, where the query emitted as `null /* sql-ref unresolved */.get()` (route inference never saw the `?{}` in the `match` scrutinee). S474: the remaining-errors arm is `_ e :>`, not `_ :>` — on a failable result a plain `_` covers `.Ok` only, so `_ :>` here would absorb `ConstraintViolation` / `ConnectionLost` (E-MATCH-ELSE-ABSORBS-ERROR, §19.7.1).",
   "language-version": "1.0",
   "spec": "§19.8.3, §18.3, §19.7.1",
-  "rationale": "§19.8.3: \"**A `match` on the result** — the success value arrives as `::Ok` (§19.7.1)\", with the example `const rows = match ?{…}.all() { ::Ok(found) :> found  ::QueryFailed(m) :> { log(m); [] }  _ :> [] }`. §18.3: \"A `match` expression MAY appear as the right-hand side of a variable declaration or assignment\". §19.8.3: a query that runs and matches nothing succeeds (`.get()` → `not`); only a query that fails to run produces a `SqlError` variant.",
+  "rationale": "§19.8.3: \"**A `match` on the result** — the success value arrives as `::Ok` (§19.7.1)\", with the example `const rows = match ?{…}.all() { ::Ok(found) :> found  ::QueryFailed(m) :> { log(m); lift []; }  _ e :> [] }` (S474: `_ e`, ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match\"). §18.3: \"A `match` expression MAY appear as the right-hand side of a variable declaration or assignment\". §19.8.3: a query that runs and matches nothing succeeds (`.get()` → `not`); only a query that fails to run produces a `SqlError` variant.",
   "expect": {
     "codes": [],
     "notCodePrefixes": ["E-"],
@@ -28,5 +28,16 @@
       { "selector": "#hit", "text": "hello" },
       { "selector": "#failed", "text": "failed" }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-whole-error-binder-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-VALUE-FUNCTION-STORED=4",
+          "prefix:E-VALUE-FUNCTION-STORED (matches forbidden E-*)"
+        ]
+      }
+    }
   }
 }

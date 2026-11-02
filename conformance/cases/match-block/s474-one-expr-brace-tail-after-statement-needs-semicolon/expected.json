@@ -1,0 +1,24 @@
+{
+  "id": "match-block-s474-one-expr-brace-tail-after-statement-needs-semicolon",
+  "description": "A brace that holds a statement is not a one-expression brace: in `.B :> { one(); 2 }` the bare `2` is a second item and owes its `;` (E-STMT-MISSING-SEMICOLON, once). In this value position it is also E-ARM-TAIL-VALUE, the ruling's code for a bare tail after a statement: after a statement the arm yields only by `lift`. (With the `;` it is E-ARM-TAIL-VALUE alone.)",
+  "language-version": "1.0",
+  "spec": "§7.2.2, §18.5",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — `{ e }` in a value-position match arm is that expression\" — \"Allow { e } in arms too (Recommended)\" (\"`lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE\") · ruling:user-voice-scrml.md S469 \"⭐⭐⭐ RULED — dpa-073 F1 = (a)\" — `;` terminates",
+  "rationale": "§7.2.2 rule 3 (S474): a brace that holds a statement or a second item is a statement list, and rule 1 applies to each statement. §18.5: a bare tail after a statement in a value position is E-ARM-TAIL-VALUE (the ruling's code), pinned on its own by match-block/s474-arm-tail-value-after-statement. impl#1 does not enforce `;` (dpa-073 F5: a carried, impl#1-labelled divergence, g-dpa063-termination-unbuilt-impl1-legacy — the xfail gap here), and it does not emit E-ARM-TAIL-VALUE either (g-impl1-arm-tail-value-unemitted-s474); the bootstrap emits both.",
+  "expect": {
+    "codes": ["E-STMT-MISSING-SEMICOLON", "E-ARM-TAIL-VALUE"],
+    "codeCounts": { "E-STMT-MISSING-SEMICOLON": 1 }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-dpa063-termination-unbuilt-impl1-legacy",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-STMT-MISSING-SEMICOLON' fired 0 time(s), expected exactly 1",
+          "missing:E-ARM-TAIL-VALUE",
+          "missing:E-STMT-MISSING-SEMICOLON"
+        ]
+      }
+    }
+  }
+}

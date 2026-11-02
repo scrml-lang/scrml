@@ -1,0 +1,16 @@
+{
+  "id": "match-block-s474-one-expr-brace-arm-value-pos",
+  "description": "A value-position `match` arm whose brace body holds exactly ONE expression and no `;` (`.B :> { 2 }`) is that expression — the same arm as `.B :> { 2; }` and `.B :> 2`. The expression may span lines and carry `/* */` and `//` comments. No `;` is owed (§7.2.2 rule 3: a single-expression position).",
+  "language-version": "1.0",
+  "spec": "§18.5, §7.2.2",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — `{ e }` in a value-position match arm is that expression\" — \"Allow { e } in arms too (Recommended)\" (\"a brace holding ONE expression is that expression\") · S474 #1512 review finding 1512-1 (the bootstrap refused `.B :> { 2 }` with E-STMT-MISSING-SEMICOLON)",
+  "rationale": "§18.5 (S469 r5): a value-position arm whose brace body holds exactly one expression yields that expression, with an implied `lift`. §7.2.2 rule 3 (S474): that brace is a single-expression position and takes no `;`. `g` yields 1, 2, 3; `area(_, 2)` yields 2*2*3 = 12, 2+1 = 3, 0.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STMT-MISSING-SEMICOLON", "E-ARM-TAIL-VALUE", "E-MATCH-ARM-SHORTHAND-AMBIGUOUS"],
+    "domAnchored": [
+      { "selector": "#g", "text": "1 2 3" },
+      { "selector": "#area", "text": "12 3 0" }
+    ]
+  }
+}

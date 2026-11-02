@@ -24,7 +24,8 @@
 # but its own FILES — a branch merely NAMED bot/generated-regen that edits anything else is refused.
 # FILES comes from the BASE ref's generated-regen.yml (r2 N1), so the branch cannot widen its own allowance.
 #
-# To fix a refusal: `git checkout origin/main -- docs/generated/ && git commit` (the bot regenerates
+# To fix a refusal: `git merge origin/main && git checkout origin/main -- docs/generated/ && git commit`
+# (merge first: a copy of main's files without main's history is still a change vs the merge-base) (the bot regenerates
 # main after your merge; `bun scripts/state.ts` prints the live counts for your tree meanwhile). To change
 # a generated file's FORMAT, change its producer (scripts/state.ts writes each file whole); the bot
 # regenerates the file after the producer change lands.
@@ -68,7 +69,8 @@ if [ -n "$touched" ]; then
   echo ""
   echo "  These are regenerated on main after merge by $REGEN_WF. A PR that"
   echo "  carries its own copy goes DIRTY on GitHub when the bot's regen lands (GitHub runs no merge driver)."
-  echo "  Restore them:  git checkout $base -- $BOT_OWNED/ && git commit -m 'restore bot-owned generated files'"
+  echo "  Restore them:  git merge origin/main && git checkout origin/main -- $BOT_OWNED/ && git commit -m 'restore bot-owned generated files'"
+  echo "  (merge first: a copy of main's current files without main's history still counts as a change)"
   exit 1
 fi
 echo "bot-owned-untouched: no file under $BOT_OWNED/ changed other than added ($base...$head)."

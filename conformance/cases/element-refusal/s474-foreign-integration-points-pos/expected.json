@@ -1,0 +1,12 @@
+{
+  "id": "element-refusal-s474-foreign-integration-points-pos",
+  "description": "§24.5: the nestings the HTML parser keeps compile clean. That covers HTML inside an SVG foreignObject, inside a MathML text integration point (mtext) and inside an HTML-encoded annotation-xml, a table written with its tbody, and a list nested in a list item.",
+  "language-version": "1.0",
+  "spec": "§24.5",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT\" (the PERMANENT class); the code and its reading are a PA reading in the S474 review of #1727",
+  "rationale": "§24.5 item 1 excepts the HTML integration points (foreignObject / desc / title; mi / mo / mn / ms / mtext; annotation-xml with encoding text/html or application/xhtml+xml). Item 2 refuses only what the parser repairs.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-HTML-FOREIGN-BREAKOUT", "E-HTML-PARSER-REPAIR"]
+  }
+}

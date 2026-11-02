@@ -1,0 +1,8 @@
+<program>
+    <icon n:int/>
+    renders <span>i</span>
+    <main>
+        <svg><icon n=1/></svg>
+        <p><icon n=2/></p>
+    </main>
+</program>

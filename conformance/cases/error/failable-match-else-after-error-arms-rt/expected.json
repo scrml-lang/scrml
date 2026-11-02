@@ -1,0 +1,19 @@
+{
+  "id": "error-failable-match-else-after-error-arms-rt",
+  "description": "§19.7.1 / §18.6 (S474) — on a failable result `else` covers the success value only. Here every error variant (`.Locked`, `.Denied`) has its own arm, so the trailing `else` takes only the success value: the match is accepted, a wrong password yields \"denied\" and the right one \"LOGGED IN\". The accepted near-miss of E-MATCH-ELSE-ABSORBS-ERROR.",
+  "language-version": "1.0",
+  "spec": "§19.7.1",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match; `scrml fix` S466 readings\" item 1 — \"on a failable subject, `else` covers success variants only. Errors need an explicit arm, `_ e`, or `!{}`\"",
+  "rationale": "§19.7.1 (S474): in a `match` on a failable result, a plain `_` / `else` arm covers the success value `.Ok` only. Explicit error arms followed by `else` are therefore exhaustive and absorb no error, so no E-MATCH-ELSE-ABSORBS-ERROR and no E-TYPE-020; at run time a failure runs its own arm, never the `else`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ELSE-ABSORBS-ERROR", "E-TYPE-020"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "wrong": "denied", "right": "LOGGED IN" },
+    "domAnchored": [
+      { "selector": "#wrong", "text": "denied" },
+      { "selector": "#right", "text": "LOGGED IN" }
+    ]
+  }
+}

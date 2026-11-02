@@ -112,8 +112,9 @@ describe("compile — the other spellings do not compile either (never written f
   test("an entity in the attribute name (`h&#114;ef=`)", () => refusedAs(`<base h&#114;ef=@u/>`, ["E-PARSE-TAG"]));
   test("an entity in the tag name (`<b&#97;se>`)", () => refusedAs(`<b&#97;se href=@u/>`, ["E-PARSE-TAG"]));
   test("a `<base>` inside SVG / MathML is refused too (no base-URL effect there; harmless over-reach, #1637 review F7)", () => {
-    expect(codes(BASE(`<svg><base href=@u/></svg>`))).toEqual(["E-ATTR-BASE-HREF"]);
-    expect(codes(BASE(`<math><base href=@u/></math>`))).toEqual(["E-ATTR-BASE-HREF"]);
+    // s474: and, as an HTML void element name in foreign content, E-HTML-FOREIGN-BREAKOUT (SPEC §24.5)
+    expect(codes(BASE(`<svg><base href=@u/></svg>`)).sort()).toEqual(["E-ATTR-BASE-HREF", "E-HTML-FOREIGN-BREAKOUT"]);
+    expect(codes(BASE(`<math><base href=@u/></math>`)).sort()).toEqual(["E-ATTR-BASE-HREF", "E-HTML-FOREIGN-BREAKOUT"]);
   });
 });
 

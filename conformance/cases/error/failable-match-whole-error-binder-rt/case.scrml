@@ -1,0 +1,33 @@
+${
+    type AuthErr:enum = {
+        Denied
+        Locked
+    }
+
+    function check(pw: string)! AuthErr {
+        if (pw == "locked") fail AuthErr.Locked;
+        if (pw != "secret") fail AuthErr.Denied;
+        return true;
+    }
+}
+
+<wrong> = ""
+<right> = ""
+
+${
+    // `_ e` takes every error variant and never `.Ok`, so one arm handles all errors.
+    function attempt(pw: string) -> string {
+        return match check(pw) {
+            ::Ok(v) :> "LOGGED IN",
+            _ e     :> "denied"
+        };
+    }
+    function login() {
+        @wrong = attempt("hunter3");
+        @right = attempt("secret");
+    }
+}
+
+<button id="go" onclick=login()>go</>
+<p id="wrong">${@wrong}</>
+<p id="right">${@right}</>

@@ -1,0 +1,16 @@
+{
+  "id": "error-handler-else-covers-errors-rt",
+  "description": "§19.4.5 / §19.7.3 (S474 boundary) — `else` in a `!{}` handler's arm list is NOT E-MATCH-ELSE-ABSORBS-ERROR. A handler's arms are failures only (the success value never reaches them), so its `else` takes the remaining error variants and cannot be read as the success arm. A wrong password runs the `else` arm (\"denied\") and returns before \"LOGGED IN\".",
+  "language-version": "1.0",
+  "spec": "§19.7.3",
+  "provenance": "ruling:user-voice-scrml.md S474 \"⭐ RULED — `else` on a failable match; `scrml fix` S466 readings\" item 1 — \"Errors need an explicit arm, `_ e`, or `!{}`\" (the `!{}` handler is itself one of the explicit forms)",
+  "rationale": "§19.7.3 (S474): the rule that `else` covers the success value only applies to a `match` on a failable result; in a `!{}` handler a `_` / `else` wildcard arm still satisfies exhaustiveness for the remaining error variants (§18.6). No E-MATCH-ELSE-ABSORBS-ERROR, no E-TYPE-080.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ELSE-ABSORBS-ERROR", "E-TYPE-080"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "msg": "denied" },
+    "domAnchored": [{ "selector": "#out", "text": "denied" }]
+  }
+}

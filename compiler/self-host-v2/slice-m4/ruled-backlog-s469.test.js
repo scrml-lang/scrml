@@ -323,8 +323,8 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
     }`;
   const fn = (body) => prog(L + `\n    function pick(id: string) -> string {\n${body}\n    }`, `        <p>x</p>`);
   test("a value-position arm (a failable `match`, a `!{}`) with statements and a bare last expression is E-ARM-TAIL-VALUE", () => {
-    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                v;\n            },\n            _ :> "e"\n        };`))).toEqual(["E-ARM-TAIL-VALUE"]);
-    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                lift v;\n            },\n            _ :> "e"\n        };`))).toEqual([]);
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                v;\n            },\n            _ e :> "e"\n        };`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                lift v;\n            },\n            _ e :> "e"\n        };`))).toEqual([]);
     expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            "e";\n        } };\n        return r;`))).toEqual(["E-ARM-TAIL-VALUE"]);
     expect(diag(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            "e";\n        } };\n        return r;`), "E-ARM-TAIL-VALUE")?.message).toContain("`lift <expr>`");
   });

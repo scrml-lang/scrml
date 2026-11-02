@@ -727,7 +727,7 @@ ${
 
     type RArms:struct = { arms: AArm[], tp: TP }
     type RPat:struct = { pat: APat, tp: TP }
-    type RArmBody:struct = { body: AArmBody, lifted: boolean, tp: TP }
+    type RArmBody:struct = { body: AArmBody, lifted: boolean, bare: boolean, tp: TP }
 
     // At `{`: the arms, through the matching `}`. ONE arm parser for `!{}`
     // and `match` (S452 ruling c: "`!{}` handler arms use the SAME grammar as
@@ -801,7 +801,7 @@ ${
                 }
                 const rb: RArmBody = parseArmBody(t)
                 t = rb.tp
-                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted }
+                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted, bare: rb.bare }
                 arms = arms.concat([arm])
                 t = bumpId(t)
                 lastComma = false
@@ -999,10 +999,10 @@ ${
                 const rs: RStmt = parseStmt(adv(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh)))
                 const close: TP = expectP(rs.tp, "}")
                 const sb: ABlock = { nid: close.nid, span: spanFrom(close, bstart), stmts: [rs.s] }
-                return { body: AArmBody.ArmBlock(sb), lifted: false, tp: bumpId(close) }
+                return { body: AArmBody.ArmBlock(sb), lifted: false, bare: false, tp: bumpId(close) }
             }
             const rb: RArmBlock = parseArmBlock(tp)
-            return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, tp: rb.tp }
+            return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, bare: rb.bare, tp: rb.tp }
         }
         const end: int = armEnd(tp)
         const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
@@ -1019,14 +1019,14 @@ ${
             let ft: TP = rf.tp
             if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `" + kw + "`", cur(ft))
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
-            return { body: AArmBody.ArmBlock(fb), lifted: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
+            return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
         }
         // `break` / `continue` are leave statements too (§18.2), but the bootstrap
         // has no loops for them to leave.
         if (isWord(sub, "break") || isWord(sub, "continue")) {
             const bt: TP = diagAt(sub, "E-BOOTSTRAP-UNSUPPORTED", "a `" + cur(sub).text + "` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap", cur(sub))
             const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
-            return { body: AArmBody.ArmExpr(rb.e), lifted: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
+            return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
         }
         const r: RExpr = parseAssign(sub)
         let st: TP = r.tp
@@ -1034,7 +1034,7 @@ ${
             const x: PTok = cur(st)
             st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
         }
-        return { body: AArmBody.ArmExpr(r.e), lifted: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+        return { body: AArmBody.ArmExpr(r.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
     }
 
     // s469 — an arm's `{ … }` block (§18.5, RULED S469 "block arms yield with
@@ -1043,7 +1043,7 @@ ${
     // and the arm is `lifted` (AArm). Speculative: the `lift` is read, and kept
     // only when the block's `}` follows it; any other `lift` goes to parseStmt,
     // which refuses it by name.
-    type RArmBlock:struct = { b: ABlock, lifted: boolean, tp: TP }
+    type RArmBlock:struct = { b: ABlock, lifted: boolean, bare: boolean, tp: TP }
 
     fn parseArmBlock(tp: TP) -> RArmBlock {
         const start: int = cur(tp).start
@@ -1051,6 +1051,8 @@ ${
         let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
         let lifted = false
+        let sawSemi = false
+        let bare = false
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
             let done = false
@@ -1082,6 +1084,7 @@ ${
             }
             if (!done && isP(t, ";")) {
                 t = adv(t)
+                sawSemi = true
                 done = true
             }
             if (!done) {
@@ -1090,7 +1093,30 @@ ${
                 // arm's value where the arm's value is used, so it is judged
                 // only for a statement-position `match` / `!{}` (armTails)
                 const h0: int = hardErrors(t.diags)
-                const r: RStmt = parseTermStmtBare(t, b0)
+                const rs: RStmt = parseStmt(t)
+                // s474 #1512 — §18.5 / §7.2.2 rule 3 (RULED S469 "Allow { e } in
+                // arms too": "a brace holding ONE expression is that
+                // expression"): a body that is exactly ONE expression, with no
+                // `;` at its top level (`.B :> { 2 }`), is a single-expression
+                // position and takes no `;` — the same arm as `.B :> { 2; }`
+                // (one expression statement, then `}`). A body that holds a
+                // statement or a second item still takes rule 1's `;`
+                // (`{ f(); 2 }` is E-STMT-MISSING-SEMICOLON after `2`), and a
+                // declaration / `return` / `fail` / `lift` is a statement, not
+                // an expression. Not after an error (a recovered placeholder).
+                // Where the arm's value is NOT used (a statement-position
+                // `match` / `!{}`) the block is a statement list and the `;` is
+                // owed after all: `bare` marks the arm so armTails reports it.
+                // A block-like expression statement (a statement `match`) owes
+                // no `;` in either position (rule 2), so it is never `bare`
+                // (#1722 review F1: `.A :> { match k { … } }` in a statement
+                // `match` drew a spurious report); termAfter passes it.
+                let r: RStmt = rs
+                if (stmts.length == 0 && !sawSemi && isP(rs.tp, "}") && stmtExpr(rs.s) is given && needsSemi(rs.s) && hardErrors(rs.tp.diags) == h0) {
+                    bare = true
+                } else {
+                    r = { s: rs.s, tp: termAfter(rs.tp, rs.s, b0) }
+                }
                 stmts = stmts.concat([r.s])
                 t = r.tp
                 if (!armBlockLastAt(t)) t = stmtChecks(t, r.s, b0, h0)
@@ -1099,7 +1125,7 @@ ${
         }
         t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
-        return { b: b, lifted: lifted, tp: bumpId(t) }
+        return { b: b, lifted: lifted, bare: bare, tp: bumpId(t) }
     }
 
     // After a statement in an arm block: is it the block's last (only `;`s, then
@@ -1900,7 +1926,7 @@ ${
         // (so its own errors report), refused by name — never read as a name `if`.
         if (t.v == "if") {
             const di: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function", t)
-            const ri: RStmt = parseIf(di)
+            const ri: RStmt = parseValueIf(di)
             // (refused: its branches are value positions, §17.6.10 — not judged as
             // statements, s469 E-STMT-NO-EFFECT)
             return mkE(dropNoEffect(ri.tp, di.diags.length), start, AExprK.Recovered)
@@ -2115,10 +2141,33 @@ ${
             const b: ABlock | not = armBlockOf(a)
             if (b is given && !a.lifted && b.stmts.length > 0) {
                 const last: AStmt = b.stmts[b.stmts.length - 1]
+                // s474 #1512 — a `{ e }` brace (one expression, no `;`) is that
+                // expression only where the arm's value is used (§18.5, RULED
+                // S469 "`{ e }` in a value-position match arm is that
+                // expression"); here the block is a statement list (§7.2.2
+                // rule 1), so its statement owes its `;` — reported where it
+                // goes, as termAfter would have (the cascade guard included)
+                if (a.bare && hardErrors(t.diags) <= d0) t = bareArmSemi(t, last)
                 t = stmtChecks(t, last, d0, hardErrors(t.diags))
             }
         }
         return t
+    }
+
+    // s474 #1512 — E-STMT-MISSING-SEMICOLON for a `bare` arm's one statement
+    // (`.A :> { f() }` in a statement-position `match`): missingSemi read at the
+    // token after the statement, so the report and its message are rule 1's own.
+    fn bareArmSemi(tp: TP, s: AStmt) -> TP {
+        let i: int = tp.i
+        if (i >= tp.toks.length) i = tp.toks.length - 1
+        while (i > 0 && tp.toks[i - 1].end > s.span.end) { i = i - 1 }
+        if (i > 0 && tp.toks[i - 1].end == s.span.end) {
+            const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file })
+            return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file }
+        }
+        // (fail closed: no token ends where the statement does — report at its end)
+        const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;`. In a statement-position `match` / `!{}` an arm's `{ … }` block is a statement list (§7.2.2 rule 1); a `{ e }` brace is its expression only where the arm's value is used (§18.5).", tp.file, mkSpan(s.span.end, s.span.end))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
 
     fn armBlockOf(a: AArm) -> ABlock | not {
@@ -3549,24 +3598,61 @@ ${
     }
 
     fn parseIf(tp: TP) -> RStmt {
+        return parseIfAs(tp, false)
+    }
+
+    // s474 #1512 — an `if` where a value stands, read past for its own errors
+    // (the form is refused by name, E-BOOTSTRAP-UNSUPPORTED, at parsePrimary).
+    // Its branches are value positions (§17.6.10, RULED S469 "Keep { e }, lift
+    // once a statement": "A braced value-form `if` branch holding ONE
+    // expression is that expression"), so a `{ e }` branch — one expression,
+    // no `;` — owes no `;` and is not reported for one: the refusal is the
+    // only report. A branch holding a statement is a statement list (rule 1).
+    fn parseValueIf(tp: TP) -> RStmt {
+        return parseIfAs(tp, true)
+    }
+
+    // `value`: the `if` stands where a value does (its branches: parseValueBranch).
+    fn parseIfAs(tp: TP, value: boolean) -> RStmt {
         const start: int = cur(tp).start
         let t: TP = expectP(adv(tp), "(")
         const cond0: RExpr = parseAssign(t)
         const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }   // s474 (§50, D10)
         t = expectP(cond.tp, ")")
-        const thenB: RBlock = parseBlockOrStmt(t)
+        const thenB: RBlock = parseIfBranch(t, value)
         t = thenB.tp
         if (isWord(t, "else")) {
             t = adv(t)
             if (isWord(t, "if")) {
-                const inner: RStmt = parseIf(t)
+                const inner: RStmt = parseIfAs(t, value)
                 const eb: ABlock = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
                 return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb))
             }
-            const elseB: RBlock = parseBlockOrStmt(t)
+            const elseB: RBlock = parseIfBranch(t, value)
             return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b))
         }
         return mkS(t, start, AStmtK.If(cond.e, thenB.b, not))
+    }
+
+    fn parseIfBranch(tp: TP, value: boolean) -> RBlock {
+        if (value) return parseValueBranch(tp)
+        return parseBlockOrStmt(tp)
+    }
+
+    // A value-form `if` branch: a `{ e }` brace is its one expression (above);
+    // anything else is read as a statement `if` reads it.
+    fn parseValueBranch(tp: TP) -> RBlock {
+        if (isP(tp, "{") && !tk(peekAt(tp, 1), ";") && !tk(peekAt(tp, 1), "}")) {
+            const h0: int = hardErrors(tp.diags)
+            const start: int = cur(tp).start
+            const rs: RStmt = parseStmt(adv(tp))
+            if (isP(rs.tp, "}") && stmtExpr(rs.s) is given && hardErrors(rs.tp.diags) == h0) {
+                const close: TP = adv(rs.tp)
+                const b: ABlock = { nid: close.nid, span: spanFrom(close, start), stmts: [rs.s] }
+                return { b: b, tp: bumpId(close) }
+            }
+        }
+        return parseBlockOrStmt(tp)
     }
 
     // `if (c) stmt` without braces is one statement in a block of its own.
@@ -4125,30 +4211,108 @@ ${
             host = tag.v
             t = adv(t)
         }
-        t = expectP(t, "{")
-        let names: AImportName[] = []
-        while (!isP(t, "}") && !atEnd(t)) {
-            const n: PTok = cur(t)
-            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
-                let bound: PTok = n
-                const ta: TP = adv(t)
-                // a host import's `name as local` binds `local` (§21.3.1); a plain
-                // import has no `as` form in the bootstrap (g-boot-import-codes-and-alias-s471)
-                if (host is given && isWord(ta, "as")) {
-                    const loc: PTok = cur(adv(ta))
-                    if (loc.cls == TC.Ident || loc.cls == TC.Keyword) {
-                        bound = loc
-                        t = adv(ta)
+        // s474 — a namespace import (`import * as m from "…"`) or a default import
+        // (`import X from "…"`) is reported BY NAME, its statement read whole (was a
+        // wall of E-PARSE-IMPORT / E-PARSE-EXPECTED and a spurious E-IMPORT-005).
+        // s474 r1 (#1715 review F3/F4, PA ruling):
+        //   - a namespace import is INTERIM — not in the bootstrap YET (the capable
+        //     form, and how `m.card` is spelled in markup, is owed:
+        //     g-boot-namespace-import-unbuilt-s474);
+        //   - a default import of a scrml module is E-IMPORT-004 — §21.3 resolves a
+        //     default import "against the exporting file's export list", and no scrml
+        //     form exports a default (§21.2). A default import of a JavaScript module
+        //     (ES semantics, §21.3) is not in the bootstrap (E-BOOTSTRAP-UNSUPPORTED).
+        // s474 r1 (F8): the statement is skipped to its `from "…"` across lines, or to
+        // a `;` / the closing `}` of the enclosing block / the end — never past them.
+        if (host is not && !isP(t, "{")) {
+            const h: PTok = cur(t)
+            const isNs: boolean = tk(h, "*")
+            // a default import is a name followed by `from` or `,` — `import stuff` alone is no
+            // import form at all, and keeps the ordinary parse errors
+            const nx: TP = adv(t)
+            const isDef: boolean = (h.cls == TC.Ident || h.cls == TC.Keyword) && (isWord(nx, "from") || isP(nx, ","))
+            if (isNs || isDef) {
+                let rt: TP = t
+                let depth = 0
+                let from0: string = ""
+                let done = false
+                while (!done && !atEnd(rt)) {
+                    if (depth == 0 && isWord(rt, "from") && cur(adv(rt)).cls == TC.Str) {
+                        from0 = cur(adv(rt)).v
+                        rt = adv(adv(rt))
+                        if (isP(rt, ";")) rt = adv(rt)
+                        done = true
+                    } else if (depth == 0 && isP(rt, ";")) {
+                        rt = adv(rt)
+                        done = true
+                    } else if (depth == 0 && isP(rt, "}")) {
+                        done = true
                     } else {
-                        t = diagAt(adv(ta), "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "`", loc)
+                        if (isP(rt, "{")) depth = depth + 1
+                        if (isP(rt, "}")) depth = depth - 1
+                        rt = adv(rt)
                     }
                 }
-                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
-                t = bumpId(t)
-            } else if (!tk(n, ",")) {
-                t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+                const scrmlSrc: boolean = from0.endsWith(".scrml") || from0.indexOf("scrml:") == 0
+                if (isNs) {
+                    rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a namespace import (`import * as …`) is not in the bootstrap yet (g-boot-namespace-import-unbuilt-s474) — import the names it uses: `import { a, b } from \"…\"` (rename one with `as`)", h)
+                } else if (scrmlSrc || from0 == "") {
+                    rt = diagAt(rt, "E-IMPORT-004", "`" + h.text + "`: a .scrml file has no default export — scrml files export names only (§21.2, §21.3); use `import { " + h.text + " } from \"…\"`", h)
+                } else {
+                    rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a default import of a JavaScript module (`import " + h.text + " from \"" + from0 + "\"`) is not in the bootstrap yet — import a named export: `import { name } from \"" + from0 + "\"`", h)
+                }
+                if (from0 == "") return { items: [], tp: rt }
+                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top }
+                return mkItem(bumpId(rt), start, AItemK.ImportItem(imp0))
             }
-            t = adv(t)
+        }
+        t = expectP(t, "{")
+        // s474 r1 (F9): §21.3 "ES module `import` syntax" — specifiers are separated by
+        // commas (`{ a, b as c, }`; a trailing comma is allowed). `{ a b }` / `{ a as b c }`
+        // is E-PARSE-IMPORT (was: read as separate names).
+        let names: AImportName[] = []
+        let needComma = false
+        while (!isP(t, "}") && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (tk(n, ",")) {
+                if (!needComma) t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name before `,`", n)
+                needComma = false
+                t = adv(t)
+            } else if (needComma) {
+                t = diagAt(t, "E-PARSE-IMPORT", "expected `,` or `}` after an import specifier, found `" + n.text + "` — specifiers are separated by commas (`import { a, b as c } from \"…\"`, §21.3)", n)
+                while (!atEnd(t) && !isP(t, ",") && !isP(t, "}")) { t = adv(t) }
+            } else if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                let bound: PTok = n
+                let bind = true
+                t = adv(t)
+                // `name as local` binds `local` to the exported `name` — a host import's
+                // (§21.3.1 `named-binding ::= identifier ('as' identifier)?`) and, s474, a
+                // plain import's (§21.3 "ES module `import` syntax"; §21.4 names the renamed
+                // re-export `export { a as b } from`) (g-boot-import-codes-and-alias-s471)
+                if (isWord(t, "as")) {
+                    const loc: PTok = cur(adv(t))
+                    if (loc.cls == TC.Keyword) {
+                        // s474 r1 (F5): a local name is a binding — a keyword is no binding name
+                        // (as `fn if` is E-PARSE-FN); the exported name may be one (a host export)
+                        t = adv(adv(diagAt(t, "E-PARSE-IMPORT", "`" + loc.text + "` is a keyword and cannot be a local name — write another name after `as` (`import { " + n.text + " as other } from \"…\"`)", loc)))
+                        bind = false
+                    } else if (loc.cls == TC.Ident) {
+                        bound = loc
+                        t = adv(adv(t))
+                    } else {
+                        t = adv(diagAt(t, "E-PARSE-IMPORT", "expected the local name after `as`, found `" + loc.text + "` (`import { " + n.text + " as localName } from \"…\"`)", loc))
+                    }
+                }
+                // §21.8.1 `import { name pinned }` — not in the bootstrap (named, not read as a name)
+                if (isWord(t, "pinned")) {
+                    t = adv(diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`pinned` on an import (§21.8.1) is not in the bootstrap yet — drop it, or declare the cell in this file", cur(t)))
+                }
+                if (bind) names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
+                t = bumpId(t)
+                needComma = true
+            } else {
+                t = adv(diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n))
+            }
         }
         t = expectP(t, "}")
         if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))

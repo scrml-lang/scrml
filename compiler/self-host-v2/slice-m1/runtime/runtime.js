@@ -151,20 +151,41 @@ function flush() {
   try { drainQueues(); } finally { flushing = false; }
 }
 
+// s474 r1 (review of #1727, F1) — ONE EFFECT'S THROW NEVER STRANDS THE REST.
+// An effect that throws (a runtime trap, a template whose structure the parser
+// changed) used to unwind out of this loop, and every effect still queued
+// behind it waited for some later write. A gate closing in the same write
+// never closed, so a gated secret stayed mounted after logout. That is fail-open,
+// whatever the throw was. Each run is now contained: the queue is drained to
+// empty, then the FIRST error is rethrown (the write still fails loudly, as
+// before); any later one is reported, never swallowed.
 function drainQueues() {
+  let first = null;
+  let failed = false;
   for (;;) {
+    let e = null;
     if (queue.size > 0) {
-      const [e] = queue;
+      [e] = queue;
       queue.delete(e);
-      if (!e.disposed) e.run();
     } else if (effectQueue.size > 0) {
-      const [d] = effectQueue;
-      effectQueue.delete(d);
-      if (!d.disposed) d.run();
+      [e] = effectQueue;
+      effectQueue.delete(e);
     } else {
-      return;
+      break;
+    }
+    if (e.disposed) continue;
+    try {
+      e.run();
+    } catch (err) {
+      if (!failed) { failed = true; first = err; } else reportLater(err);
     }
   }
+  if (failed) throw first;
+}
+
+function reportLater(err) {
+  if (typeof globalThis.reportError === "function") globalThis.reportError(err);
+  else queueMicrotask(() => { throw err; });
 }
 
 export class Cell {
@@ -2517,11 +2538,96 @@ function _scrml_url_shape_ok(value) {
 // page; holes are addressed by child-index path, looked up before any wiring.
 // ---------------------------------------------------------------------------
 
+// s474 (boot-gate-await-mathml) — a FOREIGN-CONTENT template. A template's content is parsed where the
+// printer writes it — in the page head, an HTML context — so content that will be inserted into an
+// `<svg>` or a `<math>` (an `if=` arm, an `<each>` row, a component's renders, slot content) would be
+// built as HTML elements (`<text>` / `<mi>` as HTMLUnknownElement) that never render there. The printer
+// (print.scrml `wrapNs`) instead writes such content inside the parse context it needs, and marks the
+// template `data-scrml-ns`; here the clone is unwrapped to the content itself. The wrapper chain per
+// context, and so its depth: svg `<svg>`, math `<math>`, math-text `<math><mi>` (a MathML text
+// integration point), annot `<math><annotation-xml>`. No parse happens here — the browser's parser
+// built the nodes once, from the page; this only moves them. Fail closed: an unknown marker, or a
+// wrapper level that is not exactly one node (the parser moved content out of the wrapper), throws
+// rather than rendering a tree whose hole paths would not line up.
+const NS_DEPTH = { svg: 1, math: 1, "math-text": 2, annot: 2 };
+
+// s474 r1 (review of #1727, F3 defence in depth) — THE SHAPE CHECK. Holes are addressed by child-index
+// path over the tree as the printer WROTE it; if the browser's parser restructured a template (a node
+// moved, wrapped or dropped), every path after the change names the wrong node, and a `show=` hid the
+// wrong element (the secret stayed visible). The analyzer refuses the restructurings it models (SPEC
+// §24.5); this is the backstop for the rest. The printer writes `data-scrml-shape`, a hash of the
+// content's element / comment structure (print.scrml `shapeHash` — the same walk and the same hash);
+// the first clone of each template compares it with what was actually built and throws on a mismatch,
+// so the template never mounts. Text is not part of the shape; nor are an HTML `<template>`'s
+// children (its content is separate).
+const shapeChecked = new WeakSet();
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
+// HTML elements whose children are not walked — print.scrml `shapeOpaque`, the same list: a `<template>`'s
+// content is not its children, and a raw-text / RCDATA element holds only text in a browser (a DOM that
+// builds elements there — happy-dom does, for `<textarea><!----></textarea>` — is not judged by them).
+const SHAPE_OPAQUE = new Set(["template", "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"]);
+
+// s474 r2 (re-review R1): a hole path is a `childNodes` index, which counts text nodes, so a text node
+// is part of the shape — `depth:t;`, once per run of adjacent text (presence only, never content), as
+// print.scrml `shapeOf` writes it.
+function shapeWalk(n, depth) {
+  let s = "";
+  let inText = false;
+  for (const c of n.childNodes) {
+    if (c.nodeType === 3) {
+      if (!inText) s += depth + ":t;";
+      inText = true;
+      continue;
+    }
+    inText = false;
+    if (c.nodeType === 8) s += depth + ":#;";
+    else if (c.nodeType === 1) {
+      const name = c.localName.toLowerCase();
+      s += depth + ":" + name + ";";
+      if (!(c.namespaceURI === XHTML_NS && SHAPE_OPAQUE.has(name))) s += shapeWalk(c, depth + 1);
+    }
+  }
+  return s;
+}
+
+/** The hash print.scrml `shapeHash` writes: 7, then h = (h·31 + code unit) mod 2^31−1. */
+export function shapeHash(root) {
+  const s = shapeWalk(root, 0);
+  let h = 7;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 2147483647;
+  return String(h);
+}
+
+function checkShape(t, id, root) {
+  const want = t.getAttribute("data-scrml-shape");
+  if (want === null || shapeChecked.has(t)) return;
+  if (shapeHash(root) !== want) {
+    throw new Error(`<template id="${id}">: the HTML parser restructured this markup (its element structure is not the one compiled), so its holes would address the wrong nodes — not mounted (SPEC §24.5)`);
+  }
+  shapeChecked.add(t);
+}
+
 /** A fresh clone of template `id`'s content. */
 export function template(id) {
   const t = document.getElementById(id);
   if (!t) throw new Error(`missing <template id="${id}">`);
-  return t.content.cloneNode(true);
+  const ns = t.getAttribute("data-scrml-ns");
+  if (ns === null) {
+    checkShape(t, id, t.content);
+    return t.content.cloneNode(true);
+  }
+  const depth = Object.prototype.hasOwnProperty.call(NS_DEPTH, ns) ? NS_DEPTH[ns] : 0;
+  if (depth === 0) throw new Error(`<template id="${id}">: unknown data-scrml-ns "${ns}"`);
+  let n = t.content;
+  for (let i = 0; i < depth; i++) {
+    if (n.childNodes.length !== 1) throw new Error(`<template id="${id}">: its ${ns} wrapper does not hold exactly one node`);
+    n = n.firstChild;
+  }
+  checkShape(t, id, n);
+  const inner = n.cloneNode(true);
+  const frag = document.createDocumentFragment();
+  while (inner.firstChild) frag.appendChild(inner.firstChild);
+  return frag;
 }
 
 /** The node at a child-index path under `node`. */

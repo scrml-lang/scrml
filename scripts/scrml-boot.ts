@@ -29,8 +29,15 @@
  *
  * DIAGNOSTICS print as impl#1's CLI prints them — `error [CODE]: message` then `  --> file:line:col`
  * and the source lines. `--format line` prints one line each, `file:line:col: error [CODE]: message`
- * (for an editor's quickfix / errorformat). Exit status: 0 clean (warnings allowed), 1 any
- * Error-severity diagnostic or printer refusal, 2 usage error or an internal crash.
+ * (for an editor's quickfix / errorformat). Columns count UTF-16 code units (as JS strings and LSP do);
+ * `--columns bytes` counts UTF-8 bytes instead (vim's errorformat `%c`). Exit status: 0 clean
+ * (warnings allowed), 1 any Error-severity diagnostic or printer refusal, 2 usage error (including a
+ * refused output directory) or an internal crash.
+ *
+ * THE OUTPUT DIRECTORY is the compiler's only as far as its own files go. Each build records what it
+ * wrote in `<dir>/.scrml-boot-manifest.json`. The next build overwrites and deletes only the files
+ * listed there, and refuses (writing nothing) when the directory already holds an unrecorded file it
+ * would write. A user's other files in that directory, `_scrml/` included, are never touched.
  *
  * SPEED. The bootstrap is scrml that impl#1 compiles to JS (~9 s). That build is CACHED on disk
  * (`$SCRML_BOOT_CACHE_DIR`, else `$XDG_CACHE_HOME/scrml/boot-bundle`, else `~/.cache/scrml/boot-bundle`),
@@ -38,12 +45,16 @@
  * file under compiler/src/ (impl#1 itself — its package version alone does not move per commit), the
  * package version, and the build/load code (slice-m1/harness.js + this file's CACHE_FORMAT). Any change
  * rebuilds; nothing else does. `--rebuild` forces it.
+ * The cached bundle is EXECUTED (it is the compiler). Whoever can write to the cache directory runs
+ * code in every scrml-boot and lsp-boot process, so keep it per-user: do not point
+ * `$SCRML_BOOT_CACHE_DIR` at a shared or world-writable directory (S474 backfill C4,
+ * g-boot-bundle-cache-executes-as-code-s474).
  */
 
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
-  copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync,
+  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -155,9 +166,16 @@ function pruneCache(dir: string, keep: number) {
 // The source set: the entry + the `.scrml` files it imports (relative imports, transitively).
 // ─────────────────────────────────────────────────────────────────────────────
 
-function readSource(f: string, overlay?: ReadonlyMap<string, string>): string {
+/**
+ * A source file's text: the overlay's, else the disk's. A leading UTF-8 byte-order mark (U+FEFF, which
+ * Windows editors commonly write) is dropped. S474 backfill C3: kept, it made the whole file one
+ * E-PARSE-ITEM at 1:1 and a cascade. Editors do not show the mark, so dropping it also keeps line 1's
+ * columns where the user sees them.
+ */
+export function readSource(f: string, overlay?: ReadonlyMap<string, string>): string {
   const o = overlay?.get(f);
-  return o !== undefined ? o : readFileSync(f, "utf8");
+  const text = o !== undefined ? o : readFileSync(f, "utf8");
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 /** A file's import specifiers, in source order: `(path, src) => from[]` (lowered.js `importFroms`). */
@@ -309,9 +327,25 @@ function sourceContext(src: string, line: number): string {
   return out.join("\n");
 }
 
-export function formatDiagnostic(d: Diagnostic, format: "pretty" | "line", cwd = process.cwd(), sources?: Map<string, string>): string {
+/** The column unit a printed `file:line:col` uses: UTF-16 code units (JS, LSP, VS Code) or UTF-8 bytes (vim's `%c`). */
+export type ColumnUnit = "utf16" | "bytes";
+
+/**
+ * `d.col` (UTF-16 code units) as a 1-based UTF-8 BYTE column, from the line's text. S474 backfill C2:
+ * vim's quickfix `%c` counts bytes, so a UTF-16 column after non-ASCII text put the cursor short.
+ * Without the source text it cannot be converted, and the UTF-16 column is returned as it is.
+ */
+export function byteColumn(d: Diagnostic, sources?: Map<string, string>): number | undefined {
+  const src = d.file ? sources?.get(d.file) : undefined;
+  if (d.col === undefined || d.line === undefined || src === undefined) return d.col;
+  const text = (src.split("\n")[d.line - 1] ?? "").replace(/\r$/, "");
+  return Buffer.byteLength(text.slice(0, d.col - 1), "utf8") + 1;
+}
+
+export function formatDiagnostic(d: Diagnostic, format: "pretty" | "line", cwd = process.cwd(), sources?: Map<string, string>, columns: ColumnUnit = "utf16"): string {
   const rel = d.file ? shown(d.file, cwd) : undefined;
-  const loc = rel ? `${rel}${d.line ? `:${d.line}${d.col ? ":" + d.col : ""}` : ""}` : "";
+  const col = columns === "bytes" ? byteColumn(d, sources) : d.col;
+  const loc = rel ? `${rel}${d.line ? `:${d.line}${col ? ":" + col : ""}` : ""}` : "";
   if (format === "line") return `${loc ? loc + ": " : ""}${d.severity} [${d.code}]: ${d.message}`;
   const label = d.severity === "error" ? bold(red("error")) : d.severity === "warning" ? bold(yellow("warning")) : bold(cyan("info"));
   const parts = [`${label} ${dim(`[${d.code}]`)}: ${d.message}`];
@@ -606,51 +640,177 @@ export async function compileFile(file: string, opts: { outDir?: string; rebuild
     ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, ms: c.ms });
   if (!c.ok || c.client === undefined) return result(false);
 
-  mkdirSync(outDir, { recursive: true });
-  const written = ["index.html", "program.client.js", "scrml-runtime.js"];
-  writeFileSync(join(outDir, "index.html"), c.client.html);
-  writeFileSync(join(outDir, "program.client.js"), c.client.js);
-  copyFileSync(RUNTIME, join(outDir, "scrml-runtime.js"));
+  // The files this build writes, relative to `outDir` (`/`-separated). Nothing is written until the
+  // whole list is known and checked against what a previous scrml-boot build recorded there.
+  const outs: OutputFile[] = [
+    { rel: "index.html", text: c.client.html },
+    { rel: "program.client.js", text: c.client.js },
+    { rel: "scrml-runtime.js", src: RUNTIME },
+  ];
   const server = c.serverJs !== undefined;
   if (c.serverJs !== undefined) {
-    writeFileSync(join(outDir, "program.server.js"), c.serverJs);
-    copyFileSync(SERVER_RUNTIME, join(outDir, "scrml-server-runtime.js"));
-    copyFileSync(RUNTIME, join(outDir, "runtime.js"));
-    written.push("program.server.js", "scrml-server-runtime.js", "runtime.js");
-  } else {
-    // a previous compile of this program may have had a server half
-    for (const f of ["program.server.js", "scrml-server-runtime.js", "runtime.js"]) rmSync(join(outDir, f), { force: true });
+    outs.push(
+      { rel: "program.server.js", text: c.serverJs },
+      { rel: "scrml-server-runtime.js", src: SERVER_RUNTIME },
+      { rel: "runtime.js", src: RUNTIME },
+    );
   }
-  // s472 (boot-math-port): the stdlib host modules, at `_scrml/<module>/<file>` (SPEC §21.3.1). The
-  // `_scrml/` directory is the compiler's: what a previous compile left there goes first.
-  rmSync(join(outDir, "_scrml"), { recursive: true, force: true });
-  // s473 (allowlist lane A): the `<host src=>` files and their shims (§21.3.3 rule 3); `_scrml_local/` is
-  // the compiler's directory too
-  rmSync(join(outDir, "_scrml_local"), { recursive: true, force: true });
-  for (const h of c.hostSrc?.copies ?? []) {
-    const dst = join(outDir, ...h.out.split("/"));
-    mkdirSync(dirname(dst), { recursive: true });
-    copyFileSync(h.src, dst);
-    written.push(h.out);
-  }
-  for (const h of c.hostSrc?.shims ?? []) {
-    const dst = join(outDir, ...h.out.split("/"));
-    mkdirSync(dirname(dst), { recursive: true });
-    writeFileSync(dst, h.text);
-    written.push(h.out);
-  }
-  for (const h of c.hostFiles ?? []) {
-    const dst = join(outDir, ...h.out.split("/"));
-    mkdirSync(dirname(dst), { recursive: true });
-    copyFileSync(h.src, dst);
-    written.push(h.out);
-  }
-  return result(true, written, server);
+  // s473 (allowlist lane A): the `<host src=>` files and their shims (§21.3.3 rule 3), at
+  // `_scrml_local/…` and `_scrml/host-src/…`. s472 (boot-math-port): the stdlib host modules, at
+  // `_scrml/<module>/<file>` (SPEC §21.3.1).
+  for (const h of c.hostSrc?.copies ?? []) outs.push({ rel: h.out, src: h.src });
+  for (const h of c.hostSrc?.shims ?? []) outs.push({ rel: h.out, text: h.text });
+  for (const h of c.hostFiles ?? []) outs.push({ rel: h.out, src: h.src });
+  writeOutputs(outDir, outs);
+  return result(true, outs.map((o) => o.rel), server);
 }
 
-function report(r: CompileResult, format: "pretty" | "line") {
+// ─────────────────────────────────────────────────────────────────────────────
+// The output directory: scrml-boot overwrites or deletes ONLY what a previous scrml-boot build wrote.
+// S474 backfill C1: `-o <dir>` used to `rm -r <dir>/_scrml/` and `<dir>/_scrml_local/` (and three
+// server files) on every compile, with no check that the directory was the compiler's. Pointed at a
+// project directory, it lost the user's files there. Each build now records what it wrote in
+// `<dir>/.scrml-boot-manifest.json`. The next build removes only the recorded files it no longer
+// writes, and refuses (before writing anything) to overwrite a file the manifest does not list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const OUTPUT_MANIFEST = ".scrml-boot-manifest.json";
+const MANIFEST_FORMAT = "scrml-boot-output/1";
+
+type OutputFile = { rel: string; text?: string; src?: string };
+
+/** A refused output directory: a usage error (exit 2), reported without a stack. */
+export class OutDirError extends Error {}
+
+/** A manifest entry must be a plain relative `/`-path inside the directory. Anything else is ignored. */
+function safeRel(rel: unknown): rel is string {
+  if (typeof rel !== "string" || rel === "" || rel.includes("\\") || rel.includes("\0")) return false;
+  if (rel.startsWith("/") || isAbsolute(rel)) return false;
+  return rel.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+/** The files a previous scrml-boot build recorded in `outDir`, or null (no manifest, or not ours). */
+export function readOutputManifest(outDir: string): string[] | null {
+  let data: any;
+  try {
+    data = JSON.parse(readFileSync(join(outDir, OUTPUT_MANIFEST), "utf8"));
+  } catch {
+    return null;
+  }
+  if (data === null || typeof data !== "object" || data.format !== MANIFEST_FORMAT || !Array.isArray(data.files)) return null;
+  return data.files.filter(safeRel);
+}
+
+function writeOutputManifest(outDir: string, files: string[]) {
+  const file = join(outDir, OUTPUT_MANIFEST);
+  const tmp = file + "." + process.pid + ".tmp";
+  // never through a planted file or link of that name (#1723 review C1-c): remove it, then create exclusively
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, JSON.stringify({ format: MANIFEST_FORMAT, files: [...new Set(files)].sort() }, null, 1) + "\n", { flag: "wx" });
+  renameSync(tmp, file);
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why `rel` cannot be written or removed safely inside `outDir`, or null. #1723 review C1-S: every
+ * ancestor of the path under `outDir` that exists must be a REAL directory — a symlinked `_scrml/`
+ * would otherwise carry a stale-file delete, the empty-directory prune, or a write out of the
+ * directory (`_scrml -> ~` and a manifest entry `_scrml/.ssh/id_ed25519`). C1-a: an ancestor that
+ * is a user's regular file is refused here too, before anything is written, not an ENOTDIR half-way.
+ * `outDir` itself may be a symlink: that is the directory the user named.
+ */
+function unsafeAncestor(outDir: string, rel: string): string | null {
+  const segs = rel.split("/");
+  let p = outDir;
+  for (let i = 0; i < segs.length - 1; i++) {
+    p = join(p, segs[i]);
+    const st = lstatOrNull(p);
+    if (st === null) return null; // nothing deeper exists either: mkdir creates real directories
+    if (st.isSymbolicLink()) return `${segs.slice(0, i + 1).join("/")} is a symbolic link`;
+    if (!st.isDirectory()) return `${segs.slice(0, i + 1).join("/")} is not a directory`;
+  }
+  return null;
+}
+
+/** Write (or check) the build's files. Exported for the tests. */
+export function writeOutputs(outDir: string, outs: OutputFile[]) {
+  const top = lstatOrNull(outDir);
+  if (top !== null && !statSync(outDir).isDirectory()) throw new OutDirError(`refusing to write into ${shown(outDir)}: it is not a directory`);
+  const prev = readOutputManifest(outDir);
+  const owned = new Set(prev ?? []);
+  const next = new Set(outs.map((o) => o.rel));
+  // 1. Refuse before writing anything.
+  // (a) a path the build would write, or a recorded path it would remove, under a symlink or a file
+  const bad: string[] = [];
+  for (const rel of new Set([...next, ...owned])) {
+    const why = unsafeAncestor(outDir, rel);
+    if (why !== null) bad.push(`${rel} (${why})`);
+  }
+  // (b) a recorded output that is now a symbolic link or not a regular file: never written through (C1-S2)
+  for (const rel of next) {
+    if (!owned.has(rel)) continue;
+    const st = lstatOrNull(join(outDir, ...rel.split("/")));
+    if (st !== null && !st.isFile()) bad.push(`${rel} (${st.isSymbolicLink() ? "a symbolic link" : "not a regular file"})`);
+  }
+  if (bad.length > 0) {
+    const listed = bad.slice(0, 5).join(", ") + (bad.length > 5 ? `, … (${bad.length} in all)` : "");
+    throw new OutDirError(
+      `refusing to write into ${shown(outDir)}: ${listed}. scrml-boot writes and deletes only regular files inside ` +
+        `real directories of the output directory, so a symbolic link there cannot carry a write or a delete elsewhere. ` +
+        `Remove the link or file, or use an empty or new --output-dir.`,
+    );
+  }
+  // (c) an output path that already exists and that no build recorded
+  const clash = [...next].filter((rel) => !owned.has(rel) && lstatOrNull(join(outDir, ...rel.split("/"))) !== null);
+  if (clash.length > 0) {
+    const listed = clash.slice(0, 5).join(", ") + (clash.length > 5 ? `, … (${clash.length} in all)` : "");
+    const why = prev === null ? `there is no ${OUTPUT_MANIFEST}` : `${OUTPUT_MANIFEST} does not list ${clash.length === 1 ? "it" : "them"}`;
+    throw new OutDirError(
+      `refusing to write into ${shown(outDir)}: it already holds ${listed}, which no scrml-boot build recorded there (${why}). ` +
+        `scrml-boot overwrites and deletes only the files its own previous build wrote. Use an empty or new --output-dir, ` +
+        `or move those files away. A directory written by an older scrml-boot, which kept no manifest, must be deleted once.`,
+    );
+  }
+  mkdirSync(outDir, { recursive: true });
+  // 2. Record the union first, so a build that dies half-way still owns everything it may have written.
+  writeOutputManifest(outDir, [...owned, ...next]);
+  for (const o of outs) {
+    const dst = join(outDir, ...o.rel.split("/"));
+    mkdirSync(dirname(dst), { recursive: true });
+    if (o.src !== undefined) copyFileSync(o.src, dst);
+    else writeFileSync(dst, o.text ?? "");
+  }
+  // 3. Remove what the previous build wrote and this one does not (a server half, a host module that
+  // went away), then any directory that leaves empty. Only a regular file or a link itself is removed
+  // (never a directory, never what a link points at). Nothing unrecorded is touched.
+  for (const rel of owned) {
+    if (next.has(rel)) continue;
+    const p = join(outDir, ...rel.split("/"));
+    const st = lstatOrNull(p);
+    if (st === null || (!st.isFile() && !st.isSymbolicLink())) continue;
+    unlinkSync(p);
+    for (let d = dirname(p); d.startsWith(outDir + sep); d = dirname(d)) {
+      try {
+        if (readdirSync(d).length > 0) break;
+        rmdirSync(d);
+      } catch {
+        break;
+      }
+    }
+  }
+  writeOutputManifest(outDir, [...next]);
+}
+
+function report(r: CompileResult, format: "pretty" | "line", columns: ColumnUnit = "utf16") {
   for (const d of r.diagnostics) {
-    console.error(formatDiagnostic(d, format, process.cwd(), r.sources));
+    console.error(formatDiagnostic(d, format, process.cwd(), r.sources, columns));
     if (format === "pretty") console.error("");
   }
 }
@@ -707,7 +867,7 @@ export function devClientAssets(r: CompileResult): Set<string> {
   return new Set(collectClientAssets(r.outDir, ["index.html", "program.client.js", "scrml-runtime.js"]));
 }
 
-async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line" }) {
+async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line"; columns: ColumnUnit }) {
   const entryAbs = resolve(file);
   const log = (s: string) => console.error(s);
   let current: CompileResult | null = null;
@@ -723,14 +883,15 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     try {
       r = await compileFile(entryAbs, { outDir: opts.outDir, log });
     } catch (e) {
-      log(red("scrml-boot: internal error: ") + String((e as Error)?.stack ?? e));
+      if (e instanceof OutDirError) log(red("scrml-boot: " + e.message));
+      else log(red("scrml-boot: internal error: ") + String((e as Error)?.stack ?? e));
       return;
     }
-    report(r, opts.format);
+    report(r, opts.format, opts.columns);
     rewatch(r.files);
     if (!r.ok) {
       log(red(`✗ ${reason}: compile failed — the last good build is still served`));
-      const text = "scrml-boot: compile failed\n\n" + r.diagnostics.map((d) => formatDiagnostic(d, "line")).join("\n");
+      const text = "scrml-boot: compile failed\n\n" + r.diagnostics.map((d) => formatDiagnostic(d, "line", process.cwd(), r.sources, opts.columns)).join("\n");
       for (const c of clients) { try { c.enqueue("data: " + JSON.stringify(text) + "\n\n"); } catch { clients.delete(c); } }
       return;
     }
@@ -815,8 +976,11 @@ Usage:
   scrml-boot dev <file.scrml> [options]       Compile, serve on 127.0.0.1, recompile + reload on save
 
 Options:
-  --output-dir, -o <dir>   Output directory (default: dist/<name>/ next to the file)
+  --output-dir, -o <dir>   Output directory (default: dist/<name>/ next to the file). scrml-boot records
+                           what it writes there (.scrml-boot-manifest.json), later overwrites or deletes
+                           only those files, and refuses a directory holding an unrecorded file it would write
   --format <pretty|line>   Diagnostic format (default pretty; line = file:line:col: error [CODE]: msg)
+  --columns <utf16|bytes>  The col unit (default utf16, as JS/LSP count; bytes = UTF-8, for vim's %c)
   --rebuild                Rebuild the cached bootstrap bundle even if its inputs did not change
   --port <n>               dev: HTTP port (default 3000)
   --verbose, -v            Timings (bundle load, compile)
@@ -836,6 +1000,7 @@ async function main(argv: string[]): Promise<number> {
   let file: string | undefined;
   let outDir: string | undefined;
   let format: "pretty" | "line" = "pretty";
+  let columns: ColumnUnit = "utf16";
   let port = 3000;
   let rebuild = false;
   let verbose = false;
@@ -851,6 +1016,8 @@ async function main(argv: string[]): Promise<number> {
       else if (a.startsWith("--output-dir=")) outDir = a.slice("--output-dir=".length);
       else if (a === "--format") format = val() as any;
       else if (a.startsWith("--format=")) format = a.slice("--format=".length) as any;
+      else if (a === "--columns") columns = val() as any;
+      else if (a.startsWith("--columns=")) columns = a.slice("--columns=".length) as any;
       else if (a === "--port") port = Number(val());
       else if (a.startsWith("--port=")) port = Number(a.slice("--port=".length));
       else if (a === "--rebuild") rebuild = true;
@@ -864,17 +1031,25 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   if (format !== "pretty" && format !== "line") { console.error(`scrml-boot: --format is pretty or line`); return 2; }
+  if (columns !== "utf16" && columns !== "bytes") { console.error(`scrml-boot: --columns is utf16 or bytes`); return 2; }
   if (file === undefined) { console.error(`scrml-boot ${cmd}: no input file\n\n${USAGE}`); return 2; }
   if (!existsSync(file) || !statSync(file).isFile()) { console.error(`scrml-boot: no such file: ${file}`); return 2; }
   if (!Number.isInteger(port) || port < 0 || port > 65535) { console.error(`scrml-boot: bad --port`); return 2; }
 
   if (cmd === "dev") {
-    await dev(file, { outDir, port, format });
+    await dev(file, { outDir, port, format, columns });
     return -1; // keep running
   }
   const t0 = performance.now();
-  const r = await compileFile(file, { outDir, rebuild, log: (s) => console.error(s) });
-  report(r, format);
+  let r: CompileResult;
+  try {
+    r = await compileFile(file, { outDir, rebuild, log: (s) => console.error(s) });
+  } catch (e) {
+    if (!(e instanceof OutDirError)) throw e;
+    console.error(red("scrml-boot: " + e.message));
+    return 2;
+  }
+  report(r, format, columns);
   const errors = r.diagnostics.filter((d) => d.severity === "error").length;
   const warnings = r.diagnostics.length - errors;
   if (verbose) {

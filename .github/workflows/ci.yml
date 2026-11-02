@@ -306,13 +306,22 @@ jobs:
       # bot/generated-regen is not), and even then it is checked, not waved through: `--bot` passes only if
       # every changed file is in generated-regen.yml's FILES. Not on merge_group: the PR run already judged
       # it, and a queue group may legitimately include the bot's PR.
+      # The diff is HEAD^1...HEAD^2 — the checked-out merge ref's parents, main tip ... PR head — which is
+      # GitHub's own PR diff (merge-base → PR head). Not pull_request.base.sha...HEAD: base.sha is fixed at
+      # the push event while the merge ref can be built on a NEWER main, so a bot regen landing in between
+      # was charged to a PR that never touched docs/generated/ (S474: #1711 @cb04c75d1, base.sha 62214cc1f,
+      # regen 82f6c7741). And not HEAD^1...HEAD (#1719 r1 F1): that measures main against the merge
+      # result, so a branch carrying a copy of main's CURRENT generated files passes, then goes DIRTY on the
+      # next regen. HEAD^2 must be the PR head (#1719 r1 F2), so a fast-forward checkout fails closed.
       - name: Bot-owned generated files untouched (docs/generated/)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
           IS_BOT: ${{ github.head_ref == 'bot/generated-regen' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "$IS_BOT" = "true" ]; then scripts/bot-owned-untouched.sh --bot "$BASE"; else scripts/bot-owned-untouched.sh "$BASE"; fi
+          BASE=$(git rev-parse --verify -q HEAD^1) && HEAD2=$(git rev-parse --verify -q HEAD^2) && [ "$HEAD2" = "$PR_HEAD" ] ||
+            { echo "bot-owned-untouched: HEAD is not the PR's merge ref (want parents main-tip, $PR_HEAD) — refusing (fail closed)" >&2; exit 1; }
+          if [ "$IS_BOT" = "true" ]; then scripts/bot-owned-untouched.sh --bot "$BASE" "$HEAD2"; else scripts/bot-owned-untouched.sh "$BASE" "$HEAD2"; fi
       # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
       # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only
       # answer-neutral drift reaches main, and the bot regenerates it — but a CRASHING generator (a §34

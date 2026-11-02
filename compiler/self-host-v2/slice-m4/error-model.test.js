@@ -227,15 +227,21 @@ describe("§19.7 — `match` on a failable result", () => {
     expect(o.log).toBe("ERR");
   });
 
-  test("a value-producing `match`: the Ok arm transforms, `else` covers the rest — the success value too", async () => {
-    const o = await runProgram(`${TYPES}\n${LOAD}\n    function go() {\n        @out = match load("ok") {\n            .Ok(v) :> "got:" + v,\n            else :> "none"\n        };\n        @log = match load("x") {\n            .Timeout :> "t",\n            else :> "other"\n        };\n    }`, ["go"], ["go"]);
+  // s474 (ruling: user-voice-scrml.md S474 "`else` on a failable match"): on a failable result
+  // `else` covers the success value only — the errors take `_ e` or explicit arms (§19.7.1).
+  test("a value-producing `match`: the Ok arm transforms, `_ e` takes the errors; after explicit error arms `else` takes the success value", async () => {
+    const o = await runProgram(`${TYPES}\n${LOAD}\n    function go() {\n        @out = match load("ok") {\n            .Ok(v) :> "got:" + v,\n            _ e :> "none"\n        };\n        @log = match load("x") {\n            .Timeout :> "t",\n            .NotFound(m) :> "other",\n            else :> "succ"\n        };\n        @n = match load("ok") {\n            .Timeout :> 1,\n            .NotFound(m) :> 2,\n            else :> 3\n        };\n    }`, ["go"], ["go"]);
     expect(o.out).toBe("got:ok");
     expect(o.log).toBe("other");
+    expect(o.n).toBe("3");
   });
 
-  test("a wildcard-only `match` takes the success value through the wildcard arm (§19.7.3)", async () => {
-    const o = await runProgram(`${TYPES}\n${LOAD}\n    function go() {\n        @out = match load("ok") {\n            _ :> "w"\n        };\n    }`, ["go"], ["go"]);
-    expect(o.out).toBe("w");
+  // s474 — superseded: a wildcard-only `match` on a failable result took every error into the
+  // success-shaped arm; it is now E-MATCH-ELSE-ABSORBS-ERROR (§19.7.1, PERMANENT — security).
+  test("a wildcard-only `match` on a failable result is E-MATCH-ELSE-ABSORBS-ERROR (s474)", () => {
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = match load("ok") {\n            _ :> "w"\n        };\n    }`, ["go"]);
+    expect(codes(src)).toEqual(["E-MATCH-ELSE-ABSORBS-ERROR"]);
+    expect(msg(src, "E-MATCH-ELSE-ABSORBS-ERROR")).toContain("NotFound, Timeout");
   });
 
   test("E-TYPE-020 — a missing error variant (mirror: error/failable-match-nonexhaustive-err)", () => {
@@ -367,8 +373,8 @@ describe("§19.8 — `SqlError` and the R11 rule (codes + Core; the printer refu
     expect(mods.check.checkCore(r.core)).toEqual([]);
   });
   test("`match` on a query with SqlError arms; an arm naming no SqlError variant is E-TYPE-VARIANT", () => {
-    expect(codes(PDB(`    function f() -> int {\n        return match ${Q} {\n            .Ok(row) :> 1,\n            .QueryFailed(m) :> 2,\n            _ :> 3\n        };\n    }`))).toEqual([]);
-    expect(codes(PDB(`    function f() -> int {\n        return match ${Q} {\n            .Ok(row) :> 1,\n            .Nope :> 2,\n            _ :> 3\n        };\n    }`))).toEqual(["E-TYPE-VARIANT"]);
+    expect(codes(PDB(`    function f() -> int {\n        return match ${Q} {\n            .Ok(row) :> 1,\n            .QueryFailed(m) :> 2,\n            _ e :> 3\n        };\n    }`))).toEqual([]);
+    expect(codes(PDB(`    function f() -> int {\n        return match ${Q} {\n            .Ok(row) :> 1,\n            .Nope :> 2,\n            _ e :> 3\n        };\n    }`))).toEqual(["E-TYPE-VARIANT"]);
   });
   test("a `!{}` on a query that names only some SqlError variants is E-TYPE-080", () => {
     expect(codes(PDB(`    function f() {\n        const r = ${Q} !{ .ConnectionLost :> not };\n    }`))).toEqual(["E-TYPE-080"]);
@@ -493,7 +499,7 @@ describe("S239 review fix round (114e6ef80)", () => {
 
   test("MED-1 — E-TYPE-023: two `!{}` arms for one variant; two `.Ok` arms in a `match` (§18.8.1)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .Timeout :> @n = 1,\n            .Timeout :> @n = 2,\n            _ :> @n = 3\n        };\n    }`))).toEqual(["E-TYPE-023"]);
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1,\n            .Ok(w) :> @n = 2,\n            else :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1,\n            .Ok(w) :> @n = 2,\n            _ e :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
   });
 
   // s452 r2: §18.6 names the code — "An `else` arm that is not the last arm SHALL be … E-SYNTAX-010"

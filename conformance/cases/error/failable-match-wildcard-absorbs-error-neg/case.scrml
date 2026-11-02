@@ -1,0 +1,34 @@
+${
+    type AuthErr:enum = {
+        Denied
+        Locked
+    }
+
+    function check(pw: string)! AuthErr {
+        if (pw == "locked") fail AuthErr.Locked;
+        if (pw != "secret") fail AuthErr.Denied;
+        return true;
+    }
+}
+
+<msg> = ""
+
+${
+    // `_` is `else`'s alias. After `::Ok(v)` it would take every error variant
+    // (a `return match`); after `::Denied` it would take `.Locked` (a statement).
+    function attempt(pw: string) -> string {
+        return match check(pw) {
+            ::Ok(v) :> "LOGGED IN",
+            _       :> "denied"
+        };
+    }
+    function login() {
+        match check("wrong") {
+            ::Denied :> { @msg = "denied"; },
+            _        :> { @msg = attempt("x"); }
+        }
+    }
+}
+
+<button id="go" onclick=login()>go</>
+<p id="out">${@msg}</>

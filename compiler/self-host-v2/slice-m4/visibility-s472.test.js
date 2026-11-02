@@ -324,21 +324,23 @@ describe("an import binds a name in file scope", () => {
     expect(r.diags[0].span.start).toBeGreaterThan(src.indexOf("lib.scrml"));
   });
 
-  // s473 r2 LOW-C: later-import-wins can still happen between a USER import and a STDLIB import of one
-  // name (stdlib names are not user declarations, so the pair is legal). The runtime proves which won.
-  test("a user import and a stdlib import of one name: the later wins, with W-IMPORT-001 (§41.7) — either order, and it runs", async () => {
+  // s473 r2 LOW-C pinned later-import-wins between a USER import and a STDLIB import of one name.
+  // s474 r1 (#1715 review F2, PA ruling — row-C amendment "one local name cannot bind two
+  // declarations"): two DIFFERENT declarations bound to one local name are E-SCOPE-010 whatever the
+  // source, at the later import; W-IMPORT-001 is only the SAME declaration imported twice.
+  test("a user import and a stdlib import of one name: E-SCOPE-010 at the later import (S474 r1; was W-IMPORT-001 later-wins) — either order", () => {
     const U = { path: "u.scrml", src: `\${\n    export fn pub(s: string) -> string {\n        return "user:" + s;\n    }\n}\n` };
     const stdU = (src) => frontEndStdlib(mods(), [U, { path: ENTRY, src }], ENTRY, { stdlibRoot: FIXTURE });
-    const r1 = stdU(`<program>\n    \${ import { pub } from "./u.scrml"; import { pub } from "scrml:vis"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
-    expect(r1.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
-    clean(r1);
-    await loadProgram(r1.core, "s473-later-std-" + k++);
-    expect(text("#w")).toBe("lib-helper:X");
-    const r2 = stdU(`<program>\n    \${ import { pub } from "scrml:vis"; import { pub } from "./u.scrml"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`);
-    expect(r2.diags.map((d) => [d.code, d.severity])).toEqual([["W-IMPORT-001", "Warning"]]);
-    clean(r2);
-    await loadProgram(r2.core, "s473-later-user-" + k++);
-    expect(text("#w")).toBe("user:x");
+    for (const src of [
+      `<program>\n    \${ import { pub } from "./u.scrml"; import { pub } from "scrml:vis"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`,
+      `<program>\n    \${ import { pub } from "scrml:vis"; import { pub } from "./u.scrml"; }\n    <p id="w">\${pub("x")}</p>\n</program>\n`,
+    ]) {
+      const r = stdU(src);
+      expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["E-SCOPE-010", "Error"]]);
+      const d = r.diags[0];
+      expect(src.slice(d.span.start, d.span.end)).toBe("pub");
+      expect(d.span.start).toBeGreaterThan(src.indexOf("import { pub }") + 5);
+    }
   });
 
   test("the same name imported twice from ONE file: one declaration — W-IMPORT-001 only, and it runs", async () => {

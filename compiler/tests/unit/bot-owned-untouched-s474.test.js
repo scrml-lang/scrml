@@ -71,6 +71,63 @@ describe("scripts/bot-owned-untouched.sh", () => {
     expect(r.out).toContain("docs/generated/gap-counts.md");
   });
 
+  // The CI shape (#1711, #1719): actions/checkout gives a pull_request run the merge ref, parents
+  // [main tip, PR head], and the step diffs HEAD^1...HEAD^2.
+  function botRegenOnMain(s, high = 2) {
+    s.g("checkout", "-q", "main");
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), `| HIGH | ${high} | 0 |\n`);
+    s.commit("bot regen");
+  }
+  const run = (s, ...a) => spawnSync("bash", [SCRIPT, ...a], { cwd: s.root, env: ENV, encoding: "utf8" }).status;
+  const parents = (s) => {
+    s.g("checkout", "-q", "--detach", "main");
+    s.g("merge", "-q", "--no-ff", "--no-edit", "pr");     // GitHub always builds a two-parent merge
+    return [s.g("rev-parse", "HEAD^1").trim(), s.g("rev-parse", "HEAD^2").trim()];
+  };
+
+  test("merge ref on a NEWER main: base.sha charges the bot's regen to the PR; HEAD^1...HEAD^2 does not (#1711)", () => {
+    const s = sandbox();
+    const baseSha = s.g("rev-parse", "main").trim();      // pull_request.base.sha at the push event
+    writeFileSync(join(s.root, "docs/known-gaps.md"), "ledger\nnew gap\n");
+    s.commit("pr work");                                  // the PR never touches docs/generated/
+    botRegenOnMain(s);                                    // lands on main after base.sha
+    const [p1, p2] = parents(s);
+    expect(run(s, baseSha)).toBe(1);                      // the old wiring: a false refusal
+    expect(run(s, p1, p2)).toBe(0);
+  });
+
+  test("BITE (#1719 r1 F1): a copy of main's CURRENT generated files, without merging main, is refused", () => {
+    const s = sandbox();
+    s.g("checkout", "-q", "main");
+    botRegenOnMain(s);                                    // main: HIGH 2
+    s.g("checkout", "-q", "pr");
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 2 | 0 |\n");
+    s.commit("copy main's file by hand");                 // equal to main's, but not main's history
+    const [p1, p2] = parents(s);
+    expect(run(s, p1, "HEAD")).toBe(0);                   // HEAD^1...HEAD (r0 wiring) misses it
+    expect(run(s, p1, p2)).toBe(1);                       // HEAD^1...HEAD^2 catches it
+  });
+
+  test("BITE: a PR editing docs/generated/, checked on the merge-ref shape → 1", () => {
+    const s = sandbox();
+    writeFileSync(join(s.root, "docs/generated/gap-counts.md"), "| HIGH | 9 | 0 |\n");
+    s.commit("regen by habit");
+    const [p1, p2] = parents(s);
+    expect(run(s, p1, p2)).toBe(1);
+  });
+
+  test("a PR that merged main (with the regen) and touched nothing else passes on the merge-ref shape", () => {
+    const s = sandbox();
+    botRegenOnMain(s);
+    s.g("checkout", "-q", "pr");
+    s.g("merge", "-q", "--no-edit", "main");
+    writeFileSync(join(s.root, "docs/known-gaps.md"), "ledger\nnew gap\n");
+    s.commit("pr work");
+    botRegenOnMain(s, 3);                                 // a second regen after the PR merged main
+    const [p1, p2] = parents(s);
+    expect(run(s, p1, p2)).toBe(0);
+  });
+
   test("BITE: deleting or renaming one away → 1", () => {
     const s = sandbox();
     renameSync(join(s.root, "docs/generated/gap-counts.md"), join(s.root, "docs/gap-counts.md"));
@@ -175,7 +232,18 @@ describe("ci.yml wiring", () => {
   test("the `checks` job runs it against the PR base, blocking (no continue-on-error)", () => {
     expect(step).toBeDefined();
     expect(String(step.run)).toContain("scripts/bot-owned-untouched.sh");
-    expect(String(step.env.BASE)).toContain("github.event.pull_request.base.sha");
+    // BASE is the merge ref's first parent, not pull_request.base.sha (base.sha can be older than the
+    // main the merge ref was built on: a bot regen in between was charged to the PR — #1711).
+    expect(step.env.BASE).toBeUndefined();
+    // The diff is HEAD^1...HEAD^2 (main tip ... PR head = GitHub's PR diff), and HEAD^2 must be the PR
+    // head (#1719 r1 F1/F2).
+    expect(String(step.run)).toContain("git rev-parse --verify -q HEAD^1");
+    expect(String(step.run)).toContain("git rev-parse --verify -q HEAD^2");
+    expect(String(step.run)).toContain('[ "$HEAD2" = "$PR_HEAD" ]');
+    expect(String(step.run)).toMatch(/bot-owned-untouched\.sh --bot "\$BASE" "\$HEAD2"/);
+    expect(String(step.run)).toMatch(/else scripts\/bot-owned-untouched\.sh "\$BASE" "\$HEAD2"/);
+    expect(String(step.env.PR_HEAD)).toContain("github.event.pull_request.head.sha");
+    expect(String(step.run)).not.toContain("base.sha");
     expect(step["continue-on-error"]).toBeUndefined();
   });
   test("on every pull_request; the bot is recognised by branch AND same-repo head, then checked with --bot", () => {

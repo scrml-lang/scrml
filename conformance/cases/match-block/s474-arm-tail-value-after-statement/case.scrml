@@ -1,0 +1,6 @@
+<program>
+    type K:enum = { A, B }
+    function one() -> int { return 1; }
+    function g(k: K) -> int { const v = match k { .A :> 1, .B :> { one(); 2; } }; return v; }
+    <p id="g">${g(.B)}</p>
+</program>

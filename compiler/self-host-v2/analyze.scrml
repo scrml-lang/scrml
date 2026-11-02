@@ -56,7 +56,8 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { isKnownElementName, isHtmlElementName } from "./elements.scrml"
+    import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
+             isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
@@ -447,7 +448,12 @@ ${
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
         consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
+        taliases: TypeAlias[],  // s474 r1 (#1715 F7): each type a file imports under an alias — diagnostics name it by the alias there
     }
+
+    // s474 r1 (#1715 review F7): `file` binds the user type `sym` (declared `orig` in
+    // `from`) under the local name `local` (an aliased import).
+    export type TypeAlias:struct = { file: string, local: string, sym: Sym, orig: string, from: string }
 
     // s451 (U1a) — what route inference and the SQL pass decided (placePass).
     // `servers`: the Sym ids of the functions placed on the SERVER (§12.2) —
@@ -975,28 +981,88 @@ ${
     // s472: KConst — a file-scope constant (§7.6; `[export] const NAME = …` in a `${ }` block).
     type NameKind:enum = { KType, KFn, KDecl, KConst }
     type OwnName:struct = { name: string, kind: NameKind, file: string, exported: boolean }
-    type ScopeName:struct = { name: string, kind: NameKind, from: string }
+    // s474 (import alias): `name` is the LOCAL name (what the file writes);
+    // `orig` the name the declaration has in `from` — they differ only for an
+    // aliased import (`import { Card as Card2 }`: name `Card2`, orig `Card`).
+    // A lookup takes the declaration of (`from`, `orig`), so the declaration —
+    // and its per-file scope key — stay the DECLARING file's.
+    type ScopeName:struct = { name: string, kind: NameKind, from: string, orig: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
     type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
     fn scopeFrom(lk: Linkage, file: string, k: NameKind, name: string) -> string {
+        const h: ScopeName | not = scopeHit(lk, file, k, name)
+        if (h is not) return ""
+        return h.from
+    }
+
+    // s474 — the name the declaration that `name` denotes in `file` has where it
+    // is DECLARED (`name` itself unless an import aliases it); "" when none is.
+    fn scopeOrig(lk: Linkage, file: string, k: NameKind, name: string) -> string {
+        const h: ScopeName | not = scopeHit(lk, file, k, name)
+        if (h is not) return ""
+        return h.orig
+    }
+
+    // The scope entry of KIND `k` that the local name `name` denotes in `file`:
+    // the first one (see linkage), else not.
+    fn scopeHit(lk: Linkage, file: string, k: NameKind, name: string) -> ScopeName | not {
         for (const fs of lk.scopes) {
             if (fs.file == file) {
                 for (const n of fs.names) {
-                    if (n.name == name && n.kind == k) return n.from
+                    if (n.name == name && n.kind == k) return n
                 }
-                return ""
+                return not
             }
         }
-        return ""
+        return not
     }
 
-    // Is the `k` declaration of `name` in `declFile` the one `name` denotes in `file`?
+    // s474 — every LOCAL name under which `file` binds the `k` declaration
+    // `declName` of `declFile`: its own name, an alias, or both (`import { Card,
+    // Card as C2 }`); empty when the declaration is not in scope there. Only a
+    // name that DENOTES it counts (the first entry of that name, as scopeHit).
+    fn boundAs(lk: Linkage, file: string, k: NameKind, declName: string, declFile: string) -> string[] {
+        let out: string[] = []
+        for (const fs of lk.scopes) {
+            if (fs.file == file) {
+                for (const n of fs.names) {
+                    if (n.kind == k && n.from == declFile && n.orig == declName && out.indexOf(n.name) < 0) {
+                        const h: ScopeName | not = scopeHit(lk, file, k, n.name)
+                        if (h is given) {
+                            if (h.from == declFile && h.orig == declName) out = out.concat([n.name])
+                        }
+                    }
+                }
+                return out
+            }
+        }
+        return out
+    }
+
+    // s474 r1 (#1715 F7): every user type a file imports under an alias.
+    fn typeAliases(lk: Linkage, types: TypeInfo[]) -> TypeAlias[] {
+        let out: TypeAlias[] = []
+        for (const fs of lk.scopes) {
+            for (const n of fs.names) {
+                if (n.kind == NameKind.KType && n.name != n.orig) {
+                    for (const ti of types) {
+                        if (ti.file == n.from && ti.name == n.orig) {
+                            out = out.concat([{ file: fs.file, local: n.name, sym: typeDefSym(ti.def), orig: n.orig, from: n.from }])
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // Is the `k` declaration `name` of `declFile` in scope in `file` — under its
+    // own name or (s474) an alias?
     fn inScope(lk: Linkage, file: string, k: NameKind, name: string, declFile: string) -> boolean {
-        const from: string = scopeFrom(lk, file, k, name)
-        return from != "" && from == declFile
+        return boundAs(lk, file, k, name, declFile).length > 0
     }
 
     fn exportsName(own: OwnName[], file: string, name: string) -> boolean {
@@ -1050,41 +1116,59 @@ ${
             let mine: string[] = []
             for (const o of own) {
                 if (o.file == f.path) {
-                    names = names.concat([{ name: o.name, kind: o.kind, from: f.path }])
+                    names = names.concat([{ name: o.name, kind: o.kind, from: f.path, orig: o.name }])
                     if (mine.indexOf(o.name) < 0) mine = mine.concat([o.name])
                 }
             }
+            // s474 (import alias): the rules below are about the LOCAL name an import
+            // binds (`n.name` — the alias when there is one); the export it binds is
+            // `n.orig` of `target`. `importedOrig[i]` / `importedFrom[i]`: the
+            // declaration the i-th local name already binds.
             let imported: string[] = []
             let importedFrom: string[] = []
+            let importedOrig: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
                 for (const n of imp.names) {
-                    if (target != "" && exportsName(own, target, n.name)) {
+                    // s474 r1 (#1715 review F5): an import's LOCAL name is a binding of this file —
+                    // a reserved `_scrml_` / `__scrml_` one is refused at the import (§47.1.1),
+                    // as a declaration's is, not only at a use
+                    if (n.name != n.orig) st = reservedName(st, f.path, n.span, n.name)
+                    if (target != "" && exportsName(own, target, n.orig)) {
                         if (mine.indexOf(n.name) >= 0) {
-                            st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or drop the import")
+                            st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, drop the import, or import it under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`)")
                         } else {
                             const at: int = imported.indexOf(n.name)
                             if (at >= 0) {
                                 const earlier: string = importedFrom[at]
                                 // s474 (door 3): two USER files may each export a name now; importing
                                 // both into ONE file binds it twice in that file's scope — refused
-                                // here, at the later import (was: refused at the second exporter, S473)
-                                if (earlier != target && !isStdlibPath(earlier) && !isStdlibPath(target)) {
+                                // here, at the later import (was: refused at the second exporter, S473).
+                                // s474 (alias): so are two DIFFERENT exports of one file bound to one
+                                // local name (`{ a as x, b as x }`); the same export twice stays §41.7.
+                                // s474 r1 (review F2, PA ruling — row-C amendment "one local name cannot
+                                // bind two declarations"): UNIFORM — user + user, user + stdlib,
+                                // stdlib + stdlib and within one import list alike (was: a stdlib side
+                                // fell back to the §41.7 later-wins W-IMPORT-001). W-IMPORT-001 is left
+                                // only for the SAME declaration imported twice.
+                                const other: boolean = earlier != target || importedOrig[at] != n.orig
+                                if (other) {
                                     // s474 r1 (review F3): no cascade. The build already fails here; the
                                     // EARLIER import keeps the name (scopeFrom takes the first entry of a
                                     // kind), and the refused one's entries follow it, so a use of the name
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
-                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file from `" + earlier + "`, and this import brings another `" + n.name + "` from `" + target + "` — two user files may each export one name, but one file binds a name once (duplicate binding in file scope, §7.6; ruled S474); import one of them here, or rename one of the exports")
-                                    names = names.concat(exportedEntries(own, target, n.name))
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (`" + importedOrig[at] + "` from `" + earlier + "`), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
+                                    names = names.concat(exportedEntries(own, target, n.orig, n.name))
                                 } else {
-                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — this later import wins (§41.7); remove the duplicate, or rename one")
-                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.name))
+                                    st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — the same declaration imported twice; this later import wins (§41.7); remove the duplicate")
+                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.orig, n.name))
                                 }
                             } else {
                                 imported = imported.concat([n.name])
                                 importedFrom = importedFrom.concat([target])
-                                names = names.concat(exportedEntries(own, target, n.name))
+                                importedOrig = importedOrig.concat([n.orig])
+                                names = names.concat(exportedEntries(own, target, n.orig, n.name))
                             }
                         }
                     }
@@ -1097,10 +1181,11 @@ ${
 
     // The scope entries an import of `name` from `target` brings: one per
     // EXPORTED declaration of that name there (never a private one).
-    fn exportedEntries(own: OwnName[], target: string, name: string) -> ScopeName[] {
+    // s474: bound under the LOCAL name `local` (an alias, or `name` itself).
+    fn exportedEntries(own: OwnName[], target: string, name: string, local: string) -> ScopeName[] {
         let out: ScopeName[] = []
         for (const o of own) {
-            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: name, kind: o.kind, from: target }])
+            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: local, kind: o.kind, from: target, orig: name }])
         }
         return out
     }
@@ -1120,6 +1205,9 @@ ${
     fn elsewhereNote(lk: Linkage, file: string, k: NameKind, alsoDecl: boolean, name: string) -> string {
         for (const o of lk.own) {
             if (o.name == name && o.file != file && o.exported && kindFits(o.kind, k, alsoDecl)) {
+                // s474: imported here under an alias — the alias is the name in this file
+                const als: string[] = boundAs(lk, file, o.kind, name, o.file)
+                if (als.length > 0) return " in this file — it is imported from `" + o.file + "` as `" + als[0] + "`, and that is its name here (`import { " + name + " as " + als[0] + " }` binds `" + als[0] + "` only, §21.3)"
                 return " in this file — `" + o.file + "` exports it, but this file does not import it: write `import { " + name + " } from …` (§21.3)"
             }
         }
@@ -1156,12 +1244,11 @@ ${
     // type in scope).
     fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
         const from: string = scopeFrom(te.link, te.file, NameKind.KType, name)
+        const orig: string = scopeOrig(te.link, te.file, NameKind.KType, name)   // s474: an alias names its export
         let builtin: TypeStub | not = not
         for (const s of te.stubs) {
-            if (s.name == name) {
-                if (from != "" && s.file == from) return s
-                if (s.file == builtinFile()) builtin = s
-            }
+            if (from != "" && s.file == from && s.name == orig) return s
+            if (s.name == name && s.file == builtinFile()) builtin = s
         }
         return builtin
     }
@@ -1170,9 +1257,10 @@ ${
     fn declTypeNamed(te: TypeEnv, name: string) -> Sym | not {
         const from: string = scopeFrom(te.link, te.file, NameKind.KDecl, name)
         if (from == "") return not
+        const orig: string = scopeOrig(te.link, te.file, NameKind.KDecl, name)
         let i = 0
         while (i < te.declNames.length) {
-            if (te.declNames[i] == name && te.declFiles[i] == from) return te.declSyms[i]
+            if (te.declNames[i] == orig && te.declFiles[i] == from) return te.declSyms[i]
             i = i + 1
         }
         return not
@@ -1488,8 +1576,9 @@ ${
     fn declNamed(g: Globals, file: string, name: string) -> DeclSrc | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KDecl, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KDecl, name)   // s474: an alias names its export
         for (const d of g.decls) {
-            if (!d.isProgram && d.info.sym.hint == name && d.file == from) return d
+            if (!d.isProgram && d.info.sym.hint == orig && d.file == from) return d
         }
         return not
     }
@@ -1517,8 +1606,9 @@ ${
     fn fnNamed(g: Globals, file: string, name: string) -> FnInfo | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KFn, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KFn, name)   // s474: an alias names its export
         for (const f of g.fns) {
-            if (f.info.name == name && f.info.file == from) return f.info
+            if (f.info.name == orig && f.info.file == from) return f.info
         }
         return not
     }
@@ -2977,8 +3067,9 @@ ${
         // s472: the function `n` denotes in the file being read (declared there, or imported)
         let found: FnSrc | not = not
         const from: string = scopeFrom(cx.te.link, cx.te.file, NameKind.KFn, n)
+        const orig: string = scopeOrig(cx.te.link, cx.te.file, NameKind.KFn, n)   // s474: an alias names its export
         for (const f of cx.fns) {
-            if (f.info.name == n && f.info.file == from) found = f
+            if (f.info.name == orig && f.info.file == from) found = f
         }
         if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function in scope here"), done)
         const fi: FnInfo = found.info
@@ -3953,7 +4044,7 @@ ${
     type RHandles:struct = { hs: HandleInfo[], st: AS }
     type HWalk:struct = { owner: int, conditional: boolean, file: string }
 
-    fn handlesIn(g0: DeclStub[], nodes: ANode[], w: HWalk, st0: AS) -> RHandles {
+    fn handlesIn(g0: ScopedStub[], nodes: ANode[], w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
         for (const n of nodes) {
@@ -3964,7 +4055,7 @@ ${
         return { hs: out, st: st }
     }
 
-    fn handlesInNode(g0: DeclStub[], n: ANode, w: HWalk, st: AS) -> RHandles {
+    fn handlesInNode(g0: ScopedStub[], n: ANode, w: HWalk, st: AS) -> RHandles {
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> handlesInElem(g0, e, w, st)
@@ -4026,24 +4117,30 @@ ${
         }
     }
 
-    // s472: the decl stubs a file can name — the program, and each user
-    // declaration in scope there (handlesIn's `g0`: a tag names one of these).
-    fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> DeclStub[] {
-        let out: DeclStub[] = []
+    // s472: the decl stubs a file can name — each user declaration in scope there
+    // (handlesIn's `g0`: a tag names one of these). s474: one per LOCAL name it is
+    // bound under (an aliased import binds it as the alias), so a tag names it by
+    // that name. (The program is no tag's target.)
+    type ScopedStub:struct = { local: string, d: DeclStub }
+
+    fn stubsInScope(ds: DeclStub[], lk: Linkage, file: string) -> ScopedStub[] {
+        let out: ScopedStub[] = []
         for (const d of ds) {
-            if (d.isProgram || inScope(lk, file, NameKind.KDecl, d.sym.hint, d.file)) out = out.concat([d])
+            if (!d.isProgram) {
+                for (const local of boundAs(lk, file, NameKind.KDecl, d.sym.hint, d.file)) { out = out.concat([{ local: local, d: d }]) }
+            }
         }
         return out
     }
 
-    fn stubNamedDecl(g0: DeclStub[], name: string) -> DeclStub | not {
-        for (const d of g0) {
-            if (!d.isProgram && d.sym.hint == name) return d
+    fn stubNamedDecl(g0: ScopedStub[], name: string) -> DeclStub | not {
+        for (const s of g0) {
+            if (s.local == name) return s.d
         }
         return not
     }
 
-    fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
+    fn handlesInElem(g0: ScopedStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
         const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
@@ -6697,7 +6794,7 @@ ${
                             if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(s, i)))
                             i = i + 1
                         }
-                        return diagX(env, e, "E-SCOPE-001", "`" + s.hint + "` has no field `" + name + "`", st)
+                        return diagX(env, e, "E-SCOPE-001", shownStruct(env, s) + " has no field `" + name + "`", st)
                     }
                 }
             }
@@ -7320,22 +7417,26 @@ ${
     // s472: the functions whose names are in scope in `file` — one per name, so
     // a by-name match among them (retIsValue) is THE callee, never another
     // file's function of that name.
-    fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> FnSrc[] {
-        let out: FnSrc[] = []
+    // s474: one entry per LOCAL name the function is bound under (an aliased
+    // import binds it as the alias): `local` is what a call writes, `id` its sym.
+    type ScopedFn:struct = { local: string, id: int }
+
+    fn fnsInScope(fs: FnSrc[], lk: Linkage, file: string) -> ScopedFn[] {
+        let out: ScopedFn[] = []
         for (const f of fs) {
-            if (inScope(lk, file, NameKind.KFn, f.info.name, f.info.file)) out = out.concat([f])
+            for (const local of boundAs(lk, file, NameKind.KFn, f.info.name, f.info.file)) { out = out.concat([{ local: local, id: f.info.sym.id }]) }
         }
         return out
     }
 
-    fn valueReturnIn(fs: FnSrc[], v: int[], b: ABlock) -> boolean {
+    fn valueReturnIn(fs: ScopedFn[], v: int[], b: ABlock) -> boolean {
         for (const s of b.stmts) {
             if (stmtValueReturn(fs, v, s)) return true
         }
         return false
     }
 
-    fn stmtValueReturn(fs: FnSrc[], v: int[], s: AStmt) -> boolean {
+    fn stmtValueReturn(fs: ScopedFn[], v: int[], s: AStmt) -> boolean {
         const k: AStmtK = s.k
         return match k {
             .Return(e: x) :> retIsValue(fs, v, x)
@@ -7353,7 +7454,7 @@ ${
         }
     }
 
-    fn blocksValueReturn(fs: FnSrc[], v: int[], bs: ABlock[]) -> boolean {
+    fn blocksValueReturn(fs: ScopedFn[], v: int[], bs: ABlock[]) -> boolean {
         for (const b of bs) {
             if (valueReturnIn(fs, v, b)) return true
         }
@@ -7361,14 +7462,14 @@ ${
     }
 
     // A `return` operand that is a value: present, and not a call of a void function.
-    fn retIsValue(fs: FnSrc[], v: int[], x: AExpr | not) -> boolean {
+    fn retIsValue(fs: ScopedFn[], v: int[], x: AExpr | not) -> boolean {
         if (x is not) return false
         const c: AExpr | not = calleeOf(x.k)
         if (c is not) return true
         const n: string = exprName(c)
         if (n == "") return true
         for (const f of fs) {
-            if (f.info.name == n) return v.indexOf(f.info.sym.id) < 0
+            if (f.local == n) return v.indexOf(f.id) < 0
         }
         return true
     }
@@ -8663,7 +8764,7 @@ ${
                 for (const fd of fs) {
                     if (fd.sym.hint == p.name) fty = fd.ty
                 }
-                if (fty is not) st = addDiag(st, env.file, p.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + p.name + "`")
+                if (fty is not) st = addDiag(st, env.file, p.span, "E-TYPE-STRUCT-FIELD", shownStruct(env, s) + " has no field `" + p.name + "`")
                 st = resolveExpr(env, p.value, fty, st).st
             }
             j2 = j2 + 1
@@ -10044,7 +10145,7 @@ ${
             if (overriddenBefore(ps, j)) {
                 st = dupOverride(env, st, pr)
             } else if (idx < 0) {
-                st = addDiag(st, env.file, pr.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + pr.name + "`")
+                st = addDiag(st, env.file, pr.span, "E-TYPE-STRUCT-FIELD", shownStruct(env, s) + " has no field `" + pr.name + "`")
             } else {
                 const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }
                 const rv: RX = resolveExpr(env, pr.value, fs[idx].ty, st)
@@ -12906,18 +13007,27 @@ ${
     // The arms of a `!{}` / `match`, resolved against enum `err` — what does
     // not depend on WHICH failure set the call has: every arm's pattern,
     // binders and body, a duplicate (E-TYPE-023), an arm after the wildcard
-    // (E-SYNTAX-010). `covered`: the variant indices named; `wild`: a
-    // wildcard arm (plain `_` / `else`, or `_ err`); `okSeen`: `.Ok`, or a
-    // PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`).
-    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean }
+    // (E-SYNTAX-010). `covered`: the variant indices named; `wild`: an arm
+    // that takes every remaining ERROR — `_ err`, or (in a `!{}` only) a plain
+    // `_` / `else`; `okSeen`: `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err`
+    // never takes `.Ok`); `absorb`: the plain `_` / `else` of a `match` —
+    // s474 (ruling: user-voice-scrml.md S474 "`else` on a failable match"):
+    // on a failable result it covers the success value `.Ok` ONLY, never an
+    // error variant (§18.6, §19.7.1; E-MATCH-ELSE-ABSORBS-ERROR in
+    // coverDiags, the one choke point for every failable-subject `match`);
+    // `absorbSpan`: that arm, where the error is reported.
+    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not }
 
     fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
         let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let covered: int[] = []
-        let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
+        let last = false          // a wildcard arm has been seen: plain `_` / `else`, or `_ err` (§18.6 position rule)
+        let wild = false          // an arm that takes every remaining ERROR: `_ err`; a plain wildcard in a `!{}`
         let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
         let wildWhole = false     // the first wildcard was `_ err`
+        let absorb = false        // s474: a `match`'s plain `_` / `else` — the success value only
+        let absorbSpan: ASpan | not = not
         for (const a of arms) {
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
@@ -12930,46 +13040,93 @@ ${
             // alias), and §18.6.1 for the whole-error binder: "it is the wildcard
             // for the last-arm position (E-SYNTAX-010)". After `_ err` the reason
             // is the position rule, NOT unreachability (`_ err` never takes `.Ok`).
-            if (wild) {
+            if (last) {
                 st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole))
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
             if (ra.idx == -1) {
-                wild = true
                 okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
+                // s474 — in a `match` on a failable result a plain `_` / `else` is the
+                // success value's arm: it takes NO error variant (§18.6, §19.7.1). In a
+                // `!{}` every arm is a failure, so there it is the catch-all (§19.4.5).
+                // (After an earlier wildcard it is E-SYNTAX-010 above and takes nothing.)
+                if (!last && isMatch) {
+                    absorb = true
+                    absorbSpan = a.span
+                }
+                if (!isMatch) wild = true
+                last = true
             }
-            if (ra.idx == -4 && !wild) {
+            if (ra.idx == -4 && !last) {
+                last = true
                 wild = true                  // `_ err`: every remaining error, never `.Ok` (§18.6.1)
                 wildWhole = true
             }
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
-        return { st: st, covered: covered, wild: wild, okSeen: okSeen }
+        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan }
     }
 
     // What the failure set decides about resolved arms: totality over the
     // FIRST `upto` variants of `err` (-1: all of them) — E-TYPE-080 (`!{}`) /
     // E-TYPE-020 (`match`, which also owes `.Ok`) — and, in a deferred
     // statement, the catch-all §19.16.3 rule 3 requires.
+    //
+    // s474 — the failable-subject `match` choke point for `else`. Every
+    // failable subject that reaches a `match` — a call of a `!` function, a
+    // client call of a server function (judged here against the client set
+    // and, server→server, the callee's own: `upto`), a `?{}` query; in a value
+    // position, as a statement, or as `return match …` — is checked HERE and
+    // nowhere else. A plain `_` / `else` arm covers the success value `.Ok`
+    // only (resolveArms `absorb`); an error variant no arm names is then
+    // E-MATCH-ELSE-ABSORBS-ERROR, not E-TYPE-020: the `else` is what the
+    // author wrote to finish the match, and it would have taken the error.
+    // PERMANENT (security): `match check(pw) { .Locked :> "locked", else :>
+    // "LOGGED IN" }` logged in on `.Denied` (ruling: user-voice-scrml.md S474
+    // "⭐ RULED — `else` on a failable match").
     fn coverDiags(env: Env, e: AExpr, subj: AExpr, err: Sym, isMatch: boolean, ra: RArms, upto: int, label: string) -> Diag[] {
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
-        let missing: string[] = []
-        if (isMatch && !ra.okSeen) missing = ["Ok"]
+        let errs: string[] = []           // the error variants no arm takes
         if (!ra.wild) {
             let i = 0
             for (const v of vs) {
-                if ((upto < 0 || i < upto) && ra.covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+                if ((upto < 0 || i < upto) && ra.covered.indexOf(i) < 0) errs = errs.concat([v.sym.hint])
                 i = i + 1
             }
         }
         if (!ra.wild && !isMatch && env.fx.defer) {
             return [newDiag("E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + label + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`", env.file, e.span)]
         }
+        if (isMatch && ra.absorb && errs.length > 0) {
+            let at: ASpan = e.span
+            const sp: ASpan | not = ra.absorbSpan
+            if (sp is given) at = sp
+            return [newDiag("E-MATCH-ELSE-ABSORBS-ERROR", absorbsMsg(subj, label, errs), env.file, at)]
+        }
+        let missing: string[] = []
+        if (isMatch && !ra.okSeen) missing = ["Ok"]
+        missing = missing.concat(errs)
         if (missing.length == 0) return []
-        if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + label + "`, or ends with `else :>` / `_ :>` (§19.7.1)", env.file, e.span)]
+        if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — " + e020FailableHint(label, errs, !ra.okSeen) + " (§19.7.1)", env.file, e.span)]
         return [newDiag("E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + label + "` — add those arms, or a catch-all `| _ :> …` (§19.7)", env.file, e.span)]
+    }
+
+    // s474 — E-MATCH-ELSE-ABSORBS-ERROR's message: names every error variant
+    // the `else` would have taken and offers the forms that handle them.
+    fn absorbsMsg(subj: AExpr, label: string, errs: string[]) -> string {
+        return "this `else` / `_` arm would take the error variant(s) " + errs.join(", ") + " of " + subjectName(subj) + " — on a failable result, `else` covers the success value `.Ok` only, so a failure never runs the success arm (§18.6, §19.7.1). Handle the error(s) explicitly: name them (`." + errs[0] + " :> …`), or replace the `else` with `_ e :> …`, which takes every remaining error (and write `.Ok(v) :> …` for the success value if no arm takes it), or handle the call with `!{ … }`"
+    }
+
+    // s474 — E-TYPE-020's fix on a failable result. It never offers `else`
+    // for an uncovered error: there `else` takes `.Ok` only (§19.7.1).
+    fn e020FailableHint(label: string, errs: string[], okMissing: boolean) -> string {
+        let h: string = "a `match` on a failable result covers the success value `.Ok` and every variant of `" + label + "`:"
+        if (okMissing) h = h + " add `.Ok(v) :> …`"
+        if (okMissing && errs.length > 0) h = h + ", and"
+        if (errs.length > 0) h = h + " name each missing error variant, or take them all in one `_ e :> …` arm (`else` covers `.Ok` only, never an error)"
+        return h
     }
 
     // How a client call's failure set is named in a message: the minted enum's
@@ -16664,6 +16821,303 @@ ${
         return isKnownElementName(tag)
     }
 
+    // =========================================================================
+    // s474 (boot-gate-await-mathml, review of #1727 F1–F3) — SPEC §24.5: markup
+    // the HTML parser RESTRUCTURES is refused. A template's holes (a `show=`
+    // element, an `if=` marker, a `${}` text) are addressed by child-index path
+    // over the tree as WRITTEN; a node the browser moves — a `<p>` ejected from
+    // `<svg>`, a `<div>` that closes an open `<p>`, a `<span>` fostered out of a
+    // `<table>` — shifts every path after it, so `show=` hid the wrong element and
+    // a gated secret was visible at first paint (Chromium, review F3). Two codes:
+    //   E-HTML-FOREIGN-BREAKOUT  an HTML "breakout" start tag (HTML §13.2.6.5)
+    //                            as a child of an SVG / MathML element
+    //   E-HTML-PARSER-REPAIR     an HTML nesting the "in body" / "in table"
+    //                            rules repair (a block opener in an open `<p>`,
+    //                            a non-table child of `table` / `tbody` / `tr`,
+    //                            text in them, a nested `<a>` / `<li>` / `<dd>` /
+    //                            `<button>` / heading, `<html>` / `<head>` /
+    //                            `<body>` / `<frameset>`)
+    // The context is elements.scrml `childNs` — the printer's own. Foreign
+    // context crosses every template boundary (a foreign template is printed
+    // inside its context's wrapper, print.scrml `wrapNs`), so a declaration used
+    // inside `<svg>` is walked in that context too and its faults are reported
+    // at the use. The HTML repairs do not cross one: an `if=` arm, an `<each>` /
+    // Tier-0 row, a declaration's renders and slot content are each their own
+    // `<template>`, parsed in the "in template" mode (which keeps a table part
+    // at its root) and inserted by DOM calls, which repair nothing.
+    // =========================================================================
+    type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
+                         inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string }
+    type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
+
+    fn mkRoot(ns: string, depth: int) -> MkCx {
+        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "" }
+    }
+
+    fn markupParseDiags(g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const ds of g.decls) {
+          // s474 r2 (re-review R4): a file that already fails to parse is not judged — its misparsed nesting
+          // is the parse error's cascade, not a nesting the author wrote
+          if (fileErrs(g.files, ds.file).length == 0) {
+            let faults: MkFault[] = mkNodes(g, ds.file, rendersNodes(ds), mkRoot(htmlNs(), 0))
+            for (const sb of stateBodyLists(ds)) { faults = faults.concat(mkNodes(g, ds.file, sb, mkRoot(htmlNs(), 0))) }
+            if (ds.p is not) {
+                for (const fd of fieldDecls(ds)) { faults = faults.concat(mkNodes(g, ds.file, rendersOf(fd), mkRoot(htmlNs(), 0))) }
+            }
+            for (const f of faults) { st = addDiag(st, f.file, f.span, f.code, f.msg) }
+          }
+        }
+        return st
+    }
+
+    fn hasNul(t: string) -> boolean {
+        let i: int = 0
+        while (i < t.length) {
+            if (t.charCodeAt(i) == 0) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn nulMsg() -> string {
+        return "a raw U+0000 (NUL) character in markup text is removed or replaced by the HTML parser (HTML §13.2.6.4.7), so the page would not hold the text written here (SPEC §24.5) — delete it, or write the character you mean"
+    }
+
+    fn hasAttrCI(attrs: AAttr[], name: string) -> boolean {
+        for (const a of attrs) { if (a.name.toLowerCase() == name) return true }
+        return false
+    }
+
+    // The HTML raw-text / RCDATA element whose content the parser reads as text ("" — not one).
+    fn rawTextTag(t: string) -> string {
+        if (["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "plaintext"].indexOf(t) >= 0) return t
+        return ""
+    }
+
+    fn rawTextMsg(tag: string, raw: string) -> string {
+        const head: string = "`<" + tag + ">` inside `<" + raw + ">` is text, not an element"
+        return head + ": the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">` (an interpolated value inside one is fine)"
+    }
+
+    fn mkNodes(g: Globals, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        for (const n of nodes) { out = out.concat(mkNode(g, file, n, c)) }
+        return out
+    }
+
+    fn mkNode(g: Globals, file: string, n: ANode, c: MkCx) -> MkFault[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> mkElem(g, file, e, c)
+            .Text(text: t) :> mkText(file, n, t, c)
+            .Interp(e: x) :> []
+            .DeclNode(d: x) :> []
+            .Effect(w: x) :> []
+            .Css(c: x) :> []
+            .Gather(f: lf) :> mkNodes(g, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
+        }
+    }
+
+    // "in table" text (HTML §13.2.6.4.10): a character that is not white space
+    // is foster-parented out of the table.
+    fn mkText(file: string, n: ANode, t: string, c: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R1): a raw U+0000 in markup text is dropped ("in body") or replaced by the parser;
+        // a text node of NULs alone disappears, which shifts every hole path after it
+        if (hasNul(t)) return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: nulMsg() }]
+        if (c.tbl == "" || t.trim() == "") return []
+        return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                  msg: "text directly inside `<" + c.parent + ">` is moved out of the table by the HTML parser (\"foster parenting\", HTML §13.2.6.4.10), so the page would not hold the tree written here (SPEC §24.5) — put it in a cell: `<td>…</td>`" }]
+    }
+
+    fn mkQuoted(attrs: AAttr[], name: string) -> string {
+        const a: AAttr | not = attrNamed(attrs, name)
+        if (a is not) return ""
+        const v: AAttrValue = a.value
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: x) :> ""
+        }
+    }
+
+    fn isArmElem(e: AElem) -> boolean {
+        return attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
+    }
+
+    fn mkElem(g: Globals, file: string, e: AElem, c0: MkCx) -> MkFault[] {
+        // s474 r2 (re-review R2): inside an HTML raw-text / RCDATA element the parser builds TEXT, never an
+        // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
+        if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
+        if (e.star) return []
+        // an `if=` / `else-if=` / `else` element is its arm's own template
+        let c: MkCx = c0
+        if (isArmElem(e)) c = mkRoot(c0.ns, c0.depth)
+        if (e.tag == "each") return mkNodes(g, file, e.kids, mkRoot(c.ns, c.depth))
+        if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkUse(g, file, e, d, c)
+        // a tag that is no element (a field, a refused or unknown name) has its own diagnostic
+        if (!isKnownElementName(e.tag)) return mkNodes(g, file, e.kids, c)
+        const t: string = e.tag.toLowerCase()
+        let out: MkFault[] = []
+        // s474 r2 (re-review R3): HTML attribute names are ASCII case-insensitive (`<font COLOR=…>` breaks out too)
+        const fontAttr: boolean = hasAttrCI(e.attrs, "color") || hasAttrCI(e.attrs, "face") || hasAttrCI(e.attrs, "size")
+        const breakout: boolean = isForeignNs(c.ns) && isForeignBreakout(t, fontAttr)
+        if (breakout) {
+            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: breakoutMsg(e.tag, c) }]
+        } else if (isForeignNs(c.ns) && ["area", "base", "col", "input", "link", "source", "track", "wbr"].indexOf(t) >= 0) {
+            // an HTML void element name has no SVG / MathML meaning; written there it is a foreign element
+            // the page cannot close (it is printed without an end tag, as HTML), so it swallows its siblings
+            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT",
+                     msg: voidInForeignMsg(e.tag, c.ns) }]
+        } else if (isHtmlInNs(c.ns, t)) {
+            out = mkRepair(file, e, t, c)
+        }
+        let ns: string = c.ns
+        if (breakout) ns = htmlNs()
+        // after a fault the parser has already left the written nesting: its children are judged
+        // afresh (one report per fault, never a cascade down the subtree)
+        let kc: MkCx = c
+        if (out.length > 0) kc = mkRoot(ns, c.depth)
+        return out.concat(mkNodes(g, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
+    }
+
+    fn voidInForeignMsg(tag: string, ns: string) -> string {
+        const head: string = "`<" + tag + ">` is an HTML void element, which cannot be a child of " + nsWords(ns)
+        return head + ": there it is no HTML element and has no end tag, so the elements after it would be built inside it (SPEC §24.5) — put HTML inside `<foreignObject>` (SVG) or `<mtext>` (MathML)"
+    }
+
+    fn breakoutMsg(tag: string, c: MkCx) -> string {
+        let where: string = "SVG content"
+        if (c.ns != "svg") where = "MathML content"
+        let inside: string = ""
+        if (c.parent != "") inside = " (inside `<" + c.parent + ">`)"
+        return "`<" + tag + ">` cannot be a child of " + where + inside + ": the HTML parser ends the foreign content at a `<" + tag + ">` start tag and builds it — and the markup after it — outside the `<svg>` / `<math>` (HTML §13.2.6.5, \"breakout\" start tags), so it never renders there (SPEC §24.5). Put HTML inside `<foreignObject>` (SVG) or `<mtext>` (MathML), or use an SVG / MathML element (`<text>`, `<tspan>`, `<g>`, `<mrow>`)"
+    }
+
+    // The children's context of `<t>` (in context `c.ns`, or HTML after a breakout).
+    fn mkKid(ns: string, t: string, enc: string, c: MkCx) -> MkCx {
+        const kns: string = childNs(ns, t, enc)
+        if (!isHtmlInNs(ns, t)) {
+            // an SVG / MathML element: a scope boundary (foreignObject, mi, …) ends the HTML scopes
+            const bound: boolean = boundsScope(ns, t)
+            return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
+                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "" }
+        }
+        const bound: boolean = boundsScope(htmlNs(), t)
+        const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
+        return { ns: kns, parent: t,
+                 inP: t == "p" || (c.inP && !bound && t != "button"),
+                 inA: t == "a" || (c.inA && !formattingMarker(t)),
+                 inLi: t == "li" || (c.inLi && !special),
+                 inDd: t == "dd" || t == "dt" || (c.inDd && !special),
+                 inButton: t == "button" || (c.inButton && !bound),
+                 inNobr: t == "nobr" || (c.inNobr && !bound),
+                 tbl: tableMode(t), depth: c.depth, raw: rawTextTag(t) }
+    }
+
+    fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
+        return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR",
+                  msg: why + " — the page would not hold the tree written here, so a hole after it (a `show=`, an `if=`, a `${}`) would address the wrong node (SPEC §24.5)" }]
+    }
+
+    // One report per element: the first HTML tree-construction rule it trips.
+    fn mkRepair(file: string, e: AElem, t: string, c: MkCx) -> MkFault[] {
+        const tg: string = "`<" + e.tag + ">`"
+        if (t == "html" || t == "head" || t == "body" || t == "frameset") return mkRepairFault(file, e, tg + " is never an element of a page body: the HTML parser drops the tag (HTML §13.2.6.4.7)")
+        if (c.tbl != "" && tableModeChildren(c.tbl).indexOf(t) < 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` is moved or wrapped by the HTML parser (HTML §13.2.6.4.9–15: " + tableHint(c.tbl, t) + ")")
+        if (c.inP && closesP(t)) return mkRepairFault(file, e, tg + " inside an open `<p>` CLOSES the `<p>` first (HTML §13.2.6.4.7 \"close a p element\"): it becomes the `<p>`'s next sibling. Use a `<div>` for the outer element, or a phrasing element (`<span>`) for the inner one")
+        if (t == "a" && c.inA) return mkRepairFault(file, e, "an `<a>` inside an `<a>` closes the outer one (HTML §13.2.6.4.7, the adoption agency): links do not nest")
+        if (t == "li" && c.inLi) return mkRepairFault(file, e, "an `<li>` inside an open `<li>` (with no list between) closes it (HTML §13.2.6.4.7) — nest a `<ul>` / `<ol>` for a sub-list")
+        if ((t == "dd" || t == "dt") && c.inDd) return mkRepairFault(file, e, tg + " inside an open `<dd>` / `<dt>` closes it (HTML §13.2.6.4.7) — nest a `<dl>`")
+        if (isHeading(t) && isHeading(c.parent)) return mkRepairFault(file, e, "a heading directly inside a heading closes the outer one (HTML §13.2.6.4.7)")
+        if (t == "button" && c.inButton) return mkRepairFault(file, e, "a `<button>` inside a `<button>` closes the outer one (HTML §13.2.6.4.7): buttons do not nest")
+        if (t == "nobr" && c.inNobr) return mkRepairFault(file, e, "a `<nobr>` inside a `<nobr>` closes the outer one (HTML §13.2.6.4.7)")
+        if (t == "option" && c.parent == "option") return mkRepairFault(file, e, "an `<option>` directly inside an `<option>` closes it (HTML §13.2.6.4.7): options do not nest")
+        if (t == "optgroup" && (c.parent == "option" || c.parent == "optgroup")) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` / `<optgroup>` closes it (HTML §13.2.6.4.7)")
+        if ((t == "rt" || t == "rp") && ["rb", "rp", "rt"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        if ((t == "rb" || t == "rtc") && ["rb", "rp", "rt", "rtc"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        return []
+    }
+
+    fn tableHint(mode: string, t: string) -> string {
+        if (mode == "table" && t == "tr") return "a `<tbody>` is inserted around it — write the `<tbody>`"
+        if (mode == "table" && (t == "td" || t == "th")) return "a `<tbody>` and a `<tr>` are inserted around it — write them"
+        if (mode == "table" && t == "col") return "a `<colgroup>` is inserted around it — write the `<colgroup>`"
+        if (mode == "tbody" && (t == "td" || t == "th")) return "a `<tr>` is inserted around it — write the `<tr>`"
+        return "it is moved out of the table (\"foster parenting\") — put it in a cell, `<td>…</td>`"
+    }
+
+    // A use: its slot content is its own template, in the context of the used
+    // declaration's `<slot/>`; and in a FOREIGN context the declaration's renders
+    // are printed in that context's wrapper, so what is a fault only there is
+    // reported here, at the use.
+    fn mkUse(g: Globals, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        if (isForeignNs(c.ns) && c.depth < 16) {
+            const inner: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(c.ns, c.depth + 1))
+            const alone: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(htmlNs(), c.depth + 1))
+            for (const f of inner) {
+                if (!mkFaultIn(alone, f)) {
+                    out = out.concat([{ nid: e.nid, file: file, span: e.span, code: f.code,
+                                        msg: "`<" + e.tag + ">` is used inside " + nsWords(c.ns) + ", where its renders do not hold: " + f.msg }])
+                }
+            }
+        }
+        if (e.kids.length > 0 && c.depth < 16) {
+            out = out.concat(mkNodes(g, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
+        }
+        return out
+    }
+
+    fn nsWords(ns: string) -> string {
+        if (ns == "svg") return "SVG content"
+        return "MathML content"
+    }
+
+    fn mkFaultIn(fs: MkFault[], f: MkFault) -> boolean {
+        for (const x of fs) { if (x.nid == f.nid && x.code == f.code) return true }
+        return false
+    }
+
+    /** The context `d`'s `<slot/>` sits in when its renders are in context `ns` (`ns` when it has none). */
+    fn mkSlotNs(g: Globals, d: DeclSrc, ns: string, depth: int) -> string {
+        const s: string = mkSlotIn(g, d.file, rendersNodes(d), ns, depth)
+        if (s == "") return ns
+        return s
+    }
+
+    fn mkSlotIn(g: Globals, file: string, nodes: ANode[], ns: string, depth: int) -> string {
+        if (depth > 16) return ""
+        for (const n of nodes) {
+            const k: ANodeK = n.k
+            const s: string = match k {
+                .Elem(e: e) :> mkSlotElem(g, file, e, ns, depth)
+                .Text(text: t) :> ""
+                .Interp(e: x) :> ""
+                .DeclNode(d: x) :> ""
+                .Effect(w: x) :> ""
+                .Css(c: x) :> ""
+                .Gather(f: lf) :> mkSlotIn(g, file, rowsOfBlock(lf.body), ns, depth)
+            }
+            if (s != "") return s
+        }
+        return ""
+    }
+
+    fn mkSlotElem(g: Globals, file: string, e: AElem, ns: string, depth: int) -> string {
+        if (e.star) return ""
+        if (e.tag == "slot") return ns
+        if (e.tag == "each") return mkSlotIn(g, file, e.kids, ns, depth)
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkSlotIn(g, file, e.kids, mkSlotNs(g, d, ns, depth + 1), depth + 1)
+        if (!isKnownElementName(e.tag)) return mkSlotIn(g, file, e.kids, ns, depth)
+        return mkSlotIn(g, file, e.kids, childNs(ns, e.tag, mkQuoted(e.attrs, "encoding")), depth)
+    }
+
     // s473 — an element attribute that is a scrml directive the bootstrap does
     // not carry: refused by name, never written to the DOM ("" = not one).
     //  - `fixed` — RETIRED (ruling S473 D26): it used to leak as `fixed=""`.
@@ -18834,8 +19288,9 @@ ${
     fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
         const from: string = scopeFrom(g.te.link, file, NameKind.KConst, name)
         if (from == "") return not
+        const orig: string = scopeOrig(g.te.link, file, NameKind.KConst, name)   // s474: an alias names its export
         for (const c of g.consts) {
-            if (c.file == from && c.name == name) return c
+            if (c.file == from && c.name == orig) return c
         }
         return not
     }
@@ -19019,8 +19474,12 @@ ${
     // s472: through the file's scope — declared there, or imported FROM ITS
     // FILE (was: any import of the name, whichever file it named).
     fn visibleDeclNamed(lk: Linkage, t: Tables, file: string, name: string) -> boolean {
+        // s474: `name` as written here — an alias denotes its export (scopeOrig)
+        const from: string = scopeFrom(lk, file, NameKind.KDecl, name)
+        if (from == "") return false
+        const orig: string = scopeOrig(lk, file, NameKind.KDecl, name)
         for (const d of t.decls) {
-            if (d.sym.id != t.program.id && d.sym.hint == name && inScope(lk, file, NameKind.KDecl, name, d.file)) return true
+            if (d.sym.id != t.program.id && d.sym.hint == orig && d.file == from) return true
         }
         return false
     }
@@ -19160,9 +19619,9 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     const target: string = importTarget(f.path, imp.from, paths)
-                    if (target != "" && exportsName(lk.own, target, name)) {
+                    if (target != "") {
                         for (const x of imp.names) {
-                            if (x.name == name) return imp.from
+                            if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
                         }
                     }
                 }
@@ -20258,8 +20717,11 @@ ${
     // name, so `callKeys` over them answers for THE callee a name denotes there.
     fn fnwIn(ws: FnW[], lk: Linkage, file: string) -> FnW[] {
         let out: FnW[] = []
+        // s474: one per LOCAL name the function is bound under (an alias: the call writes the alias)
         for (const w of ws) {
-            if (inScope(lk, file, NameKind.KFn, w.name, w.file)) out = out.concat([w])
+            for (const local of boundAs(lk, file, NameKind.KFn, w.name, w.file)) {
+                out = out.concat([{ name: local, nid: w.nid, file: w.file, keys: w.keys, params: w.params }])
+            }
         }
         return out
     }
@@ -20561,6 +21023,69 @@ ${
             .Seq(elem: e) :> elemName(e) + "[]"
             .Maybe(inner: i) :> typeName(i) + " | not"
         }
+    }
+
+    // s474 r1 (#1715 review F7) — a type as a diagnostic in `file` names it: a user
+    // type that file imports under an alias is written by the alias, and the note
+    // (aliasNote) says what it is — two same-named types aliased apart stay apart.
+    fn typeNameIn(al: TypeAlias[], file: string, ty: Type) -> string {
+        return match ty {
+            .Int :> "int"
+            .Num :> "number"
+            .Str :> "string"
+            .Bool :> "bool"
+            .Named(sym: s) :> aliasName(al, file, s)
+            .Seq(elem: e) :> elemNameIn(al, file, e) + "[]"
+            .Maybe(inner: i) :> typeNameIn(al, file, i) + " | not"
+        }
+    }
+
+    fn elemNameIn(al: TypeAlias[], file: string, e: Type) -> string {
+        if (maybeInner(e) is given) return "(" + typeNameIn(al, file, e) + ")"
+        return typeNameIn(al, file, e)
+    }
+
+    fn aliasName(al: TypeAlias[], file: string, s: Sym) -> string {
+        for (const a of al) {
+            if (a.file == file && a.sym.id == s.id) return a.local
+        }
+        return s.hint
+    }
+
+    fn innerNamed(ty: Type) -> Sym | not {
+        return match ty {
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> s
+            .Seq(elem: e) :> innerNamed(e)
+            .Maybe(inner: i) :> innerNamed(i)
+        }
+    }
+
+    // " (`A` is `C`, declared in `b.scrml`)" when `ty`'s user type is aliased in `file`, else "".
+    fn aliasNote(al: TypeAlias[], file: string, ty: Type) -> string {
+        const s: Sym | not = innerNamed(ty)
+        if (s is not) return ""
+        for (const a of al) {
+            if (a.file == file && a.sym.id == s.id) return " (`" + a.local + "` is `" + a.orig + "`, declared in `" + a.from + "`)"
+        }
+        return ""
+    }
+
+    // A type, in backticks, with its alias note — in a typer diagnostic of `env.file`.
+    fn shownT(env: TEnv, ty: Type) -> string {
+        return "`" + typeNameIn(env.t.taliases, env.file, ty) + "`" + aliasNote(env.t.taliases, env.file, ty)
+    }
+
+    // The same for the binder (Env): the struct type `s` as named in `env.file`.
+    fn shownStruct(env: Env, s: Sym) -> string {
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+        if (ti is not) return "`" + s.hint + "`"
+        const als: string[] = boundAs(env.g.te.link, env.file, NameKind.KType, ti.name, ti.file)
+        if (als.length == 0 || als.indexOf(ti.name) >= 0) return "`" + s.hint + "`"
+        return "`" + als[0] + "` (`" + ti.name + "`, declared in `" + ti.file + "`)"
     }
 
     // A sequence's element type as written before `[]`: a `T | not` element is
@@ -21140,7 +21665,7 @@ ${
     fn checkOneOf(env: TEnv, xs: Type[], target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         for (const x of xs) {
             if (mayBeNot(x, target) || fitsType(x, target) == Verdict.Fails) {
-                return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value may be `" + typeName(x) + "` — it is one of " + oneOfName(xs) + " (a choice whose branches have different types: each branch is the value when it is taken, and each must fit; §66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+                return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value may be " + shownT(env, x) + " — it is one of " + oneOfName(xs) + " (a choice whose branches have different types: each branch is the value when it is taken, and each must fit; §66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
             }
         }
         return ts
@@ -21148,10 +21673,10 @@ ${
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (mayBeNot(x, target)) {
-            return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x is given) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
+            return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value is " + shownT(env, x) + " — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x is given) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
         }
         if (fitsType(x, target) != Verdict.Fails) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)) + sameNameNote(env, target, x))
+        return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value is " + shownT(env, x) + " (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)) + sameNameNote(env, target, x))
     }
 
     // s472 r1 (F4): two different types that print alike (`Color` from two files —
@@ -28796,7 +29321,7 @@ ${
     fn mArms(arms: AArm[], m: CMap) -> AArm[] {
         let out: AArm[] = []
         for (const a of arms) {
-            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted }])
+            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare }])
         }
         return out
     }
@@ -32074,6 +32599,8 @@ ${
         const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
+        // s474 (review of #1727): markup the HTML parser restructures (SPEC §24.5)
+        st = markupParseDiags(ra.g, st)
         st = strayEffects(files, st)
         // s473 (§21.3.3 rule 15): a declared `:host` handle is not data
         st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))
@@ -32094,7 +32621,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, taliases: typeAliases(ra.g.te.link, ra.g.types) }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -32114,7 +32641,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts, taliases: bound.taliases }
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
         const pl: PS = planPass(ra.g, typedT, sum, cp.st)
@@ -32123,7 +32650,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts, taliases: bound.taliases }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
@@ -32871,8 +33398,9 @@ ${
                     st = addDiag(st, f.path, imp.span, r.code, r.why)
                 } else {
                     for (const n of imp.names) {
-                        if (!exportedBy(g, target, n.name)) {
-                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.name + "` is not exported by `" + imp.from + "`")
+                        // s474: an aliased import (`{ a as b }`) names the export `a`
+                        if (!exportedBy(g, target, n.orig)) {
+                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.orig + "` is not exported by `" + imp.from + "`")
                         }
                     }
                 }
@@ -32964,6 +33492,7 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     for (const m of imp.names) {
+                        if (m.name == name && m.orig != name) return "`import { " + m.orig + " as " + name + " } from \"" + imp.from + "\"`"   // s474: an alias
                         if (m.name == name) return "`import { " + name + " } from \"" + imp.from + "\"`"
                     }
                 }
@@ -33095,7 +33624,7 @@ ${
                     for (const n of imp.names) {
                         if (n.name == name) {
                             const target: string = importTarget(f.path, imp.from, paths)
-                            if (target == "" || !exportedBy(g, target, name)) return true
+                            if (target == "" || !exportedBy(g, target, n.orig)) return true   // s474 r1 F1: the EXPORTED name (an alias is the local one)
                         }
                     }
                 }

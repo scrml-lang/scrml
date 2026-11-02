@@ -215,7 +215,9 @@ for (const file of files) {
       const c = bootMod.classifySpecAhead(r, d.specAhead.codes);
       if (c.verdict === "crash" || c.verdict === "pin-mismatch") {
         perMode.ruled.failed++;
-        failures.push({ file, output: `spec-ahead marker at ${d.specAhead.doc}:${d.specAhead.line}: ${c.message}\n${r.lines.join("\n")}` });
+        // the marker's verdict is the HEAD, printed whole: the detail below keeps only the last
+        // diagnostic lines, which used to cut this line (and the pin to paste) off a long output
+        failures.push({ file, head: `spec-ahead marker at ${d.specAhead.doc}:${d.specAhead.line}: ${c.message}`, output: r.lines.join("\n") });
         console.log(`  FAIL  ${file}  (bootstrap; spec-ahead ${c.verdict})`);
         continue;
       }
@@ -269,6 +271,7 @@ if (failures.length > 0) {
   console.error("=== snippet-gate — failure detail ===");
   for (const f of failures) {
     console.error(`\n--- ${f.file} ---`);
+    if (f.head) console.error(`  ${f.head}`);
     console.error(
       f.output
         .split("\n")

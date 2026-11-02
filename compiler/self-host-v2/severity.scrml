@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 289 codes with a §34 severity; 2 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: W-TX-ARM-UNREACHABLE, W-TX-FAIL-AFTER-COMMIT); 37 without one (FAIL-CLOSED Error):
+// 294 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
 //   E-BOOTSTRAP-REDECLARE — no §34 row
@@ -72,6 +72,8 @@ ${
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
+            "W-TX-ARM-UNREACHABLE" :> Severity.Warning
+            "W-TX-FAIL-AFTER-COMMIT" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -197,6 +199,8 @@ ${
             "E-HOST-TARGET-UNBOUND" :> Severity.Error
             "E-HOST-TYPE-NO-SRC" :> Severity.Error
             "E-HOST-TYPE-OUTSIDE" :> Severity.Error
+            "E-HTML-FOREIGN-BREAKOUT" :> Severity.Error
+            "E-HTML-PARSER-REPAIR" :> Severity.Error
             "E-IMPORT-003" :> Severity.Error
             "E-IMPORT-004" :> Severity.Error
             "E-IMPORT-005" :> Severity.Error
@@ -227,6 +231,7 @@ ${
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
+            "E-MATCH-ELSE-ABSORBS-ERROR" :> Severity.Error
             "E-META-008" :> Severity.Error
             "E-MW-002" :> Severity.Error
             "E-NAME-COLLIDES-RESERVED" :> Severity.Error
@@ -350,9 +355,6 @@ ${
             "E-VALUE-WRITE-UNPROVEN" :> Severity.Error
             "E-VALUE-WRITES-STATE" :> Severity.Error
             "E-VARIANT-AMBIGUOUS" :> Severity.Error
-            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)
-            "W-TX-ARM-UNREACHABLE" :> Severity.Warning
-            "W-TX-FAIL-AFTER-COMMIT" :> Severity.Warning
             // no usable §34 row — fail closed (listed in the header)
             _ :> Severity.Error
         }

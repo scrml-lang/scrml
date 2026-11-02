@@ -20,6 +20,14 @@ bun run lsp-boot/server.ts --stdio        # or: bun run lsp:boot
 - A diagnostic inside an imported file is shown on the importing line (`in b.scrml:3:35: …`) with
   `relatedInformation` pointing at it. Editing a module re-checks the open files that import it.
 - **No hover, definition, completion, symbols.** The server does not advertise them.
+- Positions are UTF-16 code units (the LSP default), so a column after an emoji or other astral
+  character lands where the editor puts it. CRLF buffers work too.
+- A `file:` URI that names no local path (`file://remotehost/x.scrml`, an encoded `/` such as
+  `%2F`) is not compiled. The document gets one Error, code `scrml-boot-uri`, and the server stays up.
+- **Disk changes are not watched.** The server handles no `didSave` and no
+  `workspace/didChangeWatchedFiles`. When an imported file changes on disk (a `git checkout`, a
+  formatter, another editor), an open file that imports it keeps its old diagnostics until you edit
+  it. Only an edit in an open buffer re-checks its importers (g-lsp-boot-no-save-watch-stale-importer-s474).
 
 ## Scheduling
 

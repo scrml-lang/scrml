@@ -41,7 +41,7 @@ const VIEW = `        <p id="o">\${@x}</p>\n        <button id="bad" onclick=go(
 const FORMS = {
   "a cell write `@x = load(id) !{ _ e :> … }`": (arm) => `    function go(id: string) {\n        @x = load(id) !{ _ e :> ${arm} };\n    }`,
   "a `const` binding": (arm) => `    function go(id: string) {\n        const r = load(id) !{ _ e :> ${arm} };\n        @x = r;\n    }`,
-  "a failable `match` arm": (arm) => `    function go(id: string) {\n        @x = match load(id) {\n            .Ok(v) :> v,\n            _ :> ${arm}\n        };\n    }`,
+  "a failable `match` arm": (arm) => `    function go(id: string) {\n        @x = match load(id) {\n            .Ok(v) :> v,\n            _ e :> ${arm}\n        };\n    }`,
 };
 const ARMS = {
   "`{ lift @x; }`": ["{ lift @x; }", "7"],

@@ -312,7 +312,7 @@ describe("scrml-boot compile — no `<db>`-body source text reaches any client a
     expect(r.err).not.toContain("error");
     expect(r.code).toBe(0);
     const files = readdirSync(out).sort();
-    const client = files.filter((f) => !SERVER_FILES.includes(f));
+    const client = files.filter((f) => !SERVER_FILES.includes(f) && f !== ".scrml-boot-manifest.json"); // the manifest (S474 C1) lists names only
     expect(client).toEqual(["index.html", "program.client.js", "scrml-runtime.js"]);
     for (const f of client) {
       const text = readFileSync(join(out, f), "utf8");

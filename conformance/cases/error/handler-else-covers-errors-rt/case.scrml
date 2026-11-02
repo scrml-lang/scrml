@@ -1,0 +1,29 @@
+${
+    type AuthErr:enum = {
+        Denied
+        Locked
+    }
+
+    function check(pw: string)! AuthErr {
+        if (pw == "locked") fail AuthErr.Locked;
+        if (pw != "secret") fail AuthErr.Denied;
+        return true;
+    }
+}
+
+<msg> = ""
+
+${
+    // In a `!{}` handler every arm is a failure; the success value never reaches it.
+    // So `else` there takes the remaining ERROR variants, and is not refused.
+    function login() {
+        check("wrong") !{
+            .Locked :> { @msg = "locked"; return; },
+            else    :> { @msg = "denied"; return; }
+        };
+        @msg = "LOGGED IN";
+    }
+}
+
+<button id="go" onclick=login()>go</>
+<p id="out">${@msg}</>

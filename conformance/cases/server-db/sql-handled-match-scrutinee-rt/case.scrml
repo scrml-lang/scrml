@@ -23,7 +23,7 @@
         const r = match ?{`SELECT id, body FROM notes`}.get() {
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
-            _                :> "other"
+            _ e              :> "other"
         }
         return r
     }
@@ -31,7 +31,7 @@
         const r = match ?{`SELECT id, body FROM empties`}.get() {
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
-            _                :> "other"
+            _ e              :> "other"
         }
         return r
     }
@@ -39,7 +39,7 @@
         const r = match ?{`SELECT id, body FROM gone`}.get() {
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
-            _                :> "other"
+            _ e              :> "other"
         }
         return r
     }
@@ -47,7 +47,7 @@
         const r = match ?{`SELECT id FROM gone`}.all() {
             ::Ok(rows)       :> "rows:" + rows.length,
             ::QueryFailed(m) :> "failed:" + m,
-            _                :> "other"
+            _ e              :> "other"
         }
         return r
     }

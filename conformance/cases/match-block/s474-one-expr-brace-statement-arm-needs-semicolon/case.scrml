@@ -1,0 +1,9 @@
+<program>
+    type K:enum = { A, B }
+    function go(k: K) -> int {
+        let x: int = 0;
+        match k { .A :> { x = 1 }, .B :> { x = 2; } }
+        return x;
+    }
+    <p id="x">${go(.A)}</p>
+</program>
