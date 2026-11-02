@@ -1133,7 +1133,7 @@ ${
             .ResetSurface(of: v) :> [sexpr(jmcall(surfaceJs(ctx, v), "reset", []))]
             .Defer(body: d) :> [deferJs(ctx, d)]
             .Unpersist(decl: d, inst: i, idx: x) :> [unpersistJs(ctx, d, i, x)]
-            .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> attemptJs(ctx, r, c, ok, arms, assigned)
+            .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> attemptJs(ctx, r, c, e, ok, arms, assigned)
             .Fail(err: e, idx: i, args: args) :> [returnJs(ctx, rtCall(ctx, "failure", [variantValueJs(ctx, e, i, args)]))]
             .Join(k: k, body: b) :> [JsStmt.SConst(symName(ctx, k), JsExpr.JArrow([], blockJs(ctx, b)))]
             .Jump(k: k) :> [sexpr(jcall(jid(symName(ctx, k)), []))]
@@ -1697,16 +1697,23 @@ ${
     //   const v = f(…);
     //   if (rt.failed(v)) { if (<arm 1 test on v.error>) { … } else … }
     //   else { <ok body>; result = <ok value>; }
-    // The arms are total (check.scrml C-E2), so the last — or a wildcard —
-    // needs no test. The patterns test `v.error` (the raw result's local is a
-    // minted, unique name), so an Attempt nested in an arm never collides.
+    // A wildcard arm needs no test. Every variant arm is tested, the last one
+    // too: the arms are total over the Attempt's enum (check.scrml C-E2), so
+    // the fall-through after the last variant arm is unreachable. It prints
+    // as `rt.unmatchedFailure(v.error, "<Enum>")`, which throws. s474 (defence
+    // in depth, ruling user-voice-scrml.md S474 "⭐ RULED — `else` on a
+    // failable match", PERMANENT security): a failure no arm names fails
+    // CLOSED. It never runs another arm's body, and never a `match`'s `else`,
+    // which lower.scrml errArms puts in the success branch only. The patterns
+    // test `v.error` (the raw result's local is a minted, unique name), so an
+    // Attempt nested in an arm never collides.
     // -------------------------------------------------------------------------
-    fn attemptJs(ctx: Ctx, result: Sym | not, call: Failable, ok: OkArm, arms: ErrArm[], assigned: int[]) -> JsStmt[] {
+    fn attemptJs(ctx: Ctx, result: Sym | not, call: Failable, err: Sym, ok: OkArm, arms: ErrArm[], assigned: int[]) -> JsStmt[] {
         let out: JsStmt[] = []
         if (result is given) out = out.concat([JsStmt.SDecl(symName(ctx, result))])
         const raw: string = symName(ctx, ok.bind)
         out = out.concat([JsStmt.SConst(raw, failableJs(ctx, call))])
-        const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), arms, 0, result)
+        const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), err, arms, 0, result)
         const okB: JsStmt[] = blockJs(ctx, ok.body).concat(resultJs(ctx, result, ok.value))
         return out.concat([JsStmt.SIf(rtCall(ctx, "failed", [jid(raw)]), errB, okB)])
     }
@@ -1718,12 +1725,12 @@ ${
         }
     }
 
-    fn errArmsJs(ctx: Ctx, err: JsExpr, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
-        if (i >= arms.length) return []
+    fn errArmsJs(ctx: Ctx, err: JsExpr, en: Sym, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
+        if (i >= arms.length) return [sexpr(rtCall(ctx, "unmatchedFailure", [err, jstr(en.hint)]))]
         const a: ErrArm = arms[i]
         const body: JsStmt[] = wholeBind(ctx, a.whole, err).concat(patBinds(ctx, a.pat, err)).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
-        if (i == arms.length - 1 || isWildPat(a.pat)) return body
-        return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, arms, i + 1, result))]
+        if (isWildPat(a.pat)) return body
+        return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, en, arms, i + 1, result))]
     }
 
     // s452 — the whole-error binder (`| _ err :>`, §18.6.1): the arm's local

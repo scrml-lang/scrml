@@ -13015,8 +13015,10 @@ ${
     // on a failable result it covers the success value `.Ok` ONLY, never an
     // error variant (§18.6, §19.7.1; E-MATCH-ELSE-ABSORBS-ERROR in
     // coverDiags, the one choke point for every failable-subject `match`);
-    // `absorbSpan`: that arm, where the error is reported.
-    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not }
+    // `absorbSpan`: that arm, where the error is reported. `okBefore`: `.Ok`
+    // already had an arm when that `_` / `else` came (s474 — then it covers
+    // nothing once every error is named: W-MATCH-001, coverDiags).
+    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean }
 
     fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
         let st: AS = st0
@@ -13028,6 +13030,7 @@ ${
         let wildWhole = false     // the first wildcard was `_ err`
         let absorb = false        // s474: a `match`'s plain `_` / `else` — the success value only
         let absorbSpan: ASpan | not = not
+        let okBefore = false      // s474: `.Ok` had an arm before that `_` / `else`
         for (const a of arms) {
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
@@ -13046,6 +13049,7 @@ ${
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
             if (ra.idx == -1) {
+                const okPrior: boolean = okSeen
                 okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
                 // s474 — in a `match` on a failable result a plain `_` / `else` is the
                 // success value's arm: it takes NO error variant (§18.6, §19.7.1). In a
@@ -13054,6 +13058,7 @@ ${
                 if (!last && isMatch) {
                     absorb = true
                     absorbSpan = a.span
+                    okBefore = okPrior
                 }
                 if (!isMatch) wild = true
                 last = true
@@ -13066,7 +13071,7 @@ ${
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
-        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan }
+        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore }
     }
 
     // What the failure set decides about resolved arms: totality over the
@@ -13108,6 +13113,15 @@ ${
         let missing: string[] = []
         if (isMatch && !ra.okSeen) missing = ["Ok"]
         missing = missing.concat(errs)
+        // s474 — `.Ok` and every error variant already have an arm: the `_` /
+        // `else` (which covers `.Ok` only) takes nothing (§18.6 W-MATCH-001: "an
+        // `else` arm is unreachable"; a warning, compilation proceeds).
+        if (isMatch && ra.absorb && ra.okBefore && errs.length == 0) {
+            let wat: ASpan = e.span
+            const wsp: ASpan | not = ra.absorbSpan
+            if (wsp is given) wat = wsp
+            return [newDiag("W-MATCH-001", "the `else` arm is unreachable: `.Ok` and every error variant of `" + label + "` already have an arm, and on a failable result `else` covers `.Ok` only (§18.6, §19.7.1)", env.file, wat)]
+        }
         if (missing.length == 0) return []
         if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — " + e020FailableHint(label, errs, !ra.okSeen) + " (§19.7.1)", env.file, e.span)]
         return [newDiag("E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + label + "` — add those arms, or a catch-all `| _ :> …` (§19.7)", env.file, e.span)]

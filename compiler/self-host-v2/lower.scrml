@@ -2715,8 +2715,9 @@ ${
         return out
     }
 
-    // A `match`'s success branch: its `.Ok(v)` arm, else its wildcard (which
-    // covers the success value too, §19.7.3).
+    // A `match`'s success branch: its `.Ok(v)` arm, else its plain wildcard
+    // (`_` / `else`), which on a failable result covers the success value
+    // ONLY (§18.6, §19.7.1; the S474 ruling — see errArms).
     fn matchOk(c: LC, h: HandledFact, arms: AArm[]) -> OkArm {
         for (const a of arms) {
             if (armIdxOf(c.t, a) == -2) return { bind: okBind(c, h, a), body: armBody(c, h, a), value: armValue(c, h, a) }
@@ -2736,11 +2737,23 @@ ${
     // The failure arms: every arm but a `match`'s `.Ok`, in source order.
     // s452: a whole-error arm (`_ err`, analyze's FArm(-4), §18.6.1) is the
     // wildcard binding the whole error value to its binder's Sym.
+    //
+    // s474 (defence in depth for the ruling user-voice-scrml.md S474 "⭐ RULED
+    // — `else` on a failable match", PERMANENT security): in a `match` a PLAIN
+    // `_` / `else` is the success value's arm. It is lowered into the success
+    // branch ONLY (matchOk), never into the failure arms. analyze refuses an
+    // `else` that would take an error variant (E-MATCH-ELSE-ABSORBS-ERROR), so
+    // the named error arms here are total. If a checker hole ever let one
+    // through, check.scrml C-E2 refuses the non-total Attempt, and a failure
+    // that no arm names TRAPS at run time (print.scrml errArmsJs) instead of
+    // running the `else` body. In a `!{}` (isMatch false) every arm is a
+    // failure arm, so there the plain wildcard is the catch-all (§19.4.5).
     fn errArms(c: LC, h: HandledFact, arms: AArm[], isMatch: boolean) -> ErrArm[] {
         let out: ErrArm[] = []
         for (const a of arms) {
             const idx: int = armIdxOf(c.t, a)
-            if (idx == -1) {
+            // (idx == -1 in a `match`: the success value's arm, matchOk — no failure arm)
+            if (idx == -1 && !isMatch) {
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             } else if (idx == -4) {
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
