@@ -892,6 +892,14 @@ async function makeRealSql(source: string, db: ServerDb): Promise<SQL> {
  * `sqlBinding` is the `_scrml_sql` value: a REAL seeded Bun.SQL instance
  * (`sqlEngine: "real"`) or `undefined`, in which case the `makeSqlStub`
  * regex stub is used (the byte-identical default for every existing case).
+ *
+ * S474 (#1718 r1, F1): a REAL binding is wrapped by the bundle's OWN `_scrml_db_guard`, exactly as
+ * a deploy wraps its handle (the emitted `const _scrml_sql = _scrml_db_guard(<handle>, …)` line is
+ * kept, with only the handle swapped for the seeded instance). So a BEGIN issued inside an open
+ * transaction nests as a SAVEPOINT here too, as it does at run time. Before, the raw binding made
+ * a `!` body's envelope plus an author `transaction { }` fail with "cannot start a transaction
+ * within a transaction", which a deploy never does. The stub binding keeps the strip: the stub
+ * has no transaction semantics to nest.
  */
 function evalServerModule(
   serverJs: string,
@@ -900,10 +908,11 @@ function evalServerModule(
   sqlBinding?: unknown,
 ): ServerModule {
   const g = globalThis as any;
+  const guarded = sqlBinding !== undefined && /^\s*const _scrml_sql = _scrml_db_guard\(.*, "(?:sqlite|postgres|mysql)", (?:true|false)\);\s*$/m.test(serverJs);
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
     .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
-    .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = .*;\s*$/m, guarded ? 'const _scrml_sql = _scrml_db_guard(__scrml_sql_binding, "sqlite", false);' : "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"))
     // No module context under `new Function`: the remaining `import.meta` reads (the
@@ -923,7 +932,7 @@ function evalServerModule(
   Object.defineProperty(view, "Bun", { value: BunStub, writable: true, configurable: true, enumerable: true });
   const host = new Proxy(view, { set: (_t, k, v) => Reflect.set(g, k, v) });
   const wrapper = new Function(
-    "_scrml_sql", "Bun", "Response", "crypto", "URL", "__scrml_host",
+    guarded ? "__scrml_sql_binding" : "_scrml_sql", "Bun", "Response", "crypto", "URL", "__scrml_host",
     `${runnable}\nreturn {` +
       ` fetch: typeof fetch !== "undefined" ? fetch : null,` +
       ` compose: typeof _scrml_ssr_compose_handler !== "undefined" ? _scrml_ssr_compose_handler : null` +
