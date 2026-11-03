@@ -78,7 +78,11 @@ Each item is filed in `docs/known-gaps.md` §S474-PA follow-ups or §S474-backfi
 ## 6. Wrap state
 - Main at wrap: fa0e875b4 (+ this wrap PR).
 - **Worktrees:** 86 merged review/agent worktrees removed. 12 agent worktrees locked by the session process (all merged and clean) could not be force-removed under auto mode. They go with the session; otherwise run `git worktree remove -f -f` on each `.claude/worktrees/agent-*` except `agent-a036efcbcbcb1c8b0`. Kept: `agent-a036efcbcbcb1c8b0` (#1448). `~/.cache/scrml-pa/s474/` holds only logs.
-- Maps: see the wrap commit (the "Maps:" line is updated there).
+- Maps: refreshed at wrap by project-mapper (watermark d139f747c → fa0e875b4). This is a stamp on primary/bootstrap/build only. The other maps still mention the deleted `facts-regen.yml` unlabelled, and bootstrap.map.md conformance figures are still the d139f747c ones (owed: a full map pass). `bootstrap.map.md` is gitignored, so it needs `git add -f`.
 
 ## 7. Test suite at wrap
-See the wrap PR body (filled in once the run finishes).
+- **`bun run test` (whole `compiler/tests/`, ONE process) on main fa0e875b4:** 50,566 pass · 6 fail · 171 skip · 17 todo (50,760 tests, 1,869 files, 1,237 s). Down from 72 at S473.
+  - 4 of the 6 are gap-tagged tests: g-soft-nav-rehydrate-seed-apply-unscoped, and g-ast-markup-text-interp-adjacent-space-dropped ×3.
+  - The other 2 are S426 seed-bridge `observeCompiled` and §2 runtime-url-guard chunk-as-classic-script.
+  - The PA did NOT re-run them in isolation this time. S473 found its single-process failures were cross-file interference; check before treating these as regressions.
+- **Pre-commit hook (`SCRML_HOOK_SHARDS=1`) on wrap commit 2918a5426:** 47,359 pass · 0 fail · 125 skip (47,497 tests, 1,678 files, 1,073 s). CI `gate` is the record for the merged head.
