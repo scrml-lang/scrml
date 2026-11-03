@@ -1,52 +1,84 @@
-# scrml — Session 473 (bryan · theRog) — WRAPPED
+# scrml — Session 474 (bryan · theRog) — WRAPPED
 
-> S473 ran 2026-10-28 → 2026-10-30 on theRog, Profile A, one long session (several compactions). S472's hand-off is at `handOffs/hand-off-472.md`. **Rotate this file to `handOffs/hand-off-473.md` at the next wrap.** Board: `scrml-support/handOffs/active-sessions/S473-bryan.md` (WRAPPED). Rulings verbatim: `scrml-support/user-voice-scrml.md` §S473 (21636 →). Live PA ledger for the session: `~/.claude/pa-ledger/scrml.md` (entries S473-1 … S473-224).
+> S474 ran 2026-10-30 → 2026-11-03 on theRog, Profile A, one long session (several compactions). S473's hand-off is at `handOffs/hand-off-473.md`. **Rotate this file to `handOffs/hand-off-474.md` at the next wrap.** Board: `scrml-support/handOffs/active-sessions/S474-bryan.md`. Rulings verbatim: `scrml-support/user-voice-scrml.md` §S474 (21836 →). Capability ledger: `scrml-support/capability-ledger.md` (PERMANENT semantic 69 · PERMANENT security 20 · INTERIM 53), which the PA reads at boot.
 
 ## 0. Where things stand
-- **Nothing of S473 is in flight.** All 34 S473 PRs merged, plus the 5 S472 carry-overs (#1613 #1615 #1616 #1621 #1622) at boot. Open PRs at wrap: FACTS bots (#1692 #1684 #1649) and two pre-S473 PRs (#1448 `s468-rulings-spec`, #580) — not this session's; its worktree `agent-a036efcbcbcb1c8b0` is kept.
-- **S471 policy holds:** impl#1 work only for (a) what the bootstrap needs, (b) breakage blocking flogence / bryan's tools, (c) Peter, plus explicitly ruled exceptions. S473's ruled exceptions: server-side `navigate()` (#1679) and the Windows routeMap fix (#1681).
-- **Bootstrap conformance (strict D30 grading):** PASS 283 · FAIL 241 · UNSUPPORTED 604. The FAIL jump (was 40) is grading, not regression: 202 parse-rejects that used to hide as UNSUPPORTED now FAIL honestly; no PASS was lost.
-- **SPEC coverage (`docs/bootstrap-spec-coverage.md`):** 1,107 rows; SILENT 91 → 49, each with a gap; CI gate `scripts/spec-coverage-check.ts` (0 warnings at wrap).
-- **Gap rollup at wrap (open, impl#1-owed):** HIGH 270 · MED 741 · LOW 658 (carried by the bootstrap: HIGH 5 · MED 8).
+- **Nothing of S474 is in flight.** 29 S474 PRs merged (#1694–#1738, not counting bot regens). Open PRs at wrap: #1448 (`s468-rulings-spec`, pre-S473; its worktree `agent-a036efcbcbcb1c8b0` is kept) and #580 (draft). The stale scheduled-regen PRs #1684 and #1649 were superseded by the post-merge bot. The PA's close was blocked by the auto-mode classifier, so close them by hand if they are still open.
+- **Generated blocks are bot-owned (S474 ruling).** PRs commit only `@gap` / `@review` markers and sources. `generated-regen.yml` regenerates `docs/generated/*`, SPEC-INDEX, coverage totals, conformance and FACTS on main after each merge. `state.ts --check` exit 4 (stale only) is fine in a PR. The `bot-owned-untouched` CI check refuses a PR that edits `docs/generated/`.
+- **S471 policy holds:** impl#1 work only for (a) the bootstrap build, (b) breakage in flogence or bryan's tools, (c) Peter. impl#1 security gaps are filed DEFERRED. S474's impl#1 PRs fall under these: #1694 #1698 (flogence), #1704 and #1718 (ruled).
+- **Gap rollup (generated, main fa0e875b4):** open impl#1-owed HIGH 272 · MED 767 · LOW 701; carried by the bootstrap HIGH 6 · MED 10 · LOW 1.
+- **Local `main` in the primary checkout has one unpushed operator commit,** 2d354c8b9 "spec(scrml): v1 ratified in alfa" (`specs/scrml.md`, 2026-11-01, "By: operator"). It is 130 behind origin/main. The PA left it alone and ran the primary checkout detached at origin/main, so the hook path stays current. bryan decides whether to push it, rebase it or drop it.
 
-## 1. What landed (34 S473 PRs, excluding FACTS-bot regens)
-Every code PR had an S239 adversarial review on a frozen tree (or a PA-verified small round), and the PA re-ran the review's probes on the fix head.
-- **SPEC-coverage audit (bryan: "it worries me that we have ignored sections of the spec"):** #1673 the coverage table + a gap for every silent item + the coverage gate; #1682 rulings D4–D31 into the SPEC (§47 moved to an impl#1 annex, contradictions resolved, record-lag sweep); #1691 one named-refusal table (D28), specific codes (D29), strict conformance grading (D30); #1690 the ruled refusals (transitive `!` envelope, journal OFF, slots, O51, Tailwind info, cell shadow, legacy `key=`, SQL slot literal) + F10/F11.
-- **Bootstrap fail-closed (D1: refuse rather than compile without the guarantee):** #1675 SQL / `protect=` / tenant; #1678 unknown and unbuilt markup; #1676 return-type inference, derived engines with state-children, dev-server static allowlist, reserved prefixes.
-- **`<host>` (F3) end to end:** #1630 DRAFT §21.3.3 SPEC; #1659 client bindings parsed, checked, emitted; #1674 the allowlist (Appendix H surface + typed chain walk; #1670 closed into it).
-- **Bootstrap language/security lanes:** #1631 + #1638 E-LOOP-008 (exit-less loops, inner forever); #1633 `<db>` cells as per-request server cells (Lane B); #1634 duplicate-fn lint; #1635 CSS-url SVG attrs / stylesheet `<link>` href / quoted-style `${}`; #1636 one name per file scope, past-end write traps, loop-copy lint; #1637 data never moves the document base; #1640 one name per program for exported names; #1641 data-bound form action / formaction / meta refresh refused; #1643 `<program>` attrs + lang + timestamp + E-STATE-UNDECLARED; #1646 §23.2 foreign blocks read (emission refused by name); #1648 every stdlib module measured on the bootstrap; #1663 data into an executable DOM sink is E-LOGIC-EXECUTABLE-SINK.
-- **impl#1 (bootstrap/flogence needs + ruled exceptions):** #1645 + #1661 + #1664 handler arms (value-position lift, imported callee, narrow Transport routing); #1658 scrml-boot single-quoted imports + `_ e :>` typing; #1679 server-side `navigate()` really redirects (coderlegion reply verified on it); #1681 Windows red fixed (5 families incl. routeMap native-key miss).
-- **SPEC drafts:** #1644 DRAFT §68 `<program kind="service">` (long-running programs).
-- **CI/docs:** #1671 README shows on GitHub again (`.github/README.md` was shadowing it); #1672 claim gate C2 (derived figures must cite FACTS.md; DESIGN.md's "18,000 lines" fixed); #1685 Windows ratchet (`.github/windows-baseline.json`, empty; required in `gate`; nightly `windows-main-report.yml`); #1632 docs batch.
+## 1. What landed (29 PRs)
+Every code PR had an S239 adversarial review on a frozen tree. Re-reviews were bound to the new head SHA, and every round was a fresh dev agent (see §5).
+- **Generated-file bot (ruling 1):** #1696 post-merge regen bot; #1707 generated blocks moved to `docs/generated/`, plus Windows on test-only PRs; #1719 the bot-owned guard diffs against the merge ref's first parent (F1–F3); #1726 the merge driver never loses hand text.
+- **Envelope / transactions:**
+  - #1699 bootstrap transitive `!` envelope (U1e: BEGIN/COMMIT/ROLLBACK + nested savepoints);
+  - #1703 BEGIN IMMEDIATE when the envelope writes, and failed-query driver text blanked on the wire in production;
+  - #1713 a client `!` composes its server calls into ONE request with ONE envelope (door 2);
+  - #1704 impl#1 delivers declared-`!` failures to the client's arms;
+  - #1718 impl#1 envelopes every `!` body, plus a Bun.SQL code classifier (PG codes) and the `_mayQuery` SCC cache;
+  - #1732 SPEC: every `!` server body runs in the §8.9.2 envelope;
+  - #1734 SPEC: `!` `server function*` commits per `yield`;
+  - #1737 SPEC: refuse every control character in SSE event/id.
+- **Bootstrap language:** #1697 one unnamed slot per exclusive branch (F7); #1700 loop-header `key` + W-KEY-001 + D10 double-paren assignment head; #1706 per-file scope keys and output names (door 3); #1715 `import { X as Y }`; #1722 one-expression brace `{ e }` is a value, plus a pinned code-point sort; #1727 foreign-content (SVG/MathML) templates render in their namespace, plus the H1/H2 guards; #1738 a failable-match `else` lowers to the success branch only, an unmatched failure traps, and W-MATCH-001 fires on an unreachable else.
+- **impl#1 (flogence):** #1694 `!{}` arm `e.variant`/`e.message` on an imported `?{}` callee; #1698 the `!{}` whole binder gets the §18.6.1 type.
+- **SPEC:** #1711 rulings 1–7 as amended plus the four one-way doors; #1725 SPEC examples follow the ruled `;`, plus backfill LOW notes; #1729 `else` on a failable match covers `.Ok` only (E-MATCH-ELSE-ABSORBS-ERROR, PERMANENT security SEC-20), and the §63.4 S466 readings are RULED.
+- **Tooling/CI:** #1701 the §34 census resolves bootstrap symbols; #1723 the scrml-boot `-o` ownership manifest (no deletes or writes outside through symlinks), BOM handling, `--columns` bytes, lsp-boot bad-URI and untitled names, doc-gate pins on count + name.
+- **Records:** #1695 S473 review markers + SPEC-INDEX line-1 leak + inbox; #1709 #1703/#1706 follow-up gaps; #1721 S474 markers + 19 S469 backfill markers + 19 backfill gaps (review-debt to 0 OWED in range); this wrap PR adds the rest (part 2 markers + `§S474-PA follow-ups` gaps).
 
-## 2. Rulings this session (verbatim in user-voice §S473 — brief from there, never from this list)
-"your recs" on: S472 §3 owner questions; round 2 (form action/meta refresh refused, server `<host>` stdlib-only, E-LOOP-008 widened, one name per program → narrowed to exported names); long-running `kind="service"` Q1–Q4 (a trap aborts only its turn); `<host>` rule 8 → allowlist, then allowlist Q1–Q4 (curated Appendix H surface, WebIDL names as types, no project-local surface, hard error now); plain-logic executable sinks are an Error; impl#1 narrow transport routing; **SPEC-coverage D1–D34** (+ D7 correction: `authority=` is Tier 1 and stays owed); impl#1 navigate exception; review-surfaced 1–5 (transitive `!` atomicity, journal OFF refused in `!`, element-named cell refused at declaration on collision, navigate in `transaction{}` is a compile error, loop-header `key` canonical); Windows exception + ratchet; the envelope counts transitive QUERIES, not writes; F10 (`!` callees count, with reach multiplicity), F11 (client multi-call `!` is a permanent refusal, E-TX-CLIENT-MULTI-CALL).
+## 2. Rulings this session (verbatim in user-voice §S474; brief from there, never from this list)
+S473 owner Qs (bot yes; F7 per-branch slot); review-surfaced 1–7; **capability over limitation**: every limiting rec is tagged INTERIM/PERMANENT, and the capability ledger exists; **FORK RULE row C, capability first**, amended so PERMANENT is allowed only for a proven exploit or a stated semantic impossibility; the four one-way doors; the envelope covers every `!` server body; `else` on a failable match (PERMANENT security); the `scrml fix` S466 readings; **`!` streaming commits per `yield`**.
 
 ## 3. Owner questions open at wrap
-1. **Post-merge bot for generated files (PA rec: yes).** The generated-file merge tax (known-gaps counts, coverage totals, `severity.scrml`, SPEC-INDEX, bootstrap-conformance.md) forced a re-merge round ~8–10 times this session: every PR that touched gaps went DIRTY when another landed. Rec: PRs stop committing regenerated blocks; a post-merge bot (like FACTS.md's) regenerates them on main, and CI checks only the sources. Needs bryan's OK because it changes what the hook/CI gate on.
-2. **F7 slot `if/else` (two slots in two branches):** the D11 ruling counts it as two unnamed slots; a refinement (branches are exclusive) is owed — PA rec: allow one per exclusive branch.
+1. **Postgres data-loss gap `g-impl1-envelope-site-handled-pg-abort-s474` (MED, deferred).** On PG, a failed site-handled query aborts the transaction. PA rec: keep it deferred unless Peter or flogence runs Postgres, and build it first if either does.
+2. **Veto window on the ⚑ PA readings** carried in the SPEC by #1711, #1732 and #1734. They include M2/N5 (#1713), ConstraintViolation `field` = column only, §41.7 E-SCOPE-010, `transaction{}` IMMEDIATE, `<card>` beside `fn card` PERMANENT, `${}` in `<pre>` INTERIM, the SSE §37.8 origin check, and SQLite read-only sets as BEGIN DEFERRED. Silence keeps them.
+3. **`<m.card>` markup spelling for `import * as m`** (owner fork from #1715; `import * as` stays INTERIM).
+4. **Local main's operator commit 2d354c8b9** (§0).
 
 ## 4. Owed next (pick from here; nothing is mid-flight)
-1. **Bootstrap envelope build (U1e)** — the transitive `!` envelope is now refused/ruled (queries counted, callees counted, F11 refusal); the real savepoint/rollback emission is the next bootstrap lane.
-2. **Loop-header `key` parse + W-KEY-001** (ruling 5; legacy `key=` is refused with a hint already).
-3. **D10 kept form** `if ((x = e))` / `for ((m = re.exec(s)) is given)` — still refused (the parser drops parens); gap g-boot-assign-as-expression-unbuilt-s473 (narrowed).
-4. **impl#1 follow-ups from #1679** (S471 policy: only if flogence/bryan needs them): g-impl1-navigate-via-peer-inside-transaction-not-refused-s473 (MED), g-impl1-server-navigate-target-unproven-lint-s473 (W-NAV-TARGET-UNPROVEN, MED), SSR-loader navigate.
-5. **Filed at wrap (`docs/known-gaps.md` §S473-wrap):** impl#1 `match` over a failable call not exhaustiveness-checked (MED); impl#1 lets a `?{}` SqlError escape a `! LoadError` function (MED); impl#1 rewrites `fn` / `X.y` / `is .V` inside string literals of the bootstrap source (MED); a named-refusal row drops unrelated generic errors file-wide (LOW); `<each of=>` unbuilt; mount-of-non-engine generic code; `<host>` review INFO bundle (#1670/#1674); host-src symlink/TOCTOU copy (L4/L5); dev-watch flake; stale conformance case `server-db/async-fn-escapes-as-value-handler-neg`.
-6. **Article:** `scrml-support/voice/articles/type-gymnastics-ts-vs-scrml-DRAFT-2026-10-30.md` (+ verified `.scrml`) — committed (scrml-support 46b5aee); unpublished, bryan's call when to post. The two impl#1 gaps in item 5 were found writing it (the article's block avoids both).
-7. **Salvage still parked:** `~/.cache/scrml-agent-tmp/salvage-s468-failable-alias-and-match/` (patch + tgz + base sha of the uncommitted S468 impl#1 work).
+Each item is filed in `docs/known-gaps.md` §S474-PA follow-ups or §S474-backfill unless noted.
+1. **SPEC follow-up pass (small, one lane):**
+   - reword the IN-52 capable form to "audited raw admission of TAB/DEL/C1" in §37.4.2, the §34 row and the gap;
+   - #1737 N2 (NUL in id arguably PERMANENT);
+   - the comma-less arm-list sweep;
+   - the server param-default note.
+2. **Bootstrap follow-ups from #1738:** W-MATCH-001 should count only arms before the wildcard (today it fires on already-failing programs, with a false message), and cap the `unmatchedFailure` tag to an identifier pattern.
+3. **Bootstrap:** g-boot-parser-restructure-residue-s474 (MED, fails closed); value-form `if`; the §18.5 object-literal arm body; g-boot-failable-arm-foreign-enum-qualifier-accepted-s474.
+4. **Tooling/CI:**
+   - the ci.yml currency step (~:263) and the s34-census `--base` (~:348) still read the stale `pull_request.base.sha`; this is #1719's F4, the same race;
+   - #1719 N1: no test runs the fail-closed guard;
+   - #1726: the hand-text self-check is position-blind;
+   - #1489: spec-ahead pins compare code SETS, so a typo hides behind E-SCOPE-001;
+   - #1723 r1 (INTERIM): output check-then-write race and hard-link overwrite.
+5. **Capable forms owed (INTERIM, capability ledger IN-*):**
+   - a per-row scoped slot;
+   - a non-`!` two-query server call wrapped when the caller is `!`;
+   - display-position pending values (§13.9);
+   - pure `fn` values in cells;
+   - `import * as m`;
+   - the impl#1 SSE per-yield envelope (IN-46..IN-52).
+6. **impl#1 (deferred unless flogence/bryan/Peter need it):** H1/H2/H3 security (optional-call / param-default match subjects unawaited; MathML `if=`); the `<request>` body `lin` leak; ruled-form refusal misses (#1496); `else` absorbing error variants (g-impl1-else-absorbs-error-variants-s474); the pg-abort gap (§3.1).
+7. **Article** `type-gymnastics-ts-vs-scrml-DRAFT-2026-10-30.md` is still unpublished (bryan's call). The S474 article edits ("I am Jacks" series) live in scrml-support/voice/articles.
+8. **Salvage still parked:** `~/.cache/scrml-agent-tmp/salvage-s468-failable-alias-and-match/`.
 
 ## 5. Lessons
-- **A policy without a check decays** (user-voice D-lesson): §47 and ~90 other SPEC items sat silently unbuilt because nothing failed when a section had no bootstrap row. The coverage gate is the check; keep rows current in the PR that lands a gap.
-- **`gh pr merge` while checks are pending does not queue.** It prints "merge strategy set by merge queue" and does nothing. Use a loop that waits for `gate` on the head SHA, then merges, and verifies `isInMergeQueue` (the S473 `landq.sh` pattern). Also confirm a push reached the PR (`gh api repos/…/pulls/N --jq .head.sha`) — #1675's didn't.
-- **Diagnose CI red from the log, not the shape:** #1672 looked like cross-test pollution; it was a C2 test timeout plus main's own Windows red.
-- **Brief from the source decisions doc, never from my user-voice summary** — the D7 summary drifted (Tier 2 vs Tier 1) and had to be corrected.
-- **Never `cd` into a worktree from the primary shell** (it moved the primary dir twice); absolute paths or subshells.
-- The four "duplicate gap ids" flagged mid-session are not duplicates: each is one `@gap` marker plus its `gap-resolution` record (the designed form); `state.ts --check` passes.
+- **Stranded agents (hardened into the PA docs: pa-global "Stranded agents", pa-base §5, pa-core-scrml dispatch checklist).**
+  - **Cause:** a background child that never exits pins the agent in "waiting on its own background work" and holds back its report. In S474 the children were two `until ! pgrep -f "git commit"` watcher loops that matched their own command line, ran 16 h and 46 h, and blocked five agents. When they died, all five flushed. Compaction was not the cause, and neither was resuming agents.
+  - **Rules:**
+    - every wait must be able to end: wait on a PID with a cap, or on the completion notification;
+    - use a fresh agent for each dev fix round;
+    - keep scratch files under `~/.cache/scrml/<lane>/`, because the shared scratchpad got clobbered and one commit went out with another lane's message;
+    - if a branch is held by another worktree, use `<branch>-rN` and push with `HEAD:<branch>`.
+- **Capability over limitation.** bryan noticed the PA's recs defaulting to the most limiting option. Every limiting rec now carries INTERIM/PERMANENT, a PERMANENT rec must name the capable alternative, and the ledger is read at boot. A reviewer also caught a PA ledger error: IN-52's capable form ("escaping") was unreachable on the wire.
+- **Merge-queue race on gap ids.** Two PRs filing the same gap id with different sev/status went DIRTY in CI (#1718 vs #1732). Resolve by hand to one entry; the merge driver (#1726) stops with a header block and does not guess.
+- **The auto-mode classifier blocks:** `kill` of stray loops, force-removing session-locked worktrees, `gh pr close`. Hand these to bryan as one `! <command>` line.
+- **"Why are we sitting on the reviews?":** don't park finished reviews as wrap paperwork. Record markers as each review lands.
 
 ## 6. Wrap state
-- Main at wrap: d139f747c (+ this wrap PR). Worktrees: all S473 worktrees, review trees and scratch worktrees removed; kept `agent-a036efcbcbcb1c8b0` (#1448, open, pre-S473).
-- Maps: refreshed at wrap by project-mapper (watermark 546e2f4aa → d139f747c); see the wrap commit.
+- Main at wrap: fa0e875b4 (+ this wrap PR).
+- **Worktrees:** 86 merged review/agent worktrees removed. 12 agent worktrees locked by the session process (all merged and clean) could not be force-removed under auto mode. They go with the session; otherwise run `git worktree remove -f -f` on each `.claude/worktrees/agent-*` except `agent-a036efcbcbcb1c8b0`. Kept: `agent-a036efcbcbcb1c8b0` (#1448). `~/.cache/scrml-pa/s474/` holds only logs.
+- Maps: see the wrap commit (the "Maps:" line is updated there).
 
 ## 7. Test suite at wrap
-- **`bun run test` (whole `compiler/tests/`, ONE process) on main d139f747c:** 50,183 pass · 72 fail · 171 skip · 17 todo (50,443 tests, 1,860 files, 1,222 s). **The 72 are cross-file interference, not regressions:** 5 of the failing files (conf-PROTECT-EGRESS-FLOOR, conf-TENANT-SOURCE-FILTER, s457-url-scheme-runtime-guard, build-sqlite-data-root, e2e detector-validation) re-run together: 432 pass / 0 fail. The rest are dev-watcher timing (`commands/dev-*`, 10–20 s budgets) and browser tests that need their own harness. CI's `gate` (sharded, per-job) is green on this SHA. Don't read the single-process number as health; the record is the sharded hook run below.
-- **Pre-commit hook (sharded: unit + integration + conformance + slices) on the wrap commit 444fb6450:** 52,356 pass · 0 fail · 152 skip · 14 todo (52,522 tests, 1,818 files, 264 s). A landing worktree still needs `samples/compilation-tests/dist` copied in (hand-off-471 lesson; it bit again).
+See the wrap PR body (filled in once the run finishes).

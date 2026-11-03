@@ -2,6 +2,26 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S474 — 2026-10-30 → 11-03 (bryan · theRog) — 29 PRs: generated blocks go to a post-merge bot; every `!` server body runs in the transaction envelope (bootstrap U1e, impl#1, SPEC), and streaming `!` commits per `yield`; capability over limitation (INTERIM/PERMANENT tags + capability ledger + FORK RULE row C); review debt drained
+
+- **Generated-file bot:** post-merge regen (#1696); blocks moved to `docs/generated/` (#1707); the bot-owned guard diffs against the merge ref (#1719); the merge driver never loses hand text (#1726).
+- **Envelope / transactions:**
+  - bootstrap: transitive `!` envelope with savepoints (#1699); BEGIN IMMEDIATE when writing, and driver text blanked in production (#1703); a client `!` composes its server calls into one request with one envelope (#1713);
+  - impl#1: declared-`!` failures delivered (#1704); every `!` body enveloped, plus Bun.SQL/PG error codes (#1718);
+  - SPEC: every `!` body enveloped (#1732); `server function*` commits per `yield` (#1734); SSE event/id control characters refused (#1737).
+- **Bootstrap language:** one slot per exclusive branch (#1697); loop-header `key` + D10 assignment head (#1700); per-file scope keys (#1706); `import { X as Y }` (#1715); one-expression brace `{ e }` (#1722); SVG/MathML templates in their namespace (#1727); a failable-match `else` reaches success only, and an unmatched failure traps (#1738).
+- **impl#1 (flogence):** `!{}` arm fields on an imported callee (#1694); the `!{}` whole-binder type (#1698).
+- **SPEC:** rulings 1–7 + the four one-way doors (#1711); examples follow the ruled `;` (#1725); `else` on a failable match covers `.Ok` only, PERMANENT security (#1729).
+- **Tooling:** §34 census over bootstrap symbols (#1701); scrml-boot `-o` ownership manifest, plus lsp-boot fixes (#1723).
+- **Records:**
+  - #1695, #1709 and #1721 recorded review markers plus a backfill of 19 S469 reviews, with the backfill gaps filed. Their impl#1 HIGH items (H1/H2/H3) are deferred.
+  - The wrap PR records the rest.
+- **Rulings (user-voice §S474):** bot yes, F7; review-surfaced 1–7; capability over limitation; FORK RULE row C (+ semantic impossibility); the four one-way doors; envelope every `!` body; `else` on failable match; the `scrml fix` S466 readings; `!` streaming commits per `yield`.
+- **Gap rollup:** HIGH 272 · MED 767 · LOW 701 (impl#1-owed); the bootstrap carries HIGH 6 · MED 10 · LOW 1.
+- **Lessons:**
+  - Stranded agents came from never-ending background watchers (`pgrep -f` matching itself), not from compaction. Bounded waits and a fresh agent per round are now in the PA docs.
+  - Record review markers as reviews land, not at wrap.
+
 ## S473 — 2026-10-28/30 (bryan · theRog) — 34 PRs: a SPEC-coverage audit of the bootstrap (every SPEC § has a row; silent items 91 → 49, each gapped, CI-gated); the bootstrap fails closed on SQL / `protect=` / unknown markup; `<host>` typed bindings with an allowlist; impl#1 server `navigate()` and Windows fixed
 
 - **SPEC coverage:** `docs/bootstrap-spec-coverage.md` (1,107 rows) + `scripts/spec-coverage-check.ts` gate (#1673); rulings D4–D31 written into the SPEC, §47 moved to an impl#1 annex (#1682); one named-refusal table, specific codes, strict conformance grading (#1691); the ruled refusals incl. the transitive `!` envelope (#1690). Conformance under strict grading: PASS 283 · FAIL 241 · UNSUPPORTED 604 (FAIL rose from honest grading of 202 parse-rejects; no PASS lost).

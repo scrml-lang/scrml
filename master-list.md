@@ -10,6 +10,11 @@
 
 > **Per-session narrative lives in `docs/changelog.md`** — the ONE narrative source of truth (DD3 Fork 1, ratified S171 / executed S173). §0 is the LIVE dashboard **only**: current stances, rules, definitions and gates. The S230→S372 session banners were rotated out S375 (`docs/changes/boot-trim-tier1-2026-08-25/`); two orphans (S246, S275) were moved into the changelog first.
 
+> **S474 (2026-10-30 → 11-03) gate facts / stances:**
+> - **Generated blocks are bot-owned.** `docs/generated/*`, SPEC-INDEX, coverage totals, conformance and FACTS are regenerated on main after each merge by `generated-regen.yml`. A PR commits markers and sources only, and the `bot-owned-untouched` check refuses edits to `docs/generated/`.
+> - **Capability over limitation (user-voice §S474).** FORK RULE row C ("is this a capability the language should have?") is asked first. Every limiting rec is tagged INTERIM (refused until built) or PERMANENT (only for a proven exploit or a stated semantic impossibility). Each one is listed in `scrml-support/capability-ledger.md`.
+> - **Every `!` server body runs in the §8.9.2 envelope.** A `!` `server function*` commits per `yield`.
+
 > **S470 (2026-10-26) gate facts:** the runtime-size ratchet was raised by measured deltas for S470's security lanes only (#1560 `<each>`-row 8,245 → 8,375 B; #1577), under the ruling "allow raising the budget" (user-voice 552a379). Any later raise needs a new ruling. impl#1 now emits SPEC's E-ERROR-012 for a value-position fall-through arm (ruling e2e4c7a). The security pack's `EXPECTED_SHAPE_COUNT` conflicts between every two concurrent security landings: keep both sides and re-sum.
 
 > **S469 (2026-10-24) gate fact:** the browser runtime-size ratchet sits AT its ceiling after #1534 (the `<each>` row `if=` shape 8,432 B vs 8,433 B gzip). The next runtime addition needs a bryan ruling to raise it (ratchets: lower freely, never raise without a ruling). Security-lane method: constrain fixes to the proven path (markup tokenizer, plain lowering, main as oracle) and refuse what it can't cover — see `docs/changelog.md` S469.
