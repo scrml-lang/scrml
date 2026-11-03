@@ -1,6 +1,7 @@
 # build.map.md
 # project: scrml
-# updated: 2026-10-27T21:58:43Z  commit: 546e2f4aa
+# updated: 2026-11-03T00:00:00Z  commit: fa0e875b4
+# S474 (d139f747c -> fa0e875b4): `.github/workflows/facts-regen.yml` DELETED; replaced by `.github/workflows/generated-regen.yml` (post-merge bot: severity.scrml, SPEC-INDEX.md, bootstrap-spec-coverage.md, docs/generated/{gap-counts,recent-sessions}.md, bootstrap-conformance.md, FACTS.md). ci.yml gained a bot-owned-untouched guard (scripts/bot-owned-untouched.sh) and stale warnings (scripts/ci-stale-warn.sh); `.github/workflows/cloud-maps.yml` edited; .github/CI.md updated. Mentions of facts-regen below are historical.
 # ⛑ **S471 STAMP — `3d17013f8` -> `546e2f4aa` (origin/main). 68 COMMITS, 18 first-parent (s471 PRs #1581 … #1599 + bot/facts-regen merges). Branch `s471-maps`.
 # FIGURES (ls-tree at 546e2f4aa): `compiler/src` 325 files (+1: `guard-arm-bodies.ts`, the ONE reader of text-held `!{ }` arm bodies, moved out of codegen/emit-library-shared.ts for the
 # E-SYNTAX-042 null/undefined-in-arm refusal #1587), 1,845 test files (`compiler/tests`), `compiler/SPEC.md` 52,075 lines, 2,091 `case.scrml` (conformance + acceptance), 65 conformance category dirs.
