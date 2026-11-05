@@ -12711,7 +12711,7 @@ ${
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
         if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(err))
-        const ra: RArms = resolveArms(env, subj, arms, err, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, err, not, isMatch, stmt, st)
         st = ra.st
         for (const d of coverDiags(env, e, subj, err, isMatch, ra, -1, err.hint)) { st = withDiag(st, d) }
         return handledFact(env, e, err, stmt, not, [], not, st)
@@ -12859,6 +12859,39 @@ ${
         const qs: Sym | not = typeNamedHere(env, qual)
         if (qs is not) return false
         return variantIndex(env.g.types, qs, name) >= 0
+    }
+
+    // s475 (g-boot-failable-arm-foreign-enum-qualifier-accepted-s474) — on a
+    // failable subject a qualified arm `Q.V` names the FAILURE's enum, as on a
+    // plain subject (§18.13: a fully qualified arm anchors the type of the
+    // match's arms). `err` is the set the arms resolve against: the declared
+    // enum, the built-in `Error` / `SqlError`, or the set of a call of a server
+    // function. `own` is that callee's declared enum (its variants are the set's
+    // first ones, §19.9.10), so `SaveError.Conflict` qualifies there too. A
+    // minted client set (`E + Transport`) has no declared name: its `Transport`
+    // arm is written `.Transport(t)`.
+    fn qualIsFailure(env: Env, qual: string, err: Sym, own: Sym | not) -> boolean {
+        const qs: Sym | not = typeNamedHere(env, qual)
+        if (qs is not) return false
+        if (qs.id == err.id) return true
+        if (own is given) return qs.id == own.id
+        return false
+    }
+
+    fn foreignQualMsg(env: Env, pn: PatName, err: Sym, own: Sym | not) -> string {
+        const head: string = "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but the failure here is "
+        // a minted client set has no name a program can write
+        const named: Sym | not = typeNamedHere(env, err.hint)
+        let minted = true
+        if (named is given) minted = named.id != err.id
+        if (!minted) return head + "`" + err.hint + "` — write `" + err.hint + "." + pn.name + "` or `." + pn.name + "` (§18.13)"
+        const noName: string = ", and no declared enum names `Transport` there — write `.Transport(t)` (§18.13, §19.9.10)"
+        if (own is given) {
+            const set: string = "`" + own.hint + "` plus the wire's `Transport`"
+            if (pn.name == "Transport") return head + set + noName
+            return head + set + " — write `" + own.hint + "." + pn.name + "` or `." + pn.name + "` (§18.13, §19.9.10)"
+        }
+        return head + "the wire's `Transport` (the callee is not declared `!`)" + noName
     }
 
     // `scoped`: only the enums in scope in this file; else every user enum.
@@ -13151,7 +13184,7 @@ ${
     // nothing once every error is named: W-MATCH-001, coverDiags).
     type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean }
 
-    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
+    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, own: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
         let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let covered: int[] = []
@@ -13163,7 +13196,7 @@ ${
         let absorbSpan: ASpan | not = not
         let okBefore = false      // s474: `.Ok` had an arm before that `_` / `else`
         for (const a of arms) {
-            const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
+            const ra: RArm = resolveArm(env, a, err, own, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
             // the same variant) SHALL be a compile error (E-TYPE-023 …). The second
@@ -13468,7 +13501,7 @@ ${
     fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (isMatch && variantIndex(env.g.types, rset, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(rset))
-        const ra: RArms = resolveArms(env, subj, arms, rset, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, rset, f.err, isMatch, stmt, st)
         st = ra.st
         const remote: Diag[] = coverDiags(env, e, subj, rset, isMatch, ra, -1, setLabel(env, f, rset)).concat(conflictDiags(env, f, e))
         let local: Diag[] = []
@@ -13569,7 +13602,7 @@ ${
     // its binders (locals scoped to the arm), its body.
     type RArm:struct = { idx: int, st: AS }
 
-    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
+    fn resolveArm(env: Env, a: AArm, err: Sym, own: Sym | not, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
         let st: AS = st0
         if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§19 alias note; `bun scrml migrate --fix` rewrites it)")
         let armEnv: Env = withSubject(withWhole(env, -1), -1)
@@ -13607,7 +13640,11 @@ ${
         } else {
             const i: int = variantIndex(env.g.types, err, pn.name)
             // s469 — a qualified `E.V` (§18.13): `E` must name an enum that declares `V`
-            if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)")
+            if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) {
+                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)")
+            } else if (pn.qual != "" && i >= 0 && !qualIsFailure(env, pn.qual, err, own)) {
+                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", foreignQualMsg(env, pn, err, own))
+            }
             if (i < 0) {
                 let what: string = "`." + pn.name + "` is not a variant of `" + err.hint + "`"
                 if (pn.name == "Ok") what = "`.Ok` is the success value of a `match` — a `!{ … }` handler's arms are failures only"
