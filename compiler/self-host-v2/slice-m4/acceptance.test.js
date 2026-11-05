@@ -292,6 +292,8 @@ const STATUS = {
   "imports/neg-not-exported": ["PASS", ["E-IMPORT-004"]],
   "imports/neg-missing-file": ["PASS", ["E-IMPORT-006"]],
   "imports/neg-bare-specifier": ["PASS", ["E-IMPORT-005"]],
+  "imports/namespace-members-run": ["PASS", []],                       // s475: `import * as m` (ruling S475 item 3)
+  "imports/neg-namespace-member-not-exported": ["PASS", ["E-IMPORT-004"]],
   // s471-bootstrap-parse-batch — parser gaps (parse.scrml)
   "display/several-literals": ["PASS", []],
   "display/neg-runaway-literal": ["PASS", ["E-CTX-001"]],

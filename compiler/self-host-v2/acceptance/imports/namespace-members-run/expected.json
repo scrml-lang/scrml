@@ -1,0 +1,28 @@
+{
+  "id": "acceptance-imports-namespace-members-run",
+  "description": "a namespace import (`import * as m`) binds `m`; its members `m.shout`, `m.Color.Blue`, `m.GREETING` and the component `<m.badge/>` resolve to the module's exports and run in the page.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "s475: ruling:user-voice-scrml.md S475 item 3 (\"`import * as m from './x.scrml'` is defined; a namespaced component is written `<m.card/>`\"); was E-BOOTSTRAP-UNSUPPORTED (g-boot-namespace-import-unbuilt-s474).",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "WORLD!"
+      },
+      {
+        "selector": "#c",
+        "text": "blue"
+      },
+      {
+        "selector": "#g",
+        "text": "hello"
+      },
+      {
+        "selector": "#b",
+        "text": "ok"
+      }
+    ]
+  }
+}

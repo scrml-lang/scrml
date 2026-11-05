@@ -318,9 +318,15 @@ describe("still refused, each with its named code", () => {
   });
   test("near-miss: the same client `!` calling a `!` server function compiles — that function's own envelope holds both", () => {
     const both = `    function both(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n`;
-    const src = `<program db="./app.db">\n${E}${both}    function move(a: int)! E {\n        const y: int = both(a) !{ _ :> { return 0; } };\n        if (y == 0) fail .Bad;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    const mk = (tail) => `<program db="./app.db">\n${E}${both}    function move(a: int)! E {\n        const y: int = both(a) !{ _ :> { return 0; } };\n${tail}        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    const src = mk("");
     expect(errsOf(src)).toEqual([]);
     expect(compile(src).core.envelopes.find((e) => e.fn.hint === "both").standalone).toBe(true);
+    // S475 ruling item 1: a trailing `fail` after that call that cannot join a batch (composing it needs
+    // `Transport` in `E`) would fail after `both` committed — an Error now (was W-TX-FAIL-AFTER-COMMIT).
+    const late = mk("        if (y == 0) fail .Bad;\n");
+    expect(errsOf(late)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(msgOf(late, "E-TX-FAIL-AFTER-COMMIT")).toContain("Transport(t: ServerCallError)");
   });
   // s474-boot-client-bang-composition (S474 ruling door 2): this was the permanent E-TX-CLIENT-MULTI-CALL;
   // the two calls now compose into one request with one envelope. Without `Transport` in `E` the composed
@@ -643,7 +649,9 @@ describe("r2 item 1 — the runtime keys a SQLite connection by the file's REAL 
 
 describe("r2 item 2 — a CLIENT `!` holds no transaction: no one-database check on it", () => {
   test("a client `!` making one call to a `!` function of `<db src=b>` compiles; the callee carries the envelope", () => {
-    const src = `<program db="./a.db">\n${E}    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            ${q("INSERT INTO blog (a) VALUES (${a + 1})")}\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        const y: int = onB(a) !{ _ :> { return 0; } };\n        if (y == 0) fail .Bad;\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    const src = `<program db="./a.db">\n${E}    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            ${q("INSERT INTO blog (a) VALUES (${a + 1})")}\n            return 1;\n        }\n    </db>\n    function move(a: int)! E {\n        const y: int = onB(a) !{ _ :> { return 0; } };\n        return y;\n    }\n${page(["move(1)"])}</program>\n`;
+    // (S475 ruling item 1: a trailing `fail` after the call would be E-TX-FAIL-AFTER-COMMIT — `E` has no
+    // `Transport`, so the call cannot compose — and is dropped here; this case is about the database check.)
     expect(errsOf(src)).toEqual([]);
     const env = compile(src).core.envelopes;
     expect(env.find((e) => e.fn.hint === "onB").standalone).toBe(true);

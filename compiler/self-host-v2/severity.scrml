@@ -73,7 +73,6 @@ ${
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
             "W-TX-ARM-UNREACHABLE" :> Severity.Warning
-            "W-TX-FAIL-AFTER-COMMIT" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -334,6 +333,7 @@ ${
             "E-THROW-NOT-IN-SCRML" :> Severity.Error
             "E-TRY-NOT-IN-SCRML" :> Severity.Error
             "E-TX-CLIENT-MULTI-CALL" :> Severity.Error
+            "E-TX-FAIL-AFTER-COMMIT" :> Severity.Error
             "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
             "E-TYPE-021" :> Severity.Error

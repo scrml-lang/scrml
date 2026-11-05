@@ -27,7 +27,8 @@ function nodes(x, out = []) {
 // too — `variant` — and a nullary variant is a bare string element of an array
 // or a field value, checked separately).
 // s472 (boot-math-port): `orig` — an import name's EXPORTED identifier (AImportName.orig).
-const STRING_KEYS = new Set(["path", "name", "orig", "v", "raw", "text", "tag", "from", "variant", "op"]);
+// s475 (namespace import): `ns` — the identifier `import * as ns` binds (AImport.ns; "" for any other import).
+const STRING_KEYS = new Set(["path", "name", "orig", "ns", "v", "raw", "text", "tag", "from", "variant", "op"]);
 function strayStrings(x, key = "", out = []) {
   if (Array.isArray(x)) { x.forEach((y) => strayStrings(y, key === "grants" ? "grant" : key, out)); return out; }
   if (x && typeof x === "object") { for (const [k, v] of Object.entries(x)) if (k !== "span") strayStrings(v, k, out); return out; }

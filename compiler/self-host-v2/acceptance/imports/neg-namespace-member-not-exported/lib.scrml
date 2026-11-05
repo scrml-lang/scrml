@@ -1,0 +1,5 @@
+${
+    export fn here() -> string {
+        return "here";
+    }
+}

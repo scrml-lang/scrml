@@ -300,7 +300,11 @@ ${
     // file top level, OUTSIDE any `${}` logic context"). For a host import, a
     // name's `name` is the binding in this file's scope (the `as` name when one
     // is written, §21.3.1 `named-binding ::= identifier ('as' identifier)?`).
-    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string, host: string | not, top: boolean }
+    // s475 — `ns`: the local name of a namespace import `import * as ns from "…"`
+    // (§21.3 "ES module `import` syntax"; ruling:user-voice-scrml.md S475 item 3);
+    // "" for every other import. A namespace import has no `names`: its members
+    // are the target's exports, bound by analyze's linkage as `ns.name`.
+    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string, host: string | not, top: boolean, ns: string }
 
     // -------------------------------------------------------------------------
     // Markup: attributes, elements, text, interpolation.
@@ -478,7 +482,10 @@ ${
     // host surface).
     export type AHostBind:struct = { fn: int, span: ASpan, target: AExpr | not, isNew: boolean, waiting: boolean,
                                      failable: boolean, hasResult: boolean, src: string, isFn: boolean, blockTypes: string[] }
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[] }
+    // s475 r1 — `first`: the file's first node id, so analysis can re-read it (from the
+    // driver's source, never a text held in the tree) once it knows which `m.x` are
+    // namespace members (parse.scrml PNs, analyze.scrml analyzeSources).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], first: int }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)

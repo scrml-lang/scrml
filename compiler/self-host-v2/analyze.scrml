@@ -58,7 +58,8 @@ ${
     import { Severity } from "./severity.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
+    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
+    import { PNs, Parsed, parseFileNs, nsOfItems } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
@@ -629,7 +630,10 @@ ${
     // s469 — `lifts`: every `lift` the binder resolved, by the tape it appends
     // to and its operand's type where known (a bound loop's binder type is the
     // join of its lifts', §49.6 rule 2; none at all is E-LOOP-007).
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[] }
+    // s475 r1 — `nsAt`: the value names `m` resolved to a namespace import (resolveNameOf), by file and
+    // source offset; analyzeSources re-reads those files with `m.x` there one name (parse.scrml PNs).
+    type NsAt:struct = { file: string, at: int }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[] }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -671,11 +675,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -726,38 +730,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]) }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // =========================================================================
@@ -988,7 +992,10 @@ ${
     // and its per-file scope key — stay the DECLARING file's.
     type ScopeName:struct = { name: string, kind: NameKind, from: string, orig: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
-    type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
+    // s475: `nss` — every namespace import (`import * as ns from "…"`) of every file: `target`
+    // the file it resolves to, "" when none (its refusal is checkImports').
+    type NsBind:struct = { file: string, ns: string, from: string, target: string }
+    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[] }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
@@ -1111,6 +1118,7 @@ ${
         let st: AS = st0
         const paths: string[] = filePaths(files)
         let scopes: FileScope[] = []
+        let nss: NsBind[] = []
         for (const f of files) {
             let names: ScopeName[] = []
             let mine: string[] = []
@@ -1129,6 +1137,39 @@ ${
             let importedOrig: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
+                // s475 (ruling S475 item 3): `import * as m from "…"` binds `m` in file scope (one
+                // binding, judged as any import's local name is — E-SCOPE-010, §7.6), and brings
+                // each EXPORTED declaration `x` of the target as the local name `m.x` (an alias
+                // entry: the lookup takes the declaration of (target, `x`), so it and its per-file
+                // scope key stay the declaring file's). `orig` "*" in `importedOrig` marks a
+                // namespace. A name the target does not export is not bound (E-IMPORT-004 at the
+                // use, nsMember). A target that resolves to nothing binds nothing (checkImports).
+                if (imp.ns != "") {
+                    const nsn: string = imp.ns
+                    nss = nss.concat([{ file: f.path, ns: nsn, from: imp.from, target: target }])
+                    st = reservedName(st, f.path, imp.span, nsn)
+                    const at0: int = imported.indexOf(nsn)
+                    if (mine.indexOf(nsn) >= 0) {
+                        st = addDiag(st, f.path, imp.span, "E-SCOPE-010", "`" + nsn + "` is bound by `import * as " + nsn + " from \"" + imp.from + "\"` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or write another namespace name (`import * as " + nsn + "2 from \"" + imp.from + "\"`)")
+                    } else if (at0 >= 0 && (importedFrom[at0] != target || importedOrig[at0] != "*")) {
+                        st = addDiag(st, f.path, imp.span, "E-SCOPE-010", "`" + nsn + "` is already imported into this file (" + importedShown(importedOrig[at0], importedFrom[at0]) + "), and `import * as " + nsn + " from \"" + imp.from + "\"` binds it again — one local name cannot bind two declarations (duplicate binding in file scope, §7.6); write another namespace name (`import * as " + nsn + "2 from \"" + imp.from + "\"`)")
+                    } else if (at0 >= 0) {
+                        st = addDiag(st, f.path, imp.span, "W-IMPORT-001", "`" + nsn + "` is already imported by an earlier `import * as " + nsn + "` of the same module in this file — the same namespace imported twice (§41.7); remove the duplicate")
+                    }
+                    // the members are bound whatever the binding's own fault (one report per fault, as
+                    // #1715 r1 F3: the build already fails at the import; no use cascades); the earlier
+                    // binding of a duplicate namespace already brought them
+                    if (at0 < 0) {
+                        imported = imported.concat([nsn])
+                        importedFrom = importedFrom.concat([target])
+                        importedOrig = importedOrig.concat(["*"])
+                    }
+                    if (target != "" && !(at0 >= 0 && importedFrom[at0] == target && importedOrig[at0] == "*")) {
+                        for (const o of own) {
+                            if (o.file == target && o.exported) names = names.concat([{ name: nsn + "." + o.name, kind: o.kind, from: target, orig: o.name }])
+                        }
+                    }
+                }
                 for (const n of imp.names) {
                     // s474 r1 (#1715 review F5): an import's LOCAL name is a binding of this file —
                     // a reserved `_scrml_` / `__scrml_` one is refused at the import (§47.1.1),
@@ -1158,7 +1199,7 @@ ${
                                     // kind), and the refused one's entries follow it, so a use of the name
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
-                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (`" + importedOrig[at] + "` from `" + earlier + "`), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (" + importedShown(importedOrig[at], earlier) + "), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
                                     names = names.concat(exportedEntries(own, target, n.orig, n.name))
                                 } else {
                                     st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — the same declaration imported twice; this later import wins (§41.7); remove the duplicate")
@@ -1176,7 +1217,55 @@ ${
             }
             scopes = scopes.concat([{ file: f.path, names: names }])
         }
-        return { lk: { own: own, scopes: scopes }, st: st }
+        return { lk: { own: own, scopes: scopes, nss: nss }, st: st }
+    }
+
+    // s475 — how an earlier import that bound a local name is shown: `orig` from `from`, or (orig
+    // "*", linkage) the namespace of `from`.
+    fn importedShown(orig: string, from: string) -> string {
+        if (orig == "*") return "as the namespace of `" + from + "` (`import * as …`)"
+        return "`" + orig + "` from `" + from + "`"
+    }
+
+    // s475 — a dotted name `ns.x` whose head is a namespace import of `file` (Linkage.nss):
+    // `from` the import's source as written, `target` the file it resolves to ("" when it
+    // resolves to none — that import's refusal owns every use), `member` the `x`. `ns` "" when
+    // `name` is no such name.
+    type NsHit:struct = { ns: string, from: string, target: string, member: string }
+
+    fn nsMember(lk: Linkage, file: string, name: string) -> NsHit {
+        const dot: int = name.indexOf(".")
+        if (dot > 0) {
+            const head: string = name.substring(0, dot)
+            for (const b of lk.nss) {
+                if (b.file == file && b.ns == head) return { ns: head, from: b.from, target: b.target, member: name.substring(dot + 1) }
+            }
+        }
+        return { ns: "", from: "", target: "", member: "" }
+    }
+
+    // s475 — `name` is a namespace import's binding itself (`m`, no member) in `file`.
+    fn isNsBinding(lk: Linkage, file: string, name: string) -> boolean {
+        for (const b of lk.nss) {
+            if (b.file == file && b.ns == name) return true
+        }
+        return false
+    }
+
+    // s475 — the diagnostic for a use of `ns.x` that resolves to nothing, when `ns` is a namespace
+    // import of `file`: its module does not export `x` (§21.3 "resolved by the compiler against the
+    // exporting file's export list") — E-IMPORT-004 naming the member; an export of another kind
+    // than the position needs (`what`) is E-SCOPE-001, as for an aliased import. "" code: not a
+    // namespace member (the caller's own report stands), or its import resolves to no file — that
+    // import's refusal owns the failure ("-": report nothing more).
+    type NsMiss:struct = { code: string, why: string }
+
+    fn nsMiss(lk: Linkage, file: string, name: string, what: string) -> NsMiss {
+        const h: NsHit = nsMember(lk, file, name)
+        if (h.ns == "") return { code: "", why: "" }
+        if (h.target == "") return { code: "-", why: "" }
+        if (exportsName(lk.own, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        return { code: "E-IMPORT-004", why: "`" + h.member + "` is not exported by `" + h.from + "` — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3)" }
     }
 
     // The scope entries an import of `name` from `target` brings: one per
@@ -1323,6 +1412,10 @@ ${
         // `color`") is built in — not unknown — but a named shape is a string
         // with a format predicate the bootstrap does not check: refused by name.
         if (isNamedShape(n)) return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the named-shape type `" + n + "` (§53 — a string with a built-in format predicate) is not in the bootstrap — it checks no named shape; declare the value a `string`"), unresolved: true }
+        // s475 — `m.T` with `m` a namespace import: its module does not export `T` (E-IMPORT-004)
+        const nm: NsMiss = nsMiss(te.link, te.file, n, "a type")
+        if (nm.code == "-") return { t: Type.Str, st: st, unresolved: true }
+        if (nm.code != "") return { t: Type.Str, st: addDiag(st, te.file, at.span, nm.code, nm.why), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, NameKind.KType, true, n)), unresolved: true }
     }
 
@@ -6479,6 +6572,14 @@ ${
     }
 
     fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        // s475 r1 (review of #1746, item 1) — `m.x` is one name only where THIS resolver already found
+        // the plain `m` to be the namespace import, after every nearer binding (below: a local, a
+        // parameter, a host binding, a declaration's prop or field — §7.6 lexical scoping; parse.scrml
+        // PNs.at). A nearer `m` there now is an internal fault: refused, never read behind its back.
+        const nh: NsHit = nsMember(env.g.te.link, env.file, name)
+        if (nh.ns != "") {
+            if (nsShadowed(env, nh.ns)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "internal: `" + name + "` was read as a member of the namespace import `" + nh.ns + "`, but a nearer binding of `" + nh.ns + "` is in scope here — the build is stopped rather than read the member behind it; rename the nearer `" + nh.ns + "`", st)
+        }
         const l: LocalB | not = lookupLocal(env, name)
         // s473 — §5.2 "Executable sinks in plain logic (S473)" (the #1663 review F3):
         // `eval` / `Function` as a VALUE (`const f = eval`, `.map(Function)`)
@@ -6499,6 +6600,16 @@ ${
                 const i: int = fieldIndex(d.info, name)
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
+        }
+        // s475 r1 (review item 1): a plain `m` with no nearer binding (above) IS the namespace import —
+        // a file-scope name of the same spelling is E-SCOPE-010 at the import, so the namespace reading
+        // is kept here (no cascade) — except as a call's callee (`m()`), which no namespace can be, so
+        // the colliding function keeps it. Recorded (nsAt): when a member follows it (`m.x`),
+        // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
+        // stands only for `m` used as a value.
+        if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]) }
+            return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
         const kc: ConstInfo | not = constNamed(env.g, env.file, name)
@@ -6527,7 +6638,24 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
+        // s475 — a namespace member that names no value here, and the namespace itself as a value
+        const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a function or a constant")
+        if (nm.code == "-") return plain(not, st)
+        if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
+        if (isNsBinding(env.g.te.link, env.file, name)) return diagX(env, e, "E-SCOPE-001", "`" + name + "(…)` — `" + name + "` is a namespace import, not a function; call one of its exports: `" + name + ".name(…)` (§21.3)", st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    // s475 r1 — a binding of `n` nearer than the file's namespace import: resolveNameOf's own order
+    // (a local or parameter, a host binding, the current declaration's prop or field).
+    fn nsShadowed(env: Env, n: string) -> boolean {
+        if (lookupLocal(env, n) is given) return true
+        if (hostImportBinding(env.g.files, env.file, n) is given) return true
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is given) {
+            if (!d.isProgram && fieldIndex(d.info, n) >= 0) return true
+        }
+        return false
     }
 
     // s472 — where a VALUE name (a function, or a file-scope constant) is declared, when not here.
@@ -7117,6 +7245,9 @@ ${
                 // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
                 // E-HOST-HANDLE-MEMBER (the receiver is peeked: its resolution is redone below)
                 const hro: RX = resolveExpr(env, m.obj, not, st0)
+                // s475 r1: the receiver is the namespace import (`m.f(…)`): kept — the file is re-read
+                // with `m.f` one name there (analyzeSources), and this run's report is not the program's
+                if (hro.st.nsAt.length > st0.nsAt.length) return plain(not, resolveExprs(env, args, not, hro.st))
                 const hot: Type | not = hro.x.ty
                 if (hot is given) {
                     if (isDomElementIface(hostSlotText(env.g.types, unMaybe(hot)))) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the method call `." + m.method + "(…)` on the DOM element type `" + typeName(unMaybe(hot)) + "` — DOM members stay open in logic (§21.3.3 rule 16, S473 round 2 item 7), but open, untyped DOM member access is not in the bootstrap; declare a `<host>` binding for it", hro.st)
@@ -13251,7 +13382,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -16682,6 +16813,13 @@ ${
         // s472: a declaration of another file that is not in scope here is not
         // an unknown HTML element (that would render it silently empty) — the
         // tag names it, so it is refused by name, saying where it is declared
+        // s475 — `<m.card/>` with `m` a namespace import whose module does not export a `card`
+        // declaration: E-IMPORT-004 naming the member (or E-SCOPE-001 for an export of another kind)
+        if (d is not) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, e.tag, "a declaration (a component or a cell)")
+            if (nm.code == "-") return resolveNodes(env, e.kids, st)
+            if (nm.code != "") return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, nm.code, nm.why)
+        }
         if (d is not && declAnywhere(env.g, e.tag)) {
             return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-SCOPE-001", "`<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
@@ -17772,6 +17910,12 @@ ${
         const sf: StarField | not = starField(env, e.tag)
         if (sf is given) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
+        // s475 — `<*m.card/>`: a namespace member that is no declaration of the module
+        if (d is not) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, e.tag, "a declaration (a component or a cell)")
+            if (nm.code == "-") return st
+            if (nm.code != "") return addDiag(st, env.file, e.span, nm.code, nm.why)
+        }
         if (d is not && declAnywhere(env.g, e.tag)) {
             return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
@@ -19633,6 +19777,7 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     const target: string = importTarget(f.path, imp.from, paths)
+                    if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
                             if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
@@ -28275,8 +28420,8 @@ ${
     // =========================================================================
     export type ComposeExtra:struct = { name: string, span: ASpan, ty: AType | not, vt: Type | not }
     // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
-    // warnings the plan raises (W-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
-    // composed program's diagnostics); `late`: how many of them are W-TX-FAIL-AFTER-COMMIT.
+    // diagnostics the plan raises (E-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
+    // composed program's diagnostics); `late`: how many of them are E-TX-FAIL-AFTER-COMMIT.
     export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int }
     type RCompose:struct = { plans: ComposePlan[], st: AS }
     type RPlan:struct = { plan: ComposePlan | not, st: AS }
@@ -28363,18 +28508,20 @@ ${
     // effect statement; `handled`: every handling form whose subject is a call of a name.
     type CHand:struct = { nid: int, callee: int, how: int, arms: AArm[] }
     // `clocks` (review L4): every bare `Date` / `performance` name — the browser's clock is not the server's.
-    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[] }
+    // s475 r1 (review item 4): `exitAt` — where each `fail` / `?` of the run stands (a `fail` statement's span,
+    // a `?`'s expression span), for the path walk after a server call (pwStmts).
+    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[], exitAt: ASpan[] }
 
-    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [] } }
+    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [], exitAt: [] } }
 
     fn cfWith(a: CFold, names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[]) -> CFold {
-        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks }
+        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks, exitAt: a.exitAt }
     }
 
     fn cfName(a: CFold, nid: int, n: string) -> CFold {
         let c: int[] = a.clocks
         if (n == "Date" || n == "performance") c = c.concat([nid])
-        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c }
+        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt }
     }
 
     fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
@@ -28400,7 +28547,9 @@ ${
     }
 
     fn cfRet(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, true, a.exits, a.effects, a.handled) }
-    fn cfExit(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, true, a.effects, a.handled) }
+    fn cfExit(a: CFold, at: ASpan) -> CFold {
+        return { names: a.names, assigns: a.assigns, rets: a.rets, exits: true, effects: a.effects, handled: a.handled, clocks: a.clocks, exitAt: a.exitAt.concat([at]) }
+    }
     fn cfEffect(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, a.exits, true, a.handled) }
 
     fn cfStmt(s: AStmt, a: CFold) -> CFold {
@@ -28417,7 +28566,7 @@ ${
             .Lift(what: w) :> cfExprs(liftExprs(w), a)
             .EffectStmt(w: w) :> cfEffect(a)
             .Defer(body: b) :> cfStmts(b.stmts, a)
-            .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a))
+            .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a, s.span))
         }
     }
 
@@ -28433,7 +28582,7 @@ ${
         return match k {
             .Name(name: n) :> cfName(a, e.nid, n)
             .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([e.nid, rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
-            .Handled(h: h) :> cfHandled(a, e.nid, h)
+            .Handled(h: h) :> cfHandled(a, e.nid, e.span, h)
             .At(name: n) :> a
             .AtItem :> a
             .Num(raw: r) :> a
@@ -28458,7 +28607,7 @@ ${
         }
     }
 
-    fn cfHandled(a0: CFold, nid: int, h: AHandled) -> CFold {
+    fn cfHandled(a0: CFold, nid: int, sp: ASpan, h: AHandled) -> CFold {
         let a: CFold = a0
         const how: AHow = h.how
         const hk: int = match how {
@@ -28466,7 +28615,7 @@ ${
             .Guard(arms: x) :> 1
             .MatchOn(arms: x) :> 2
         }
-        if (hk == 0) a = cfExit(a)
+        if (hk == 0) a = cfExit(a, sp)
         const c: AExpr | not = calleeOf(h.subject.k)
         if (c is given) {
             if (exprName(c) != "") a = cfWith(a, a.names, a.assigns, a.rets, a.exits, a.effects, a.handled.concat([{ nid: nid, callee: c.nid, how: hk, arms: handledArms(h) }]))
@@ -28981,12 +29130,12 @@ ${
         return true
     }
 
-    // W-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b)).
+    // E-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b);
+    // an Error since S475 ruling item 1, was W-TX-FAIL-AFTER-COMMIT).
     // `reason0`: why nothing after `from` could join, when the statements do not say it (review N2 / N4).
     fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int, reason0: string) -> Diag[] {
         let out: Diag[] = []
         const ss: AStmt[] = fs.f.body.stmts
-        const name: string = fs.info.name
         let k: int = from + 1
         let blocked: string = ""
         while (k < ss.length) {
@@ -29000,7 +29149,7 @@ ${
                 let why: string = blocked
                 if (why == "") why = reason0
                 if (why == "") why = "a statement before it cannot join the batch"
-                out = out.concat([newDiag("W-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") runs after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: when it fails, the caller is told '" + name + "' failed, but the batch's writes are already committed and are not rolled back (§19.10.5, S474). It cannot join the server batch because " + why + ". Move the check before the first server call, or into the server function, so it can roll the writes back", fs.info.file, ss[k].span)])
+                out = out.concat([lateDiag(g, fs, calls, ss[k].span, why)])
             }
             if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
             k = k + 1
@@ -29008,9 +29157,305 @@ ${
         return out
     }
 
+    // The E-TX-FAIL-AFTER-COMMIT report for the `fail` / `?` at `sp`. s475 r1 (review item 4 note): "any
+    // writes the batch made stand" — true also of a read-only batch, which made none.
+    fn lateDiag(g: Globals, fs: FnSrc, calls: string[], sp: ASpan, why: string) -> Diag {
+        const name: string = fs.info.name
+        return newDiag("E-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, sp.start) + ") would run after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: the caller would be told '" + name + "' failed while any writes the batch made stand — they are not rolled back (§19.10.5). A `!` function must not report failure while its writes stand (S475). It cannot join the server batch because " + why + ". Fix: move the check before the first server call (or into the server function, so it can roll the writes back)", fs.info.file, sp)
+    }
+
+    // =========================================================================
+    // s475 r1 (review item 4) — THE EXITS AFTER ONE SERVER CALL: at any statement depth (r1), and inside
+    // the call's own statement / expression (r2, review F1 — before r2 those were not seen). S475 ruling item 1
+    // (user-voice-scrml.md "## S475"): "A `!` function must not report failure while its writes
+    // stand." A `fail` / `?` that can run after the call — on some path from it, however deeply the
+    // call or the exit is nested — is one the batch must hold (or E-TX-FAIL-AFTER-COMMIT). The walk
+    // follows the statement tree from the call: `after` = some path from the call reaches here.
+    //  - a block: in order; after a `return` / `fail` / `break` / `continue` nothing follows on it;
+    //  - an `if` / `given` holding the call: its branch holding the call is walked from the call; the
+    //    other branch does not follow the call (exclusive); both follow a call in the condition;
+    //    after it, either branch's path may continue;
+    //  - a `for` holding the call: every exit in it can follow the call (a later iteration), and
+    //    whatever follows the loop does;
+    //  - a simple statement holding the call: its expressions are walked from the call (pwExpr);
+    //    a `fail` statement whose operand holds the call runs after it.
+    // s475 r2 (review F1) — inside the call's expression (pwExpr; PA ruling, INTERIM): operands and
+    //  arguments evaluated after the operand holding the call follow it (the call's own arguments do
+    //  not: they run before it); a `?` / `!{}` / `match` on an expression that HOLDS the call but is not
+    //  the call itself can exit after the call succeeded, so its `?` and every arm follow it; on the
+    //  call ITSELF the `?` and the `!{}` arms run only when the call failed (its own envelope rolled
+    //  back) and are not on the path, while a `match`'s `.Ok` arm and a plain `_` with no `.Ok` arm
+    //  before it (§18.6: on a failable a plain `_` covers `.Ok` only) ARE; an error-variant arm and a
+    //  `_ err` arm are not. A ternary's branch not holding the call is exclusive of it. When the call
+    //  already ran on the path before the expression (a loop's later iteration), every exit in it
+    //  follows a success.
+    // =========================================================================
+    type PathW:struct = { after: boolean, hits: ASpan[] }
+
+    fn pwStmts(ss: AStmt[], call: ASpan, w0: PathW) -> PathW {
+        let w: PathW = w0
+        for (const s of ss) { w = pwStmt(s, call, w) }
+        return w
+    }
+
+    // `more` are exits on the path when it follows the call.
+    fn pwHit(w: PathW, more: ASpan[]) -> PathW {
+        if (!w.after) return w
+        return { after: true, hits: w.hits.concat(more) }
+    }
+
+    fn pwStmt(s: AStmt, call: ASpan, w: PathW) -> PathW {
+        const k: AStmtK = s.k
+        const leaves: boolean = match k {
+            .Return(e: e) :> true
+            .Fail(f: f) :> true
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Lift(what: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: b) :> false
+        }
+        if (!spanIn(call, s.span)) {
+            const w0: PathW = pwHit(w, cfStmt(s, cf0()).exitAt)
+            return { after: w0.after && !leaves, hits: w0.hits }
+        }
+        const w2: PathW = match k {
+            .If(cond: c, thenB: tb, elseB: eb) :> pwIf(c, tb, eb, call, w)
+            .Given(name: n, subject: x, body: b) :> pwIf(x, b, not, call, w)
+            .For(f: lf) :> pwLoop(lf, call, w)
+            .Eval(e: e) :> pwSimple([e], [], call, w)
+            .Local(name: n, init: i) :> pwSimple([i], [], call, w)
+            .Return(e: e) :> pwSimple(maybeExprs(e), [], call, w)
+            .Fail(f: f) :> pwHitAfter(pwSimple(failExprs(f), [], call, w), s.span)
+            .Lift(what: x) :> pwSimple(liftExprs(x), [], call, w)
+            .Defer(body: b) :> pwSimple([], [b], call, w)
+            .EffectStmt(w: x) :> pwSimple([], [], call, w)
+            .Break(label: x) :> w
+            .Continue(label: x) :> w
+        }
+        return { after: w2.after && !leaves, hits: w2.hits }
+    }
+
+    fn maybeExprs(e: AExpr | not) -> AExpr[] {
+        if (e is not) return []
+        return [e]
+    }
+
+    fn pwIf(c: AExpr, tb: ABlock, eb: ABlock | not, call: ASpan, w: PathW) -> PathW {
+        let w1: PathW = pwHit(w, cfExpr(c, cf0()).exitAt)
+        if (spanIn(call, c.span)) w1 = pwExpr(c, call, w)
+        const t: PathW = pwStmts(tb.stmts, call, w1)
+        let e: PathW = { after: w1.after, hits: t.hits }
+        if (eb is given) e = pwStmts(eb.stmts, call, { after: w1.after, hits: t.hits })
+        return { after: t.after || e.after, hits: e.hits }
+    }
+
+    fn pwLoop(lf: AFor, call: ASpan, w: PathW) -> PathW {
+        const head: ASpan[] = cfExprs(forExprs(lf), cf0()).exitAt
+        const b: PathW = pwStmts(lf.body.stmts, call, { after: true, hits: w.hits.concat(head) })
+        return { after: true, hits: b.hits }
+    }
+
+    fn pwSimple(es: AExpr[], bs: ABlock[], call: ASpan, w: PathW) -> PathW {
+        let w1: PathW = w
+        for (const e of es) {
+            if (spanIn(call, e.span)) w1 = pwExpr(e, call, w1)
+            else w1 = pwHit(w1, cfExpr(e, cf0()).exitAt)
+        }
+        for (const b of bs) {
+            if (spanIn(call, b.span)) w1 = { after: w1.after, hits: pwStmts(b.stmts, call, w1).hits }
+        }
+        return { after: true, hits: w1.hits }
+    }
+
+    // `at` (a `fail` statement whose operand holds the call) runs after the call.
+    fn pwHitAfter(w: PathW, at: ASpan) -> PathW {
+        return { after: w.after, hits: w.hits.concat([at]) }
+    }
+
+    // s475 r2 (review F1): the exits in `e` (which holds the call) that run after the call returned
+    // success. The result's `after` is true: the call has run once `e` is done.
+    fn pwExpr(e: AExpr, call: ASpan, w: PathW) -> PathW {
+        // the call already ran on this path before `e` (a later loop iteration): every exit follows it
+        if (w.after) return { after: true, hits: w.hits.concat(cfExpr(e, cf0()).exitAt) }
+        // the call itself: its arguments run before it
+        if (isTheCall(e, call)) return { after: true, hits: w.hits }
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) return pwHandled(e, h, call, w)
+        const kids: AExpr[] = exprKids(e)
+        if (isTernary(e.k)) {
+            // the branch not holding the call is exclusive of it; both follow a call in the test
+            if (spanIn(call, kids[0].span)) return { after: true, hits: pwExpr(kids[0], call, w).hits.concat(cfExprs([kids[1], kids[2]], cf0()).exitAt) }
+            if (spanIn(call, kids[1].span)) return pwExpr(kids[1], call, w)
+            return pwExpr(kids[2], call, w)
+        }
+        // left to right: what is evaluated after the operand holding the call follows it
+        let hits: ASpan[] = w.hits
+        let seen: boolean = false
+        for (const x of kids) {
+            if (seen) {
+                hits = hits.concat(cfExpr(x, cf0()).exitAt)
+            } else if (spanIn(call, x.span)) {
+                hits = pwExpr(x, call, { after: false, hits: hits }).hits
+                seen = true
+            }
+        }
+        return { after: true, hits: hits }
+    }
+
+    // A `?` / `!{}` / `match` holding the call. On the call ITSELF: the `?` and the `!{}` arms run only
+    // when it failed; a `match`'s success arms (`.Ok`, a plain `_` with no `.Ok` arm before it) follow a
+    // success. On an expression holding the call: the `?` and every arm can follow a success. The call
+    // inside an arm: that arm is walked from it, the others are exclusive of it.
+    fn pwHandled(e: AExpr, h: AHandled, call: ASpan, w: PathW) -> PathW {
+        const arms: AArm[] = handledArms(h)
+        const how: AHow = h.how
+        const prop: boolean = match how {
+            .Propagate :> true
+            .Guard(arms: x) :> false
+            .MatchOn(arms: x) :> false
+        }
+        const isMatch: boolean = match how {
+            .Propagate :> false
+            .Guard(arms: x) :> false
+            .MatchOn(arms: x) :> true
+        }
+        if (spanIn(call, h.subject.span)) {
+            const direct: boolean = isTheCall(h.subject, call)
+            let hits: ASpan[] = pwExpr(h.subject, call, w).hits
+            if (prop && !direct) hits = hits.concat([e.span])
+            let okBefore: boolean = false
+            for (const a of arms) {
+                const ok: boolean = isOkArm(a)
+                let succ: boolean = !direct
+                if (direct && isMatch) succ = ok || (isPlainWild(a.pat) && !okBefore)
+                if (succ) hits = hits.concat(cfArm(a).exitAt)
+                if (ok) okBefore = true
+            }
+            return { after: true, hits: hits }
+        }
+        let hits: ASpan[] = w.hits
+        for (const a of arms) {
+            if (spanIn(call, a.span)) {
+                const b: AArmBody = a.body
+                for (const x of armExprOf(b)) { hits = pwExpr(x, call, { after: false, hits: hits }).hits }
+                for (const blk of armBlockOf(b)) { hits = pwStmts(blk.stmts, call, { after: false, hits: hits }).hits }
+            }
+        }
+        return { after: true, hits: hits }
+    }
+
+    // `e` is the call at `call` (the reference's span is the call expression's, scanCall) — not an
+    // expression around it.
+    fn isTheCall(e: AExpr, call: ASpan) -> boolean {
+        if (calleeOf(e.k) is not) return false
+        return e.span.start == call.start && e.span.end == call.end
+    }
+
+    fn isTernary(k: AExprK) -> boolean {
+        return match k {
+            .Ternary(test: x) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+        }
+    }
+
+    fn isOkArm(a: AArm) -> boolean {
+        const pn: PatName | not = patName(a.pat)
+        if (pn is not) return false
+        return pn.name == "Ok"
+    }
+
+    // A plain `_` / `else` (a bare binder — E-MATCH-BARE-BINDER — read as one here); `_ err` takes
+    // failures only (§18.6.1).
+    fn isPlainWild(p: APat) -> boolean {
+        return match p {
+            .PWild :> true
+            .PBare(bind: b) :> true
+            .PWhole(bind: b) :> false
+            .PName(name: n) :> false
+            .PNot :> false
+            .PLit(e: x) :> false
+        }
+    }
+
+    fn cfArm(a: AArm) -> CFold {
+        const b: AArmBody = a.body
+        return match b {
+            .ArmExpr(e: x) :> cfExpr(x, cf0())
+            .ArmBlock(b: blk) :> cfStmts(blk.stmts, cf0())
+        }
+    }
+
+    // The span of the one server call (or the client function making it) in `sp`; `not` when none.
+    fn oneCallSpan(sum: Summary, tq: TxQ, places: PlaceFact[], f: FnFacts, sp: ASpan) -> ASpan | not {
+        for (const r of f.scan.refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym)
+            if (spanIn(r.span, sp) && isFnNode(sum.nodes, j)) {
+                if (isServerPlace(placeOf(places, sum.nodes[j].f.sym)) || tq.remote[j] > 0) return r.span
+            }
+        }
+        return not
+    }
+
+    fn anySpanIn(xs: ASpan[], sp: ASpan) -> boolean {
+        for (const x of xs) {
+            if (spanIn(x, sp)) return true
+        }
+        return false
+    }
+
+    // The late reports for ONE server call made in statement `at`: an exit nested in `at` after the call
+    // (the statement could not join a batch), then lateExits' later statements — each only where an
+    // exit on a path after the call stands (`hits`).
+    fn lateHits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], at: int, reason0: string, hits: ASpan[]) -> Diag[] {
+        const ss: AStmt[] = fs.f.body.stmts
+        const x: StmtFx = fx[at]
+        let why: string = reason0
+        if (x.browser != "") why = "the statement that makes the server call also uses " + x.browser + ", which needs the browser"
+        else if (x.read != "") why = "the statement that makes the server call reads `" + x.read + "`, which is not marshalled into the batch yet"
+        else if (x.client != "") why = "the statement that makes the server call calls `" + x.client + "`, which reads or writes client state"
+        else if (x.write != "") why = "the statement that makes the server call writes `" + x.write + "`"
+        if (why == "") why = "the statement that makes the server call cannot join the batch"
+        let out: Diag[] = []
+        for (const h of hits) {
+            if (spanIn(h, ss[at].span)) out = out.concat([lateDiag(g, fs, calls, h, why)])
+        }
+        for (const d of lateExits(g, t, fs, fx, calls, at, reason0)) {
+            if (anySpanIn(hits, d.span)) out = out.concat([d])
+        }
+        return out
+    }
+
     // s474 r1 (review M2, PA ruling): ONE server call followed by a `fail` / `?` — composed like two,
     // so a movable check joins the call's request and rolls its writes back. Composed only when every
-    // such check joins (otherwise nothing changes): a check that cannot move is W-TX-FAIL-AFTER-COMMIT.
+    // such check joins (otherwise nothing changes): a check that cannot move is E-TX-FAIL-AFTER-COMMIT.
     // A function whose one call is a composed batch's (the composed program's F) is not looked at again.
     fn composeSingle(g: Globals, t: Tables, sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], fs: FnSrc, i: int, allow: boolean, st0: AS) -> RPlan {
         const f: FnFacts = sum.nodes[i].f
@@ -29023,33 +29468,52 @@ ${
             k = k + 1
         }
         if (at < 0) return { plan: not, st: st0 }
+        // s475 r1 (review item 4): the exits that can run after the call — at any statement depth on a path
+        // from it, and (r2) in the call's own expression after it returned success
+        // (was: only top-level statements after the call's statement, so an exit nested beside the call was
+        // never seen, and one on a path that never meets the call was)
+        let hits: ASpan[] = []
+        const csp: ASpan | not = oneCallSpan(sum, tq, places, f, ss[at].span)
+        if (csp is given) {
+            hits = pwStmts(ss, csp, { after: false, hits: [] }).hits
+        } else {
+            k = at + 1
+            while (k < ss.length) {
+                hits = hits.concat(cfStmt(ss[k], cf0()).exitAt)
+                k = k + 1
+            }
+        }
         // s474 r2 (review N2): the one request is made by a client function — composing it is not built,
         // so a later `fail` / `?` runs after that request committed
         if (fx[at].via != "") {
             let st2: AS = st0
-            for (const d of lateExits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)")) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
+            for (const d of lateHits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)", hits)) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
             return { plan: not, st: st2 }
         }
         for (const r of fx[at].remote) {
             if (r.substring(0, 2) == "`#") return { plan: not, st: st0 }
         }
-        let exits = false
-        k = at + 1
-        while (k < ss.length) {
-            if (cfStmt(ss[k], cf0()).exits) exits = true
-            k = k + 1
-        }
-        if (!exits) return { plan: not, st: st0 }
+        if (hits.length == 0) return { plan: not, st: st0 }
         const r1: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, "a statement after its one server call can `fail`", allow, st0)
         const p: ComposePlan | not = r1.plan
         if (p is given) {
-            if (p.late == 0) return r1
+            // the batch holds every exit nested in the call's statement; a later one composeOne could not
+            // join counts only when it stands on a path after the call
+            let notes: Diag[] = []
+            let late: int = 0
+            for (const d of p.notes) {
+                if (d.code != "E-TX-FAIL-AFTER-COMMIT" || anySpanIn(hits, d.span)) {
+                    notes = notes.concat([d])
+                    if (d.code == "E-TX-FAIL-AFTER-COMMIT") late = late + 1
+                }
+            }
+            if (late == 0) return { plan: { fnNid: p.fnNid, name: p.name, lo: p.lo, hi: p.hi, deferred: p.deferred, extra: p.extra, strip: p.strip, drop: p.drop, returns: p.returns, notes: notes, late: 0 }, st: r1.st }
         }
         // s474 r2 (review N4): the reason composing failed, when it was refused
         let reason: string = ""
         if (p is not && r1.st.diags.length > st0.diags.length) reason = refusalReason(r1.st.diags[r1.st.diags.length - 1])
         let st: AS = st0
-        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at, reason)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
+        for (const d of lateHits(g, t, fs, fx, fx[at].remote, at, reason, hits)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
         return { plan: not, st: st }
     }
 
@@ -29084,7 +29548,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, first: f.first }])
         }
         return out
     }
@@ -30552,7 +31016,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -32551,7 +33015,8 @@ ${
     // unused node id (link.scrml Linked.nextId); without one (-1) nothing is composed
     // and such a function is refused. A program with an error is not composed (its
     // report stands; the compile fails either way). Both passes get `keyBase`.
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[] }
+    // s475 r1: `nsAt` — the namespace member reads the run found (AS.nsAt).
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[] }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
@@ -32560,8 +33025,26 @@ ${
     // source root is the project root. The file names the front end reports are not changed.
     export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram { return analyzeLinked(files, entry, keyBase, -1) }
 
-    export fn analyzeLinked(files: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
-        const r1: ARun = analyzeRun(files, entry, keyBase, nextId >= 0)
+    export fn analyzeLinked(files0: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram { return analyzeSources(files0, [], entry, keyBase, nextId) }
+
+    // s475 r1 (review of #1746, item 1): `srcs` — the files' sources (the driver's: the tree holds no
+    // text), for the namespace re-read. A namespace member is read by WHAT `m` RESOLVES TO here — the
+    // first run finds each plain `m` that is the namespace import (no nearer binding, AS.nsAt); those
+    // files are re-read with `m.x` one name at exactly those places (parse.scrml PNs) and analyzed
+    // again. A nearer `m` (a local, a parameter, a prop or field, a host binding) keeps `m.x` a member
+    // access on it, as it is without the import. Without a file's source nothing is re-read: its
+    // `m.x` stays a member access on the namespace, refused (E-SCOPE-001 — fails closed).
+    export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
+        const r0: ARun = analyzeRun(files0, entry, keyBase, nextId >= 0)
+        let files: FileAst[] = files0
+        let r1: ARun = r0
+        if (r0.nsAt.length > 0) {
+            const rr: NsReread = nsReread(files0, srcs, r0.nsAt)
+            if (rr.changed) {
+                files = rr.files
+                r1 = analyzeRun(files, entry, keyBase, nextId >= 0)
+            }
+        }
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
@@ -32571,6 +33054,37 @@ ${
         let ds: Diag[] = []
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
         return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
+    }
+
+    // s475 r1 — each file with namespace member reads (`at`), re-read from its source with the same
+    // first node id: `m . x` at those offsets is one name (parse.scrml nsToks), one node where the
+    // member access was two, so its ids stay inside the range the linker gave it. Its parse report is
+    // the first read's (the driver's): the re-read changes only those names' shape. `changed`: some
+    // file was re-read.
+    type NsReread:struct = { files: FileAst[], changed: boolean }
+
+    fn nsReread(files: FileAst[], srcs: Source[], at: NsAt[]) -> NsReread {
+        let out: FileAst[] = []
+        let changed = false
+        for (const f of files) {
+            let offs: int[] = []
+            for (const a of at) {
+                if (a.file == f.path && offs.indexOf(a.at) < 0) offs = offs.concat([a.at])
+            }
+            let src: string | not = not
+            for (const x of srcs) {
+                if (x.path == f.path) src = x.src
+            }
+            if (offs.length == 0 || src is not) {
+                out = out.concat([f])
+            } else {
+                const ns: PNs = { names: nsOfItems(f.items), at: offs }
+                const r: Parsed = parseFileNs(f.path, src, f.first, ns)
+                out = out.concat([r.ast])
+                changed = true
+            }
+        }
+        return { files: out, changed: changed }
     }
 
     // `m` with every WHOLE `tok` (no identifier character before or after it) replaced by `rep`, and a
@@ -32621,7 +33135,7 @@ ${
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
         const ra0: RGlobals = phaseA(files, entry, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
@@ -32688,7 +33202,7 @@ ${
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
         return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
