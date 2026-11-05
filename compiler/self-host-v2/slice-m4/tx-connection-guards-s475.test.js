@@ -29,17 +29,17 @@ function mockDriver({ closeImpl, rollbackFails = false } = {}) {
   };
   const reservedHandle = Object.assign((s, ...v) => tag(s, ...v), {
     release: () => { ev.released += 1; },
-    close: () => { ev.closed += 1; return closeImpl ? closeImpl() : Promise.resolve(); },
+    close: (opts) => { ev.closed += 1; ev.closeOpts = opts; return closeImpl ? closeImpl() : Promise.resolve(); },
   });
   const pool = Object.assign((s, ...v) => tag(s, ...v), {
     reserve: async () => { ev.reserved += 1; return reservedHandle; },
   });
   return { pool, ev };
 }
-function connOf(driver, pool, ev, logs) {
+function connOf(driver, pool, ev, logs, extra = {}) {
   file += 1;
   return rt.connection(
-    { connect: () => { ev.opened += 1; return pool; }, log: (l) => logs.push(l) },
+    { connect: () => { ev.opened += 1; return pool; }, log: (l) => logs.push(l), ...extra },
     { driver, target: `${driver}://u@127.0.0.1:1/db${file}`, file: `guards${file}.scrml` },
   );
 }
@@ -119,5 +119,61 @@ describe("item 4 — reserved.close() is awaited and caught", () => {
     await rt.envelope(conn, async () => { throw new Error("body failed"); }, true, "IMMEDIATE").catch(() => {});
     expect(await rt.envelope(conn, async () => 3, true, "IMMEDIATE")).toBe(3);
     await settle();
+  });
+});
+
+// s475 r1 (review F1): `done` awaited close() with no bound — a close() that never settles (after a
+// failed ROLLBACK) hung the failing request (no 500) and, holding the gate, every later envelope on
+// the database. Now the wait is bounded (RESERVED_CLOSE_WAIT_MS; a host may shorten it with
+// `reservedCloseWaitMs`, as here), logged once, and the gate released.
+// "red on base" = failed on 317d02879 (PR #1755 head before r1).
+const within = (p, ms) => Promise.race([
+  p.then((v) => ({ settled: "resolved", v }), (e) => ({ settled: "rejected", e })),
+  new Promise((res) => { const t = setTimeout(() => res({ settled: "hung" }), ms); t.unref?.(); }),
+]);
+describe("r1 F1 — the wait for close() is bounded", () => {
+  test("a close() that never settles: the failing envelope still rejects with its own error, and the next envelope runs (red on base)", async () => {
+    unhandled.length = 0;
+    const logs = [];
+    const { pool, ev } = mockDriver({ rollbackFails: true, closeImpl: () => new Promise(() => {}) });
+    const conn = connOf("postgres", pool, ev, logs, { reservedCloseWaitMs: 40 });
+    const first = await within(rt.envelope(conn, async () => { throw new Error("body failed"); }, true, "IMMEDIATE"), 1500);
+    expect(first.settled).toBe("rejected");
+    expect(first.e.message).toBe("body failed");
+    expect(ev.closed).toBe(1);
+    expect(logs.filter((l) => l.includes("did not finish in 40 ms; gate released")).length).toBe(1);
+    const second = await within(rt.envelope(conn, async () => 42, true, "IMMEDIATE"), 1500);
+    expect(second).toEqual({ settled: "resolved", v: 42 });
+    await settle();
+    expect(unhandled.map((e) => String(e && e.message))).toEqual([]);
+  });
+  test("a close() that rejects AFTER the wait ran out is logged, never an unhandled rejection", async () => {
+    unhandled.length = 0;
+    const logs = [];
+    const { pool, ev } = mockDriver({ rollbackFails: true, closeImpl: () => new Promise((_, rej) => setTimeout(() => rej(new Error("late close failure")), 80)) });
+    const conn = connOf("postgres", pool, ev, logs, { reservedCloseWaitMs: 20 });
+    const first = await within(rt.envelope(conn, async () => { throw new Error("body failed"); }, true, "IMMEDIATE"), 1500);
+    expect(first.settled).toBe("rejected");
+    await new Promise((res) => setTimeout(res, 150));
+    expect(unhandled.map((e) => String(e && e.message))).toEqual([]);
+    expect(logs.some((l) => l.includes("failed after the wait ran out") && l.includes("late close failure"))).toBe(true);
+  });
+  test("a normal close() inside the wait is awaited fully, and the timer never fires after it (green on both)", async () => {
+    const logs = [];
+    let closeDone = false;
+    const { pool, ev } = mockDriver({ rollbackFails: true, closeImpl: () => new Promise((res) => setTimeout(() => { closeDone = true; res(); }, 30)) });
+    const conn = connOf("postgres", pool, ev, logs, { reservedCloseWaitMs: 400 });
+    let closedAtSettle = null;
+    await rt.envelope(conn, async () => { throw new Error("body failed"); }, true, "IMMEDIATE").catch(() => { closedAtSettle = closeDone; });
+    expect(closedAtSettle).toBe(true);
+    await new Promise((res) => setTimeout(res, 500));
+    expect(logs.some((l) => l.includes("did not finish"))).toBe(false);
+  });
+  test("the driver's own close({ timeout }) bound is passed, in seconds (red on base)", async () => {
+    const logs = [];
+    const { pool, ev } = mockDriver({ rollbackFails: true });
+    const conn = connOf("postgres", pool, ev, logs);
+    await rt.envelope(conn, async () => { throw new Error("body failed"); }, true, "IMMEDIATE").catch(() => {});
+    expect(ev.closeOpts).toEqual({ timeout: 5 });
   });
 });
