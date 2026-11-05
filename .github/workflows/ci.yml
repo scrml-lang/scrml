@@ -672,6 +672,59 @@ jobs:
       # byte staleness warns; see "Bootstrap severity table" there.)
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # postgres-live — NON-BLOCKING (not in gate.needs; listed in scripts/ci-shards.ts NON_BLOCKING), S475.
+  # The bootstrap's live Postgres tests (compiler/self-host-v2/slice-m4/*-pg-s475.test.js) SKIP without
+  # SCRML_TEST_PG_URL, so the `slices` job never runs them against a server. This job runs them against a
+  # REAL PostgreSQL service container — the only place §19.10.6 "A statement from another request runs on
+  # another pool connection and SHALL NOT wait" can be observed: PGlite serves every socket from one
+  # backend session, so there the other request always waits (gap
+  # g-boot-pg-envelope-nowait-unproven-on-real-pg-s475). SCRML_TEST_PG_REAL=1 turns on the no-wait /
+  # no-dirty-read assertions in pg-envelope-s475.test.js.
+  # NOT REQUIRED on purpose: a new required check would block every PR on a service container's health
+  # (a Docker Hub pull) and on a suite that has never yet run green in CI. No job-level continue-on-error
+  # either, so a failure shows RED on the PR (visible, non-blocking) instead of passing silently. Promote it
+  # into gate.needs once it has run green — the PA's call. Skips merge_group (ran on the PR; runs again on
+  # the push to main).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  postgres-live:
+    if: ${{ github.event_name != 'merge_group' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18   # PGlite, where the tests were measured, is PostgreSQL 18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: bun install --frozen-lockfile
+      # Fails if any of the three files SKIPPED anything: a live suite that silently skips proves nothing.
+      - name: Bootstrap live Postgres tests (pg-envelope, sql-error, statement-savepoint) on a real server
+        env:
+          SCRML_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          SCRML_TEST_PG_REAL: "1"
+        run: |
+          bun test ./compiler/self-host-v2/slice-m4/pg-envelope-s475.test.js \
+                   ./compiler/self-host-v2/slice-m4/sql-error-pg-s475.test.js \
+                   ./compiler/self-host-v2/slice-m4/statement-savepoint-pg-s475.test.js 2>&1 | tee pg-live.log
+          if grep -Eq '^ *[1-9][0-9]* skip$|skipping the live Postgres|no-wait assertions are skipped' pg-live.log; then
+            echo "postgres-live: a live Postgres test was SKIPPED — this job must run every one of them" >&2; exit 1
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
   # windows — BLOCKING since S473 (in `gate.needs`), judged by a RATCHET. Surfaces OS-path-separator
   # regressions invisible on Linux: #25 nested-pages prefix, #26 isStdlibFilePath auth-bypass (both
   # `\` vs `/`), and the S417 e2e-render-map tier that minted every relpath with `\`.
