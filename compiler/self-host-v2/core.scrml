@@ -359,6 +359,14 @@ ${
     // once (structurally equal Core Exprs are one parameter, evaluated once).
     // `db` names the CoreProgram.dbs entry the query runs on (§8.1.1).
     // `site`: the `?{}` node (its NodeId), for diagnostics and later passes.
+    // s475 — `handled`: the query's failure is handled WHERE IT IS WRITTEN — a
+    // `!{}` on the query, or a `match` on its result (§19.8.3). Not `?` and not
+    // the implicit §19.8.2 propagation: those fail the body, which rolls the
+    // envelope back. SPEC §8.9.2 "Amendment S474" item 4: "Inside an envelope, a
+    // `?{}` whose failure is handled where it is written … SHALL run under a
+    // statement savepoint of its own." The server printer passes it to
+    // `rt.query`; the runtime takes the savepoint only when the query runs inside
+    // an open transaction (server-runtime.js `query`).
     // -------------------------------------------------------------------------
     export type SqlMode:enum = { All, Get, Run }
     export type SqlKind:enum = { SqlSelect, SqlWrite }
@@ -378,6 +386,7 @@ ${
         writes: SqlTables,
         columns: SqlColumns,
         nobatch: boolean,
+        handled: boolean,
         site: NodeId,
     }
 
