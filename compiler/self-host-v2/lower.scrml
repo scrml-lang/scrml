@@ -3020,7 +3020,8 @@ ${
     // appearance left-to-right" — the lowered values are compared structurally
     // (`==` on Core Expr: the same local, the same call, the same literal), so
     // a repeated value is ONE parameter, evaluated once.
-    fn sqlQueryOf(c: LC, e: AExpr, q: ASql) -> SqlQuery {
+    // s475 — `handled`: the query is the subject of a `!{}` or a `match` (core.scrml SqlQuery.handled).
+    fn sqlQueryOf(c: LC, e: AExpr, q: ASql, handled: boolean) -> SqlQuery {
         const info: SqlInfo | not = sqlInfo(c.t, e.nid)
         let db: Sym = mkSym(-1, "nodb")
         let kind: SqlKind = SqlKind.SqlWrite
@@ -3049,7 +3050,7 @@ ${
         }
         return { db: db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
                  kind: kind, reads: reads, writes: writes, columns: columns,
-                 nobatch: q.nobatch, site: { n: e.nid } }
+                 nobatch: q.nobatch, handled: handled, site: { n: e.nid } }
     }
 
     fn exprIndex(es: Expr[], x: Expr) -> int {
@@ -3255,11 +3256,27 @@ ${
     // subject, or (an implicit §19.8.2 propagation) the `?{}` node itself.
     fn queryAt(c: LC, e: AExpr) -> Expr {
         let node: AExpr = e
+        let atSite: boolean = false
         const h: AHandled | not = handledOfK(e.k)
-        if (h is given) node = h.subject
+        if (h is given) {
+            node = h.subject
+            atSite = handledAtSite(h.how)
+        }
         const q: ASql | not = sqlOfExpr(node.k)
         if (q is not) return missing()
-        return Expr.Query(sqlQueryOf(c, node, q))
+        return Expr.Query(sqlQueryOf(c, node, q, atSite))
+    }
+
+    // s475 — SPEC §8.9.2 "Amendment S474" item 4: a query "whose failure is handled where it is
+    // written (a `!{}` on the query, or a `match` on its result, §19.8.3)" runs under a statement
+    // savepoint inside an envelope. `?` handles nothing at the site: it fails the body, which rolls
+    // the whole envelope back ("A query that is not handled at its site needs no savepoint").
+    fn handledAtSite(how: AHow) -> boolean {
+        return match how {
+            .Propagate :> false
+            .Guard(arms: g) :> true
+            .MatchOn(arms: m) :> true
+        }
     }
 
     // An `if` / `given` that suspends in a branch with statements after it: a

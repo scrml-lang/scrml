@@ -330,6 +330,12 @@ function control(conn, text) {
 // statement in it throws, and so does the envelope (a host error: the route
 // answers 500, never success — its writes are gone).
 async function probeTx(tx) {
+  // s475: SQLite only. Postgres never ends a transaction by itself on a statement error: it ABORTS
+  // it (every later statement fails "current transaction is aborted" until a ROLLBACK [TO]), and the
+  // probe would itself fail that way. A handled statement there runs under a statement savepoint
+  // (`statement`), whose ROLLBACK TO clears the abort; an unhandled one fails the body, which rolls
+  // the envelope back.
+  if (!gated(tx.conn)) return;
   try {
     await control(tx.conn, "BEGIN DEFERRED");
   } catch (e) {
@@ -400,6 +406,14 @@ function brokenError(conn) {
 // release, then a throw (the call does not report success: its writes are gone).
 // ---------------------------------------------------------------------------
 const BEGINS = { IMMEDIATE: "BEGIN IMMEDIATE", DEFERRED: "BEGIN DEFERRED" };
+// s475: `BEGIN IMMEDIATE` / `BEGIN DEFERRED` are SQLite's. "On Postgres / MySQL it opens with plain
+// `BEGIN`, as ruling 5 states" (SPEC §8.9.2 "Amendment S474" item 1) — Postgres refuses `BEGIN
+// DEFERRED` ("syntax error at or near DEFERRED"). The compiler still refuses an envelope on a pooled
+// database (analyze.scrml envelopeOf: no pool connection is reserved), so on a deployed server this
+// arm runs only for a host whose `connect` hands back ONE connection (a `max: 1` pool).
+function beginText(conn, begin) {
+  return conn.desc.driver === "sqlite" ? BEGINS[begin] : "BEGIN";
+}
 export async function envelope(conn, run, standalone, begin) {
   if (!Object.hasOwn(BEGINS, begin)) {
     throw new Error(`scrml server: an envelope's BEGIN must be "IMMEDIATE" or "DEFERRED" (the compiler decides it from the query set), got ${String(begin)}`);
@@ -412,7 +426,7 @@ export async function envelope(conn, run, standalone, begin) {
   const tx = { conn, open: true, broken: false, seq: 0, stack: [] };
   try {
     try {
-      await control(conn, BEGINS[begin]);
+      await control(conn, beginText(conn, begin));
     } catch (e) {
       // "after a `BEGIN` that fails" the connection is released (the finally below)
       conn.log(`scrml server: BEGIN on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
@@ -436,7 +450,12 @@ export async function envelope(conn, run, standalone, begin) {
       return result;
     }
     try {
-      await control(conn, "COMMIT");
+      const done = await control(conn, "COMMIT");
+      // s475: Postgres answers the COMMIT of an ABORTED transaction (a statement in it failed and
+      // nothing rolled back to a savepoint before it) with `ROLLBACK` and no error: every write of
+      // the body is gone. That is a failed COMMIT — never a reported success (SPEC §8.9.2
+      // "Amendment S474" item 1: "or its `COMMIT` fails … the call SHALL NOT report success").
+      if (done && done.command === "ROLLBACK") throw new Error("the database answered COMMIT with ROLLBACK (the transaction was aborted by a failed statement)");
     } catch (e) {
       conn.log(`scrml server: COMMIT on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}; rolled back`);
       await rollbackQuiet(tx, "ROLLBACK");
@@ -473,7 +492,44 @@ async function savepoint(tx, run) {
     return result;
   }
   innermost(tx, name);
-  await control(tx.conn, "RELEASE " + name);
+  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  tx.stack.pop();
+  return result;
+}
+
+// s475 — THE STATEMENT SAVEPOINT. SPEC §8.9.2 "Amendment S474" item 4: "Inside an envelope, a `?{}`
+// whose failure is handled where it is written (a `!{}` on the query, or a `match` on its result,
+// §19.8.3) SHALL run under a statement savepoint of its own. When the query fails, the handler runs
+// after a rollback to that savepoint, and the envelope survives with every earlier write intact. On
+// Postgres a failed statement aborts the whole transaction, so without this savepoint every later
+// query would fail and the envelope's `COMMIT` would silently end as a `ROLLBACK`, reporting success
+// with every write gone." — and "The statement savepoint is taken once per **executed** handled
+// statement" (so a handled query in a loop takes one per iteration: this runs per execution).
+//
+// Every driver takes it (uniform; two extra round trips per executed handled statement inside a
+// transaction — g-envelope-lock-hold-cost-s474). On SQLite it is observable too: a statement whose
+// conflict resolution is `OR FAIL` keeps the rows it changed before the failing one (measured: an
+// `INSERT OR FAIL … SELECT` over 1, 2, 1 into a primary key left 1 and 2 behind after its error);
+// the rollback to the savepoint removes them before the handler runs, as the SPEC says.
+//
+// The name shares the envelope's counter (`scrml_sp_<n>`, one sequence per transaction), so it never
+// collides with a nested `!` call's savepoint, and it is pushed on the same stack: the strict
+// nesting `innermost` enforces covers both. Author SQL cannot name it (§8.9.2 item 3).
+// A SQLite error that ended the whole transaction (ON CONFLICT ROLLBACK, SQLITE_FULL, …) is found by
+// runQuery's probe, which throws: the savepoint went with the transaction, and the envelope rolls
+// back and answers a server error. A ROLLBACK TO / RELEASE that fails throws the same way.
+async function statement(tx, mode, text, params, slots) {
+  tx.seq = tx.seq + 1;
+  const name = "scrml_sp_" + tx.seq;
+  await control(tx.conn, "SAVEPOINT " + name);
+  tx.stack.push(name);
+  const result = await runQuery(tx.conn, mode, text, params, slots, tx);
+  if (failed(result)) {
+    await undoSavepoint(tx, name);
+    return result;
+  }
+  innermost(tx, name);
+  await control(tx.conn, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
   return result;
 }
@@ -488,8 +544,8 @@ function innermost(tx, name) {
 async function undoSavepoint(tx, name) {
   if (tx.broken) return;   // nothing left to roll back to — the outer envelope throws
   innermost(tx, name);
-  await control(tx.conn, "ROLLBACK TO " + name);
-  await control(tx.conn, "RELEASE " + name);
+  await control(tx.conn, "ROLLBACK TO SAVEPOINT " + name);
+  await control(tx.conn, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
 }
 
@@ -574,10 +630,15 @@ function logLine(host, line) {
 // s474 (U1e): inside an envelope this scope owns, the statement runs on the
 // transaction at once; any other statement on a gated (SQLite) connection waits
 // at the §19.10.6 gate for its turn and holds it for this one statement.
-export async function query(conn, mode, text, params, slots) {
+// s475: `handled` — the compiler printed `true` (print.scrml queryJs): the query's failure is
+// handled where it is written (a `!{}` on it, a `match` on its result). Inside a transaction this
+// scope owns it runs under a statement savepoint of its own (`statement`); outside one it runs as
+// any other query (one statement undoes only itself).
+export async function query(conn, mode, text, params, slots, handled = false) {
   const tx = ownTx(conn);
   if (tx !== null) {
     if (tx.broken) throw brokenError(conn);
+    if (handled === true) return statement(tx, mode, text, params, slots);
     return runQuery(conn, mode, text, params, slots, tx);
   }
   if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null);

@@ -420,10 +420,16 @@ ${
     // parameter slot"), and `slots` maps the template's i-th `${}` to its value —
     // the driver receives values only as bound parameters (§8.1). It stands only
     // as a Suspend's `on` (check.scrml C-SQL2), so it is always awaited.
+    // s475: a query handled at its site (SqlQuery.handled) gets a sixth argument,
+    // `true /* handled at its site */`: inside an open transaction the runtime
+    // runs it under a statement savepoint of its own (SPEC §8.9.2 "Amendment
+    // S474" item 4). Any other query is printed with five, as before.
     fn queryJs(ctx: Ctx, q: SqlQuery) -> JsExpr {
         let slots: JsExpr[] = []
         for (const i of q.slots) { slots = slots.concat([jnum(i)]) }
-        return rtCall(ctx, "query", [jid(dbVarName(q.db)), jstr(sqlModeName(q.mode)), jid(sqlTextName(q.site.n)), JsExpr.JArray(exprsJs(ctx, q.params)), JsExpr.JArray(slots)])
+        let args: JsExpr[] = [jid(dbVarName(q.db)), jstr(sqlModeName(q.mode)), jid(sqlTextName(q.site.n)), JsExpr.JArray(exprsJs(ctx, q.params)), JsExpr.JArray(slots)]
+        if (q.handled) args = args.concat([JsExpr.JAnnot(JsExpr.JBool(true), "handled at its site")])
+        return rtCall(ctx, "query", args)
     }
 
     fn sqlModeName(m: SqlMode) -> string {
