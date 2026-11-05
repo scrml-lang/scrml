@@ -13149,7 +13149,13 @@ ${
     // `absorbSpan`: that arm, where the error is reported. `okBefore`: `.Ok`
     // already had an arm when that `_` / `else` came (s474 — then it covers
     // nothing once every error is named: W-MATCH-001, coverDiags).
-    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean }
+    // s475 (g-boot-w-match-001-fires-on-failing-programs-s474): `coveredBefore`
+    // — the variant indices named BEFORE the first wildcard; `armErr` — an arm
+    // up to and including that wildcard drew an Error (a recovered pattern
+    // such as `.Ok(true)` read as `.Ok()`, a duplicate). W-MATCH-001 reads
+    // these, never `covered`: an arm after the wildcard is E-SYNTAX-010 and
+    // covers nothing the wildcard could have missed.
+    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean, coveredBefore: int[], armErr: boolean }
 
     fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
         let st: AS = st0
@@ -13162,7 +13168,10 @@ ${
         let absorb = false        // s474: a `match`'s plain `_` / `else` — the success value only
         let absorbSpan: ASpan | not = not
         let okBefore = false      // s474: `.Ok` had an arm before that `_` / `else`
+        let coveredBefore: int[] = []   // s475: `covered`, counting only the arms before the first wildcard
+        let armErr = false        // s475: an arm up to and including the first wildcard drew an Error
         for (const a of arms) {
+            const d0: int = st.diags.length
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
@@ -13179,6 +13188,8 @@ ${
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
+            if (!last && hasErrorDiag(st.diags.slice(d0))) armErr = true
+            if (!last && ra.idx >= 0) coveredBefore = coveredBefore.concat([ra.idx])
             if (ra.idx == -1) {
                 const okPrior: boolean = okSeen
                 okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
@@ -13202,7 +13213,7 @@ ${
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
-        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore }
+        return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore, coveredBefore: coveredBefore, armErr: armErr }
     }
 
     // What the failure set decides about resolved arms: totality over the
@@ -13247,7 +13258,19 @@ ${
         // s474 — `.Ok` and every error variant already have an arm: the `_` /
         // `else` (which covers `.Ok` only) takes nothing (§18.6 W-MATCH-001: "an
         // `else` arm is unreachable"; a warning, compilation proceeds).
-        if (isMatch && ra.absorb && ra.okBefore && errs.length == 0) {
+        // s475 — "already" is read off the arms BEFORE the `else` only
+        // (`coveredBefore`), and never when one of those arms drew an Error:
+        // an arm after the `else` is E-SYNTAX-010, and a recovered `.Ok(true)`
+        // does not cover `.Ok` — the warning would state a falsehood.
+        let errsBefore: string[] = []
+        if (!ra.wild) {
+            let j = 0
+            for (const v of vs) {
+                if ((upto < 0 || j < upto) && ra.coveredBefore.indexOf(j) < 0) errsBefore = errsBefore.concat([v.sym.hint])
+                j = j + 1
+            }
+        }
+        if (isMatch && ra.absorb && ra.okBefore && !ra.armErr && errsBefore.length == 0) {
             let wat: ASpan = e.span
             const wsp: ASpan | not = ra.absorbSpan
             if (wsp is given) wat = wsp
