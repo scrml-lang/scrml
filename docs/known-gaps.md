@@ -176,11 +176,18 @@ Pre-existing (base and #1722 alike). The §18.5 object-literal test is: non-empt
 
 Since #1722 the refusal is the only report: a `{ e }` branch no longer draws a second, wrong E-STMT-MISSING-SEMICOLON (`parseValueIf` / `parseValueBranch`), and a branch that holds a statement still owes its `;`. Building it means an expression kind for the value `if`, the §17.6.2 union typing (see `g-spec-ternary-union-vs-match-e-type-001-s473`), the implied `lift` of a one-expression branch, E-ARM-TAIL-VALUE for a bare tail after a statement, and lowering. The suggested repair in the refusal message (`match c { true :> a, false :> b }`) stays valid meanwhile.
 
-### g-boot-failable-arm-foreign-enum-qualifier-accepted-s474 — on a FAILABLE subject, the BOOTSTRAP accepts a match / `!{}` arm qualified by a different enum that happens to declare a variant of the same name (`match check(p) { Other.Denied :> …, … }` with `check()! AuthErr`): the arm is taken as `AuthErr.Denied`. The same arm on a plain enum subject is refused (E-TYPE-VARIANT "`Other.Denied` names `Other`, but the subject is `AuthErr` (§18.13)") — `NEW S474 (#1729 review, out-of-scope item b); LOW; open`
+### g-boot-failable-arm-foreign-enum-qualifier-accepted-s474 — on a FAILABLE subject, the BOOTSTRAP accepts a match / `!{}` arm qualified by a different enum that happens to declare a variant of the same name (`match check(p) { Other.Denied :> …, … }` with `check()! AuthErr`): the arm is taken as `AuthErr.Denied`. The same arm on a plain enum subject is refused (E-TYPE-VARIANT "`Other.Denied` names `Other`, but the subject is `AuthErr` (§18.13)") — `NEW S474 (#1729 review, out-of-scope item b); LOW; RESOLVED S475 (s475-boot-parser-residue)`
 
-<!-- @gap id=g-boot-failable-arm-foreign-enum-qualifier-accepted-s474 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveArm — the qualified-variant check calls qualNames, which asks only whether the qualifier's enum declares the name, not whether it IS the failure's enum; the plain-subject limb compares typeNamedHere(qual) with the subject enum) prov=review:S474-#1729(~/.cache/scrml/review/s474-1729/p8/i07_foreign_arm_covers.scrml; base-identical, pb2/);spec:§18.13 -->
+<!-- @gap id=g-boot-failable-arm-foreign-enum-qualifier-accepted-s474 sev=LOW status=resolved resolved-by=s475-boot-parser-residue locus=compiler/self-host-v2/analyze.scrml(resolveArm — the qualified-variant check calls qualNames, which asks only whether the qualifier's enum declares the name, not whether it IS the failure's enum; the plain-subject limb compares typeNamedHere(qual) with the subject enum) prov=review:S474-#1729(~/.cache/scrml/review/s474-1729/p8/i07_foreign_arm_covers.scrml; base-identical, pb2/);spec:§18.13 -->
 
 Reproduced on the s474-boot-failable-match-lowering branch: `p8/i07` compiles clean, while the plain-enum control (`function f(x: AuthErr) -> string { return match x { Other.Denied :> "d", .Locked :> "l" }; }`) is E-TYPE-VARIANT. At run time the arm routes correctly (it tests `AuthErr`'s `Denied` tag), so nothing wrong runs, and the S474 `else` rule still holds. The cost is the author's: the qualifier says one enum and the arm handles another, and §18.13 says a qualified pattern names the subject's enum. It is not a one-line fix. On a client call of a server function the arms resolve against the synthesized client set (`rset`, the callee's variants plus `Transport`), so comparing the qualifier with `err` would wrongly refuse `AuthErr.Denied` there. The fix must accept the callee's own declared enum as well as the set itself, decide what a qualified `Transport` arm may name (the set has no declared enum of its own), and check `SqlError.V` on a `?{}` subject against the compiler-provided enum. Who pays: an author reading a misleading qualifier; no end-user impact.
+
+**Resolved by** s475-boot-parser-residue. On a failable subject (`match` or `!{}`), a qualified arm `Q.V` must name the failure's own enum, as on a plain subject; otherwise it is E-TYPE-VARIANT ("`Other.Denied` names `Other`, but the failure here is `AuthErr` — write `AuthErr.Denied` or `.Denied` (§18.13)"). The check is in analyze.scrml `resolveArm`, with `qualIsFailure` and `foreignQualMsg`. The enums accepted:
+- the arms' set itself: the declared enum, the built-in `Error` on a bare `!`, or the built-in `SqlError` on a `?{}` subject;
+- on a call of a server function, the callee's declared enum (`own`, passed by `remoteGuarded`). Its variants are the client set's first ones, so `SaveError.Conflict(c)` qualifies on a client call.
+- A minted client set (`E + Transport`, or the bare `Transport` of a callee that is not `!`) has no name a program can write. A qualified `Transport` arm there (a user enum that declares `Transport`) is refused, and the message names `.Transport(t)` as the form. When `E` itself declares `Transport(t: ServerCallError)`, `E` is the set, so `E.Transport(t)` stays valid.
+
+The arm still counts as the failure's variant, so `else` coverage and E-MATCH-ELSE-ABSORBS-ERROR are not affected (one report). Tests: compiler/self-host-v2/slice-m4/failable-arm-qualifier-s475.test.js, with 6 cases red on base and 6 guards green on both. Corpus (2,183 files) and bootstrap conformance (1,827 cases): no verdict change.
 
 ### g-impl1-navigate-via-peer-inside-transaction-not-refused-s473 — the S473 refusal of `navigate()` inside a `transaction { }` block (E-TRANSACTION-CONTROL-FLOW, `lint-transaction.ts`) sees only a `navigate()` written in the block itself. A server function called inside the block that navigates (an in-process peer, `transaction { ?{…}.run(); finish() }` with `function finish() { navigate("/done") }`) is not refused: at run time its navigation signal leaves the block, the block ROLLS BACK (§19.10.3), and the browser is still sent the redirect, so the block's writes are lost with no error. That is the silent shape the ruling forbids, reached one call away — `NEW S473 (review round of #1679; the residual of the transaction ruling); MED; open`
 
@@ -30978,7 +30985,7 @@ Measured: across 2,052 corpus programs, 197 print, and all 197 mount in Chromium
 Residue: g-boot-parser-restructure-residue-s474.
 <!-- @gap id=g-boot-parser-restructure-misaddresses-holes-s474 sev=HIGH status=resolved resolved-by=s474-boot-gate-await-mathml locus=compiler/self-host-v2/analyze.scrml(markupParseDiags)+compiler/self-host-v2/print.scrml(shapeHash)+compiler/self-host-v2/slice-m1/runtime/runtime.js(checkShape) prov=review:s474-1727(F3) -->
 
-### g-boot-parser-restructure-residue-s474 — the parser repairs §24.5 does not model are caught only at run time. The template is not mounted, which fails closed but can blank the page — `NEW S474 (s474-boot-gate-await-mathml r1); MED; open (fails closed)`
+### g-boot-parser-restructure-residue-s474 — the parser repairs §24.5 does not model are caught only at run time. The template is not mounted, which fails closed but can blank the page — `NEW S474 (s474-boot-gate-await-mathml r1); MED → LOW (NARROWED S475, s475-boot-parser-residue); open (fails closed)`
 The analyzer models the repairs listed in §24.5. Any other restructuring is caught by the runtime shape check. The template is then not mounted (no misaddressed hole, no leak), but a root template that fails blanks the page, and the author learns only at run time. Known unmodeled:
 - the "in select" / customizable-`<select>` content rules. Chromium's parser keeps a `<div>` or `<span>` in `<select>` today; an `<input>` in a `<select>` is caught by the shape check (blank page);
 - a `<td>` inside a `<td>` (caught by the shape check);
@@ -30996,7 +31003,37 @@ The analyzer models the repairs listed in §24.5. Any other restructuring is cau
 - **R4:** a file that already fails to parse is no longer judged, so no cascade diagnostics.
 
 The analyzer's foreign descent through uses is an AST walk, and the printer's per-context renders come from print.scrml `declNsUses` over Core. Both call `childNs`, but they are two walks. Owed: model the remaining rules, or unify the two walks.
-<!-- @gap id=g-boot-parser-restructure-residue-s474 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(markupParseDiags)+compiler/self-host-v2/slice-m1/runtime/runtime.js(checkShape) prov=dispatch:s474-boot-gate-await-mathml-r1 -->
+
+> **NARROWED S475 (s475-boot-parser-residue) — the three known shapes are built, and so are the rules found next to them.** Each refused shape and each kept one was measured in Chromium 152. The method: a `<template>`'s content as the browser parsed it, compared with the same markup read as XML (the tree as written). The new refusals are `E-HTML-PARSER-REPAIR` / `E-HTML-FOREIGN-BREAKOUT`, in analyze.scrml `markupParseDiags` (`mkRepair`, `mkRootNodes`, `mkStar`). They are listed in SPEC §24.5 as the S475 bullets.
+> - **`<select>` (was bullet 1).** Chromium's customizable-`<select>` parser keeps `<div>`, `<span>`, `<button>`, `<textarea>`, `<hr>` between options, a `<table>`, an `<svg>` and the rest in a `<select>`. It restructures three things, all now refused:
+>   - an `<input>` with a `<select>` open in scope, at any depth (through `<button>`, `<label>`, `<option>`). It closes the `<select>`.
+>   - a `<select>` in a `<select>`. It is dropped, and it closes the outer one.
+>   - an `<hr>` directly in an `<option>` / `<optgroup>` of a `<select>`.
+>
+>   The scope ends at `td` / `th` / `table` / `object` / `foreignObject` / `mi`, and so on (elements.scrml `boundsScope`); each case was measured.
+> - **`<td>` inside `<td>` (was bullet 2), generalised.** A table part (`caption` `col` `colgroup` `tbody` `thead` `tfoot` `tr` `td` `th`) that is not a child of its table part is refused. "In body" drops the tag (`<div><td>`, `<select><td>`, `<mi><td>`), and in an open cell or caption the tag closes that element first (`<td><td>`, `<td><div><td>`, `<td><svg><foreignObject><td>`, `<caption><tr>`).
+> - **A template's root.** The first root element sets the "in template" mode (HTML §13.2.6.4.18). The bootstrap now refuses:
+>   - a root table part of another kind (`<tr>` then `<td>`, `<span>` then `<td>`, `<caption>` then `<col>`);
+>   - anything but `<col>` after a first root `<col>`, including text;
+>   - a `<table>` outside a cell when the first root element is a table part. A `<form>` there is kept (measured).
+>
+>   An HTML `<template>` element's content is judged as a root of its own.
+> - **`<*x/>` (was bullet 3), all three forms.** The resolver records what a `<*x/>` renders (its element fact), and the analyzer judges it where it is shown:
+>   - the shared instance's renders (`MStar`) in a foreign context, as a use's are;
+>   - a graph field's state-child bodies (`MStateView`) in a foreign context;
+>   - a child field's renders that the `<*f/>` inlines into this template (`MInline`), in place. This includes the HTML repairs (`<p><*email/></p>` with `<div>` renders, an `<input>` field in a `<select>`).
+>
+>   A fault the markup has on its own is still reported once, at its own site.
+> - **`<plaintext>`** has no end tag: the rest of the template becomes its text. It is refused as one fault, and what it holds is not judged a second time.
+>
+> **What remains** (fails closed; proposed LOW, since no known shape is left):
+> 1. **Two walks (INTERIM).** The analyzer's foreign descent is an AST walk. The printer's per-context renders come from print.scrml `declNsUses` over Core. The capable form is one walk over Core that both read.
+> 2. **The runtime shape check stays the backstop.** A parser rule nobody has measured is still caught only at mount (the template is not mounted).
+> 3. **A SPEC over-refusal, not built.** §24.5 lists "an `<optgroup>` directly inside an `<option>` / `<optgroup>`" without condition. In Chromium 152, an `<optgroup>` in an `<optgroup>` is kept outside a `<select>` (`<optgroup><optgroup>`, `<div><optgroup><optgroup>`, `<datalist>…`), and it is restructured only inside one. The bootstrap follows the SPEC. Narrowing that bullet to "inside a `<select>`" is owed to the SPEC owner.
+>
+> Tests: compiler/self-host-v2/slice-m4/parser-residue-s475.test.js has 38 cases red on base, and its 4 guard groups are green on both. The corpus of 2,183 files (examples/, conformance/cases, acceptance, slice-m2/src, slice-m4/src) and bootstrap conformance (1,827 cases) show no verdict change.
+<!-- @gap id=g-boot-parser-restructure-residue-s474 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(markupParseDiags)+compiler/self-host-v2/print.scrml(declNsUses)+compiler/self-host-v2/slice-m1/runtime/runtime.js(checkShape) prov=dispatch:s474-boot-gate-await-mathml-r1;dispatch:s475-boot-parser-residue -->
+
 
 ### g-impl1-markup-parser-restructure-unrefused-s474 — impl#1 does not refuse markup the HTML parser restructures (SPEC §24.5, `E-HTML-FOREIGN-BREAKOUT` / `E-HTML-PARSER-REPAIR`) — `NEW S474 (s474-boot-gate-await-mathml r1); MED; carried (impl#1 Nominal, §34.0; deferred under the S471 impl#1 policy)`
 impl#1 carries the two §24.5 codes as Nominal (§34.0). Conformance cases `element-refusal/s474-*-neg` xfail there. Not measured on impl#1: whether its hole addressing is misaddressed by a restructured tree the way the bootstrap's child-index paths were. impl#1's foreign-content gate is the separate HIGH from the backfill review (H3, `if=` under `<math>`).

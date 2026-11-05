@@ -543,7 +543,7 @@ SILENT rows carrying a gap id: 49 of 49.
 | §18.10 | Guards excluded | PARTIAL | refused, but as E-PARSE-ARM + cascade, not E-SYNTAX-011 (p18-misc2) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) · S473 D28: a guard → E-SYNTAX-011 (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
 | §18.11 | Nested patterns excluded | PARTIAL | refused as E-PARSE-ARM cascade, not E-SYNTAX-012 (p18-misc5) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) · S473 D28: a nested pattern → E-SYNTAX-012 (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
 | §18.12 | `lin` × match | BUILT | E-LIN-002 on use after a match consume (p18-lin), E-LIN-003 path consistency (p18-lin2); lin-s471.test.js | — | (P3) |
-| §18.13 | Arm qualification | PARTIAL | `C.Red :>` in `match` compiles (p18-qual); in a `!{}` arm qualified patterns are refused by name (parse.scrml:944) | — | (P3) |
+| §18.13 | Arm qualification | PARTIAL | `C.Red :>` in `match` compiles (p18-qual); a qualifier naming another enum is E-TYPE-VARIANT on a plain subject and, since S475, on a failable one too (`match` / `!{}`: the failure's enum, the built-in `Error` / `SqlError`, or a server callee's own; analyze.scrml `qualIsFailure`; slice-m4/failable-arm-qualifier-s475.test.js). A malformed qualified arm is refused by name (parse.scrml, E-BOOTSTRAP-UNSUPPORTED) | — | (P3) g-boot-failable-arm-foreign-enum-qualifier-accepted-s474 resolved S475 |
 | §18.14.1 / 18.14.2 | Zero-variant enum; duplicate arms | BUILT | p18-zero compiles; E-TYPE-023 (p18-basic) | — | (P3) |
 | §18.15 / 18.16.3 / 18.16.4 | Code summaries / AST | N/A |  | — | (P3) |
 | §18.16.1 / 18.16.2 | Literal arms | BUILT | W-MATCH-002, E-TYPE-028 (p18-misc, p18-misc2) | — | (P3) |
