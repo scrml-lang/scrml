@@ -29176,11 +29176,18 @@ ${
     //    after it, either branch's path may continue;
     //  - a `for` holding the call: every exit in it can follow the call (a later iteration), and
     //    whatever follows the loop does;
-    //  - a simple statement holding the call: the statement blocks inside its expressions that hold
-    //    the call (a `match` arm block, a handler arm block) are walked from it; a handler's arms that
-    //    do not hold the call are not (they run when the call fails — its own writes rolled back).
-    //    NOT seen (pre-existing residual, reported): an exit inside the SAME expression as the call
-    //    (`hold()? + check()?`, a success arm of a `match` on the call itself).
+    //  - a simple statement holding the call: its expressions are walked from the call (pwExpr);
+    //    a `fail` statement whose operand holds the call runs after it.
+    // s475 r2 (review F1) — inside the call's expression (pwExpr; PA ruling, INTERIM): operands and
+    //  arguments evaluated after the operand holding the call follow it (the call's own arguments do
+    //  not: they run before it); a `?` / `!{}` / `match` on an expression that HOLDS the call but is not
+    //  the call itself can exit after the call succeeded, so its `?` and every arm follow it; on the
+    //  call ITSELF the `?` and the `!{}` arms run only when the call failed (its own envelope rolled
+    //  back) and are not on the path, while a `match`'s `.Ok` arm and a plain `_` with no `.Ok` arm
+    //  before it (§18.6: on a failable a plain `_` covers `.Ok` only) ARE; an error-variant arm and a
+    //  `_ err` arm are not. A ternary's branch not holding the call is exclusive of it. When the call
+    //  already ran on the path before the expression (a loop's later iteration), every exit in it
+    //  follows a success.
     // =========================================================================
     type PathW:struct = { after: boolean, hits: ASpan[] }
 
@@ -29223,7 +29230,7 @@ ${
             .Eval(e: e) :> pwSimple([e], [], call, w)
             .Local(name: n, init: i) :> pwSimple([i], [], call, w)
             .Return(e: e) :> pwSimple(maybeExprs(e), [], call, w)
-            .Fail(f: f) :> pwSimple(failExprs(f), [], call, w)
+            .Fail(f: f) :> pwHitAfter(pwSimple(failExprs(f), [], call, w), s.span)
             .Lift(what: x) :> pwSimple(liftExprs(x), [], call, w)
             .Defer(body: b) :> pwSimple([], [b], call, w)
             .EffectStmt(w: x) :> pwSimple([], [], call, w)
@@ -29240,7 +29247,7 @@ ${
 
     fn pwIf(c: AExpr, tb: ABlock, eb: ABlock | not, call: ASpan, w: PathW) -> PathW {
         let w1: PathW = pwHit(w, cfExpr(c, cf0()).exitAt)
-        if (spanIn(call, c.span)) w1 = pwInExpr(c, call, { after: true, hits: w1.hits })
+        if (spanIn(call, c.span)) w1 = pwExpr(c, call, w)
         const t: PathW = pwStmts(tb.stmts, call, w1)
         let e: PathW = { after: w1.after, hits: t.hits }
         if (eb is given) e = pwStmts(eb.stmts, call, { after: w1.after, hits: t.hits })
@@ -29256,7 +29263,8 @@ ${
     fn pwSimple(es: AExpr[], bs: ABlock[], call: ASpan, w: PathW) -> PathW {
         let w1: PathW = w
         for (const e of es) {
-            if (spanIn(call, e.span)) w1 = pwInExpr(e, call, w1)
+            if (spanIn(call, e.span)) w1 = pwExpr(e, call, w1)
+            else w1 = pwHit(w1, cfExpr(e, cf0()).exitAt)
         }
         for (const b of bs) {
             if (spanIn(call, b.span)) w1 = { after: w1.after, hits: pwStmts(b.stmts, call, w1).hits }
@@ -29264,16 +29272,144 @@ ${
         return { after: true, hits: w1.hits }
     }
 
-    // The statement blocks inside `e` that hold the call, walked from it.
-    fn pwInExpr(e: AExpr, call: ASpan, w: PathW) -> PathW {
+    // `at` (a `fail` statement whose operand holds the call) runs after the call.
+    fn pwHitAfter(w: PathW, at: ASpan) -> PathW {
+        return { after: w.after, hits: w.hits.concat([at]) }
+    }
+
+    // s475 r2 (review F1): the exits in `e` (which holds the call) that run after the call returned
+    // success. The result's `after` is true: the call has run once `e` is done.
+    fn pwExpr(e: AExpr, call: ASpan, w: PathW) -> PathW {
+        // the call already ran on this path before `e` (a later loop iteration): every exit follows it
+        if (w.after) return { after: true, hits: w.hits.concat(cfExpr(e, cf0()).exitAt) }
+        // the call itself: its arguments run before it
+        if (isTheCall(e, call)) return { after: true, hits: w.hits }
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) return pwHandled(e, h, call, w)
+        const kids: AExpr[] = exprKids(e)
+        if (isTernary(e.k)) {
+            // the branch not holding the call is exclusive of it; both follow a call in the test
+            if (spanIn(call, kids[0].span)) return { after: true, hits: pwExpr(kids[0], call, w).hits.concat(cfExprs([kids[1], kids[2]], cf0()).exitAt) }
+            if (spanIn(call, kids[1].span)) return pwExpr(kids[1], call, w)
+            return pwExpr(kids[2], call, w)
+        }
+        // left to right: what is evaluated after the operand holding the call follows it
         let hits: ASpan[] = w.hits
-        for (const b of exprBlocks(e)) {
-            if (spanIn(call, b.span)) hits = pwStmts(b.stmts, call, { after: w.after, hits: hits }).hits
+        let seen: boolean = false
+        for (const x of kids) {
+            if (seen) {
+                hits = hits.concat(cfExpr(x, cf0()).exitAt)
+            } else if (spanIn(call, x.span)) {
+                hits = pwExpr(x, call, { after: false, hits: hits }).hits
+                seen = true
+            }
         }
-        for (const x of exprKids(e)) {
-            if (spanIn(call, x.span)) hits = pwInExpr(x, call, { after: w.after, hits: hits }).hits
+        return { after: true, hits: hits }
+    }
+
+    // A `?` / `!{}` / `match` holding the call. On the call ITSELF: the `?` and the `!{}` arms run only
+    // when it failed; a `match`'s success arms (`.Ok`, a plain `_` with no `.Ok` arm before it) follow a
+    // success. On an expression holding the call: the `?` and every arm can follow a success. The call
+    // inside an arm: that arm is walked from it, the others are exclusive of it.
+    fn pwHandled(e: AExpr, h: AHandled, call: ASpan, w: PathW) -> PathW {
+        const arms: AArm[] = handledArms(h)
+        const how: AHow = h.how
+        const prop: boolean = match how {
+            .Propagate :> true
+            .Guard(arms: x) :> false
+            .MatchOn(arms: x) :> false
         }
-        return { after: w.after, hits: hits }
+        const isMatch: boolean = match how {
+            .Propagate :> false
+            .Guard(arms: x) :> false
+            .MatchOn(arms: x) :> true
+        }
+        if (spanIn(call, h.subject.span)) {
+            const direct: boolean = isTheCall(h.subject, call)
+            let hits: ASpan[] = pwExpr(h.subject, call, w).hits
+            if (prop && !direct) hits = hits.concat([e.span])
+            let okBefore: boolean = false
+            for (const a of arms) {
+                const ok: boolean = isOkArm(a)
+                let succ: boolean = !direct
+                if (direct && isMatch) succ = ok || (isPlainWild(a.pat) && !okBefore)
+                if (succ) hits = hits.concat(cfArm(a).exitAt)
+                if (ok) okBefore = true
+            }
+            return { after: true, hits: hits }
+        }
+        let hits: ASpan[] = w.hits
+        for (const a of arms) {
+            if (spanIn(call, a.span)) {
+                const b: AArmBody = a.body
+                for (const x of armExprOf(b)) { hits = pwExpr(x, call, { after: false, hits: hits }).hits }
+                for (const blk of armBlockOf(b)) { hits = pwStmts(blk.stmts, call, { after: false, hits: hits }).hits }
+            }
+        }
+        return { after: true, hits: hits }
+    }
+
+    // `e` is the call at `call` (the reference's span is the call expression's, scanCall) — not an
+    // expression around it.
+    fn isTheCall(e: AExpr, call: ASpan) -> boolean {
+        if (calleeOf(e.k) is not) return false
+        return e.span.start == call.start && e.span.end == call.end
+    }
+
+    fn isTernary(k: AExprK) -> boolean {
+        return match k {
+            .Ternary(test: x) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
+            .Foreign(f: fb0) :> false
+        }
+    }
+
+    fn isOkArm(a: AArm) -> boolean {
+        const pn: PatName | not = patName(a.pat)
+        if (pn is not) return false
+        return pn.name == "Ok"
+    }
+
+    // A plain `_` / `else` (a bare binder — E-MATCH-BARE-BINDER — read as one here); `_ err` takes
+    // failures only (§18.6.1).
+    fn isPlainWild(p: APat) -> boolean {
+        return match p {
+            .PWild :> true
+            .PBare(bind: b) :> true
+            .PWhole(bind: b) :> false
+            .PName(name: n) :> false
+            .PNot :> false
+            .PLit(e: x) :> false
+        }
+    }
+
+    fn cfArm(a: AArm) -> CFold {
+        const b: AArmBody = a.body
+        return match b {
+            .ArmExpr(e: x) :> cfExpr(x, cf0())
+            .ArmBlock(b: blk) :> cfStmts(blk.stmts, cf0())
+        }
     }
 
     // The span of the one server call (or the client function making it) in `sp`; `not` when none.

@@ -648,7 +648,8 @@ ${HOLD_CHARGE}    let <r:int=0/>
 // ---------------------------------------------------------------------------
 // s475 r1 (review of #1746, item 4) — S475 ruling item 1 (user-voice-scrml.md "## S475"): "A `!` function
 // must not report failure while its writes stand." The check sees a `fail` / `?` after the ONE server call
-// at ANY nesting depth, on a path from it (it saw only top-level statements after the call's statement).
+// in a nested statement on a path from it (it saw only top-level statements after the call's statement);
+// an exit inside the call's own statement / expression is r2 F1's (the describe block at the end).
 describe("s475 r1 item 4: a `fail` after the one server call, nested beside it", () => {
   const BODY = (body) => `<program db="./app.db">
 ${HOLD_CHARGE}    let <r:int=0/>
@@ -721,5 +722,89 @@ ${E}    type C:struct = { c: int }
     expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
     expect(e[0].message).toContain("while any writes the batch made stand");
     expect(e[0].message).not.toContain("the batch's writes stand");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s475 r2 (review of #1746 r1, F1): an exit in the SAME statement / expression as the one server call
+// was not seen — the client `!` reported failure while its write stood, with no diagnostic (executed
+// by the reviewer on real SQLite: r = .Bad, rows [5] committed, diags []). PA ruling (INTERIM,
+// capability-first): an exit inside an arm that runs ONLY when the call failed (an error-variant arm of
+// a `match` / `!{}` handler on the call itself) is allowed — the call's own envelope rolled back. An
+// exit in a success arm, in a `_` arm that could see success, or anywhere in the statement after the
+// call outside the call's error-only arms, is E-TX-FAIL-AFTER-COMMIT. `_` sees success unless an
+// earlier arm of the same `match` took `.Ok`.
+describe("s475 r2 F1: an exit in the same expression as the one server call", () => {
+  const ONE = (body) => withHost(`<program db="./app.db">
+${E}    function hold(a: int)! E {
+        ${q("INSERT INTO log (a) VALUES (${a})")}
+        return 1;
+    }
+    function chkArg(x: int)! E {
+        if (title() == "x") fail .Bad;
+        return x;
+    }
+    function bad() -> boolean {
+        return title() == "x";
+    }
+    let <r:int=0/>
+    function book(a: int)! E {
+${body}
+    }
+    <main><button id="go" onclick={ @r = book(5) !{ .Bad :> 7, _ :> 9, }; }>go</button></main>
+</program>
+`);
+  const ARMS = "            .QueryFailed(m) :> 0,\n            .ConstraintViolation(c) :> 0,\n            .ConnectionLost :> 0,\n            .Transport(t) :> 0,\n";
+  test("review shape 1: `chkArg(hold(a) !{ _ :> 0, })?` — the `?` runs after the call succeeded: E-TX-FAIL-AFTER-COMMIT at it (was: no diagnostic, the write stood)", () => {
+    const src = ONE(`        const y: int = chkArg(hold(a) !{ _ :> 0, })?;\n        return y;`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("chkArg(hold(a) !{ _ :> 0, })?");
+    expect(e[0].message).toContain("move the check before the first server call");
+    expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
+  });
+  test("review shape 2: a `fail` in the `.Ok` arm of a `match` on the call — E-TX-FAIL-AFTER-COMMIT at the `fail` (was: no diagnostic)", () => {
+    const src = ONE(`        const y: int = match hold(a) {\n            .Ok(v) :> { if (bad()) { fail .Bad; } lift v; },\n            .Bad :> 0,\n${ARMS}        };\n        return y;`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("fail .Bad");
+    expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
+  });
+  // §18.6 / §19.7.1: in a `match` over a failable, a plain `_` covers `.Ok` only (it may not take an error
+  // variant: E-MATCH-ELSE-ABSORBS-ERROR), so with no `.Ok` arm before it, it IS the success arm.
+  test("`_` with no `.Ok` arm before it takes the success value — a `fail` in it is E-TX-FAIL-AFTER-COMMIT", () => {
+    const src = ONE(`        const y: int = match hold(a) {\n            .Bad :> 0,\n${ARMS}            _ :> { if (bad()) { fail .Bad; } lift 1; },\n        };\n        return y;`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("fail .Bad");
+  });
+  test("near-miss: `_ err` after an explicit `.Ok` arm takes only failures — a `fail` in it is clean", () => {
+    const src = ONE(`        const y: int = match hold(a) {\n            .Ok(v) :> v,\n            _ err :> { if (bad()) { fail .Bad; } lift 0; },\n        };\n        return y;`);
+    expect(errs(src)).toEqual([]);
+  });
+  test("near-miss: a plain `_` after `.Ok` and every variant takes nothing (W-MATCH-001) — a `fail` in it is not E-TX-FAIL-AFTER-COMMIT", () => {
+    const src = ONE(`        const y: int = match hold(a) {\n            .Ok(v) :> v,\n            .Bad :> 0,\n${ARMS}            _ :> { if (bad()) { fail .Bad; } lift 0; },\n        };\n        return y;`);
+    expect(errs(src)).toEqual([]);
+  });
+  test("near-miss: a re-fail in an error arm of a `!{}` handler on the call is clean (the call's own envelope rolled back)", () => {
+    const src = ONE(`        const y: int = hold(a) !{ .Bad :> { if (bad()) { fail .Bad; } lift 0; }, _ :> 0, };\n        return y;`);
+    expect(errs(src)).toEqual([]);
+  });
+  test("near-miss: a re-fail in an error arm of a `match` on the call is clean", () => {
+    const src = ONE(`        const y: int = match hold(a) {\n            .Ok(v) :> v,\n            .Bad :> { if (bad()) { fail .Bad; } lift 0; },\n${ARMS}        };\n        return y;`);
+    expect(errs(src)).toEqual([]);
+  });
+  test("near-miss: `hold(a)?` — the call's own `?` runs only when the call failed — clean", () => {
+    const src = ONE(`        const y: int = hold(a)?;\n        return y;`);
+    expect(errs(src)).toEqual([]);
+  });
+  // a `?` / `match` inside a larger expression is E-BOOTSTRAP-UNSUPPORTED (slice Ue2), a `!{}` there is not:
+  // a handler on an expression that HOLDS the call (not the call itself) runs when that expression
+  // fails, which can be after the call succeeded
+  test("an error arm of a handler on an expression holding the call (not the call itself) — E-TX-FAIL-AFTER-COMMIT", () => {
+    const src = ONE(`        const y: int = chkArg(hold(a) !{ _ :> 0, }) !{ .Bad :> { fail .Bad; }, _ :> 0, };\n        return y;`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("fail .Bad");
   });
 });
