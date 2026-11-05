@@ -235,10 +235,12 @@ export function connection(host, desc) {
 // server function that request calls in-process — SHALL run inside the
 // transaction without waiting"). Any other statement waits at the gate.
 //
-// Pooled drivers (Postgres / MySQL) are not gated here: the bootstrap builds no
-// envelope on them (analyze.scrml refuses one — a pooled transaction needs a
-// connection reserved from the pool, which is not built), so a statement there
-// never meets an open transaction of another request.
+// Pooled drivers (Postgres / MySQL): only TRANSACTIONS pass the gate ("Under the
+// default, a database's transactions still run one at a time"), and each runs on a
+// connection reserved from the pool for it alone (s475 — `txConnection`). Any other
+// statement goes straight to the pool and never waits ("A statement from another
+// request runs on another pool connection and SHALL NOT wait"): it cannot meet an
+// open transaction of another request, which holds its own connection.
 // ---------------------------------------------------------------------------
 // s474 r1 (review F5): there is no timeout (g-boot-envelope-gate-no-timeout-s474) — a holder that
 // never finishes holds the connection; a server log line names it after GATE_SLOW_MS.
@@ -314,9 +316,52 @@ function gated(conn) {
   return GATED.has(conn.desc.driver);
 }
 
-// A compiler-issued control statement (BEGIN / SAVEPOINT / …): fixed text, no values.
-function control(conn, text) {
-  return conn.open()(sqlText([text]));
+// A compiler-issued control statement (BEGIN / SAVEPOINT / …): fixed text, no values, on the
+// transaction's own connection (`tx.sql` — see `txConnection`).
+function control(tx, text) {
+  return tx.sql(sqlText([text]));
+}
+
+// s475 (lane s475-boot-pg-envelopes) — THE CONNECTION A TRANSACTION RUNS ON. SPEC §19.10.6 "Pooled
+// drivers (Postgres, MySQL — §44.2). A transaction SHALL run on one connection taken from the pool
+// for it alone, and every statement of the owning request SHALL run on that connection until the
+// transaction ends. A statement from another request runs on another pool connection and SHALL NOT
+// wait. Under the default, a database's transactions still run one at a time."
+//  - SQLite: the database's one connection (`conn.open()`); the §19.10.6 gate keeps every other
+//    statement off it while the transaction holds it.
+//  - Postgres: a connection RESERVED from the pool (Bun.SQL `reserve()`, Bun 1.3+; measured: a pool
+//    query waits for a reserved connection of a `max: 1` pool and runs on another one otherwise).
+//    Every statement of the owning scope — the body's, an in-place callee's, a nested `!` call's
+//    savepoint, a statement savepoint — runs on it (`ownTx` → `tx.sql`); a statement from any other
+//    request goes to the pool and never into this transaction. Before s475 the transaction ran on the
+//    pool handle itself: on a `max: 1` pool another request's autocommit statement ran INSIDE it and
+//    was rolled back with it while reporting success (review F2), and a larger pool refused the raw
+//    `BEGIN` (Bun: ERR_POSTGRES_UNSAFE_TRANSACTION).
+//    At the end the connection goes back to the pool (`release`) only when the transaction is known
+//    ended (its COMMIT or ROLLBACK succeeded); otherwise it is CLOSED, so a connection still inside a
+//    transaction is never handed to another request (measured: Bun's `close()` on a reserved handle
+//    closes that connection only; the server rolls back what was open on it).
+//    A driver handle with no `reserve()` (a host's own `connect`) is refused: fail closed, never a
+//    transaction on a shared connection.
+// MySQL envelopes are refused at compile time (analyze.scrml envelopeOf): this path is not proven
+// against a MySQL server.
+async function txConnection(conn) {
+  const pool = conn.open();
+  if (gated(conn)) return { sql: pool, done: () => {} };
+  if (typeof pool.reserve !== "function") {
+    throw new Error(`scrml server: ${conn.desc.driver}:${conn.desc.file} is a pooled database and its driver handle has no reserve() — a transaction needs a connection of its own (§19.10.6), so it is refused, never run on a shared connection`);
+  }
+  const reserved = await pool.reserve();
+  return {
+    sql: reserved,
+    done: (ended) => {
+      try {
+        if (ended) reserved.release(); else reserved.close();
+      } catch (e) {
+        conn.log(`scrml server: giving back the reserved connection to ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
+      }
+    },
+  };
 }
 
 // After a statement failed INSIDE a transaction: is the transaction still open?
@@ -337,14 +382,14 @@ async function probeTx(tx) {
   // the envelope back.
   if (!gated(tx.conn)) return;
   try {
-    await control(tx.conn, "BEGIN DEFERRED");
+    await control(tx, "BEGIN DEFERRED");
   } catch (e) {
     if (/within a transaction/i.test(messageOf(e))) return;
     tx.broken = true;
     return;
   }
   tx.broken = true;
-  try { await control(tx.conn, "ROLLBACK"); } catch { /* the probe's own; nothing in it */ }
+  try { await control(tx, "ROLLBACK"); } catch { /* the probe's own; nothing in it */ }
 }
 
 function brokenError(conn) {
@@ -394,12 +439,15 @@ function brokenError(conn) {
 // failure or a throw — and neither commits nor ends the enclosing transaction,
 // so a later `fail` in the outer function still rolls everything back.
 //
-// `standalone`: whether this function needs its own transaction when no
-// enclosing one is open (its transitive query set has two or more queries, or
-// one reached more than once — §8.9.2 amendment). A `!` function with one query
-// in its set is printed with `standalone = false`: outside a transaction it runs
-// as written (one statement autocommits atomically by itself), inside one it is
-// a savepoint like any inner `!` call.
+// `standalone`: whether this function opens its own transaction when no
+// enclosing one is open. s475: the compiler prints `true` for every envelope —
+// SPEC §8.9.2 "Amendment S474" item 1: every `!` server body whose transitive
+// query set is non-empty runs in the envelope, "however many queries it reaches
+// (one is enough)". (Before s475 a one-query set was printed `false` and ran
+// with no transaction: a one-statement `INSERT … SELECT` that failed part way
+// kept its earlier rows, and a `fail` after its one write kept the write.)
+// `false` — run as written outside a transaction, a savepoint inside one — is
+// no longer printed; a hand-written caller may still pass it.
 //
 // "A failed `COMMIT` SHALL NOT release the connection … the `ROLLBACK` that
 // follows releases it" — so a failed COMMIT is followed by ROLLBACK, then the
@@ -408,9 +456,8 @@ function brokenError(conn) {
 const BEGINS = { IMMEDIATE: "BEGIN IMMEDIATE", DEFERRED: "BEGIN DEFERRED" };
 // s475: `BEGIN IMMEDIATE` / `BEGIN DEFERRED` are SQLite's. "On Postgres / MySQL it opens with plain
 // `BEGIN`, as ruling 5 states" (SPEC §8.9.2 "Amendment S474" item 1) — Postgres refuses `BEGIN
-// DEFERRED` ("syntax error at or near DEFERRED"). The compiler still refuses an envelope on a pooled
-// database (analyze.scrml envelopeOf: no pool connection is reserved), so on a deployed server this
-// arm runs only for a host whose `connect` hands back ONE connection (a `max: 1` pool).
+// DEFERRED` ("syntax error at or near DEFERRED"). It runs on the transaction's reserved connection
+// (txConnection).
 function beginText(conn, begin) {
   return conn.desc.driver === "sqlite" ? BEGINS[begin] : "BEGIN";
 }
@@ -422,11 +469,21 @@ export async function envelope(conn, run, standalone, begin) {
   if (outer !== null) return savepoint(outer, run);
   if (!standalone) return run();
   const als = scopeStore();
+  // the gate first, then the connection: a transaction waiting its turn holds no pool connection
   await conn.gate.acquire();
-  const tx = { conn, open: true, broken: false, seq: 0, stack: [] };
+  let handle = null;
+  // `ended`: the transaction is known closed (COMMIT or ROLLBACK succeeded, or BEGIN never opened it)
+  const tx = { conn, sql: null, open: true, broken: false, seq: 0, stack: [], ended: false };
   try {
     try {
-      await control(conn, beginText(conn, begin));
+      handle = await txConnection(conn);
+    } catch (e) {
+      conn.log(`scrml server: no connection for a transaction on ${conn.desc.driver}:${conn.desc.file} — ${messageOf(e)}`);
+      throw e;
+    }
+    tx.sql = handle.sql;
+    try {
+      await control(tx, beginText(conn, begin));
     } catch (e) {
       // "after a `BEGIN` that fails" the connection is released (the finally below)
       conn.log(`scrml server: BEGIN on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
@@ -450,12 +507,13 @@ export async function envelope(conn, run, standalone, begin) {
       return result;
     }
     try {
-      const done = await control(conn, "COMMIT");
+      const done = await control(tx, "COMMIT");
       // s475: Postgres answers the COMMIT of an ABORTED transaction (a statement in it failed and
       // nothing rolled back to a savepoint before it) with `ROLLBACK` and no error: every write of
       // the body is gone. That is a failed COMMIT — never a reported success (SPEC §8.9.2
       // "Amendment S474" item 1: "or its `COMMIT` fails … the call SHALL NOT report success").
       if (done && done.command === "ROLLBACK") throw new Error("the database answered COMMIT with ROLLBACK (the transaction was aborted by a failed statement)");
+      tx.ended = true;
     } catch (e) {
       conn.log(`scrml server: COMMIT on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}; rolled back`);
       await rollbackQuiet(tx, "ROLLBACK");
@@ -464,6 +522,7 @@ export async function envelope(conn, run, standalone, begin) {
     return result;
   } finally {
     tx.open = false;
+    if (handle !== null) handle.done(tx.ended);
     conn.gate.release();
   }
 }
@@ -477,7 +536,7 @@ async function savepoint(tx, run) {
   if (tx.broken) throw brokenError(tx.conn);
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
-  await control(tx.conn, "SAVEPOINT " + name);
+  await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
   let result;
   try {
@@ -492,7 +551,7 @@ async function savepoint(tx, run) {
     return result;
   }
   innermost(tx, name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
   return result;
 }
@@ -521,7 +580,7 @@ async function savepoint(tx, run) {
 async function statement(tx, mode, text, params, slots) {
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
-  await control(tx.conn, "SAVEPOINT " + name);
+  await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
   const result = await runQuery(tx.conn, mode, text, params, slots, tx);
   if (failed(result)) {
@@ -529,7 +588,7 @@ async function statement(tx, mode, text, params, slots) {
     return result;
   }
   innermost(tx, name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
   return result;
 }
@@ -544,14 +603,15 @@ function innermost(tx, name) {
 async function undoSavepoint(tx, name) {
   if (tx.broken) return;   // nothing left to roll back to — the outer envelope throws
   innermost(tx, name);
-  await control(tx.conn, "ROLLBACK TO SAVEPOINT " + name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "ROLLBACK TO SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
 }
 
 async function rollbackQuiet(tx, text) {
   try {
-    await control(tx.conn, text);
+    await control(tx, text);
+    tx.ended = true;
   } catch (e) {
     // a transaction the database already ended answers "no transaction is active"
     if (!tx.broken) tx.conn.log(`scrml server: ROLLBACK on ${tx.conn.desc.driver}:${tx.conn.desc.file} failed — ${messageOf(e)}`);
@@ -654,7 +714,8 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
-    const sql = conn.open();
+    // s475: inside a transaction, on its connection (a pooled database's reserved one — txConnection)
+    const sql = tx !== null ? tx.sql : conn.open();
     rows = await sql(text, ...values);
   } catch (e) {
     const err = sqlErrorOf(e);
@@ -687,34 +748,76 @@ function messageOf(e) {
   try { return String(e && e.message !== undefined ? e.message : e); } catch { return "an error"; }
 }
 
-const CONNECTION_CODES = new Set([
-  "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EPIPE",
-  "ERR_POSTGRES_CONNECTION_CLOSED", "ERR_POSTGRES_CONNECTION_TIMEOUT", "ERR_POSTGRES_IDLE_TIMEOUT",
-  "ERR_MYSQL_CONNECTION_CLOSED", "ERR_MYSQL_CONNECTION_TIMEOUT",
-  "SQLITE_CANTOPEN", "SQLITE_NOTADB", "SQLITE_IOERR",
-]);
-
-// §19.8.1's variants, by the driver's error code (SQLite's `SQLITE_CONSTRAINT*`,
-// Postgres class 23 — integrity constraint violation).
+// §19.8.1's variants, by the driver's error codes.
+// s475 (lane s475-boot-pg-envelopes): read EVERY field a driver puts a code in, as impl#1's
+// classifier does (compiler/src/codegen/sql-attempt.ts `_scrml_sql_error`, S474 N1). Bun.SQL's
+// PostgresError carries `code: "ERR_POSTGRES_SERVER_ERROR"` with the SQLSTATE in `errno` (measured,
+// Bun 1.4.3 against PostgreSQL 18 / PGlite: a unique violation is `errno: "23505"`, a NOT NULL one
+// "23502", a CHECK one "23514"); its MySQLError carries `code: "ER_DUP_ENTRY"`, the number in `errno`
+// and the SQLSTATE in `sqlState`; SQLite's code names the constraint (`SQLITE_CONSTRAINT_UNIQUE`).
+// Before s475 only `e.code` was read, so a Postgres unique violation was QueryFailed, never
+// ConstraintViolation (g-boot-pg-constraint-violation-misclassified-s475) — an
+// `!{ .ConstraintViolation :> … }` arm never ran on Postgres.
+const CONSTRAINT_NAMES = /^ER_(?:DUP_ENTRY|DUP_UNIQUE|NO_REFERENCED_ROW(?:_2)?|ROW_IS_REFERENCED(?:_2)?|BAD_NULL_ERROR|CHECK_CONSTRAINT_VIOLATED)$/;
+const CONSTRAINT_NUMBERS = /^(?:1062|1169|1216|1217|1451|1452|1048|3819)$/;
+const CONNECTION_NAMES = /^ERR_(?:POSTGRES|MYSQL)_(?:CONNECTION_\w+|IDLE_TIMEOUT|LIFETIME_TIMEOUT|AUTHENTICATION_FAILED\w*|SASL_SIGNATURE_\w+|INVALID_SERVER_SIGNATURE|INVALID_SERVER_KEY|(?:UNKNOWN|UNSUPPORTED)_AUTHENTICATION_METHOD|TLS_NOT_AVAILABLE|TLS_UPGRADE_FAILED|PASSWORD_REQUIRED|MISSING_AUTH_DATA|UNSUPPORTED_AUTH_PLUGIN|FAILED_TO_ENCRYPT_PASSWORD)$/;
+function codesOf(e) {
+  if (e === null || typeof e !== "object") return [];
+  return [e.code, e.errno, e.sqlState].filter((c) => c !== undefined && c !== null).map((c) => String(c));
+}
 export function sqlErrorOf(e) {
-  const code = e && typeof e.code === "string" ? e.code : "";
+  const codes = codesOf(e);
+  const any = (re) => codes.some((c) => re.test(c));
   const msg = messageOf(e);
-  if (code.startsWith("SQLITE_CONSTRAINT") || /^23\d\d\d$/.test(code)) {
+  // SQLite's SQLITE_CONSTRAINT*; SQLSTATE class 23 (integrity constraint violation — Postgres `errno`,
+  // MySQL `sqlState`); MySQL's duplicate-key, foreign-key, NOT NULL and CHECK errors by name and number
+  if (any(/^SQLITE_CONSTRAINT/) || any(/^23[0-9A-Z]{3}$/) || any(CONSTRAINT_NAMES) || any(CONSTRAINT_NUMBERS)) {
     return { variant: "ConstraintViolation", data: [constraintField(e, msg).field] };
   }
-  if (CONNECTION_CODES.has(code) || [...CONNECTION_CODES].some((c) => code.startsWith(c))) return "ConnectionLost";
+  // SQLSTATE class 08 (connection exception) and Postgres's server-side ends of a connection outside it
+  // (57P01-03 shutdown / cannot connect now, 53300 too many connections, 28000 / 28P01 authorization);
+  // the socket errors; Bun.SQL's connection / timeout / authentication codes; MySQL's client connection
+  // errors (2002, 2003, 2006, 2013); SQLite's cannot-open / not-a-database / I/O errors
+  if (any(/^08[0-9A-Z]{3}$/) || any(/^(?:57P0[1-3]|53300|28000|28P01)$/) ||
+      any(/^(?:ECONNREFUSED|ECONNRESET|ECONNABORTED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EPIPE|ETIMEDOUT)$/) ||
+      any(CONNECTION_NAMES) || any(/^(?:2002|2003|2006|2013)$/) || any(/^SQLITE_(?:CANTOPEN|NOTADB|IOERR)/)) {
+    return "ConnectionLost";
+  }
   return { variant: "QueryFailed", data: [msg] };
 }
 
 // ConstraintViolation's `field` (S474 #1703 r1, PA ruling): the COLUMN name only —
 // `email`, never `users.email` — in every build, as impl#1 (#1704) delivers it: a
 // client needs the field to say "that email is taken", and the table name is schema.
+// SPEC §19.8 (S474 — "a failed query's driver text does not cross the wire"):
+// "`ConstraintViolation`'s `field` is the COLUMN name only, in both builds … `email`,
+// not `users.email`; a composite UNIQUE gives `a, b`. … A field that is not exactly a
+// `table.col` list — a CHECK constraint's name or expression, an expression index, a
+// Postgres constraint name — is not a column: server code still sees it, and a
+// production build blanks it in the delivered value."
 // SQLite names the columns `table.col[, table.col…]` after "constraint failed: "
 // (UNIQUE / NOT NULL / PRIMARY KEY); each is cut to its column. Anything else after
 // it (a CHECK's constraint name or expression) is NOT a column: it stays the field's
 // value in server code and is withheld from a production answer (`column: false`).
-// Postgres / MySQL: the driver's `column` when it gives one, else its `constraint`
-// name (not a column).
+// Postgres: a unique / foreign-key / exclusion violation names its columns only in
+// `detail` — `Key (email)=(a@b) already exists.`, `Key (a, b)=(1, 2) …` (measured; the
+// driver's `constraint` is the index name `users_email_key`, and Bun.SQL's own `column`
+// is then the JS stack column, a number). s475: those columns are the field when every
+// one is a plain or double-quoted identifier (an expression index — `Key (lower(email))=`
+// — is not a column, and a server whose messages are translated does not say `Key`:
+// both fall back to the constraint name, `column: false`). A NOT NULL violation carries
+// the column in the driver's `column` (a string). MySQL: its `column` when it gives
+// one, else the `constraint` name (not a column).
+const PG_IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")$/;
+function pgKeyColumns(e) {
+  if (e === null || typeof e !== "object" || typeof e.detail !== "string") return null;
+  if (!codesOf(e).some((c) => /^23[0-9A-Z]{3}$/.test(c))) return null;
+  const m = /^Key \((.+?)\)=\(/.exec(e.detail);
+  if (m === null) return null;
+  const parts = m[1].split(", ");
+  if (!parts.every((p) => PG_IDENT.test(p))) return null;
+  return parts.map((p) => (p.startsWith('"') ? p.slice(1, -1).replace(/""/g, '"') : p)).join(", ");
+}
 function constraintField(e, msg) {
   const m = /constraint failed: (.*)$/.exec(msg);
   if (m) {
@@ -722,6 +825,8 @@ function constraintField(e, msg) {
     if (cols.every((c) => c !== null)) return { field: cols.map((c) => c[1]).join(", "), column: true };
     return { field: m[1], column: false };
   }
+  const keyCols = pgKeyColumns(e);
+  if (keyCols !== null) return { field: keyCols, column: true };
   if (e && typeof e.column === "string" && e.column !== "") return { field: e.column, column: true };
   if (e && typeof e.constraint === "string" && e.constraint !== "") return { field: e.constraint, column: false };
   return { field: "", column: false };

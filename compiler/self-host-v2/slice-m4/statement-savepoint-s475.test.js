@@ -77,6 +77,21 @@ ${E}
         ${SQ}\`INSERT INTO uniq (k) VALUES (\${a})\`}.run() !{ _ :> { } };
         return 1;
     }
+    function oneQuery(a: int)! E {
+        ${SQ}\`INSERT OR FAIL INTO uniq (k) SELECT k FROM src ORDER BY rowid\`}.run();
+        return a;
+    }
+    function oneWriteThenFail(a: int)! E {
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();
+        if (a > 5) fail .Bad;
+        return a;
+    }
+    function twoNobatch(a: int)! E {
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.nobatch().run();
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a + 1})\`}.nobatch().run();
+        if (a > 5) fail .Bad;
+        return a;
+    }
     let <r:int=0/>
     <main>
         <button onclick={ @r = guarded(1) !{ _ :> 0, }; }>a</button>
@@ -86,6 +101,9 @@ ${E}
         <button onclick={ @r = nested(1) !{ _ :> 0, }; }>e</button>
         <button onclick={ @r = rollbackConflict(1) !{ _ :> 0, }; }>f</button>
         <button onclick={ @r = alone(1) !{ _ :> 0, }; }>g</button>
+        <button onclick={ @r = oneQuery(1) !{ _ :> 0, }; }>h</button>
+        <button onclick={ @r = oneWriteThenFail(1) !{ _ :> 0, }; }>i</button>
+        <button onclick={ @r = twoNobatch(1) !{ _ :> 0, }; }>j</button>
     </main>
 </program>
 `;
@@ -209,6 +227,44 @@ describe("SQLite: a failed handled statement is rolled back to its savepoint bef
   });
 });
 
+// s475-boot-pg-envelopes, part 1 — SPEC §8.9.2 "Amendment S474" item 1: "The body of every `!`
+// function placed on the server … whose transitive query set … is **non-empty** SHALL run inside the
+// implicit per-handler transaction. This holds whatever its error type (not only `! -> SqlError`) and
+// however many queries it reaches (one is enough)." Item 2: `.nobatch()` "SHALL NOT remove the query
+// from the transitive query set, and it SHALL NOT suppress, narrow or end the envelope."
+// RED before: the bootstrap gave a body reaching one query once (or only `.nobatch()` queries) no
+// envelope of its own (g-boot-envelope-nobatch-count-and-remedy-s474).
+describe("every `!` server body with a query runs in the envelope — one query is enough", () => {
+  test("every `!` function of the program has a standalone envelope", () => {
+    for (const name of ["alone", "oneQuery", "oneWriteThenFail", "twoNobatch", "innerBang"]) {
+      const env = core.envelopes.find((e) => e.fn.hint === name);
+      expect([name, env && env.standalone]).toEqual([name, true]);
+    }
+  });
+  test("one statement that fails part way (`INSERT OR FAIL … SELECT`, not handled): its earlier rows roll back", async () => {
+    await reset();
+    await sql.unsafe("INSERT INTO src (k) VALUES (1), (2), (1)");
+    const res = await call("oneQuery", [1]);
+    expect(res.json).toMatchObject({ variant: "ConstraintViolation" });
+    // before: [1, 2] — the rows the statement inserted before its failing row were committed
+    expect(rows("uniq", "k")).toEqual([]);
+  });
+  test("one write, then `fail`: the write is rolled back", async () => {
+    await reset();
+    expect((await call("oneWriteThenFail", [7])).json).toMatchObject({ variant: "Bad" });
+    expect(rows("log", "a")).toEqual([]);   // before: [7]
+    expect((await call("oneWriteThenFail", [2])).json).toBe(2);
+    expect(rows("log", "a")).toEqual([2]);
+  });
+  test("two `.nobatch()` writes, then `fail`: both are rolled back", async () => {
+    await reset();
+    expect((await call("twoNobatch", [7])).json).toMatchObject({ variant: "Bad" });
+    expect(rows("log", "a")).toEqual([]);   // before: [7, 8]
+    expect((await call("twoNobatch", [2])).json).toBe(2);
+    expect(rows("log", "a")).toEqual([2, 3]);
+  });
+});
+
 describe("the statement sequence (a driver spy)", () => {
   // the control statements the runtime issues, and the `INSERT INTO uniq` sites (which fail)
   const run = async (fn, args) => {
@@ -264,15 +320,48 @@ describe("the statement sequence (a driver spy)", () => {
       "COMMIT",
     ]);
   });
-  test("outside any transaction (a one-query `!` function, no envelope of its own): no savepoint", async () => {
-    const { seq } = await run("alone", [1]);
-    expect(seq).toEqual(["INSERT INTO uniq (k) VALUES (?)"]);
+  // s475-boot-pg-envelopes: §8.9.2 "Amendment S474" item 1 — a `!` server body runs in the envelope
+  // "however many queries it reaches (one is enough)". Before: `["INSERT INTO uniq (k) VALUES (?)"]`
+  // (a one-query `!` function had no envelope of its own, so its handled statement took no savepoint).
+  test("a one-query `!` function has its own envelope, and its handled statement its savepoint", async () => {
+    const { res, seq } = await run("alone", [1]);
+    expect(res.status).toBe(200);
+    expect(seq).toEqual([
+      "BEGIN IMMEDIATE",
+      "SAVEPOINT scrml_sp_1",
+      "INSERT INTO uniq (k) VALUES (?)",
+      "ROLLBACK TO SAVEPOINT scrml_sp_1",
+      "RELEASE SAVEPOINT scrml_sp_1",
+      "COMMIT",
+    ]);
   });
 });
 
-describe("Postgres: the bootstrap still builds no envelope on a pooled database", () => {
-  test("a `!` function that needs one is E-BOOTSTRAP-UNSUPPORTED (refused, never compiled non-atomic)", () => {
+// s475-boot-pg-envelopes part 3: the envelope is BUILT on Postgres (a reserved pool connection,
+// §19.10.6 — the live proof is pg-envelope-s475.test.js); it was E-BOOTSTRAP-UNSUPPORTED here.
+// MySQL stays refused by name.
+describe("Postgres: the bootstrap builds the envelope on a Postgres database (MySQL: refused)", () => {
+  test("a `!` function with a handled statement compiles on Postgres; its handled query carries `handled`", async () => {
     const P = `<program db="postgres://u:p@localhost:5432/d">
+${E}
+    function g(a: int)! E {
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();
+        ${SQ}\`INSERT INTO uniq (k) VALUES (\${a})\`}.run() !{ _ :> { } };
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a + 1})\`}.run();
+        return 1;
+    }
+    let <r:int=0/>
+    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button></main>
+</program>
+`;
+    expect(codes(P)).toEqual([]);
+    const r = compile(P);
+    expect(r.core.envelopes.find((e) => e.fn.hint === "g")).toMatchObject({ standalone: true, writes: true });
+    const { js: j } = await serve(r.core, spyDriver().fn, []);
+    expect(j.split(HANDLED).length - 1).toBe(1);
+  });
+  test("on MySQL a `!` function that needs one is E-BOOTSTRAP-UNSUPPORTED (refused, never compiled non-atomic)", () => {
+    const P = `<program db="mysql://u:p@localhost:3306/d">
 ${E}
     function g(a: int)! E {
         ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();

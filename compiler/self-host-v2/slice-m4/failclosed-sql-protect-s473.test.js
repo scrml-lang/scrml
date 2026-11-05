@@ -231,13 +231,17 @@ describe("4 — §8.9.2 / §19.10.5: the implicit per-handler transaction (s474 
     expect(envOf(PROBE_P19_TX).standalone).toBe(true);
   });
 
-  test("near-misses: one query; `.nobatch()` leaves fewer than two; a function not declared `!`", () => {
+  // s475-boot-pg-envelopes: §8.9.2 "Amendment S474" items 1–2 — one query is enough, and `.nobatch()`
+  // neither removes a query from the set nor narrows the envelope: each of these is standalone now
+  // (before s475: `false` for one query and for one counted + one `.nobatch()`).
+  test("one query, or one beside a `.nobatch()` one, is enough for a standalone envelope; a function not declared `!` has none", () => {
     const bang = (q1, q2) => DBP(`    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }\n    function move(a: int)! E {\n${q1}${q2}        return 1;\n    }`);
     const q = (sql, nb = "") => `        ${SQ}\`${sql}\`}${nb}.run();\n`;
     expect(codes(bang(q("UPDATE t SET n = 1"), ""))).toEqual([]);
-    expect(envOf(bang(q("UPDATE t SET n = 1"), "")).standalone).toBe(false);
+    expect(envOf(bang(q("UPDATE t SET n = 1"), "")).standalone).toBe(true);
     expect(codes(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2", ".nobatch()")))).toEqual([]);
-    expect(envOf(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2", ".nobatch()"))).standalone).toBe(false);
+    expect(envOf(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2", ".nobatch()"))).standalone).toBe(true);
+    expect(envOf(bang(q("UPDATE t SET n = 1", ".nobatch()"), "")).standalone).toBe(true);
     expect(codes(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2")))).toEqual([]);
     expect(envOf(bang(q("UPDATE t SET n = 1"), q("UPDATE u SET n = 2"))).standalone).toBe(true);
     const plain = DBP(`    function f() -> int {\n        ${SQ}\`UPDATE t SET n = 1\`}.run() !{ _ :> { return 0; } };\n        ${SQ}\`UPDATE u SET n = 1\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`);

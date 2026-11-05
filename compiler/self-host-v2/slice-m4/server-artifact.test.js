@@ -290,8 +290,12 @@ describe("the route — every path answers; nothing runs on a refused request", 
     const logs2 = [];
     const { srv: s2, routes: rs2 } = await serve(r0.core, (...a) => boom.fn(...a), logs2);
     const r = await post(s2, pathOf(rs2, "lookup"), [1, 0]);
-    // the query's driver throw is a SqlError value → the `!{ _ :> { return 0 } }` arm: still 200
-    expect(r.status).toBe(200);
+    // s475-boot-pg-envelopes: `lookup` (one query) now runs in its envelope (SPEC §8.9.2 "Amendment
+    // S474" item 1, "one is enough"), so the first statement the throwing driver sees is the envelope's
+    // BEGIN — "If the envelope's own opening statement fails … It SHALL be answered as a server error"
+    // (item 1): 500. (Before s475 the query ran with no envelope; its throw was a SqlError value the
+    // `!{ _ :> … }` arm handled: 200.)
+    expect(r.status).toBe(500);
     expect(r.text).not.toContain("SECRET");
     expect(logs2.join("\n")).toContain("SECRET");
   });
