@@ -773,9 +773,17 @@ export function failed(result) {
  * runs another arm's body or the `else`. Ruling: user-voice-scrml.md S474 "`else` on a
  * failable match" (PERMANENT, security). Only the variant's tag and the enum name are in
  * the message (no payload). On the server, the request fails as an internal error.
+ * s475 (g-boot-unmatched-failure-tag-uncapped-s474): the tag is echoed only when it is an
+ * identifier of at most 64 characters (a variant name); any other string — a raw string
+ * error, a forged `variant` — is "?", so a defect never copies an arbitrary value into the
+ * server log or the browser console. INTERIM: this stays a plain-Error defect assertion,
+ * not a §19.17 trap code, until §19.16.3 rule 3 ("a failure outside the declared enum")
+ * gets a normative run-time code.
  */
+const UNMATCHED_TAG = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 export function unmatchedFailure(error, enumName) {
-  const tag = typeof error === "string" ? error : (error !== null && typeof error === "object" && typeof error.variant === "string" ? error.variant : "?");
+  const raw = typeof error === "string" ? error : (error !== null && typeof error === "object" && typeof error.variant === "string" ? error.variant : "?");
+  const tag = UNMATCHED_TAG.test(raw) ? raw : "?";
   throw new Error("internal: a failure (" + enumName + "." + tag + ") reached no arm of its handler. The compiler proves the arms total, so this is a compiler defect; please report it. Failing closed: no arm ran.");
 }
 
