@@ -28479,18 +28479,20 @@ ${
     // effect statement; `handled`: every handling form whose subject is a call of a name.
     type CHand:struct = { nid: int, callee: int, how: int, arms: AArm[] }
     // `clocks` (review L4): every bare `Date` / `performance` name — the browser's clock is not the server's.
-    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[] }
+    // s475 r1 (review item 4): `exitAt` — where each `fail` / `?` of the run stands (a `fail` statement's span,
+    // a `?`'s expression span), for the path walk after a server call (pwStmts).
+    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[], exitAt: ASpan[] }
 
-    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [] } }
+    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [], exitAt: [] } }
 
     fn cfWith(a: CFold, names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[]) -> CFold {
-        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks }
+        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks, exitAt: a.exitAt }
     }
 
     fn cfName(a: CFold, nid: int, n: string) -> CFold {
         let c: int[] = a.clocks
         if (n == "Date" || n == "performance") c = c.concat([nid])
-        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c }
+        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt }
     }
 
     fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
@@ -28516,7 +28518,9 @@ ${
     }
 
     fn cfRet(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, true, a.exits, a.effects, a.handled) }
-    fn cfExit(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, true, a.effects, a.handled) }
+    fn cfExit(a: CFold, at: ASpan) -> CFold {
+        return { names: a.names, assigns: a.assigns, rets: a.rets, exits: true, effects: a.effects, handled: a.handled, clocks: a.clocks, exitAt: a.exitAt.concat([at]) }
+    }
     fn cfEffect(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, a.exits, true, a.handled) }
 
     fn cfStmt(s: AStmt, a: CFold) -> CFold {
@@ -28533,7 +28537,7 @@ ${
             .Lift(what: w) :> cfExprs(liftExprs(w), a)
             .EffectStmt(w: w) :> cfEffect(a)
             .Defer(body: b) :> cfStmts(b.stmts, a)
-            .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a))
+            .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a, s.span))
         }
     }
 
@@ -28549,7 +28553,7 @@ ${
         return match k {
             .Name(name: n) :> cfName(a, e.nid, n)
             .Assign(target: t) :> cfWith(a, a.names, a.assigns.concat([e.nid, rootNameNid(t)]), a.rets, a.exits, a.effects, a.handled)
-            .Handled(h: h) :> cfHandled(a, e.nid, h)
+            .Handled(h: h) :> cfHandled(a, e.nid, e.span, h)
             .At(name: n) :> a
             .AtItem :> a
             .Num(raw: r) :> a
@@ -28574,7 +28578,7 @@ ${
         }
     }
 
-    fn cfHandled(a0: CFold, nid: int, h: AHandled) -> CFold {
+    fn cfHandled(a0: CFold, nid: int, sp: ASpan, h: AHandled) -> CFold {
         let a: CFold = a0
         const how: AHow = h.how
         const hk: int = match how {
@@ -28582,7 +28586,7 @@ ${
             .Guard(arms: x) :> 1
             .MatchOn(arms: x) :> 2
         }
-        if (hk == 0) a = cfExit(a)
+        if (hk == 0) a = cfExit(a, sp)
         const c: AExpr | not = calleeOf(h.subject.k)
         if (c is given) {
             if (exprName(c) != "") a = cfWith(a, a.names, a.assigns, a.rets, a.exits, a.effects, a.handled.concat([{ nid: nid, callee: c.nid, how: hk, arms: handledArms(h) }]))
@@ -29099,7 +29103,6 @@ ${
     fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int, reason0: string) -> Diag[] {
         let out: Diag[] = []
         const ss: AStmt[] = fs.f.body.stmts
-        const name: string = fs.info.name
         let k: int = from + 1
         let blocked: string = ""
         while (k < ss.length) {
@@ -29113,10 +29116,169 @@ ${
                 let why: string = blocked
                 if (why == "") why = reason0
                 if (why == "") why = "a statement before it cannot join the batch"
-                out = out.concat([newDiag("E-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") would run after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: the caller would be told '" + name + "' failed while the batch's writes stand, and they are not rolled back (§19.10.5). A `!` function must not report failure while its writes stand (S475). It cannot join the server batch because " + why + ". Fix: move the check before the first server call (or into the server function, so it can roll the writes back)", fs.info.file, ss[k].span)])
+                out = out.concat([lateDiag(g, fs, calls, ss[k].span, why)])
             }
             if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
             k = k + 1
+        }
+        return out
+    }
+
+    // The E-TX-FAIL-AFTER-COMMIT report for the `fail` / `?` at `sp`. s475 r1 (review item 4 note): "any
+    // writes the batch made stand" — true also of a read-only batch, which made none.
+    fn lateDiag(g: Globals, fs: FnSrc, calls: string[], sp: ASpan, why: string) -> Diag {
+        const name: string = fs.info.name
+        return newDiag("E-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, sp.start) + ") would run after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: the caller would be told '" + name + "' failed while any writes the batch made stand — they are not rolled back (§19.10.5). A `!` function must not report failure while its writes stand (S475). It cannot join the server batch because " + why + ". Fix: move the check before the first server call (or into the server function, so it can roll the writes back)", fs.info.file, sp)
+    }
+
+    // =========================================================================
+    // s475 r1 (review item 4) — THE EXITS AFTER ONE SERVER CALL, AT ANY DEPTH. S475 ruling item 1
+    // (user-voice-scrml.md "## S475"): "A `!` function must not report failure while its writes
+    // stand." A `fail` / `?` that can run after the call — on some path from it, however deeply the
+    // call or the exit is nested — is one the batch must hold (or E-TX-FAIL-AFTER-COMMIT). The walk
+    // follows the statement tree from the call: `after` = some path from the call reaches here.
+    //  - a block: in order; after a `return` / `fail` / `break` / `continue` nothing follows on it;
+    //  - an `if` / `given` holding the call: its branch holding the call is walked from the call; the
+    //    other branch does not follow the call (exclusive); both follow a call in the condition;
+    //    after it, either branch's path may continue;
+    //  - a `for` holding the call: every exit in it can follow the call (a later iteration), and
+    //    whatever follows the loop does;
+    //  - a simple statement holding the call: the statement blocks inside its expressions that hold
+    //    the call (a `match` arm block, a handler arm block) are walked from it; a handler's arms that
+    //    do not hold the call are not (they run when the call fails — its own writes rolled back).
+    //    NOT seen (pre-existing residual, reported): an exit inside the SAME expression as the call
+    //    (`hold()? + check()?`, a success arm of a `match` on the call itself).
+    // =========================================================================
+    type PathW:struct = { after: boolean, hits: ASpan[] }
+
+    fn pwStmts(ss: AStmt[], call: ASpan, w0: PathW) -> PathW {
+        let w: PathW = w0
+        for (const s of ss) { w = pwStmt(s, call, w) }
+        return w
+    }
+
+    // `more` are exits on the path when it follows the call.
+    fn pwHit(w: PathW, more: ASpan[]) -> PathW {
+        if (!w.after) return w
+        return { after: true, hits: w.hits.concat(more) }
+    }
+
+    fn pwStmt(s: AStmt, call: ASpan, w: PathW) -> PathW {
+        const k: AStmtK = s.k
+        const leaves: boolean = match k {
+            .Return(e: e) :> true
+            .Fail(f: f) :> true
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Lift(what: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: b) :> false
+        }
+        if (!spanIn(call, s.span)) {
+            const w0: PathW = pwHit(w, cfStmt(s, cf0()).exitAt)
+            return { after: w0.after && !leaves, hits: w0.hits }
+        }
+        const w2: PathW = match k {
+            .If(cond: c, thenB: tb, elseB: eb) :> pwIf(c, tb, eb, call, w)
+            .Given(name: n, subject: x, body: b) :> pwIf(x, b, not, call, w)
+            .For(f: lf) :> pwLoop(lf, call, w)
+            .Eval(e: e) :> pwSimple([e], [], call, w)
+            .Local(name: n, init: i) :> pwSimple([i], [], call, w)
+            .Return(e: e) :> pwSimple(maybeExprs(e), [], call, w)
+            .Fail(f: f) :> pwSimple(failExprs(f), [], call, w)
+            .Lift(what: x) :> pwSimple(liftExprs(x), [], call, w)
+            .Defer(body: b) :> pwSimple([], [b], call, w)
+            .EffectStmt(w: x) :> pwSimple([], [], call, w)
+            .Break(label: x) :> w
+            .Continue(label: x) :> w
+        }
+        return { after: w2.after && !leaves, hits: w2.hits }
+    }
+
+    fn maybeExprs(e: AExpr | not) -> AExpr[] {
+        if (e is not) return []
+        return [e]
+    }
+
+    fn pwIf(c: AExpr, tb: ABlock, eb: ABlock | not, call: ASpan, w: PathW) -> PathW {
+        let w1: PathW = pwHit(w, cfExpr(c, cf0()).exitAt)
+        if (spanIn(call, c.span)) w1 = pwInExpr(c, call, { after: true, hits: w1.hits })
+        const t: PathW = pwStmts(tb.stmts, call, w1)
+        let e: PathW = { after: w1.after, hits: t.hits }
+        if (eb is given) e = pwStmts(eb.stmts, call, { after: w1.after, hits: t.hits })
+        return { after: t.after || e.after, hits: e.hits }
+    }
+
+    fn pwLoop(lf: AFor, call: ASpan, w: PathW) -> PathW {
+        const head: ASpan[] = cfExprs(forExprs(lf), cf0()).exitAt
+        const b: PathW = pwStmts(lf.body.stmts, call, { after: true, hits: w.hits.concat(head) })
+        return { after: true, hits: b.hits }
+    }
+
+    fn pwSimple(es: AExpr[], bs: ABlock[], call: ASpan, w: PathW) -> PathW {
+        let w1: PathW = w
+        for (const e of es) {
+            if (spanIn(call, e.span)) w1 = pwInExpr(e, call, w1)
+        }
+        for (const b of bs) {
+            if (spanIn(call, b.span)) w1 = { after: w1.after, hits: pwStmts(b.stmts, call, w1).hits }
+        }
+        return { after: true, hits: w1.hits }
+    }
+
+    // The statement blocks inside `e` that hold the call, walked from it.
+    fn pwInExpr(e: AExpr, call: ASpan, w: PathW) -> PathW {
+        let hits: ASpan[] = w.hits
+        for (const b of exprBlocks(e)) {
+            if (spanIn(call, b.span)) hits = pwStmts(b.stmts, call, { after: w.after, hits: hits }).hits
+        }
+        for (const x of exprKids(e)) {
+            if (spanIn(call, x.span)) hits = pwInExpr(x, call, { after: w.after, hits: hits }).hits
+        }
+        return { after: w.after, hits: hits }
+    }
+
+    // The span of the one server call (or the client function making it) in `sp`; `not` when none.
+    fn oneCallSpan(sum: Summary, tq: TxQ, places: PlaceFact[], f: FnFacts, sp: ASpan) -> ASpan | not {
+        for (const r of f.scan.refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym)
+            if (spanIn(r.span, sp) && isFnNode(sum.nodes, j)) {
+                if (isServerPlace(placeOf(places, sum.nodes[j].f.sym)) || tq.remote[j] > 0) return r.span
+            }
+        }
+        return not
+    }
+
+    fn anySpanIn(xs: ASpan[], sp: ASpan) -> boolean {
+        for (const x of xs) {
+            if (spanIn(x, sp)) return true
+        }
+        return false
+    }
+
+    // The late reports for ONE server call made in statement `at`: an exit nested in `at` after the call
+    // (the statement could not join a batch), then lateExits' later statements — each only where an
+    // exit on a path after the call stands (`hits`).
+    fn lateHits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], at: int, reason0: string, hits: ASpan[]) -> Diag[] {
+        const ss: AStmt[] = fs.f.body.stmts
+        const x: StmtFx = fx[at]
+        let why: string = reason0
+        if (x.browser != "") why = "the statement that makes the server call also uses " + x.browser + ", which needs the browser"
+        else if (x.read != "") why = "the statement that makes the server call reads `" + x.read + "`, which is not marshalled into the batch yet"
+        else if (x.client != "") why = "the statement that makes the server call calls `" + x.client + "`, which reads or writes client state"
+        else if (x.write != "") why = "the statement that makes the server call writes `" + x.write + "`"
+        if (why == "") why = "the statement that makes the server call cannot join the batch"
+        let out: Diag[] = []
+        for (const h of hits) {
+            if (spanIn(h, ss[at].span)) out = out.concat([lateDiag(g, fs, calls, h, why)])
+        }
+        for (const d of lateExits(g, t, fs, fx, calls, at, reason0)) {
+            if (anySpanIn(hits, d.span)) out = out.concat([d])
         }
         return out
     }
@@ -29136,33 +29298,51 @@ ${
             k = k + 1
         }
         if (at < 0) return { plan: not, st: st0 }
+        // s475 r1 (review item 4): the exits that can run after the call — at any depth, on a path from it
+        // (was: only top-level statements after the call's statement, so an exit nested beside the call was
+        // never seen, and one on a path that never meets the call was)
+        let hits: ASpan[] = []
+        const csp: ASpan | not = oneCallSpan(sum, tq, places, f, ss[at].span)
+        if (csp is given) {
+            hits = pwStmts(ss, csp, { after: false, hits: [] }).hits
+        } else {
+            k = at + 1
+            while (k < ss.length) {
+                hits = hits.concat(cfStmt(ss[k], cf0()).exitAt)
+                k = k + 1
+            }
+        }
         // s474 r2 (review N2): the one request is made by a client function — composing it is not built,
         // so a later `fail` / `?` runs after that request committed
         if (fx[at].via != "") {
             let st2: AS = st0
-            for (const d of lateExits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)")) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
+            for (const d of lateHits(g, t, fs, fx, ["`" + fx[at].via + "`"], at, "the server call is made inside `" + fx[at].via + "`, a client function, and composing that call is not built yet (call the server function from '" + fs.info.name + "' directly)", hits)) { st2 = addDiag(st2, d.file, d.span, d.code, d.message) }
             return { plan: not, st: st2 }
         }
         for (const r of fx[at].remote) {
             if (r.substring(0, 2) == "`#") return { plan: not, st: st0 }
         }
-        let exits = false
-        k = at + 1
-        while (k < ss.length) {
-            if (cfStmt(ss[k], cf0()).exits) exits = true
-            k = k + 1
-        }
-        if (!exits) return { plan: not, st: st0 }
+        if (hits.length == 0) return { plan: not, st: st0 }
         const r1: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, "a statement after its one server call can `fail`", allow, st0)
         const p: ComposePlan | not = r1.plan
         if (p is given) {
-            if (p.late == 0) return r1
+            // the batch holds every exit nested in the call's statement; a later one composeOne could not
+            // join counts only when it stands on a path after the call
+            let notes: Diag[] = []
+            let late: int = 0
+            for (const d of p.notes) {
+                if (d.code != "E-TX-FAIL-AFTER-COMMIT" || anySpanIn(hits, d.span)) {
+                    notes = notes.concat([d])
+                    if (d.code == "E-TX-FAIL-AFTER-COMMIT") late = late + 1
+                }
+            }
+            if (late == 0) return { plan: { fnNid: p.fnNid, name: p.name, lo: p.lo, hi: p.hi, deferred: p.deferred, extra: p.extra, strip: p.strip, drop: p.drop, returns: p.returns, notes: notes, late: 0 }, st: r1.st }
         }
         // s474 r2 (review N4): the reason composing failed, when it was refused
         let reason: string = ""
         if (p is not && r1.st.diags.length > st0.diags.length) reason = refusalReason(r1.st.diags[r1.st.diags.length - 1])
         let st: AS = st0
-        for (const d of lateExits(g, t, fs, fx, fx[at].remote, at, reason)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
+        for (const d of lateHits(g, t, fs, fx, fx[at].remote, at, reason, hits)) { st = addDiag(st, d.file, d.span, d.code, d.message) }
         return { plan: not, st: st }
     }
 

@@ -639,3 +639,82 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(m).not.toContain("batch)()");
   });
 });
+
+// ---------------------------------------------------------------------------
+// s475 r1 (review of #1746, item 4) — S475 ruling item 1 (user-voice-scrml.md "## S475"): "A `!` function
+// must not report failure while its writes stand." The check sees a `fail` / `?` after the ONE server call
+// at ANY nesting depth, on a path from it (it saw only top-level statements after the call's statement).
+describe("s475 r1 item 4: a `fail` after the one server call, nested beside it", () => {
+  const BODY = (body) => `<program db="./app.db">
+${HOLD_CHARGE}    let <r:int=0/>
+    function book(a: int, f: int)! E {
+${body}
+    }
+    <main>
+        <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+        <button id="ok" onclick={ @r = book(1, 0) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
+    </main>
+</program>
+`;
+  test("the review's repro: a browser `fail` nested after the call — E-TX-FAIL-AFTER-COMMIT at the `fail` (was: no diagnostic, the write stood)", () => {
+    const src = withHost(BODY(`        if (f >= 0) {\n            hold(a)?;\n            if (title() == "x") fail .Bad;\n        }\n        return 3;`));
+    expect(warns(src)).toEqual([]);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("fail .Bad");
+    expect(e[0].message).toContain("uses the `<host>` binding `title`");
+    expect(e[0].message).toContain("move the check before the first server call");
+    expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
+  });
+  test("a movable `fail` nested after the call composes: the failure rolls the call's write back (was: the write stood)", async () => {
+    const src = BODY(`        if (f >= 0) {\n            hold(a)?;\n            if (f > 0) fail .Bad;\n        }\n        return 3;`);
+    expect(errs(src)).toEqual([]);
+    const r = compile(src);
+    expect(r.core.server.map((x) => x.sym.hint)).toContain("book#batch");
+    const sql = await realDb(DDL);
+    const bad = await clickRun(r.core, sql, "#bad");
+    expect(bad.calls).toBe(1);
+    expect(bad.state.r).toBe(7);
+    expect(await rows(sql)).toEqual([]);
+    const ok = await clickRun(r.core, sql, "#ok");
+    expect(ok.state.r).toBe(3);
+    expect(await rows(sql)).toEqual([1]);
+  });
+  test("a `fail` nested in a loop after the call (every exit in the loop can follow it) — E-TX-FAIL-AFTER-COMMIT", () => {
+    const src = withHost(BODY(`        for (const i of [1, 2]) {\n            if (title() == "x") fail .Bad;\n        }\n        if (f >= 0) {\n            hold(a)?;\n            for (const j of [1, 2]) {\n                if (title() == "y") fail .Bad;\n            }\n        }\n        return 3;`));
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(src.slice(e[0].span.start, e[0].span.end)).toBe("fail .Bad");
+    expect(e[0].span.start).toBeGreaterThan(src.indexOf("hold(a)?"));
+  });
+  test("near-miss: a `fail` in the OTHER branch never follows the call — no diagnostic, not composed", () => {
+    const src = withHost(BODY(`        if (f > 5) {\n            hold(a)?;\n        } else {\n            if (title() == "x") fail .Bad;\n        }\n        return 3;`));
+    expect(errs(src)).toEqual([]);
+    expect(compile(src).core.server.map((x) => x.sym.hint)).not.toContain("book#batch");
+  });
+  test("near-miss: the call's branch returns, so a later `fail` never follows it — no diagnostic (was a false E-TX-FAIL-AFTER-COMMIT)", () => {
+    const src = withHost(BODY(`        if (f > 5) {\n            hold(a)?;\n            return 1;\n        }\n        if (title() == "x") fail .Bad;\n        return 3;`));
+    expect(errs(src)).toEqual([]);
+  });
+  test("a read-only batch: the message is true without writes (\"any writes the batch made\")", () => {
+    const src = withHost(`<program db="./app.db">
+${E}    type C:struct = { c: int }
+    function peek(a: int)! E {
+        const row: C = ${SQ}\`SELECT count(*) AS c FROM log WHERE a = \${a}\`}.get();
+        return row.c;
+    }
+    let <r:int=0/>
+    function look(a: int)! E {
+        const v: int = peek(a)?;
+        if (title() == "x") fail .Bad;
+        return v;
+    }
+    <main><button onclick={ @r = look(1) !{ _ :> 9, }; }>go</button></main>
+</program>
+`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(e[0].message).toContain("while any writes the batch made stand");
+    expect(e[0].message).not.toContain("the batch's writes stand");
+  });
+});
