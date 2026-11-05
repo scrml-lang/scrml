@@ -9079,7 +9079,7 @@ stated at §66.3: an own value is a declaration whose type is its write contract
   ${
       let x = 1;
       const r = match x {
-          1 :> 10
+          1 :> 10,
           else :> 20
       };
       print(r);
@@ -9108,7 +9108,7 @@ stated at §66.3: an own value is a declaration whose type is its write contract
   ${
       function eat(powerUp) {
           match powerUp {
-              .Mushroom(n) :> n
+              .Mushroom(n) :> n,
               .Star        :> 0
           }
       }
@@ -11600,15 +11600,15 @@ ${
 <button onclick=loadUsers()>Load users</>
 
 match @usersState {
-    .NotAsked :> {}
-    .Loading  :> { <div class="spinner">Loading users...</> }
+    .NotAsked :> {},
+    .Loading  :> { <div class="spinner">Loading users...</> },
     .Ready(users) :> {
         <ul>
             ${ for (user of users) {
                 lift <li>${user.name} (${user.email})</>;
             }}
         </>
-    }
+    },
     .Failed(msg) :> {
         <div class="error">
             ${msg}
@@ -12559,8 +12559,8 @@ Pattern matching on an enum-typed struct field works normally:
 
 ```scrml
 match issue.status {
-    .Pending :> showPending()
-    .Active  :> showActive()
+    .Pending :> showPending(),
+    .Active  :> showActive(),
     .Closed  :> showClosed()
 }
 ```
@@ -12752,8 +12752,8 @@ Pattern matching over enum types uses match arms. All variants must be covered o
 
 ```scrml
 match value {
-    ::Circle(r) :> ...
-    ::Rectangle(w, h) :> ...
+    ::Circle(r) :> ...,
+    ::Rectangle(w, h) :> ...,
     ::Point :> ...
 }
 ```
@@ -15707,7 +15707,7 @@ const name = u.name;      // OK — post-transition access
 const u = loadUser(42);
 
 match u {
-    not :> handleAbsence()         // the `not` arm — u is `not`
+    not :> handleAbsence(),        // the `not` arm — u is `not`
     given u :> {
         // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
         const name = u.name;         // OK — post-transition access
@@ -18775,7 +18775,7 @@ reaches for when a fragment of rendered content depends on a condition or on an 
 
 ```scrml
 <p>${ if @isAdmin { "Admin" } else { "User" } }</p>
-<p>${ match @view { .List :> "list view"  .Grid :> "grid view" } }</p>
+<p>${ match @view { .List :> "list view", .Grid :> "grid view" } }</p>
 ```
 
 The value-form is **sugar for `lift`**. A branch body that is exactly one expression is equivalent
@@ -19777,9 +19777,9 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
 **Worked example — unit variants:**
 ```scrml
 match direction {
-    .North :> "up"
-    .South :> "down"
-    .East  :> "right"
+    .North :> "up",
+    .South :> "down",
+    .East  :> "right",
     .West  :> "left"
 }
 ```
@@ -19787,8 +19787,8 @@ match direction {
 **Worked example — payload variants, positional binding:**
 ```scrml
 match shape {
-    .Circle(r)       :> r * r * 3.14159
-    .Rectangle(w, h) :> w * h
+    .Circle(r)       :> r * r * 3.14159,
+    .Rectangle(w, h) :> w * h,
     .Point           :> 0
 }
 ```
@@ -19800,8 +19800,8 @@ match shape {
         let area = r * r * 3.14159;
         let perimeter = 2 * r * 3.14159;
         lift area + perimeter;              // S469: a value-position block arm yields with `lift` (§18.5)
-    }
-    .Rectangle(w, h) :> w * h
+    },
+    .Rectangle(w, h) :> w * h,
     .Point            :> 0
 }
 ```
@@ -19836,9 +19836,9 @@ right-hand side of an assignment.
 ```scrml
 ${ function getLabel(status: LoadStatus) {
     return match status {
-        .Loading :> "Loading..."
-        .Success :> "Done!"
-        .Error   :> "Failed"
+        .Loading :> "Loading...",
+        .Success :> "Done!",
+        .Error   :> "Failed",
         else     :> "Unknown"
     };
 } }
@@ -19853,9 +19853,9 @@ string. The function's return type is inferred as `string`.
 ```scrml
 ${ function logStatus(status: LoadStatus) {
     return match status {
-        .Loading :> console.log("loading")
-        .Success :> console.log("done")
-        .Error   :> console.log("error")
+        .Loading :> console.log("loading"),
+        .Success :> console.log("done"),
+        .Error   :> console.log("error"),
         else     :> console.log("unknown")
     };
 } }
@@ -19896,8 +19896,8 @@ unify to a common supertype. The result type of the `match` expression is that u
 **Worked example — valid (all arms same type):**
 ```scrml
 let label:string = match status {
-    .Active  :> "active"
-    .Pending :> "pending"
+    .Active  :> "active",
+    .Pending :> "pending",
     .Closed  :> "closed"
 };
 ```
@@ -19906,7 +19906,7 @@ All arms produce `string`. Result type is `string`.
 **Worked example — invalid (type mismatch across arms):**
 ```scrml
 let x = match flag {
-    .On  :> "yes"
+    .On  :> "yes",
     .Off :> 42        // Error: string vs number
 };
 ```
@@ -20365,7 +20365,7 @@ type Person:enum = {
 }
 
 match person {
-    .Employee(name: n, department: d) :> "${n} works in ${d}"
+    .Employee(name: n, department: d) :> "${n} works in ${d}",
     .Contractor(name: n)              :> "${n} is a contractor"
 }
 ```
@@ -20378,7 +20378,7 @@ type Shape:enum = {
 }
 
 match shape {
-    .Rectangle(w) :> w   // Error E-TYPE-021: arity mismatch, 1 binding for 2 fields
+    .Rectangle(w) :> w,  // Error E-TYPE-021: arity mismatch, 1 binding for 2 fields
     else          :> 0
 }
 ```
@@ -20424,7 +20424,7 @@ type Post:struct = { role: Role oneOf([.Admin, .Editor]) }   // Role = { Admin, 
 
 fn label(p: Post) -> string {
   return match p.role {                          // S469: a value leaves only by `return` (§48)
-    .Admin  => "Admin"
+    .Admin  => "Admin",
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
   };
@@ -20475,7 +20475,7 @@ use `.Some(value)` / `.None` when the union contains `not` (optional match).
 ```scrml
 // val : string | not
 match val {
-    .Some(s) :> "got: ${s}"
+    .Some(s) :> "got: ${s}",
     .None    :> "nothing"
 }
 ```
@@ -20600,11 +20600,11 @@ dispatches over the bound value.
 match expr {
     .Add(left, right) :> {
         let leftVal = match left {
-            .Lit(v)    :> v
+            .Lit(v)    :> v,
             .Add(l, r) :> l + r   // recursive; here simplified
         };
         lift leftVal + evalExpr(right);   // S469: `lift` (§18.5)
-    }
+    },
     .Lit(v) :> v
 }
 ```
@@ -20706,8 +20706,8 @@ Two arms for the same variant in a single match expression:
 
 ```scrml
 match shape {
-    ::Circle(r) :> r * 2
-    ::Circle(r) :> r * 3   // Error E-TYPE-023
+    ::Circle(r) :> r * 2,
+    ::Circle(r) :> r * 3,  // Error E-TYPE-023
     ::Point :> 0
 }
 ```
@@ -20761,8 +20761,8 @@ arm-pattern         ::= variant-pattern
 
 ```scrml
 match status {
-    "active"  :> handleActive()
-    "banned"  :> handleBanned()
+    "active"  :> handleActive(),
+    "banned"  :> handleBanned(),
     else      :> handleOther()
 }
 ```
@@ -20771,9 +20771,9 @@ match status {
 
 ```scrml
 match priority {
-    1    :> "high"
-    2    :> "medium"
-    3    :> "low"
+    1    :> "high",
+    2    :> "medium",
+    3    :> "low",
     else :> "unknown"
 }
 ```
@@ -20782,7 +20782,7 @@ match priority {
 
 ```scrml
 match isAdmin {
-    true  :> showAdminPanel()
+    true  :> showAdminPanel(),
     false :> showUserPanel()
 }
 ```
@@ -20949,7 +20949,7 @@ in generated code rather than an enum variant dispatch.
 
 ```scrml
 match role {
-    "admin"  :> showAdmin()
+    "admin"  :> showAdmin(),
     "editor" :> showEditor()
 }
 ```
@@ -20961,8 +20961,8 @@ Compiles. Emits W-MATCH-002: non-exhaustive string match; a role value other tha
 
 ```scrml
 match role {
-    "admin"  :> showAdmin()
-    "editor" :> showEditor()
+    "admin"  :> showAdmin(),
+    "editor" :> showEditor(),
     _        :> showUser()
 }
 ```
@@ -20975,7 +20975,7 @@ No warning. `_` covers all other string values.
 type Status:enum = { Active, Banned }
 
 match status {
-    "active" :> handleActive()   // Error E-TYPE-028
+    "active" :> handleActive(),  // Error E-TYPE-028
     _        :> handleOther()
 }
 ```
@@ -21006,8 +21006,8 @@ explicitly ignore the rest. The current workaround is an `else =>` arm that does
 
 ```scrml
 match @status {
-    .Failed(err) :> console.log(err.message)
-    .Timeout :> retryPayment()
+    .Failed(err) :> console.log(err.message),
+    .Timeout :> retryPayment(),
     else :> {}   // deliberately ignoring Active, Pending, Cancelled
 }
 ```
@@ -21033,7 +21033,7 @@ syntactic.
 ```scrml
 // partial match — only handles the variants relevant here; others silently ignored
 partial match @status {
-    .Failed(err) :> console.log(err.message)
+    .Failed(err) :> console.log(err.message),
     .Timeout :> retryPayment()
 }
 ```
@@ -21092,7 +21092,7 @@ type Status:enum = { Active, Pending }
 
 // W-MATCH-003: `partial` is unnecessary — all variants are covered
 partial match @status {
-    .Active :> handleActive()
+    .Active :> handleActive(),
     .Pending :> handlePending()
 }
 ```
@@ -21155,7 +21155,7 @@ achievable at no additional cost.
 
     ${ function handleTerminalStates() {
         partial match @status {
-            .Failed(err) :> console.log(err.message)
+            .Failed(err) :> console.log(err.message),
             .Timeout :> retryPayment()
             // Active, Pending, Cancelled silently ignored
         }
@@ -21189,7 +21189,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
   variant `.Inactive`, making it indistinguishable from a missing-arm bug.
   Use `match` with an `else` arm instead:
     match @status {
-        .Active => <p>Active/
+        .Active => <p>Active/,
         else => {}   // or provide markup for .Inactive
     }
 ```
@@ -21202,7 +21202,7 @@ type Mode:enum = { Dark, Light }
 
 ${ function applyMode() {
     partial match @mode {
-        .Dark :> setDarkStyles()
+        .Dark :> setDarkStyles(),
         .Light :> setLightStyles()
     }
 } }
@@ -21219,7 +21219,7 @@ against future variant additions.
 ```scrml
 ${ function processEvent(event: AppEvent) {
     partial match event {
-        .UserLogin(userId) :> recordLogin(userId)
+        .UserLogin(userId) :> recordLogin(userId),
         .UserLogout(userId) :> recordLogout(userId)
         // Other AppEvent variants (SystemAlert, ConfigChange, etc.) not handled here
     }
@@ -21278,11 +21278,11 @@ one exhaustive `match` over `(currentState, event)`:
 ```scrml
 fn step(st: LexState): LexState {
     return match (st.mode, classify(st.cur, lastKind(st))) {
-        (.InCode, .SawQuote(q))             :> scanString(st, q)      // q binds the event payload
-        (.InCode, .SawBacktick)             :> enterTemplate(st)
-        (.InCode, .SawLineComment)          :> scanLineComment(st)
-        (.InTemplateBody, .SawInterpClose)  :> closeInterp(st)
-        (_, .SawEof)                        :> emitEof(st)
+        (.InCode, .SawQuote(q))             :> scanString(st, q),     // q binds the event payload
+        (.InCode, .SawBacktick)             :> enterTemplate(st),
+        (.InCode, .SawLineComment)          :> scanLineComment(st),
+        (.InTemplateBody, .SawInterpClose)  :> closeInterp(st),
+        (_, .SawEof)                        :> emitEof(st),
         _                                   :> advanceOne(st)
     };
 }
@@ -21598,7 +21598,7 @@ function loadItem(id: string)! LoadError { … }        // success type: Item
 // VALID — value position, every arm yields an Item or leaves
 function itemOrPlaceholder(id: string) {
     const item = loadItem(id) !{
-        .NotFound(mid) :> placeholderItem(mid)       // yields a value
+        .NotFound(mid) :> placeholderItem(mid),      // yields a value
         .Timeout       :> { @phase = .TimedOut; return placeholderItem(id); }   // leaves
     };
     return item;
@@ -21607,7 +21607,7 @@ function itemOrPlaceholder(id: string) {
 // VALID — statement position: the arms only write, nothing reads a result
 function refresh(id: string) {
     loadItem(id) !{
-        .NotFound(mid) :> @phase = .Missing(mid)
+        .NotFound(mid) :> @phase = .Missing(mid),
         .Timeout       :> @phase = .TimedOut
     };
 }
@@ -21615,7 +21615,7 @@ function refresh(id: string) {
 // INVALID — value position, the arms fall through
 function show(id: string) {
     let item = loadItem(id) !{
-        .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
+        .NotFound(mid) :> @phase = .Missing(mid),    // E-ERROR-012: produces no value
         .Timeout       :> @phase = .TimedOut         // E-ERROR-012
     };
     @phase = .Loaded(item);                             // on failure `item` would hold nothing
@@ -21624,8 +21624,8 @@ function show(id: string) {
 // VALID — `match` in a value position: every arm, `.Ok` included, yields a string
 function label(id: string) {
     return match loadItem(id) {
-        .Ok(item)        :> item.title
-        .NotFound(mid)   :> "missing " + mid
+        .Ok(item)        :> item.title,
+        .NotFound(mid)   :> "missing " + mid,
         .Timeout         :> "timed out"
     };
 }
@@ -21780,8 +21780,8 @@ function load(id: string)! LoadError { … }
 
 function show(id: string) {
     const item = load(id) !{
-        .Network(msg) :> { @phase = .Failed(msg); return; }
-        .Timeout      :> placeholderItem(id)
+        .Network(msg) :> { @phase = .Failed(msg); return; },
+        .Timeout      :> placeholderItem(id),
         _ err         :> { @phase = .Failed(describe(err)); return; }
     };
     @phase = .Loaded(item);
@@ -21932,7 +21932,7 @@ The `?` operator is postfix. When applied to the result of a `!` function call:
 
 ```scrml
 match riskyFunction() {
-    ::Ok(val) :> val
+    ::Ok(val) :> val,
     ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args); }
 }
 ```
@@ -22143,10 +22143,10 @@ The success value is wrapped in an implicit `::Ok` variant. Error variants use t
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>
-    ::InvalidAmount(reason) :> <div class="error">${reason}</>
-    ::CustomerNotFound(id) :> redirect("/customers")
-    ::ExpiredCard :> <div>Please update payment method</>
+    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
+    ::InvalidAmount(reason) :> <div class="error">${reason}</>,
+    ::CustomerNotFound(id) :> redirect("/customers"),
+    ::ExpiredCard :> <div>Please update payment method</>,
     ::NetworkError(detail) :> <div>Network issue: ${detail}</>
 }
 ```
@@ -22157,7 +22157,7 @@ The error variants MAY be covered together, and the whole error bound, with the 
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>
+    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
     _ err         :> <div class="error">${describe(err)}</>   // err: the declared error enum, whole
 }
 ```
@@ -22168,7 +22168,7 @@ no earlier arm names is **E-MATCH-ELSE-ABSORBS-ERROR**, not E-TYPE-020:
 
 ```scrml
 match processPayment(100, 42) {
-    ::InvalidAmount(reason) :> …
+    ::InvalidAmount(reason) :> …,
     else                    :> …     // E-MATCH-ELSE-ABSORBS-ERROR: would take CustomerNotFound, ExpiredCard, NetworkError
 }
 ```
@@ -22236,9 +22236,9 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function userName(id: int) {
        const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
-           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?"; }
-           .ConstraintViolation(f) :> { return "?"; }
-           .ConnectionLost         :> { return "?"; }
+           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?"; },
+           .ConstraintViolation(f) :> { return "?"; },
+           .ConnectionLost         :> { return "?"; },
            _                       :> { return "?"; }
        };
        return row is not ? "(none)" : row.name;
@@ -22249,8 +22249,8 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function openOrders(customerId: string) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
-           ::Ok(found)       :> found
-           ::QueryFailed(m)  :> { log(m); lift []; }
+           ::Ok(found)       :> found,
+           ::QueryFailed(m)  :> { log(m); lift []; },
            _ e               :> []    // S474: `_ e`, not `_` — on a failable result `_` covers `.Ok` only (§18.6)
        };
        return rows;
@@ -22480,7 +22480,7 @@ function notifyOrder(orderId: number) {
 3. **Explicit match on result** (most-precise control):
    ```scrml
    match loadProfile(id) {
-       .Ok(p) :> @profile = p
+       .Ok(p) :> @profile = p,
        .Transport(t) :> @lastError = callProblem(t)   // callProblem: a `match t { … }` over ServerCallError (§19.9.10)
    }
    ```
@@ -22930,8 +22930,8 @@ added — S454 F7):
 ${
     function save() {
         @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
-            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return; }
-            .Storage       :> { @status = "the server could not store it"; return; }
+            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return; },
+            .Storage       :> { @status = "the server could not store it"; return; },
             .Transport(t)  :> { @status = callProblem(t); return; }
         };
         @status = "saved";
@@ -22939,9 +22939,9 @@ ${
 
     fn callProblem(t: ServerCallError) -> string {
         return match t {
-            .Unreachable    :> "offline — not saved"
-            .Refused(s)     :> `the server refused the save (${s}) — sign in again`
-            .ServerFault(s) :> `the server failed (${s}) — try again later`
+            .Unreachable    :> "offline — not saved",
+            .Refused(s)     :> `the server refused the save (${s}) — sign in again`,
+            .ServerFault(s) :> `the server failed (${s}) — try again later`,
             .Malformed(r)   :> "the server's answer could not be read"
         };
     }
@@ -23253,10 +23253,10 @@ Error values from `!` functions can be stored in reactive cells (§6):
 ${
     function handlePayment() {
         match processPayment(100, 42) {
-            ::Ok(receipt) :> @receipt = receipt
-            ::InvalidAmount(reason) :> @error = PaymentError::InvalidAmount(reason)
-            ::CustomerNotFound(id) :> @error = PaymentError::CustomerNotFound(id)
-            ::ExpiredCard :> @error = PaymentError::ExpiredCard
+            ::Ok(receipt) :> @receipt = receipt,
+            ::InvalidAmount(reason) :> @error = PaymentError::InvalidAmount(reason),
+            ::CustomerNotFound(id) :> @error = PaymentError::CustomerNotFound(id),
+            ::ExpiredCard :> @error = PaymentError::ExpiredCard,
             ::NetworkError(detail) :> @error = PaymentError::NetworkError(detail)
         }
     }
@@ -23264,10 +23264,10 @@ ${
 
 <div if=@error>
     ${match @error {
-        ::InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>
-        ::CustomerNotFound(_) :> lift <div class="error">Customer not found</>
-        ::ExpiredCard :> lift <div class="error">Card expired</>
-        ::NetworkError(detail) :> lift <div class="error">${detail}</>
+        ::InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>,
+        ::CustomerNotFound(_) :> lift <div class="error">Customer not found</>,
+        ::ExpiredCard :> lift <div class="error">Card expired</>,
+        ::NetworkError(detail) :> lift <div class="error">${detail}</>,
         _ :> lift <div></>
     }}
 </>
@@ -23303,9 +23303,9 @@ value position"). To keep the error for display, an arm writes it to its own cel
 ${
     function attemptPayment() {
         @receipt = processPayment(100, 42) !{
-            .InvalidAmount(reason) :> { @paymentError = PaymentError.InvalidAmount(reason); return; }
-            .CustomerNotFound(id)  :> { @paymentError = PaymentError.CustomerNotFound(id); return; }
-            .ExpiredCard           :> { @paymentError = PaymentError.ExpiredCard; return; }
+            .InvalidAmount(reason) :> { @paymentError = PaymentError.InvalidAmount(reason); return; },
+            .CustomerNotFound(id)  :> { @paymentError = PaymentError.CustomerNotFound(id); return; },
+            .ExpiredCard           :> { @paymentError = PaymentError.ExpiredCard; return; },
             .NetworkError(detail)  :> { @paymentError = PaymentError.NetworkError(detail); return; }
         };
         @paymentError = not;
@@ -34873,9 +34873,9 @@ type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results");
     const result = parseVariant(raw, LoadResult) !{
-        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); }
-        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); }
-        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); }
+        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); },
+        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); },
+        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); },
         .Malformed(reason)             :> { fail LoadError::Malformed(reason); }
     };
     return result;    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
@@ -35919,7 +35919,7 @@ Because a `given` head NAMES variables rather than binding them, each head name 
 ```scrml
 ${
     match x {
-        not        :> handleAbsence()
+        not        :> handleAbsence(),
         given x :> handlePresence(x)
     }
 }
@@ -41107,8 +41107,8 @@ state is FUNCTION of an upstream source rather than authored.
 
 ```scrml
 <engine for=Health derived=match @marioState {
-  .Small | .Big => .Healthy
-  .Fire | .Cape => .AtRisk
+  .Small | .Big => .Healthy,
+  .Fire | .Cape => .AtRisk,
   _              => .Critical
 }>
   <Healthy/>
@@ -41339,7 +41339,7 @@ type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: str
 function load() {
   @loadPhase = .Loading;
   const result = fetchItems() !{
-    .Network(msg) :> { @loadPhase = .Error(msg); return; }
+    .Network(msg) :> { @loadPhase = .Error(msg); return; },
     .Empty        :> { @loadPhase = .Done(0);    return; }
   };
   @loadPhase = .Done(result.length);
@@ -42147,13 +42147,13 @@ emitted.)*
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
 
   <Idle rule=.Dragging>
-    .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+    .Start(id) :> .Dragging(id),             <!-- (Idle × Start) → Dragging, carrying id -->
     _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }   <!-- id (state) + col (msg) in scope -->
-    .End       :> .Idle
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; },  <!-- id (state) + col (msg) in scope -->
+    .End       :> .Idle,
     _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
 
@@ -42290,12 +42290,12 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
   <Idle rule=.Dragging>
-    .Start(id) :> .Dragging(id)
+    .Start(id) :> .Dragging(id),
     _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }
-    .End       :> .Idle
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; },
+    .End       :> .Idle,
     _          :> @dragPhase
   </>
 </>
@@ -46720,7 +46720,7 @@ type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
 
 fn label(p: Post) -> string {
   return match p.role {                          // S469: a value leaves only by `return` (§48)
-    .Admin  => "Admin"
+    .Admin  => "Admin",
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
   };
@@ -46972,8 +46972,8 @@ Narrowing semantics extend the existing §18.17 `is` operator and §42 `not` nar
 
 ```scrml
 match @sub {
-    <Draft>     :> "editing"
-    <Validated> :> "ready"
+    <Draft>     :> "editing",
+    <Validated> :> "ready",
     <Submitted> :> "done"
     // missing any arm -> E-TYPE-020
 }
@@ -53533,7 +53533,7 @@ is inferred as everywhere. **Provenance:** ruling:user-voice-scrml.md S462 "go o
    ```scrml
    let <mode:Mode=.Light/>
    <theme>
-       <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+       <ink:string=(match @mode { .Light :> "#0f172a", .Dark :> "#e2e8f0" })/>
    </theme>
    ```
 
@@ -53733,8 +53733,8 @@ export let <mode:Mode=.Light/>                                 // `export let` b
                                                                // (O61 RULED S469: a `<theme>` body is an item position, §66.2.5)
     export <brand:string="#338967"/>                           // locked literal → :root { --brand: #338967 }
     export <danger:string="#dc2626"/>
-    export <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
-    export <paper:string=(match @mode { .Light :> "#ffffff"  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
+    export <ink:string=(match @mode { .Light :> "#0f172a",  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
+    export <paper:string=(match @mode { .Light :> "#ffffff",  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
 </theme>
 
 export <swatch:struct>                                         // writable fields are children (§66.4 rule 6, S447) —
