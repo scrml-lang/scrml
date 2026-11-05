@@ -1,0 +1,5 @@
+// s475: `m.nothere` names no export of the namespace import's module — E-IMPORT-004, naming the member.
+<program>
+    import * as m from "./lib.scrml";
+    <p>${m.nothere()}</p>
+</program>

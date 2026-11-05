@@ -221,6 +221,16 @@ describe("errors", () => {
     expect(ns.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ns.diags[0].message).toBe(named.diags[0].message);
   });
+  // re-exports are not built (g-boot-reexport-from-s473): the re-exporting module is refused where it
+  // is written, and a namespace over it does not bring the re-exported name — its use names it
+  test("a namespace over a module that RE-exports: the re-exported member is refused by name (E-IMPORT-004), the module at its `export … from`", () => {
+    const T = { path: "t.scrml", src: `\${\n    export fn inner() -> string {\n        return "t";\n    }\n}\n` };
+    const R = { path: "r.scrml", src: `\${\n    export { inner as outer } from "./t.scrml";\n    export fn own() -> string {\n        return "r";\n    }\n}\n` };
+    const r = prog([T, R, { path: ENTRY, src: `import * as r from "./r.scrml";\n<program>\n    <main><p>\${r.outer()}</p></main>\n</program>\n` }]);
+    expect(at(r)).toContainEqual(["E-PARSE-ITEM", "r.scrml"]);
+    expect(at(r)).toContainEqual(["E-IMPORT-004", ENTRY]);
+    expect(errs(r).find((d) => d.file === ENTRY).message).toContain("`outer` is not exported by `./r.scrml`");
+  });
   test("INTERIM: a local shadowing the namespace name, used as `m.x`, is refused by name", () => {
     const r = prog([LIB, useLib(`type T:struct = { Card: string }\n    fn f(m: T) -> string {\n        return m.Card;\n    }`, `<p>x</p>`)]);
     expect(at(r)).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ENTRY]]);

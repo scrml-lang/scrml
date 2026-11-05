@@ -1,0 +1,18 @@
+${
+    export fn shout(s: string) -> string {
+        return `${s.toUpperCase()}!`;
+    }
+
+    export type Color:enum = { Red, Blue }
+
+    export fn colorName(c: Color) -> string {
+        return match c {
+            .Red :> "red",
+            .Blue :> "blue",
+        };
+    }
+
+    export const GREETING = "hello";
+}
+export <badge t:string/>
+renders <span id="b">${t}</span>

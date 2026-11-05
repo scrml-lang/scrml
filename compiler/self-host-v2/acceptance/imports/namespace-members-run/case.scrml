@@ -1,0 +1,12 @@
+// s475: a namespace import binds `m`; `m.x` is the module's export `x` — a function, an enum,
+// a constant, a component (`<m.badge/>`) — and runs in the page.
+<program>
+    import * as m from "./lib.scrml";
+    let <name:string="world"/>
+    <main>
+        <p id="s">${m.shout(@name)}</p>
+        <p id="c">${m.colorName(m.Color.Blue)}</p>
+        <p id="g">${m.GREETING}</p>
+        <m.badge t="ok"/>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-imports-neg-namespace-member-not-exported",
+  "description": "E-IMPORT-004: a member of a namespace import that the module does not export.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "s475: §21.3 resolves imports against the exporting file's export list; a namespace member is judged at its use (ruling:user-voice-scrml.md S475 item 3).",
+  "expect": {
+    "codes": [
+      "E-IMPORT-004"
+    ],
+    "codeCounts": {
+      "E-IMPORT-004": 1
+    }
+  }
+}
