@@ -825,15 +825,45 @@ export function sqlErrorOf(e) {
 // both fall back to the constraint name, `column: false`). A NOT NULL violation carries
 // the column in the driver's `column` (a string). MySQL: its `column` when it gives
 // one, else the `constraint` name (not a column).
-const PG_IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")$/;
+// s475 (g-boot-pg-constraint-field-fallbacks-s475 part a): the key list is READ, not split on
+// ", " — a double-quoted column may itself hold `, ` or `)=(` (`Key ("Weird, col")=(x)`), which a
+// split read as two parts and fell back to the constraint name. Postgres prints each column with
+// quote_identifier: a plain lower-case identifier, or `"…"` with `"` doubled. Anything else in the
+// list (an expression index's `lower(email)`) is not a column: null, the constraint-name fallback.
+const PG_PLAIN_IDENT = /^[A-Za-z_][A-Za-z0-9_$]*/;
 function pgKeyColumns(e) {
   if (e === null || typeof e !== "object" || typeof e.detail !== "string") return null;
   if (!codesOf(e).some((c) => /^23[0-9A-Z]{3}$/.test(c))) return null;
-  const m = /^Key \((.+?)\)=\(/.exec(e.detail);
-  if (m === null) return null;
-  const parts = m[1].split(", ");
-  if (!parts.every((p) => PG_IDENT.test(p))) return null;
-  return parts.map((p) => (p.startsWith('"') ? p.slice(1, -1).replace(/""/g, '"') : p)).join(", ");
+  const d = e.detail;
+  if (!d.startsWith("Key (")) return null;
+  let i = 5;
+  const cols = [];
+  for (;;) {
+    if (d[i] === '"') {
+      let name = "";
+      let j = i + 1;
+      for (;;) {
+        if (j >= d.length) return null;              // an unterminated quoted name
+        if (d[j] === '"') {
+          if (d[j + 1] === '"') { name += '"'; j += 2; continue; }
+          break;
+        }
+        name += d[j];
+        j += 1;
+      }
+      if (name === "") return null;
+      cols.push(name);
+      i = j + 1;
+    } else {
+      const m = PG_PLAIN_IDENT.exec(d.slice(i));
+      if (m === null) return null;
+      cols.push(m[0]);
+      i += m[0].length;
+    }
+    if (d.startsWith(", ", i)) { i += 2; continue; }
+    if (d.startsWith(")=(", i)) return cols.join(", ");
+    return null;                                     // anything else after a name: not a plain column list
+  }
 }
 function constraintField(e, msg) {
   const m = /constraint failed: (.*)$/.exec(msg);
