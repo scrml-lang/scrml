@@ -337,9 +337,31 @@ describe("the statement sequence (a driver spy)", () => {
   });
 });
 
-describe("Postgres: the bootstrap still builds no envelope on a pooled database", () => {
-  test("a `!` function that needs one is E-BOOTSTRAP-UNSUPPORTED (refused, never compiled non-atomic)", () => {
+// s475-boot-pg-envelopes part 3: the envelope is BUILT on Postgres (a reserved pool connection,
+// §19.10.6 — the live proof is pg-envelope-s475.test.js); it was E-BOOTSTRAP-UNSUPPORTED here.
+// MySQL stays refused by name.
+describe("Postgres: the bootstrap builds the envelope on a Postgres database (MySQL: refused)", () => {
+  test("a `!` function with a handled statement compiles on Postgres; its handled query carries `handled`", async () => {
     const P = `<program db="postgres://u:p@localhost:5432/d">
+${E}
+    function g(a: int)! E {
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();
+        ${SQ}\`INSERT INTO uniq (k) VALUES (\${a})\`}.run() !{ _ :> { } };
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a + 1})\`}.run();
+        return 1;
+    }
+    let <r:int=0/>
+    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button></main>
+</program>
+`;
+    expect(codes(P)).toEqual([]);
+    const r = compile(P);
+    expect(r.core.envelopes.find((e) => e.fn.hint === "g")).toMatchObject({ standalone: true, writes: true });
+    const { js: j } = await serve(r.core, spyDriver().fn, []);
+    expect(j.split(HANDLED).length - 1).toBe(1);
+  });
+  test("on MySQL a `!` function that needs one is E-BOOTSTRAP-UNSUPPORTED (refused, never compiled non-atomic)", () => {
+    const P = `<program db="mysql://u:p@localhost:3306/d">
 ${E}
     function g(a: int)! E {
         ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();

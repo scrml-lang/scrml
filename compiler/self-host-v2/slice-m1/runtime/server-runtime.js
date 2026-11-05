@@ -235,10 +235,12 @@ export function connection(host, desc) {
 // server function that request calls in-process — SHALL run inside the
 // transaction without waiting"). Any other statement waits at the gate.
 //
-// Pooled drivers (Postgres / MySQL) are not gated here: the bootstrap builds no
-// envelope on them (analyze.scrml refuses one — a pooled transaction needs a
-// connection reserved from the pool, which is not built), so a statement there
-// never meets an open transaction of another request.
+// Pooled drivers (Postgres / MySQL): only TRANSACTIONS pass the gate ("Under the
+// default, a database's transactions still run one at a time"), and each runs on a
+// connection reserved from the pool for it alone (s475 — `txConnection`). Any other
+// statement goes straight to the pool and never waits ("A statement from another
+// request runs on another pool connection and SHALL NOT wait"): it cannot meet an
+// open transaction of another request, which holds its own connection.
 // ---------------------------------------------------------------------------
 // s474 r1 (review F5): there is no timeout (g-boot-envelope-gate-no-timeout-s474) — a holder that
 // never finishes holds the connection; a server log line names it after GATE_SLOW_MS.
@@ -314,9 +316,52 @@ function gated(conn) {
   return GATED.has(conn.desc.driver);
 }
 
-// A compiler-issued control statement (BEGIN / SAVEPOINT / …): fixed text, no values.
-function control(conn, text) {
-  return conn.open()(sqlText([text]));
+// A compiler-issued control statement (BEGIN / SAVEPOINT / …): fixed text, no values, on the
+// transaction's own connection (`tx.sql` — see `txConnection`).
+function control(tx, text) {
+  return tx.sql(sqlText([text]));
+}
+
+// s475 (lane s475-boot-pg-envelopes) — THE CONNECTION A TRANSACTION RUNS ON. SPEC §19.10.6 "Pooled
+// drivers (Postgres, MySQL — §44.2). A transaction SHALL run on one connection taken from the pool
+// for it alone, and every statement of the owning request SHALL run on that connection until the
+// transaction ends. A statement from another request runs on another pool connection and SHALL NOT
+// wait. Under the default, a database's transactions still run one at a time."
+//  - SQLite: the database's one connection (`conn.open()`); the §19.10.6 gate keeps every other
+//    statement off it while the transaction holds it.
+//  - Postgres: a connection RESERVED from the pool (Bun.SQL `reserve()`, Bun 1.3+; measured: a pool
+//    query waits for a reserved connection of a `max: 1` pool and runs on another one otherwise).
+//    Every statement of the owning scope — the body's, an in-place callee's, a nested `!` call's
+//    savepoint, a statement savepoint — runs on it (`ownTx` → `tx.sql`); a statement from any other
+//    request goes to the pool and never into this transaction. Before s475 the transaction ran on the
+//    pool handle itself: on a `max: 1` pool another request's autocommit statement ran INSIDE it and
+//    was rolled back with it while reporting success (review F2), and a larger pool refused the raw
+//    `BEGIN` (Bun: ERR_POSTGRES_UNSAFE_TRANSACTION).
+//    At the end the connection goes back to the pool (`release`) only when the transaction is known
+//    ended (its COMMIT or ROLLBACK succeeded); otherwise it is CLOSED, so a connection still inside a
+//    transaction is never handed to another request (measured: Bun's `close()` on a reserved handle
+//    closes that connection only; the server rolls back what was open on it).
+//    A driver handle with no `reserve()` (a host's own `connect`) is refused: fail closed, never a
+//    transaction on a shared connection.
+// MySQL envelopes are refused at compile time (analyze.scrml envelopeOf): this path is not proven
+// against a MySQL server.
+async function txConnection(conn) {
+  const pool = conn.open();
+  if (gated(conn)) return { sql: pool, done: () => {} };
+  if (typeof pool.reserve !== "function") {
+    throw new Error(`scrml server: ${conn.desc.driver}:${conn.desc.file} is a pooled database and its driver handle has no reserve() — a transaction needs a connection of its own (§19.10.6), so it is refused, never run on a shared connection`);
+  }
+  const reserved = await pool.reserve();
+  return {
+    sql: reserved,
+    done: (ended) => {
+      try {
+        if (ended) reserved.release(); else reserved.close();
+      } catch (e) {
+        conn.log(`scrml server: giving back the reserved connection to ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
+      }
+    },
+  };
 }
 
 // After a statement failed INSIDE a transaction: is the transaction still open?
@@ -337,14 +382,14 @@ async function probeTx(tx) {
   // the envelope back.
   if (!gated(tx.conn)) return;
   try {
-    await control(tx.conn, "BEGIN DEFERRED");
+    await control(tx, "BEGIN DEFERRED");
   } catch (e) {
     if (/within a transaction/i.test(messageOf(e))) return;
     tx.broken = true;
     return;
   }
   tx.broken = true;
-  try { await control(tx.conn, "ROLLBACK"); } catch { /* the probe's own; nothing in it */ }
+  try { await control(tx, "ROLLBACK"); } catch { /* the probe's own; nothing in it */ }
 }
 
 function brokenError(conn) {
@@ -411,9 +456,8 @@ function brokenError(conn) {
 const BEGINS = { IMMEDIATE: "BEGIN IMMEDIATE", DEFERRED: "BEGIN DEFERRED" };
 // s475: `BEGIN IMMEDIATE` / `BEGIN DEFERRED` are SQLite's. "On Postgres / MySQL it opens with plain
 // `BEGIN`, as ruling 5 states" (SPEC §8.9.2 "Amendment S474" item 1) — Postgres refuses `BEGIN
-// DEFERRED` ("syntax error at or near DEFERRED"). The compiler still refuses an envelope on a pooled
-// database (analyze.scrml envelopeOf: no pool connection is reserved), so on a deployed server this
-// arm runs only for a host whose `connect` hands back ONE connection (a `max: 1` pool).
+// DEFERRED` ("syntax error at or near DEFERRED"). It runs on the transaction's reserved connection
+// (txConnection).
 function beginText(conn, begin) {
   return conn.desc.driver === "sqlite" ? BEGINS[begin] : "BEGIN";
 }
@@ -425,11 +469,21 @@ export async function envelope(conn, run, standalone, begin) {
   if (outer !== null) return savepoint(outer, run);
   if (!standalone) return run();
   const als = scopeStore();
+  // the gate first, then the connection: a transaction waiting its turn holds no pool connection
   await conn.gate.acquire();
-  const tx = { conn, open: true, broken: false, seq: 0, stack: [] };
+  let handle = null;
+  // `ended`: the transaction is known closed (COMMIT or ROLLBACK succeeded, or BEGIN never opened it)
+  const tx = { conn, sql: null, open: true, broken: false, seq: 0, stack: [], ended: false };
   try {
     try {
-      await control(conn, beginText(conn, begin));
+      handle = await txConnection(conn);
+    } catch (e) {
+      conn.log(`scrml server: no connection for a transaction on ${conn.desc.driver}:${conn.desc.file} — ${messageOf(e)}`);
+      throw e;
+    }
+    tx.sql = handle.sql;
+    try {
+      await control(tx, beginText(conn, begin));
     } catch (e) {
       // "after a `BEGIN` that fails" the connection is released (the finally below)
       conn.log(`scrml server: BEGIN on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
@@ -453,12 +507,13 @@ export async function envelope(conn, run, standalone, begin) {
       return result;
     }
     try {
-      const done = await control(conn, "COMMIT");
+      const done = await control(tx, "COMMIT");
       // s475: Postgres answers the COMMIT of an ABORTED transaction (a statement in it failed and
       // nothing rolled back to a savepoint before it) with `ROLLBACK` and no error: every write of
       // the body is gone. That is a failed COMMIT — never a reported success (SPEC §8.9.2
       // "Amendment S474" item 1: "or its `COMMIT` fails … the call SHALL NOT report success").
       if (done && done.command === "ROLLBACK") throw new Error("the database answered COMMIT with ROLLBACK (the transaction was aborted by a failed statement)");
+      tx.ended = true;
     } catch (e) {
       conn.log(`scrml server: COMMIT on ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}; rolled back`);
       await rollbackQuiet(tx, "ROLLBACK");
@@ -467,6 +522,7 @@ export async function envelope(conn, run, standalone, begin) {
     return result;
   } finally {
     tx.open = false;
+    if (handle !== null) handle.done(tx.ended);
     conn.gate.release();
   }
 }
@@ -480,7 +536,7 @@ async function savepoint(tx, run) {
   if (tx.broken) throw brokenError(tx.conn);
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
-  await control(tx.conn, "SAVEPOINT " + name);
+  await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
   let result;
   try {
@@ -495,7 +551,7 @@ async function savepoint(tx, run) {
     return result;
   }
   innermost(tx, name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
   return result;
 }
@@ -524,7 +580,7 @@ async function savepoint(tx, run) {
 async function statement(tx, mode, text, params, slots) {
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
-  await control(tx.conn, "SAVEPOINT " + name);
+  await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
   const result = await runQuery(tx.conn, mode, text, params, slots, tx);
   if (failed(result)) {
@@ -532,7 +588,7 @@ async function statement(tx, mode, text, params, slots) {
     return result;
   }
   innermost(tx, name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
   return result;
 }
@@ -547,14 +603,15 @@ function innermost(tx, name) {
 async function undoSavepoint(tx, name) {
   if (tx.broken) return;   // nothing left to roll back to — the outer envelope throws
   innermost(tx, name);
-  await control(tx.conn, "ROLLBACK TO SAVEPOINT " + name);
-  await control(tx.conn, "RELEASE SAVEPOINT " + name);
+  await control(tx, "ROLLBACK TO SAVEPOINT " + name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
   tx.stack.pop();
 }
 
 async function rollbackQuiet(tx, text) {
   try {
-    await control(tx.conn, text);
+    await control(tx, text);
+    tx.ended = true;
   } catch (e) {
     // a transaction the database already ended answers "no transaction is active"
     if (!tx.broken) tx.conn.log(`scrml server: ROLLBACK on ${tx.conn.desc.driver}:${tx.conn.desc.file} failed — ${messageOf(e)}`);
@@ -657,7 +714,8 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
-    const sql = conn.open();
+    // s475: inside a transaction, on its connection (a pooled database's reserved one — txConnection)
+    const sql = tx !== null ? tx.sql : conn.open();
     rows = await sql(text, ...values);
   } catch (e) {
     const err = sqlErrorOf(e);

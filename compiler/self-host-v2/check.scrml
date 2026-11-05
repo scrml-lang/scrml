@@ -139,9 +139,10 @@ ${
     //   C-TX2 `fn` WAITS (Fn.waits / ServerFn.waits): its transitive query set
     //         holds a query, so it reaches a Suspend — its callers await it, and
     //         the envelope's own BEGIN / COMMIT are awaited inside it
-    //   C-TX3 a `standalone` envelope is on a SQLite database (the server
-    //         runtime reserves no pooled connection, §19.10.6 — analyze refuses
-    //         the source shape; this keeps a bad Core from printing)
+    //   C-TX3 a `standalone` envelope is not on a MySQL database (s475: the
+    //         server runtime reserves a pool connection per transaction,
+    //         §19.10.6, proven on Postgres only — analyze refuses the MySQL
+    //         source shape; this keeps a bad Core from printing)
     // =========================================================================
     fn checkEnvelopes(p: CoreProgram) -> string[] {
         let out: string[] = []
@@ -169,8 +170,8 @@ ${
             const d: Db | not = findDb(p, e.db)
             if (d is not) {
                 out = out.concat(["C-TX1: " + who + " names no database of the program"])
-            } else if (e.standalone && d.driver != Driver.Sqlite) {
-                out = out.concat(["C-TX3: " + who + " is on a pooled (Postgres / MySQL) database"])
+            } else if (e.standalone && d.driver == Driver.Mysql) {
+                out = out.concat(["C-TX3: " + who + " is on a MySQL database"])
             }
         }
         return out

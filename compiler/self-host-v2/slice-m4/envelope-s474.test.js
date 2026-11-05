@@ -292,10 +292,14 @@ describe("still refused, each with its named code", () => {
     expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("reads `./b.db`");
   });
-  test("an envelope on a pooled (Postgres) database — E-BOOTSTRAP-UNSUPPORTED (no reserved pool connection)", () => {
-    const src = `<program db="postgres://localhost/app">\n${E}    function move(a: int)! E {\n        ${q("UPDATE acct SET n = n - ${a}")}\n        ${q("UPDATE acct SET n = n + ${a}")}\n        return 1;\n    }\n${page(["move(1)"])}</program>\n`;
-    expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("pooled");
+  // s475-boot-pg-envelopes: a Postgres envelope is built (server-runtime.js txConnection reserves a
+  // pool connection — §19.10.6; live proof slice-m4/pg-envelope-s475.test.js). MySQL stays refused.
+  test("an envelope on a MySQL database — E-BOOTSTRAP-UNSUPPORTED (Postgres: built, s475)", () => {
+    const on = (db) => `<program db="${db}">\n${E}    function move(a: int)! E {\n        ${q("UPDATE acct SET n = n - ${a}")}\n        ${q("UPDATE acct SET n = n + ${a}")}\n        return 1;\n    }\n${page(["move(1)"])}</program>\n`;
+    expect(errsOf(on("mysql://localhost/app"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(msgOf(on("mysql://localhost/app"), "E-BOOTSTRAP-UNSUPPORTED")).toContain("a MySQL database");
+    expect(errsOf(on("postgres://localhost/app"))).toEqual([]);
+    expect(compile(on("postgres://localhost/app")).core.envelopes.find((e) => e.fn.hint === "move")).toMatchObject({ standalone: true, writes: true });
   });
   // s474-boot-client-bang-composition (S474 ruling, capability over limitation item 2): this was
   // E-BOOTSTRAP-UNSUPPORTED ("Declare `both()` with '!'"); the call now runs inside the composed batch's

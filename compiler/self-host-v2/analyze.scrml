@@ -29531,8 +29531,13 @@ ${
             const path2: string = sqlPathOf(sum, tq.all, i, reached[readElse])
             return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it runs inside the envelope, §8.9.5). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
         }
-        if (!sqliteDb(dbs, home)) {
-            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) needs the implicit per-handler transaction on " + homeName + ", a pooled (Postgres / MySQL) database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone, which the bootstrap's server runtime does not reserve — refused, never compiled non-atomic (S473 D1). Use a SQLite database") }
+        // s475 (lane s475-boot-pg-envelopes): a Postgres envelope is BUILT — §19.10.6 "A transaction
+        // SHALL run on one connection taken from the pool for it alone": server-runtime.js
+        // `txConnection` reserves one (Bun.SQL `reserve()`), measured against a live Postgres
+        // (slice-m4/pg-envelope-s475.test.js). MySQL stays refused by name: the same mechanism is not
+        // proven against a MySQL server (no live MySQL test), so it is not compiled on trust (S473 D1).
+        if (envelopeDbRefused(dbs, home)) {
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and reaches a query (§8.9.2 'Amendment S474' item 1), so its body runs in the implicit per-handler transaction on " + homeName + ", a MySQL database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone; the bootstrap's server runtime reserves one on Postgres, but that is not yet proven against a MySQL server — refused, never compiled non-atomic (S473 D1). Use a SQLite or Postgres database") }
         }
         // the connection the envelope opens: one a reached query of the home database uses (a
         // second scope naming the same file is the same database — and the server runtime the same
@@ -29657,11 +29662,13 @@ ${
         return "`" + d.hint + "`"
     }
 
-    fn sqliteDb(dbs: Db[], d: Sym) -> boolean {
+    // s475: whether the bootstrap refuses an envelope on database `d` — a MySQL database (replaces
+    // sqliteDb, which refused Postgres too); a database not in `dbs` is refused (fail closed, as before)
+    fn envelopeDbRefused(dbs: Db[], d: Sym) -> boolean {
         for (const x of dbs) {
-            if (x.sym.id == d.id) return x.driver == Driver.Sqlite
+            if (x.sym.id == d.id) return x.driver == Driver.Mysql
         }
-        return false
+        return true
     }
 
     // Where a query of a transitive query set stands, for a message.
