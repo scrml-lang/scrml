@@ -29165,7 +29165,8 @@ ${
     }
 
     // =========================================================================
-    // s475 r1 (review item 4) — THE EXITS AFTER ONE SERVER CALL, AT ANY DEPTH. S475 ruling item 1
+    // s475 r1 (review item 4) — THE EXITS AFTER ONE SERVER CALL: at any statement depth (r1), and inside
+    // the call's own statement / expression (r2, review F1 — before r2 those were not seen). S475 ruling item 1
     // (user-voice-scrml.md "## S475"): "A `!` function must not report failure while its writes
     // stand." A `fail` / `?` that can run after the call — on some path from it, however deeply the
     // call or the exit is nested — is one the batch must hold (or E-TX-FAIL-AFTER-COMMIT). The walk
@@ -29467,7 +29468,8 @@ ${
             k = k + 1
         }
         if (at < 0) return { plan: not, st: st0 }
-        // s475 r1 (review item 4): the exits that can run after the call — at any depth, on a path from it
+        // s475 r1 (review item 4): the exits that can run after the call — at any statement depth on a path
+        // from it, and (r2) in the call's own expression after it returned success
         // (was: only top-level statements after the call's statement, so an exit nested beside the call was
         // never seen, and one on a path that never meets the call was)
         let hits: ASpan[] = []
