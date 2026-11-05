@@ -482,7 +482,10 @@ ${
     // host surface).
     export type AHostBind:struct = { fn: int, span: ASpan, target: AExpr | not, isNew: boolean, waiting: boolean,
                                      failable: boolean, hasResult: boolean, src: string, isFn: boolean, blockTypes: string[] }
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[] }
+    // s475 r1 — `first`: the file's first node id, so analysis can re-read it (from the
+    // driver's source, never a text held in the tree) once it knows which `m.x` are
+    // namespace members (parse.scrml PNs, analyze.scrml analyzeSources).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], first: int }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)

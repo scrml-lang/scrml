@@ -78,7 +78,8 @@ export function frontEnd(mods, files, entry, opts = {}) {
   // s474 r1 (review F1): `opts.keyBase` — the files' root under the PROJECT root, which the per-file
   // output keys hash from (core.scrml fileKeyPath); the reported file names stay `f.path`.
   // s474 (client-bang composition): `next` — the linker's first unused node id (composeFiles)
-  const tp = mods.analyze.analyzeLinked(asts, entry, opts.keyBase ?? "", next);
+  // s475 r1: the sources too — analysis re-reads a file whose `m.x` it resolved to a namespace member
+  const tp = mods.analyze.analyzeSources(asts, files.map((f) => ({ path: f.path, src: f.src })), entry, opts.keyBase ?? "", next);
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
   const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct

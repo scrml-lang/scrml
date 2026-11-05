@@ -174,60 +174,69 @@ ${
     // for the shared instance). Resolved by what `m` is bound to: a namespace
     // import → module member; a cell → field navigation (E-SCOPE-010 already
     // forbids one name being both)").
-    // `nsNames(src)`: the names this FILE binds with `import * as NAME` — the
-    // binding is the file's own import, so a dotted name whose head is one of
-    // them is a module member, and any other dotted name keeps its old reading.
-    // `nsToks`: in a logic region, `m . x` with `m` such a name (and not itself
-    // a member — no `.` / `?.` / `@` before it) is ONE identifier token `m.x`:
-    // the binder then resolves the local name `m.x` through the file scope that
-    // analyze's linkage gives it (each export `x` of the module, bound as
-    // `m.x` — the #1715 (declaring file, orig) lookup), so every pass that reads
-    // a name reads a member as it reads an aliased import.
+    //
+    // s475 r1 (review of #1746, items 1 and 3) — WHAT `m.x` IS, ASKED OF THE TREE:
+    // `PNs` is the file's namespace context, threaded through MP and TP:
+    //  - `names`: the local names of the file's PARSED `import * as NAME` items
+    //    (nsOfItems — never a scan of the source text: an `import * as C` in a
+    //    comment or a string binds nothing, review item 3). A dotted name in a
+    //    position no value can stand in — a type (`x: m.Box`), a `fail m.E.V`
+    //    head, a qualified arm (`m.E.V :>`), a tag (`<m.card/>`) — whose head is
+    //    one of them names that module's member: no local shadows a type, a tag
+    //    or an enum path;
+    //  - `at`: the source offsets of the VALUE names `m` that ANALYSIS resolved
+    //    to the namespace import (analyze.scrml resolveNameOf — after every
+    //    nearer binding: a local, a parameter, a declaration's prop or field, a
+    //    host binding, §7.6 lexical scoping, review item 1). At those offsets
+    //    only, `m . x` is ONE identifier token `m.x` (nsToks), which analyze's
+    //    linkage binds to the module's export `x` (the #1715 (declaring file,
+    //    orig) lookup) — so every pass reads a member as it reads an aliased
+    //    import. Everywhere else `m.x` is a member access on `m`, exactly as
+    //    without the import. The first parse has `at` empty; analyze.scrml
+    //    analyzeSources re-parses a file (from the driver's source — the tree
+    //    holds no text) with the offsets its first analysis found (parseFileNs).
     // =========================================================================
-    export fn nsNames(src: string) -> string[] {
+    export type PNs:struct = { names: string[], at: int[] }
+
+    // The local names of the namespace imports among `items` (a `<program>`'s own
+    // included — the items analyze's linkage binds, link.scrml importsOfItems).
+    export fn nsOfItems(items: AItem[]) -> string[] {
         let out: string[] = []
-        let i: int = src.indexOf("import")
-        while (i >= 0) {
-            let j: int = i + 6
-            const before: boolean = i == 0 || !isIdentCh(src.charAt(i - 1))
-            if (before && !isIdentCh(src.charAt(j))) {
-                while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
-                if (src.charAt(j) == "*") {
-                    j = j + 1
-                    while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
-                    if (src.substring(j, j + 2) == "as" && !isIdentCh(src.charAt(j + 2))) {
-                        j = j + 2
-                        while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
-                        const s0: int = j
-                        while (j < src.length && isIdentCh(src.charAt(j))) { j = j + 1 }
-                        const nm: string = src.substring(s0, j)
-                        if (nm != "" && isIdentStartCh(nm.charAt(0)) && out.indexOf(nm) < 0) out = out.concat([nm])
-                    }
-                }
+        for (const it of items) {
+            const k: AItemK = it.k
+            const more: string[] = match k {
+                .ImportItem(i: i) :> nsOfImport(i)
+                .ProgramItem(p: p) :> nsOfItems(p.items)
+                .TypeItem(t: t) :> []
+                .FnItem(f: f) :> []
+                .DeclItem(d: d) :> []
+                .MarkupItem(n: n) :> []
+                .ConstItem(c: c) :> []
             }
-            i = src.indexOf("import", i + 6)
+            for (const n of more) {
+                if (out.indexOf(n) < 0) out = out.concat([n])
+            }
         }
         return out
     }
 
-    fn nsToks(src: string, ts: PTok[]) -> PTok[] {
-        if (src.indexOf("*") < 0) return ts
-        const ns: string[] = nsNames(src)
-        if (ns.length == 0) return ts
+    fn nsOfImport(i: AImport) -> string[] {
+        if (i.ns == "" || i.host is given) return []
+        return [i.ns]
+    }
+
+    // `m . x` at a proven value offset (`ns.at`) as the one token `m.x`.
+    fn nsToks(ns: PNs, ts: PTok[]) -> PTok[] {
+        if (ns.at.length == 0) return ts
         let out: PTok[] = []
         let i: int = 0
         while (i < ts.length) {
             const t: PTok = ts[i]
             let merged = false
-            if (t.cls == TC.Ident && ns.indexOf(t.v) >= 0 && i + 2 < ts.length) {
+            if (t.cls == TC.Ident && ns.at.indexOf(t.start) >= 0 && ns.names.indexOf(t.v) >= 0 && i + 2 < ts.length) {
                 const d: PTok = ts[i + 1]
                 const x: PTok = ts[i + 2]
-                let lead = true
-                if (i > 0) {
-                    const p: PTok = ts[i - 1]
-                    if (p.cls == TC.At || tk(p, ".") || tk(p, "?.")) lead = false
-                }
-                if (lead && tk(d, ".") && x.cls == TC.Ident) {
+                if (tk(d, ".") && x.cls == TC.Ident) {
                     const nm: string = t.v + "." + x.v
                     out = out.concat([{ cls: TC.Ident, v: nm, text: nm, start: t.start, end: x.end, line: t.line, bad: "" }])
                     i = i + 3
@@ -242,10 +251,24 @@ ${
         return out
     }
 
+    // In a type / `fail` head / qualified-arm position: a namespace name `m` followed by
+    // `.x` (touching) — the member name `m.x` and how many tokens it spans (0: not one).
+    type NsHead:struct = { name: string, n: int }
+
+    fn nsHeadAt(tp: TP, k: int) -> NsHead {
+        const a: PTok = peekAt(tp, k)
+        const b: PTok = peekAt(tp, k + 1)
+        const c: PTok = peekAt(tp, k + 2)
+        if (a.cls == TC.Ident && tp.ns.names.indexOf(a.v) >= 0 && b.cls == TC.Punct && tk(b, ".") && c.cls == TC.Ident && touching(a, b) && touching(b, c)) {
+            return { name: a.v + "." + c.v, n: 3 }
+        }
+        return { name: "", n: 0 }
+    }
+
     // =========================================================================
     // The token-level parser state: a value threaded through every function.
     // =========================================================================
-    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string }
+    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string, ns: PNs }
 
     type RExpr:struct  = { e: AExpr, tp: TP }
     type RExprs:struct = { es: AExpr[], tp: TP }
@@ -268,16 +291,16 @@ ${
 
     fn adv(tp: TP) -> TP {
         if (tp.i >= tp.toks.length - 1) return tp
-        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file }
+        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
     }
 
     fn bumpId(tp: TP) -> TP {
-        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file, ns: tp.ns }
     }
 
     fn diagAt(tp: TP, code: string, msg: string, t: PTok) -> TP {
         const d: Diag = newDiag(code, msg, tp.file, mkSpan(t.start, t.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     fn atEnd(tp: TP) -> boolean { return cur(tp).cls == TC.End }
@@ -758,7 +781,7 @@ ${
         if (t.cls == TC.TChunk) what = "a template"
         const msg: string = "add `;` to the line above, or join the lines — the next line starts with " + what + ", which would continue the expression above it (a call, an index or a tagged template); scrml refuses that reading rather than guess (§7.2.2 rule 5)"
         const d: Diag = newDiag("E-STMT-SPLIT-CONTINUATION", msg, tp.file, mkSpan(last.end, last.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // s462 — W-IS-SOME-DEPRECATED (§42.2.2a, Info; one per site): the
@@ -767,7 +790,7 @@ ${
     fn someLint(tp: TP, isTok: PTok, someTok: PTok) -> TP {
         const msg: string = "`x is some` is the soft-deprecated spelling of `x is given` (§42.2.2a). Write `is given` — it means the same and compiles to the same program. `scrml fix` rewrites it (rule `is-some`)."
         const d: Diag = newDiag("W-IS-SOME-DEPRECATED", msg, tp.file, mkSpan(isTok.start, someTok.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     fn handledExpr(tp: TP, start: int, subject: AExpr, how: AHow) -> RExpr {
@@ -899,7 +922,7 @@ ${
     fn missingArmComma(tp: TP, at: int) -> TP {
         const msg: string = "Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2)."
         const d: Diag = newDiag("E-MATCH-ARM-SEPARATOR", msg, tp.file, mkSpan(at, at))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // s452 — W-ARM-PIPE-LEGACY (§19.4.5, Info; one per arm): the `|`-led `!{}`
@@ -917,7 +940,7 @@ ${
         if (tp.i > from) end = tp.toks[tp.i - 1].end
         const msg: string = "Arm '| " + written + " :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '" + canonical + " :>'. Run 'scrml fix' to rewrite every site (§19.4.5)."
         const d: Diag = newDiag("W-ARM-PIPE-LEGACY", msg, tp.file, mkSpan(pipe.start, end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // The source text of tokens `from` up to (not including) `to`, with a
@@ -1006,6 +1029,14 @@ ${
         }
         // s469 — `E.V` / `E::V`, a qualified pattern (§18.13: "`TypeName.VariantName`
         // (fully qualified) SHALL always be valid"); analyze checks `E`
+        // s475 r1: `m.E.V` — qualified through a namespace import's member enum
+        const ph: NsHead = nsHeadAt(tp, 0)
+        if (ph.n > 0) {
+            const pd: PTok = peekAt(tp, 3)
+            const pv: PTok = peekAt(tp, 4)
+            if (pd.cls == TC.Variant && touching(peekAt(tp, 2), pd)) return patBinds(adv(adv(adv(adv(tp)))), pd, pd.v, guard, ph.name)
+            if (pd.cls == TC.Punct && tk(pd, ".") && (pv.cls == TC.Ident || pv.cls == TC.Keyword) && touching(peekAt(tp, 2), pd) && touching(pd, pv)) return patBinds(adv(adv(adv(adv(adv(tp))))), pv, pv.v, guard, ph.name)
+        }
         if (a.cls == TC.Ident && b.cls == TC.Variant && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, a.v)
         if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && touching(a, b)) {
             const qn: PTok = peekAt(tp, 2)
@@ -1080,7 +1111,7 @@ ${
             return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, bare: rb.bare, tp: rb.tp }
         }
         const end: int = armEnd(tp)
-        const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
+        const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
         // §18.2 `leave-stmt` (S462, ruling dpa-068 W1): `arm-body ::= expression |
         // block-body | leave-stmt`. A bare `fail <variant>` / `return [expr]` arm is
         // a one-statement block — it leaves the function exactly as `{ fail … }` /
@@ -1094,14 +1125,14 @@ ${
             let ft: TP = rf.tp
             if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `" + kw + "`", cur(ft))
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
-            return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
+            return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file, ns: tp.ns } }
         }
         // `break` / `continue` are leave statements too (§18.2), but the bootstrap
         // has no loops for them to leave.
         if (isWord(sub, "break") || isWord(sub, "continue")) {
             const bt: TP = diagAt(sub, "E-BOOTSTRAP-UNSUPPORTED", "a `" + cur(sub).text + "` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap", cur(sub))
             const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
-            return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
+            return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: tp.ns } }
         }
         const r: RExpr = parseAssign(sub)
         let st: TP = r.tp
@@ -1109,7 +1140,7 @@ ${
             const x: PTok = cur(st)
             st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
         }
-        return { body: AArmBody.ArmExpr(r.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+        return { body: AArmBody.ArmExpr(r.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file, ns: tp.ns } }
     }
 
     // s469 — an arm's `{ … }` block (§18.5, RULED S469 "block arms yield with
@@ -1138,7 +1169,7 @@ ${
                 // reading as the split `return` in parseStmt)
                 if (peekAt(t, 1).line != kw.line && !tk(peekAt(t, 1), "}") && !tk(peekAt(t, 1), ";")) {
                     const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
-                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file }
+                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns }
                 }
                 const v: RExpr = parseAssign(adv(t))
                 let t2: TP = v.tp
@@ -1820,7 +1851,7 @@ ${
                     const close: PTok = cur(t)
                     if (close.v != "") {
                         const d: Diag = newDiag("E-PARSE-TEMPLATE", "this template slot cannot be read one way — " + close.v + " — so where it ends is not known, and it is refused (§14.13.3). Compute the value into a local first and put the local in the slot", t.file, mkSpan(open.start, close.end))
-                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file }
+                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
                     }
                     t = adv(t)
                     if (cur(t).cls != TC.TChunk) {
@@ -2200,7 +2231,7 @@ ${
         let from: int = s.span.start
         if (i0 >= 0 && tp.toks[i0].cls == TC.TChunk && from > 0) from = from - 1
         const d: Diag = newDiag("E-STMT-NO-EFFECT", msg, tp.file, mkSpan(from, s.span.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // A statement-position `match` / `!{}` (the whole expression statement): its
@@ -2237,12 +2268,12 @@ ${
         if (i >= tp.toks.length) i = tp.toks.length - 1
         while (i > 0 && tp.toks[i - 1].end > s.span.end) { i = i - 1 }
         if (i > 0 && tp.toks[i - 1].end == s.span.end) {
-            const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file })
-            return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file }
+            const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })
+            return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file, ns: tp.ns }
         }
         // (fail closed: no token ends where the statement does — report at its end)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;`. In a statement-position `match` / `!{}` an arm's `{ … }` block is a statement list (§7.2.2 rule 1); a `{ e }` brace is its expression only where the arm's value is used (§18.5).", tp.file, mkSpan(s.span.end, s.span.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     fn armBlockOf(a: AArm) -> ABlock | not {
@@ -2433,7 +2464,7 @@ ${
         // the S446 reading took it for)
         msg = msg + gluedQHint(tp)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // Does statement `s` end with a `;` (dpa-073 F3 (i))? A block-like statement
@@ -2546,7 +2577,7 @@ ${
         } else {
             ds = ds.concat([newDiag("E-IMPORT-003", "`import` here is inside a function or block — an `import` SHALL be valid only inside a `${ }` logic context at file top level (§41.3, §21.3); move it to the top of the file", tp.file, imp.span)])
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat(ds), file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns }
     }
 
     // A block's statements when the region holds them WITHOUT braces (an
@@ -2588,7 +2619,7 @@ ${
             if (nx.line != t.line) {
                 const rt: TP = adv(tp)
                 const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;` after `return` to return nothing, or put the returned value on the `return` line. A `return` followed by a line break is refused for now: dpa-073 F1 reads `return⏎expr;` as returning `expr`, and the bootstrap does not guess which was meant while newline-terminated code is still being migrated.", rt.file, mkSpan(t.end, t.end))
-                const rd: TP = { toks: rt.toks, i: rt.i, nid: rt.nid, diags: rt.diags.concat([d]), file: rt.file }
+                const rd: TP = { toks: rt.toks, i: rt.i, nid: rt.nid, diags: rt.diags.concat([d]), file: rt.file, ns: rt.ns }
                 return mkS(rd, start, AStmtK.Return(not))
             }
             const v: RExpr = parseAssign(adv(tp))
@@ -3079,7 +3110,7 @@ ${
         // newline-terminated corpus is migrated (parseArmBlock's rule)
         if (nx.line != kw.line && !tk(nx, "}") && !tk(nx, ";") && !splitLiftReported(t, kw)) {
             const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
-            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file }
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns }
         }
         if (isRowTok(nx)) {
             const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
@@ -3164,7 +3195,7 @@ ${
         let going = true
         while (going) {
             const p: LexPause = lexTier0(mp.src, pos, depth)
-            const pt: PTok[] = nsToks(mp.src, toPToks(p.tokens))
+            const pt: PTok[] = nsToks(mp.ns, toPToks(p.tokens))
             toks = toks.concat(pt.slice(0, pt.length - 1))
             if (!p.paused) {
                 toks = toks.concat([pt[pt.length - 1]])
@@ -3178,7 +3209,7 @@ ${
                 depth = p.depth
             }
         }
-        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file }
+        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns }
         t = expectP(t, "{")
         const rs: RStmt = parseStmt(t)
         t = rs.tp
@@ -3874,6 +3905,13 @@ ${
         if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a, split)
         if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b, split)
         if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c, split)
+        // s475 r1: `fail m.E.V` — a namespace import's member enum
+        const fh: NsHead = nsHeadAt(t, 0)
+        if (fh.n > 0) {
+            const fd: PTok = peekAt(t, 3)
+            const fv: PTok = peekAt(t, 4)
+            if (fd.cls == TC.Punct && tk(fd, ".") && isNameTok(fv) && touching(c, fd) && touching(fd, fv)) return failArgs(adv(adv(adv(adv(adv(t))))), start, fh.name, fv, split)
+        }
         if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c, split)
         if (a.cls == TC.Ident && tk(b, ":") && tk(c, ":") && touching(a, b) && touching(b, c)) {
             const d: PTok = peekAt(t, 3)
@@ -4027,7 +4065,7 @@ ${
         if (names != "" && !bad) {
             const msg: string = "the presence guard `given " + names + " :> { … }` is deprecated (§42.2.3). Write `if (" + tests + ") { … }` — it tests the same thing and narrows the same names inside the block. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
             const d: Diag = newDiag("W-GIVEN-PRESENCE-DEPRECATED", msg, t.file, mkSpan(start, sepEnd))
-            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file }
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
         }
         const body: RBlock = parseBlock(t)
         if (cond is given && !bad) return mkS(body.tp, start, AStmtK.If(cond, body.b, not))
@@ -4051,7 +4089,10 @@ ${
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
         }
+        // s475 r1: `m.T` — a namespace import's member type (no value shadows a type)
+        const nh: NsHead = nsHeadAt(t, 0)
         let r: RType = mkT(adv(t), start, ATypeK.TName(nameTok.v))
+        if (nh.n > 0) r = mkT(adv(adv(adv(t))), start, ATypeK.TName(nh.name))
         while (isP(r.tp, "[")) {
             let g: TP = adv(r.tp)
             let grants: string[] = []
@@ -4080,7 +4121,7 @@ ${
     fn maybeType(tp: TP, start: int, from: int, inner: AType) -> RType {
         if (seqUnionCheck(inner)) {
             const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", seqUnionReason(tokText(tp, from, tp.i)), tp.file, spanFrom(tp, start))
-            const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+            const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
             return mkT(t, start, inner.k)
         }
         return mkT(tp, start, ATypeK.TMaybe(inner))
@@ -4291,7 +4332,7 @@ ${
         // wall of E-PARSE-IMPORT / E-PARSE-EXPECTED and a spurious E-IMPORT-005).
         // s474 r1 (#1715 review F3/F4, PA ruling):
         //   - a namespace import was INTERIM-refused (g-boot-namespace-import-unbuilt-s474);
-        //     s475 builds it (ruling item 3, see nsNames): `import * as m from "…"` binds
+        //     s475 builds it (ruling item 3, see PNs): `import * as m from "…"` binds
         //     `m` (AImport.ns); `m.x` names the module's export `x`;
         //   - a default import of a scrml module is E-IMPORT-004 — §21.3 resolves a
         //     default import "against the exporting file's export list", and no scrml
@@ -4594,7 +4635,7 @@ ${
     // read in a `<db>` body (parseDbBody), waiting for the nearest item list
     // (parseMarkupItems drains them into the program body or the file top);
     // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[] }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], ns: PNs }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -4620,7 +4661,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -4635,20 +4676,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -4726,7 +4767,7 @@ ${
     // ---- lexing a logic region --------------------------------------------
     fn regionTP(mp: MP, stop: LexStop) -> TP {
         const run: LexRun = lexFrom(mp.src, mp.pos, stop)
-        return { toks: nsToks(mp.src, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
     }
 
     // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
@@ -4740,7 +4781,7 @@ ${
         const d: TP = regionTP(mp, stop)
         if (isStandaloneDisplay(d)) return d
         const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
-        return { toks: nsToks(mp.src, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
     }
 
     fn isStandaloneDisplay(tp: TP) -> boolean {
@@ -4753,7 +4794,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -4879,7 +4920,7 @@ ${
             if (i < from || d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
     }
 
     // `tp` without the E-STMT-NO-EFFECT reports made since it had `from` diagnostics
@@ -4891,7 +4932,7 @@ ${
             if (i < from || d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
     }
 
     fn parseQuoted(mp: MP, q: string) -> RValue {
@@ -5139,9 +5180,9 @@ ${
             nm = readName(skipSpace(nm.mp))
         }
         // s475 (ruling S475 item 3): `<m.card …>` / `<*m.card/>` — a dotted tag whose head is a
-        // namespace import of this file names that module's member (nsNames); any other dotted
+        // namespace import of this file names that module's member (PNs.names); any other dotted
         // tag keeps its old reading (`.` is not a tag-name character: E-PARSE-TAG below)
-        if (chAt(nm.mp, 0) == "." && isIdentStartCh(chAt(nm.mp, 1)) && nm.w != "" && nsNames(mp.src).indexOf(nm.w) >= 0) {
+        if (chAt(nm.mp, 0) == "." && isIdentStartCh(chAt(nm.mp, 1)) && nm.w != "" && mp.ns.names.indexOf(nm.w) >= 0) {
             const mem: RWord = readName(mAdv(nm.mp, 1))
             nm = { w: nm.w + "." + mem.w, mp: mem.mp }
         }
@@ -5423,7 +5464,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -5723,10 +5764,10 @@ ${
         }
         const before: int = m.pos
         const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
-        const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
+        const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file, ns: tp0.ns }
         const runEnd: int = lastEnd(tp)
         if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
-        const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
+        const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file, ns: tp.ns })
         if (msgArmAt(tp)) {
             // s469: a §51.0.S.2.3 message-arm list (`.Go :> .Loading, …`,
             // newline- or comma-separated) — refused by name, never read
@@ -5829,9 +5870,9 @@ ${
     // ending where the next literal starts.
     fn parseDisplayItem(mp: MP, d: TP) -> RNodes {
         const t0: PTok = d.toks[0]
-        const one: TP = { toks: [t0, endTokAt(d.toks[1])], i: 0, nid: d.nid, diags: mp.diags, file: d.file }
+        const one: TP = { toks: [t0, endTokAt(d.toks[1])], i: 0, nid: d.nid, diags: mp.diags, file: d.file, ns: d.ns }
         const m: MP = displayEscapeDiags(mp, one.toks)
-        const r: RExpr = parseAssign({ toks: one.toks, i: 0, nid: one.nid, diags: m.diags, file: one.file })
+        const r: RExpr = parseAssign({ toks: one.toks, i: 0, nid: one.nid, diags: m.diags, file: one.file, ns: one.ns })
         const back: MP = backToMarkup(m, r.tp)
         return displayNodes(back, r.e, t0.start, one)
     }
@@ -6773,7 +6814,7 @@ ${
             const fid: int = fnIdOfItem(it.k)
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, ns: r.mp.ns }
         return { e: r.e, mp: m }
     }
 
@@ -7139,7 +7180,7 @@ ${
             }
         }
         toks = toks.concat([lexed[lexed.length - 1]])
-        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
         if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end, src)
         return hostBindLine(mp, t0, at, end, src, blockTypes)
     }
@@ -7261,7 +7302,7 @@ ${
             }
         }
         ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)))
-        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]) }
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), ns: mp.ns }
         return { items: [it], mp: m }
     }
 
@@ -7466,7 +7507,7 @@ ${
     // `}` or a line break. Otherwise `mp.pos` — the run is prose.
     fn dbStatementEnd(mp: MP) -> int {
         const tp0: TP = codeRegionTP(mp, LexStop.CodeBody)
-        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file }
+        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file, ns: mp.ns }
         if (atEnd(tp)) return mp.pos
         const rs: RStmt = parseStmt(tp)
         const t: TP = rs.tp
@@ -7502,7 +7543,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -8080,7 +8121,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -8230,8 +8271,20 @@ ${
     export type Parsed:struct = { ast: FileAst, diags: Diag[], nextId: int }
 
     // Parse one file. NodeIds start at `firstId`; `nextId` is the first unused.
+    // s475 r1: a file with namespace imports is read twice — the second time knowing their names
+    // (from the first read's import items, nsOfItems), so its dotted types, `fail` heads, qualified
+    // arms and tags name module members. Its VALUE members are analysis's (PNs).
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [] }
+        const p1: Parsed = parseFileNs(path, src, firstId, { names: [], at: [] })
+        const names: string[] = nsOfItems(p1.ast.items)
+        if (names.length == 0) return p1
+        return parseFileNs(path, src, firstId, { names: names, at: [] })
+    }
+
+    // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
+    // offsets its first analysis proved, PNs.at).
+    export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], ns: ns }
         const r: RMItems = parseMarkupItems(m0, "")
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
@@ -8240,7 +8293,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).

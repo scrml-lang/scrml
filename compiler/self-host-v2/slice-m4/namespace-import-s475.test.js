@@ -22,7 +22,9 @@
 //   - a dotted tag whose head is NOT a namespace import keeps its old reading (E-PARSE-TAG: the bootstrap
 //     reads no dotted tag), and `@cell.field` navigation is untouched;
 //   - a namespace import of a `.js` module keeps the `.js` refusal every `.js` import has;
-//   - INTERIM: a LOCAL that shadows the namespace name, used as `m.x`, is refused by name.
+//   - s475 r1: a NEARER binding of the namespace's name (a local, a parameter, a prop or field) wins —
+//     `m.x` is then member access on it, as without the import (lexical scoping, §7.6); the namespace
+//     names come from the parsed imports, never the source text.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { join } from "node:path";
@@ -231,11 +233,113 @@ describe("errors", () => {
     expect(at(r)).toContainEqual(["E-IMPORT-004", ENTRY]);
     expect(errs(r).find((d) => d.file === ENTRY).message).toContain("`outer` is not exported by `./r.scrml`");
   });
-  test("INTERIM: a local shadowing the namespace name, used as `m.x`, is refused by name", () => {
-    const r = prog([LIB, useLib(`type T:struct = { Card: string }\n    fn f(m: T) -> string {\n        return m.Card;\n    }`, `<p>x</p>`)]);
-    expect(at(r)).toEqual([["E-BOOTSTRAP-UNSUPPORTED", ENTRY]]);
-    expect(errs(r)[0].message).toContain("the local `m` shadows the namespace import `m`");
+});
+
+// s475 r1 (review of #1746, item 1 — HIGH, was a silent miscompile): a NEARER binding of the namespace's
+// name — a local, a parameter, a declaration's prop or field — wins, as it does without the import (§7.6
+// lexical scoping); `m.x` is then member access on that binding, exactly as base emits. (Was: `m.x` was
+// read as the module's member behind the binding — `${m.trim()}` on a field `m` emitted `trim()`, the
+// library's function.)
+describe("s475 r1: a nearer binding of the namespace's name wins (lexical scoping)", () => {
+  const TRIM = { path: "lib.scrml", src: `\${\n    export fn trim() -> string {\n        return "LIBTRIM";\n    }\n    export const length = 99;\n    export fn Card() -> string {\n        return "from-lib";\n    }\n}\n` };
+  const NS = `import * as m from "./lib.scrml";\n`;
+  // each program twice: with the namespace import, and without it (base) — same output, same page
+  const both = (body) => [prog([TRIM, { path: ENTRY, src: NS + body }]), prog([TRIM, { path: ENTRY, src: body }])];
+  const sameJs = (a, b) => {
+    const strip = (js) => js.replace(/\/\/ functions\n[\s\S]*?\n\n/, "");
+    expect(strip(printed(a).js)).toBe(strip(printed(b).js));
+  };
+  test("the review's repro: a declaration's FIELD `m` — `${m.trim()}` trims the field", async () => {
+    const body = `<program>\n    <outer:struct>\n        let <m:string=" q "/>\n    </>\n    renders <p id="p">\${m.trim()}</p>\n    <main><*outer/></main>\n</program>\n`;
+    const [withNs, base] = both(body);
+    clean(withNs);
+    clean(base);
+    sameJs(withNs, base);
+    expect(printed(withNs).js).not.toContain("trim()\n");
+    await loadProgram(withNs.core, "s475r1-field-" + k++);
+    expect($("#p").textContent).toBe("q");
   });
+  test("a PROP `m` — `${m.trim()}` trims the prop", async () => {
+    const body = `<show m:string/>\nrenders <p id="p">\${m.trim()}</p>\n<program>\n    <main><show m=" z "/></main>\n</program>\n`;
+    const [withNs, base] = both(body);
+    clean(withNs);
+    clean(base);
+    sameJs(withNs, base);
+    await loadProgram(withNs.core, "s475r1-prop-" + k++);
+    expect($("#p").textContent).toBe("z");
+  });
+  test("`${m.length}` on a field `m` is the string's length, not the module's exported `length`", async () => {
+    const body = `<program>\n    <outer:struct>\n        let <m:string="abc"/>\n    </>\n    renders <p id="p">\${m.length}</p>\n    <main><*outer/></main>\n</program>\n`;
+    const [withNs, base] = both(body);
+    clean(withNs);
+    clean(base);
+    sameJs(withNs, base);
+    await loadProgram(withNs.core, "s475r1-length-" + k++);
+    expect($("#p").textContent).toBe("3");
+  });
+  test("an event handler inside the declaration — `@s = m.trim()` trims the field", async () => {
+    const body = `<program>\n    let <s:string=""/>\n    <outer:struct>\n        let <m:string=" h "/>\n    </>\n    renders <button id="b" onclick={ @s = m.trim(); }>go</button>\n    <main><*outer/><p id="s">\${@s}</p></main>\n</program>\n`;
+    const [withNs, base] = both(body);
+    clean(withNs);
+    clean(base);
+    sameJs(withNs, base);
+    await loadProgram(withNs.core, "s475r1-handler-" + k++);
+    click($("#b"));
+    expect($("#s").textContent).toBe("h");
+  });
+  test("a PARAMETER `m` — `m.Card` is the struct field (was INTERIM-refused)", async () => {
+    const logic = `type T:struct = { Card: string }\n    fn f(m: T) -> string {\n        return m.Card;\n    }\n    fn g() -> string {\n        const t: T = { Card: "field" };\n        return f(t);\n    }`;
+    const body = `<program>\n    \${ ${logic} }\n    <main><p id="p">\${g()}</p><p id="q">\${m.Card()}</p></main>\n</program>\n`;
+    const r = clean(prog([TRIM, { path: ENTRY, src: NS + body }]));
+    await loadProgram(r.core, "s475r1-param-" + k++);
+    expect($("#p").textContent).toBe("field");
+    expect($("#q").textContent).toBe("from-lib");
+  });
+  test("a LOCAL `m` in a nested block shadows only inside it — outside, `m.Card()` is the module's", async () => {
+    const logic = `fn f() -> string {\n        const a: string = m.Card();\n        if (a == "from-lib") {\n            const m: string = " in ";\n            return a + "|" + m.trim();\n        }\n        return a;\n    }`;
+    const r = clean(prog([TRIM, { path: ENTRY, src: NS + `<program>\n    \${ ${logic} }\n    <main><p id="p">\${f()}</p></main>\n</program>\n` }]));
+    await loadProgram(r.core, "s475r1-block-" + k++);
+    expect($("#p").textContent).toBe("from-lib|in");
+  });
+});
+
+// s475 r1 (review item 3): the namespace names are the file's PARSED imports — never a scan of the
+// source text. `import * as C` in a comment or a string binds nothing, so `C.Red`, `o.v`, `console.log`
+// keep their reading (was: merged into one name — E-SCOPE-001 / E-MATCH-BARE-BINDER on valid programs).
+describe("s475 r1: `import * as` in a comment or a string is no namespace import", () => {
+  const BODY = `<program>
+    \${
+        type C:enum = { Red, Blue }
+        type O:struct = { v: string }
+        fn hue(c: C) -> string {
+            return match c {
+                C.Red :> "r",
+                C.Blue :> "b",
+            };
+        }
+        fn val(o: O) -> string {
+            return o.v;
+        }
+        fn go() -> string {
+            const o: O = { v: "ok" };
+            return hue(C.Red) + val(o);
+        }
+    }
+    <main><p id="p">\${go()}</p></main>
+</program>
+`;
+  for (const [name, text] of [
+    ["a comment", `// import * as C from "./lib.scrml"\n// import * as o from "./lib.scrml"\n`],
+    ["a string", `\${ const NOTE: string = "import * as C from './lib.scrml'; import * as o from 'x'"; }\n`],
+  ]) {
+    test(`${name}: compiles identically to the file without it`, async () => {
+      const r = clean(prog([{ path: ENTRY, src: text + BODY }]));
+      const base = clean(prog([{ path: ENTRY, src: BODY }]));
+      expect(r.diags).toEqual(base.diags);
+      await loadProgram(r.core, "s475r1-text-" + k++);
+      expect($("#p").textContent).toBe("rok");
+    });
+  }
 });
 
 describe("resolution by binding kind: only a namespace-import head is a member", () => {

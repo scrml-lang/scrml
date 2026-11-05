@@ -58,7 +58,8 @@ ${
     import { Severity } from "./severity.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf } from "./link.scrml"
+    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
+    import { PNs, Parsed, parseFileNs, nsOfItems } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
@@ -629,7 +630,10 @@ ${
     // s469 — `lifts`: every `lift` the binder resolved, by the tape it appends
     // to and its operand's type where known (a bound loop's binder type is the
     // join of its lifts', §49.6 rule 2; none at all is E-LOOP-007).
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[] }
+    // s475 r1 — `nsAt`: the value names `m` resolved to a namespace import (resolveNameOf), by file and
+    // source offset; analyzeSources re-reads those files with `m.x` there one name (parse.scrml PNs).
+    type NsAt:struct = { file: string, at: int }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[] }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -671,11 +675,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -726,38 +730,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]) }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
     }
 
     // =========================================================================
@@ -6568,13 +6572,13 @@ ${
     }
 
     fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
-        // s475 — `m.x` with `m` a namespace import (parse nsToks): a LOCAL `m` here would shadow
-        // the namespace (§7.6: locals shadow file-scope names), making `m.x` its field — reading
-        // a field of a local through a namespace-shaped name is not in the bootstrap: refused by
-        // name, never resolved to the module's member behind the local's back (INTERIM)
+        // s475 r1 (review of #1746, item 1) — `m.x` is one name only where THIS resolver already found
+        // the plain `m` to be the namespace import, after every nearer binding (below: a local, a
+        // parameter, a host binding, a declaration's prop or field — §7.6 lexical scoping; parse.scrml
+        // PNs.at). A nearer `m` there now is an internal fault: refused, never read behind its back.
         const nh: NsHit = nsMember(env.g.te.link, env.file, name)
         if (nh.ns != "") {
-            if (lookupLocal(env, nh.ns) is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` — the local `" + nh.ns + "` shadows the namespace import `" + nh.ns + "` (`import * as " + nh.ns + " from \"" + nh.from + "\"`) here, and a field of a local spelled through a namespace's name is not in the bootstrap yet — rename the local", st)
+            if (nsShadowed(env, nh.ns)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "internal: `" + name + "` was read as a member of the namespace import `" + nh.ns + "`, but a nearer binding of `" + nh.ns + "` is in scope here — the build is stopped rather than read the member behind it; rename the nearer `" + nh.ns + "`", st)
         }
         const l: LocalB | not = lookupLocal(env, name)
         // s473 — §5.2 "Executable sinks in plain logic (S473)" (the #1663 review F3):
@@ -6596,6 +6600,16 @@ ${
                 const i: int = fieldIndex(d.info, name)
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
+        }
+        // s475 r1 (review item 1): a plain `m` with no nearer binding (above) IS the namespace import —
+        // a file-scope name of the same spelling is E-SCOPE-010 at the import, so the namespace reading
+        // is kept here (no cascade) — except as a call's callee (`m()`), which no namespace can be, so
+        // the colliding function keeps it. Recorded (nsAt): when a member follows it (`m.x`),
+        // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
+        // stands only for `m` used as a value.
+        if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]) }
+            return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
         const kc: ConstInfo | not = constNamed(env.g, env.file, name)
@@ -6628,8 +6642,20 @@ ${
         const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a function or a constant")
         if (nm.code == "-") return plain(not, st)
         if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
-        if (isNsBinding(env.g.te.link, env.file, name)) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", st)
+        if (isNsBinding(env.g.te.link, env.file, name)) return diagX(env, e, "E-SCOPE-001", "`" + name + "(…)` — `" + name + "` is a namespace import, not a function; call one of its exports: `" + name + ".name(…)` (§21.3)", st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    // s475 r1 — a binding of `n` nearer than the file's namespace import: resolveNameOf's own order
+    // (a local or parameter, a host binding, the current declaration's prop or field).
+    fn nsShadowed(env: Env, n: string) -> boolean {
+        if (lookupLocal(env, n) is given) return true
+        if (hostImportBinding(env.g.files, env.file, n) is given) return true
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is given) {
+            if (!d.isProgram && fieldIndex(d.info, n) >= 0) return true
+        }
+        return false
     }
 
     // s472 — where a VALUE name (a function, or a file-scope constant) is declared, when not here.
@@ -7219,6 +7245,9 @@ ${
                 // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
                 // E-HOST-HANDLE-MEMBER (the receiver is peeked: its resolution is redone below)
                 const hro: RX = resolveExpr(env, m.obj, not, st0)
+                // s475 r1: the receiver is the namespace import (`m.f(…)`): kept — the file is re-read
+                // with `m.f` one name there (analyzeSources), and this run's report is not the program's
+                if (hro.st.nsAt.length > st0.nsAt.length) return plain(not, resolveExprs(env, args, not, hro.st))
                 const hot: Type | not = hro.x.ty
                 if (hot is given) {
                     if (isDomElementIface(hostSlotText(env.g.types, unMaybe(hot)))) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the method call `." + m.method + "(…)` on the DOM element type `" + typeName(unMaybe(hot)) + "` — DOM members stay open in logic (§21.3.3 rule 16, S473 round 2 item 7), but open, untyped DOM member access is not in the bootstrap; declare a `<host>` binding for it", hro.st)
@@ -13353,7 +13382,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -29377,7 +29406,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, first: f.first }])
         }
         return out
     }
@@ -30835,7 +30864,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -32834,7 +32863,8 @@ ${
     // unused node id (link.scrml Linked.nextId); without one (-1) nothing is composed
     // and such a function is refused. A program with an error is not composed (its
     // report stands; the compile fails either way). Both passes get `keyBase`.
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[] }
+    // s475 r1: `nsAt` — the namespace member reads the run found (AS.nsAt).
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[] }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
@@ -32843,8 +32873,26 @@ ${
     // source root is the project root. The file names the front end reports are not changed.
     export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram { return analyzeLinked(files, entry, keyBase, -1) }
 
-    export fn analyzeLinked(files: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
-        const r1: ARun = analyzeRun(files, entry, keyBase, nextId >= 0)
+    export fn analyzeLinked(files0: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram { return analyzeSources(files0, [], entry, keyBase, nextId) }
+
+    // s475 r1 (review of #1746, item 1): `srcs` — the files' sources (the driver's: the tree holds no
+    // text), for the namespace re-read. A namespace member is read by WHAT `m` RESOLVES TO here — the
+    // first run finds each plain `m` that is the namespace import (no nearer binding, AS.nsAt); those
+    // files are re-read with `m.x` one name at exactly those places (parse.scrml PNs) and analyzed
+    // again. A nearer `m` (a local, a parameter, a prop or field, a host binding) keeps `m.x` a member
+    // access on it, as it is without the import. Without a file's source nothing is re-read: its
+    // `m.x` stays a member access on the namespace, refused (E-SCOPE-001 — fails closed).
+    export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
+        const r0: ARun = analyzeRun(files0, entry, keyBase, nextId >= 0)
+        let files: FileAst[] = files0
+        let r1: ARun = r0
+        if (r0.nsAt.length > 0) {
+            const rr: NsReread = nsReread(files0, srcs, r0.nsAt)
+            if (rr.changed) {
+                files = rr.files
+                r1 = analyzeRun(files, entry, keyBase, nextId >= 0)
+            }
+        }
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
@@ -32854,6 +32902,37 @@ ${
         let ds: Diag[] = []
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
         return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
+    }
+
+    // s475 r1 — each file with namespace member reads (`at`), re-read from its source with the same
+    // first node id: `m . x` at those offsets is one name (parse.scrml nsToks), one node where the
+    // member access was two, so its ids stay inside the range the linker gave it. Its parse report is
+    // the first read's (the driver's): the re-read changes only those names' shape. `changed`: some
+    // file was re-read.
+    type NsReread:struct = { files: FileAst[], changed: boolean }
+
+    fn nsReread(files: FileAst[], srcs: Source[], at: NsAt[]) -> NsReread {
+        let out: FileAst[] = []
+        let changed = false
+        for (const f of files) {
+            let offs: int[] = []
+            for (const a of at) {
+                if (a.file == f.path && offs.indexOf(a.at) < 0) offs = offs.concat([a.at])
+            }
+            let src: string | not = not
+            for (const x of srcs) {
+                if (x.path == f.path) src = x.src
+            }
+            if (offs.length == 0 || src is not) {
+                out = out.concat([f])
+            } else {
+                const ns: PNs = { names: nsOfItems(f.items), at: offs }
+                const r: Parsed = parseFileNs(f.path, src, f.first, ns)
+                out = out.concat([r.ast])
+                changed = true
+            }
+        }
+        return { files: out, changed: changed }
     }
 
     // `m` with every WHOLE `tok` (no identifier character before or after it) replaced by `rep`, and a
@@ -32904,7 +32983,7 @@ ${
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
         const ra0: RGlobals = phaseA(files, entry, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
@@ -32971,7 +33050,7 @@ ${
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
         return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
