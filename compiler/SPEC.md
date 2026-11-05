@@ -9079,7 +9079,7 @@ stated at §66.3: an own value is a declaration whose type is its write contract
   ${
       let x = 1;
       const r = match x {
-          1 :> 10
+          1 :> 10,
           else :> 20
       };
       print(r);
@@ -9108,7 +9108,7 @@ stated at §66.3: an own value is a declaration whose type is its write contract
   ${
       function eat(powerUp) {
           match powerUp {
-              .Mushroom(n) :> n
+              .Mushroom(n) :> n,
               .Star        :> 0
           }
       }
@@ -10122,7 +10122,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >    passes the §19.10.6 one-transaction-per-connection gate for the body's whole run, including any outbound
 >    call the body awaits. That cost is the one the ruling tracks ("whole-body lock hold"):
 >    `g-envelope-lock-hold-cost-s474`.
->    **A failure of the envelope itself is a server error (⚑ PA reading, for bryan's veto).** If the envelope's
+>    **A failure of the envelope itself is a server error (PA reading, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* If the envelope's
 >    own opening statement fails (for example `BEGIN IMMEDIATE` returning SQLITE_BUSY after the busy timeout,
 >    ruling 5), or its `COMMIT` fails, or the release or rollback-to of a savepoint it opened (items 3, 4 and
 >    6 below) fails, the call SHALL NOT report success, whatever the function's declared error type. It SHALL
@@ -10233,7 +10233,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      commits leaves one committed and the other not.
 >    - **INTERIM for a Postgres / MySQL pair**, where two-phase commit exists (`PREPARE TRANSACTION` / XA). The
 >      capable form is a two-phase envelope across the pair: owed, not designed.
->    impl#1 does not emit E-SQL-011 (`g-impl1-cross-database-write-in-envelope-s451`, open). *(⚑ PA reading:
+>    impl#1 does not emit E-SQL-011 (`g-impl1-cross-database-write-in-envelope-s451`, open). *(PA reading, confirmed S475 (**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only)):
 >    the envelope's database is the function's nearest database scope (§8.1.1) when the function has its own
 >    `?{}` sites. A `!` function with none, all of whose queries are in callees, takes the database of the first
 >    query in its transitive query set, as the bootstrap's `envelopeOf` does.)*
@@ -10277,7 +10277,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      the segment's commit closed that savepoint, as a region closes an author savepoint left open in it
 >      (item 3). The capable form is a span that holds one transaction across its `yield`s, with its events sent
 >      after the span commits: owed, not designed.
->    - **`yield*` delegation (⚑ PA reading, for bryan's veto).** Each value a `yield*` delegate yields is an
+>    - **`yield*` delegation (PA reading, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* Each value a `yield*` delegate yields is an
 >      event of the outer stream, so each is a segment boundary of the outer stream, as a `yield` in its body
 >      is. This holds through a chain of `yield*`s. A `!` generator delegate does not run as an item-4
 >      savepoint. Its body runs inside the outer stream's segments, and no savepoint is held across any of its
@@ -10292,7 +10292,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      nest LIFO with the caller's own. The capable form is a defined lazy-savepoint meaning for a `!`
 >      generator iterated inside an envelope: owed, not designed. Today's alternative is a generator that is
 >      not `!`, whose writes join the caller's envelope, or a `!` function that returns a tape.
->    - **Teardown, commit and delivery (⚑ PA reading, for bryan's veto).** The runtime SHALL check that the
+>    - **Teardown, commit and delivery (PA reading, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* The runtime SHALL check that the
 >      stream is still open immediately before the COMMIT of each segment that ends at a `yield`, the segments
 >      whose COMMIT backs a data event. A stream found closed rolls that segment back. The segment that ends
 >      the body (the last `yield` → the end) backs no data event, so it commits without the check. A teardown or a send failure after the COMMIT leaves the segment committed and its event
@@ -10333,7 +10333,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      run, and is logged on the server; no client is left to receive an event. Statement savepoints
 >      (item 4) apply there as in any segment, so a failed `?{}` handled at its site rolls back only its
 >      savepoint and does not abort the segment.
->    - **How a failed stream ends (⚑ PA reading, for bryan's veto).** A failure ends the stream with one
+>    - **How a failed stream ends (PA reading, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* A failure ends the stream with one
 >      terminal `__scrml_error` event, sent after the exit's `defer` bodies have run inside the current
 >      segment and that segment is rolled back, if the client is still connected. It is framed as the §37.4.2 named event `__scrml_error` whose data is `{ error: … }`. That is
 >      the framing impl#1 emits for §19.10.6's `TransactionLeftOpen` event, under the compiler-namespaced
@@ -10343,8 +10343,8 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >      in the §19.9.1 wire shape, `{ __scrml_error: true, type, variant, data }`. A failure of a segment's own
 >      opening statement, `COMMIT`, or savepoint release or rollback-to is item 1's server error: the `error`
 >      field is `{ kind: "EnvelopeFailed", message }`, distinct from §19.10.6's `kind: "TransactionLeftOpen"`, and that
->      segment's event is not sent. A host throw out of the body is a server error too (⚑ PA reading, for
->      bryan's veto), `{ kind: "ServerError", message }`, with no detail of the thrown value. A refused event
+>      segment's event is not sent. A host throw out of the body is a server error too (PA reading, confirmed
+>      S475, provenance as this item's heading), `{ kind: "ServerError", message }`, with no detail of the thrown value. A refused event
 >      name or id (§37.4.2, E-SSE-EVENT-FIELD-RT) is `{ kind: "EventFieldRefused", message }`. The client stub
 >      SHALL close the `EventSource` when it receives a terminal `__scrml_error`
 >      event, and SHALL NOT reconnect. Without that, the browser's automatic reconnect would re-run the body
@@ -10367,7 +10367,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >    last `yield` → end) is its own §8.9.2 envelope; the segment's writes COMMIT before its event is sent; a
 >    failure rolls back only the current segment."* Supersedes: the ⚑ OPEN item in this list, *"Neither whether
 >    nor how such a generator's writes are undone by a failure is decided … Until it is ruled, the SPEC states
->    no envelope rule for a `!` generator."* PA derivations, each marked ⚑ above: the per-segment opening
+>    no envelope rule for a `!` generator."* PA derivations, each marked above and all confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed"): the per-segment opening
 >    statement and its open-at-first-query timing, the `yield`-crossing refusal, `yield*` delegation, the
 >    refusal of a `!` generator iterated by another `!` caller, the teardown and delivery order, the place of
 >    `defer` (S474 #1734 review F4; the stream-open check limited to segments that end at a `yield` in
@@ -11600,15 +11600,15 @@ ${
 <button onclick=loadUsers()>Load users</>
 
 match @usersState {
-    .NotAsked :> {}
-    .Loading  :> { <div class="spinner">Loading users...</> }
+    .NotAsked :> {},
+    .Loading  :> { <div class="spinner">Loading users...</> },
     .Ready(users) :> {
         <ul>
             ${ for (user of users) {
                 lift <li>${user.name} (${user.email})</>;
             }}
         </>
-    }
+    },
     .Failed(msg) :> {
         <div class="error">
             ${msg}
@@ -12559,8 +12559,8 @@ Pattern matching on an enum-typed struct field works normally:
 
 ```scrml
 match issue.status {
-    .Pending :> showPending()
-    .Active  :> showActive()
+    .Pending :> showPending(),
+    .Active  :> showActive(),
     .Closed  :> showClosed()
 }
 ```
@@ -12752,8 +12752,8 @@ Pattern matching over enum types uses match arms. All variants must be covered o
 
 ```scrml
 match value {
-    ::Circle(r) :> ...
-    ::Rectangle(w, h) :> ...
+    ::Circle(r) :> ...,
+    ::Rectangle(w, h) :> ...,
     ::Point :> ...
 }
 ```
@@ -15707,7 +15707,7 @@ const name = u.name;      // OK — post-transition access
 const u = loadUser(42);
 
 match u {
-    not :> handleAbsence()         // the `not` arm — u is `not`
+    not :> handleAbsence(),        // the `not` arm — u is `not`
     given u :> {
         // INSIDE this arm: u is typed as User AND lifecycle-transitioned.
         const name = u.name;         // OK — post-transition access
@@ -18775,7 +18775,7 @@ reaches for when a fragment of rendered content depends on a condition or on an 
 
 ```scrml
 <p>${ if @isAdmin { "Admin" } else { "User" } }</p>
-<p>${ match @view { .List :> "list view"  .Grid :> "grid view" } }</p>
+<p>${ match @view { .List :> "list view", .Grid :> "grid view" } }</p>
 ```
 
 The value-form is **sugar for `lift`**. A branch body that is exactly one expression is equivalent
@@ -19777,9 +19777,9 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
 **Worked example — unit variants:**
 ```scrml
 match direction {
-    .North :> "up"
-    .South :> "down"
-    .East  :> "right"
+    .North :> "up",
+    .South :> "down",
+    .East  :> "right",
     .West  :> "left"
 }
 ```
@@ -19787,8 +19787,8 @@ match direction {
 **Worked example — payload variants, positional binding:**
 ```scrml
 match shape {
-    .Circle(r)       :> r * r * 3.14159
-    .Rectangle(w, h) :> w * h
+    .Circle(r)       :> r * r * 3.14159,
+    .Rectangle(w, h) :> w * h,
     .Point           :> 0
 }
 ```
@@ -19800,8 +19800,8 @@ match shape {
         let area = r * r * 3.14159;
         let perimeter = 2 * r * 3.14159;
         lift area + perimeter;              // S469: a value-position block arm yields with `lift` (§18.5)
-    }
-    .Rectangle(w, h) :> w * h
+    },
+    .Rectangle(w, h) :> w * h,
     .Point            :> 0
 }
 ```
@@ -19836,9 +19836,9 @@ right-hand side of an assignment.
 ```scrml
 ${ function getLabel(status: LoadStatus) {
     return match status {
-        .Loading :> "Loading..."
-        .Success :> "Done!"
-        .Error   :> "Failed"
+        .Loading :> "Loading...",
+        .Success :> "Done!",
+        .Error   :> "Failed",
         else     :> "Unknown"
     };
 } }
@@ -19853,9 +19853,9 @@ string. The function's return type is inferred as `string`.
 ```scrml
 ${ function logStatus(status: LoadStatus) {
     return match status {
-        .Loading :> console.log("loading")
-        .Success :> console.log("done")
-        .Error   :> console.log("error")
+        .Loading :> console.log("loading"),
+        .Success :> console.log("done"),
+        .Error   :> console.log("error"),
         else     :> console.log("unknown")
     };
 } }
@@ -19896,8 +19896,8 @@ unify to a common supertype. The result type of the `match` expression is that u
 **Worked example — valid (all arms same type):**
 ```scrml
 let label:string = match status {
-    .Active  :> "active"
-    .Pending :> "pending"
+    .Active  :> "active",
+    .Pending :> "pending",
     .Closed  :> "closed"
 };
 ```
@@ -19906,7 +19906,7 @@ All arms produce `string`. Result type is `string`.
 **Worked example — invalid (type mismatch across arms):**
 ```scrml
 let x = match flag {
-    .On  :> "yes"
+    .On  :> "yes",
     .Off :> 42        // Error: string vs number
 };
 ```
@@ -20365,7 +20365,7 @@ type Person:enum = {
 }
 
 match person {
-    .Employee(name: n, department: d) :> "${n} works in ${d}"
+    .Employee(name: n, department: d) :> "${n} works in ${d}",
     .Contractor(name: n)              :> "${n} is a contractor"
 }
 ```
@@ -20378,7 +20378,7 @@ type Shape:enum = {
 }
 
 match shape {
-    .Rectangle(w) :> w   // Error E-TYPE-021: arity mismatch, 1 binding for 2 fields
+    .Rectangle(w) :> w,  // Error E-TYPE-021: arity mismatch, 1 binding for 2 fields
     else          :> 0
 }
 ```
@@ -20424,7 +20424,7 @@ type Post:struct = { role: Role oneOf([.Admin, .Editor]) }   // Role = { Admin, 
 
 fn label(p: Post) -> string {
   return match p.role {                          // S469: a value leaves only by `return` (§48)
-    .Admin  => "Admin"
+    .Admin  => "Admin",
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
   };
@@ -20475,7 +20475,7 @@ use `.Some(value)` / `.None` when the union contains `not` (optional match).
 ```scrml
 // val : string | not
 match val {
-    .Some(s) :> "got: ${s}"
+    .Some(s) :> "got: ${s}",
     .None    :> "nothing"
 }
 ```
@@ -20600,11 +20600,11 @@ dispatches over the bound value.
 match expr {
     .Add(left, right) :> {
         let leftVal = match left {
-            .Lit(v)    :> v
+            .Lit(v)    :> v,
             .Add(l, r) :> l + r   // recursive; here simplified
         };
         lift leftVal + evalExpr(right);   // S469: `lift` (§18.5)
-    }
+    },
     .Lit(v) :> v
 }
 ```
@@ -20706,8 +20706,8 @@ Two arms for the same variant in a single match expression:
 
 ```scrml
 match shape {
-    ::Circle(r) :> r * 2
-    ::Circle(r) :> r * 3   // Error E-TYPE-023
+    ::Circle(r) :> r * 2,
+    ::Circle(r) :> r * 3,  // Error E-TYPE-023
     ::Point :> 0
 }
 ```
@@ -20761,8 +20761,8 @@ arm-pattern         ::= variant-pattern
 
 ```scrml
 match status {
-    "active"  :> handleActive()
-    "banned"  :> handleBanned()
+    "active"  :> handleActive(),
+    "banned"  :> handleBanned(),
     else      :> handleOther()
 }
 ```
@@ -20771,9 +20771,9 @@ match status {
 
 ```scrml
 match priority {
-    1    :> "high"
-    2    :> "medium"
-    3    :> "low"
+    1    :> "high",
+    2    :> "medium",
+    3    :> "low",
     else :> "unknown"
 }
 ```
@@ -20782,7 +20782,7 @@ match priority {
 
 ```scrml
 match isAdmin {
-    true  :> showAdminPanel()
+    true  :> showAdminPanel(),
     false :> showUserPanel()
 }
 ```
@@ -20949,7 +20949,7 @@ in generated code rather than an enum variant dispatch.
 
 ```scrml
 match role {
-    "admin"  :> showAdmin()
+    "admin"  :> showAdmin(),
     "editor" :> showEditor()
 }
 ```
@@ -20961,8 +20961,8 @@ Compiles. Emits W-MATCH-002: non-exhaustive string match; a role value other tha
 
 ```scrml
 match role {
-    "admin"  :> showAdmin()
-    "editor" :> showEditor()
+    "admin"  :> showAdmin(),
+    "editor" :> showEditor(),
     _        :> showUser()
 }
 ```
@@ -20975,7 +20975,7 @@ No warning. `_` covers all other string values.
 type Status:enum = { Active, Banned }
 
 match status {
-    "active" :> handleActive()   // Error E-TYPE-028
+    "active" :> handleActive(),  // Error E-TYPE-028
     _        :> handleOther()
 }
 ```
@@ -21006,8 +21006,8 @@ explicitly ignore the rest. The current workaround is an `else =>` arm that does
 
 ```scrml
 match @status {
-    .Failed(err) :> console.log(err.message)
-    .Timeout :> retryPayment()
+    .Failed(err) :> console.log(err.message),
+    .Timeout :> retryPayment(),
     else :> {}   // deliberately ignoring Active, Pending, Cancelled
 }
 ```
@@ -21033,7 +21033,7 @@ syntactic.
 ```scrml
 // partial match — only handles the variants relevant here; others silently ignored
 partial match @status {
-    .Failed(err) :> console.log(err.message)
+    .Failed(err) :> console.log(err.message),
     .Timeout :> retryPayment()
 }
 ```
@@ -21092,7 +21092,7 @@ type Status:enum = { Active, Pending }
 
 // W-MATCH-003: `partial` is unnecessary — all variants are covered
 partial match @status {
-    .Active :> handleActive()
+    .Active :> handleActive(),
     .Pending :> handlePending()
 }
 ```
@@ -21155,7 +21155,7 @@ achievable at no additional cost.
 
     ${ function handleTerminalStates() {
         partial match @status {
-            .Failed(err) :> console.log(err.message)
+            .Failed(err) :> console.log(err.message),
             .Timeout :> retryPayment()
             // Active, Pending, Cancelled silently ignored
         }
@@ -21189,7 +21189,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
   variant `.Inactive`, making it indistinguishable from a missing-arm bug.
   Use `match` with an `else` arm instead:
     match @status {
-        .Active => <p>Active/
+        .Active => <p>Active/,
         else => {}   // or provide markup for .Inactive
     }
 ```
@@ -21202,7 +21202,7 @@ type Mode:enum = { Dark, Light }
 
 ${ function applyMode() {
     partial match @mode {
-        .Dark :> setDarkStyles()
+        .Dark :> setDarkStyles(),
         .Light :> setLightStyles()
     }
 } }
@@ -21219,7 +21219,7 @@ against future variant additions.
 ```scrml
 ${ function processEvent(event: AppEvent) {
     partial match event {
-        .UserLogin(userId) :> recordLogin(userId)
+        .UserLogin(userId) :> recordLogin(userId),
         .UserLogout(userId) :> recordLogout(userId)
         // Other AppEvent variants (SystemAlert, ConfigChange, etc.) not handled here
     }
@@ -21278,11 +21278,11 @@ one exhaustive `match` over `(currentState, event)`:
 ```scrml
 fn step(st: LexState): LexState {
     return match (st.mode, classify(st.cur, lastKind(st))) {
-        (.InCode, .SawQuote(q))             :> scanString(st, q)      // q binds the event payload
-        (.InCode, .SawBacktick)             :> enterTemplate(st)
-        (.InCode, .SawLineComment)          :> scanLineComment(st)
-        (.InTemplateBody, .SawInterpClose)  :> closeInterp(st)
-        (_, .SawEof)                        :> emitEof(st)
+        (.InCode, .SawQuote(q))             :> scanString(st, q),     // q binds the event payload
+        (.InCode, .SawBacktick)             :> enterTemplate(st),
+        (.InCode, .SawLineComment)          :> scanLineComment(st),
+        (.InTemplateBody, .SawInterpClose)  :> closeInterp(st),
+        (_, .SawEof)                        :> emitEof(st),
         _                                   :> advanceOne(st)
     };
 }
@@ -21598,7 +21598,7 @@ function loadItem(id: string)! LoadError { … }        // success type: Item
 // VALID — value position, every arm yields an Item or leaves
 function itemOrPlaceholder(id: string) {
     const item = loadItem(id) !{
-        .NotFound(mid) :> placeholderItem(mid)       // yields a value
+        .NotFound(mid) :> placeholderItem(mid),      // yields a value
         .Timeout       :> { @phase = .TimedOut; return placeholderItem(id); }   // leaves
     };
     return item;
@@ -21607,7 +21607,7 @@ function itemOrPlaceholder(id: string) {
 // VALID — statement position: the arms only write, nothing reads a result
 function refresh(id: string) {
     loadItem(id) !{
-        .NotFound(mid) :> @phase = .Missing(mid)
+        .NotFound(mid) :> @phase = .Missing(mid),
         .Timeout       :> @phase = .TimedOut
     };
 }
@@ -21615,7 +21615,7 @@ function refresh(id: string) {
 // INVALID — value position, the arms fall through
 function show(id: string) {
     let item = loadItem(id) !{
-        .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
+        .NotFound(mid) :> @phase = .Missing(mid),    // E-ERROR-012: produces no value
         .Timeout       :> @phase = .TimedOut         // E-ERROR-012
     };
     @phase = .Loaded(item);                             // on failure `item` would hold nothing
@@ -21624,8 +21624,8 @@ function show(id: string) {
 // VALID — `match` in a value position: every arm, `.Ok` included, yields a string
 function label(id: string) {
     return match loadItem(id) {
-        .Ok(item)        :> item.title
-        .NotFound(mid)   :> "missing " + mid
+        .Ok(item)        :> item.title,
+        .NotFound(mid)   :> "missing " + mid,
         .Timeout         :> "timed out"
     };
 }
@@ -21780,8 +21780,8 @@ function load(id: string)! LoadError { … }
 
 function show(id: string) {
     const item = load(id) !{
-        .Network(msg) :> { @phase = .Failed(msg); return; }
-        .Timeout      :> placeholderItem(id)
+        .Network(msg) :> { @phase = .Failed(msg); return; },
+        .Timeout      :> placeholderItem(id),
         _ err         :> { @phase = .Failed(describe(err)); return; }
     };
     @phase = .Loaded(item);
@@ -21932,7 +21932,7 @@ The `?` operator is postfix. When applied to the result of a `!` function call:
 
 ```scrml
 match riskyFunction() {
-    ::Ok(val) :> val
+    ::Ok(val) :> val,
     ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args); }
 }
 ```
@@ -22143,10 +22143,10 @@ The success value is wrapped in an implicit `::Ok` variant. Error variants use t
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>
-    ::InvalidAmount(reason) :> <div class="error">${reason}</>
-    ::CustomerNotFound(id) :> redirect("/customers")
-    ::ExpiredCard :> <div>Please update payment method</>
+    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
+    ::InvalidAmount(reason) :> <div class="error">${reason}</>,
+    ::CustomerNotFound(id) :> redirect("/customers"),
+    ::ExpiredCard :> <div>Please update payment method</>,
     ::NetworkError(detail) :> <div>Network issue: ${detail}</>
 }
 ```
@@ -22157,7 +22157,7 @@ The error variants MAY be covered together, and the whole error bound, with the 
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>
+    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
     _ err         :> <div class="error">${describe(err)}</>   // err: the declared error enum, whole
 }
 ```
@@ -22168,7 +22168,7 @@ no earlier arm names is **E-MATCH-ELSE-ABSORBS-ERROR**, not E-TYPE-020:
 
 ```scrml
 match processPayment(100, 42) {
-    ::InvalidAmount(reason) :> …
+    ::InvalidAmount(reason) :> …,
     else                    :> …     // E-MATCH-ELSE-ABSORBS-ERROR: would take CustomerNotFound, ExpiredCard, NetworkError
 }
 ```
@@ -22236,9 +22236,9 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function userName(id: int) {
        const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
-           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?"; }
-           .ConstraintViolation(f) :> { return "?"; }
-           .ConnectionLost         :> { return "?"; }
+           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?"; },
+           .ConstraintViolation(f) :> { return "?"; },
+           .ConnectionLost         :> { return "?"; },
            _                       :> { return "?"; }
        };
        return row is not ? "(none)" : row.name;
@@ -22249,8 +22249,8 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function openOrders(customerId: string) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
-           ::Ok(found)       :> found
-           ::QueryFailed(m)  :> { log(m); lift []; }
+           ::Ok(found)       :> found,
+           ::QueryFailed(m)  :> { log(m); lift []; },
            _ e               :> []    // S474: `_ e`, not `_` — on a failable result `_` covers `.Ok` only (§18.6)
        };
        return rows;
@@ -22287,7 +22287,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
 - Inside a `!` function, a `?{}` query that fails at runtime SHALL produce a `SqlError` variant. This variant SHALL be propagated if the enclosing function's error type is compatible, or SHALL be a compile error if incompatible.
 - A `?{}` query SHALL be a failable expression in every context. Outside a `!` function it SHALL be handled at the site with a `!{}` handler or a `match` (§19.8.3); an unhandled `?{}` there SHALL be E-ERROR-002. *(S451 R11 — supersedes: "Outside a `!` function, a `?{}` query that fails at runtime SHALL return `not` (for `.get()`) or `[]` (for `.all()`). No error SHALL be raised.")*
 - A query that runs and matches no row SHALL NOT be a failure: `.get()` SHALL return `not` and `.all()` SHALL return `[]`.
-- When a `SqlError` from a failed query is delivered to the client, a production build SHALL withhold its unchanged driver text from the delivered value and a dev build (the output of `scrml dev` / `scrml-boot dev`; every other build counts as production here) SHALL deliver it; `ConstraintViolation`'s `field` carries the column name only, in every build and for server code too (⚑ PA ruling); the server SHALL log the full text in both; server code handling the `?{}` where it is written sees the full driver message (§19.9.1, S474 ruling 2 as amended).
+- When a `SqlError` from a failed query is delivered to the client, a production build SHALL withhold its unchanged driver text from the delivered value and a dev build (the output of `scrml dev` / `scrml-boot dev`; every other build counts as production here) SHALL deliver it; `ConstraintViolation`'s `field` carries the column name only, in every build and for server code too (PA ruling, confirmed S475 — **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only)); the server SHALL log the full text in both; server code handling the `?{}` where it is written sees the full driver message (§19.9.1, S474 ruling 2 as amended).
 - The right-hand side of a `<x server>` declaration that IS its compiler-generated hydration load (§52.6.5 Pattern C), and the compiler-generated call to a load function, SHALL NOT be E-ERROR-002. Their failure SHALL be reported by §52.6.8 (a server log line, the placeholder kept, `@x.error`). *(S451 "your recs on all five" item 2.)*
 - *(Informative.)* The migration for code the R11 bullet above newly rejects is the `scrml fix` rule `sql-failable` (built S455: provable reads rewritten, writes listed; tooling, not language — §19.8.3).
 
@@ -22308,7 +22308,7 @@ When a server `!` function fails:
    - **`ConstraintViolation`'s `field` is the COLUMN name only, in both builds** *(PA ruling, confirmed S475 — narrower than ruling 2 (server code) and amendment 3 (dev build): the field is cut to the column for every reader, server code included. Reason: one field contract across builds, so a client written against dev (`field == "email"`) behaves the same in production; the full driver text is in the server log. **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only))* — `email`, not `users.email`; a composite UNIQUE gives `a, b`. A client needs the column to say "that email is taken". A field that is not exactly a `table.col` list — a CHECK constraint's name or expression, an expression index, a Postgres constraint name — is not a column: server code still sees it, and a production build blanks it in the delivered value.
    - **The author's text is the author's.** Text the author derives from the driver text (`m.slice(16)`, `f.toUpperCase()`) or writes themselves is delivered as written; the guarantee is that the compiler and runtime never deliver UNCHANGED driver text by themselves.
    - **Dev vs production.** A dev build is the output of `scrml dev` (on the bootstrap, `scrml-boot dev`). Every other build — plain `scrml compile` and `scrml build` included — counts as production for driver text, so a build carrying no dev marker withholds it (fails closed). This is separate from the `--production` flag that strips `log()` (§20.6.5): that flag does not decide driver text.
-   *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 2 — *"**A failed query's error text does not cross the wire.** The client receives the error variant with its message blanked; the server logs the full driver text. (Driver text exposes the schema.) A `?{}` handled where it is written still sees the driver text in server code."* — as amended by ruling:user-voice-scrml.md S474 "⭐ RULED — capability over limitation: interim vs permanent refusals" item 3 — *"**Amends S474 ruling 2:** a dev build keeps the full driver text in the value delivered to the client; a production build blanks it (the server logs it either way)."* · the dev/production definition, the `ConstraintViolation` column rule and the "author's text" rule are **PA rulings** (S474 dispatch, #1703 r1), consistent with both compilers · supersedes: nothing written (§19.9.1 serialized `data` as declared) · **Direction of change:** semantics-changed for a production build (the client sees `""` where it saw driver text, and a bare column where it saw `table.col`); inert for a dev build except the column rule. **Built by the bootstrap** (#1703: `server-runtime.js` `withholdDriverText`, `constraintField`); a transformed driver text is not tracked (best effort, `g-boot-wire-driver-text-transformed-not-tracked-s474`). impl#1: in flight, #1704.)*
+   *(Provenance: ruling:user-voice-scrml.md S474 "⭐ RULED — S474 review-surfaced decisions 1–7" item 2 — *"**A failed query's error text does not cross the wire.** The client receives the error variant with its message blanked; the server logs the full driver text. (Driver text exposes the schema.) A `?{}` handled where it is written still sees the driver text in server code."* — as amended by ruling:user-voice-scrml.md S474 "⭐ RULED — capability over limitation: interim vs permanent refusals" item 3 — *"**Amends S474 ruling 2:** a dev build keeps the full driver text in the value delivered to the client; a production build blanks it (the server logs it either way)."* · the dev/production definition, the `ConstraintViolation` column rule and the "author's text" rule are **PA rulings** (S474 dispatch, #1703 r1), confirmed S475 (**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only)), consistent with both compilers · supersedes: nothing written (§19.9.1 serialized `data` as declared) · **Direction of change:** semantics-changed for a production build (the client sees `""` where it saw driver text, and a bare column where it saw `table.col`); inert for a dev build except the column rule. **Built by the bootstrap** (#1703: `server-runtime.js` `withholdDriverText`, `constraintField`); a transformed driver text is not tracked (best effort, `g-boot-wire-driver-text-transformed-not-tracked-s474`). impl#1: in flight, #1704.)*
 2. The HTTP response carries an appropriate status code (see §19.9.2).
 3. The client CPS continuation deserializes the tagged object back into the error enum variant.
 4. The client code handles the error via match, `?`, `!{}`, or a `<request>` body (the failure is `<#id>.error`, §6.7.7). It reaches an `<errorBoundary>` only through the `<formFor>` submit route (§19.6.6) — a server call is never made while rendering (§13.7). *(S451 — supersedes "or `<errorBoundary>`". Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
@@ -22480,7 +22480,7 @@ function notifyOrder(orderId: number) {
 3. **Explicit match on result** (most-precise control):
    ```scrml
    match loadProfile(id) {
-       .Ok(p) :> @profile = p
+       .Ok(p) :> @profile = p,
        .Transport(t) :> @lastError = callProblem(t)   // callProblem: a `match t { … }` over ServerCallError (§19.9.10)
    }
    ```
@@ -22930,8 +22930,8 @@ added — S454 F7):
 ${
     function save() {
         @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
-            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return; }
-            .Storage       :> { @status = "the server could not store it"; return; }
+            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return; },
+            .Storage       :> { @status = "the server could not store it"; return; },
             .Transport(t)  :> { @status = callProblem(t); return; }
         };
         @status = "saved";
@@ -22939,9 +22939,9 @@ ${
 
     fn callProblem(t: ServerCallError) -> string {
         return match t {
-            .Unreachable    :> "offline — not saved"
-            .Refused(s)     :> `the server refused the save (${s}) — sign in again`
-            .ServerFault(s) :> `the server failed (${s}) — try again later`
+            .Unreachable    :> "offline — not saved",
+            .Refused(s)     :> `the server refused the save (${s}) — sign in again`,
+            .ServerFault(s) :> `the server failed (${s}) — try again later`,
             .Malformed(r)   :> "the server's answer could not be read"
         };
     }
@@ -23205,7 +23205,7 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
 - ~~Nesting rules of §19.10.4 (E-ERROR-007) SHALL treat the implicit envelope as a transaction block for the purpose of detecting illegal nesting.~~ **The implicit envelope SHALL NOT count as a `transaction` block for §19.10.4's E-ERROR-007 (S474).** E-ERROR-007 stays lexical — **INTERIM**: it covers a `transaction` block written inside another `transaction` block. The capable form is the savepoint meaning: the inner block as a savepoint inside the outer one, as a block reached through a call already is. Today's alternative is to move the inner block into a called function. A `transaction` block inside the envelope is a savepoint (above).
 - The implicit envelope SHALL roll back on a `fail` exit (including `?` propagation) as well as on an exception, and commit only on successful completion (§8.9.2, S449 D).
 - **A nested `!` call is a SAVEPOINT (S474, §8.9.2 "Amendment S474" item 4).** A `!` server function called while an envelope is open SHALL run its body as a savepoint within it. A callee failure SHALL roll back to the callee's savepoint before its failure value reaches the caller; a caller that handles that failure keeps its own writes and only the callee's writes are undone. A caller that propagates the failure or fails itself rolls back the whole envelope.
-- **Every surface that runs a `!` server body (S474, §8.9.2 "Amendment S474" item 6).** A `!` function called by an `<endpoint>` arm (§61) or a channel `onserver:` handler (§38.6.1) runs in its envelope like any other `!` server body. **A `!` `server function*` commits per `yield` (S474, ruled; §8.9.2 "Amendment S474" item 6).** Its body runs as envelope segments: start → first `yield`, `yield` → next `yield`, last `yield` → end. Each segment is its own envelope. Its writes COMMIT before its event is sent, and a failure rolls back only the current segment and ends the stream; earlier committed segments and their sent events stand. Each segment opens `BEGIN IMMEDIATE` or `BEGIN DEFERRED` by the queries that can run in it, at the first query it executes (⚑ PA reading). Statement, nested-call and paired-transaction savepoints nest in the current segment. A paired `?{BEGIN}` or an author savepoint release that crosses a `yield` is E-TX-UNMATCHED-END (INTERIM, ⚑ PA reading). A `yield*` delegate's yields are segment boundaries of the outer stream; a `!` server generator iterated by another `!` caller is E-TX-BANG-GENERATOR-ITERATED (INTERIM, ⚑ PA reading). The runtime checks the stream is open just before the COMMIT of each segment that ends at a `yield` (the last segment, which backs no event, commits without it); delivery is at-most-once (every received event is committed, not every committed segment is received). The `defer` bodies that run because the body exits run inside the current segment, before it commits or rolls back, as in an ordinary `!` function: on a normal end they commit with the final segment, and on a `fail`, a host throw or a refused event field they roll back with the current segment. Only on a teardown do they run in a separate teardown segment, after the current segment is rolled back, and that segment commits (⚑ PA reading). A deferred body's host error replaces the failure in flight (§19.16.2). A failure ends the stream with a terminal `__scrml_error` event: a `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a failure of the segment's own opening statement, `COMMIT` or savepoint release, and the client closes without reconnecting (§8.9.2 "Amendment S474" item 6, "How a failed stream ends"). A host throw is `kind: "ServerError"` (⚑ PA reading). A body that completes normally ends the stream with a terminal `__scrml_end` event, and the client closes on that too (§37.4.4, ⚑ PA reading). Both terminal names are compiler-namespaced, so an author generator keeps every event name outside the `__scrml_` prefix (§37.4.4); a yielded event name starting with `__scrml_`, an event name that is not a `string` or an id that is neither a `string` nor an `int`, or an event name or id holding a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029, is refused at run time (E-SSE-EVENT-FIELD-RT, §37.4.2).
+- **Every surface that runs a `!` server body (S474, §8.9.2 "Amendment S474" item 6).** A `!` function called by an `<endpoint>` arm (§61) or a channel `onserver:` handler (§38.6.1) runs in its envelope like any other `!` server body. **A `!` `server function*` commits per `yield` (S474, ruled; §8.9.2 "Amendment S474" item 6).** Its body runs as envelope segments: start → first `yield`, `yield` → next `yield`, last `yield` → end. Each segment is its own envelope. Its writes COMMIT before its event is sent, and a failure rolls back only the current segment and ends the stream; earlier committed segments and their sent events stand. Each segment opens `BEGIN IMMEDIATE` or `BEGIN DEFERRED` by the queries that can run in it, at the first query it executes (PA reading, confirmed S475). Statement, nested-call and paired-transaction savepoints nest in the current segment. A paired `?{BEGIN}` or an author savepoint release that crosses a `yield` is E-TX-UNMATCHED-END (INTERIM, PA reading, confirmed S475). A `yield*` delegate's yields are segment boundaries of the outer stream; a `!` server generator iterated by another `!` caller is E-TX-BANG-GENERATOR-ITERATED (INTERIM, PA reading, confirmed S475). The runtime checks the stream is open just before the COMMIT of each segment that ends at a `yield` (the last segment, which backs no event, commits without it); delivery is at-most-once (every received event is committed, not every committed segment is received). The `defer` bodies that run because the body exits run inside the current segment, before it commits or rolls back, as in an ordinary `!` function: on a normal end they commit with the final segment, and on a `fail`, a host throw or a refused event field they roll back with the current segment. Only on a teardown do they run in a separate teardown segment, after the current segment is rolled back, and that segment commits (PA reading, confirmed S475). A deferred body's host error replaces the failure in flight (§19.16.2). A failure ends the stream with a terminal `__scrml_error` event: a `fail` value in the §19.9.1 wire shape, `kind: "EnvelopeFailed"` for a failure of the segment's own opening statement, `COMMIT` or savepoint release, and the client closes without reconnecting (§8.9.2 "Amendment S474" item 6, "How a failed stream ends"). A host throw is `kind: "ServerError"` (PA reading, confirmed S475). A body that completes normally ends the stream with a terminal `__scrml_end` event, and the client closes on that too (§37.4.4, PA reading, confirmed S475). Both terminal names are compiler-namespaced, so an author generator keeps every event name outside the `__scrml_` prefix (§37.4.4); a yielded event name starting with `__scrml_`, an event name that is not a `string` or an id that is neither a `string` nor an `int`, or an event name or id holding a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029, is refused at run time (E-SSE-EVENT-FIELD-RT, §37.4.2). *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)*
 - **A query handled at its site runs under a statement savepoint (S474, §8.9.2 "Amendment S474" item 4).** Inside an envelope, a `?{}` whose failure is handled at its site SHALL run under its own statement savepoint. Its failure rolls back to that savepoint, and the envelope survives (the Postgres aborted-transaction case).
 - **A failure of the envelope itself is a server error (S474, §8.9.2 "Amendment S474" item 1).** A failure of the envelope's own opening statement, its `COMMIT`, or a savepoint release or rollback-to SHALL NOT report success. It is a server error, mirroring §19.10.6: HTTP 500 for a route, a thrown failure for an in-process call, a terminal `__scrml_error` event with `kind: "EnvelopeFailed"` for a stream (§8.9.2 "Amendment S474" item 6).
 - The implicit envelope SHALL cover its own database only. A write to another database that the `!` function reaches while the envelope is open — its own `?{}` or, transitively, through any function it calls — SHALL be **E-SQL-011** (§8.9.2). The same holds for an explicit envelope in a `!` function (a `transaction { }` block or a manual `?{BEGIN}`). Cross-database atomicity is not offered (§8.9.2 "Amendment S474" item 5). It is **PERMANENT (semantic)** when either database is SQLite: SQLite has no prepare phase, so no protocol makes a commit across two independent connections crash-atomic. It is **INTERIM** for a Postgres / MySQL pair, where two-phase commit exists; the capable form is a two-phase envelope across the pair, owed and not designed. A write to a second `<db>` inside an envelope is not covered atomically; under S474 every `!` server body with a query has an envelope, so this reaches every such body (§8.9.2 "Amendment S474" item 5). impl#1 does not emit E-SQL-011 for it: `g-impl1-cross-database-write-in-envelope-s451` (open). *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 4 (a), quoted in §8.9.2 · supersedes: nothing written — SPEC was silent · newly-rejecting.)*
@@ -23253,10 +23253,10 @@ Error values from `!` functions can be stored in reactive cells (§6):
 ${
     function handlePayment() {
         match processPayment(100, 42) {
-            ::Ok(receipt) :> @receipt = receipt
-            ::InvalidAmount(reason) :> @error = PaymentError::InvalidAmount(reason)
-            ::CustomerNotFound(id) :> @error = PaymentError::CustomerNotFound(id)
-            ::ExpiredCard :> @error = PaymentError::ExpiredCard
+            ::Ok(receipt) :> @receipt = receipt,
+            ::InvalidAmount(reason) :> @error = PaymentError::InvalidAmount(reason),
+            ::CustomerNotFound(id) :> @error = PaymentError::CustomerNotFound(id),
+            ::ExpiredCard :> @error = PaymentError::ExpiredCard,
             ::NetworkError(detail) :> @error = PaymentError::NetworkError(detail)
         }
     }
@@ -23264,10 +23264,10 @@ ${
 
 <div if=@error>
     ${match @error {
-        ::InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>
-        ::CustomerNotFound(_) :> lift <div class="error">Customer not found</>
-        ::ExpiredCard :> lift <div class="error">Card expired</>
-        ::NetworkError(detail) :> lift <div class="error">${detail}</>
+        ::InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>,
+        ::CustomerNotFound(_) :> lift <div class="error">Customer not found</>,
+        ::ExpiredCard :> lift <div class="error">Card expired</>,
+        ::NetworkError(detail) :> lift <div class="error">${detail}</>,
         _ :> lift <div></>
     }}
 </>
@@ -23303,9 +23303,9 @@ value position"). To keep the error for display, an arm writes it to its own cel
 ${
     function attemptPayment() {
         @receipt = processPayment(100, 42) !{
-            .InvalidAmount(reason) :> { @paymentError = PaymentError.InvalidAmount(reason); return; }
-            .CustomerNotFound(id)  :> { @paymentError = PaymentError.CustomerNotFound(id); return; }
-            .ExpiredCard           :> { @paymentError = PaymentError.ExpiredCard; return; }
+            .InvalidAmount(reason) :> { @paymentError = PaymentError.InvalidAmount(reason); return; },
+            .CustomerNotFound(id)  :> { @paymentError = PaymentError.CustomerNotFound(id); return; },
+            .ExpiredCard           :> { @paymentError = PaymentError.ExpiredCard; return; },
             .NetworkError(detail)  :> { @paymentError = PaymentError.NetworkError(detail); return; }
         };
         @paymentError = not;
@@ -30212,7 +30212,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TIMER-NAME-INVALID | §51.0.M.1 | An `<onTimeout name=...>` value is not a valid identifier — must match `/^[A-Za-z_][A-Za-z0-9_]*$/` (ASCII letters, digits, and underscores; first character non-digit; no whitespace or punctuation). Per §51.0.M.1 (S79), the `name=` attribute MUST be identifier-shaped to match the `cancelTimer("X")` argument convention. Resolution: rename to a valid identifier or drop the `name=` attribute (the timer becomes index-keyed and uncancellable). (A5-6 Feature 1, S79.) | Error |
 | E-SSE-001 | §37.9 | `yield` used inside a non-generator `server function` body | Error |
 | W-SSE-001 | §37.9 | `server function*` body contains no `yield` statements | Warning |
-| E-SSE-EVENT-FIELD-RT | §37.4.2, §37.9 | **(Runtime, S474, security; code name is the PA's.)** A `server function*` yielded a named event whose `event` value is not a `string` or whose `id` value is neither a `string` nor an `int` — INTERIM (round 5: the capable form is a check on the exact stringified text, owed) — or whose `event` or `id` value contains a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029 — one class at run time, its tag split (#1734 follow-up round 1): the line-ending characters (CR, LF, VT, FF, U+001C–U+001E, U+0085, U+2028, U+2029) PERMANENT (semantic: the SSE field grammar cannot carry a line ending, and a foreign `route=` consumer (§37.3) such as Python's `str.splitlines()` ends a line at each of these, so one would let yielded data forge further fields or frames); a NUL in an `id` PERMANENT (S475: semantic — the WHATWG event-stream rule ignores an `id` field that contains NUL, so no conforming consumer can receive it); the other C0 controls (NUL in an `event` name included), DEL and the other C1 controls INTERIM (~~refused until a defined escaping for SSE field values exists; that escaping is the capable form, owed~~ the capable form is audited raw admission of TAB/DEL/C1 — raw, as the WHATWG field grammar carries them, once a per-parser audit shows they end no line for the supported `route=` consumers; not an escaping, which the wire-contract reason rules out; owed) — or whose `event` value starts with `__scrml_` — PERMANENT (semantic: `__scrml_` is the compiler's namespace, §37.4.4, and a foreign `route=` consumer reads the raw event names as its contract, so the compiler cannot escape author names on a wire it does not own at both ends; the refusal holds on compiler-internal streams too, for wire uniformity: any stream can gain a `route=` later, and one wire format serves both). The event is not sent; the stream ends with the terminal `__scrml_error` event, `error: { kind: "EventFieldRefused", message }`, the message naming the field, not the value. On a `!` body the current segment rolls back (§8.9.2 "Amendment S474" item 6). **Provenance:** PA ruling, S474 #1734 re-review r1 G4 (round 5, PA rulings H3–H4: the type restriction, the Unicode line breaks, the wire-contract reason; #1734 follow-up, PA ruling on re-review r3: the control-character class, the wire-uniformity reason; #1734 follow-up round 1, PA ruling: the tag split), on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`". S475 SPEC pass: the INTERIM capable form reworded to audited raw admission and NUL-in-`id` tagged PERMANENT (review:s474-1737 r1 N1/N2; ledger IN-52/PS-73). Direction of change: newly-rejecting at run time (S475 edits inert). **Nominal / not yet emitted** by impl#1, which writes `event:` / `id:` unescaped (`g-impl1-sse-event-field-injection-s474`); the bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed. | Runtime |
+| E-SSE-EVENT-FIELD-RT | §37.4.2, §37.9 | **(Runtime, S474, security; PA rulings, confirmed S475; code name is the PA's.)** (**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).) A `server function*` yielded a named event whose `event` value is not a `string` or whose `id` value is neither a `string` nor an `int` — INTERIM (round 5: the capable form is a check on the exact stringified text, owed) — or whose `event` or `id` value contains a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029 — one class at run time, its tag split (#1734 follow-up round 1): the line-ending characters (CR, LF, VT, FF, U+001C–U+001E, U+0085, U+2028, U+2029) PERMANENT (semantic: the SSE field grammar cannot carry a line ending, and a foreign `route=` consumer (§37.3) such as Python's `str.splitlines()` ends a line at each of these, so one would let yielded data forge further fields or frames); a NUL in an `id` PERMANENT (S475: semantic — the WHATWG event-stream rule ignores an `id` field that contains NUL, so no conforming consumer can receive it); the other C0 controls (NUL in an `event` name included), DEL and the other C1 controls INTERIM (~~refused until a defined escaping for SSE field values exists; that escaping is the capable form, owed~~ the capable form is audited raw admission of TAB/DEL/C1 — raw, as the WHATWG field grammar carries them, once a per-parser audit shows they end no line for the supported `route=` consumers; not an escaping, which the wire-contract reason rules out; owed) — or whose `event` value starts with `__scrml_` — PERMANENT (semantic: `__scrml_` is the compiler's namespace, §37.4.4, and a foreign `route=` consumer reads the raw event names as its contract, so the compiler cannot escape author names on a wire it does not own at both ends; the refusal holds on compiler-internal streams too, for wire uniformity: any stream can gain a `route=` later, and one wire format serves both). The event is not sent; the stream ends with the terminal `__scrml_error` event, `error: { kind: "EventFieldRefused", message }`, the message naming the field, not the value. On a `!` body the current segment rolls back (§8.9.2 "Amendment S474" item 6). **Provenance:** PA ruling, S474 #1734 re-review r1 G4 (round 5, PA rulings H3–H4: the type restriction, the Unicode line breaks, the wire-contract reason; #1734 follow-up, PA ruling on re-review r3: the control-character class, the wire-uniformity reason; #1734 follow-up round 1, PA ruling: the tag split), on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`". S475 SPEC pass: the INTERIM capable form reworded to audited raw admission and NUL-in-`id` tagged PERMANENT (review:s474-1737 r1 N1/N2; ledger IN-52/PS-73). Direction of change: newly-rejecting at run time (S475 edits inert). **Nominal / not yet emitted** by impl#1, which writes `event:` / `id:` unescaped (`g-impl1-sse-event-field-injection-s474`); the bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed. | Runtime |
 | E-CHANNEL-001 | §38.9 | `<channel>` missing required `name=` attribute | Error |
 | ~~E-CHANNEL-002~~ | §38.9 | **Retired 2026-05-04 (D3 / M19).** `@shared` modifier removed in v0.next; replaced by `E-CHANNEL-SHARED-MODIFIER`. | — |
 | E-CHANNEL-003 | §38.9 | Duplicate channel name in same file | Error |
@@ -32080,7 +32080,7 @@ id: <value.id>\n
 data: <JSON.stringify(value.data)>\n\n
 ```
 
-**Event names and ids the stream refuses (S474 #1734 rounds 4–5, PA rulings).** The emitter SHALL check a yielded named event's `event` and `id` values at run time, before anything of that event is written, and SHALL refuse the event in three cases:
+**Event names and ids the stream refuses (S474 #1734 rounds 4–5, PA rulings, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* The emitter SHALL check a yielded named event's `event` and `id` values at run time, before anything of that event is written, and SHALL refuse the event in three cases:
 
 1. **An `event` value that is not a `string`, or an `id` value that is neither a `string` nor an `int`** (round 5, PA ruling H3). The field text the emitter writes is then exactly the checked value: a string as it is, an `int` in decimal digits, with a leading `-` when negative. A tape, an object or any other value would be stringified on the way out, and a value parsed from user JSON (`["x\nevent: __scrml_end"]`) can stringify to text holding a line ending that a check on the value's type would not see. **INTERIM:** the capable form is a check on the exact stringified text, which would admit other `id` types; owed, not designed. The author converts the value to a string first.
 2. **An `event` or `id` string that contains a control character or a line separator: any C0 control (U+0000–U+001F, which takes in NUL, TAB, LF and CR), DEL (U+007F), any C1 control (U+0080–U+009F, which takes in NEL, U+0085), LINE SEPARATOR (U+2028) or PARAGRAPH SEPARATOR (U+2029).** The refusal is one class at run time, no control characters and no line separators, not a list that chases each parser (#1734 follow-up, PA ruling). Its tag is split by the reason each part rests on (#1734 follow-up round 1, PA ruling):
@@ -32092,7 +32092,7 @@ data: <JSON.stringify(value.data)>\n\n
 
 **`data` (round 5, PA ruling H3).** `data` takes no refusal: `JSON.stringify` never emits a raw CR or LF, and escapes every other control character below U+0020. It does emit U+2028 and U+2029 raw, and U+0085 too. The emitter SHALL write each of those three as its JSON escape (`\u2028`, `\u2029`, `\u0085`) in every `data:` line, of §37.4.1 and §37.4.2 alike. The three can appear only inside a JSON string, where the escape denotes the same character, so the parsed value is unchanged. The wider class item 2 refuses needs nothing more in `data`: every C0 control is already escaped, and DEL and the other C1 controls are not line breaks to a common line splitter.
 
-A refusal is **E-SSE-EVENT-FIELD-RT**, a run-time refusal of the stream, not a compile error, since the value is known only when it is yielded. The refused event is not sent, and the stream ends with the terminal `__scrml_error` event (§37.4.4) whose `error` field is `{ kind: "EventFieldRefused", message }`; the message names the code and which field was refused, not the value. The refusal is a failure of the body like a host throw: on a `!` body (§8.9.2 "Amendment S474" item 6) its `defer` bodies run inside the current segment, which is then rolled back, and earlier segments and their events stand (⚑ PA reading, for bryan's veto: the `kind` name, and that the refusal rolls back rather than committing the segment it would have backed). *(Provenance: PA ruling, S474 #1734 re-review r1 G4, on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`". Round 5 (PA rulings H3, H4) adds the type restriction, the three Unicode line breaks and the `data` escape, and states the wire-contract reason for item 3. The #1734 follow-up (PA ruling on re-review r3) widens item 2 to the control-character class, notes the negative `int` id, and adds the wire-uniformity reason to item 3. Its round 1 (PA ruling) splits item 2's tag: the line-ending characters PERMANENT (semantic), the other controls INTERIM until a defined escaping for SSE field values exists (capable form reworded S475 to audited raw admission of TAB/DEL/C1, and NUL in an `id` tagged PERMANENT — item 2 above); the run-time refusal is unchanged. Direction of change: newly-rejecting at run time, for a yielded `event` that is not a `string` or an `id` that is neither a `string` nor an `int`, for an `event` or `id` holding a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029, and for an `event` starting with `__scrml_`; semantics-stated (wire bytes only) for the `data` escape. impl#1 writes `event:` and `id:` unescaped and checks none of these (`g-impl1-sse-event-field-injection-s474`, deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.)*
+A refusal is **E-SSE-EVENT-FIELD-RT**, a run-time refusal of the stream, not a compile error, since the value is known only when it is yielded. The refused event is not sent, and the stream ends with the terminal `__scrml_error` event (§37.4.4) whose `error` field is `{ kind: "EventFieldRefused", message }`; the message names the code and which field was refused, not the value. The refusal is a failure of the body like a host throw: on a `!` body (§8.9.2 "Amendment S474" item 6) its `defer` bodies run inside the current segment, which is then rolled back, and earlier segments and their events stand (PA reading, confirmed S475: the `kind` name, and that the refusal rolls back rather than committing the segment it would have backed; **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only)). *(Provenance: PA ruling, S474 #1734 re-review r1 G4, on ruling:user-voice-scrml.md S474 "⭐ RULED — `!` streaming server functions commit per `yield`". Round 5 (PA rulings H3, H4) adds the type restriction, the three Unicode line breaks and the `data` escape, and states the wire-contract reason for item 3. The #1734 follow-up (PA ruling on re-review r3) widens item 2 to the control-character class, notes the negative `int` id, and adds the wire-uniformity reason to item 3. Its round 1 (PA ruling) splits item 2's tag: the line-ending characters PERMANENT (semantic), the other controls INTERIM until a defined escaping for SSE field values exists (capable form reworded S475 to audited raw admission of TAB/DEL/C1, and NUL in an `id` tagged PERMANENT — item 2 above); the run-time refusal is unchanged. Direction of change: newly-rejecting at run time, for a yielded `event` that is not a `string` or an `id` that is neither a `string` nor an `int`, for an `event` or `id` holding a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029, and for an `event` starting with `__scrml_`; semantics-stated (wire bytes only) for the `data` escape. impl#1 writes `event:` and `id:` unescaped and checks none of these (`g-impl1-sse-event-field-injection-s474`, deferred under the S471 impl#1 policy). The bootstrap does not parse `function*` (E-PARSE-FN), so it fails closed.)*
 
 #### 36.4.3 Last-Event-ID reconnection
 
@@ -32118,7 +32118,7 @@ data: null\n\n
 
 The client stub SHALL close the `EventSource` when it receives `__scrml_end`, and SHALL NOT reconnect. This mirrors the terminal `__scrml_error` event (§8.9.2 "Amendment S474" item 6, "How a failed stream ends"; §19.10.6). A connection that drops without `__scrml_end` or `__scrml_error` is not a clean end, and the browser's reconnect (§37.4.3) still applies to it.
 
-**The terminal names are the compiler's (S474 #1734 round 3, PA ruling, capability first).** Every terminal event the compiler sends on a stream is named in its `__scrml_` namespace: `__scrml_end` for a completed body, `__scrml_error` for every failure frame (§8.9.2 item 6, §19.10.6's `TransactionLeftOpen`, and §14.8.9's refusal frame). The same prefix names the compiler's wire keys `__scrml_error` (§19.9.1) and `__scrml_absent` (§57). An author generator keeps full use of every event name outside that prefix, `end` and `error` included: an author `{ event: "end", … }` or `{ event: "error", … }` is an ordinary §37.4.2 named event, and the stub does not close on it. ~~Nothing is reserved and no yield is refused~~ *(struck S474 #1734 round 4, PA ruling G4: an author event name starting with `__scrml_` is refused at run time, E-SSE-EVENT-FIELD-RT, §37.4.2.)* A terminal frame named plain `error` would also reach the listeners of `EventSource`'s own connection-error event, so the stub could not tell it from a dropped connection. The namespaced name has no such overlap.
+**The terminal names are the compiler's (S474 #1734 round 3, PA ruling, capability first, confirmed S475).** *(**Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S474 veto-window readings; namespace-import markup; impl#1 stays off" item 2 — "Every other S474 ⚑ PA reading is confirmed" · **Direction of change:** inert (marker only).)* Every terminal event the compiler sends on a stream is named in its `__scrml_` namespace: `__scrml_end` for a completed body, `__scrml_error` for every failure frame (§8.9.2 item 6, §19.10.6's `TransactionLeftOpen`, and §14.8.9's refusal frame). The same prefix names the compiler's wire keys `__scrml_error` (§19.9.1) and `__scrml_absent` (§57). An author generator keeps full use of every event name outside that prefix, `end` and `error` included: an author `{ event: "end", … }` or `{ event: "error", … }` is an ordinary §37.4.2 named event, and the stub does not close on it. ~~Nothing is reserved and no yield is refused~~ *(struck S474 #1734 round 4, PA ruling G4: an author event name starting with `__scrml_` is refused at run time, E-SSE-EVENT-FIELD-RT, §37.4.2.)* A terminal frame named plain `error` would also reach the listeners of `EventSource`'s own connection-error event, so the stub could not tell it from a dropped connection. The namespaced name has no such overlap.
 
 The reason: the server closing a `text/event-stream` response is, to `EventSource`, a dropped connection, so a body that simply finished would be reconnected after the retry delay and run again from the start. For a stream whose body writes, each run re-commits the first run's writes (for a `!` body, every segment, §8.9.2 item 6). For a read-only stream it is a polling loop the author did not write.
 
@@ -34873,9 +34873,9 @@ type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results");
     const result = parseVariant(raw, LoadResult) !{
-        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); }
-        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); }
-        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); }
+        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); },
+        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); },
+        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); },
         .Malformed(reason)             :> { fail LoadError::Malformed(reason); }
     };
     return result;    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
@@ -35919,7 +35919,7 @@ Because a `given` head NAMES variables rather than binding them, each head name 
 ```scrml
 ${
     match x {
-        not        :> handleAbsence()
+        not        :> handleAbsence(),
         given x :> handlePresence(x)
     }
 }
@@ -41107,8 +41107,8 @@ state is FUNCTION of an upstream source rather than authored.
 
 ```scrml
 <engine for=Health derived=match @marioState {
-  .Small | .Big => .Healthy
-  .Fire | .Cape => .AtRisk
+  .Small | .Big => .Healthy,
+  .Fire | .Cape => .AtRisk,
   _              => .Critical
 }>
   <Healthy/>
@@ -41339,7 +41339,7 @@ type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: str
 function load() {
   @loadPhase = .Loading;
   const result = fetchItems() !{
-    .Network(msg) :> { @loadPhase = .Error(msg); return; }
+    .Network(msg) :> { @loadPhase = .Error(msg); return; },
     .Empty        :> { @loadPhase = .Done(0);    return; }
   };
   @loadPhase = .Done(result.length);
@@ -42147,13 +42147,13 @@ emitted.)*
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
 
   <Idle rule=.Dragging>
-    .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+    .Start(id) :> .Dragging(id),             <!-- (Idle × Start) → Dragging, carrying id -->
     _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }   <!-- id (state) + col (msg) in scope -->
-    .End       :> .Idle
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; },  <!-- id (state) + col (msg) in scope -->
+    .End       :> .Idle,
     _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
 
@@ -42290,12 +42290,12 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
   <Idle rule=.Dragging>
-    .Start(id) :> .Dragging(id)
+    .Start(id) :> .Dragging(id),
     _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }
-    .End       :> .Idle
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; },
+    .End       :> .Idle,
     _          :> @dragPhase
   </>
 </>
@@ -46720,7 +46720,7 @@ type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
 
 fn label(p: Post) -> string {
   return match p.role {                          // S469: a value leaves only by `return` (§48)
-    .Admin  => "Admin"
+    .Admin  => "Admin",
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
   };
@@ -46972,8 +46972,8 @@ Narrowing semantics extend the existing §18.17 `is` operator and §42 `not` nar
 
 ```scrml
 match @sub {
-    <Draft>     :> "editing"
-    <Validated> :> "ready"
+    <Draft>     :> "editing",
+    <Validated> :> "ready",
     <Submitted> :> "done"
     // missing any arm -> E-TYPE-020
 }
@@ -53533,7 +53533,7 @@ is inferred as everywhere. **Provenance:** ruling:user-voice-scrml.md S462 "go o
    ```scrml
    let <mode:Mode=.Light/>
    <theme>
-       <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+       <ink:string=(match @mode { .Light :> "#0f172a", .Dark :> "#e2e8f0" })/>
    </theme>
    ```
 
@@ -53733,8 +53733,8 @@ export let <mode:Mode=.Light/>                                 // `export let` b
                                                                // (O61 RULED S469: a `<theme>` body is an item position, §66.2.5)
     export <brand:string="#338967"/>                           // locked literal → :root { --brand: #338967 }
     export <danger:string="#dc2626"/>
-    export <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
-    export <paper:string=(match @mode { .Light :> "#ffffff"  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
+    export <ink:string=(match @mode { .Light :> "#0f172a",  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
+    export <paper:string=(match @mode { .Light :> "#ffffff",  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
 </theme>
 
 export <swatch:struct>                                         // writable fields are children (§66.4 rule 6, S447) —
