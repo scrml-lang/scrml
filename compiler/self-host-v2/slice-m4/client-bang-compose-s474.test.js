@@ -246,20 +246,23 @@ ${HOLD_CHARGE}    let <s:string=""/>
     expect(e[0].message).toContain("after the last server call, uses the `<host>` binding `title`");
   });
 
-  test("INTERIM: a cell READ inside the batch (the §6.6.9 marshal is not built) — E-BOOTSTRAP-UNSUPPORTED naming the fix", () => {
+  test("BUILT (s475-boot-nonbang-callee-envelope; was INTERIM): a cell READ inside the batch — the §6.6.9 marshal hands the client's value to the batch", async () => {
     const src = `<program db="./app.db">
-${HOLD_CHARGE}    let <n:int=1/>
+${HOLD_CHARGE}    let <n:int=4/>
+    let <r:int=0/>
     function book()! E {
         hold(@n)?;
         charge(@n, 0)?;
     }
-    <main><button onclick={ book() !{ _ :> { @n = 0; }, }; }>go</button></main>
+    <main><button id="go" onclick={ book() !{ _ :> { @n = 0; }, }; @r = 1; }>go</button></main>
 </program>
 `;
-    const e = errs(src);
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("reads `@n` inside the batch");
-    expect(e[0].message).toContain("Read it into a local before the first server call");
+    expect(errs(src)).toEqual([]);
+    const r = compile(src);
+    const sql = await realDb(DDL);
+    const { calls } = await clickRun(r.core, sql, "#go");
+    expect(calls).toBe(1);
+    expect(await rows(sql)).toEqual([4, 104]);
   });
 
   test("near-miss: the cell read into a local before the first call composes — the local rides the request", () => {
@@ -276,20 +279,41 @@ ${HOLD_CHARGE}    let <n:int=1/>
     expect(errs(src)).toEqual([]);
   });
 
-  test("INTERIM: a cell write whose value the batch computes — E-BOOTSTRAP-UNSUPPORTED (the cell envelope is owed)", () => {
+  test("BUILT (s475-boot-nonbang-callee-envelope; was INTERIM): a cell write whose value the batch computes — the cell envelope carries it back", async () => {
+    const src = `<program db="./app.db">
+${HOLD_CHARGE}    let <n:int=0/>
+    let <r:int=0/>
+    function book(a: int)! E {
+        const x: int = hold(a)?;
+        const y: int = charge(a, 0)?;
+        @n = x + y;
+    }
+    <main><button id="go" onclick={ book(1) !{ _ :> { @n = -1; }, }; @r = 1; }>go</button></main>
+</program>
+`;
+    expect(errs(src)).toEqual([]);
+    const r = compile(src);
+    const sql = await realDb(DDL);
+    const { state, calls } = await clickRun(r.core, sql, "#go");
+    expect(calls).toBe(1);
+    expect(state.n).toBe(3);
+    expect(await rows(sql)).toEqual([1, 101]);
+  });
+
+  test("INTERIM: a cell write whose value the batch computes, in a nested statement — E-BOOTSTRAP-UNSUPPORTED (the cell envelope carries a top-level write)", () => {
     const src = `<program db="./app.db">
 ${HOLD_CHARGE}    let <n:int=0/>
     function book(a: int)! E {
         const x: int = hold(a)?;
         const y: int = charge(a, 0)?;
-        @n = x + y;
+        if (x > 0) { @n = x + y; }
     }
     <main><button onclick={ book(1) !{ _ :> { @n = -1; }, }; }>go</button></main>
 </program>
 `;
     const e = errs(src);
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("writes `@n` with a value the batch computes");
+    expect(e[0].message).toContain("writes `@n` with a value the batch computes inside a nested statement");
   });
 
   test("E-ERROR-010: the error type has no `Transport` — the composed request can fail on the wire", () => {
