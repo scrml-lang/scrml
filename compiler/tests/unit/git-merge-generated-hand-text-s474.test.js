@@ -286,6 +286,16 @@ describe("S475 — position-aware hand-text check (moved, both-sides-added, dupl
     expect(M.handTextSelfCheck(o, a, b, "a\nX\nb\nc\nX\n", PATH)).toEqual([]);
   });
 
+  // S475 r1 (review F2 on #1753): the test above loses THEIRS' copy, which only the B-side replay sees.
+  // Losing OURS' copy instead is seen only by the A-side replay: the count holds, and the result's X is
+  // accounted for by theirs' addition. Each side's replay is pinned by one of the two.
+  test("BITE (mirror): the same line added at two places and only THEIRS' kept — ours' X lost — is caught", () => {
+    const o = "a\nb\nc\n", a = "a\nX\nb\nc\n", b = "a\nb\nc\nX\n";
+    const bad = "a\nb\nc\nX\n";                                   // ours' X after `a` is gone
+    expect(countOnly(o, a, b, bad)).toEqual([]);
+    expect(M.handTextSelfCheck(o, a, b, bad, PATH)).toEqual(["X"]);
+  });
+
   test("BITE: a DUPLICATED line (too many copies) is caught", () => {
     const o = "a\nb\n", a = "a\nX\nb\n";
     const bad = "a\nX\nX\nb\n";
