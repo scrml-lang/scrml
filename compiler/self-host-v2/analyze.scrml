@@ -988,7 +988,10 @@ ${
     // and its per-file scope key — stay the DECLARING file's.
     type ScopeName:struct = { name: string, kind: NameKind, from: string, orig: string }
     type FileScope:struct = { file: string, names: ScopeName[] }
-    type Linkage:struct = { own: OwnName[], scopes: FileScope[] }
+    // s475: `nss` — every namespace import (`import * as ns from "…"`) of every file: `target`
+    // the file it resolves to, "" when none (its refusal is checkImports').
+    type NsBind:struct = { file: string, ns: string, from: string, target: string }
+    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[] }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
@@ -1111,6 +1114,7 @@ ${
         let st: AS = st0
         const paths: string[] = filePaths(files)
         let scopes: FileScope[] = []
+        let nss: NsBind[] = []
         for (const f of files) {
             let names: ScopeName[] = []
             let mine: string[] = []
@@ -1129,6 +1133,39 @@ ${
             let importedOrig: string[] = []
             for (const imp of importsOfItems(f.items)) {
                 const target: string = importTarget(f.path, imp.from, paths)
+                // s475 (ruling S475 item 3): `import * as m from "…"` binds `m` in file scope (one
+                // binding, judged as any import's local name is — E-SCOPE-010, §7.6), and brings
+                // each EXPORTED declaration `x` of the target as the local name `m.x` (an alias
+                // entry: the lookup takes the declaration of (target, `x`), so it and its per-file
+                // scope key stay the declaring file's). `orig` "*" in `importedOrig` marks a
+                // namespace. A name the target does not export is not bound (E-IMPORT-004 at the
+                // use, nsMember). A target that resolves to nothing binds nothing (checkImports).
+                if (imp.ns != "") {
+                    const nsn: string = imp.ns
+                    nss = nss.concat([{ file: f.path, ns: nsn, from: imp.from, target: target }])
+                    st = reservedName(st, f.path, imp.span, nsn)
+                    const at0: int = imported.indexOf(nsn)
+                    if (mine.indexOf(nsn) >= 0) {
+                        st = addDiag(st, f.path, imp.span, "E-SCOPE-010", "`" + nsn + "` is bound by `import * as " + nsn + " from \"" + imp.from + "\"` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, or write another namespace name (`import * as " + nsn + "2 from \"" + imp.from + "\"`)")
+                    } else if (at0 >= 0 && (importedFrom[at0] != target || importedOrig[at0] != "*")) {
+                        st = addDiag(st, f.path, imp.span, "E-SCOPE-010", "`" + nsn + "` is already imported into this file (" + importedShown(importedOrig[at0], importedFrom[at0]) + "), and `import * as " + nsn + " from \"" + imp.from + "\"` binds it again — one local name cannot bind two declarations (duplicate binding in file scope, §7.6); write another namespace name (`import * as " + nsn + "2 from \"" + imp.from + "\"`)")
+                    } else if (at0 >= 0) {
+                        st = addDiag(st, f.path, imp.span, "W-IMPORT-001", "`" + nsn + "` is already imported by an earlier `import * as " + nsn + "` of the same module in this file — the same namespace imported twice (§41.7); remove the duplicate")
+                    }
+                    // the members are bound whatever the binding's own fault (one report per fault, as
+                    // #1715 r1 F3: the build already fails at the import; no use cascades); the earlier
+                    // binding of a duplicate namespace already brought them
+                    if (at0 < 0) {
+                        imported = imported.concat([nsn])
+                        importedFrom = importedFrom.concat([target])
+                        importedOrig = importedOrig.concat(["*"])
+                    }
+                    if (target != "" && !(at0 >= 0 && importedFrom[at0] == target && importedOrig[at0] == "*")) {
+                        for (const o of own) {
+                            if (o.file == target && o.exported) names = names.concat([{ name: nsn + "." + o.name, kind: o.kind, from: target, orig: o.name }])
+                        }
+                    }
+                }
                 for (const n of imp.names) {
                     // s474 r1 (#1715 review F5): an import's LOCAL name is a binding of this file —
                     // a reserved `_scrml_` / `__scrml_` one is refused at the import (§47.1.1),
@@ -1158,7 +1195,7 @@ ${
                                     // kind), and the refused one's entries follow it, so a use of the name
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
-                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (`" + importedOrig[at] + "` from `" + earlier + "`), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
+                                    st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (" + importedShown(importedOrig[at], earlier) + "), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
                                     names = names.concat(exportedEntries(own, target, n.orig, n.name))
                                 } else {
                                     st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — the same declaration imported twice; this later import wins (§41.7); remove the duplicate")
@@ -1176,7 +1213,55 @@ ${
             }
             scopes = scopes.concat([{ file: f.path, names: names }])
         }
-        return { lk: { own: own, scopes: scopes }, st: st }
+        return { lk: { own: own, scopes: scopes, nss: nss }, st: st }
+    }
+
+    // s475 — how an earlier import that bound a local name is shown: `orig` from `from`, or (orig
+    // "*", linkage) the namespace of `from`.
+    fn importedShown(orig: string, from: string) -> string {
+        if (orig == "*") return "as the namespace of `" + from + "` (`import * as …`)"
+        return "`" + orig + "` from `" + from + "`"
+    }
+
+    // s475 — a dotted name `ns.x` whose head is a namespace import of `file` (Linkage.nss):
+    // `from` the import's source as written, `target` the file it resolves to ("" when it
+    // resolves to none — that import's refusal owns every use), `member` the `x`. `ns` "" when
+    // `name` is no such name.
+    type NsHit:struct = { ns: string, from: string, target: string, member: string }
+
+    fn nsMember(lk: Linkage, file: string, name: string) -> NsHit {
+        const dot: int = name.indexOf(".")
+        if (dot > 0) {
+            const head: string = name.substring(0, dot)
+            for (const b of lk.nss) {
+                if (b.file == file && b.ns == head) return { ns: head, from: b.from, target: b.target, member: name.substring(dot + 1) }
+            }
+        }
+        return { ns: "", from: "", target: "", member: "" }
+    }
+
+    // s475 — `name` is a namespace import's binding itself (`m`, no member) in `file`.
+    fn isNsBinding(lk: Linkage, file: string, name: string) -> boolean {
+        for (const b of lk.nss) {
+            if (b.file == file && b.ns == name) return true
+        }
+        return false
+    }
+
+    // s475 — the diagnostic for a use of `ns.x` that resolves to nothing, when `ns` is a namespace
+    // import of `file`: its module does not export `x` (§21.3 "resolved by the compiler against the
+    // exporting file's export list") — E-IMPORT-004 naming the member; an export of another kind
+    // than the position needs (`what`) is E-SCOPE-001, as for an aliased import. "" code: not a
+    // namespace member (the caller's own report stands), or its import resolves to no file — that
+    // import's refusal owns the failure ("-": report nothing more).
+    type NsMiss:struct = { code: string, why: string }
+
+    fn nsMiss(lk: Linkage, file: string, name: string, what: string) -> NsMiss {
+        const h: NsHit = nsMember(lk, file, name)
+        if (h.ns == "") return { code: "", why: "" }
+        if (h.target == "") return { code: "-", why: "" }
+        if (exportsName(lk.own, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        return { code: "E-IMPORT-004", why: "`" + h.member + "` is not exported by `" + h.from + "` — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3)" }
     }
 
     // The scope entries an import of `name` from `target` brings: one per
@@ -1323,6 +1408,10 @@ ${
         // `color`") is built in — not unknown — but a named shape is a string
         // with a format predicate the bootstrap does not check: refused by name.
         if (isNamedShape(n)) return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the named-shape type `" + n + "` (§53 — a string with a built-in format predicate) is not in the bootstrap — it checks no named shape; declare the value a `string`"), unresolved: true }
+        // s475 — `m.T` with `m` a namespace import: its module does not export `T` (E-IMPORT-004)
+        const nm: NsMiss = nsMiss(te.link, te.file, n, "a type")
+        if (nm.code == "-") return { t: Type.Str, st: st, unresolved: true }
+        if (nm.code != "") return { t: Type.Str, st: addDiag(st, te.file, at.span, nm.code, nm.why), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`" + elsewhereNote(te.link, te.file, NameKind.KType, true, n)), unresolved: true }
     }
 
@@ -6479,6 +6568,14 @@ ${
     }
 
     fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        // s475 — `m.x` with `m` a namespace import (parse nsToks): a LOCAL `m` here would shadow
+        // the namespace (§7.6: locals shadow file-scope names), making `m.x` its field — reading
+        // a field of a local through a namespace-shaped name is not in the bootstrap: refused by
+        // name, never resolved to the module's member behind the local's back (INTERIM)
+        const nh: NsHit = nsMember(env.g.te.link, env.file, name)
+        if (nh.ns != "") {
+            if (lookupLocal(env, nh.ns) is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` — the local `" + nh.ns + "` shadows the namespace import `" + nh.ns + "` (`import * as " + nh.ns + " from \"" + nh.from + "\"`) here, and a field of a local spelled through a namespace's name is not in the bootstrap yet — rename the local", st)
+        }
         const l: LocalB | not = lookupLocal(env, name)
         // s473 — §5.2 "Executable sinks in plain logic (S473)" (the #1663 review F3):
         // `eval` / `Function` as a VALUE (`const f = eval`, `.map(Function)`)
@@ -6527,6 +6624,11 @@ ${
         }
         // s471: a name a refused import brings is that import's failure (checkImports), not also undeclared
         if (importRefusesName(env.g, env.file, name)) return plain(not, st)
+        // s475 — a namespace member that names no value here, and the namespace itself as a value
+        const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a function or a constant")
+        if (nm.code == "-") return plain(not, st)
+        if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
+        if (isNsBinding(env.g.te.link, env.file, name)) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
     }
 
@@ -16682,6 +16784,13 @@ ${
         // s472: a declaration of another file that is not in scope here is not
         // an unknown HTML element (that would render it silently empty) — the
         // tag names it, so it is refused by name, saying where it is declared
+        // s475 — `<m.card/>` with `m` a namespace import whose module does not export a `card`
+        // declaration: E-IMPORT-004 naming the member (or E-SCOPE-001 for an export of another kind)
+        if (d is not) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, e.tag, "a declaration (a component or a cell)")
+            if (nm.code == "-") return resolveNodes(env, e.kids, st)
+            if (nm.code != "") return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, nm.code, nm.why)
+        }
         if (d is not && declAnywhere(env.g, e.tag)) {
             return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-SCOPE-001", "`<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
@@ -17772,6 +17881,12 @@ ${
         const sf: StarField | not = starField(env, e.tag)
         if (sf is given) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
+        // s475 — `<*m.card/>`: a namespace member that is no declaration of the module
+        if (d is not) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, e.tag, "a declaration (a component or a cell)")
+            if (nm.code == "-") return st
+            if (nm.code != "") return addDiag(st, env.file, e.span, nm.code, nm.why)
+        }
         if (d is not && declAnywhere(env.g, e.tag)) {
             return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `<" + e.tag + ">` is not declared" + elsewhereNote(env.g.te.link, env.file, NameKind.KDecl, false, e.tag))
         }
@@ -19633,6 +19748,7 @@ ${
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
                     const target: string = importTarget(f.path, imp.from, paths)
+                    if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
                             if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name

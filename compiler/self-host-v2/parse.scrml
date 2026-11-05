@@ -168,6 +168,81 @@ ${
     }
 
     // =========================================================================
+    // s475 — namespace imports (ruling:user-voice-scrml.md S475 "S474 veto-window
+    // readings; namespace-import markup" item 3: "`import * as m from './x.scrml'`
+    // is defined; a namespaced component is written `<m.card/>` (and `<*m.card/>`
+    // for the shared instance). Resolved by what `m` is bound to: a namespace
+    // import → module member; a cell → field navigation (E-SCOPE-010 already
+    // forbids one name being both)").
+    // `nsNames(src)`: the names this FILE binds with `import * as NAME` — the
+    // binding is the file's own import, so a dotted name whose head is one of
+    // them is a module member, and any other dotted name keeps its old reading.
+    // `nsToks`: in a logic region, `m . x` with `m` such a name (and not itself
+    // a member — no `.` / `?.` / `@` before it) is ONE identifier token `m.x`:
+    // the binder then resolves the local name `m.x` through the file scope that
+    // analyze's linkage gives it (each export `x` of the module, bound as
+    // `m.x` — the #1715 (declaring file, orig) lookup), so every pass that reads
+    // a name reads a member as it reads an aliased import.
+    // =========================================================================
+    export fn nsNames(src: string) -> string[] {
+        let out: string[] = []
+        let i: int = src.indexOf("import")
+        while (i >= 0) {
+            let j: int = i + 6
+            const before: boolean = i == 0 || !isIdentCh(src.charAt(i - 1))
+            if (before && !isIdentCh(src.charAt(j))) {
+                while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
+                if (src.charAt(j) == "*") {
+                    j = j + 1
+                    while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
+                    if (src.substring(j, j + 2) == "as" && !isIdentCh(src.charAt(j + 2))) {
+                        j = j + 2
+                        while (j < src.length && isSpaceCh(src.charAt(j))) { j = j + 1 }
+                        const s0: int = j
+                        while (j < src.length && isIdentCh(src.charAt(j))) { j = j + 1 }
+                        const nm: string = src.substring(s0, j)
+                        if (nm != "" && isIdentStartCh(nm.charAt(0)) && out.indexOf(nm) < 0) out = out.concat([nm])
+                    }
+                }
+            }
+            i = src.indexOf("import", i + 6)
+        }
+        return out
+    }
+
+    fn nsToks(src: string, ts: PTok[]) -> PTok[] {
+        if (src.indexOf("*") < 0) return ts
+        const ns: string[] = nsNames(src)
+        if (ns.length == 0) return ts
+        let out: PTok[] = []
+        let i: int = 0
+        while (i < ts.length) {
+            const t: PTok = ts[i]
+            let merged = false
+            if (t.cls == TC.Ident && ns.indexOf(t.v) >= 0 && i + 2 < ts.length) {
+                const d: PTok = ts[i + 1]
+                const x: PTok = ts[i + 2]
+                let lead = true
+                if (i > 0) {
+                    const p: PTok = ts[i - 1]
+                    if (p.cls == TC.At || tk(p, ".") || tk(p, "?.")) lead = false
+                }
+                if (lead && tk(d, ".") && x.cls == TC.Ident) {
+                    const nm: string = t.v + "." + x.v
+                    out = out.concat([{ cls: TC.Ident, v: nm, text: nm, start: t.start, end: x.end, line: t.line, bad: "" }])
+                    i = i + 3
+                    merged = true
+                }
+            }
+            if (!merged) {
+                out = out.concat([t])
+                i = i + 1
+            }
+        }
+        return out
+    }
+
+    // =========================================================================
     // The token-level parser state: a value threaded through every function.
     // =========================================================================
     type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string }
@@ -3089,7 +3164,7 @@ ${
         let going = true
         while (going) {
             const p: LexPause = lexTier0(mp.src, pos, depth)
-            const pt: PTok[] = toPToks(p.tokens)
+            const pt: PTok[] = nsToks(mp.src, toPToks(p.tokens))
             toks = toks.concat(pt.slice(0, pt.length - 1))
             if (!p.paused) {
                 toks = toks.concat([pt[pt.length - 1]])
@@ -4215,9 +4290,9 @@ ${
         // (`import X from "…"`) is reported BY NAME, its statement read whole (was a
         // wall of E-PARSE-IMPORT / E-PARSE-EXPECTED and a spurious E-IMPORT-005).
         // s474 r1 (#1715 review F3/F4, PA ruling):
-        //   - a namespace import is INTERIM — not in the bootstrap YET (the capable
-        //     form, and how `m.card` is spelled in markup, is owed:
-        //     g-boot-namespace-import-unbuilt-s474);
+        //   - a namespace import was INTERIM-refused (g-boot-namespace-import-unbuilt-s474);
+        //     s475 builds it (ruling item 3, see nsNames): `import * as m from "…"` binds
+        //     `m` (AImport.ns); `m.x` names the module's export `x`;
         //   - a default import of a scrml module is E-IMPORT-004 — §21.3 resolves a
         //     default import "against the exporting file's export list", and no scrml
         //     form exports a default (§21.2). A default import of a JavaScript module
@@ -4254,15 +4329,30 @@ ${
                     }
                 }
                 const scrmlSrc: boolean = from0.endsWith(".scrml") || from0.indexOf("scrml:") == 0
+                // s475: `* as NAME` — the local name of a namespace import
+                let ns: string = ""
                 if (isNs) {
-                    rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a namespace import (`import * as …`) is not in the bootstrap yet (g-boot-namespace-import-unbuilt-s474) — import the names it uses: `import { a, b } from \"…\"` (rename one with `as`)", h)
+                    const asT: TP = adv(t)
+                    const nmT: PTok = cur(adv(asT))
+                    if (!isWord(asT, "as")) {
+                        rt = diagAt(rt, "E-PARSE-IMPORT", "expected `as` after `import *` — a namespace import is written `import * as name from \"…\"` (§21.3)", cur(asT))
+                    } else if (nmT.cls == TC.Keyword) {
+                        rt = diagAt(rt, "E-PARSE-IMPORT", "`" + nmT.text + "` is a keyword and cannot be a local name — write another name after `as` (`import * as m from \"…\"`)", nmT)
+                    } else if (nmT.cls != TC.Ident || !isWord(adv(adv(asT)), "from")) {
+                        rt = diagAt(rt, "E-PARSE-IMPORT", "expected `import * as name from \"…\"` — one name after `as`, then `from` (§21.3)", nmT)
+                    } else {
+                        ns = nmT.v
+                    }
                 } else if (scrmlSrc || from0 == "") {
                     rt = diagAt(rt, "E-IMPORT-004", "`" + h.text + "`: a .scrml file has no default export — scrml files export names only (§21.2, §21.3); use `import { " + h.text + " } from \"…\"`", h)
                 } else {
                     rt = diagAt(rt, "E-BOOTSTRAP-UNSUPPORTED", "a default import of a JavaScript module (`import " + h.text + " from \"" + from0 + "\"`) is not in the bootstrap yet — import a named export: `import { name } from \"" + from0 + "\"`", h)
                 }
-                if (from0 == "") return { items: [], tp: rt }
-                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top }
+                if (from0 == "") {
+                    if (isNs && ns != "") rt = diagAt(rt, "E-PARSE-IMPORT", "expected `from \"…\"` after `import * as " + ns + "`", h)
+                    return { items: [], tp: rt }
+                }
+                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top, ns: ns }
                 return mkItem(bumpId(rt), start, AItemK.ImportItem(imp0))
             }
         }
@@ -4328,7 +4418,7 @@ ${
         } else if (hardErrors(t.diags) == d0) {
             t = missingSemi(t)
         }
-        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v, host: host, top: top }
+        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v, host: host, top: top, ns: "" }
         return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
     }
 
@@ -4636,7 +4726,7 @@ ${
     // ---- lexing a logic region --------------------------------------------
     fn regionTP(mp: MP, stop: LexStop) -> TP {
         const run: LexRun = lexFrom(mp.src, mp.pos, stop)
-        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { toks: nsToks(mp.src, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
     }
 
     // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
@@ -4650,7 +4740,7 @@ ${
         const d: TP = regionTP(mp, stop)
         if (isStandaloneDisplay(d)) return d
         const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
-        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+        return { toks: nsToks(mp.src, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
     }
 
     fn isStandaloneDisplay(tp: TP) -> boolean {
@@ -5047,6 +5137,13 @@ ${
             kwPrefix = true
             kws = [{ nid: m.nid, span: mkSpan(start, nm.mp.pos), name: "let", value: AAttrValue.NoValue }]
             nm = readName(skipSpace(nm.mp))
+        }
+        // s475 (ruling S475 item 3): `<m.card …>` / `<*m.card/>` — a dotted tag whose head is a
+        // namespace import of this file names that module's member (nsNames); any other dotted
+        // tag keeps its old reading (`.` is not a tag-name character: E-PARSE-TAG below)
+        if (chAt(nm.mp, 0) == "." && isIdentStartCh(chAt(nm.mp, 1)) && nm.w != "" && nsNames(mp.src).indexOf(nm.w) >= 0) {
+            const mem: RWord = readName(mAdv(nm.mp, 1))
+            nm = { w: nm.w + "." + mem.w, mp: mem.mp }
         }
         m = nm.mp
         if (nm.w == "" && !kwPrefix) m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
@@ -6087,7 +6184,12 @@ ${
     fn parseCloser(mp: MP, tag: string) -> MP {
         const start: int = mp.pos
         let m: MP = mAdv(mp, 2)
-        const nm: RWord = readName(m)
+        let nm: RWord = readName(m)
+        // s475: the closer of a namespaced element `<m.card>…</m.card>`
+        if (tag.indexOf(".") > 0 && chAt(nm.mp, 0) == ".") {
+            const mem: RWord = readName(mAdv(nm.mp, 1))
+            nm = { w: nm.w + "." + mem.w, mp: mem.mp }
+        }
         m = skipSpace(nm.mp)
         if (chAt(m, 0) != ">") {
             m = mDiag(m, "E-PARSE-CLOSER", "expected `>` to end the closer", start, m.pos)

@@ -21,7 +21,8 @@
 //   - an alias of a name the file does not export is E-IMPORT-004 (naming the exported name); an
 //     alias colliding with a declaration of the file is E-SCOPE-010; `as` with no name after it is
 //     E-PARSE-IMPORT;
-//   - a namespace import (`import * as m`) and a default import (`import X from`) are refused BY NAME
+//   - a default import (`import X from`) is refused BY NAME (a namespace import `import * as m` was
+//     too; s475 builds it — namespace-import-s475.test.js)
 //     (one E-BOOTSTRAP-UNSUPPORTED; was a wall of E-PARSE-IMPORT and a spurious E-IMPORT-005).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
@@ -263,13 +264,10 @@ describe("errors", () => {
     expect(r.diags.map((d) => d.code)).toContain("E-PARSE-IMPORT");
     expect(r.diags.map((d) => d.code)).not.toContain("E-IMPORT-004");
   });
-  // r1 F3: INTERIM — "not in the bootstrap yet" (g-boot-namespace-import-unbuilt-s474)
-  test("a namespace import is refused BY NAME, INTERIM — one E-BOOTSTRAP-UNSUPPORTED", () => {
-    const r = prog([LIB("a.scrml", "a"), useFns(`import * as m from "./a.scrml";`, `<p>x</p>`)]);
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("namespace import");
-    expect(r.diags[0].message).toContain("not in the bootstrap yet");
-    expect(r.diags[0].message).toContain("g-boot-namespace-import-unbuilt-s474");
+  // r1 F3 refused it INTERIM (g-boot-namespace-import-unbuilt-s474); s475 (ruling S475 item 3) builds
+  // it — the full coverage is namespace-import-s475.test.js
+  test("a namespace import is read (s475): clean, and `m.Card()` calls the export", () => {
+    clean(prog([LIB("a.scrml", "a"), useFns(`import * as m from "./a.scrml";`, `<p>\${m.Card()}</p>`)]));
   });
   // r1 F4 (PA ruling): §21.3 resolves a default import against the export list, and a scrml
   // file exports no default — E-IMPORT-004, one diagnostic (was E-BOOTSTRAP-UNSUPPORTED; before
@@ -281,10 +279,10 @@ describe("errors", () => {
     expect(r.diags[0].message).toContain("import { Card }");
   });
   // r1 F8: the recovery skips to the statement's `from "…"` across lines
-  test("F8: a default / namespace import split across lines is still ONE diagnostic", () => {
-    for (const [imp, code] of [[`import Card\n        from "./a.scrml";`, "E-IMPORT-004"], [`import * as m\n        from "./a.scrml";`, "E-BOOTSTRAP-UNSUPPORTED"]]) {
+  test("F8: a default import split across lines is still ONE diagnostic; a namespace import split across lines is read (s475)", () => {
+    for (const [imp, want] of [[`import Card\n        from "./a.scrml";`, ["E-IMPORT-004"]], [`import * as m\n        from "./a.scrml";`, []]]) {
       const r = prog([LIB("a.scrml", "a"), useFns(imp, `<p>x</p>`)]);
-      expect([imp, r.diags.map((d) => d.code)]).toEqual([imp, [code]]);
+      expect([imp, r.diags.map((d) => d.code)]).toEqual([imp, want]);
     }
   });
   // r1 F5: a keyword is no binding name; a reserved prefix is refused at the import
@@ -328,8 +326,8 @@ describe("errors", () => {
     expect(r.diags.length).toBeGreaterThan(0);
     expect(r.diags.map((d) => d.message).join("\n")).not.toContain("default import");
   });
-  test("a namespace import of a missing module still reports the module (E-IMPORT-006 beside the refusal)", () => {
+  test("a namespace import of a missing module reports the module (E-IMPORT-006) — and nothing else (s475: no refusal of the form)", () => {
     const r = prog([useFns(`import * as m from "./gone.scrml";`, `<p>x</p>`)]);
-    expect(r.diags.map((d) => d.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006"]);
+    expect(r.diags.map((d) => d.code).sort()).toEqual(["E-IMPORT-006"]);
   });
 });
