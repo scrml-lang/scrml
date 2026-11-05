@@ -345,18 +345,32 @@ function control(tx, text) {
 //    transaction on a shared connection.
 // MySQL envelopes are refused at compile time (analyze.scrml envelopeOf): this path is not proven
 // against a MySQL server.
+// s475 (g-boot-runtime-envelope-mysql-unguarded-s475) — and refused HERE too, before the driver is
+// opened or a connection reserved: a transaction runs only on a driver whose path is proven
+// (`TX_DRIVERS`), so a compiler hole, a hand-written server, or a new driver never reaches
+// `reserve()` + `BEGIN` on an unproven one. INTERIM: the capable form is a MySQL
+// reserved-connection path proven against a live MySQL server (then "mysql" joins TX_DRIVERS, with
+// the compile-time refusal lifted in the same change).
+const TX_DRIVERS = new Set(["sqlite", "postgres"]);
 async function txConnection(conn) {
+  if (!TX_DRIVERS.has(conn.desc.driver)) {
+    throw new Error(`scrml server: a transaction on ${conn.desc.driver}:${conn.desc.file} is refused — the bootstrap runs a \`!\` envelope only on SQLite or Postgres (§19.10.6: a pooled driver's transaction needs a connection of its own, and the ${conn.desc.driver} path is not proven); nothing was run`);
+  }
   const pool = conn.open();
-  if (gated(conn)) return { sql: pool, done: () => {} };
+  if (gated(conn)) return { sql: pool, done: async () => {} };
   if (typeof pool.reserve !== "function") {
     throw new Error(`scrml server: ${conn.desc.driver}:${conn.desc.file} is a pooled database and its driver handle has no reserve() — a transaction needs a connection of its own (§19.10.6), so it is refused, never run on a shared connection`);
   }
   const reserved = await pool.reserve();
   return {
     sql: reserved,
-    done: (ended) => {
+    // s475 (g-boot-reserved-close-unawaited-s475): awaited, and its failure caught — a rejected
+    // `close()` (or `release()`) is logged, never an unhandled rejection; and the envelope releases
+    // its gate only after the connection is given back or closed, so the next transaction never
+    // starts beside a connection still being closed.
+    done: async (ended) => {
       try {
-        if (ended) reserved.release(); else reserved.close();
+        if (ended) await reserved.release(); else await reserved.close();
       } catch (e) {
         conn.log(`scrml server: giving back the reserved connection to ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
       }
@@ -522,8 +536,11 @@ export async function envelope(conn, run, standalone, begin) {
     return result;
   } finally {
     tx.open = false;
-    if (handle !== null) handle.done(tx.ended);
-    conn.gate.release();
+    try {
+      if (handle !== null) await handle.done(tx.ended);
+    } finally {
+      conn.gate.release();
+    }
   }
 }
 
