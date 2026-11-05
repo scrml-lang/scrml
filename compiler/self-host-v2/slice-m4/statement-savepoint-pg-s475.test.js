@@ -51,12 +51,16 @@ const dupK = (handled) => rt.query(conn, "run", rt.sqlText([`INSERT INTO ${UNIQ}
 
 d("Postgres: a handled failing statement inside an envelope", () => {
   beforeAll(async () => {
-    admin = new SQL({ url: URL, max: 1 });
+    // `prepare: false` (s475-boot-pg-envelopes): PGlite serves every socket from ONE backend session,
+    // so Bun's named prepared statements ("PBEGIN$0") from an earlier run's closed connection still
+    // exist there and the next run's PREPARE fails 42P05. Unnamed statements avoid it; on a real
+    // Postgres server it changes nothing the tests observe.
+    admin = new SQL({ url: URL, max: 1, prepare: false });
     await admin.unsafe(`DROP TABLE IF EXISTS ${LOG}`);
     await admin.unsafe(`DROP TABLE IF EXISTS ${UNIQ}`);
     await admin.unsafe(`CREATE TABLE ${LOG} (a INTEGER)`);
     await admin.unsafe(`CREATE TABLE ${UNIQ} (k INTEGER PRIMARY KEY)`);
-    driver = new SQL({ url: URL, max: 1 });
+    driver = new SQL({ url: URL, max: 1, prepare: false });
     logs = [];
     conn = rt.connection({ connect: () => driver, log: (l) => logs.push(l) }, { driver: "postgres", target: URL, file: "app.scrml" });
   }, LIVE_TIMEOUT_MS);
@@ -174,6 +178,20 @@ d("Postgres: a handled failing statement inside an envelope", () => {
     await expect(run).rejects.toThrow(/COMMIT with ROLLBACK/);
     expect(logs.some((l) => l.includes("COMMIT on postgres") && l.includes("failed"))).toBe(true);
     expect(await persisted()).toEqual([]);
+  }, LIVE_TIMEOUT_MS);
+
+  // s475-boot-pg-envelopes part 2 (g-boot-pg-constraint-violation-misclassified-s475): Bun.SQL puts
+  // the SQLSTATE in `errno` ("23505"), its `code` is "ERR_POSTGRES_SERVER_ERROR". RED before: the
+  // runtime read `code` only → QueryFailed("duplicate key value violates unique constraint …").
+  test("a Postgres unique violation is ConstraintViolation, its field the key column (§19.8.1, §19.8)", async () => {
+    await reset();
+    const r = await dupK(true);
+    expect(rt.failed(r)).toBe(true);
+    expect(r.error).toEqual({ variant: "ConstraintViolation", data: ["k"] });
+    const nn = await rt.query(conn, "run", rt.sqlText([`INSERT INTO ${UNIQ} (k) VALUES (`, ")"]), [null], [0]);
+    expect(nn.error).toEqual({ variant: "ConstraintViolation", data: ["k"] });   // NOT NULL on the key: the server's `column`
+    const bad = await rt.query(conn, "run", rt.sqlText([`INSERT INTO no_such_table_${process.pid} (k) VALUES (`, ")"]), [1], [0]);
+    expect(bad.error).toMatchObject({ variant: "QueryFailed" });
   }, LIVE_TIMEOUT_MS);
 
   test("outside a transaction a handled statement takes no savepoint and changes nothing", async () => {

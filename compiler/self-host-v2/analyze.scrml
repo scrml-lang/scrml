@@ -27825,7 +27825,7 @@ ${
         let i: int = 0
         while (i < nodes.length) {
             if (nodes[i].kind == CallableK.KFn && nodes[i].f.failable) {
-                for (const a of tq.qs[i]) {
+                for (const a of tq.all[i]) {   // s475: `.nobatch()` writes run in the envelope too (§8.9.2 "Amendment S474" item 2)
                     const site: SqlSite = nodes[a.root].f.sqls[a.pos]
                     for (const si of sqls) {
                         if (si.nid == site.nid && si.kind == SqlKind.SqlWrite) bangWrites = bangWrites.concat([si.db.id])
@@ -28728,6 +28728,10 @@ ${
     // need one transaction (§8.9.2 wraps only a `!` server function).
     fn composeTrigger(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> string {
         if (tq.remote[i] >= 2) return "it makes more than one server call (" + tq.remoteWhy[i] + ")"
+        // s475: still the pre-S474 count (g-boot-envelope-nobatch-count-and-remedy-s474, narrowed): a
+        // client `!` whose one server call runs ONE counted query in a non-`!` server function is not
+        // composed, so that query runs with no envelope. Composing it would newly refuse programs that
+        // compile today (composeOne's INTERIM shapes — a cell written from the call's result).
         const needs: boolean = tq.qs[i].length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
         if (!needs) return ""
         for (const j of remoteCallees(sum.nodes, tq, places, i)) {
@@ -29404,9 +29408,9 @@ ${
     // (or a lambda, or a recursive callee) counting as two.
     //
     // Each `!` function whose set holds a query gets an Envelope (CoreProgram.
-    // envelopes): `standalone` when the set needs a transaction of its own (the
-    // trigger above), else `false` — it is then a savepoint inside an enclosing
-    // envelope and runs as written outside one. The server printer wraps the
+    // envelopes), always `standalone` since s475 (§8.9.2 "Amendment S474" item 1:
+    // a non-empty set, "one is enough", `.nobatch()` queries included — the
+    // two-query trigger quoted above is superseded). The server printer wraps the
     // body (print.scrml envelopedFnJs); the runtime holds the transaction across
     // the body's waits behind the §19.10.6 per-connection gate
     // (server-runtime.js `envelope`).
@@ -29459,15 +29463,21 @@ ${
     // One `!` function's envelope (none when its set is empty), or its refusal.
     fn envelopeOf(sum: Summary, tq: TxQ, f: FnFacts, i: int, places: PlaceFact[], sqls: SqlInfo[], dbs: Db[], rd: RDbs, st0: AS) -> REnv {
         let st: AS = st0
-        const qs: FxAtom[] = tq.qs[i]
-        if (qs.length == 0) return { envs: [], st: st }
-        // the facts of each query the set COUNTS (the trigger), and of every query the envelope
-        // REACHES — `.nobatch()` ones included (s474 r1, review F1/F2: §8.9.5 opts a query out of
-        // the count, not out of the envelope's extent); a site with no facts was refused where it stands
-        const infos: SqlInfo[] = atomInfos(sum, qs, sqls)
+        // s475 (lane s475-boot-pg-envelopes) — SPEC §8.9.2 "Amendment S474" item 1: the body of every
+        // `!` function placed on the server "whose transitive query set … is **non-empty** SHALL run
+        // inside the implicit per-handler transaction. This holds whatever its error type … and however
+        // many queries it reaches (one is enough)"; item 2: `.nobatch()` "SHALL NOT remove the query
+        // from the transitive query set, and it SHALL NOT suppress, narrow or end the envelope". So the
+        // trigger is every query the body REACHES (`tq.all`, `.nobatch()` ones included), not the
+        // counted set `tq.qs`, and there is no count threshold: every envelope is `standalone`
+        // (g-boot-envelope-nobatch-count-and-remedy-s474). Before s475 a body reaching one query once
+        // ran it with no envelope — a one-statement `INSERT OR FAIL … SELECT` that failed part way kept
+        // its earlier rows while the call failed, and a `fail` after one write kept the write.
         const reached: FxAtom[] = tq.all[i]
+        if (reached.length == 0) return { envs: [], st: st }
+        // the facts of every query the envelope reaches; a site with no facts was refused where it stands
         const rinfos: SqlInfo[] = atomInfos(sum, reached, sqls)
-        if (infos.length < qs.length || rinfos.length < reached.length) return { envs: [], st: st }
+        if (rinfos.length < reached.length) return { envs: [], st: st }
         const fsym: Sym = { id: f.sym, hint: f.name }
         // S474 ruling 5: the envelope opens with BEGIN IMMEDIATE when a query it reaches writes
         // (core.scrml Envelope.writes) — every query of `rinfos` runs inside it, `.nobatch()` included
@@ -29475,12 +29485,9 @@ ${
         for (const wi of rinfos) {
             if (wi.kind == SqlKind.SqlWrite) writes = true
         }
-        // s474 r2 (review N5) — PA reading S474, M2: a `!` that fails leaves no writes. A composed batch
-        // (`#F`) whose set WRITES (the same fail-closed write test as `writes` above) holds its queries in
-        // a transaction of its own even when it reaches ONE, so a `fail` / `?` it joined after the write
-        // rolls the write back. A read-only batch opens none (its reads stay off the §19.10.6 gate).
-        const needs: boolean = qs.length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given || (isBatchName(f.name) && writes)
-        if (!needs) return { envs: [{ fn: fsym, db: infos[0].db, standalone: false, writes: writes }], st: st }
+        // (s475: a composed batch `#F` takes its envelope by the same rule — §19.10.5 "A composed batch's
+        // envelope", #1732: "opens its own envelope when its transitive query set is non-empty", so a
+        // read-only batch is no longer kept off it)
         // a client-placed `!` function: its queries run in the server function(s) it calls, each in
         // that function's own envelope — it holds no transaction itself. s474 r2 (review item 2): so
         // the one-database checks below do not apply to it (a client `!` calling one `!` function of
@@ -29494,7 +29501,7 @@ ${
         }
         // the envelope's database: §8.9.2 "on the database of their function's `?{}` sites — the
         // function's nearest database scope (§8.1.1)"; a function with none, its set's first
-        let home: Sym = infos[0].db
+        let home: Sym = rinfos[0].db
         const sc: int = fnScope(rd.fns, f.nid)
         if (sc >= 0) {
             const pd: ScopeDb | not = scopeDbOf(rd.scopes, sc)
@@ -29514,7 +29521,7 @@ ${
                 if (rinfos[k].kind == SqlKind.SqlWrite) {
                     const path: string = sqlPathOf(sum, tq.all, i, reached[k])
                     const other: string = dbLabel(dbs, rinfos[k].db)
-                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns), or remove the envelope ('.nobatch()' on every query of the envelope, §8.9.5) if the writes need not be atomic.") }
+                    return { envs: [], st: addDiag(st, f.file, f.span, "E-SQL-011", "'" + f.name + "' holds a transaction on " + homeName + " (§8.9.2), and " + path + " writes " + other + ". A transaction covers one database: a 'fail' or an error would roll back " + homeName + " and leave the write to " + other + " in place. Move the write to " + other + " out of '" + f.name + "' (call it after '" + f.name + "' returns).") }
                 }
                 if (readElse < 0) readElse = k
             }
@@ -29522,10 +29529,15 @@ ${
         }
         if (readElse >= 0) {
             const path2: string = sqlPathOf(sum, tq.all, i, reached[readElse])
-            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it opts out of the count, not out of the envelope). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and needs the implicit per-handler transaction (§8.9.2) on " + homeName + ", and " + path2 + " reads " + dbLabel(dbs, rinfos[readElse].db) + " while it is open (a `.nobatch()` query included: it runs inside the envelope, §8.9.5). The SPEC allows that read (§8.9.2: reading database B inside the envelope is allowed), but the bootstrap does not build it: a request holding one database's transaction gate while it waits on another's can deadlock against a request holding them the other way round (§19.10.6). Read the other database before calling '" + f.name + "' and pass the value in") }
         }
-        if (!sqliteDb(dbs, home)) {
-            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and its transitive query set (§8.9.2, S473) needs the implicit per-handler transaction on " + homeName + ", a pooled (Postgres / MySQL) database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone, which the bootstrap's server runtime does not reserve — refused, never compiled non-atomic (S473 D1). Use a SQLite database, or mark each query that need not be atomic with `.nobatch()` (§8.9.5)") }
+        // s475 (lane s475-boot-pg-envelopes): a Postgres envelope is BUILT — §19.10.6 "A transaction
+        // SHALL run on one connection taken from the pool for it alone": server-runtime.js
+        // `txConnection` reserves one (Bun.SQL `reserve()`), measured against a live Postgres
+        // (slice-m4/pg-envelope-s475.test.js). MySQL stays refused by name: the same mechanism is not
+        // proven against a MySQL server (no live MySQL test), so it is not compiled on trust (S473 D1).
+        if (envelopeDbRefused(dbs, home)) {
+            return { envs: [], st: addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "'" + f.name + "' is declared '!' and reaches a query (§8.9.2 'Amendment S474' item 1), so its body runs in the implicit per-handler transaction on " + homeName + ", a MySQL database. §19.10.6 runs such a transaction on one connection taken from the pool for it alone; the bootstrap's server runtime reserves one on Postgres, but that is not yet proven against a MySQL server — refused, never compiled non-atomic (S473 D1). Use a SQLite or Postgres database") }
         }
         // the connection the envelope opens: one a reached query of the home database uses (a
         // second scope naming the same file is the same database — and the server runtime the same
@@ -29650,11 +29662,13 @@ ${
         return "`" + d.hint + "`"
     }
 
-    fn sqliteDb(dbs: Db[], d: Sym) -> boolean {
+    // s475: whether the bootstrap refuses an envelope on database `d` — a MySQL database (replaces
+    // sqliteDb, which refused Postgres too); a database not in `dbs` is refused (fail closed, as before)
+    fn envelopeDbRefused(dbs: Db[], d: Sym) -> boolean {
         for (const x of dbs) {
-            if (x.sym.id == d.id) return x.driver == Driver.Sqlite
+            if (x.sym.id == d.id) return x.driver == Driver.Mysql
         }
-        return false
+        return true
     }
 
     // Where a query of a transitive query set stands, for a message.

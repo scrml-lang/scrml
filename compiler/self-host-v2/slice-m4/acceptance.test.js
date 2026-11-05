@@ -327,7 +327,9 @@ const STATUS = {
   "envelope/neg-nobatch-cross-db-write": ["PASS", ["E-SQL-011"]],   // s474 r1 F1
   "envelope/neg-client-multi-call": ["PASS", ["E-TX-CLIENT-MULTI-CALL"]],   // s474: now the browser-split residue
   "envelope/neg-journal-off": ["PASS", ["E-SQL-JOURNAL-OFF"]],
-  "envelope/neg-pooled-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s475-boot-pg-envelopes: a Postgres envelope is built (was neg-pooled-unsupported); MySQL stays refused
+  "envelope/pooled-postgres": ["PASS", []],
+  "envelope/neg-mysql-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;

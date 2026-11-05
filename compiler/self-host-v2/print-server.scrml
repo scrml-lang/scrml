@@ -160,7 +160,7 @@ ${
 
     // s474 (U1e) — fail closed on its own (check.scrml C-TX1..C-TX3 are the Core's
     // invariants): an envelope this artifact prints must name a function that waits
-    // and a SQLite database this artifact connects to.
+    // and a SQLite or (s475) Postgres database this artifact connects to.
     fn envelopeRefusal(p: CoreProgram, reach: int[], conns: Db[]) -> string[] {
         let out: string[] = []
         for (const e of p.envelopes) {
@@ -173,8 +173,8 @@ ${
                 if (!waits) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "() has a transaction envelope but does not wait — the Core is ill-formed (check.scrml C-TX2)"])
                 if (db is not) {
                     out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "()'s transaction envelope is on a database none of the server's queries use — the Core is ill-formed (check.scrml C-TX1)"])
-                } else if (e.standalone && db.driver != Driver.Sqlite) {
-                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "()'s transaction envelope is on a pooled database — the server runtime reserves no pool connection (check.scrml C-TX3)"])
+                } else if (e.standalone && db.driver == Driver.Mysql) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + e.fn.hint + "()'s transaction envelope is on a MySQL database — the server runtime's reserved-connection transaction is proven on Postgres only (check.scrml C-TX3)"])
                 }
             }
         }
