@@ -17035,12 +17035,25 @@ ${
     // `<template>`, parsed in the "in template" mode (which keeps a table part
     // at its root) and inserted by DOM calls, which repair nothing.
     // =========================================================================
+    // s475 (g-boot-parser-restructure-residue-s474) — three more facts of the
+    // parse a child's context carries:
+    //   inSel  a `<select>` is open in (default) scope: an `<input>` or a
+    //          `<select>` start tag there closes it (HTML §13.2.6.4.7, the
+    //          customizable-`<select>` "in body" rules), an `<hr>` directly in
+    //          an `<option>` / `<optgroup>` closes them;
+    //   root   the node list is a template's ROOT (its first element decides
+    //          the "in template" mode, HTML §13.2.6.4.18);
+    //   tmode  the template's root mode is a table mode, so outside a cell or a
+    //          caption a `<table>` start tag is dropped (HTML §13.2.6.4.9 "in
+    //          table": no table in table scope). Measured in Chromium 152.
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
-                         inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string }
+                         inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string,
+                         inSel: boolean, root: boolean, tmode: boolean }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
-        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "" }
+        return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "",
+                 inSel: false, root: true, tmode: false }
     }
 
     fn markupParseDiags(g: Globals, st0: AS) -> AS {
@@ -17049,10 +17062,10 @@ ${
           // s474 r2 (re-review R4): a file that already fails to parse is not judged — its misparsed nesting
           // is the parse error's cascade, not a nesting the author wrote
           if (fileErrs(g.files, ds.file).length == 0) {
-            let faults: MkFault[] = mkNodes(g, ds.file, rendersNodes(ds), mkRoot(htmlNs(), 0))
-            for (const sb of stateBodyLists(ds)) { faults = faults.concat(mkNodes(g, ds.file, sb, mkRoot(htmlNs(), 0))) }
+            let faults: MkFault[] = mkNodes(g, st0, ds.file, rendersNodes(ds), mkRoot(htmlNs(), 0))
+            for (const sb of stateBodyLists(ds)) { faults = faults.concat(mkNodes(g, st0, ds.file, sb, mkRoot(htmlNs(), 0))) }
             if (ds.p is not) {
-                for (const fd of fieldDecls(ds)) { faults = faults.concat(mkNodes(g, ds.file, rendersOf(fd), mkRoot(htmlNs(), 0))) }
+                for (const fd of fieldDecls(ds)) { faults = faults.concat(mkNodes(g, st0, ds.file, rendersOf(fd), mkRoot(htmlNs(), 0))) }
             }
             for (const f of faults) { st = addDiag(st, f.file, f.span, f.code, f.msg) }
           }
@@ -17089,22 +17102,121 @@ ${
         return head + ": the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">` (an interpolated value inside one is fine)"
     }
 
-    fn mkNodes(g: Globals, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+    fn mkNodes(g: Globals, sa: AS, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        if (c.root && isHtmlInNs(c.ns, "div")) return mkRootNodes(g, sa, file, nodes, c)
         let out: MkFault[] = []
-        for (const n of nodes) { out = out.concat(mkNode(g, file, n, c)) }
+        for (const n of nodes) { out = out.concat(mkNode(g, sa, file, n, c)) }
         return out
     }
 
-    fn mkNode(g: Globals, file: string, n: ANode, c: MkCx) -> MkFault[] {
+    // s475 — a template's ROOT in an HTML context. The template's content is
+    // parsed in the "in template" mode (HTML §13.2.6.4.18): its FIRST start tag
+    // sets the mode for the rest of the template — a `td` / `th` "in row", a
+    // `tr` "in table body", a `caption` / `colgroup` / `tbody` / `thead` /
+    // `tfoot` "in table", a `col` "in column group", anything else "in body".
+    // A table part at the root is kept only in the mode that holds it; in
+    // another it is dropped or wrapped (`<tr>` then `<td>`: a `<tr>` is
+    // inserted around the `<td>`; `<div>` then `<td>`: the tag is dropped).
+    // After a `col`, the column-group mode drops every other element and text.
+    // Measured in Chromium 152 (s475 probe).
+    fn mkRootNodes(g: Globals, sa: AS, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        let mode = "-"                       // "-": no element yet; "": in body; else tableModeOfRoot
+        for (const n of nodes) {
+            let cn: MkCx = c
+            const k: ANodeK = n.k
+            const e: AElem | not = mkElemOf(k)
+            if (e is given) {
+                if (mkPrintsElem(g, file, e)) {
+                    const t: string = e.tag.toLowerCase()
+                    if (mode == "-") {
+                        mode = rootTableMode(t)
+                    } else if (mode == "col" && t != "col") {
+                        out = out.concat(mkRepairFault(file, e, "`<" + e.tag + ">` after a `<col>` at the start of a template is dropped by the HTML parser (HTML §13.2.6.4.12 \"in column group\": a template that starts with a `<col>` holds only `<col>`s) — put the `<col>`s in a `<colgroup>`, or move them to a template of their own"))
+                    } else if (isTablePart(t) && rootTableMode(t) != mode) {
+                        out = out.concat(mkRepairFault(file, e, rootTableMsg(e.tag, mode)))
+                    }
+                    cn = { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
+                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-" }
+                }
+            } else if (mode == "col") {
+                const tx: string | not = mkTextOf(k)
+                if (tx is given) {
+                    if (tx.trim() != "") out = out.concat([{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                                                           msg: "text after a `<col>` at the start of a template is dropped by the HTML parser (HTML §13.2.6.4.12 \"in column group\") — put the `<col>`s in a `<colgroup>` (SPEC §24.5)" }])
+                }
+            }
+            out = out.concat(mkNode(g, sa, file, n, cn))
+        }
+        return out
+    }
+
+    fn mkElemOf(k: ANodeK) -> AElem | not {
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: x) :> not
+            .Effect(w: x) :> not
+            .Css(c: x) :> not
+            .Gather(f: lf) :> not
+        }
+    }
+
+    fn mkTextOf(k: ANodeK) -> string | not {
+        return match k {
+            .Elem(e: e) :> not
+            .Text(text: t) :> t
+            .Interp(e: x) :> not
+            .DeclNode(d: x) :> not
+            .Effect(w: x) :> not
+            .Css(c: x) :> not
+            .Gather(f: lf) :> not
+        }
+    }
+
+    // An element written here that the printer writes as an ELEMENT of this
+    // template (an arm, an `<each>`, a use, a `<*x/>`, a `<slot/>` is a marker
+    // comment: its content is a template of its own).
+    fn mkPrintsElem(g: Globals, file: string, e: AElem) -> boolean {
+        if (e.star || isArmElem(e)) return false
+        if (e.tag == "each" || e.tag == "slot" || e.tag == "errors" || e.tag == "db") return false
+        if (declNamed(g, file, e.tag) is given) return false
+        return isKnownElementName(e.tag)
+    }
+
+    fn isTablePart(t: string) -> boolean {
+        return ["caption", "col", "colgroup", "tbody", "td", "tfoot", "th", "thead", "tr"].indexOf(t) >= 0
+    }
+
+    // The mode a template root's first element `t` sets ("" = in body).
+    fn rootTableMode(t: string) -> string {
+        if (t == "td" || t == "th") return "row"
+        if (t == "tr") return "tbody"
+        if (t == "caption" || t == "colgroup" || t == "tbody" || t == "thead" || t == "tfoot") return "table"
+        if (t == "col") return "col"
+        return ""
+    }
+
+    fn rootTableMsg(tag: string, mode: string) -> string {
+        const tg: string = "`<" + tag + ">`"
+        let first: string = "a non-table element"
+        if (mode == "row") first = "a `<td>` / `<th>`"
+        if (mode == "tbody") first = "a `<tr>`"
+        if (mode == "table") first = "a `<caption>` / `<colgroup>` / `<tbody>` / `<thead>` / `<tfoot>`"
+        return tg + " at the root of a template that starts with " + first + " is dropped or wrapped by the HTML parser (HTML §13.2.6.4.18: a template's first element sets how the rest of it is parsed) — give the table parts a template of their own that holds only that kind (an `if=` / `<each>` of `<tr>`s), or write them inside their `<table>` / `<tbody>` / `<tr>`"
+    }
+
+    fn mkNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
         const k: ANodeK = n.k
         return match k {
-            .Elem(e: e) :> mkElem(g, file, e, c)
+            .Elem(e: e) :> mkElem(g, sa, file, e, c)
             .Text(text: t) :> mkText(file, n, t, c)
             .Interp(e: x) :> []
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
             .Css(c: x) :> []
-            .Gather(f: lf) :> mkNodes(g, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
+            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
         }
     }
 
@@ -17136,20 +17248,20 @@ ${
         return attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
     }
 
-    fn mkElem(g: Globals, file: string, e: AElem, c0: MkCx) -> MkFault[] {
+    fn mkElem(g: Globals, sa: AS, file: string, e: AElem, c0: MkCx) -> MkFault[] {
         // s474 r2 (re-review R2): inside an HTML raw-text / RCDATA element the parser builds TEXT, never an
         // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
         if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
-        if (e.star) return []
         // an `if=` / `else-if=` / `else` element is its arm's own template
         let c: MkCx = c0
         if (isArmElem(e)) c = mkRoot(c0.ns, c0.depth)
-        if (e.tag == "each") return mkNodes(g, file, e.kids, mkRoot(c.ns, c.depth))
+        if (e.star) return mkStar(g, sa, file, e, c)
+        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRoot(c.ns, c.depth))
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
-        if (d is given) return mkUse(g, file, e, d, c)
+        if (d is given) return mkUse(g, sa, file, e, d, c)
         // a tag that is no element (a field, a refused or unknown name) has its own diagnostic
-        if (!isKnownElementName(e.tag)) return mkNodes(g, file, e.kids, c)
+        if (!isKnownElementName(e.tag)) return mkNodes(g, sa, file, e.kids, c)
         const t: string = e.tag.toLowerCase()
         let out: MkFault[] = []
         // s474 r2 (re-review R3): HTML attribute names are ASCII case-insensitive (`<font COLOR=…>` breaks out too)
@@ -17171,7 +17283,11 @@ ${
         // afresh (one report per fault, never a cascade down the subtree)
         let kc: MkCx = c
         if (out.length > 0) kc = mkRoot(ns, c.depth)
-        return out.concat(mkNodes(g, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
+        // s475: `<plaintext>` is one fault — what it holds is its text either way (one report, no cascade)
+        if (t == "plaintext" && out.length > 0) return out
+        // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
+        if (t == "template" && isHtmlInNs(c.ns, t)) return out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth)))
+        return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
     }
 
     fn voidInForeignMsg(tag: string, ns: string) -> string {
@@ -17194,7 +17310,8 @@ ${
             // an SVG / MathML element: a scope boundary (foreignObject, mi, …) ends the HTML scopes
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
-                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "" }
+                     inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "",
+                     inSel: c.inSel && !bound, root: false, tmode: c.tmode }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -17205,7 +17322,11 @@ ${
                  inDd: t == "dd" || t == "dt" || (c.inDd && !special),
                  inButton: t == "button" || (c.inButton && !bound),
                  inNobr: t == "nobr" || (c.inNobr && !bound),
-                 tbl: tableMode(t), depth: c.depth, raw: rawTextTag(t) }
+                 tbl: tableMode(t), depth: c.depth, raw: rawTextTag(t),
+                 // s475: a `<select>` is in scope until a scope boundary; a cell / caption parses its content "in body"
+                 inSel: t == "select" || (c.inSel && !bound),
+                 root: false,
+                 tmode: c.tmode && t != "td" && t != "th" && t != "caption" }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
@@ -17218,6 +17339,13 @@ ${
         const tg: string = "`<" + e.tag + ">`"
         if (t == "html" || t == "head" || t == "body" || t == "frameset") return mkRepairFault(file, e, tg + " is never an element of a page body: the HTML parser drops the tag (HTML §13.2.6.4.7)")
         if (c.tbl != "" && tableModeChildren(c.tbl).indexOf(t) < 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` is moved or wrapped by the HTML parser (HTML §13.2.6.4.9–15: " + tableHint(c.tbl, t) + ")")
+        // s475 (g-boot-parser-restructure-residue-s474) — measured in Chromium 152:
+        if (t == "plaintext") return mkRepairFault(file, e, "`<plaintext>` has no end tag in HTML: everything after its start tag, to the end of the template, is read as its text (HTML §13.2.6.4.7) — use a `<pre>`")
+        if (isTablePart(t) && !c.root && c.tbl == "") return mkRepairFault(file, e, tg + " inside `<" + c.parent + ">` is not inside its table part: the HTML parser drops the tag (\"in body\", HTML §13.2.6.4.7), or, inside an open `<td>` / `<th>` / `<caption>`, closes that first (HTML §13.2.6.4.11 / §13.2.6.4.15) — write it inside its `<table>` / `<tbody>` / `<tr>`")
+        if (c.tmode && t == "table") return mkRepairFault(file, e, "a `<table>` in a template that starts with a table part, outside a cell, is dropped by the HTML parser (HTML §13.2.6.4.9 \"in table\": no table in table scope) — put it inside a `<td>` / `<th>`, or give the table parts a template of their own")
+        if (t == "input" && c.inSel) return mkRepairFault(file, e, "an `<input>` inside a `<select>` CLOSES the `<select>` first (HTML §13.2.6.4.7, the `<select>` rules): it becomes the `<select>`'s next sibling. Put the `<input>` after the `<select>`")
+        if (t == "select" && c.inSel) return mkRepairFault(file, e, "a `<select>` inside a `<select>` is dropped, and closes the outer one (HTML §13.2.6.4.7): selects do not nest — use an `<optgroup>`")
+        if (t == "hr" && c.inSel && (c.parent == "option" || c.parent == "optgroup")) return mkRepairFault(file, e, "an `<hr>` directly inside an `<option>` / `<optgroup>` of a `<select>` closes it (HTML §13.2.6.4.7): it becomes a separator between options — write it between the `<option>`s")
         if (c.inP && closesP(t)) return mkRepairFault(file, e, tg + " inside an open `<p>` CLOSES the `<p>` first (HTML §13.2.6.4.7 \"close a p element\"): it becomes the `<p>`'s next sibling. Use a `<div>` for the outer element, or a phrasing element (`<span>`) for the inner one")
         if (t == "a" && c.inA) return mkRepairFault(file, e, "an `<a>` inside an `<a>` closes the outer one (HTML §13.2.6.4.7, the adoption agency): links do not nest")
         if (t == "li" && c.inLi) return mkRepairFault(file, e, "an `<li>` inside an open `<li>` (with no list between) closes it (HTML §13.2.6.4.7) — nest a `<ul>` / `<ol>` for a sub-list")
@@ -17244,22 +17372,84 @@ ${
     // declaration's `<slot/>`; and in a FOREIGN context the declaration's renders
     // are printed in that context's wrapper, so what is a fault only there is
     // reported here, at the use.
-    fn mkUse(g: Globals, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
+    fn mkUse(g: Globals, sa: AS, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
-        if (isForeignNs(c.ns) && c.depth < 16) {
-            const inner: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(c.ns, c.depth + 1))
-            const alone: MkFault[] = mkNodes(g, d.file, rendersNodes(d), mkRoot(htmlNs(), c.depth + 1))
-            for (const f of inner) {
-                if (!mkFaultIn(alone, f)) {
-                    out = out.concat([{ nid: e.nid, file: file, span: e.span, code: f.code,
-                                        msg: "`<" + e.tag + ">` is used inside " + nsWords(c.ns) + ", where its renders do not hold: " + f.msg }])
-                }
-            }
-        }
+        if (isForeignNs(c.ns) && c.depth < 16) out = mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, "`<" + e.tag + ">` is used")
         if (e.kids.length > 0 && c.depth < 16) {
-            out = out.concat(mkNodes(g, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
+            out = out.concat(mkNodes(g, sa, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
         }
         return out
+    }
+
+    // The faults `nodes` (from `dfile`) have as their OWN template in the use's
+    // FOREIGN context and not alone (walked in HTML, where they are judged at
+    // their own site), reported at the use `e`.
+    fn mkAtUse(g: Globals, sa: AS, file: string, e: AElem, dfile: string, nodes: ANode[], c: MkCx, what: string) -> MkFault[] {
+        const inner: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(c.ns, c.depth + 1))
+        const alone: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(htmlNs(), c.depth + 1))
+        return mkRelabel(file, e, inner, alone, what + " inside " + nsWords(c.ns) + ", where its renders do not hold: ")
+    }
+
+    fn mkRelabel(file: string, e: AElem, inner: MkFault[], alone: MkFault[], head: string) -> MkFault[] {
+        let out: MkFault[] = []
+        for (const f of inner) {
+            if (!mkFaultIn(alone, f)) out = out.concat([{ nid: e.nid, file: file, span: e.span, code: f.code, msg: head + f.msg }])
+        }
+        return out
+    }
+
+    // s475 (g-boot-parser-restructure-residue-s474) — `<*x/>` (§66.6.2), as the
+    // resolver recorded it (its element fact):
+    //   MStar       the shared instance: x's renders are printed for THIS
+    //               site's context (print.scrml `declNsUses` .Star) — in a
+    //               foreign context they are judged there, as a use's are;
+    //   MStateView  a graph field's state-child bodies: each an arm (a template
+    //               of its own) in this site's context;
+    //   MInline     a child field's own `renders`, INLINED into this template
+    //               (lower.scrml `inlineViews`): judged in place, in this
+    //               context, so an HTML repair counts here too.
+    // The faults the markup has on its own (walked in HTML at its declaration)
+    // are reported there; what holds only at this site is reported here.
+    fn mkStar(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
+        if (c.depth >= 16) return []
+        const f0: ElemFact | not = elemFactNow(sa, e.nid)
+        if (f0 is not) return []
+        return mkStarFact(g, sa, file, e, f0, c)
+    }
+
+    fn mkStarFact(g: Globals, sa: AS, file: string, e: AElem, f: ElemFact, c: MkCx) -> MkFault[] {
+        const w: string = "`<*" + e.tag + "/>` is rendered"
+        return match f {
+            .MStar(decl: ds) :> mkStarShared(g, sa, file, e, ds, c, w)
+            .MStateView(v: v) :> mkStarArms(g, sa, file, e, v, c, w)
+            .MInline(v: v) :> mkRelabel(file, e, mkNodes(g, sa, file, v.nodes, mkKidOf(c)), mkNodes(g, sa, file, v.nodes, mkRoot(htmlNs(), c.depth + 1)), w + " here, where its markup does not hold: ")
+            .MHtml :> []
+            .MUse(decl: x) :> []
+            .MEach(bind: x) :> []
+            .MSlot :> []
+            .MErrors(of: x) :> []
+            .MDb :> []
+        }
+    }
+
+    fn mkStarShared(g: Globals, sa: AS, file: string, e: AElem, s: Sym, c: MkCx, w: string) -> MkFault[] {
+        if (!isForeignNs(c.ns)) return []
+        const d: DeclSrc | not = findDeclSrc(g, s)
+        if (d is not) return []
+        return mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, w)
+    }
+
+    fn mkStarArms(g: Globals, sa: AS, file: string, e: AElem, v: StateView, c: MkCx, w: string) -> MkFault[] {
+        if (!isForeignNs(c.ns)) return []
+        let out: MkFault[] = []
+        for (const a of v.arms) { out = out.concat(mkAtUse(g, sa, file, e, file, a.body, c, w)) }
+        return out
+    }
+
+    // `c` one level deeper (the inlined markup stands where the `<*x/>` does).
+    fn mkKidOf(c: MkCx) -> MkCx {
+        return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
+                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode }
     }
 
     fn nsWords(ns: string) -> string {
