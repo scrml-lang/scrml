@@ -137,8 +137,8 @@ on:
   # `enforce_admins=true` is untouched.
   #
   # ONE HONEST CAVEAT — a dispatched run's §34.0 row-provenance check is WEAKER. Step
-  # `s34-census --check-new --base` reads `github.event.pull_request.base.sha`, which does
-  # not exist on a manual run, so it falls back to `HEAD~1`. On a multi-commit branch that
+  # `s34-census --check-new --base` reads its base from `scripts/ci-pr-base.sh` (the PR merge
+  # ref's HEAD^1, or merge_group.base_sha), which has no PR base on a manual run, so it falls back to `HEAD~1`. On a multi-commit branch that
   # compares against the previous commit rather than the merge base, so rows added in EARLIER
   # commits of the same branch are not seen as NEW. Every other step is event-independent.
   workflow_dispatch: {}
@@ -257,10 +257,18 @@ jobs:
       # HONEST LIMIT: the report also reads impl#1's front end (`compiler/src/commands/fix-s66.js`) and
       # `conformance/*.ts`, so a PR touching only those can stale it without tripping this step.
       # `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
+      # S475 — the base is scripts/ci-pr-base.sh (the merge ref's HEAD^1 on a PR; merge_group.base_sha in the
+      # queue), NOT pull_request.base.sha, which is fixed at the push event and can predate the main the merge
+      # ref was built on (g-ci-pr-base-sha-stale-in-currency-and-census-steps-s474; #1719 fixed the same race
+      # in the bot-owned guard). No base (not the merge ref) counts as "touched" — the check runs.
       - name: Bootstrap conformance report (PRs touching conformance/cases or self-host-v2; stale WARNS)
         if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
-          if git diff --quiet "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+          if BASE=$(scripts/ci-pr-base.sh) && git diff --quiet "$BASE"...HEAD -- conformance/cases compiler/self-host-v2; then
             echo "no conformance/cases or compiler/self-host-v2 change in this PR — the bootstrap run is not repeated here"
           else
             scripts/ci-stale-warn.sh docs/bootstrap-conformance.md bun scripts/bootstrap-conformance.ts --check
@@ -313,14 +321,19 @@ jobs:
       # regen 82f6c7741). And not HEAD^1...HEAD (#1719 r1 F1): that measures main against the merge
       # result, so a branch carrying a copy of main's CURRENT generated files passes, then goes DIRTY on the
       # next regen. HEAD^2 must be the PR head (#1719 r1 F2), so a fast-forward checkout fails closed.
+      # S475: that HEAD^1 / HEAD^2 = PR_HEAD logic lives in scripts/ci-pr-base.sh (shared with the currency,
+      # census and tracking steps); bot-owned-untouched-s474.test.js RUNS this step against a fast-forward
+      # checkout (g-ci-bot-owned-guard-fail-closed-branch-untested-s474), so the refusal is executed, not grepped.
       - name: Bot-owned generated files untouched (docs/generated/)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           IS_BOT: ${{ github.head_ref == 'bot/generated-regen' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          BASE=$(git rev-parse --verify -q HEAD^1) && HEAD2=$(git rev-parse --verify -q HEAD^2) && [ "$HEAD2" = "$PR_HEAD" ] ||
+          BASE=$(scripts/ci-pr-base.sh) ||
             { echo "bot-owned-untouched: HEAD is not the PR's merge ref (want parents main-tip, $PR_HEAD) — refusing (fail closed)" >&2; exit 1; }
+          HEAD2=$PR_HEAD
           if [ "$IS_BOT" = "true" ]; then scripts/bot-owned-untouched.sh --bot "$BASE" "$HEAD2"; else scripts/bot-owned-untouched.sh "$BASE" "$HEAD2"; fi
       # S474 — compiler/self-host-v2/severity.scrml (generated from SPEC §34). Moved here from `tracking`:
       # byte staleness WARNS (4) — answer-changing drift fails slice-m4/severity.test.js on the PR, so only
@@ -347,9 +360,18 @@ jobs:
       - name: Windows baseline is valid (scripts/windows-ratchet.ts validate)
         if: ${{ !cancelled() }}
         run: bun scripts/windows-ratchet.ts validate
+      # S475 — base from scripts/ci-pr-base.sh (merge ref's HEAD^1 on a PR, not the stale pull_request.base.sha;
+      # merge_group.base_sha in the queue; HEAD~1 on push / schedule / dispatch). A PR checkout that is not
+      # the merge ref fails the step (fail closed) instead of diffing against a guess.
       - name: §34.0 row-provenance gate (new error-code rows state where they fire)
         if: ${{ !cancelled() }}
-        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'HEAD~1' }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          BASE=$(scripts/ci-pr-base.sh --fallback HEAD~1) || exit 1
+          bun scripts/s34-census.ts --check-new --base "$BASE"
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # unit — unit + conformance, sharded across the matrix with bun's own `--shard=i/N`.
@@ -634,10 +656,14 @@ jobs:
       # compiler/self-host-v2 the BLOCKING `checks` step runs this exact check, so it is not run twice;
       # here it reports staleness on every OTHER run (push, nightly, dispatch, untouched PRs). The
       # touched-test below is byte-for-byte the blocking step's, so exactly one of the two runs.
+      # S475: the base is scripts/ci-pr-base.sh, as in the blocking step (not the stale pull_request.base.sha).
       - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && ! git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+          if [ "$EVENT_NAME" = "pull_request" ] && ! { BASE=$(scripts/ci-pr-base.sh) && git diff --quiet "$BASE"...HEAD -- conformance/cases compiler/self-host-v2; }; then
             echo "this PR touches conformance/cases or compiler/self-host-v2 — the blocking 'checks' job runs this check; not repeated here"
           else
             scripts/ci-stale-warn.sh docs/bootstrap-conformance.md bun scripts/bootstrap-conformance.ts --check
