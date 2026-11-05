@@ -28275,8 +28275,8 @@ ${
     // =========================================================================
     export type ComposeExtra:struct = { name: string, span: ASpan, ty: AType | not, vt: Type | not }
     // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
-    // warnings the plan raises (W-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
-    // composed program's diagnostics); `late`: how many of them are W-TX-FAIL-AFTER-COMMIT.
+    // diagnostics the plan raises (E-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
+    // composed program's diagnostics); `late`: how many of them are E-TX-FAIL-AFTER-COMMIT.
     export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int }
     type RCompose:struct = { plans: ComposePlan[], st: AS }
     type RPlan:struct = { plan: ComposePlan | not, st: AS }
@@ -28977,7 +28977,8 @@ ${
         return true
     }
 
-    // W-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b)).
+    // E-TX-FAIL-AFTER-COMMIT for each statement after `from` that can `fail` / `?` (PA ruling, review M2 (b);
+    // an Error since S475 ruling item 1, was W-TX-FAIL-AFTER-COMMIT).
     // `reason0`: why nothing after `from` could join, when the statements do not say it (review N2 / N4).
     fn lateExits(g: Globals, t: Tables, fs: FnSrc, fx: StmtFx[], calls: string[], from: int, reason0: string) -> Diag[] {
         let out: Diag[] = []
@@ -28996,7 +28997,7 @@ ${
                 let why: string = blocked
                 if (why == "") why = reason0
                 if (why == "") why = "a statement before it cannot join the batch"
-                out = out.concat([newDiag("W-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") runs after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: when it fails, the caller is told '" + name + "' failed, but the batch's writes are already committed and are not rolled back (§19.10.5, S474). It cannot join the server batch because " + why + ". Move the check before the first server call, or into the server function, so it can roll the writes back", fs.info.file, ss[k].span)])
+                out = out.concat([newDiag("E-TX-FAIL-AFTER-COMMIT", "this `fail` / `?` (line " + lineOf(g, fs.info.file, ss[k].span.start) + ") would run after '" + name + "''s server work (" + calls.join(", ") + ") has COMMITTED: the caller would be told '" + name + "' failed while the batch's writes stand, and they are not rolled back (§19.10.5). A `!` function must not report failure while its writes stand (S475). It cannot join the server batch because " + why + ". Fix: move the check before the first server call (or into the server function, so it can roll the writes back)", fs.info.file, ss[k].span)])
             }
             if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
             k = k + 1
@@ -29006,7 +29007,7 @@ ${
 
     // s474 r1 (review M2, PA ruling): ONE server call followed by a `fail` / `?` — composed like two,
     // so a movable check joins the call's request and rolls its writes back. Composed only when every
-    // such check joins (otherwise nothing changes): a check that cannot move is W-TX-FAIL-AFTER-COMMIT.
+    // such check joins (otherwise nothing changes): a check that cannot move is E-TX-FAIL-AFTER-COMMIT.
     // A function whose one call is a composed batch's (the composed program's F) is not looked at again.
     fn composeSingle(g: Globals, t: Tables, sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], fs: FnSrc, i: int, allow: boolean, st0: AS) -> RPlan {
         const f: FnFacts = sum.nodes[i].f

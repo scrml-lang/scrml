@@ -351,13 +351,19 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(await rows(sql)).toEqual([1, 101]);
   });
 
-  test("(b) a trailing `fail` that needs the browser stays — W-TX-FAIL-AFTER-COMMIT names it and says the writes are committed", () => {
+  // S475 ruling item 1 (user-voice-scrml.md "## S475", "veto window readings" 1): "a trailing
+  // `fail`/`?` after a client `!` function's composed server batch that cannot join the batch becomes
+  // a compile ERROR (INTERIM; was `W-TX-FAIL-AFTER-COMMIT`). A `!` function must not report failure
+  // while its writes stand. Fix named in the message: move the check before the first server call."
+  test("(b) a trailing `fail` that needs the browser — E-TX-FAIL-AFTER-COMMIT (an Error) names it, says the writes stand, and names the fix", () => {
     const src = withHost(POST(`if (title() == "x") fail .Bad;`));
-    expect(errs(src)).toEqual([]);
-    const w = warns(src);
-    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(warns(src)).toEqual([]);
+    const w = errs(src);
+    expect(w.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
     expect(w[0].message).toContain("COMMITTED");
     expect(w[0].message).toContain("not rolled back");
+    expect(w[0].message).toContain("move the check before the first server call");
+    expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
     expect(w[0].message).toContain("the `<host>` binding `title`");
     expect(src.slice(w[0].span.start, w[0].span.end)).toContain("title()");
   });
@@ -387,11 +393,13 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(await rows(sql)).toEqual([]);
   });
 
-  test("(b) one server call + a browser trailing `fail`: not composed; W-TX-FAIL-AFTER-COMMIT", () => {
+  test("(b) one server call + a browser trailing `fail`: E-TX-FAIL-AFTER-COMMIT, the compile fails", () => {
     const src = withHost(ONE(`if (title() == "x") fail .Bad;`));
-    expect(errs(src)).toEqual([]);
-    expect(warns(src).map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
-    expect(compile(src).core.server.map((x) => x.sym.hint)).not.toContain("book#batch");
+    expect(warns(src)).toEqual([]);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
+    expect(e[0].message).toContain("move the check before the first server call");
+    expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
   });
 
   test("near-miss: one server call and no later `fail` is unchanged (not composed, no warning)", () => {
@@ -542,7 +550,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
 });
 
 describe("r2 N1 / N2 / N3 / N4", () => {
-  test("N1: a `return` between the batch and a later `fail` — compiles; the `fail` is W-TX-FAIL-AFTER-COMMIT naming the `return`", () => {
+  test("N1: a `return` between the batch and a later `fail` — the `fail` is E-TX-FAIL-AFTER-COMMIT naming the `return`", () => {
     const src = `<program db="./app.db">
 ${HOLD_CHARGE}    let <r:int=0/>
     function book(a: int, f: int)! E {
@@ -555,13 +563,13 @@ ${HOLD_CHARGE}    let <r:int=0/>
     <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
 </program>
 `;
-    expect(errs(src)).toEqual([]);
-    const w = warns(src);
-    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(warns(src)).toEqual([]);
+    const w = errs(src);
+    expect(w.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
     expect(w[0].message).toContain("a `return` before it");
   });
 
-  test("N2: one request made inside a client `!` callee, then a `fail` — W-TX-FAIL-AFTER-COMMIT", () => {
+  test("N2: one request made inside a client `!` callee, then a `fail` — E-TX-FAIL-AFTER-COMMIT", () => {
     const src = `<program db="./app.db">
 ${HOLD_CHARGE}    let <r:int=0/>
     function one(a: int)! E {
@@ -576,9 +584,9 @@ ${HOLD_CHARGE}    let <r:int=0/>
     <main><button onclick={ @r = outer(1, 1) !{ _ :> 9, }; }>go</button></main>
 </program>
 `;
-    expect(errs(src)).toEqual([]);
-    const w = warns(src);
-    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(warns(src)).toEqual([]);
+    const w = errs(src);
+    expect(w.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
     expect(w[0].message).toContain("`one()`, a client function");
   });
 
@@ -600,7 +608,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(e[0].message).toContain("Declare a new local inside the batch");
   });
 
-  test("N4: a single call whose composition needs `Transport` — the warning says so", () => {
+  test("N4: a single call whose composition needs `Transport` — the error says so", () => {
     const src = `<program db="./app.db">
     type F2:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
     let <r:int=0/>
@@ -616,9 +624,9 @@ ${HOLD_CHARGE}    let <r:int=0/>
     <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
 </program>
 `;
-    expect(errs(src)).toEqual([]);
-    const w = warns(src);
-    expect(w.map((d) => d.code)).toEqual(["W-TX-FAIL-AFTER-COMMIT"]);
+    expect(warns(src)).toEqual([]);
+    const w = errs(src);
+    expect(w.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
     expect(w[0].message).toContain("Transport(t: ServerCallError)");
     expect(w[0].message).not.toContain("a statement before it cannot join");
   });
