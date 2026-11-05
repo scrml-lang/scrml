@@ -712,7 +712,11 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
       # Fails if any of the three files SKIPPED anything: a live suite that silently skips proves nothing.
+      # `shell: bash` is load-bearing (S475 r1): without it Actions runs `bash -e` (no pipefail) and the
+      # `| tee` pipeline returns tee's 0 — green with failing tests. Pinned, executed:
+      # compiler/tests/unit/ci-postgres-live-pipefail-s475.test.js.
       - name: Bootstrap live Postgres tests (pg-envelope, sql-error, statement-savepoint) on a real server
+        shell: bash
         env:
           SCRML_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           SCRML_TEST_PG_REAL: "1"

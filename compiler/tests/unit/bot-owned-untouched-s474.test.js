@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, renameSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
+import { runActionsStep } from "../helpers/actions-shell.js";
 
 const REPO = join(import.meta.dir, "../../..");
 const SCRIPT = join(REPO, "scripts/bot-owned-untouched.sh");
@@ -254,15 +255,16 @@ describe("ci.yml wiring", () => {
     expect(String(step.run)).toMatch(/IS_BOT.*--bot/s);
   });
   // g-ci-bot-owned-guard-fail-closed-branch-untested-s474: the step's own shell, extracted from ci.yml and
-  // run as Actions runs it (bash -eo pipefail) with the real scripts, against a FAST-FORWARD checkout (HEAD
+  // run under the shell its own `shell:` key selects (helpers/actions-shell.js: none → `bash -e`, as
+  // Actions does; S475 r1) with the real scripts, against a FAST-FORWARD checkout (HEAD
   // has no second parent) and against a merge ref whose HEAD^2 is not the PR head. Both must refuse BEFORE
   // the diff — a PR that edits docs/generated/ would otherwise be judged against the wrong pair.
   function runGuardStep(s, env) {
     mkdirSync(join(s.root, "scripts"), { recursive: true });
     for (const f of ["ci-pr-base.sh", "bot-owned-untouched.sh"]) copyFileSync(join(REPO, "scripts", f), join(s.root, "scripts", f));
-    const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", String(step.run)],
-      { cwd: s.root, env: { ...ENV, EVENT_NAME: "pull_request", IS_BOT: "false", ...env }, encoding: "utf8" });
-    return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
+    const r = runActionsStep(step, { cwd: s.root, env: { ...ENV, EVENT_NAME: "pull_request", IS_BOT: "false", ...env },
+      job: ci.jobs.checks, workflow: ci });
+    return { rc: r.rc, out: r.out };
   }
   const prWithCleanDocs = () => {
     const s = sandbox();

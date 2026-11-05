@@ -17,6 +17,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, copyFileSy
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
+import { runActionsStep } from "../helpers/actions-shell.js";
 
 const REPO = join(import.meta.dir, "../../..");
 const SCRIPT = join(REPO, "scripts/ci-pr-base.sh");
@@ -75,7 +76,8 @@ const base = (root, env, ...args) => {
   return { rc: r.status, out: (r.stdout ?? "").trim(), err: r.stderr ?? "" };
 };
 
-/** Run a ci.yml step body the way Actions does (bash -eo pipefail), with the repo's scripts stubbed in. */
+/** Run a ci.yml step body the way Actions does — the shell its `shell:` key selects (none → `bash -e`;
+ *  helpers/actions-shell.js, S475 r1) — with the repo's scripts stubbed in. */
 function runStep(s, step, env) {
   mkdirSync(join(s.root, "scripts"), { recursive: true });
   copyFileSync(SCRIPT, join(s.root, "scripts/ci-pr-base.sh"));
@@ -84,9 +86,9 @@ function runStep(s, step, env) {
   writeFileSync(join(s.root, "scripts/ci-stale-warn.sh"), "#!/bin/bash\necho RAN-CURRENCY-CHECK\n");
   chmodSync(join(s.root, "scripts/ci-stale-warn.sh"), 0o755);
   writeFileSync(join(s.root, "scripts/s34-census.ts"), "console.log('CENSUS-ARGS ' + process.argv.slice(2).join(' '));\n");
-  const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", String(step.run)],
-    { cwd: s.root, env: { ...ENV, ...env }, encoding: "utf8" });
-  return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
+  const job = Object.values(ci.jobs).find((j) => (j.steps ?? []).includes(step));
+  const r = runActionsStep(step, { cwd: s.root, env: { ...ENV, ...env }, job, workflow: ci });
+  return { rc: r.rc, out: r.out };
 }
 
 describe("the stale-base repro (g-ci-pr-base-sha-stale-in-currency-and-census-steps-s474)", () => {
