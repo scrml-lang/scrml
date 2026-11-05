@@ -510,19 +510,24 @@ ${E}    type C:struct = { c: int }
     <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
 </program>
 `;
-  test("a read-only single-call batch: composed, but NO transaction — no BEGIN reaches the driver", async () => {
+  // s475-boot-pg-envelopes: superseded by SPEC §19.10.5 "A composed batch's envelope" (#1732): "that
+  // batch SHALL open its own implicit envelope when its transitive query set is non-empty … (S474 —
+  // superseded; a batch that reaches one read opens `BEGIN DEFERRED`, ruling 5)". Before s475: no
+  // envelope, no BEGIN reached the driver.
+  test("a read-only single-call batch: composed, in its own DEFERRED transaction (one read is enough)", async () => {
     const r = compile(RO);
     const batch = r.core.server.find((x) => x.sym.hint === "book#batch");
     expect(batch).toBeTruthy();
-    const env = r.core.envelopes.find((e) => e.fn.id === batch.sym.id);
-    expect(env === undefined || env.standalone === false).toBe(true);
+    expect(r.core.envelopes.find((e) => e.fn.id === batch.sym.id)).toMatchObject({ standalone: true, writes: false });
     const spy = spyDriver(() => [{ c: 1 }]);
     const { srv, routes } = await serve(r.core, spy.fn);
     const res = await post(srv, pathOf(routes, "book#batch"), [1, 1]);
     expect(res.status).toBe(500);
     const sent = spy.calls.map((c) => c.strings.join("?")).join(" | ");
     expect(sent).toContain("SELECT");
-    expect(/BEGIN/i.test(sent)).toBe(false);
+    expect(sent.startsWith("BEGIN DEFERRED")).toBe(true);
+    expect(sent).not.toContain("BEGIN IMMEDIATE");
+    expect(sent.endsWith("ROLLBACK")).toBe(true);   // the `fail` after the read
   });
   test("a WRITING single-call batch: its own IMMEDIATE transaction", () => {
     const src = `<program db="./app.db">

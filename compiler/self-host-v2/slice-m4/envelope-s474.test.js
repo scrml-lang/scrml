@@ -354,7 +354,9 @@ describe("F11 counts CLIENT requests only: a server-only (inherited) `!` helper 
     const env = compile(src).core.envelopes;
     expect(env.find((e) => e.fn.hint === "top").standalone).toBe(true);
     expect(env.find((e) => e.fn.hint === "mid").standalone).toBe(true);
-    expect(env.find((e) => e.fn.hint === "s1").standalone).toBe(false);
+    // s475: a one-query `!` function is standalone too (§8.9.2 "Amendment S474" item 1, "one is
+    // enough"); called inside `top`'s envelope it still runs as a savepoint (runtime: an open outer)
+    expect(env.find((e) => e.fn.hint === "s1").standalone).toBe(true);
   });
 });
 
@@ -464,7 +466,10 @@ describe("r1 F1/F2 — a `.nobatch()` query is still inside the envelope's reach
     const logB = `        function logB(a: int) -> int {\n            ${SQ}\`INSERT INTO blog (a) VALUES (\${a})\`}.nobatch().run() !{ _ :> { return 0; } };\n            return 1;\n        }\n`;
     const src = xdb(logB, `        ${q("UPDATE acct SET n = n - ${a}")}\n        ${q("UPDATE acct SET n = n - ${a}")}\n        const x: int = logB(a);\n        if (a > 5) fail .Bad;\n        return x;\n`);
     expect(errsOf(src)).toEqual(["E-SQL-011"]);
-    expect(msgOf(src, "E-SQL-011")).toContain("'.nobatch()' on every query of the envelope");
+    // s475: the `.nobatch()` remedy is gone from the message — "`.nobatch()` no longer touches the
+    // envelope" (SPEC §8.9.2 cross-database bullet, the S474 fix clause): the SPEC's own fix text
+    expect(msgOf(src, "E-SQL-011")).toContain("Move the write to `./b.db` out of 'move' (call it after 'move' returns).");
+    expect(msgOf(src, "E-SQL-011")).not.toContain(".nobatch()");
     expect(fe(src).core).toBeFalsy();
   });
   test("F1: the `!` function's OWN `.nobatch()` write to another database — E-SQL-011", () => {

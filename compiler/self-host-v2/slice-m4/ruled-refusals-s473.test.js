@@ -69,9 +69,11 @@ describe("1 — §8.9.2 amendment: the envelope trigger reads the TRANSITIVE que
       bang(own("SELECT n FROM acct", ".nobatch()") + "        for (let i = 0; i < 3; i = i + 1) {\n            const y: int = bump(i);\n        }\n")));
   });
 
-  test("near-misses: one query (own, or through one helper) needs no transaction of its own; `.nobatch()` is not counted", () => {
+  // s475-boot-pg-envelopes: §8.9.2 "Amendment S474" item 1 — "however many queries it reaches (one is
+  // enough)": a one-query `!` function has a transaction of its own (before s475: standalone false)
+  test("one query (own, or through one helper) compiles clean — and is enough for a transaction of its own", () => {
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1"))))).toEqual([]);
-    expect(envOf(DBP(bang(own("UPDATE acct SET n = 1")))).standalone).toBe(false);
+    expect(envOf(DBP(bang(own("UPDATE acct SET n = 1")))).standalone).toBe(true);
     expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
     // a loop that runs no query, beside one query outside it
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1") + "        for (let i = 0; i < 3; i = i + 1) {\n            const z: int = i;\n        }\n")))).toEqual([]);
@@ -339,13 +341,16 @@ describe("F10 — a `!` callee's queries count toward the outer `!` function's s
     ]) {
       expect([name, codes(src)]).toEqual([name, []]);
       expect([name, envOf(src).standalone]).toEqual([name, true]);
-      // the inner `!` (one query) is a savepoint inside the outer's transaction
-      expect([name, envOf(src, "g").standalone]).toEqual([name, false]);
+      // the inner `!` (one query) has its own envelope (s475: "one is enough"); called inside the
+      // outer's transaction it runs as a savepoint (the runtime sees the open outer)
+      expect([name, envOf(src, "g").standalone]).toEqual([name, true]);
     }
   });
-  test("near-miss: an outer whose set holds exactly one query (its own `.nobatch()` read, one `!` call)", () => {
+  // s475: an outer whose set reaches a query has its own transaction, `.nobatch()` and one `!` call
+  // included (§8.9.2 "Amendment S474" items 1–2; before s475: standalone false)
+  test("an outer whose set reaches its own `.nobatch()` read and one `!` call: its own transaction", () => {
     expect(codes(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n")))).toEqual([]);
-    expect(envOf(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n"))).standalone).toBe(false);
+    expect(envOf(DBP(G + bang(NB + "        const y: int = g(a) !{ _ :> { return 0; } };\n"))).standalone).toBe(true);
   });
 });
 

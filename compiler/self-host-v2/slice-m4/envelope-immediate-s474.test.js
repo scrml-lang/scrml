@@ -114,8 +114,9 @@ describe("compile time: the envelope's BEGIN is decided from its query set (S474
     }
     // the helper's write is reached through a non-`!` call: the set has two queries and one writes
     expect(envelopeOf(js, "readsViaWritingHelper")).toContain(`true, "IMMEDIATE")`);
-    // a one-query `!` function is not standalone; its spelling is still decided (it writes)
-    expect(envelopeOf(js, "innerWrite")).toContain(`false, "IMMEDIATE")`);
+    // a one-query `!` function has its own envelope too (s475: SPEC §8.9.2 "Amendment S474" item 1,
+    // "one is enough" — before s475 it was printed `false`, not standalone); it writes: IMMEDIATE
+    expect(envelopeOf(js, "innerWrite")).toContain(`true, "IMMEDIATE")`);
   });
   test("the Core carries the decision (Envelope.writes), set by analyze, never by a printer", () => {
     const byName = new Map(core.envelopes.map((e) => [e.fn.hint, e]));

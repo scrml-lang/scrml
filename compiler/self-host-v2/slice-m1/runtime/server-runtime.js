@@ -394,12 +394,15 @@ function brokenError(conn) {
 // failure or a throw — and neither commits nor ends the enclosing transaction,
 // so a later `fail` in the outer function still rolls everything back.
 //
-// `standalone`: whether this function needs its own transaction when no
-// enclosing one is open (its transitive query set has two or more queries, or
-// one reached more than once — §8.9.2 amendment). A `!` function with one query
-// in its set is printed with `standalone = false`: outside a transaction it runs
-// as written (one statement autocommits atomically by itself), inside one it is
-// a savepoint like any inner `!` call.
+// `standalone`: whether this function opens its own transaction when no
+// enclosing one is open. s475: the compiler prints `true` for every envelope —
+// SPEC §8.9.2 "Amendment S474" item 1: every `!` server body whose transitive
+// query set is non-empty runs in the envelope, "however many queries it reaches
+// (one is enough)". (Before s475 a one-query set was printed `false` and ran
+// with no transaction: a one-statement `INSERT … SELECT` that failed part way
+// kept its earlier rows, and a `fail` after its one write kept the write.)
+// `false` — run as written outside a transaction, a savepoint inside one — is
+// no longer printed; a hand-written caller may still pass it.
 //
 // "A failed `COMMIT` SHALL NOT release the connection … the `ROLLBACK` that
 // follows releases it" — so a failed COMMIT is followed by ROLLBACK, then the
