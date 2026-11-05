@@ -1,4 +1,5 @@
 # s475-ci-tooling — progress (append-only)
 
 - 2026-11-05 start — worktree /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-ad5ef4810e6dd1354 at be56b6dad (= origin/main); bun install + pretest OK.
-- 2026-11-05 items 1+2 — scripts/ci-pr-base.sh (HEAD^1 + HEAD^2=PR_HEAD on pull_request, merge_group.base_sha in the queue); ci.yml currency / census / tracking / bot-owned steps read it; ci-pr-base-s475.test.js (stale-base repro + executed step bodies); the bot-owned test executes the guard step on a fast-forward. One commit: the bot-owned step change rewrites the wiring test's strings, so 1 and 2 cannot be split green.
+- 2026-11-05 items 1+2 — scripts/ci-pr-base.sh (HEAD^1 + HEAD^2=PR_HEAD on pull_request, merge_group.base_sha in the queue); ci.yml currency / census / tracking / bot-owned steps read it; ci-pr-base-s475.test.js (stale-base repro + executed step bodies); the bot-owned test executes the guard step on a fast-forward. One commit: the bot-owned step change rewrites the wiring test's strings, so 1 and 2 cannot be split green. Committed with SCRML_HOOK_SHARDS=12 SCRML_HOOK_SHARD_TIMEOUT_S=2400 (default sharding hit the 3072 MB per-shard ceiling).
+- 2026-11-05 item 3 — handTextSelfCheck position-aware (alignLines via git diff --no-index, Myers); 6 new tests; 2 old tests updated (they now also name the wrongly-kept base line).

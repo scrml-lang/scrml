@@ -53,7 +53,8 @@
 //     4. SELF-CHECK — a MULTISET 3-way of every `@gap` id's count (fenced code ignored): the result
 //        must hold exactly the count the 3-way implies — no drop, no double-filing, no id whose count
 //        both sides changed. PLUS (S474) a HAND-TEXT survival check: every non-blank hand-text line a
-//        side changed must still be in the result (`handTextSelfCheck`) — the id count alone never saw
+//        side changed must still be in the result, in that side's order, and the result may hold no
+//        line neither side accounts for (`handTextSelfCheck`, position-aware S475) — the id count alone never saw
 //        an entry's status=open → status=resolved edit vanish. A violation of either FAILS the merge
 //        loudly (exit 1, a marker block over git's plain 3-way). ⚑ By design the hand-text check
 //        does not see blank-line inserts or EOL-only (LF ↔ CRLF) changes: blank lines are skipped and
@@ -351,7 +352,8 @@ export type MergeResult = {
    *  so the merge STOPS on them (exit 1) until `--regen` derives them from the merged tree. */
   needsRegen: string[];
   selfCheck: { dropped: string[]; duplicated: string[]; ambiguous: string[] };
-  /** hand-text lines a side changed that are missing from the result (handTextSelfCheck). */
+  /** hand-text lines a side changed that are missing from the result, out of place, or extra
+   *  (handTextSelfCheck — position-aware since S475). */
   lostHandLines: string[];
   /** non-null = the driver REFUSED to merge structurally (why); `text` is a fail block over git's
    *  plain 3-way of the original inputs, and the driver exits 1. */
@@ -535,30 +537,101 @@ function mergeGeneratedLf(
  * ⚑ KNOWN LIMIT, by design: blank / whitespace-only lines are skipped and a trailing `\r` is
  * stripped, so a lost blank-line insert or an EOL-only (LF ↔ CRLF) change is invisible to this
  * check. A lost whitespace change INSIDE a content line (trailing space, indentation) is caught.
- * Returns the lost lines (sorted, deduplicated); empty = pass.
+ *
+ * S475 — POSITION-AWARE (g-merge-driver-hand-text-self-check-count-based-s474). The count alone was
+ * position-blind: a line added on both sides at DIFFERENT places and kept once (max, not sum), a moved
+ * line put back in the wrong place, and a duplicated line (only "too few" was checked) all passed. The
+ * count check stays, and a diff3-style REPLAY runs beside it over the same hand-text lines:
+ *   - every line a side ADDED (unmatched in the side's alignment to base) must be MATCHED in that
+ *     side's alignment to the result — i.e. still present, in the side's order relative to the lines
+ *     around it. A moved line placed wrongly falls out of the alignment;
+ *   - every result line must be accounted for: kept by both sides, or matched to a line one side added.
+ *     A duplicated line, or a line one side deleted that the result kept, is not. Unmatched conflict
+ *     markers (`<<<<<<<` / `=======` / `|||||||` / `>>>>>>>` + label) are exempt, so a conflicted
+ *     result can be checked too.
+ * Alignments come from `git diff --no-index --diff-algorithm=myers` (a common subsequence, git's own
+ * C diff, fast on the 31k-line ledger). A diff that cannot be computed throws (the driver's catch
+ * falls back to the fail block — fail closed). Residual: an alignment is ONE common subsequence; where
+ * equal lines repeat (fences, `---`), a different-but-equally-short alignment could in principle mark
+ * the wrong copy, which errs toward a refusal (exit 1, the plain 3-way), never toward a silent drop.
+ * Returns the lost, misplaced or extra lines (sorted, deduplicated); empty = pass.
  */
 export function handTextSelfCheck(o: string, a: string, b: string, result: string, path: string): string[] {
   // A file wholly generated on every side has no hand text. Otherwise a wholly-generated version is
   // counted RAW (masking would hide its every line — exactly the F2 shape, a one-sided header).
   if ([o, a, b].every((t) => t === "" || isWhollyGenerated(t))) return [];
-  const counts = (t: string) => {
+  const handLines = (t: string) =>
+    (isWhollyGenerated(t) ? t : mask(t, path).text).split("\n").map((ln) => ln.replace(/\r$/, "")).filter((k) => k.trim() !== "");
+  const Ol = handLines(o), Al = handLines(a), Bl = handLines(b), Rl = handLines(result);
+  const counts = (ls: string[]) => {
     const m = new Map<string, number>();
-    for (const ln of (isWhollyGenerated(t) ? t : mask(t, path).text).split("\n")) {
-      const k = ln.replace(/\r$/, "");
-      if (k.trim() === "") continue;
-      m.set(k, (m.get(k) ?? 0) + 1);
-    }
+    for (const k of ls) m.set(k, (m.get(k) ?? 0) + 1);
     return m;
   };
-  const O = counts(o), A = counts(a), B = counts(b), R = counts(result);
-  const lost: string[] = [];
+  const O = counts(Ol), A = counts(Al), B = counts(Bl), R = counts(Rl);
+  const bad = new Set<string>();
   for (const ln of new Set([...A.keys(), ...B.keys()])) {
     const on = O.get(ln) ?? 0;
     const dA = (A.get(ln) ?? 0) - on, dB = (B.get(ln) ?? 0) - on;
     const need = on + Math.max(dA, dB) + Math.min(0, dA, dB);
-    if ((R.get(ln) ?? 0) < need) lost.push(ln);
+    if ((R.get(ln) ?? 0) < need) bad.add(ln);
   }
-  return lost.sort();
+  // the position-aware replay
+  const oa = alignLines(Al, Ol), ob = alignLines(Bl, Ol);      // side line → base index (-1 = added)
+  const ar = alignLines(Al, Rl), br = alignLines(Bl, Rl);      // side line → result index (-1 = gone)
+  for (let i = 0; i < Al.length; i++) if (oa[i] < 0 && ar[i] < 0) bad.add(Al[i]);
+  for (let i = 0; i < Bl.length; i++) if (ob[i] < 0 && br[i] < 0) bad.add(Bl[i]);
+  const fromA = new Int32Array(Rl.length).fill(-1), fromB = new Int32Array(Rl.length).fill(-1);
+  ar.forEach((r, i) => { if (r >= 0) fromA[r] = i; });
+  br.forEach((r, i) => { if (r >= 0) fromB[r] = i; });
+  const MARKER = /^(<{7,}|={7,}|\|{7,}|>{7,})( .*)?$/;
+  for (let r = 0; r < Rl.length; r++) {
+    const ia = fromA[r], ib = fromB[r];
+    const ok = (ia >= 0 && ib >= 0) || (ia >= 0 && oa[ia] < 0) || (ib >= 0 && ob[ib] < 0) ||
+      (ia < 0 && ib < 0 && MARKER.test(Rl[r]));
+    if (!ok) bad.add(Rl[r]);
+  }
+  return [...bad].sort();
+}
+
+/**
+ * Align line list X to line list Y with git's Myers diff: element i of the result is the index in Y of
+ * the line X[i] is matched to, or -1 (X[i] is not in the common subsequence). Matches are in order.
+ * Throws when git cannot compute the diff.
+ */
+export function alignLines(x: string[], y: string[]): Int32Array {
+  const out = new Int32Array(x.length).fill(-1);
+  if (x.length === y.length && x.every((l, i) => l === y[i])) { out.forEach((_, i) => { out[i] = i; }); return out; }
+  const dir = scratchDir();
+  let r;
+  try {
+    const px = join(dir, "x"), py = join(dir, "y");
+    writeFileSync(px, x.length ? x.join("\n") + "\n" : "");
+    writeFileSync(py, y.length ? y.join("\n") + "\n" : "");
+    // -c pins every config that could change the hunks; --no-index needs no repository.
+    r = spawnSync("git", [
+      "-c", "diff.algorithm=myers", "-c", "diff.indentHeuristic=true", "-c", "core.autocrlf=false",
+      "diff", "--no-index", "--no-color", "--no-ext-diff", "--no-textconv", "--text", "--diff-algorithm=myers", "-U0", px, py,
+    ], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))) });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  if (r.error || (r.status !== 0 && r.status !== 1)) throw new Error(`alignLines: git diff failed (${r.status}): ${r.stderr || r.error}`);
+  let px = 0, py = 0; // 0-based next unconsumed line of x / y
+  const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+  for (const ln of r.stdout.split("\n")) {
+    const m = HUNK.exec(ln);
+    if (!m) continue;
+    const ol = m[2] === undefined ? 1 : Number(m[2]), nl = m[4] === undefined ? 1 : Number(m[4]);
+    // with a zero-length side, git names the line BEFORE the gap (1-based); else the first line
+    const of = ol === 0 ? Number(m[1]) : Number(m[1]) - 1, nf = nl === 0 ? Number(m[3]) : Number(m[3]) - 1;
+    if (of - px !== nf - py || of < px) throw new Error(`alignLines: inconsistent hunk ${ln}`);
+    while (px < of) out[px++] = py++;
+    px += ol; py += nl;
+  }
+  if (x.length - px !== y.length - py) throw new Error("alignLines: inconsistent tail");
+  while (px < x.length) out[px++] = py++;
+  return out;
 }
 
 /**
@@ -801,7 +874,7 @@ export function runDriver(argv: string[], merge: typeof mergeGenerated = mergeGe
   }
   if (r.lostHandLines.length) {
     const shown = r.lostHandLines.slice(0, 3).map((l) => JSON.stringify(l.length > 80 ? l.slice(0, 77) + "..." : l)).join(", ");
-    const why = `HAND-TEXT SELF-CHECK FAILED — ${r.lostHandLines.length} changed line(s) lost: ${shown}${r.lostHandLines.length > 3 ? ", ..." : ""}`;
+    const why = `HAND-TEXT SELF-CHECK FAILED — ${r.lostHandLines.length} line(s) lost, misplaced or extra: ${shown}${r.lostHandLines.length > 3 ? ", ..." : ""}`;
     writeFileSync(pA, inEolOf(failBlock(markerSize, why), a) + plainOr());
     console.error(`${tag}: ${why}. The merge would have dropped a hand edit; refusing it.`);
     return done(1);

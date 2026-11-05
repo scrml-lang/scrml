@@ -143,7 +143,10 @@ describe("hand-text survival self-check", () => {
     // the exact pre-fix driver outputs, from the review
     const c4cBad = "# Gaps\n\nintro line\n\n<!-- @generated:foo START -->\nfoo 1\n<!-- @generated:foo END -->\nhand A theirs\n" + CLOSE + " theirs\n\n## end\n";
     expect(M.handTextSelfCheck(C4C.o, C4C.a, C4C.b, c4cBad, PATH)).toContain("hand A OURS-EDIT");
-    expect(M.handTextSelfCheck(C7.o, C7.a, C7.b, C7.a, PATH)).toEqual(["<!-- @gap id=g-a sev=LOW status=resolved -->"]);
+    // S475 (position-aware): the base line theirs REPLACED, kept in the result, is named too
+    expect(M.handTextSelfCheck(C7.o, C7.a, C7.b, C7.a, PATH)).toEqual([
+      "<!-- @gap id=g-a sev=LOW status=open -->", "<!-- @gap id=g-a sev=LOW status=resolved -->",
+    ]);
     // the gap-id check alone passes that c7 result — the hole this closes
     expect(M.gapIdSelfCheck(C7.o, C7.a, C7.b, C7.a)).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
   });
@@ -184,7 +187,8 @@ describe("N1 — the hand-text check counts base copies (duplicated and moved li
   test("BITE: a changed line that already occurs elsewhere in base, then lost, is named", () => {
     const o = "x\nFixed.\nold wording\n", a = "x\nFixed.\nFixed.\n", b = o;
     // the result kept base's one `Fixed.` but lost ours' rewrite of `old wording` into a second one
-    expect(M.handTextSelfCheck(o, a, b, o, PATH)).toEqual(["Fixed."]);
+    // S475 (position-aware): `old wording`, which ours rewrote, survives in the result — named too
+    expect(M.handTextSelfCheck(o, a, b, o, PATH)).toEqual(["Fixed.", "old wording"]);
   });
 
   test("BITE: a line MOVED between sections, then lost, is named", () => {
@@ -245,6 +249,80 @@ describe("N1 — the hand-text check counts base copies (duplicated and moved li
     const dropped = r.text.replace(moved.join("\n") + "\n", "");
     expect(dropped).not.toBe(r.text);
     expect(M.handTextSelfCheck(base, a, theirs, dropped, PATH)).toContain(moved[0]);
+  }, 30_000);
+});
+
+// ── S475: g-merge-driver-hand-text-self-check-count-based-s474 — the check is POSITION-AWARE ─────────
+// Each BITE below passes the count-only check (asserted via countOnly, the pre-S475 formula verbatim),
+// so it is caught only by the position-aware replay.
+function countOnly(o, a, b, r) {
+  const c = (t) => { const m = new Map(); for (const l of t.split("\n")) if (l.trim()) m.set(l, (m.get(l) ?? 0) + 1); return m; };
+  const O = c(o), A = c(a), B = c(b), R = c(r), lost = [];
+  for (const ln of new Set([...A.keys(), ...B.keys()])) {
+    const on = O.get(ln) ?? 0, dA = (A.get(ln) ?? 0) - on, dB = (B.get(ln) ?? 0) - on;
+    if ((R.get(ln) ?? 0) < on + Math.max(dA, dB) + Math.min(0, dA, dB)) lost.push(ln);
+  }
+  return lost;
+}
+
+describe("S475 — position-aware hand-text check (moved, both-sides-added, duplicated)", () => {
+  test("BITE: a MOVED line put back in the wrong place, at an EQUAL count, is caught", () => {
+    const o = "## S1\nentry E\nkeep 1\n## S2\nkeep 2\n";
+    const a = "## S1\nkeep 1\n## S2\nentry E\nkeep 2\n";       // ours moves E from S1 into S2
+    const b = "## S1\nentry E\nkeep 1\n## S2\nkeep 2 THEIRS\n"; // theirs edits elsewhere
+    const bad = "## S1\nentry E\nkeep 1\n## S2\nkeep 2 THEIRS\n"; // the move lost: E still in S1
+    expect(countOnly(o, a, b, bad)).toEqual([]);                  // every count is satisfied
+    expect(M.handTextSelfCheck(o, a, b, bad, PATH)).not.toEqual([]);
+    const good = "## S1\nkeep 1\n## S2\nentry E\nkeep 2 THEIRS\n";
+    expect(M.handTextSelfCheck(o, a, b, good, PATH)).toEqual([]);
+    expect(M.mergeGenerated(o, a, b, PATH).lostHandLines).toEqual([]); // the real driver merge is clean
+  });
+
+  test("BITE: the same line added at TWO places (one per side) and kept once is caught (max, not sum)", () => {
+    const o = "a\nb\nc\n", a = "a\nX\nb\nc\n", b = "a\nb\nc\nX\n";
+    const bad = "a\nX\nb\nc\n";                                   // theirs' X at the end is gone
+    expect(countOnly(o, a, b, bad)).toEqual([]);
+    expect(M.handTextSelfCheck(o, a, b, bad, PATH)).toEqual(["X"]);
+    expect(M.handTextSelfCheck(o, a, b, "a\nX\nb\nc\nX\n", PATH)).toEqual([]);
+  });
+
+  test("BITE: a DUPLICATED line (too many copies) is caught", () => {
+    const o = "a\nb\n", a = "a\nX\nb\n";
+    const bad = "a\nX\nX\nb\n";
+    expect(countOnly(o, a, o, bad)).toEqual([]);
+    expect(M.handTextSelfCheck(o, a, o, bad, PATH)).toEqual(["X"]);
+  });
+
+  test("BITE: a line one side DELETED, kept by the result, is caught", () => {
+    const o = "a\nold\nb\n", a = "a\nb\n";
+    expect(countOnly(o, a, o, o)).toEqual([]);
+    expect(M.handTextSelfCheck(o, a, o, o, PATH)).toEqual(["old"]);
+  });
+
+  test("no false failure: identical edit both sides kept once, a union of two insertions, a conflicted result", () => {
+    const o = "a\nb\nc\n";
+    expect(M.handTextSelfCheck(o, "a\nX\nb\nc\n", "a\nX\nb\nc\n", "a\nX\nb\nc\n", PATH)).toEqual([]);
+    expect(M.handTextSelfCheck(o, "a\nb\nX\nc\n", "a\nb\nY\nc\n", "a\nb\nX\nY\nc\n", PATH)).toEqual([]);
+    const conflicted = `a\n${OPEN} ours\nB1\n${SEP}\nB2\n${CLOSE} theirs\nc\n`;
+    expect(M.handTextSelfCheck(o, "a\nB1\nc\n", "a\nB2\nc\n", conflicted, PATH)).toEqual([]);
+  });
+
+  test("REAL ledger: a clean driver merge of two distant edits has no false loss, and the same result with ours' edit moved is caught", () => {
+    const base = readFileSync(join(REPO, "docs/known-gaps.md"), "utf8").replace(/\r\n/g, "\n");
+    const L = base.split("\n");
+    const heads = L.map((l, i) => (l.startsWith("### ") ? i : -1)).filter((i) => i >= 0);
+    const h1 = heads[Math.floor(heads.length / 4)], h3 = heads[Math.floor((heads.length * 3) / 4)];
+    const ins = "S475 position-aware probe line";
+    const a = [...L.slice(0, h1), ins, ...L.slice(h1)].join("\n");
+    const b = [...L.slice(0, h3), "S475 theirs probe", ...L.slice(h3)].join("\n");
+    const r = M.mergeGenerated(base, a, b, PATH);
+    expect(r.fallback).toBeNull();
+    expect(r.lostHandLines).toEqual([]);
+    const R = r.text.split("\n");
+    const at = R.indexOf(ins);
+    const moved = [...R.slice(0, at), ...R.slice(at + 1)];
+    moved.splice(heads[Math.floor(heads.length / 2)], 0, ins);  // same count, wrong section
+    expect(M.handTextSelfCheck(base, a, b, moved.join("\n"), PATH)).toContain(ins);
   }, 30_000);
 });
 
