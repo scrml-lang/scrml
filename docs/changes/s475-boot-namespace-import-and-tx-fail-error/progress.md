@@ -1,3 +1,7 @@
 # progress — s475-boot-namespace-import-and-tx-fail-error
 
 - 2026-11-05 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a02b0daeeafa95711; base ec038b549 == origin/main; bun install + pretest ok.
+- 2026-11-05 Part A committed 978eb8e32: lateExits emits E-TX-FAIL-AFTER-COMMIT (Error; message names "move the check before the first server call"). Tests: client-bang-compose-s474 (5 tests flipped W->E), envelope-s474 (near-miss now pins the E; cross-db case drops its incidental trailing fail). Red on base: 6 fail with base analyze.scrml; green on head. Corpus: measure.ts (scrml-boot compileSource over examples/ + conformance/cases + acceptance + slice-m2/m4 src = 2180 files): 0 files emit TX-FAIL-AFTER-COMMIT; bootstrap-conformance --json (1827 cases, twins included): 0 emit it. severity.scrml NOT edited (bot-owned; no §34 row yet -> fail-closed Error).
+- 2026-11-05 Part B committed c928e0d72: namespace import built (parse nsNames/nsToks/dotted tag+closer; AImport.ns; analyze linkage Linkage.nss + m.x scope entries, nsMiss E-IMPORT-004, E-SCOPE-010 incl. cell via importBringing, shadowing INTERIM refusal). slice-m2 parse.test STRING_KEYS += ns.
+- 2026-11-05 ab6ff750e: Chromium case (opt-in, 7/7 pass with SCRML_BROWSER_TESTS=1 incl. css-chromium-s469), acceptance cases PASS (not twinned: §66 form), re-export refusal test.
+- 2026-11-05 docs: known-gaps g-boot-namespace-import-unbuilt-s474 -> narrowed (LOW; shadowing residue); coverage row §21.3 namespace -> BUILT.
