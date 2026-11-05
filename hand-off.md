@@ -3,11 +3,11 @@
 > S474 ran 2026-10-30 → 2026-11-03 on theRog, Profile A, one long session (several compactions). S473's hand-off is at `handOffs/hand-off-473.md`. **Rotate this file to `handOffs/hand-off-474.md` at the next wrap.** Board: `scrml-support/handOffs/active-sessions/S474-bryan.md`. Rulings verbatim: `scrml-support/user-voice-scrml.md` §S474 (21836 →). Capability ledger: `scrml-support/capability-ledger.md` (PERMANENT semantic 69 · PERMANENT security 20 · INTERIM 53), which the PA reads at boot.
 
 ## 0. Where things stand
-- **Nothing of S474 is in flight.** 29 S474 PRs merged (#1694–#1738, not counting bot regens). Open PRs at wrap: #1448 (`s468-rulings-spec`, pre-S473; its worktree `agent-a036efcbcbcb1c8b0` is kept) and #580 (draft). The stale scheduled-regen PRs #1684 and #1649 were superseded by the post-merge bot. The PA's close was blocked by the auto-mode classifier, so close them by hand if they are still open.
+- **Nothing of S474 is in flight.** 29 S474 PRs merged (#1694–#1738, not counting bot regens). Open PRs at wrap: #1448 (`s468-rulings-spec`, pre-S473; its worktree `agent-a036efcbcbcb1c8b0` is kept) and #580 (draft). The stale scheduled-regen PRs #1684 and #1649 are closed (superseded by the post-merge bot).
 - **Generated blocks are bot-owned (S474 ruling).** PRs commit only `@gap` / `@review` markers and sources. `generated-regen.yml` regenerates `docs/generated/*`, SPEC-INDEX, coverage totals, conformance and FACTS on main after each merge. `state.ts --check` exit 4 (stale only) is fine in a PR. The `bot-owned-untouched` CI check refuses a PR that edits `docs/generated/`.
 - **S471 policy holds:** impl#1 work only for (a) the bootstrap build, (b) breakage in flogence or bryan's tools, (c) Peter. impl#1 security gaps are filed DEFERRED. S474's impl#1 PRs fall under these: #1694 #1698 (flogence), #1704 and #1718 (ruled).
 - **Gap rollup (generated, main fa0e875b4):** open impl#1-owed HIGH 272 · MED 767 · LOW 701; carried by the bootstrap HIGH 6 · MED 10 · LOW 1.
-- **Local `main` in the primary checkout has one unpushed operator commit,** 2d354c8b9 "spec(scrml): v1 ratified in alfa" (`specs/scrml.md`, 2026-11-01, "By: operator"). It is 130 behind origin/main. The PA left it alone and ran the primary checkout detached at origin/main, so the hook path stays current. bryan decides whether to push it, rebase it or drop it.
+- **Local `main`:** the stray alfa commit 2d354c8b9 (`specs/scrml.md`, "v1 ratified in alfa") was dropped on bryan's call ("ditch that"); local main = origin/main.
 
 ## 1. What landed (29 PRs)
 Every code PR had an S239 adversarial review on a frozen tree. Re-reviews were bound to the new head SHA, and every round was a fresh dev agent (see §5).
@@ -34,7 +34,6 @@ S473 owner Qs (bot yes; F7 per-branch slot); review-surfaced 1–7; **capability
 1. **Postgres data-loss gap `g-impl1-envelope-site-handled-pg-abort-s474` (MED, deferred).** On PG, a failed site-handled query aborts the transaction. PA rec: keep it deferred unless Peter or flogence runs Postgres, and build it first if either does.
 2. **Veto window on the ⚑ PA readings** carried in the SPEC by #1711, #1732 and #1734. They include M2/N5 (#1713), ConstraintViolation `field` = column only, §41.7 E-SCOPE-010, `transaction{}` IMMEDIATE, `<card>` beside `fn card` PERMANENT, `${}` in `<pre>` INTERIM, the SSE §37.8 origin check, and SQLite read-only sets as BEGIN DEFERRED. Silence keeps them.
 3. **`<m.card>` markup spelling for `import * as m`** (owner fork from #1715; `import * as` stays INTERIM).
-4. **Local main's operator commit 2d354c8b9** (§0).
 
 ## 4. Owed next (pick from here; nothing is mid-flight)
 Each item is filed in `docs/known-gaps.md` §S474-PA follow-ups or §S474-backfill unless noted.
@@ -77,7 +76,7 @@ Each item is filed in `docs/known-gaps.md` §S474-PA follow-ups or §S474-backfi
 
 ## 6. Wrap state
 - Main at wrap: fa0e875b4 (+ this wrap PR).
-- **Worktrees:** 86 merged review/agent worktrees removed. 12 agent worktrees locked by the session process (all merged and clean) could not be force-removed under auto mode. They go with the session; otherwise run `git worktree remove -f -f` on each `.claude/worktrees/agent-*` except `agent-a036efcbcbcb1c8b0`. Kept: `agent-a036efcbcbcb1c8b0` (#1448). `~/.cache/scrml-pa/s474/` holds only logs.
+- **Worktrees:** all S474 worktrees removed; only the primary checkout and `agent-a036efcbcbcb1c8b0` (#1448) remain. `~/.cache/scrml-pa/s474/` holds only logs.
 - Maps: refreshed at wrap by project-mapper (watermark d139f747c → fa0e875b4). This is a stamp on primary/bootstrap/build only. The other maps still mention the deleted `facts-regen.yml` unlabelled, and bootstrap.map.md conformance figures are still the d139f747c ones (owed: a full map pass). `bootstrap.map.md` is gitignored, so it needs `git add -f`.
 
 ## 7. Test suite at wrap
