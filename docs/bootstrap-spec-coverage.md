@@ -33,7 +33,7 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 <!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
 | status | rows |
 |---|---:|
-| BUILT | 308 |
+| BUILT | 309 |
 | PARTIAL | 153 |
 | REFUSED-LOUD | 311 |
 | DEFERRED-RULED | 64 |
@@ -41,7 +41,7 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 | SILENT-ACCEPT | 17 |
 | SILENT-ABSENT | 32 |
 | UNVERIFIED | 9 |
-| **total** | **1114** |
+| **total** | **1115** |
 
 SILENT rows carrying a gap id: 49 of 49.
 <!-- @generated:coverage-totals END -->
