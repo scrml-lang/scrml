@@ -50,3 +50,27 @@ describe("W-MATCH-001 counts only the arms before the wildcard (§18.6)", () => 
     expect(codes(A(`.Ok(v) :> "IN", .Denied :> "d", .Locked :> "l", _ :> "?"`))).toEqual(["W-MATCH-001"]);
   });
 });
+
+// s475 r1 (review F2): only a PATTERN error silences W-MATCH-001 — an Error in an arm's BODY says
+// nothing about which variants the arms cover. "red on 317d02879" = failed on PR #1755's head before
+// r1, which read every diagnostic of the arm, body included.
+const AUTH2 = `    type AuthErr:enum = { Denied(reason: string), Locked }
+    function check(p: string)! AuthErr {
+        if (p == "locked") fail AuthErr.Locked;
+        if (p != "secret") fail AuthErr.Denied("no");
+        return true;
+    }`;
+const A2 = (arms) => `<program>\n    let <msg:string=""/>\n${AUTH2}\n    function a(p: string) -> string {\n        return match check(p) { ${arms} };\n    }\n    function login() {\n        @msg = "x";\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="msg">\${@msg}</p>\n    </main>\n</program>\n`;
+describe("W-MATCH-001: an Error in an arm body does not silence it (r1 F2)", () => {
+  test("unknown name in an arm body before the `else`: E-SCOPE-001 AND W-MATCH-001 (red on 317d02879)", () => {
+    expect(codes(A2(`.Ok(v) :> "IN", .Denied(r) :> nosuch, .Locked :> "l", else :> "X"`))).toEqual(["E-SCOPE-001", "W-MATCH-001"]);
+  });
+  test("same program without the body error: W-MATCH-001 only (green on both)", () => {
+    expect(codes(A2(`.Ok(v) :> "IN", .Denied(r) :> r, .Locked :> "l", else :> "X"`))).toEqual(["W-MATCH-001"]);
+  });
+  test("a pattern error (wrong payload arity) before the `else` still silences it (green on both)", () => {
+    const c = codes(A2(`.Ok(v) :> "IN", .Denied(r, q) :> r, .Locked :> "l", else :> "X"`));
+    expect(c).toContain("E-TYPE-021");
+    expect(c).not.toContain("W-MATCH-001");
+  });
+});

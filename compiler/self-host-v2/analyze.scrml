@@ -13150,9 +13150,10 @@ ${
     // already had an arm when that `_` / `else` came (s474 — then it covers
     // nothing once every error is named: W-MATCH-001, coverDiags).
     // s475 (g-boot-w-match-001-fires-on-failing-programs-s474): `coveredBefore`
-    // — the variant indices named BEFORE the first wildcard; `armErr` — an arm
-    // up to and including that wildcard drew an Error (a recovered pattern
-    // such as `.Ok(true)` read as `.Ok()`, a duplicate). W-MATCH-001 reads
+    // — the variant indices named BEFORE the first wildcard; `armErr` — the
+    // PATTERN of an arm up to and including that wildcard drew an Error (a
+    // recovered pattern such as `.Ok(true)` read as `.Ok()`, a duplicate);
+    // an Error in an arm's body does not count (s475 r1). W-MATCH-001 reads
     // these, never `covered`: an arm after the wildcard is E-SYNTAX-010 and
     // covers nothing the wildcard could have missed.
     type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean, coveredBefore: int[], armErr: boolean }
@@ -13171,9 +13172,9 @@ ${
         let coveredBefore: int[] = []   // s475: `covered`, counting only the arms before the first wildcard
         let armErr = false        // s475: an arm up to and including the first wildcard drew an Error
         for (const a of arms) {
-            const d0: int = st.diags.length
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
+            const d0: int = st.diags.length     // s475 r1: past the arm's body — only this arm-position check's diagnostics
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
             // the same variant) SHALL be a compile error (E-TYPE-023 …). The second
             // arm is unreachable." (`!{}` arms follow the match rule, §19 alias
@@ -13188,7 +13189,10 @@ ${
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
-            if (!last && hasErrorDiag(st.diags.slice(d0))) armErr = true
+            // s475 r1 (review F2): pattern errors only (`ra.patErr`, and the duplicate check just
+            // above) — an Error in an arm's BODY (an unknown name) says nothing about which variants
+            // the arms cover, so it does not silence W-MATCH-001
+            if (!last && (ra.patErr || hasErrorDiag(st.diags.slice(d0)))) armErr = true
             if (!last && ra.idx >= 0) coveredBefore = coveredBefore.concat([ra.idx])
             if (ra.idx == -1) {
                 const okPrior: boolean = okSeen
@@ -13589,8 +13593,9 @@ ${
     }
 
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
-    // its binders (locals scoped to the arm), its body.
-    type RArm:struct = { idx: int, st: AS }
+    // its binders (locals scoped to the arm), its body. `patErr` (s475 r1): the
+    // PATTERN part drew an Error — never the body's (W-MATCH-001, resolveArms).
+    type RArm:struct = { idx: int, st: AS, patErr: boolean }
 
     fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
         let st: AS = st0
@@ -13653,9 +13658,10 @@ ${
             }
         }
         st = addFail(st, a.nid, FailFact.FArm(idx))
+        const patErr: boolean = hasErrorDiag(st.diags.slice(st0.diags.length))
         const body: AArmBody = a.body
         st = resolveArmBody(armEnv, a, body, cx, st)
-        return { idx: idx, st: st }
+        return { idx: idx, st: st, patErr: patErr }
     }
 
     type PatName:struct = { name: string, binds: ABind[], parens: boolean, qual: string }
