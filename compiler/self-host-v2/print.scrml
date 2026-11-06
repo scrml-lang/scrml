@@ -2372,9 +2372,9 @@ ${
     }
 
     // s475 — the request machine (§6.7.7 / §13.9.2), modelled on effectJs:
-    //   [const <handle> =] rt.requestOn(scope$, <target cell>, [<dependency cells>],
+    //   rt.requestOn(scope$, <target cell>, [<dependency cells>],
     //     (task$) => { <Lets>; return { on: <the load>, then: (x) => { <then> } }; },
-    //     { mount[, state: { loading, data, error, stale }] })
+    //     { mount[, state: { loading, data, error, stale }][, slot: <handle>] })
     // The body's ONE Suspend (C-R1) is not printed as `rt.suspend`: the
     // runtime owns the load's suspension, so it knows the run (newest wins —
     // EC-2), drops a late settle after teardown (EC-3), sets the signals, and,
@@ -2382,8 +2382,7 @@ ${
     // failure itself (target unchanged, §6.7.7 "Settled state (failure)")
     // instead of running `then`. `then` closes over the Lets. Registered into
     // the scope this view list renders into (C12's owner rule, as an Effect).
-    // r1 (F3): a `handle` binds the `{ refetch }` object requestOn returns, so
-    // `<#id>.refetch()` (EC-4) has a route; with none the call is a statement.
+    // r1 (F3) / s475 S3b: a `handle` is the request's program-level slot (below).
     fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not, handle: Sym | not) -> Rendered {
         const n: int = body.stmts.length
         if (n == 0) return only([sexpr(jid("malformedRequest$"))])          // C-R1 refuses it first

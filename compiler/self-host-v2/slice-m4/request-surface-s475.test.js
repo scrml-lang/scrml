@@ -20,7 +20,7 @@
 //
 // The acceptance twins of the 12 conformance/cases/lifecycle/request-* cases live in
 // compiler/self-host-v2/acceptance/request/ (graded in acceptance.test.js). This file grades what
-// they cannot reach: the four `<#id>` signal cells (their S3b reads do not parse yet), the newest-wins
+// they cannot reach: the four `<#id>` signal cells as cells (their reads: request-refs-s475.test.js), the newest-wins
 // and teardown edges (a controlled transport), the Core shape, and every S3a refusal by its message.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";

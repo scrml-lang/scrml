@@ -366,6 +366,13 @@ ${body}    <main><p>${D}@x}${D}@b}</p>${markup}</main>
       expect(d.find((m) => m.startsWith("E-BOOTSTRAP-UNSUPPORTED"))).toContain("`<" + tag + ">`");
     }
   });
+  test("another file's `<#id>` names nothing (the program's requests, like its cells, are its own file's — §7.6.1)", () => {
+    const lib = { path: "lib.scrml", src: `export function poke() {\n    ${H("r")}.refetch();\n}\n` };
+    const app = { path: "app.scrml", src: `import { poke } from "./lib.scrml";\n` + P("", `<button onclick=poke()>p</button>`) };
+    const r = frontEnd(mods(), [lib, app], "app.scrml");
+    const d = r.diags.filter((x) => x.severity === "Error");
+    expect(d.map((x) => [x.code, x.file])).toEqual([["E-SCOPE-001", "lib.scrml"]]);
+  });
   test("a `<#id>` in a string literal stays text", async () => {
     const src = P("", `<p id="t">${D}"${H("r")}.data"}</p>`);
     expect(errCodes(src)).toEqual([]);

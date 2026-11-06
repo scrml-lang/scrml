@@ -1657,15 +1657,11 @@ ${
     //    a request torn down with its `if=` arm keeps its data, and on remount
     //    §6.7.7 "`<#id>.data` retains its previous value if one exists";
     //  - handle: the request's own Sym (hint `#<id>`, minted once per request,
-    //    so its printed name is unique): bound, where the request's view list
-    //    renders, to the `{ refetch }` rt.requestOn returns. S3b NOTE: that
-    //    binding is local to the render scope the request stands in — the
-    //    program's render, or an `if=` arm's. A `<#id>.loading` / `.data` /
-    //    `.error` / `.stale` read anywhere in the program reads the program cell
-    //    (`signals`, reachable from any scope); a `<#id>.refetch()` OUTSIDE the
-    //    request's own scope (a program function, a sibling handler) cannot see
-    //    the const — S3b needs a program-level route to it (e.g. a program-scope
-    //    slot requestOn fills on mount and clears on teardown).
+    //    so its printed name is unique). s475 (S3b): it names a PROGRAM-LEVEL
+    //    slot (print.scrml requestSlotStmts) the request fills while mounted, so
+    //    `<#id>.refetch()` (Core Refetch, refetchExpr) reaches it from a program
+    //    function or another scope; `<#id>.loading` / … read the program cell
+    //    (`signals`, reqSignalRead) from any scope.
     //  - body: the `lin` Lets, then ONE Suspend, last (C-R1). A load that waits
     //    is already a Suspend (the plan's point, hoisted by lowerBlock + cpsBody);
     //    a load that does not wait is wrapped: `Suspend(load, <value>, [Write(@x,

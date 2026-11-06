@@ -15053,7 +15053,7 @@ ${
         explicit: boolean,      // `deps=` was written
         signals: Sym[],         // the four `<#id>` cells lower appends to the program: loading, data, error, stale
         wcaps: Sym[],           // their write capabilities
-        handle: Sym,            // the request's identity: bound to the `{ refetch }` rt.requestOn returns
+        handle: Sym,            // the request's identity: its program-level slot (S3b — `<#id>.refetch()`)
         load: Sym,              // the load's bind when the right-hand side does not wait (lower wraps it)
         rhs: int,               // the right-hand side's nid
         dataTy: Type,           // `<#id>.data : T | not` (§6.7.7 Properties)
@@ -15275,6 +15275,9 @@ ${
     fn hashTargetTag(env: Env, id: string) -> string {
         const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
         if (ps is not) return ""
+        // the program's requests are reachable from its own file only, as its cells are
+        // (§7.6.1 — programInfo): another file's `<#id>` names nothing
+        if (ps.file != env.file) return ""
         return hashTagIn(declMarkup(ps), id)
     }
 
