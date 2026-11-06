@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-request-neg-no-id",
+  "description": "A `<request>` with no `id`: E-LIFECYCLE-018.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The `id` attribute is required (E-LIFECYCLE-018).\"",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-018"
+    ],
+    "severity": {
+      "E-LIFECYCLE-018": "error"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "acceptance-request-warn-no-deps",
+  "description": "A request that reads no reactive `@variable` and has no `deps=`: W-LIFECYCLE-013; it still loads once on mount.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 EC-5: \"The compiler SHALL emit W-LIFECYCLE-013 when a body references no reactive `@variables` and `deps=` is absent or empty (suppressed by explicit `deps=[]`).\"",
+  "expect": {
+    "codes": [
+      "W-LIFECYCLE-013"
+    ],
+    "severity": {
+      "W-LIFECYCLE-013": "warning"
+    },
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#x",
+        "text": "2"
+      }
+    ]
+  }
+}

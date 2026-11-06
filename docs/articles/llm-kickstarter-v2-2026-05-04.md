@@ -95,7 +95,7 @@ When you are stuck on a design call ("should this engine attribute behave X way 
 
 Start from the canonical shape below and modify what you need. Don't write from scratch — every scrml app is a variation of this skeleton.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5] — the bootstrap has no <schema>, <db tables=> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
 ```scrml
 <program db="contacts.db">
 
@@ -153,7 +153,7 @@ function deleteContact(id: int) {
 }
 
 // Load on mount: a <request> owns the result, its loading state and its error.
-<request id="contacts" deps=[]>${ @contacts = loadContacts() }</>
+<request id="contacts" deps=[]>${ @contacts = loadContacts(); }</>
 
 <div class="max-w-2xl mx-auto my-8 font-sans">
     <h1 class="text-2xl font-semibold mb-4">Contact Book</h1>
@@ -1832,7 +1832,7 @@ A `lin` declared outside a loop may not be consumed inside the loop body (E-LIN-
 
 When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-VALUE-WRITES-STATE(@contacts)] — the bootstrap has no <schema>, <db tables=>, <request> or <empty> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4] — the bootstrap has no <schema>, <db tables=> or <empty> yet, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
 ```scrml
 <program db="contacts.db">
 
@@ -1855,7 +1855,7 @@ function loadContacts()! -> SqlError {
     return ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all();
 }
 
-<request id="contacts" deps=[]>${ @contacts = loadContacts() }</>
+<request id="contacts" deps=[]>${ @contacts = loadContacts(); }</>
 
 <ul class="list-none p-0">
     <each in=@contacts as c key=c.id>

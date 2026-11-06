@@ -1,0 +1,9 @@
+// §66 twin of conformance/cases/lifecycle/request-deps-non-cell-entry-e-lifecycle-022-pos.
+<program>
+    type U:struct = { id: int }
+    let <u:U=({ id: 1 })/>
+    let <hits:int=0/>
+    fn suggest(x: int) -> int { return x + 10; }
+    <request id="hunt" deps=[@u.id]>${ @hits = suggest(@u.id); }</request>
+    <main><p>${@hits}</p></main>
+</program>

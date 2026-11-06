@@ -1,0 +1,30 @@
+{
+  "id": "acceptance-request-settle-success-cell",
+  "description": "A body-form `<request>` on a server function: on a 2xx settle the assigned cell holds the answer.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 \"Settled state (success)\" (`<#id>.data` → resolved value; the assigned `@var` is the request's write point).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": "Ada"
+    },
+    "state": {
+      "userName": "Ada"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "Ada"
+      }
+    ]
+  }
+}

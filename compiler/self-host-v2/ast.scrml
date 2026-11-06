@@ -190,6 +190,17 @@ ${
     // list is a parse error). A self-closing `<effect …/>` has an empty body.
     export type AEffect:struct = { nid: int, span: ASpan, deps: AExpr[], body: ABlock, keyword: boolean }
 
+    // s475 (slice S3a) — a `<request id="…">${ lin* @x = e }</>` (SPEC §6.7.7)
+    // where markup stands. Parsed as a request only when its body is a `${ … }`
+    // logic block (parse.scrml `isRequestBody`); a self-closing `<request …/>`
+    // or one with a markup body stays an AElem, judged by analyze (E-LIFECYCLE-019,
+    // the `url=` / `api=` form's refusal, or a user declaration named `request`).
+    // `attrs` are the opener's attributes as written — analyze reads `id=`,
+    // `deps=`, `cache` and refuses any other by name. `body` is the block's
+    // statements as written (analyze classifies them: `lin`* then ONE assignment).
+    // `opener`: the opener's span (the element's diagnostics point at it).
+    export type ARequest:struct = { nid: int, span: ASpan, attrs: AAttr[], body: ABlock, opener: ASpan }
+
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
         Local(name: string, mutable: boolean, ty: AType | not, init: AExpr, lin: boolean), // let / const [: T]; s471: `lin` (§35.2 — immutable, linear)
@@ -347,6 +358,9 @@ ${
         // the tree, by the nearest enclosing element scope (§6.7.4 "Scope and
         // teardown"): the program, an `if=` element, an `<each>` row.
         Effect(w: AEffect),
+        // s475 (slice S3a) — a `<request>` where markup stands (§6.7.7): owned,
+        // like an effect, by the element scope it stands in; renders nothing.
+        Request(r: ARequest),
         // s469 — a `#{…}` CSS block where markup stands (§9.1, §65): its rules,
         // parsed (css-syntax.scrml). It renders nothing where it stands; WHICH
         // stylesheet it feeds — the program-global layer, a component's

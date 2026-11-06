@@ -255,7 +255,6 @@ You **cannot** consume an outer `lin` inside one of these bodies. The compiler c
 
 The fix is to move the `lin` declaration inside the deferred body, so it is freshly produced every time the body runs:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-TRAILING] — the bootstrap has no `lin` declarations and no <request> element yet -->
 ```scrml
 <program>
 

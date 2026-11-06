@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-request-neg-only-lin",
+  "description": "A body of only `lin` declarations has no `@var = expr`: E-LIFECYCLE-021 (S469 PA reading (e)).",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`. (S469 PA reading: this includes a body that holds only `lin` declarations.)\"",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-021"
+    ],
+    "severity": {
+      "E-LIFECYCLE-021": "error"
+    }
+  }
+}

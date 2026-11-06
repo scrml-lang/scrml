@@ -1,0 +1,9 @@
+// The §60 `url=` form stays refused by name (INTERIM — §60 is not built).
+<program>
+    let <a:int=1/>
+    let <x:int=0/>
+    let <y:int=0/>
+    fn f(n: int) -> int { return n + 1; }
+    <request id="r" url="/api/users"/>
+    <main><p>${@x}</p></main>
+</program>

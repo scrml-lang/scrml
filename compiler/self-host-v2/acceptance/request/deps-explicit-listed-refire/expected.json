@@ -1,0 +1,54 @@
+{
+  "id": "acceptance-request-deps-explicit-listed-refire",
+  "description": "A change to a `deps=` cell re-executes the fetch: @userId (unlisted) changes first and nothing re-runs; bumping @ver re-runs the load, which reads the CURRENT @userId — user 2.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Re-execution: \"The fetch re-executes when: … Any `@variable` in `deps=` changes\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#setid"
+      },
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#bump"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "userId": 2,
+      "ver": 1,
+      "userName": "b"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "b"
+      }
+    ]
+  }
+}

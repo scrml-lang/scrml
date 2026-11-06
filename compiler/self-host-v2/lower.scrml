@@ -29,20 +29,20 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              CoreConst, CoreHead, CoreMeta, HeadTitle, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
     import { partsText } from "./css.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
              mkSpan } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
@@ -1446,6 +1446,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
             .Gather(f: x) :> not
         }
     }
@@ -1459,6 +1460,7 @@ ${
             .DeclNode(d: d) :> false
             .Css(c: c) :> true
             .Effect(w: w) :> false
+            .Request(r: r) :> false
             .Gather(f: x) :> false
         }
     }
@@ -1571,6 +1573,7 @@ ${
                 .DeclNode(d: d) :> lowerNode(c, n)
                 .Css(c: c) :> lowerNode(c, n)
                 .Effect(w: w) :> lowerNode(c, n)
+                .Request(r: r) :> lowerNode(c, n)
                 .Gather(f: x) :> lowerNode(c, n)
             }
             out = out.concat(vs)
@@ -1596,6 +1599,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
+            .Request(r: r) :> [requestView(c, r)]
             .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         }
     }
@@ -1625,6 +1629,117 @@ ${
     }
 
     fn mkEffectDep(d: Sym, i: InstRef, x: int) -> EffectDep { return { decl: d, inst: i, idx: x } }
+
+    // =========================================================================
+    // s475 (slice S3a) — a `<request>` (SPEC §6.7.7) → Core View.Request (the
+    // request machine, #1771), from analyze's ReqFact:
+    //  - target: the assigned cell; deps: the explicit `deps=` or the inferred
+    //    reads (never the target — analyze resolveRequest); mount: true (a
+    //    provably-writing request with dependencies is refused — slice S5);
+    //  - state: the request's FOUR `<#id>` cells — loading, data, error, stale —
+    //    appended to the PROGRAM's fields in ReqFact order (requestSignalFields;
+    //    index = the program's own field count + 4·k + j). They are program
+    //    cells wherever the request stands (the program body, an `if=` element):
+    //    a request torn down with its `if=` arm keeps its data, and on remount
+    //    §6.7.7 "`<#id>.data` retains its previous value if one exists";
+    //  - handle: the request's own Sym (hint `#<id>`, minted once per request,
+    //    so its printed name is unique): bound, where the request's view list
+    //    renders, to the `{ refetch }` rt.requestOn returns. S3b NOTE: that
+    //    binding is local to the render scope the request stands in — the
+    //    program's render, or an `if=` arm's. A `<#id>.loading` / `.data` /
+    //    `.error` / `.stale` read anywhere in the program reads the program cell
+    //    (`signals`, reachable from any scope); a `<#id>.refetch()` OUTSIDE the
+    //    request's own scope (a program function, a sibling handler) cannot see
+    //    the const — S3b needs a program-level route to it (e.g. a program-scope
+    //    slot requestOn fills on mount and clears on teardown).
+    //  - body: the `lin` Lets, then ONE Suspend, last (C-R1). A load that waits
+    //    is already a Suspend (the plan's point, hoisted by lowerBlock + cpsBody);
+    //    a load that does not wait is wrapped: `Suspend(load, <value>, [Write(@x,
+    //    load)])` — the runtime settles a non-promise at once.
+    // =========================================================================
+    fn requestView(c: LC, r: ARequest) -> View {
+        let k: int = 0
+        let at: int = -1
+        for (const rq0 of c.t.requests) {
+            if (rq0.nid == r.nid) at = k
+            k = k + 1
+        }
+        if (at < 0) return View.Text("")         // analyze refused it (the diagnostics gate stops lowering)
+        const rq: ReqFact = c.t.requests[at]
+        const tds: EffectDep[] = effectDep(c, rq.target)
+        if (tds.length == 0) return View.Text("")
+        const target: EffectDep = tds[0]
+        let deps: EffectDep[] = []
+        for (const d of rq.deps) { deps = deps.concat(effectDep(c, d)) }
+        const base: int = programFieldCount(c.t) + 4 * at
+        const state: RequestState = { loading: mkEffectDep(target.decl, target.inst, base), data: mkEffectDep(target.decl, target.inst, base + 1),
+                                      error: mkEffectDep(target.decl, target.inst, base + 2), stale: mkEffectDep(target.decl, target.inst, base + 3) }
+        const body: Block = loadBody(rq, cpsBody(lowerBlock(c, r.body), []))
+        return View.Request(target, deps, body, true, state, rq.handle)
+    }
+
+    fn programFieldCount(t: Tables) -> int {
+        for (const d of t.decls) {
+            if (d.sym.id == t.program.id) return d.fields.length
+        }
+        return 0
+    }
+
+    // The body with its load as its last statement: a Write that ends it (a load
+    // that does not wait) becomes `Suspend(load, value, [Write(…, load)])`.
+    fn loadBody(rq: ReqFact, b: Block) -> Block {
+        const n: int = b.stmts.length
+        if (n == 0) return b
+        const last: Stmt = b.stmts[n - 1]
+        const w: WriteParts | not = writeParts(last)
+        if (w is not) return b
+        const wr: Stmt = Stmt.Write(w.cap, w.inst, w.edit, Expr.Local(rq.load), w.check)
+        return block(b.stmts.slice(0, n - 1).concat([Stmt.Suspend(rq.load, w.value, block([wr]))]))
+    }
+
+    type WriteParts:struct = { cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check }
+
+    fn writeParts(s: Stmt) -> WriteParts | not {
+        return match s {
+            .Write(cap: c, inst: i, edit: e, value: v, check: k) :> { cap: c, inst: i, edit: e, value: v, check: k }
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+            .Suspend(bind: x) :> not
+        }
+    }
+
+    // A request's four `<#id>` cells, in the order loading, data, error, stale:
+    // `let` cells (each has a write capability — only the runtime writes them),
+    // loading / stale `false`, data / error `not` (§6.7.7 Properties).
+    fn requestSignalFields(rq: ReqFact) -> Field[] {
+        const tys: Type[] = [Type.Bool, rq.dataTy, rq.errTy, Type.Bool]
+        let out: Field[] = []
+        let j: int = 0
+        for (const s of rq.signals) {
+            let init: Expr = Expr.Lit(Literal.Absent)
+            if (j == 0 || j == 3) init = Expr.Lit(Literal.Bool(false))
+            out = out.concat([{ sym: s, ty: tys[j], init: init, mode: FieldMode.Let, role: FieldRole.Child,
+                                grants: { replace: true, edits: [] }, graph: not, exported: false, wcap: rq.wcaps[j], vals: [], persist: not }])
+            j = j + 1
+        }
+        return out
+    }
 
     // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
     // between elements is kept exactly too"): a Text node is free-text content
@@ -2103,6 +2218,10 @@ ${
         const c: LC = { t: t, file: d.file, subst: not, snap: not, rows: [] }
         let fields: Field[] = []
         for (const f of d.fields) { fields = fields.concat([lowerField(c, f)]) }
+        // s475 (S3a): each `<request>`'s four `<#id>` signals are cells of the program (requestView)
+        if (d.sym.id == t.program.id) {
+            for (const rq of t.requests) { fields = fields.concat(requestSignalFields(rq)) }
+        }
         let renders: View[] | not = not
         const s: DeclSyntax | not = syntaxOf(ss, d.nid)
         if (s is given) renders = lowerRenders(c, s)
@@ -2996,6 +3115,8 @@ ${
             if (e is given) out = out.concat([e.id])
         }
         for (const ff of t.fails.facts) { out = out.concat(failFactErrs(ff)) }
+        // s475 (S3a): a request's `<#id>.error` cell names its call's failure set (or `Error`)
+        for (const rq of t.requests) { out = out.concat(namedSyms(rq.errTy)) }
         return out
     }
 
@@ -3576,6 +3697,7 @@ ${
                 .Interp(e: x) :> false
                 .DeclNode(d: d) :> false
                 .Effect(w: w) :> false
+                .Request(r: r) :> false
                 .Css(c: c) :> false
                 .Gather(f: g) :> false
             }

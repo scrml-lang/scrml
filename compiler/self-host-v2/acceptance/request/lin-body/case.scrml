@@ -1,0 +1,9 @@
+// §6.7.7 (S469): a `lin` declared in the body and consumed by its one assignment.
+<program>
+    let <seed:int=3/>
+    let <v:int=0/>
+    fn mint(s: int) -> int { return s * 10; }
+    fn use(t: int) -> int { return t + 1; }
+    <request id="r">${ lin t = mint(@seed); @v = use(t); }</request>
+    <main><p id="v">${@v}</p></main>
+</program>

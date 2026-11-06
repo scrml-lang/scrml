@@ -1,0 +1,47 @@
+{
+  "id": "acceptance-request-deps-explicit-unlisted-no-refire",
+  "description": "Explicit `deps=` overrides inference: the body reads @userId but only @ver is listed, so changing @userId does not re-run the load.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Syntax: \"When present, `deps` overrides inference.\"",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#setid"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "userId": 2,
+      "userName": "a"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "a"
+      }
+    ]
+  }
+}
