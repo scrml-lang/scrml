@@ -1113,6 +1113,18 @@ ${
             // (armObjectShape) comes before the one-expression brace and the
             // block; the body is then read as the arm's ONE expression, by the
             // expression path below (parsePrimary's object path), ended by armEnd.
+            // s475 (#1762 review item 3) — §7.2.2 rule 3: "a `{ … }` holding exactly ONE
+            // expression and no `;` at its own top level, written as the body of a
+            // `match` or `!{}` arm whose value is used (§18.5) … is that expression";
+            // a value `if` is an expression (§17.6 if-as-expression), and value `if`
+            // branches already take a nested one (parseValueBranchExpr). Read as that
+            // ONE expression, `bare` (the brace is `[Eval(if …)]`, as `{ e }` is). In
+            // a STATEMENT-position `match` / `!{}` the brace is a statement list and
+            // the `if` a statement `if`: armTails re-reads it so (stmtArmReread).
+            if (isWord(adv(tp), "if")) {
+                const vb: RArmBlock | not = valueIfBrace(tp)
+                if (vb is given) return { body: AArmBody.ArmBlock(vb.b), lifted: false, bare: true, tp: vb.tp }
+            }
             if (!armObjectShape(tp)) {
                 const rb: RArmBlock = parseArmBlock(tp)
                 return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, bare: rb.bare, tp: rb.tp }
@@ -1231,15 +1243,35 @@ ${
                 } else {
                     r = { s: rs.s, tp: termAfter(rs.tp, rs.s, b0) }
                 }
+                if (!armBlockLastAt(r.tp)) r = stmtChecks(r.tp, r.s, b0, h0)
                 stmts = stmts.concat([r.s])
                 t = r.tp
-                if (!armBlockLastAt(t)) t = stmtChecks(t, r.s, b0, h0)
                 if (t.i == before) t = adv(t)
             }
         }
         t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
         return { b: b, lifted: lifted, bare: bare, tp: bumpId(t) }
+    }
+
+    // s475 (#1762 review item 3) — at an arm's `{` whose first token is `if`: the
+    // brace read as ONE value `if` (parseValueIfExpr, parenthesized head), an
+    // optional `;`, then the brace's `}` — the block `[Eval(if …)]`. `not` when the
+    // brace holds anything else or the value `if` does not read without an error;
+    // the caller then reads the brace as a block (a statement `if` among others).
+    fn valueIfBrace(tp: TP) -> RArmBlock | not {
+        const start: int = cur(tp).start
+        const h0: int = hardErrors(tp.diags)
+        const ifStart: int = cur(adv(tp)).start
+        const inner: RExpr = parseValueIfExpr(adv(tp), false)
+        if (hardErrors(inner.tp.diags) != h0) return not
+        const es: RStmt = mkS(inner.tp, ifStart, AStmtK.Eval(inner.e))
+        let t: TP = es.tp
+        if (isP(t, ";")) t = adv(t)
+        if (!isP(t, "}")) return not
+        t = adv(t)
+        const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: [es.s] }
+        return { b: b, lifted: false, bare: true, tp: bumpId(t) }
     }
 
     // After a statement in an arm block: is it the block's last (only `;`s, then
@@ -2219,6 +2251,7 @@ ${
         let t: TP = adv(tp)
         let props: AProp[] = []
         let going = !isP(t, "}") && !atEnd(t)
+        let keyRefused = false          // s475: a computed or number key — the literal is reported once, then Recovered
         while (going) {
             const nameTok: PTok = cur(t)
             const pstart: int = nameTok.start
@@ -2235,8 +2268,28 @@ ${
                 const sv: RExpr = mkE(adv(t), pstart, AExprK.Name(nameTok.v))
                 t = sv.tp
                 props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: false, name: nameTok.v, value: sv.e }])
+            } else if (isP(t, "[")) {
+                // s475 (#1762 review item 4) — a `[computed]: value` entry. §18.5's
+                // object-literal test reads it as an object entry (armObjectShape),
+                // but a scrml object literal is a struct value constructed BY FIELD
+                // NAME (§66.18, §14.3): a key known only at run time names no field.
+                // PERMANENT (a computed key cannot be checked against a struct's
+                // fields): one report, and the entry is read past whole — `[ … ]`,
+                // `:`, its value — so nothing cascades.
+                t = diagAt(t, "E-PARSE-OBJECT", "a computed key `[…]: value` in an object literal — an object literal is a struct value, built by field name (§66.18, §14.3), and a key computed at run time names no field; write the field's name (`name: value`)", nameTok)
+                t = expectP(skipParens(t), ":")          // (scanHead balances every bracket kind: past the `]`)
+                const cv: RExpr = parseAssign(t)
+                t = cv.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: false, name: "", value: cv.e }])
+                keyRefused = true
             } else {
-                if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword && nameTok.cls != TC.Str) {
+                if (nameTok.cls == TC.Num) {
+                    // s475 (#1762 review item 4) — §18.5's object test admits a number
+                    // literal key (JavaScript reads `{ 1: x }`), but a struct field is
+                    // named by an identifier (§14.3 `field: type`): no field is `1`
+                    t = diagAt(t, "E-PARSE-OBJECT", "a number `" + nameTok.text + "` is not a field name — an object literal is a struct value, built by field name (§66.18), and a struct field is named by an identifier (§14.3 `field: type`); write the field's name (`name: value`)", nameTok)
+                    keyRefused = true
+                } else if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword && nameTok.cls != TC.Str) {
                     t = diagAt(t, "E-PARSE-OBJECT", "expected a field name, found `" + nameTok.text + "`", nameTok)
                 }
                 t = expectP(adv(t), ":")
@@ -2253,6 +2306,9 @@ ${
             }
         }
         t = expectP(t, "}")
+        // (a refused key: the literal is a parse-error placeholder — no struct type is
+        // judged against an entry list that names no field, so no E-TYPE-STRUCT-FIELD cascade)
+        if (keyRefused) return mkE(t, start, AExprK.Recovered)
         return mkE(t, start, AExprK.ObjectLit(props))
     }
 
@@ -2303,7 +2359,7 @@ ${
     fn parseTermStmt(tp: TP, d0: int) -> RStmt {
         const h0: int = hardErrors(tp.diags)
         const r: RStmt = parseTermStmtBare(tp, d0)
-        return { s: r.s, tp: stmtChecks(r.tp, r.s, d0, h0) }
+        return stmtChecks(r.tp, r.s, d0, h0)
     }
 
     // The statement and its terminator, without the no-effect judgment (an arm
@@ -2340,10 +2396,12 @@ ${
     // Two no-effect statements on one line are one report (§40.8). The `~`
     // exemption (§32.2) has nothing to apply to: the bootstrap has no `~`.
     // =========================================================================
-    fn stmtChecks(tp: TP, s: AStmt, d0: int, h0: int) -> TP {
-        let t: TP = noEffectStmt(tp, s, d0)
-        if (hardErrors(t.diags) == h0) t = armTails(t, s, d0)
-        return t
+    // s475 (#1762 review item 3): returns the statement too — armTails may re-read
+    // a value-`if` arm brace of a statement-position `match` / `!{}` as statements.
+    fn stmtChecks(tp: TP, s: AStmt, d0: int, h0: int) -> RStmt {
+        const t: TP = noEffectStmt(tp, s, d0)
+        if (hardErrors(t.diags) == h0) return armTails(t, s, d0)
+        return { s: s, tp: t }
     }
 
     fn noEffectStmt(tp: TP, s: AStmt, d0: int) -> TP {
@@ -2383,12 +2441,25 @@ ${
     // block arms yield nothing (§18.5), so each block's LAST statement is a
     // statement too — judged here (parseArmBlock left it alone). A `lift` there
     // is analyze's refusal (it yields to nothing), not judged.
-    fn armTails(tp: TP, s: AStmt, d0: int) -> TP {
+    fn armTails(tp: TP, s: AStmt, d0: int) -> RStmt {
         const x: AExpr | not = stmtExpr(s)
-        if (x is not) return tp
+        if (x is not) return { s: s, tp: tp }
         const arms: AArm[] = handledArms(x)
+        if (arms.length == 0) return { s: s, tp: tp }
         let t: TP = tp
-        for (const a of arms) {
+        let out: AArm[] = []
+        for (const a0 of arms) {
+            let a: AArm = a0
+            // s475 (#1762 review item 3) — a value-`if` brace (valueIfBrace) is the
+            // arm's ONE expression only where its value is used; here the brace is a
+            // statement list (§7.2.2 rule 1; §18.5 "In a STATEMENT position a block arm
+            // yields nothing"), so it is re-read as one: its `if` is a statement `if`,
+            // whose branches owe their own `;` (reported by that reading, as for any block)
+            if (a.bare && valueIfArm(t, a)) {
+                const rr: RArmReread = stmtArmReread(t, a)
+                a = rr.a
+                t = rr.tp
+            }
             const b: ABlock | not = armBlockOf(a)
             if (b is given && !a.lifted && b.stmts.length > 0) {
                 const last: AStmt = b.stmts[b.stmts.length - 1]
@@ -2399,10 +2470,88 @@ ${
                 // rule 1), so its statement owes its `;` — reported where it
                 // goes, as termAfter would have (the cascade guard included)
                 if (a.bare && hardErrors(t.diags) <= d0) t = bareArmSemi(t, last)
-                t = stmtChecks(t, last, d0, hardErrors(t.diags))
+                const rl: RStmt = stmtChecks(t, last, d0, hardErrors(t.diags))
+                t = rl.tp
+                a = withArmBlock(a, { nid: b.nid, span: b.span, stmts: b.stmts.slice(0, b.stmts.length - 1).concat([rl.s]) }, a.lifted, a.bare)
             }
+            out = out.concat([a])
         }
-        return t
+        return { s: withArmsStmt(s, x, out), tp: t }
+    }
+
+    type RArmReread:struct = { a: AArm, tp: TP }
+
+    // Is this `bare` arm a value-`if` brace (valueIfBrace: the block `[Eval(if …)]`,
+    // written `{ if … }`)? A `{ e }` brace never starts with `if` (parseStmt reads a
+    // statement `if` there), so the brace's first token decides.
+    fn valueIfArm(tp: TP, a: AArm) -> boolean {
+        const b: ABlock | not = armBlockOf(a)
+        if (b is not) return false
+        const i: int = tokIndexAt(tp, b.span.start)
+        if (i < 0 || i + 1 >= tp.toks.length) return false
+        const w: PTok = tp.toks[i + 1]
+        return isNameTok(w) && w.v == "if"
+    }
+
+    // The arm's brace read again as a statement-list block (parseArmBlock), from its
+    // `{` — fresh node ids from `tp`, and that reading's own diagnostics.
+    fn stmtArmReread(tp: TP, a: AArm) -> RArmReread {
+        const b: ABlock | not = armBlockOf(a)
+        if (b is not) return { a: a, tp: tp }
+        const i: int = tokIndexAt(tp, b.span.start)
+        if (i < 0) return { a: a, tp: tp }
+        const rb: RArmBlock = parseArmBlock({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })
+        return { a: withArmBlock(a, rb.b, rb.lifted, rb.bare), tp: { toks: tp.toks, i: tp.i, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: rb.tp.ns } }
+    }
+
+    fn withArmBlock(a: AArm, b: ABlock, lifted: boolean, bare: boolean) -> AArm {
+        return { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmBlock(b), legacy: a.legacy, lifted: lifted, bare: bare }
+    }
+
+    // The expression statement `s` (its expression `x` a `match` / `!{}`) with its arms replaced.
+    fn withArmsStmt(s: AStmt, x: AExpr, arms: AArm[]) -> AStmt {
+        const hx: AHandled | not = handledOf(x)
+        if (hx is given) {
+            const how: AHow = hx.how
+            const nh: AHow = match how {
+                .MatchOn(arms: a) :> AHow.MatchOn(arms)
+                .Guard(arms: a) :> AHow.Guard(arms)
+                .Propagate :> AHow.Propagate
+            }
+            const nx: AExpr = { nid: x.nid, span: x.span, k: AExprK.Handled({ subject: hx.subject, how: nh }) }
+            return { nid: s.nid, span: s.span, k: AStmtK.Eval(nx) }
+        }
+        return s
+    }
+
+    fn handledOf(e: AExpr) -> AHandled | not {
+        const k: AExprK = e.k
+        return match k {
+            .Handled(h: h) :> h
+            .Recovered :> not
+            .Sql(q: q) :> not
+            .Template(quasis: qs) :> not
+            .Foreign(f: fb0) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: sv) :> not
+            .Bool(v: bv) :> not
+            .NotLit :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: tt) :> not
+            .Assign(target: at) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
     }
 
     // s474 #1512 — E-STMT-MISSING-SEMICOLON for a `bare` arm's one statement
@@ -3917,7 +4066,7 @@ ${
         const start: int = cur(tp).start
         let t: TP = adv(tp)
         let cond: AExpr = mkE(t, start, AExprK.Recovered).e
-        if (bareOk && !isP(t, "(")) {
+        if (bareOk && bareHeadAt(t)) {
             const cb: RExpr = parseTernary(t)
             cond = cb.e
             t = cb.tp
@@ -3945,6 +4094,16 @@ ${
             }
         }
         return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true))
+    }
+
+    // s475 (#1762 review item 2) — at the token after `if`: is the head a BARE
+    // condition (§17.6.10 `value-form-if ::= 'if' condition '{' …`)? Yes when it
+    // does not start with `(`, and when it does but no `{` follows the matching
+    // `)` — the parentheses are then part of the condition (`(@ok) && @n > 0`),
+    // not the head's own (§17.6.1 `'if' '(' condition ')' arm-body`).
+    fn bareHeadAt(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return true
+        return !isP(skipParens(tp), "{")
     }
 
     // One branch of a value `if`: its value, or a Recovered placeholder for a
@@ -7916,8 +8075,11 @@ ${
         // interpolation may drop its head's parentheses (`value-form-if ::= 'if'
         // condition '{' expression '}'`): `${ if @isAdmin { "Admin" } else { "User" } }`.
         // With the parentheses it is an ordinary expression (an operand too, §17.6.1).
+        // s475 (#1762 review item 2): a bare condition may itself START with `(` —
+        // `${ if (@ok) && @n > 0 { "y" } }` — so a `(` head is the parenthesized
+        // head only when a `{` follows its `)` (bareHeadAt).
         let r: RExpr = { e: { nid: t.nid, span: mkSpan(start, start), k: AExprK.Recovered }, tp: t }
-        if (isWord(t, "if") && !tk(peekAt(t, 1), "(")) {
+        if (isWord(t, "if") && bareHeadAt(adv(t))) {
             r = parseValueIfExpr(t, true)
         } else {
             r = parseAssign(t)

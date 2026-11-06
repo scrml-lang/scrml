@@ -12,12 +12,25 @@
 //    type, and a `!{}` / failable-`match` arm's value the callee's success type (or,
 //    for a callee that declares none, the position's).
 //
+// 2. A markup value `if` whose bare condition starts with `(` — §17.6.10
+//    `value-form-if ::= 'if' condition '{' expression '}'`: `${ if (@ok) && @n > 0 { … } }`.
+//    The `(` is the head's own only when a `{` follows its `)` (§17.6.1).
+// 3. A value `if` as a match / `!{}` arm's brace body — §7.2.2 rule 3: "a `{ … }`
+//    holding exactly ONE expression and no `;` at its own top level, written as the
+//    body of a `match` or `!{}` arm whose value is used (§18.5) … is that
+//    expression". In a STATEMENT position the brace is a statement list (§7.2.2
+//    rule 3: "In a STATEMENT position … the arm's `{ … }` is a statement list"), so
+//    its `if` is a statement `if`.
+// 4. A `[computed]` or number key in an object literal — §18.5's object test reads
+//    the brace as an object, but an object literal is a struct value built by field
+//    name (§66.18; §14.3 fields are identifiers): ONE E-PARSE-OBJECT, no cascade.
+//
 // Graded on diagnostic codes, checkCore, and the RUNTIME through the slice runtime in
 // happy-dom.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -42,7 +55,10 @@ const DECLS = [
   "    type L:enum = { NotFound(id: string), Timeout }",
   "    function one() -> int { return 1; }",
 ].join("\n");
-const P = (decls, main = "        <p>x</p>") => `<program>\n${DECLS}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+const BUTTONS = `        <button onclick={ @ok = !@ok; }>flip</button>\n        <button onclick={ @n = @n + 1; }>bump</button>`;
+const P = (decls, main = "        <p>x</p>") => `<program>\n${DECLS}\n${decls}\n    <main>\n${main}\n${BUTTONS}\n    </main>\n</program>\n`;
+const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
+const CHECK = `    function check(p: string)! L { if (p == "x") fail L.Timeout; return true; }`;
 
 // ---------------------------------------------------------------------------
 describe("1 — an object literal takes its struct type from a `return`, an argument, a handler arm (§18.5, §14.10, §19.4.3)", () => {
@@ -101,5 +117,88 @@ describe("1 — an object literal takes its struct type from a `return`, an argu
     expect(codes(P(`    function g(k: K) -> int { return 1; }
     function h() -> int { return g(.Timeout); }`))).toEqual(["E-TYPE-VARIANT"]);
     expect(codes(P(`    function h() -> K { return .Timeout; }`))).toEqual(["E-TYPE-VARIANT"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("2 — a markup value `if` whose bare condition starts with `(` (§17.6.10 `'if' condition '{'`)", () => {
+  test("`(@ok) && @n > 0`, `(@ok) || …` with `else`, a grouped operand `(@n + 1) * 2 > 3`; reactive (runtime)", async () => {
+    await load(P(``, `        <p id="a">\${ if (@ok) && @n > 0 { "y" } }</p>
+        <p id="b">\${ if (@ok) || @n > 1 { "y" } else { "n" } }</p>
+        <p id="c">\${ if (@n + 1) * 2 > 3 { "big" } else { "small" } }</p>`));
+    expect([$("#a").textContent, $("#b").textContent, $("#c").textContent]).toEqual(["", "y", "small"]);
+    click(btn("bump"));
+    expect([$("#a").textContent, $("#b").textContent, $("#c").textContent]).toEqual(["y", "y", "big"]);
+    click(btn("flip"));
+    expect([$("#a").textContent, $("#b").textContent, $("#c").textContent]).toEqual(["", "n", "big"]);
+  });
+
+  test("an `else if` with a `(`-led bare condition; the parenthesized head and the operand form are unchanged (runtime)", async () => {
+    await load(P(``, `        <p id="a">\${ if @n > 2 { "big" } else if (@n) > 0 && @ok { "small" } else { "zero" } }</p>
+        <p id="b">\${ if (@ok) { "Y" } else { "N" } }</p>
+        <p id="c">\${ if (@ok) { "y" } else { "n" } + "!" }</p>`));
+    expect([$("#a").textContent, $("#b").textContent, $("#c").textContent]).toEqual(["zero", "Y", "y!"]);
+    click(btn("bump"));
+    expect($("#a").textContent).toBe("small");
+  });
+
+  test("still refused: an unbraced branch (§17.6.1), and a bare head outside a markup `${ }`'s sole content", () => {
+    expect(codes(P(``, `        <p>\${ if (@ok) "y" else "n" }</p>`))).toEqual(["E-PARSE-EXPECTED", "E-PARSE-EXPECTED"]);
+    expect(codes(P(`    function h(c: bool, n: int) -> int { return if (c) && n > 0 { 1 } else { 2 }; }`))).toContain("E-PARSE-EXPECTED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("3 — a value `if` as an arm's one-expression brace (§7.2.2 rule 3, §18.5)", () => {
+  test("`return match` / `const v = match` / `!{}` arms: `{ if … }`, `{ if …; }`, `{ e; }` branches, `else if`, no `else` (runtime)", async () => {
+    await load(P(`${CHECK}
+    function a(k: K, c: bool) -> int { return match k { .A :> { if (c) { 1 } else { 2 } }, .B :> { if (c) { 3; } else { 4; } }, else :> { if (c) { 5 } else if (!c) { 6 } else { 7 }; } }; }
+    function b(k: K, c: bool) -> int { const v = match k { .A :> { if (c) { 8 } }, else :> 0 }; return match v { not :> -1, else :> v }; }
+    function h(p: string, c: bool) -> int { const v = check(p) !{ .Timeout :> { if (c) { 10 } else { 20 } }, _ :> 0 }; return 0; }
+    function g(p: string, c: bool) -> int { return match check(p) { .Ok(x) :> 1, .Timeout :> { if (c) { 30 } else { 40 } }, _ e :> 0 }; }`,
+      `        <p id="v">\${a(.A, true)} \${a(.A, false)} \${a(.B, true)} \${a(.B, false)} \${a(.C, true)} \${a(.C, false)} \${b(.A, true)} \${b(.A, false)} \${g("x", true)} \${g("x", false)} \${g("y", true)}</p>`));
+    expect($("#v").textContent).toBe("1 2 3 4 5 6 8 -1 30 40 1");
+  });
+
+  test("in a STATEMENT-position `match` / `!{}` the brace is a statement list — its `if` is a statement `if` (runtime)", async () => {
+    await load(P(`${CHECK}
+    function w(k: K, c: bool) { match k { .A :> { if (c) { @n = 1; } else { @n = 2; } }, .B :> { if (c) { @n = 7; } }, else :> { @n = 3; } } }
+    function x(c: bool) { check("x") !{ .Timeout :> { if (c) { @n = 4; } else { @n = 5; } }, _ :> { } }; }
+    function y(j: K, c: bool) { match K.A { .A :> { match j { .B :> { if (c) { @n = 6; } }, else :> { } } }, else :> { } } }`,
+      `        <p id="v">\${@n}</p>
+        <button onclick={ w(.A, true); }>wa</button>
+        <button onclick={ w(.A, false); }>wb</button>
+        <button onclick={ x(false); }>xb</button>
+        <button onclick={ y(.B, true); }>yb</button>`));
+    click(btn("wa")); expect($("#v").textContent).toBe("1");
+    click(btn("wb")); expect($("#v").textContent).toBe("2");
+    click(btn("xb")); expect($("#v").textContent).toBe("5");
+    click(btn("yb")); expect($("#v").textContent).toBe("6");
+  });
+
+  test("statement position keeps the statement list's rules: a branch's bare `e` owes its `;` (§7.2.2 rule 1)", () => {
+    expect(codes(P(`    function h(k: K, c: bool) { match k { .A :> { if (c) { one() } else { one() } }, else :> { } } }`))).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON"]);
+    expect(codes(P(`    function h(k: K, c: bool) { match k { .A :> { if (c) { one(); } }, else :> { } } }`))).toEqual([]);
+  });
+
+  test("the value reading's own rules: an assignment branch is E-ASSIGN-POSITION; statements after the `if` make the brace a block", () => {
+    expect(codes(P(`    function h(k: K, c: bool) -> int { return match k { .A :> { if (c) { @n = 1; } else { 2 } }, else :> 0 }; }`))).toEqual(["E-ASSIGN-POSITION"]);
+    expect(codes(P(`    function h(k: K, c: bool) -> int { return match k { .A :> { if (c) { one(); } one(); lift 2; }, else :> 0 }; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("4 — a `[computed]` or number key in an object literal: ONE E-PARSE-OBJECT, no cascade", () => {
+  test("in an annotated declaration, and as an arm's object body", () => {
+    expect(codes(P(`    function h(s: string) -> int { const o: S = { [s]: 1, b: 2 }; return 0; }`))).toEqual(["E-PARSE-OBJECT"]);
+    expect(codes(P(`    function h(k: K, s: string) -> S { return match k { .A :> { [s]: 1 }, else :> { a: 0, b: 0 } }; }`))).toEqual(["E-PARSE-OBJECT"]);
+    expect(codes(P(`    function h() -> int { const o: S = { 1: 2, b: 2 }; return 0; }`))).toEqual(["E-PARSE-OBJECT"]);
+    expect(codes(P(`    function h(k: K) -> S { return match k { .A :> { 1: 2, b: 3 }, else :> { a: 0, b: 0 } }; }`))).toEqual(["E-PARSE-OBJECT"]);
+  });
+
+  test("the message names the struct rule", () => {
+    const d = run(P(`    function h(s: string) -> int { const o: S = { [s]: 1, b: 2 }; return 0; }`)).diags[0];
+    expect(d.message).toContain("computed key");
+    expect(d.message).toContain("§66.18");
   });
 });
