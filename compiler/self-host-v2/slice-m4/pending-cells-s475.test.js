@@ -75,6 +75,10 @@ const LOAD = `    function loadName(id: int) -> string {
         return u.name;
     }
 `;
+// r1 F1: a CLIENT function that reads `@userId` and reaches the server; a cell-free client helper.
+const CUR = `    function cur() -> string { const n = loadName(@userId) !{ _ :> "?" }; return n; }
+    function one() -> int { return 1; }
+`;
 const APP = (decl, opts = {}) => `<program db="./app.db">
     type User:struct = { id: int, name: string }
     let <userId:int=1/>
@@ -265,7 +269,9 @@ ${body}    </main>
 
 describe("§13.9.5 — failure is handled at the declaration", () => {
   test("an unhandled failable initializer is E-ERROR-002 (§13.9.5 worked example `<members2>`)", () => {
-    expect(codes(APP(`let <who:(not to string)=(loadName(@userId))/>`))).toEqual(["E-ERROR-002"]);
+    const e = errsOf(APP(`let <who:(not to string)=(loadName(@userId))/>`));
+    expect(e.map((d) => d.code)).toEqual(["E-ERROR-002"]);
+    expect(e[0].message).toContain("the initializer of the pending cell `@who` is failable and not handled");
   });
 
   test("an arm that yields the declared type is legal; one that yields another type is refused", () => {
@@ -276,6 +282,40 @@ describe("§13.9.5 — failure is handled at the declaration", () => {
 });
 
 describe("refusals kept (each named)", () => {
+  // r1 F1 (red on ac5fe6d1b: compiled clean, deps 0 — the load never re-ran): a call of a CLIENT
+  // function may read cells the initializer does not show (`cur()` reads `@userId`), so a locked
+  // initializer calling one is derived (ruling S475 item 1 "locked + reads is derived and stays refused").
+  test("locked + a client-function call is DERIVED: E-VALUE-SERVER-CALL (r1 F1 — the call may read cells)", () => {
+    const src = APP(`<who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR);
+    const c = codes(src);
+    expect(c).toContain("E-VALUE-SERVER-CALL");
+    expect(errsOf(src).find((d) => d.code === "E-VALUE-SERVER-CALL").message).toContain("the formula of derived `@who`");
+  });
+
+  test("`let` + a client-function call is refused by name: its deps cannot be inferred (r1 F1, INTERIM)", () => {
+    const e = errsOf(APP(`let <who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR));
+    expect(e.map((d) => d.code)).toEqual([U]);
+    expect(e[0].message).toContain("cannot infer the load's dependencies");
+    expect(e[0].message).toContain("g-boot-pending-cell-opaque-call-s475");
+    // INTERIM over-refusal, recorded in the gap: a cell-free client helper in the initializer
+    const o = errsOf(APP(`let <who:(not to string)=(loadName(one()) !{ _ :> not })/>`).replace(LOAD, LOAD + CUR));
+    expect(o.map((d) => d.code)).toEqual([U]);
+    expect(o[0].message).toContain("`one()`");
+  });
+
+  test("a file-scope (imported module) `(not to T)` cell with a waiting initializer is refused by name (r1 L1, INTERIM)", () => {
+    const mod = `type User:struct = { id: int, name: string }
+${LOAD}export let <who:(not to string)=(loadName(1) !{ _ :> not })/>
+`;
+    const e = errsOf([{ path: "m.scrml", src: mod }, { path: "app.scrml", src: `${D} import { who } from "./m.scrml"; }
+<program db="./app.db">
+    <main><p if=@who>${D}@who}</p></main>
+</program>
+` }]);
+    expect(e.some((d) => d.code === "E-VALUE-SERVER-CALL")).toBe(false);
+    expect(e.some((d) => d.code === U && d.message.includes("g-boot-pending-cell-outside-program-s475"))).toBe(true);
+  });
+
   test("locked + reads is DERIVED: E-VALUE-SERVER-CALL (ruling S475 items 1 and 7, PERMANENT)", () => {
     const c = codes(APP(`<who:(not to string)=(loadName(@userId) !{ _ :> not })/>`));
     expect(c).toContain("E-VALUE-SERVER-CALL");
@@ -303,9 +343,20 @@ describe("refusals kept (each named)", () => {
 });
 
 describe("writes — the settle is the compiler's; author writes stay governed (rulings S475 items 2 and 3)", () => {
-  test("an author write of a `not`-admitting value is still refused (item 2: only the pending cell's own load)", () => {
-    const src = APP(PEND).replace(`onclick={ @userId = 2; }`, `onclick={ @who = loadName(2) !{ _ :> not }; }`);
-    expect(codes(src)).toEqual(["E-WRITE-NOT-GRANTED"]);
+  // r1 F2 (flipped; red on ac5fe6d1b: E-WRITE-NOT-GRANTED) — §13.9.4 ¶2 "An action-position write of a
+  // waiting value into a pending cell … is awaited at its suspension point (§13.8 (i)) and lands when the
+  // value arrives" — the cell's own handled load (ruling S475 item 2; §66.11.6 rule 3, #1793).
+  test("an author's handled waiting write into a pending cell is admitted (§13.9.4 ¶2), its value still typed", () => {
+    const w = (h) => APP(PEND).replace(`onclick={ @userId = 2; }`, `onclick={ ${h} }`);
+    expect(codes(w(`@who = loadName(2) !{ _ :> not };`))).toEqual([]);
+    expect(codes(w(`@who = loadName(2) !{ _ :> "?" };`))).toEqual([]);
+    expect(codes(w(`@who = loadName(2) !{ _ :> 7 };`))).toEqual(["E-TYPE-031"]);
+  });
+
+  test("a bare `not`, or another value that may be `not`, is still refused (item 2: only the own handled load)", () => {
+    const w = (h) => APP(PEND).replace(`onclick={ @userId = 2; }`, `onclick={ ${h} }`).replace("    let <show", "    let <alt:string | not=not/>\n    let <show");
+    expect(codes(w(`@who = not;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(w(`@who = @alt;`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 
   test("a LOCKED pending cell may be rewritten `T → T′` (item 3: it reloads); a plain locked lifecycle may not", () => {
@@ -386,6 +437,41 @@ describe("run time — the request machine, through the server artifact (slice-m
     } finally {
       rt.setHostErrorReporter(prev);
     }
+  });
+
+  test("an author's handled waiting write is awaited and lands; the cell keeps its value meanwhile (§13.9.4 ¶2, r1 F2)", async () => {
+    const r = compile(APP(PEND).replace(`onclick={ @userId = 2; }`, `onclick={ @who = loadName(3) !{ _ :> not }; }`));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-write-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#u2"));
+    await settle(5);
+    expect(held.length).toBe(2);                     // the handler's call
+    expect(cells(rt).who).toBe("a");                 // keeps its current value — never back to `not`
+    await held[1].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
+    expect(shown()).toBe("c");
+  });
+
+  test("a failed author waiting write runs its arm: `not` returns the cell to its pre-state (§13.9.5)", async () => {
+    const r = compile(APP(PEND).replace(`onclick={ @userId = 2; }`, `onclick={ @who = loadName(3) !{ _ :> not }; }`));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-write-fail-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));
+    await settle(5);
+    held[1].fail();
+    await settle();
+    expect(cells(rt).who).toBe(null);
+    expect(waiting()).toBe(true);
   });
 
   test("a failed load with a value arm settles that value", async () => {

@@ -24,3 +24,11 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
   resolved; NEW g-boot-pending-cell-reset-unbuilt-s475 (open). Coverage rows §13.7 (second fix), §13.9/13.9.1, 13.9.2, 13.9.3,
   13.9.4, 13.9.5, 13.9.6, 13.9.7, §66.11.6 updated. Slices: lints 0; m1 159, m2 619, m3 60, m4 5438, codec 166, m1-lowered 159 — 0 fail.
   bootstrap-conformance --json base vs head: counts identical (PASS 302 / FAIL 238 / NOT-TWINNED 685 / UNSUPPORTED 602), 0 verdict diffs.
+- 2026-11-06T19:10Z — FIX ROUND r1 (adversarial review of #1796, FIX-FIRST). Merged origin/main ca31847a8 (no self-host-v2
+  changes; known-gaps auto-resolved by the generated-merge driver, 0 markers). F1: a `(not to T)` cell's locked initializer
+  calling a non-server function is derived again (`lifeDerived`/`opaqueCall`); `let` + such a call refused by name
+  (E-BOOTSTRAP-UNSUPPORTED, new gap g-boot-pending-cell-opaque-call-s475, INTERIM). F2 BUILT: an author handled waiting write
+  into a pending cell is admitted (`checkWrite`/`handledWait`, `Tables.waits` from the effect summary). F3: C-R1 `pathWrites`
+  walks Counted heads; message "at most one per path". L1: file-scope/module pending cell refused by name (new gap
+  g-boot-pending-cell-outside-program-s475). L2: E-ERROR-002 re-word only for the initializer's own call. Block-initializer
+  wording fixed (parser refuses it). Tests: pending-cells 33 pass, request.core 22 pass.

@@ -1725,10 +1725,12 @@ ${
         // success and failure arms (§13.9.5 `@x = f() !{ _ :> not }`; an Attempt's ok arm and each
         // error arm, an If's branches) are alternatives, each the request's one settle — counting
         // them as two Writes refused the desugar §13.9.2 prescribes (the #1771 r1 trap). A Write in
-        // a Loop or Gather counts twice (it may run more than once — refused, fail closed).
+        // a Loop or Gather counts twice (it may run more than once — refused, fail closed), and so
+        // does one in a Counted head's `step` (r1 F3: the head is walked as the `writes` total is).
+        // A path that writes nothing (an arm that leaves) is allowed: the rule is AT MOST one per path.
         const pw: int = pathWrites(body)
         if (writes == 0) out = out.concat(["C-R1: a Request body holds no Write — it holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
-        if (writes > 0 && pw != 1) out = out.concat(["C-R1: a Request body's path performs " + pw + " Writes — each path holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
+        if (writes > 0 && pw > 1) out = out.concat(["C-R1: one control path through a Request body performs " + pw + " Writes — a path performs at most one, the Write of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\"; a Write inside a loop counts as more than one)"])
         return out
     }
 
@@ -1749,8 +1751,8 @@ ${
             .Suspend(then: t) :> pathWrites(t)
             .Defer(body: b) :> pathWrites(b)
             .Join(body: b) :> pathWrites(b)
-            .Loop(body: b) :> 2 * pathWrites(b)
-            .Gather(g: g) :> 2 * pathWrites(g.body)
+            .Loop(head: h, body: b) :> headWrites(h) + 2 * pathWrites(b)
+            .Gather(g: g) :> headWrites(g.head) + 2 * pathWrites(g.body)
             .Let(sym: x) :> 0
             .Assign(local: x) :> 0
             .Return(e: x) :> 0
@@ -1763,6 +1765,24 @@ ${
             .Continue(target: x) :> 0
             .Lift(into: x) :> 0
         }
+    }
+
+    // r1 F3 — a loop head's Writes: a Counted head's `init` runs once, its `step` after every
+    // iteration (counted twice, as a body's). Other heads hold expressions only.
+    fn headWrites(h: LoopHead) -> int {
+        return match h {
+            .Counted(init: i, cond: c, step: sp) :> stmtsWrites(i) + 2 * stmtsWrites(sp)
+            .Forever :> 0
+            .While(cond: c) :> 0
+            .Each(h: x) :> 0
+            .Range(h: x) :> 0
+        }
+    }
+
+    fn stmtsWrites(ss: Stmt[]) -> int {
+        let n: int = 0
+        for (const s of ss) { n = n + stmtPathWrites(s) }
+        return n
     }
 
     fn elseWrites(e: Block | not) -> int {
