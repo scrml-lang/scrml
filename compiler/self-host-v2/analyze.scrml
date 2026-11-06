@@ -28604,7 +28604,8 @@ ${
     //
     // THE BUILD. A client-placed `!` function F whose server calls need one
     // transaction (two or more requests — tq.remote — or one call of a non-`!`
-    // server function whose queries need one) is planned here over its TOP-LEVEL
+    // server function that reaches a query, one is enough — s475-boot-nonbang-callee-envelope,
+    // §8.9.2 "Amendment S474" item 1) is planned here over its TOP-LEVEL
     // statements S[0..n):
     //   - the BATCH is S[lo..hi]: `lo` the first statement that calls a server
     //     function, `hi` the last — extended (rule 1, to a fixpoint) over every later
@@ -28615,6 +28616,14 @@ ${
     //     applies it after the batch commits, in source order — its value is the one
     //     the batch would return in the cell envelope (§19.9.9.8 rule 1), computed
     //     from what the client already holds;
+    //   - THE CELL ENVELOPE (s475-boot-nonbang-callee-envelope): a top-level `@c = e`
+    //     of the batch whose value the batch computes is CARRIED — in the batch it is
+    //     the local `#w<k>`, and the batch answers the final value of each carried cell
+    //     (one cell and no `return`: the value; otherwise a synthesized struct `#FCells`
+    //     holding them and the function's final `return` value), which F writes after
+    //     the batch commits, in source order with the deferred writes;
+    //   - THE MARSHAL: a program cell a batch statement reads before the batch writes
+    //     it is the client's value at the batch's start — the parameter `#m_<cell>`;
     //   - S(hi..n) stays on the client and runs after the batch commits.
     // composeFiles then writes the plan into the program, as the author would by
     // hand ("compose the calls in one server `!` function and call that once"): a
@@ -28629,15 +28638,20 @@ ${
     // blanking of driver text), and F's `?` re-fails it as F's own variant.
     //
     // What stays refused:
-    //  - PERMANENT (the residue of F11): a statement of the batch that needs the
+    //  - the residue of F11 — INTERIM, design owed, not planned (§19.10.5: a
+    //    transaction held across the client round trip, g-tx-across-client-roundtrip-
+    //    undesigned-s474; was tagged PERMANENT): a statement of the batch that needs the
     //    browser — a DOM global, a `<host>` binding, a client function reaching one.
     //    Its calls would be two requests, and no transaction spans two requests
     //    (§19.10.5): E-TX-CLIENT-MULTI-CALL, at that statement.
     //  - INTERIM (E-BOOTSTRAP-UNSUPPORTED, the capable form named in each message):
-    //    a cell READ in the batch (§6.6.9 marshal into the request), a cell write
-    //    that needs a batch value (the cell envelope), a statement after the batch
-    //    reading a batch local that cannot join it, a batch `return` with client
-    //    work after it, a client function in the batch that reaches client state or
+    //    a read in the batch of client state that is not a cell of the file's
+    //    `<program>` (or of a tape cell — its grants cannot be spelled), a cell write
+    //    that needs a batch value on only some paths (nested, in a handler arm, after
+    //    a `return`), a carried cell of a tape type beside another value in the
+    //    answer struct, a statement after the batch reading a batch local that cannot
+    //    join it, a batch `return` with client work after it (or before the batch's
+    //    end when cells come back), a client function in the batch that reaches client state or
     //    a server call, a top-level `defer` or an effect in the batch, a `lin`
     //    parameter, a parameter or a client local with no nameable type, a `match`
     //    on a non-`!` server call.
@@ -28649,7 +28663,19 @@ ${
     // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
     // diagnostics the plan raises (E-TX-FAIL-AFTER-COMMIT, W-TX-ARM-UNREACHABLE — reported with the
     // composed program's diagnostics); `late`: how many of them are E-TX-FAIL-AFTER-COMMIT.
-    export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int }
+    // s475-boot-nonbang-callee-envelope — THE CELL ENVELOPE (§19.9.9.8 rule 1: "The only value a server
+    // batch hands the client is the set of final values of the cells it wrote (`{ __scrml_cells: { … } }`)").
+    // `cells`: each top-level `@c = e` of the batch whose value the batch computes (statement index `k`,
+    // the cell `cell` without its `@`, its type `ty` when the plan needs it spelled). In the batch the write
+    // is the local `#w<k>`; the batch answers the final value of each written cell (one cell and no
+    // `return`: the value itself; otherwise a synthesized struct, `rty` the type of the function's final
+    // `return`), and F writes the cells from that answer after the batch committed, in source order with the
+    // deferred writes.
+    export type ComposeCell:struct = { k: int, cell: string, ty: Type | not }
+    // `marsh` (the marshal, §6.6.9 / §19.9.9.7): each program cell the batch reads before writing it — handed to
+    // the batch as the parameter `#m_<cell>` of type `ty`, its argument the client's value at the call.
+    export type ComposeMarsh:struct = { cell: string, ty: Type }
+    export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int, cells: ComposeCell[], rty: Type | not, marsh: ComposeMarsh[] }
     type RCompose:struct = { plans: ComposePlan[], st: AS }
     type RPlan:struct = { plan: ComposePlan | not, st: AS }
 
@@ -29100,18 +29126,16 @@ ${
     }
 
     // Why callable i's server calls need composing ("" — they do not): two or more
-    // requests (F11's count), or one whose non-`!` server callee runs queries that
-    // need one transaction (§8.9.2 wraps only a `!` server function).
+    // requests (F11's count), or one whose non-`!` server callee reaches a query (§8.9.2
+    // wraps only a `!` server function, so that query would run with no envelope).
+    // s475-boot-nonbang-callee-envelope: the callee's REACHED set (`tq.all`, `.nobatch()`
+    // queries included), with no count — §8.9.2 "Amendment S474" item 1: "however many
+    // queries it reaches (one is enough)" (was: the pre-S474 count over `tq.qs`, so one
+    // query, or only `.nobatch()` ones, ran unenveloped).
     fn composeTrigger(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> string {
         if (tq.remote[i] >= 2) return "it makes more than one server call (" + tq.remoteWhy[i] + ")"
-        // s475: still the pre-S474 count (g-boot-envelope-nobatch-count-and-remedy-s474, narrowed): a
-        // client `!` whose one server call runs ONE counted query in a non-`!` server function is not
-        // composed, so that query runs with no envelope. Composing it would newly refuse programs that
-        // compile today (composeOne's INTERIM shapes — a cell written from the call's result).
-        const needs: boolean = tq.qs[i].length >= 2 || tq.runs[i] >= 2 || witnessOf(tq.loops[i]) is given
-        if (!needs) return ""
         for (const j of remoteCallees(sum.nodes, tq, places, i)) {
-            if (tq.qs[j].length > 0 && !sum.nodes[j].f.failable) return "its queries run in the server function `" + sum.nodes[j].label + "`, which is not declared '!'"
+            if (tq.all[j].length > 0 && !sum.nodes[j].f.failable) return "its queries run in the server function `" + sum.nodes[j].label + "`, which is not declared '!'"
         }
         return ""
     }
@@ -29203,10 +29227,16 @@ ${
         }
         if (!enumHasVariant(t, fs.info.err, "Transport")) {
             const en: string = fs.info.err is given ? "`" + errName(fs.info.err) + "`" : "its error type"
-            return { plan: not, st: addDiag(st, file, fs.info.span, "E-ERROR-010", "'" + name + "' is declared '!' and runs on the client, and " + why + ": the bootstrap composes those calls into ONE request inside ONE transaction (§19.9.9.8 rule 1, S474), and that request can also fail on the wire (§19.9.10). '" + name + "' re-fails that failure as its own, so add `Transport(t: ServerCallError)` to " + en) }
+            // s475-boot-nonbang-callee-envelope: the built-in `SqlError` takes no variant — say what to declare;
+            // and name the capable form (INTERIM, g-boot-client-bang-composition-residue-s474)
+            let fix: string = "add `Transport(t: ServerCallError)` to " + en
+            if (en == "`SqlError`") fix = "add `Transport(t: ServerCallError)` to `SqlError`'s variants — `SqlError` is built in, so declare an error enum holding its variants and `Transport(t: ServerCallError)`, and use it"
+            return { plan: not, st: addDiag(st, file, fs.info.span, "E-ERROR-010", "'" + name + "' is declared '!' and runs on the client, and " + why + ": the bootstrap composes those calls into ONE request inside ONE transaction (§19.9.9.8 rule 1, S474), and that request can also fail on the wire (§19.9.10). '" + name + "' re-fails that failure as its own, so " + fix + ". (INTERIM: the capable form gives the composed request's wire failure to '" + name + "''s callers as `Transport` in their failure set, §19.9.5, without a variant in '" + name + "''s error type)") }
         }
         // the batch's statements: deferred cell writes apart
         let deferred: int[] = []
+        let cells: ComposeCell[] = []
+        let marsh: ComposeMarsh[] = []
         let bsyms: int[] = []
         let seenRet = false
         let body: CFold = cf0()
@@ -29215,23 +29245,50 @@ ${
             const s: AStmt = ss[k]
             const x: StmtFx = fx[k]
             const one: CFold = cfStmt(s, cf0())
+            const cw: CellWrite | not = plainCellWrite(sum, tq, places, dr, f, s)
             if (cpIsDefer(s)) return composeRefuse(st, file, s.span, name, why, "this `defer` would run when the server batch ends, not when '" + name + "' returns (§19.16). Move it before the first server call")
             if (x.browser != "") return composeRefuse(st, file, s.span, name, why, "this statement, after the last server call, uses " + x.browser + " and reads a value the batch computes: it stays in the browser, and the value would come back with the batch's result (§19.9.9.8 rule 3). Return the value from '" + name + "' and use it in the browser where it is called")
             if (one.effects) return composeRefuse(st, file, s.span, name, why, "this statement holds an effect, which belongs to the page. Move it out of the function")
             if (x.via != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.via + "`, a client function that makes a server call: composed, it would run in place in the batch (§19.9.9.8 rule 1). Call the server function from '" + name + "' directly")
             if (x.client != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.client + "`, which reads or writes client state: composed, it would run in the server batch with its cells marshalled into the request and written back with the result (§6.6.9, §19.9.9.8 rule 1). Move the call before the first server call or after the last one")
-            if (x.read != "") return composeRefuse(st, file, s.span, name, why, "this statement reads `" + x.read + "` inside the batch: composed, the read is the client's value at the batch's start, marshalled into the request (§6.6.9, §19.9.9.7). Read it into a local before the first server call (`const v = " + x.read + ";`) and use the local")
             if (x.write != "") {
-                // s474 r1 (review L7): a write in the statement that makes the server call — its result
-                // assigned to a cell, or a cell written in a handler arm of the call
-                if (x.remote.length > 0) return composeRefuse(st, file, s.span, name, why, "this statement makes a server call and writes `" + x.write + "` (the call's result, or a write in one of its handler arms): composed, the write is decided inside the batch and comes back with the result in the cell envelope (§19.9.9.8 rule 1). Keep the call's value in a local and write the cell before the first server call or from what '" + name + "' returns")
-                const needsBatch: boolean = one.rets || one.exits || isLocalStmt(s) || anyIn(localSymsOf(t, one.names), bsyms)
-                if (needsBatch) return composeRefuse(st, file, s.span, name, why, "this statement writes `" + x.write + "` with a value the batch computes: composed, the write joins the batch and its value comes back with the result in the cell envelope (§19.9.9.8 rule 1). Write the cell after the batch from a value the function returns, or before the first server call")
-                if (seenRet) return composeRefuse(st, file, s.span, name, why, "this write follows a `return` inside the batch, so whether it runs is decided on the server (§19.9.9.8 rule 3). Move the write before the first server call")
-                deferred = deferred.concat([k])
+                const needsBatch: boolean = x.remote.length > 0 || one.rets || one.exits || isLocalStmt(s) || anyIn(localSymsOf(t, one.names), bsyms)
+                if (needsBatch && cw is given && !one.rets && !seenRet) {
+                    // s475-boot-nonbang-callee-envelope: the cell envelope — a top-level `@c = e` whose value
+                    // the batch computes runs in the batch (as a local), and its final value comes back with
+                    // the batch's answer (§19.9.9.8 rule 1)
+                    cells = cells.concat([{ k: k, cell: cw.cell, ty: knownOf(exprType(t, cw.target.nid)) }])
+                    body = cfExpr(cw.value, body)
+                } else {
+                    // s474 r1 (review L7): a write in the statement that makes the server call — in a handler
+                    // arm of the call, or not as the statement's own `@c = …`
+                    if (x.remote.length > 0) return composeRefuse(st, file, s.span, name, why, "this statement makes a server call and writes `" + x.write + "` inside it (in one of the call's handler arms, or not as the statement's own `@c = …`): composed, that write is decided inside the batch on a path the cell envelope does not carry yet — it carries a top-level `@c = …` of the batch, whose final value comes back with the batch's answer (§19.9.9.8 rule 1). Keep the call's value in a local and write the cell in a statement of its own (`const v = …; @c = v;`)")
+                    if (needsBatch && seenRet) return composeRefuse(st, file, s.span, name, why, "this statement writes `" + x.write + "` with a value the batch computes, after a `return` inside the batch: whether it runs is decided on the server, and the cell envelope does not carry a write on only some paths yet (§19.9.9.8 rules 1 and 3). Move the `return` after the write, or write the cell from a value '" + name + "' returns")
+                    if (needsBatch) return composeRefuse(st, file, s.span, name, why, "this statement writes `" + x.write + "` with a value the batch computes inside a nested statement (or a field of the cell): the cell envelope carries a top-level `@c = …` of the batch, whose final value comes back with the batch's answer (§19.9.9.8 rule 1), not a write on only some paths yet. Compute the value in a local and write the cell in a top-level statement (`@c = v;`)")
+                    if (seenRet) return composeRefuse(st, file, s.span, name, why, "this write follows a `return` inside the batch, so whether it runs is decided on the server (§19.9.9.8 rule 3). Move the write before the first server call")
+                    deferred = deferred.concat([k])
+                }
             } else {
                 body = cfStmt(s, body)
                 if (one.rets) seenRet = true
+            }
+            // s475-boot-nonbang-callee-envelope: THE MARSHAL (§6.6.9, §19.9.9.7) — a program cell a statement
+            // of the batch reads is the client's value at the batch's start, handed to the batch as an argument
+            // (`#m_<cell>`); after a carried write of the cell in the batch, the read is that write's local. A
+            // deferred statement runs on the client after the batch, in source order: its reads are its own.
+            if (deferred.indexOf(k) < 0) {
+                for (const cu of f.reads) {
+                    if (spanIn(cu.span, s.span)) {
+                        const cn: string = progCellName(t, file, cu.what)
+                        if (cn == "") return composeRefuse(st, file, s.span, name, why, "this statement reads " + cu.what + " inside the batch: composed, the read is the client's value at the batch's start, marshalled into the request (§6.6.9, §19.9.9.7) — built for a cell of the file's `<program>`, not for this read yet. Read it into a local before the first server call (`const v = …;`) and use the local")
+                        if (deferredWriteOf(f, ss, deferred, cn, lo, k) > lastCarriedOf(cells, cn, k)) return composeRefuse(st, file, s.span, name, why, "this statement reads `@" + cn + "` after a write of it that the client applies only after the batch commits (its value is one the client holds): the batch would read the value from before that write. Move the read before the write, or the write after the last server call")
+                        if (lastCarriedOf(cells, cn, k) < 0 && marshOf(marsh, cn) is not) {
+                            const mt: Type | not = progCellType(t, file, cn)
+                            if (mt is not || !spellable(mt)) return composeRefuse(st, file, s.span, name, why, "the batch reads `@" + cn + "`, whose type the bootstrap cannot write into the batch's parameter list (a tape's grants), so it cannot marshal it into the request (§6.6.9). Read it into a local of a written type before the first server call (`const v: T = @" + cn + ";`) and use the local")
+                            marsh = marsh.concat([{ cell: cn, ty: mt }])
+                        }
+                    }
+                }
             }
             bsyms = bsyms.concat(topBinds(t, s))
             k = k + 1
@@ -29305,13 +29362,166 @@ ${
             if (deferred.indexOf(k) < 0) bss = bss.concat([ss[k]])
             k = k + 1
         }
-        const rets: boolean = cfStmts(mStmts(bss, { strip: strip, drop: drop }), cf0()).rets
-        if (rets && (hi + 1 < ss.length || deferred.length > 0)) {
-            return composeRefuse(st, file, ss[hi + 1 < ss.length ? hi + 1 : hi].span, name, why, "the batch holds a `return`, and client work follows it: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3). Move the client work before the first server call, or end the function with the batch")
+        const cm0: CMap = { strip: strip, drop: drop, rn: [], rv: [] }
+        const rets: boolean = cfStmts(mStmts(bss, cm0), cf0()).rets
+        if (rets && hi + 1 < ss.length) {
+            return composeRefuse(st, file, ss[hi + 1].span, name, why, "the batch holds a `return`, and client work follows it: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3). Move the client work before the first server call, or end the function with the batch")
+        }
+        // s475-boot-nonbang-callee-envelope: a batch that returns AND hands back cell values (or has client-held
+        // writes to apply after it) — built when its one `return` is its last statement: F applies the writes,
+        // then returns the batch's result. A `return` earlier in the batch needs the exit flag (§19.9.9.8 rule 3).
+        let rty: Type | not = not
+        if (rets && (deferred.length > 0 || cells.length > 0)) {
+            const er: AExpr | not = returnValueOf(ss[hi])
+            const earlier: boolean = cfStmts(mStmts(bss.slice(0, bss.length - 1), cm0), cf0()).rets
+            if (er is not || earlier) return composeRefuse(st, file, ss[hi].span, name, why, "the batch holds a `return` before its end, and cell writes are applied after the batch: composed, the batch would end the function and hand back its result with an exit flag (§19.9.9.8 rule 3), which is not built. End the function with one `return` as the batch's last statement")
+            if (cells.length > 0) {
+                rty = knownOf(exprType(t, er.nid))
+                const rt0: Type | not = rty
+                if (rt0 is not || !spellable(rt0)) return composeRefuse(st, file, ss[hi].span, name, why, "it writes cells from values the batch computes and returns a value whose type the bootstrap cannot write into the batch's answer (the struct carrying the cells' final values and the result, §19.9.9.8 rule 1). Return a value of a written type (`const v: T = …; return v;`)")
+            }
+        }
+        // the batch's answer is a struct when it carries two cells, or a cell and a result: each cell's type spelled
+        if (cellNames(cells).length >= 2 || (cells.length > 0 && rets)) {
+            for (const c of cells) {
+                const ct: Type | not = c.ty
+                if (ct is not || !spellable(ct)) return composeRefuse(st, file, ss[c.k].span, name, why, "this statement writes `@" + c.cell + "` with a value the batch computes, and the batch's answer must carry it beside other values in a struct whose field types are written out — the bootstrap cannot write `@" + c.cell + "`'s type (a tape's grants) there yet (§19.9.9.8 rule 1). Write that cell from a value '" + name + "' returns, or alone in its own client `!` function")
+            }
         }
         // s474 r1 (review M2, PA ruling (b)): a later `fail` / `?` that cannot join the batch runs after it committed
         const late: Diag[] = lateExits(g, t, fs, fx, calls, hi, "")
-        return { plan: { fnNid: fs.f.nid, name: name, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets, notes: notes.concat(late), late: late.length }, st: st }
+        return { plan: { fnNid: fs.f.nid, name: name, lo: lo, hi: hi, deferred: deferred, extra: extra, strip: strip, drop: drop, returns: rets, notes: notes.concat(late), late: late.length, cells: cells, rty: rty, marsh: marsh }, st: st }
+    }
+
+    // s475-boot-nonbang-callee-envelope — a statement `@c = e` (a whole program cell, assigned as a statement
+    // of its own), whose value writes no other cell (a write in a handler arm of a call in `e`): the shape the
+    // cell envelope carries.
+    type CellWrite:struct = { cell: string, target: AExpr, value: AExpr }
+
+    fn plainCellWrite(sum: Summary, tq: TxQ, places: PlaceFact[], dr: boolean[], f: FnFacts, s: AStmt) -> CellWrite | not {
+        const k: AStmtK = s.k
+        const e: AExpr | not = match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: b) :> not
+            .Fail(f: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: w) :> not
+        }
+        if (e is not) return not
+        const hv0: HView = hostView(e)
+        const tg: AExpr | not = hv0.obj
+        const v: AExpr | not = hv0.value
+        if (hv0.k != 3 || tg is not || v is not) return not
+        const c: string = atName(tg)
+        if (c == "") return not
+        if (stmtFx(sum, tq, places, dr, f, v.span).write != "") return not
+        return { cell: c, target: tg, value: v }
+    }
+
+    fn returnValueOf(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: b) :> not
+            .Fail(f: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: w) :> not
+        }
+    }
+
+    // The distinct cells of a plan, in the order of their first write.
+    fn cellNames(cs: ComposeCell[]) -> string[] {
+        let out: string[] = []
+        for (const c of cs) {
+            if (out.indexOf(c.cell) < 0) out = out.concat([c.cell])
+        }
+        return out
+    }
+
+    // The cell a read names when it is a cell of `file`'s `<program>` ("" — another read: an instance, a
+    // declaration's field, a validity surface, a cell of another file).
+    fn progCellName(t: Tables, file: string, what: string) -> string {
+        if (what.substring(0, 1) != "@" || what.indexOf(".") >= 0) return ""
+        const n: string = what.substring(1)
+        if (progCellType(t, file, n) is not) return ""
+        return n
+    }
+
+    fn progCellType(t: Tables, file: string, n: string) -> Type | not {
+        for (const d of t.decls) {
+            if (d.kind == DeclKind.Program && d.file == file) {
+                for (const fi of d.fields) {
+                    if (fi.sym.hint == n) return fi.ty
+                }
+            }
+        }
+        return not
+    }
+
+    // The latest carried write of `cell` at a statement before `k` (-1: none).
+    fn lastCarriedOf(cs: ComposeCell[], cell: string, k: int) -> int {
+        let at: int = -1
+        for (const c of cs) {
+            if (c.cell == cell && c.k < k && c.k > at) at = c.k
+        }
+        return at
+    }
+
+    // The latest deferred statement in [from, k) that writes `cell` (-1: none).
+    fn deferredWriteOf(f: FnFacts, ss: AStmt[], deferred: int[], cell: string, from: int, k: int) -> int {
+        let at: int = -1
+        for (const d of deferred) {
+            if (d >= from && d < k && d > at) {
+                for (const w of f.scan.writes) {
+                    if (w.cell == "@" + cell && spanIn(w.span, ss[d].span)) at = d
+                }
+            }
+        }
+        return at
+    }
+
+    fn marshOf(ms: ComposeMarsh[], cell: string) -> ComposeMarsh | not {
+        for (const m of ms) {
+            if (m.cell == cell) return m
+        }
+        return not
+    }
+
+    // What a statement `k` of the batch reads for each cell: the latest carried write's local before it, else
+    // the marshalled parameter.
+    fn cmapAt(pl: ComposePlan, k: int) -> CMap {
+        let rn: string[] = []
+        let rv: string[] = []
+        for (const c of pl.cells) {
+            if (rn.indexOf(c.cell) < 0) {
+                const w: int = lastCarriedOf(pl.cells, c.cell, k)
+                if (w >= 0) {
+                    rn = rn.concat([c.cell])
+                    rv = rv.concat(["#w" + w])
+                }
+            }
+        }
+        for (const m of pl.marsh) {
+            if (rn.indexOf(m.cell) < 0) {
+                rn = rn.concat([m.cell])
+                rv = rv.concat(["#m_" + m.cell])
+            }
+        }
+        return { strip: pl.strip, drop: pl.drop, rn: rn, rv: rv }
     }
 
     // Each statement's facts, a `Date` / `performance` read counted as browser work (review L4:
@@ -29344,13 +29554,13 @@ ${
         return false
     }
 
-    // Can statements from..to (inclusive) all move into the batch? (rule 3: no browser work, no cell
-    // read — the marshal is not built — no client function, no effect, no `defer`)
+    // Can statements from..to (inclusive) all move into the batch? (rule 3: no browser work — a cell
+    // read is marshalled since s475-boot-nonbang-callee-envelope — no client function, no effect, no `defer`)
     fn movableRun(t: Tables, ss: AStmt[], fx: StmtFx[], from: int, to: int) -> boolean {
         let k: int = from
         while (k <= to) {
             const x: StmtFx = fx[k]
-            if (x.browser != "" || x.read != "" || x.client != "" || x.via != "" || x.remote.length > 0) return false
+            if (x.browser != "" || x.client != "" || x.via != "" || x.remote.length > 0) return false
             if (cfStmt(ss[k], cf0()).effects || cpIsDefer(ss[k])) return false
             k = k + 1
         }
@@ -29369,7 +29579,6 @@ ${
             const x: StmtFx = fx[k]
             if (blocked == "" && x.write != "") blocked = "it writes `" + x.write + "` in the same statement"
             if (blocked == "" && x.client != "") blocked = "it calls `" + x.client + "`, which reads or writes client state"
-            if (blocked == "" && x.read != "") blocked = "it reads `" + x.read + "`, which is not marshalled into the batch yet"
             if (x.browser != "") blocked = "it uses " + x.browser + ", which needs the browser"
             const fk: CFold = cfStmt(ss[k], cf0())
             if (fk.exits) {
@@ -29666,7 +29875,6 @@ ${
         const x: StmtFx = fx[at]
         let why: string = reason0
         if (x.browser != "") why = "the statement that makes the server call also uses " + x.browser + ", which needs the browser"
-        else if (x.read != "") why = "the statement that makes the server call reads `" + x.read + "`, which is not marshalled into the batch yet"
         else if (x.client != "") why = "the statement that makes the server call calls `" + x.client + "`, which reads or writes client state"
         else if (x.write != "") why = "the statement that makes the server call writes `" + x.write + "`"
         if (why == "") why = "the statement that makes the server call cannot join the batch"
@@ -29734,7 +29942,7 @@ ${
                     if (d.code == "E-TX-FAIL-AFTER-COMMIT") late = late + 1
                 }
             }
-            if (late == 0) return { plan: { fnNid: p.fnNid, name: p.name, lo: p.lo, hi: p.hi, deferred: p.deferred, extra: p.extra, strip: p.strip, drop: p.drop, returns: p.returns, notes: notes, late: 0 }, st: r1.st }
+            if (late == 0) return { plan: { fnNid: p.fnNid, name: p.name, lo: p.lo, hi: p.hi, deferred: p.deferred, extra: p.extra, strip: p.strip, drop: p.drop, returns: p.returns, notes: notes, late: 0, cells: p.cells, rty: p.rty, marsh: p.marsh }, st: r1.st }
         }
         // s474 r2 (review N4): the reason composing failed, when it was refused
         let reason: string = ""
@@ -29766,8 +29974,10 @@ ${
     type RFiles:struct = { files: FileAst[], next: int }
     type RItems:struct = { items: AItem[], next: int }
     type RTy:struct = { ty: AType, next: int }
-    type RFn2:struct = { fns: AFn[], next: int }
-    type CMap:struct = { strip: int[], drop: int[] }
+    type RFn2:struct = { fns: AFn[], next: int, tys: ATypeDecl[] }
+    // `rn` / `rv` (s475-boot-nonbang-callee-envelope): a read of cell `rn[i]` in the batch is the name `rv[i]`
+    // (a marshalled parameter, or a carried write's local).
+    type CMap:struct = { strip: int[], drop: int[], rn: string[], rv: string[] }
 
     fn composeFiles(files: FileAst[], plans: ComposePlan[], next0: int) -> FileAst[] {
         let next: int = next0
@@ -29799,6 +30009,11 @@ ${
                     out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.FnItem(r2.fns[0]) }])
                     out = out.concat([{ nid: next, span: it.span, k: AItemK.FnItem(r2.fns[1]) }])
                     next = next + 1
+                    // s475-boot-nonbang-callee-envelope: the batch's answer struct (the cell envelope)
+                    for (const td of r2.tys) {
+                        out = out.concat([{ nid: next, span: it.span, k: AItemK.TypeItem(td) }])
+                        next = next + 1
+                    }
                 } else {
                     out = out.concat([it])
                 }
@@ -29844,7 +30059,7 @@ ${
     fn composeFn(af: AFn, pl: ComposePlan, next0: int) -> RFn2 {
         let next: int = next0
         const ss: AStmt[] = af.body.stmts
-        const cm: CMap = { strip: pl.strip, drop: pl.drop }
+        const cm: CMap = { strip: pl.strip, drop: pl.drop, rn: [], rv: [] }
         const sp: ASpan = mkSpan(ss[pl.lo].span.start, ss[pl.hi].span.end)
         // the batch's parameters: F's, then the client locals it reads
         let params: AParam[] = []
@@ -29878,6 +30093,14 @@ ${
             args = args.concat([{ nid: next + 1, span: sp, k: AExprK.Name(x.name) }])
             next = next + 2
         }
+        // s475-boot-nonbang-callee-envelope: the marshalled cells — `#m_<cell>: T`, the argument `@cell`
+        for (const m of pl.marsh) {
+            const r4: RTy = typeAType(m.ty, sp, next)
+            next = r4.next
+            params = params.concat([{ nid: next, span: sp, name: "#m_" + m.cell, ty: r4.ty, lin: false }])
+            args = args.concat([{ nid: next + 1, span: sp, k: AExprK.At(m.cell) }])
+            next = next + 2
+        }
         let et: AType | not = not
         const ae: AType | not = af.err
         if (ae is given) {
@@ -29885,24 +30108,77 @@ ${
             next = r3.next
             et = r3.ty
         }
-        // the batch body: S[lo..hi] without the deferred writes, its server-call handling adjusted
+        // the batch body: S[lo..hi] without the deferred writes, its server-call handling adjusted;
+        // s475-boot-nonbang-callee-envelope: each carried cell write `@c = e` is the local `#w<k> = e`
+        const cnames: string[] = cellNames(pl.cells)
+        const asStruct: boolean = cnames.length >= 2 || (pl.cells.length > 0 && pl.returns)
         let bstmts: AStmt[] = []
-        let defs: AStmt[] = []
+        let retVal: AExpr | not = not
         let k: int = pl.lo
         while (k <= pl.hi) {
+            const cw: ComposeCell | not = cellAt(pl.cells, k)
             if (pl.deferred.indexOf(k) >= 0) {
-                defs = defs.concat([ss[k]])
+                // a deferred write: F applies it after the batch
+            } else if (cw is given) {
+                const v0: AExpr | not = hostView(stmtExprOf(ss[k])).value
+                if (v0 is given) {
+                    bstmts = bstmts.concat([{ nid: next, span: ss[k].span, k: AStmtK.Local("#w" + k, false, not, mExpr(v0, cmapAt(pl, k)), false) }])
+                    next = next + 1
+                }
+            } else if (asStruct && pl.returns && k == pl.hi) {
+                const rv: AExpr | not = returnValueOf(ss[k])
+                if (rv is given) retVal = mExpr(rv, cmapAt(pl, k))
             } else {
-                bstmts = bstmts.concat([mStmt(ss[k], cm)])
+                bstmts = bstmts.concat([mStmt(ss[k], cmapAt(pl, k))])
             }
             k = k + 1
         }
-        // a batch that returns nothing answers `true` — a client call decodes the answer against
-        // the callee's success type (§57.4, S451 R10), and F discards it (`#F(…)?;`)
-        if (!pl.returns) {
-            const tv: AExpr = { nid: next, span: sp, k: AExprK.Bool(true) }
-            bstmts = bstmts.concat([{ nid: next + 1, span: sp, k: AStmtK.Return(tv) }])
+        let tys: ATypeDecl[] = []
+        const sname: string = "#" + af.name + "Cells"
+        if (pl.cells.length == 0) {
+            // a batch that returns nothing answers `true` — a client call decodes the answer against
+            // the callee's success type (§57.4, S451 R10), and F discards it (`#F(…)?;`)
+            if (!pl.returns) {
+                const tv: AExpr = { nid: next, span: sp, k: AExprK.Bool(true) }
+                bstmts = bstmts.concat([{ nid: next + 1, span: sp, k: AStmtK.Return(tv) }])
+                next = next + 2
+            }
+        } else if (!asStruct) {
+            // one cell, no result: the batch answers the cell's final value
+            const wv: AExpr = { nid: next, span: sp, k: AExprK.Name("#w" + lastWriteOf(pl.cells, cnames[0])) }
+            bstmts = bstmts.concat([{ nid: next + 1, span: sp, k: AStmtK.Return(wv) }])
             next = next + 2
+        } else {
+            // the cell envelope: `const #cells: #FCells = { c0: #w…, …, r: <the result> }; return #cells;`
+            let fields: ATypeField[] = []
+            let props: AProp[] = []
+            let i: int = 0
+            for (const c of cnames) {
+                const ct: Type | not = cellTypeOf(pl.cells, c)
+                if (ct is given) {
+                    const rt: RTy = typeAType(ct, sp, next)
+                    next = rt.next
+                    fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "c" + i, ty: rt.ty }])
+                    props = props.concat([{ nid: next + 1, span: sp, spread: false, name: "c" + i, value: { nid: next + 2, span: sp, k: AExprK.Name("#w" + lastWriteOf(pl.cells, c)) } }])
+                    next = next + 3
+                }
+                i = i + 1
+            }
+            const rty: Type | not = pl.rty
+            const rv2: AExpr | not = retVal
+            if (rty is given && rv2 is given) {
+                const rt2: RTy = typeAType(rty, sp, next)
+                next = rt2.next
+                fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "r", ty: rt2.ty }])
+                props = props.concat([{ nid: next + 1, span: sp, spread: false, name: "r", value: rv2 }])
+                next = next + 2
+            }
+            tys = [{ nid: next, span: af.span, exported: false, name: sname, body: ATypeBody.StructBody(fields) }]
+            const lit: AExpr = { nid: next + 1, span: sp, k: AExprK.ObjectLit(props) }
+            const sty: AType = { nid: next + 2, span: sp, k: ATypeK.TName(sname) }
+            bstmts = bstmts.concat([{ nid: next + 3, span: sp, k: AStmtK.Local("#cells", false, sty, lit, false) }])
+            bstmts = bstmts.concat([{ nid: next + 4, span: sp, k: AStmtK.Return({ nid: next + 5, span: sp, k: AExprK.Name("#cells") }) }])
+            next = next + 6
         }
         const bname: string = "#" + af.name
         const batch: AFn = { nid: next, span: af.span, exported: false, pure: false, name: bname, params: params, ret: not,
@@ -29911,13 +30187,93 @@ ${
         const callee: AExpr = { nid: next + 2, span: sp, k: AExprK.Name(bname) }
         const call: AExpr = { nid: next + 3, span: sp, k: AExprK.Call(callee, args) }
         const prop: AExpr = { nid: next + 4, span: sp, k: AExprK.Handled({ subject: call, how: AHow.Propagate }) }
-        let cs: AStmt = { nid: next + 5, span: sp, k: AStmtK.Eval(prop) }
-        if (pl.returns) cs = { nid: next + 5, span: sp, k: AStmtK.Return(prop) }
-        next = next + 6
-        const fstmts: AStmt[] = ss.slice(0, pl.lo).concat([cs]).concat(defs).concat(ss.slice(pl.hi + 1))
+        next = next + 5
+        let fstmts: AStmt[] = []
+        if (pl.cells.length == 0 && (pl.deferred.length == 0 || !pl.returns)) {
+            let cs: AStmt = { nid: next, span: sp, k: AStmtK.Eval(prop) }
+            if (pl.returns) cs = { nid: next, span: sp, k: AStmtK.Return(prop) }
+            next = next + 1
+            let defs: AStmt[] = []
+            for (const d of pl.deferred) { defs = defs.concat([ss[d]]) }
+            fstmts = ss.slice(0, pl.lo).concat([cs]).concat(defs).concat(ss.slice(pl.hi + 1))
+        } else {
+            // `const #r = #F(…)?;`, then — in source order — the deferred writes and each carried cell's write
+            // from the answer (at its last write), then `return #r` / `return #r.r` or the statements after
+            // the answer struct's type is written on `#r` (a failable callee's success type is not read back
+            // from its returns at a client call)
+            let rty0: AType | not = not
+            if (asStruct) rty0 = { nid: next + 1, span: sp, k: ATypeK.TName(sname) }
+            let after: AStmt[] = [{ nid: next, span: sp, k: AStmtK.Local("#r", false, rty0, prop, false) }]
+            next = next + 2
+            k = pl.lo
+            while (k <= pl.hi) {
+                const cw2: ComposeCell | not = cellAt(pl.cells, k)
+                if (pl.deferred.indexOf(k) >= 0) {
+                    after = after.concat([ss[k]])
+                } else if (cw2 is given) {
+                    if (lastWriteOf(pl.cells, cw2.cell) == k) {
+                        let val: AExpr = { nid: next, span: ss[k].span, k: AExprK.Name("#r") }
+                        if (asStruct) val = { nid: next, span: ss[k].span, k: AExprK.Member({ nid: next + 1, span: ss[k].span, k: AExprK.Name("#r") }, "c" + cnames.indexOf(cw2.cell)) }
+                        const tg: AExpr = { nid: next + 2, span: ss[k].span, k: AExprK.At(cw2.cell) }
+                        after = after.concat([{ nid: next + 3, span: ss[k].span, k: AStmtK.Eval({ nid: next + 4, span: ss[k].span, k: AExprK.Assign(tg, val, false, false) }) }])
+                        next = next + 5
+                    }
+                }
+                k = k + 1
+            }
+            if (pl.returns) {
+                let rv3: AExpr = { nid: next, span: sp, k: AExprK.Name("#r") }
+                if (asStruct) rv3 = { nid: next, span: sp, k: AExprK.Member({ nid: next + 1, span: sp, k: AExprK.Name("#r") }, "r") }
+                after = after.concat([{ nid: next + 2, span: sp, k: AStmtK.Return(rv3) }])
+                next = next + 3
+            } else {
+                after = after.concat(ss.slice(pl.hi + 1))
+            }
+            fstmts = ss.slice(0, pl.lo).concat(after)
+        }
         const f2: AFn = { nid: af.nid, span: af.span, exported: af.exported, pure: af.pure, name: af.name, params: af.params, ret: af.ret,
                           body: { nid: af.body.nid, span: af.body.span, stmts: fstmts }, server: af.server, failable: af.failable, err: af.err }
-        return { fns: [f2, batch], next: next }
+        return { fns: [f2, batch], next: next, tys: tys }
+    }
+
+    fn cellAt(cs: ComposeCell[], k: int) -> ComposeCell | not {
+        for (const c of cs) {
+            if (c.k == k) return c
+        }
+        return not
+    }
+
+    fn lastWriteOf(cs: ComposeCell[], cell: string) -> int {
+        let at: int = -1
+        for (const c of cs) {
+            if (c.cell == cell) at = c.k
+        }
+        return at
+    }
+
+    fn cellTypeOf(cs: ComposeCell[], cell: string) -> Type | not {
+        for (const c of cs) {
+            if (c.cell == cell) return c.ty
+        }
+        return not
+    }
+
+    fn stmtExprOf(s: AStmt) -> AExpr {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Return(e: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .If(cond: c) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Given(name: n) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .EffectStmt(w: w) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Defer(body: b) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Fail(f: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .For(f: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Break(label: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Continue(label: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .Lift(what: w) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+        }
     }
 
     fn copyAType(t: AType, next: int) -> RTy {
@@ -30050,6 +30406,12 @@ ${
         }
     }
 
+    fn mAt(k: AExprK, n: string, m: CMap) -> AExprK {
+        const i: int = m.rn.indexOf(n)
+        if (i < 0) return k
+        return AExprK.Name(m.rv[i])
+    }
+
     fn mExpr(e: AExpr, m: CMap) -> AExpr {
         const k: AExprK = e.k
         if (m.strip.indexOf(e.nid) >= 0) {
@@ -30058,7 +30420,7 @@ ${
         }
         const k2: AExprK = match k {
             .Name(name: n) :> k
-            .At(name: n) :> k
+            .At(name: n) :> mAt(k, n, m)
             .AtItem :> k
             .Num(raw: r) :> k
             .Str(v: s) :> k
@@ -30072,7 +30434,7 @@ ${
             .Unary(op: o, e: x) :> AExprK.Unary(o, mExpr(x, m))
             .Binary(op: o, l: l, r: r) :> AExprK.Binary(o, mExpr(l, m), mExpr(r, m))
             .Ternary(test: t, yes: y, no: no) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m))
-            .Assign(target: t, value: v, paren: p, kept: kp) :> AExprK.Assign(mExpr(t, m), mExpr(v, m), p, kp)
+            .Assign(target: t, value: v, paren: p, kept: kp) :> AExprK.Assign(mExpr(t, { strip: m.strip, drop: m.drop, rn: [], rv: [] }), mExpr(v, m), p, kp)
             .ArrayLit(elems: es) :> AExprK.ArrayLit(mExprs(es, m))
             .ObjectLit(props: ps) :> AExprK.ObjectLit(mProps(ps, m))
             .Spread(e: x) :> AExprK.Spread(mExpr(x, m))
@@ -30120,11 +30482,12 @@ ${
     //    SHALL run on one connection taken from the pool for it alone"; the
     //    bootstrap's server runtime reserves no pool connection:
     //    E-BOOTSTRAP-UNSUPPORTED;
-    //  - a CLIENT-placed `!` function (its one server call — two are the
-    //    permanent E-TX-CLIENT-MULTI-CALL) whose queries run in a server
-    //    function that is not `!`: that function runs them with no envelope of
-    //    its own, and none can span the request: E-BOOTSTRAP-UNSUPPORTED naming
-    //    the fix (declare it `!`, so its own envelope holds them).
+    //  - (since #1713 / s475-boot-nonbang-callee-envelope, not here) a CLIENT-placed
+    //    `!` function whose server calls reach a query in a server function that is
+    //    not `!` is composed (composePass): its batch is a server `!` function with
+    //    an envelope of its own. Only calls separated by browser work that cannot
+    //    move stay E-TX-CLIENT-MULTI-CALL — INTERIM (design owed, not planned:
+    //    g-tx-across-client-roundtrip-undesigned-s474), not permanent (§19.10.5).
     // Manual transaction control in a `!` function stays refused
     // (envelopeDiags): such a function gets no envelope here.
     // =========================================================================

@@ -74,7 +74,16 @@ describe("1 — §8.9.2 amendment: the envelope trigger reads the TRANSITIVE que
   test("one query (own, or through one helper) compiles clean — and is enough for a transaction of its own", () => {
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1"))))).toEqual([]);
     expect(envOf(DBP(bang(own("UPDATE acct SET n = 1")))).standalone).toBe(true);
-    expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
+    // s475-boot-nonbang-callee-envelope: the client `!` whose ONE call reaches the helper's one query is
+    // composed (its query in the batch's envelope — "one is enough"); the composed request can fail on the
+    // wire, and the built-in `SqlError` has no `Transport`: E-ERROR-010 (was: compiled, the query unenveloped)
+    expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual(["E-ERROR-010"]);
+    const T1 = "    type TE:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }\n";
+    const one = DBP(T1 + helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`).replace("! SqlError", "! TE"));
+    expect(codes(one)).toEqual([]);
+    const core1 = run(one).core;
+    const b1 = core1.server.find((x) => x.sym.hint === "move#batch");
+    expect(core1.envelopes.find((x) => x.fn.id === b1.sym.id)).toMatchObject({ standalone: true, writes: true });
     // a loop that runs no query, beside one query outside it
     expect(codes(DBP(bang(own("UPDATE acct SET n = 1") + "        for (let i = 0; i < 3; i = i + 1) {\n            const z: int = i;\n        }\n")))).toEqual([]);
     // a helper whose one query carries `.nobatch()`, beside one own query
@@ -291,9 +300,13 @@ describe("review F2 / F3 — `journal_mode = OFF` behind a comment, and through 
   });
   test("in a helper a `!` function calls; elsewhere, when the `!` function writes only through a helper", () => {
     const off = (p) => `    function setup(${p}) -> int {\n        ${SQ}\`PRAGMA journal_mode = OFF\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n`;
-    expect(codes(DBP(off("a: int") + bang(`        ${hcall("y", "setup", "a")}\n`)))).toEqual(["E-SQL-JOURNAL-OFF"]);
+    // s475-boot-nonbang-callee-envelope: `move`'s one call of a non-`!` helper reaching a query is composed, so its
+    // error type holds `Transport` here (with the built-in `SqlError` it is also E-ERROR-010)
+    const T1 = "    type TE:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }\n";
+    const bangT = (b) => T1 + bang(b).replace("! SqlError", "! TE");
+    expect(codes(DBP(off("a: int") + bangT(`        ${hcall("y", "setup", "a")}\n`)))).toEqual(["E-SQL-JOURNAL-OFF"]);
     const bump = helper("bump", "UPDATE acct SET n = 1");
-    const src = `<program db="./app.db">\n${off("")}${bump}${bang(`        ${hcall("y", "bump", "a")}\n`)}    let <r:int=0/>\n    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button><button onclick={ @r = setup() !{ _ :> 0, }; }>s</button></main>\n</program>\n`;
+    const src = `<program db="./app.db">\n${off("")}${bump}${bangT(`        ${hcall("y", "bump", "a")}\n`)}    let <r:int=0/>\n    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button><button onclick={ @r = setup() !{ _ :> 0, }; }>s</button></main>\n</program>\n`;
     expect(codes(src)).toEqual(["E-SQL-JOURNAL-OFF"]);
   });
 });
@@ -371,6 +384,7 @@ describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two
       const e = errs(DBP(L + bang(body)));
       expect([name, e.map((d) => d.code)]).toEqual([name, ["E-ERROR-010"]]);
       expect(e[0].message).toContain("add `Transport(t: ServerCallError)` to `SqlError`");
+      expect(e[0].message).toContain("`SqlError` is built in, so declare an error enum holding its variants");
       const ok = DBP(T + L + bang(body).replace("! SqlError", "! TE"));
       expect([name, codes(ok)]).toEqual([name, []]);
       const core = run(ok).core;
@@ -378,7 +392,11 @@ describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two
       expect([name, core.envelopes.find((x) => x.fn.id === batch.sym.id).standalone]).toEqual([name, true]);
     }
   });
-  test("near-miss: one server call", () => {
-    expect(codes(DBP(L + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
+  // s475-boot-nonbang-callee-envelope: one call of a non-`!` helper that reaches a query composes too (§8.9.2
+  // "Amendment S474" item 1: "one is enough") — so it needs `Transport` like two calls (was: compiled clean, the
+  // helper's query unenveloped)
+  test("one server call reaching a query composes like two (E-ERROR-010 with the built-in `SqlError`)", () => {
+    expect(codes(DBP(L + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual(["E-ERROR-010"]);
+    expect(codes(DBP(T + L + bang(`        ${hcall("y", "bump", "a")}\n`).replace("! SqlError", "! TE")))).toEqual([]);
   });
 });

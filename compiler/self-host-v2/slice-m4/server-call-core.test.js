@@ -126,11 +126,17 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
     const s1 = fnCore(r, "sync").body.stmts[0];
     const at = s1.data.then.stmts[0];
     expect(at.data.arms.map((a) => [a.pat.data.idx, a.body.stmts[0].data.idx])).toEqual([[0, 0], [1, 1], [2, 2], [3, 3]]);
-    // the non-`!` callee: `?` on a failable call (no E-ERROR-004) — its one variant re-fails as Transport
+    // the non-`!` callee reaches a query, and sync2 is `!`: s475-boot-nonbang-callee-envelope — its one call
+    // composes into a server batch (§8.9.2 "Amendment S474" item 1: "however many queries it reaches (one is
+    // enough)"; §19.10.5), so wordCount's one SELECT runs in an envelope (DEFERRED: it only reads); the cell
+    // write comes back as the batch's answer (the cell envelope, §19.9.9.8 rule 1). Was: a plain client call
+    // whose one variant re-fails as Transport, its query in autocommit.
+    const b2 = r.core.server.find((s) => s.sym.hint === "sync2#batch");
+    expect(b2).toBeTruthy();
+    expect(r.core.envelopes.find((e) => e.fn.id === b2.sym.id)).toMatchObject({ standalone: true, writes: false });
     const s2 = fnCore(r, "sync2").body.stmts.find((x) => v(x) === "Suspend");
-    const at2 = s2.data.then.stmts[0];
-    expect(at2.data.err.hint).toBe("Transport");
-    expect(at2.data.arms.map((a) => a.body.stmts[0].data.idx)).toEqual([3]);
+    expect(s2.data.on.data.fn.id).toBe(b2.sym.id);
+    expect(JSON.stringify(fnCore(r, "sync2").body)).not.toContain(`"hint":"wordCount"`);
   });
 });
 
