@@ -54,7 +54,7 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import {
-  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync,
+  closeSync, constants as fsc, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -701,13 +701,152 @@ export function readOutputManifest(outDir: string): string[] | null {
   return data.files.filter(safeRel);
 }
 
-function writeOutputManifest(outDir: string, files: string[]) {
-  const file = join(outDir, OUTPUT_MANIFEST);
-  const tmp = file + "." + process.pid + ".tmp";
-  // never through a planted file or link of that name (#1723 review C1-c): remove it, then create exclusively
-  rmSync(tmp, { force: true });
-  writeFileSync(tmp, JSON.stringify({ format: MANIFEST_FORMAT, files: [...new Set(files)].sort() }, null, 1) + "\n", { flag: "wx" });
-  renameSync(tmp, file);
+function writeOutputManifest(root: OutDirHandle, files: string[]) {
+  replaceFile(root, OUTPUT_MANIFEST, JSON.stringify({ format: MANIFEST_FORMAT, files: [...new Set(files)].sort() }, null, 1) + "\n");
+}
+
+/**
+ * Create `path` as a NEW file and write `data` to it. The `wx` flag (O_CREAT|O_EXCL) is load-bearing:
+ * it refuses a name that already exists, so a planted symbolic link or hard link at a temp-file name is
+ * never written through (#1723 review C1-c; pinned by g-boot-tooling-manifest-wx-unpinned-and-lsp-statsync-s474).
+ */
+export function writeNewFile(path: string, data: string | Uint8Array, mode = 0o666) {
+  const fd = openSync(path, "wx", mode);
+  try {
+    writeSync(fd, typeof data === "string" ? Buffer.from(data) : data);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * One directory of the output tree, held so that a path component renamed or swapped for a symbolic link
+ * AFTER the checks cannot redirect a write, a delete or a prune out of `-o`
+ * (g-boot-output-check-then-write-race-s474). On Linux the directory is held OPEN and every operation
+ * names its entry through `/proc/self/fd/<fd>/<name>`, which the kernel resolves against the directory
+ * the fd holds (an `openat` in all but name), and each sub-directory is opened `O_NOFOLLOW`. Elsewhere
+ * (no `/proc`, Windows) the directory is its real path, re-checked by `realpath` right before each
+ * operation — INTERIM: that narrows the window but does not close it; the capable form is a real
+ * `openat`/`O_NOFOLLOW` walk (a native call through `bun:ffi`), which Node's fs does not offer.
+ */
+type OutDirHandle = { rel: string; fd: number | null; real: string; at: (name: string) => string };
+
+class OutTree {
+  readonly root: OutDirHandle;
+  private readonly dirs = new Map<string, OutDirHandle>();
+  private readonly fds: number[] = [];
+  constructor(readonly outDir: string) {
+    const real = realpathSync(outDir);
+    let fd: number | null = null;
+    if (process.platform === "linux" && fsc.O_DIRECTORY !== undefined && fsc.O_NOFOLLOW !== undefined) {
+      try {
+        fd = openSync(real, fsc.O_RDONLY | fsc.O_DIRECTORY);
+        const a = statSync(`/proc/self/fd/${fd}`), b = fstatSync(fd);
+        if (a.ino !== b.ino || a.dev !== b.dev) throw new Error("no /proc/self/fd");
+      } catch {
+        if (fd !== null) closeSync(fd);
+        fd = null;
+      }
+    }
+    this.root = this.handle("", fd, real);
+    this.dirs.set("", this.root);
+  }
+  private handle(rel: string, fd: number | null, real: string): OutDirHandle {
+    if (fd !== null) this.fds.push(fd);
+    const at = fd !== null ? (name: string) => `/proc/self/fd/${fd}/${name}` : (name: string) => join(real, name);
+    return { rel, fd, real, at };
+  }
+  /** The directory `relDir` (a `/`-path, "" for the root), created when `create`; null when absent and not created. */
+  dir(relDir: string, create: boolean): OutDirHandle | null {
+    const known = this.dirs.get(relDir);
+    if (known !== undefined) return known;
+    const cut = relDir.lastIndexOf("/");
+    const parent = this.dir(cut < 0 ? "" : relDir.slice(0, cut), create);
+    if (parent === null) return null;
+    const seg = relDir.slice(cut + 1);
+    if (create) {
+      checkUnmoved(parent, this.outDir);
+      try {
+        mkdirSync(parent.at(seg));
+      } catch (e: any) {
+        if (e?.code !== "EEXIST") throw e;
+      }
+    }
+    let h: OutDirHandle;
+    if (this.root.fd !== null) {
+      let fd: number;
+      try {
+        fd = openSync(parent.at(seg), fsc.O_RDONLY | fsc.O_DIRECTORY | fsc.O_NOFOLLOW);
+      } catch (e: any) {
+        if (e?.code === "ENOENT" && !create) return null;
+        if (e?.code === "ENOTDIR" || e?.code === "ELOOP") throw changedUnder(this.outDir, relDir);
+        throw e;
+      }
+      h = this.handle(relDir, fd, join(parent.real, seg));
+    } else {
+      checkUnmoved(parent, this.outDir);
+      const st = lstatOrNull(parent.at(seg));
+      if (st === null && !create) return null;
+      if (st === null || st.isSymbolicLink() || !st.isDirectory()) throw changedUnder(this.outDir, relDir);
+      h = this.handle(relDir, null, join(parent.real, seg));
+    }
+    this.dirs.set(relDir, h);
+    return h;
+  }
+  /** Forget `relDir` and everything under it (it was removed). */
+  forget(relDir: string) {
+    for (const k of [...this.dirs.keys()]) if (k === relDir || k.startsWith(relDir + "/")) this.dirs.delete(k);
+  }
+  close() {
+    for (const fd of this.fds.splice(0)) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
+function changedUnder(outDir: string, rel: string): OutDirError {
+  return new OutDirError(
+    `refusing to write into ${shown(outDir)}: ${rel} stopped being a real directory while the build was writing ` +
+      `(something replaced it, perhaps with a symbolic link). Nothing was written or deleted through it.`,
+  );
+}
+
+/** The fallback's re-check: the directory is still the real directory it was when opened. */
+function checkUnmoved(d: OutDirHandle, outDir: string) {
+  if (d.fd !== null) return;
+  let now: string | null = null;
+  try {
+    now = realpathSync(d.real);
+  } catch {}
+  if (now !== d.real) throw changedUnder(outDir, d.rel || ".");
+}
+
+/**
+ * Put `data` at `name` in `d` by writing a new sibling temp file and renaming it over the name. A rename
+ * replaces the directory ENTRY: a hard link at `name` keeps its old content for its other names
+ * (g-boot-output-hardlink-overwrite-s474), and a symbolic link at `name` is replaced, never followed.
+ */
+function replaceFile(d: OutDirHandle, name: string, data: string | Uint8Array, mode = 0o666, outDir = d.real) {
+  const tmp = `.${name}.${process.pid}.tmp`;
+  checkUnmoved(d, outDir);
+  try {
+    writeNewFile(d.at(tmp), data, mode);
+  } catch (e: any) {
+    if (e?.code === "EEXIST")
+      throw new OutDirError(`refusing to write into ${shown(outDir)}: ${d.rel ? d.rel + "/" : ""}${tmp} already exists (a temp file scrml-boot did not create now). Remove it and build again.`);
+    throw e;
+  }
+  try {
+    checkUnmoved(d, outDir);
+    renameSync(d.at(tmp), d.at(name));
+  } catch (e) {
+    try {
+      unlinkSync(d.at(tmp));
+    } catch {}
+    throw e;
+  }
 }
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
@@ -779,33 +918,53 @@ export function writeOutputs(outDir: string, outs: OutputFile[]) {
     );
   }
   mkdirSync(outDir, { recursive: true });
-  // 2. Record the union first, so a build that dies half-way still owns everything it may have written.
-  writeOutputManifest(outDir, [...owned, ...next]);
-  for (const o of outs) {
-    const dst = join(outDir, ...o.rel.split("/"));
-    mkdirSync(dirname(dst), { recursive: true });
-    if (o.src !== undefined) copyFileSync(o.src, dst);
-    else writeFileSync(dst, o.text ?? "");
-  }
-  // 3. Remove what the previous build wrote and this one does not (a server half, a host module that
-  // went away), then any directory that leaves empty. Only a regular file or a link itself is removed
-  // (never a directory, never what a link points at). Nothing unrecorded is touched.
-  for (const rel of owned) {
-    if (next.has(rel)) continue;
-    const p = join(outDir, ...rel.split("/"));
-    const st = lstatOrNull(p);
-    if (st === null || (!st.isFile() && !st.isSymbolicLink())) continue;
-    unlinkSync(p);
-    for (let d = dirname(p); d.startsWith(outDir + sep); d = dirname(d)) {
-      try {
-        if (readdirSync(d).length > 0) break;
-        rmdirSync(d);
-      } catch {
-        break;
+  // From here every operation goes through held directories (OutTree): the checks above are the
+  // user-facing refusals, and a swap made after them cannot carry an operation out of `-o`.
+  const tree = new OutTree(outDir);
+  const split = (rel: string) => {
+    const cut = rel.lastIndexOf("/");
+    return { dir: cut < 0 ? "" : rel.slice(0, cut), name: rel.slice(cut + 1) };
+  };
+  try {
+    // 2. Record the union first, so a build that dies half-way still owns everything it may have written.
+    writeOutputManifest(tree.root, [...owned, ...next]);
+    for (const o of outs) {
+      const { dir, name } = split(o.rel);
+      const d = tree.dir(dir, true)!;
+      if (o.src !== undefined) replaceFile(d, name, readFileSync(o.src), statSync(o.src).mode & 0o777, outDir);
+      else replaceFile(d, name, o.text ?? "", 0o666, outDir);
+    }
+    // 3. Remove what the previous build wrote and this one does not (a server half, a host module that
+    // went away), then any directory that leaves empty. Only a regular file or a link itself is removed
+    // (never a directory, never what a link points at). Nothing unrecorded is touched.
+    for (const rel of owned) {
+      if (next.has(rel)) continue;
+      const { dir, name } = split(rel);
+      const d = tree.dir(dir, false);
+      if (d === null) continue;
+      checkUnmoved(d, outDir);
+      const st = lstatOrNull(d.at(name));
+      if (st === null || (!st.isFile() && !st.isSymbolicLink())) continue;
+      unlinkSync(d.at(name));
+      // prune: rmdir refuses a non-empty directory and never follows a link
+      for (let sub = dir; sub !== ""; ) {
+        const up = split(sub);
+        const parent = tree.dir(up.dir, false);
+        if (parent === null) break;
+        try {
+          checkUnmoved(parent, outDir);
+          rmdirSync(parent.at(up.name));
+        } catch {
+          break;
+        }
+        tree.forget(sub);
+        sub = up.dir;
       }
     }
+    writeOutputManifest(tree.root, [...next]);
+  } finally {
+    tree.close();
   }
-  writeOutputManifest(outDir, [...next]);
 }
 
 function report(r: CompileResult, format: "pretty" | "line", columns: ColumnUnit = "utf16") {

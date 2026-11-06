@@ -463,3 +463,61 @@ describe("lsp-boot over stdio — #1723 review round 1", () => {
     expect(await c.stop()).toBe(0);
   }, 90_000);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S475 (s475-boot-tooling-hardening): one file open under two URI spellings
+// (g-lsp-boot-uri-alias-overlay-s474), and the per-URI path cache
+// (g-boot-tooling-manifest-wx-unpinned-and-lsp-statsync-s474 (b)).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("lsp-boot over stdio — S475 tooling hardening", () => {
+  test("alias: the FIRST-opened spelling owns the file; a later alias gets one scrml-boot-uri diagnostic and never lends the owner its text; it is compiled once the owner closes", async () => {
+    const c = client({ SCRML_BOOT_LSP_DEBOUNCE_MS: "20" });
+    await c.init(dir);
+    const file = join(dir, "aliased.scrml");
+    const owner = pathToFileURL(file).href; // file:///…/aliased.scrml
+    const alias = "file://localhost" + owner.slice("file://".length); // the same file, another spelling
+    let p = c.nextDiagnostics(owner, 60_000);
+    c.open(owner, GOOD);
+    expect((await p).params.diagnostics).toEqual([]);
+    p = c.nextDiagnostics(alias);
+    c.open(alias, BAD);
+    const d = (await p).params.diagnostics;
+    expect(d).toHaveLength(1);
+    expect(d[0]).toMatchObject({ severity: 1, source: "scrml-boot", code: "scrml-boot-uri" });
+    expect(d[0].message).toContain(owner);
+    // the owner is compiled with ITS text (GOOD), not the alias's BAD buffer
+    p = c.nextDiagnostics(owner);
+    c.changeFull(owner, 2, GOOD + "\n");
+    expect((await p).params.diagnostics).toEqual([]);
+    // the owner closes: the alias now owns the file and is compiled with its own text
+    p = c.wait((m) => m.method === "textDocument/publishDiagnostics" && m.params.uri === alias && m.params.diagnostics[0]?.code !== "scrml-boot-uri");
+    c.notify("textDocument/didClose", { textDocument: { uri: owner } });
+    expect((await p).params.diagnostics[0]?.code).toBe("E-STATE-UNDECLARED");
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+
+  test("path cache: a document's file path is looked up once while it is open, not once per compile", async () => {
+    const c = client({ SCRML_BOOT_LSP_TEST_FAULTS: "1", SCRML_BOOT_LSP_DEBOUNCE_MS: "20" });
+    await c.init(dir);
+    const a = pathToFileURL(join(dir, "cache-a.scrml")).href;
+    const b = pathToFileURL(join(dir, "cache-b.scrml")).href;
+    let p = c.nextDiagnostics(a, 60_000);
+    c.open(a, GOOD);
+    await p;
+    p = c.nextDiagnostics(b);
+    c.open(b, GOOD);
+    await p;
+    for (let v = 2; v < 7; v++) {
+      p = c.nextDiagnostics(a);
+      c.changeFull(a, v, v % 2 ? BAD : GOOD);
+      await p;
+    }
+    const counts = c.logs().map((l) => /path lookups so far (\d+)/.exec(l)?.[1]).filter((x) => x !== undefined).map(Number);
+    expect(counts.length).toBeGreaterThanOrEqual(7); // one per compile
+    // once both documents are open, five more compiles (each building the overlay of both) look up nothing
+    expect(new Set(counts.slice(1))).toEqual(new Set([counts[1]]));
+    expect(counts[1]).toBe(counts[0] + 1); // opening b was the one lookup in between
+    expect(await c.stop()).toBe(0);
+  }, 90_000);
+});

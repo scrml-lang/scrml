@@ -49,7 +49,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import type { Diagnostic as BootDiagnostic } from "../scripts/scrml-boot.ts";
-import { crashDiagnostic, toLspDiagnostics, uriDiagnostic, type LspDiagnostic } from "./diagnostics.ts";
+import { aliasDiagnostic, crashDiagnostic, toLspDiagnostics, uriDiagnostic, type LspDiagnostic } from "./diagnostics.ts";
 
 const envMs = (name: string, dflt: number) => {
   const v = Number(process.env[name]);
@@ -102,16 +102,46 @@ function localPath(uri: string): { path: string } | { why: string } {
   return { path: p };
 }
 
+// g-boot-tooling-manifest-wx-unpinned-and-lsp-statsync-s474 (b): `localPath` stats the disk, and
+// `overlay()` asks for every open document's path on every compile — so the answer is kept per URI
+// for as long as the document is open (dropped on close), not re-stat'ed on the LSP thread each time.
+const localPaths = new Map<string, { path: string } | { why: string }>();
+let localPathCalls = 0; // stat calls made; reported to the tests under SCRML_BOOT_LSP_TEST_FAULTS
+
+function cachedLocalPath(uri: string): { path: string } | { why: string } {
+  let l = localPaths.get(uri);
+  if (l === undefined) {
+    localPathCalls++;
+    l = localPath(uri);
+    if (documents.get(uri) !== undefined) localPaths.set(uri, l); // only an open document's answer is kept
+  }
+  return l;
+}
+
 /** Why a `file:` URI has no local path, or null when it has one. */
 function uriProblem(uri: string): string | null {
   if (!uri.startsWith("file:")) return null;
-  const l = localPath(uri);
+  const l = cachedLocalPath(uri);
   return "why" in l ? l.why : null;
+}
+
+// g-lsp-boot-uri-alias-overlay-s474: two open documents can name ONE file (`file:///x` and
+// `file://localhost/x`, or `%61` for `a`); canonicalizing cannot separate them, and the overlay has
+// one slot per path. The FIRST-opened document owns the path: only owners are in the overlay, and a
+// later alias gets one `scrml-boot-uri` diagnostic until the owner closes (then it is promoted).
+const owners = new Map<string, string>(); // path → URI of the open document that owns it
+
+/** The open document that owns `path` (claiming it for `uri` when nobody does). */
+function ownerOf(path: string, uri: string): string {
+  const o = owners.get(path);
+  if (o !== undefined && documents.get(o) !== undefined) return o;
+  owners.set(path, uri);
+  return uri;
 }
 
 function pathOf(uri: string): string | null {
   if (uri.startsWith("file:")) {
-    const l = localPath(uri);
+    const l = cachedLocalPath(uri);
     return "path" in l ? l.path : null;
   }
   let p = untitled.get(uri);
@@ -238,7 +268,7 @@ function overlay(): [string, string][] {
   const out: [string, string][] = [];
   for (const d of documents.all()) {
     const p = pathOf(d.uri);
-    if (p !== null) out.push([p, d.getText()]);
+    if (p !== null && ownerOf(p, d.uri) === d.uri) out.push([p, d.getText()]);
   }
   return out;
 }
@@ -258,6 +288,13 @@ function pump() {
     pump();
     return;
   }
+  const owner = ownerOf(path, uri);
+  if (owner !== uri) {
+    publish(uri, [aliasDiagnostic(doc.getText(), uri, owner)]);
+    pump();
+    return;
+  }
+  if (TEST_FAULTS) log(`scrml-boot LSP: test: path lookups so far ${localPathCalls}`);
   const j: Job = { id: nextId++, uri, path, version: doc.version, text: doc.getText(), started: performance.now() };
   inflight = j;
   j.hangTimer = setTimeout(() => onHang(j), TIMEOUT_MS);
@@ -319,6 +356,12 @@ connection.onInitialize((params) => {
   };
 });
 
+// the first-OPENED document owns its path (fired before the first onDidChangeContent)
+documents.onDidOpen((ev) => {
+  const p = pathOf(ev.document.uri);
+  if (p !== null) ownerOf(p, ev.document.uri);
+});
+
 documents.onDidChangeContent((change) => {
   const uri = change.document.uri;
   schedule(uri);
@@ -339,7 +382,17 @@ documents.onDidClose((ev) => {
   if (i >= 0) queue.splice(i, 1);
   deps.delete(uri);
   untitled.delete(uri);
+  localPaths.delete(uri);
   publish(uri, []);
+  if (p !== null && owners.get(p) === uri) {
+    owners.delete(p);
+    // an alias of the same file, still open, now owns it and is compiled with its own text
+    const heir = documents.all().find((d) => d.uri !== uri && pathOf(d.uri) === p);
+    if (heir !== undefined) {
+      owners.set(p, heir.uri);
+      schedule(heir.uri);
+    }
+  }
   // documents that imported it now read it from disk
   if (p !== null) for (const [other, files] of deps) if (files.has(p) && documents.get(other)) schedule(other);
 });
