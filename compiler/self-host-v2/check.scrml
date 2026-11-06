@@ -1745,8 +1745,86 @@ ${
         const on: Expr | not = suspendOnOf(body.stmts[n - 1])
         if (on is not) return []                                // C-R1 reports it
         const sf: Sym | not = exprServerCallSym(on)
-        if (sf is not) return ["C-R2: a READ Request's load is not one server call — §6.7.7.1 rule 1(b) classifies READ only a call that lowers to a single server batch; anything else is WRITE"]
-        if (findServerFn(p, sf) is not) return ["C-R2: a READ Request calls `" + sf.hint + "`, which is not a server function of the program"]
+        if (sf is given) {
+            if (findServerFn(p, sf) is not) return ["C-R2: a READ Request calls `" + sf.hint + "`, which is not a server function of the program"]
+            return readServerWalk(p, sf)
+        }
+        // a client function that waits: along its client calls, exactly ONE server call, none in a Loop
+        const cf: Sym | not = calledSym(on)
+        if (cf is not) return ["C-R2: a READ Request's load is not one server call — §6.7.7.1 rule 1(b) classifies READ only a call that lowers to a single server batch; anything else is WRITE"]
+        let cseen: int[] = []
+        let ctodo: Sym[] = [cf]
+        let roots: Sym[] = []
+        let j = 0
+        while (j < ctodo.length) {
+            const s0: Sym = ctodo[j]
+            j = j + 1
+            // a server function named by an Attempt's call is the ServerCall's own (counted there)
+            if (cseen.indexOf(s0.id) < 0 && findServerFn(p, s0) is not) {
+                cseen = cseen.concat([s0.id])
+                const f0: Fn | not = findFn(p, s0)
+                if (f0 is not) return ["C-R2: a READ Request's load calls `" + s0.hint + "`, which is not a client function of the program — unclassifiable is WRITE (§6.7.7.1 rule 1)"]
+                if (f0.host is given) return ["C-R2: a READ Request's load reaches the host-backed `" + s0.hint + "` on the client — it is WRITE (§6.7.7.1 O-059-3)"]
+                for (const nd of allNodes(Node.NBlock(f0.body))) {
+                    if (nodeIsLoop(nd)) return ["C-R2: a READ Request's load runs a loop in `" + s0.hint + "` — not provably one server batch (§6.7.7.1 rule 1(b))"]
+                    const sc: Sym | not = nodeServerCallSym(nd)
+                    if (sc is given) roots = roots.concat([sc])
+                    const pc: Sym | not = nodePlainCall(nd)
+                    if (pc is given) ctodo = ctodo.concat([pc])
+                }
+            }
+        }
+        if (roots.length != 1) return ["C-R2: a READ Request's load makes " + roots.length + " server calls — §6.7.7.1 rule 1(b) classifies READ only one server batch"]
+        return readServerWalk(p, roots[0])
+    }
+
+    fn nodeIsLoop(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> stmtIsLoop(s)
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn stmtIsLoop(s: Stmt) -> boolean {
+        return match s {
+            .Loop(label: x) :> true
+            .Suspend(bind: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
+        }
+    }
+
+    // C-R2's rule 1(a) walk: from the READ request's one server call, every function it reaches on
+    // the server holds only SELECT queries (at least one) and no host-backed function.
+    fn readServerWalk(p: CoreProgram, sf: Sym) -> string[] {
         let seen: int[] = []
         let todo: Sym[] = [sf]
         let selects = 0

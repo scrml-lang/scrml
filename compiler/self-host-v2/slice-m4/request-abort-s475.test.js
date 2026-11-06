@@ -131,14 +131,23 @@ describe("§6.7.7.1 rule 1 — the class (analyze requestReads → Core View.Req
     expect(name(clsOf(src).cls)).toBe(READ);
   });
 
-  test("a load through a CLIENT function that waits on the server (SWaits — not one server call) is WRITE", () => {
-    const src = APP(`    function q(id: int) -> string {
+  const Q = `    function q(id: int) -> string {
         const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
         return u.name;
     }
-    function loadName(id: int) -> string { return q(id) !{ _ :> "?" }; }
-`);
-    expect(name(clsOf(src).cls)).toBe(WRITE);
+`;
+  test("a load through a CLIENT function that makes exactly ONE read request is READ (one server batch)", () => {
+    expect(name(clsOf(APP(Q + `    function loadName(id: int) -> string { return q(id) !{ _ :> "?" }; }\n`)).cls)).toBe(READ);
+  });
+
+  test("a client function that makes TWO requests (two server batches, rule 1(b)) is WRITE", () => {
+    const two = `    function loadName(id: int) -> string {
+        const a: string = q(id) !{ _ :> "?" };
+        const b: string = q(id + 1) !{ _ :> "?" };
+        return a + b;
+    }
+`;
+    expect(name(clsOf(APP(Q + two)).cls)).toBe(WRITE);
   });
 
   test("a write reachable from the load is WRITE (rule 1(a)) — prints no `read`", () => {
@@ -211,6 +220,41 @@ describe("rules 2 / 4 — supersede: a READ is aborted, a WRITE is discarded", (
       expect(held[1].aborted).toBe(false);
       // the abort set no error and was not a failure settle; the newer run is still loading
       expect(sig(cells(rt))).toEqual({ loading: true, data: "a", error: null, stale: true });
+      await held[1].go();
+      await settle();
+      expect(who()).toBe("c");
+      expect(sig(cells(rt))).toEqual({ loading: false, data: "c", error: null, stale: false });
+      expect(reported).toEqual([]);
+    } finally {
+      rt.setHostErrorReporter(prev);
+    }
+  });
+
+  test("READ through a client wrapper (its `!{ .Transport … }` handler): the superseded call is aborted, the handler does NOT run", async () => {
+    const wrap = `    function q(id: int) -> string {
+        const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function loadName(id: int) -> string { return q(id) !{ _ :> "aborted-as-failure" }; }
+`;
+    const r = compile(APP(wrap));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    globalThis.fetch = bridge(srv);
+    const { rt } = await loadProgram(r.core, "abort-wrap-" + k++);
+    const reported = [];
+    const prev = rt.setHostErrorReporter((e) => reported.push(e));
+    try {
+      await settle();
+      expect(who()).toBe("a");
+      const held = abortableTransport(srv);
+      click(document.querySelector("#u2"));
+      await settle(5);
+      click(document.querySelector("#u3"));
+      await settle(5);
+      expect(held.map((h) => h.aborted)).toEqual([true, false]);
+      await settle();
+      // the aborted call is not a Transport failure the wrapper's handler sees (rule 4)
+      expect(who()).toBe("a");
       await held[1].go();
       await settle();
       expect(who()).toBe("c");

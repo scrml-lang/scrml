@@ -27898,8 +27898,10 @@ ${
     // including any request the compiler cannot classify." A request is READ
     // here iff:
     //  (b) its load is the right-hand side's own call of a SERVER function
-    //      (the plan's SRemote — one request; a client function that waits,
-    //      SWaits, may make several and is WRITE);
+    //      (the plan's SRemote — one request), or of a CLIENT function that
+    //      waits (SWaits) and provably makes exactly one request along its
+    //      calls (clientOneRead — no loop, lambda, cycle or unresolvable call
+    //      on the way; any other such function is WRITE);
     //  (a) every callable that server function reaches (sum.nodes, along each
     //      body's calls, itself included) is known to the summary, has no
     //      unresolvable call (`scan.unproven`), is not host-backed and has no
@@ -27927,12 +27929,66 @@ ${
     fn requestIsRead(t: Tables, sum: Summary, plan: SuspendPlan, rq: ReqFact) -> boolean {
         if (sqlsInBlock(rq.req.body).length > 0) return false
         let callee: int = -1
+        let viaClient: int = -1
         for (const a of plan.at) {
-            if (a.nid == rq.value.nid) callee = remoteCallee(a.kind)
+            if (a.nid == rq.value.nid) {
+                callee = remoteCallee(a.kind)
+                viaClient = waitsCallee(a.kind)
+            }
         }
-        if (callee < 0) return false
+        if (callee >= 0) return serverReadOnly(t, sum, [callee])
+        if (viaClient >= 0) return clientOneRead(t, sum, viaClient)
+        return false
+    }
+
+    // A CLIENT function that waits (SWaits — `pick(id) { return loadName(id) !{ … } }`) is READ
+    // when it makes exactly ONE request (rule 1(b), "a single server batch") and that request's
+    // server work is read-only: along its client calls — none in a loop or a lambda, no cycle, no
+    // unresolvable call, no host-backed function, no `_{}` block — exactly one call reaches a server
+    // function, and txQuerySets' `remote` (the requests a client callable makes, counted along
+    // every call) agrees: 1. Both counts must hold: `remote` sums a function called twice; the
+    // walk here also counts a call of a server-only (inherited) function as a request.
+    fn clientOneRead(t: Tables, sum: Summary, start: int) -> boolean {
+        const tq: TxQ = txQuerySets(sum.nodes, sum.places, sum.inherited)
+        const i0: int = nodeIdx(sum.nodes, start)
+        if (i0 < 0 || tq.remote[i0] != 1) return false
         let seen: int[] = []
-        let todo: int[] = [callee]
+        let todo: int[] = [start]
+        let roots: int[] = []
+        let calls: int = 0
+        let k: int = 0
+        while (k < todo.length) {
+            const sym: int = todo[k]
+            k = k + 1
+            if (seen.indexOf(sym) < 0) {
+                seen = seen.concat([sym])
+                const i: int = nodeIdx(sum.nodes, sym)
+                if (i < 0) return false
+                if (tq.cyc[i]) return false
+                const f: FnFacts = sum.nodes[i].f
+                if (hostBackedSym(t, sym) || f.foreigns.length > 0 || f.scan.unproven.length > 0 || f.sqls.length > 0) return false
+                for (const r of f.scan.refs) {
+                    if (r.asValue) return false
+                    if (isServerPlace(placeOf(sum.places, r.sym)) || sum.inherited.indexOf(r.sym) >= 0) {
+                        if (inRepeat(f.repeats, r.span)) return false
+                        calls = calls + 1
+                        roots = roots.concat([r.sym])
+                    } else {
+                        todo = todo.concat([r.sym])
+                    }
+                }
+            }
+        }
+        if (calls != 1) return false
+        return serverReadOnly(t, sum, roots)
+    }
+
+    // rule 1(a) over the server call graph from `roots`: every callable reached is known, has no
+    // unresolvable call, is not host-backed, has no `_{}` block, and every `?{}` is provably a
+    // SELECT — and there is at least one.
+    fn serverReadOnly(t: Tables, sum: Summary, roots: int[]) -> boolean {
+        let seen: int[] = []
+        let todo: int[] = roots
         let selects: int = 0
         let k: int = 0
         while (k < todo.length) {
@@ -27960,6 +28016,15 @@ ${
         return match k {
             .SRemote(callee: c) :> c.id
             .SWaits(callee: c) :> -1
+            .SQuery :> -1
+            .SLocal(callee: c) :> -1
+        }
+    }
+
+    fn waitsCallee(k: SuspendK) -> int {
+        return match k {
+            .SWaits(callee: c) :> c.id
+            .SRemote(callee: c) :> -1
             .SQuery :> -1
             .SLocal(callee: c) :> -1
         }
