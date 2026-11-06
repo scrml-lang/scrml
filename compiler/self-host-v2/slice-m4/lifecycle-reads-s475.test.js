@@ -208,7 +208,6 @@ describe("the S475 r1 probes (docs/changes/s475-boot-lifecycle-type/probes/) —
 });
 
 // ---- s475 r1 (#1783 review) — red on #1783 head faa84ccff unless noted ----------------------------
-const L = `<m:(not to int)=not/>`;
 const N = `let <n:int=0/>`;
 const B = `<button onclick=f()>b</button>`;
 
@@ -287,5 +286,37 @@ describe("F5: a call's own writes do not un-narrow its arguments", () => {
   });
   test("a call nested IN an argument still un-narrows the arguments", () => {
     expect(codes(P(`${M}\nfunction clr() -> int { @m = 5; return 1; }\nfunction h(a: int, b: int) -> int { return a + b; }\nfunction f() { if (@m is given) { h(clr(), @m); } }`, B))).toEqual([T1]);
+  });
+});
+
+// s475-boot-request-followups (#1783 review LOW 2 / 3) — red on origin/main bd0f5b1cd unless noted.
+describe("#1783 review LOW: one report per refused lifecycle; the article before a type", () => {
+  test("`<xs:(not to int[append])=not/>` + `.append`: the declaration's refusal ONLY (was also E-WRITE-NOT-GRANTED against `(not to int[])`, the grant dropped)", () => {
+    const e = errs(P(`<xs:(not to int[append])=not/>\nfunction f() { @xs.append(1); }`, B));
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("`(not to int[append])`");
+  });
+  test("the same for a whole write of a cell whose lifecycle was refused (`(int -> int)`, `(.A to .B)`)", () => {
+    expect(codes(P(`<m:(int -> int)=1/>\nfunction f() { @m = 2; }`, B))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`type S:enum = { A, B }\n<m:(.A to .B)=.A/>\nfunction f() { @m = .B; }`, B))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("an un-refused locked `(not to int[])` edit still reports, and says \"an `int[]`\"", () => {
+    const e = errs(P(`<xs:(not to int[])=not/>\nfunction f() { @xs.append(1); }`, B));
+    expect(e.map((d) => d.code)).toEqual([WNG]);
+    expect(e[0].message).toContain("an edit changes an `int[]` it already holds");
+    expect(e[0].message).not.toContain("a `int");
+  });
+  test("lifeAgainMsg: \"already an `int`\"; a `string` keeps \"a\"", () => {
+    const i = errs(P(`<m:(not to int)=not/>\nfunction f() { @m = 1; @m = 2; }`, B));
+    expect(i.map((d) => d.code)).toEqual([WNG]);
+    expect(i[0].message).toContain("here it is already an `int`");
+    const s = errs(P(`<m:(not to string)=not/>\nfunction f() { @m = "a"; @m = "b"; }`, B));
+    expect(s[0].message).toContain("here it is already a `string`");
+  });
+  // Not a fix — the residual the gap text names, pinned so a later absence-narrowing lane sees it move:
+  // a locked cell written twice in ONE handler through a loop or a called function is accepted today.
+  test("residual (provable-or-silent): a loop / a called function writing a locked cell twice compiles clean", () => {
+    expect(codes(P(`<m:(not to int)=not/>\nfunction f() { for (let i = 0; i < 2; i = i + 1) { @m = i; } }`, B))).toEqual([]);
+    expect(codes(P(`<m:(not to int)=not/>\nfunction g(v: int) { @m = v; }\nfunction f() { g(1); g(2); }`, B))).toEqual([]);
   });
 });

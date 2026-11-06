@@ -13,8 +13,11 @@
 //   3. "Teardown … The same rule applies."
 //   4. "Abort is transport-only. … It is not a rollback … the server may have committed. … An
 //      aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle."
-// O-059-3 (a non-SQL side effect) is not ruled: the bootstrap classifies such a call graph — and one
-// that reaches no SQL at all — WRITE (fail closed to discard; INTERIM, analyze.scrml requestReads).
+// O-059-3 (a non-SQL side effect) is not ruled: the bootstrap classifies a call graph that reaches a
+// host-backed function, a `_{}` block or an unresolvable call WRITE (fail closed to discard; INTERIM,
+// analyze.scrml requestReads). A call graph that reaches NO SQL holds rule 1(a) vacuously and is READ
+// (ruling:user-voice-scrml.md S475 "PA self-correction adopted: the #1787 '≥1 SELECT' clause (a no-SQL
+// server call classed WRITE) is dropped — SPEC §6.7.7.1 rule 1 makes it READ").
 
 import { describe, test, expect, beforeAll, afterEach, afterAll } from "bun:test";
 import { createServer as httpServer, request as httpRequest } from "node:http";
@@ -25,6 +28,7 @@ import { SQL } from "bun";
 import { Database } from "bun:sqlite";
 import { mods, compile, check, realDb, serve, bridge, pathOf, plainRequest } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { frontEndStdlib } from "../slice-m2/lowered.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf } from "../slice-m1/load-program.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 300000 });
@@ -40,15 +44,27 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 async function settle(n = 60) { for (let i = 0; i < n; i++) await tick(); }
 let k = 0;
 
-// A READ load (a SELECT, nothing else) and a WRITE-classified one (a server function with no SQL:
-// O-059-3 unruled → WRITE), each a request on `@userId` with buttons to change it and an optional
-// `if=` region (teardown).
+// A READ load (a SELECT, nothing else) and a WRITE-classified one (a client function making TWO server
+// calls: two server batches, rule 1(b) → WRITE), each a request on `@userId` with buttons to change it
+// and an optional `if=` region (teardown). The WRITE load's runs each fetch `pre` first, then `nm`.
 const READ_FN = `    function loadName(id: int) -> string {
         const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
         return u.name;
     }
 `;
-const WRITE_FN = `    server function loadName(id: int) -> string {
+const WRITE_FN = `    server function pre(id: int) -> int { return id; }
+    server function nm(id: int) -> string {
+        if (id == 1) return "a";
+        if (id == 2) return "b";
+        return "c";
+    }
+    function loadName(id: int) -> string {
+        const n: int = pre(id) !{ _ :> 0 };
+        return nm(n) !{ _ :> "?" };
+    }
+`;
+// A server function that reaches no SQL at all.
+const NOSQL_FN = `    server function loadName(id: int) -> string {
         if (id == 1) return "a";
         if (id == 2) return "b";
         return "c";
@@ -184,13 +200,119 @@ describe("§6.7.7.1 rule 1 — the class (analyze requestReads → Core View.Req
     expect(d.js).not.toContain("read: true");
   });
 
-  test("a server function that reaches no SQL is WRITE (O-059-3 unruled — fail closed)", () => {
+  test("a server function that reaches NO SQL is READ (rule 1(a) holds vacuously — S475 ruling), and prints `read: true`", () => {
+    // RED before s475-boot-request-followups: the '≥1 SELECT' clause classed it WRITE
+    const t = clsOf(APP(NOSQL_FN));
+    expect(name(t.cls)).toBe(READ);
+    expect(t.js).toContain("}, { mount: true, read: true, state: {");
+    // … also when the no-SQL function is reached through a client wrapper making one request
+    expect(name(clsOf(APP(NOSQL_FN.replace("server function loadName", "server function nm")
+      + `    function loadName(id: int) -> string { return nm(id) !{ _ :> "?" }; }\n`)).cls)).toBe(READ);
+  });
+
+  test("a client function making two server calls of no-SQL functions is WRITE (rule 1(b): two batches)", () => {
     expect(name(clsOf(APP(WRITE_FN)).cls)).toBe(WRITE);
+  });
+
+  test("a server function reaching a host-backed function (`scrml:math`'s abs) is still WRITE (O-059-3 — INTERIM)", () => {
+    const src = APP(`    import { abs } from "scrml:math";
+    server function loadName(id: int) -> string {
+        if (abs(id) == 1) return "a";
+        return "c";
+    }
+`);
+    const r = frontEndStdlib(mods(), [{ path: "app.scrml", src }], "app.scrml", {});
+    expect(r.diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info")).toEqual([]);
+    expect(check(r.core)).toEqual([]);
+    expect(name(requestOf(r.core).cls)).toBe(WRITE);
   });
 
   test("a client-only load (no server call: not a single server batch) is WRITE", () => {
     const src = `<program>\n    let <u:int=1/>\n    let <m:int=0/>\n    fn cnt(x: int) -> int { return x + 1; }\n    <request id="load">${D} @m = cnt(@u); }</request>\n    <main><p>${D}@m}</p></main>\n</program>\n`;
     expect(name(clsOf(src).cls)).toBe(WRITE);
+  });
+});
+
+// s475-boot-request-followups (#1787 review) — analyze's `clientOneRead` walk visits each client
+// function ONCE, so a function reached along two calls counts its one server call once; only
+// txQuerySets' `remote` (the requests counted along EVERY call) catches it. Measured: drop
+// `tq.remote[i0] != 1` and both loads below go red — C-R2 refuses the READ class analyze then gives
+// them; with C-R2 also at its origin/main form, analyze classes both ReqRead (Expected "ReqWrite",
+// Received "ReqRead"). Before this lane C-R2 had the same per-function hole (a forced READ of either
+// re-checked clean).
+const Q1 = `    server function q(id: int) -> string {
+        const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+`;
+const DIAMOND = APP(Q1 + `    function d(id: int) -> string { return q(id) !{ _ :> "?" }; }
+    function b(id: int) -> string { return d(id); }
+    function c(id: int) -> string { return d(id); }
+    function loadName(id: int) -> string { return b(id) + c(id); }
+`);
+const H_TWICE = APP(Q1 + `    function h(id: int) -> string { return q(id) !{ _ :> "?" }; }
+    function loadName(id: int) -> string { return h(id) + h(id + 1); }
+`);
+const LOOP = APP(Q1 + `    function loadName(id: int) -> string {
+        let s: string = "";
+        for (let i = 0; i < 2; i = i + 1) { s = s + (q(id) !{ _ :> "?" }); }
+        return s;
+    }
+`);
+const INS = `<program db="./app.db">
+    let <s:int=0/>
+    function ins(id: int) -> int {
+        ${SQ}\`INSERT INTO users (id, name) VALUES (\${id}, 'x')\`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    <request id="r" deps=[]>${D} @s = ins(1); }</request>
+    <main><p>${D}@s}</p></main>
+</program>
+`;
+
+describe("§6.7.7.1 rule 1(b) — a client function reached along two calls makes two requests (analyze `remote`)", () => {
+  test("a client diamond (b and c both call d, which calls the server) is WRITE", () => {
+    const t = clsOf(DIAMOND);
+    expect(name(t.cls)).toBe(WRITE);
+    expect(t.js).not.toContain("read: true");
+  });
+  test("`h(id) + h(id + 1)` (one function, two calls, one server call each) is WRITE", () => {
+    const t = clsOf(H_TWICE);
+    expect(name(t.cls)).toBe(WRITE);
+    expect(t.js).not.toContain("read: true");
+  });
+});
+
+// C-R2 (check.scrml checkReadRequest) — defence in depth: a Core whose Request is marked READ when its
+// load is not one SELECT-only server batch is refused. Each Core below is a real compile of a WRITE
+// load with its class forced to ReqRead.
+describe("C-R2 — the READ re-check refuses a READ class the load does not earn", () => {
+  const forcedRead = (src) => {
+    const r = compile(src);
+    expect(name(requestOf(r.core).cls)).toBe(WRITE);
+    expect(check(r.core)).toEqual([]);          // WRITE is never re-checked
+    requestOf(r.core).cls = READ;
+    return check(r.core).join("\n");
+  };
+  test("a non-SELECT query reached on the server", () => {
+    expect(forcedRead(INS)).toMatch(/C-R2: a READ Request's server call reaches a query that is not provably a SELECT, in `ins`/);
+  });
+  test("two server calls (a client wrapper calling `pre` then `nm`)", () => {
+    expect(forcedRead(APP(WRITE_FN))).toMatch(/C-R2: a READ Request's load makes 2 (or more )?server calls/);
+  });
+  test("a loop around the server call", () => {
+    expect(forcedRead(LOOP)).toMatch(/C-R2: a READ Request's load runs a loop in `loadName`/);
+  });
+  test("a function reached along two calls — the diamond and `h(id) + h(id + 1)` (RED before this lane: C-R2 counted once per function)", () => {
+    expect(forcedRead(DIAMOND)).toMatch(/C-R2: a READ Request's load makes 2 or more server calls \(counted along every call\)/);
+    expect(forcedRead(H_TWICE)).toMatch(/C-R2: a READ Request's load makes 2 or more server calls \(counted along every call\)/);
+  });
+  test("a READ that earns it re-checks clean — a SELECT, and a server call that reaches no SQL (RED before: 'reaches no query')", () => {
+    const r = compile(APP(NOSQL_FN));
+    expect(name(requestOf(r.core).cls)).toBe(READ);
+    expect(check(r.core)).toEqual([]);
+    const rs = compile(APP(READ_FN));
+    expect(check(rs.core)).toEqual([]);
   });
 });
 
@@ -276,18 +398,22 @@ describe("rules 2 / 4 — supersede: a READ is aborted, a WRITE is discarded", (
       await settle();
       expect(who()).toBe("a");
       const held = abortableTransport(srv);
-      click(document.querySelector("#u2"));
+      click(document.querySelector("#u2"));     // run 1: pre(2) held
       await settle(5);
-      click(document.querySelector("#u3"));
+      click(document.querySelector("#u3"));     // run 2 supersedes run 1: pre(3) held
       await settle(5);
       expect(held.length).toBe(2);
       expect(held[0].aborted).toBe(false);
       expect(held[0].signal.aborted).toBe(false);
-      await held[1].go();
+      await held[1].go();                       // run 2 goes on to nm(3)
+      await settle(5);
+      expect(held.length).toBe(3);
+      await held[2].go();
       await settle();
       expect(who()).toBe("c");
       await held[0].go();                       // the superseded transport completes
       await settle();
+      expect(held.length).toBe(3);              // … run 1 never continues to its second call
       expect(who()).toBe("c");                  // … and is discarded
       expect(sig(cells(rt))).toEqual({ loading: false, data: "c", error: null, stale: false });
       expect(reported).toEqual([]);
@@ -335,6 +461,7 @@ describe("rule 3 — teardown: a READ is aborted, a WRITE is discarded", () => {
     expect(held[0].aborted).toBe(false);
     for (const h of held) await h.go();
     await settle();
+    expect(held.length).toBe(1);                // the torn-down run never continues to its second call
     expect(who()).toBe("-");
     expect(sig(cells(rt))).toEqual({ loading: false, data: null, error: null, stale: false });
   });
@@ -556,17 +683,21 @@ describe("rule 2 via `<#id>.refetch()` — a refetch supersedes: READ aborted, W
       await settle();
       expect(who()).toBe("a");
       const held = abortableTransport(srv);
-      click(document.querySelector("#u2"));   // run 1: user 2
+      click(document.querySelector("#u2"));   // run 1: pre(2) held
       await settle(5);
-      click(document.querySelector("#rf"));   // the refetch (run 2) supersedes run 1
+      click(document.querySelector("#rf"));   // the refetch (run 2) supersedes run 1: pre(2) held
       await settle(5);
       expect(held.length).toBe(2);
       expect(held.map((h) => h.aborted)).toEqual([false, false]);
-      await held[1].go();
+      await held[1].go();                      // run 2 goes on to nm(2) (WRITE_FN: two server calls a run)
+      await settle(5);
+      expect(held.length).toBe(3);
+      await held[2].go();
       await settle();
       expect(who()).toBe("b");
       await held[0].go();                      // the superseded transport completes …
       await settle();
+      expect(held.length).toBe(3);             // … run 1 never continues to its second call
       expect(who()).toBe("b");                 // … and is discarded
       expect(sig(cells(rt))).toEqual({ loading: false, data: "b", error: null, stale: false });
       expect(reported).toEqual([]);
