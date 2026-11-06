@@ -251,7 +251,10 @@ describe("what stays refused — one diagnostic, naming a fix that can work (rev
     expect(e[0].message).toContain("§19.9.5");
   });
 
-  test("an UNcomposed client `! SqlError` function `?`-propagating a `!` server call (§19.5.3: \"the enclosing enum SHALL declare it\"): one E-ERROR-010, which does not tell the author to add a variant to the built-in", () => {
+  // s475-boot-transport-every-client-bang: owner ruling S475 item 4 — "§19.9.5 extends to every client `!`
+  // function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for client functions.
+  // Newly-accepting." Was: one E-ERROR-010 here ("`SqlError` is built in and takes no variant").
+  test("an UNcomposed client `! SqlError` function `?`-propagating a `!` server call is a carrier: it compiles, its caller's `_` covers `Transport` (ruling S475 item 4; was E-ERROR-010)", () => {
     const src = `<program db="./app.db">
     let <r:int=0/>
     function get(x: int)! SqlError {
@@ -265,10 +268,11 @@ describe("what stays refused — one diagnostic, naming a fix that can work (rev
     <main><button id="go" onclick={ @r = load(5) !{ _ :> 9, }; }>go</button></main>
 </program>
 `;
-    const e = errs(src);
-    expect(e.map((d) => d.code)).toEqual(["E-ERROR-010"]);
-    expect(e[0].message).toContain("`SqlError` is built in and takes no variant");
-    expect(e[0].message).not.toContain("Add `Transport(t: ServerCallError)` to `SqlError`");
+    expect(errs(src)).toEqual([]);
+    // the caller's handler owes `Transport`: without `_`, naming only SqlError's variants is E-TYPE-080
+    const e = errs(src.replace("!{ _ :> 9, }", "!{ .QueryFailed(m) :> 3, .ConstraintViolation(c) :> 4, .ConnectionLost :> 5, }"));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-080"]);
+    expect(e[0].message).toContain("Transport");
   });
 });
 
