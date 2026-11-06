@@ -17149,14 +17149,40 @@ ${
     //   tmode  the template's root mode is a table mode, so outside a cell or a
     //          caption a `<table>` start tag is dropped (HTML §13.2.6.4.9 "in
     //          table": no table in table scope). Measured in Chromium 152.
+    //   selT   (s475-boot-optgroup-narrow r1) NOT a parse fact: this template is
+    //          PLACED inside a `<select>` — an arm / row / use's renders / slot
+    //          content inserted (by DOM calls) under one. "" = it is not; else the
+    //          tag of the element its root nodes are inserted into. It crosses
+    //          template boundaries the way `ns` does, and a scope boundary inside
+    //          the template ends it, as it ends `inSel`. It feeds ONE content-model
+    //          rule (E-HTML-OPTGROUP-NESTED: an `<optgroup>` directly inside an
+    //          `<optgroup>` of a `<select>` holds options the `<select>` does not
+    //          list) and nothing else — the `inSel` rules are the parser's, and the
+    //          parser never sees across a template boundary. INTERIM: the capable
+    //          form is a general content-model check across composition (every
+    //          template judged in the element it is inserted into).
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
                          inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string,
-                         inSel: boolean, root: boolean, tmode: boolean }
+                         inSel: boolean, root: boolean, tmode: boolean, selT: string }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
+        return mkRootAt(ns, depth, "")
+    }
+
+    // A template's root context, placed at `place` (`mkPlaceOf` of where it is inserted).
+    fn mkRootAt(ns: string, depth: int, place: string) -> MkCx {
         return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "",
-                 inSel: false, root: true, tmode: false }
+                 inSel: false, root: true, tmode: false, selT: place }
+    }
+
+    // Where a template inserted at context `c` is placed: "" when no `<select>` holds that point
+    // (in this template, or in the one this template is placed in); else the element it goes into.
+    fn mkPlaceOf(c: MkCx) -> string {
+        if (!c.inSel && c.selT == "") return ""
+        if (c.parent != "") return c.parent
+        if (c.selT != "") return c.selT
+        return "select"
     }
 
     fn markupParseDiags(g: Globals, st0: AS) -> AS {
@@ -17240,7 +17266,7 @@ ${
                         out = out.concat(mkRepairFault(file, e, rootTableMsg(e.tag, mode)))
                     }
                     cn = { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-" }
+                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT }
                 }
             } else if (mode == "col") {
                 const tx: string | not = mkTextOf(k)
@@ -17319,7 +17345,7 @@ ${
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
             .Css(c: x) :> []
-            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
+            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
         }
     }
 
@@ -17357,9 +17383,9 @@ ${
         if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
         // an `if=` / `else-if=` / `else` element is its arm's own template
         let c: MkCx = c0
-        if (isArmElem(e)) c = mkRoot(c0.ns, c0.depth)
+        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
         if (e.star) return mkStar(g, sa, file, e, c)
-        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRoot(c.ns, c.depth))
+        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
         if (d is given) return mkUse(g, sa, file, e, d, c)
@@ -17414,7 +17440,7 @@ ${
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
                      inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "",
-                     inSel: c.inSel && !bound, root: false, tmode: c.tmode }
+                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -17429,7 +17455,8 @@ ${
                  // s475: a `<select>` is in scope until a scope boundary; a cell / caption parses its content "in body"
                  inSel: t == "select" || (c.inSel && !bound),
                  root: false,
-                 tmode: c.tmode && t != "td" && t != "th" && t != "caption" }
+                 tmode: c.tmode && t != "td" && t != "th" && t != "caption",
+                 selT: bound ? "" : c.selT }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
@@ -17464,7 +17491,32 @@ ${
         if (t == "optgroup" && c.parent == "optgroup" && c.inSel) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<optgroup>` of a `<select>` closes the outer one (HTML §13.2.6.4.7, the `<select>` rules): option groups do not nest in a `<select>` — write it after the outer `<optgroup>`")
         if ((t == "rt" || t == "rp") && ["rb", "rp", "rt"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
         if ((t == "rb" || t == "rtc") && ["rb", "rp", "rt", "rtc"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        // s475-boot-optgroup-narrow r1 (review F2): with a `<select>` in scope, an `<optgroup>` / `<hr>`
+        // start tag first "generates implied end tags" (pops every open dd dt li optgroup option p rb rp rt
+        // rtc that is the current node, in a chain), and an `<option>` does the same except for optgroup
+        // (HTML §13.2.6.4.7). So the parent decides: one pop already moves the element out of it. Measured
+        // Chromium 152: `<select><optgroup><li><optgroup>` → select(optgroup(li), optgroup),
+        // `<select><p><option>` → select(p, option, p); `<select><optgroup><div><optgroup>` is kept.
+        if (c.inSel && (t == "optgroup" || t == "hr") && impliedEndTag(c.parent)) return mkRepairFault(file, e, impliedEndMsg(tg, c.parent))
+        if (c.inSel && t == "option" && c.parent != "optgroup" && impliedEndTag(c.parent)) return mkRepairFault(file, e, impliedEndMsg(tg, c.parent))
+        // s475-boot-optgroup-narrow r1 (review F1) — a CONTENT-MODEL rule, not a parser repair: the
+        // template is placed inside a `<select>` (selT), so the DOM is select > … optgroup > optgroup, built
+        // as written, and the inner group's options are not in the `<select>`'s option list (Chromium 152:
+        // `select.options` skips them; `select.value` cannot be set to one). INTERIM (see MkCx `selT`).
+        if (t == "optgroup" && !c.inSel && c.selT != "" && (c.parent == "optgroup" || (c.parent == "" && c.selT == "optgroup"))) {
+            return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-OPTGROUP-NESTED",
+                      msg: "an `<optgroup>` directly inside an `<optgroup>`, placed inside a `<select>` (by an `if=` arm, an `<each>` / `for … lift` row, a component's renders or a `<slot/>`): option groups do not nest in a `<select>` — the inner group's options are not in the `<select>`'s option list, so they cannot be chosen (SPEC §24.5) — write the inner `<optgroup>` after the outer one" }]
+        }
         return []
+    }
+
+    // HTML §13.2.6.4.7 "generate implied end tags": the elements it pops.
+    fn impliedEndTag(t: string) -> boolean {
+        return ["dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"].indexOf(t) >= 0
+    }
+
+    fn impliedEndMsg(tg: string, parent: string) -> string {
+        return tg + " directly inside `<" + parent + ">` with a `<select>` open closes the `<" + parent + ">` first (HTML §13.2.6.4.7, the `<select>` rules \"generate implied end tags\"): it is built after it, not inside — write it after the `<" + parent + ">`"
     }
 
     fn tableHint(mode: string, t: string) -> string {
@@ -17481,20 +17533,29 @@ ${
     // reported here, at the use.
     fn mkUse(g: Globals, sa: AS, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
-        if (isForeignNs(c.ns) && c.depth < 16) out = mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, "`<" + e.tag + ">` is used")
+        if (mkPlacedApart(c) && c.depth < 16) out = mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, "`<" + e.tag + ">` is used")
         if (e.kids.length > 0 && c.depth < 16) {
-            out = out.concat(mkNodes(g, sa, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
+            out = out.concat(mkNodes(g, sa, file, e.kids, mkRootAt(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1, mkSlotPlace(g, d, c, c.depth + 1))))
         }
         return out
     }
 
+    // A template inserted here is judged in this context, not only alone: a FOREIGN context (the parser
+    // builds it there), or (s475-boot-optgroup-narrow r1) a point inside a `<select>` (the content-model
+    // rule E-HTML-OPTGROUP-NESTED).
+    fn mkPlacedApart(c: MkCx) -> boolean {
+        return isForeignNs(c.ns) || mkPlaceOf(c) != ""
+    }
+
     // The faults `nodes` (from `dfile`) have as their OWN template in the use's
-    // FOREIGN context and not alone (walked in HTML, where they are judged at
-    // their own site), reported at the use `e`.
+    // FOREIGN / `<select>` context and not alone (walked in HTML, where they are
+    // judged at their own site), reported at the use `e`.
     fn mkAtUse(g: Globals, sa: AS, file: string, e: AElem, dfile: string, nodes: ANode[], c: MkCx, what: string) -> MkFault[] {
-        const inner: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(c.ns, c.depth + 1))
+        const inner: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRootAt(c.ns, c.depth + 1, mkPlaceOf(c)))
         const alone: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(htmlNs(), c.depth + 1))
-        return mkRelabel(file, e, inner, alone, what + " inside " + nsWords(c.ns) + ", where its renders do not hold: ")
+        let where: string = "a `<select>`"
+        if (isForeignNs(c.ns)) where = nsWords(c.ns)
+        return mkRelabel(file, e, inner, alone, what + " inside " + where + ", where its renders do not hold: ")
     }
 
     fn mkRelabel(file: string, e: AElem, inner: MkFault[], alone: MkFault[], head: string) -> MkFault[] {
@@ -17540,14 +17601,14 @@ ${
     }
 
     fn mkStarShared(g: Globals, sa: AS, file: string, e: AElem, s: Sym, c: MkCx, w: string) -> MkFault[] {
-        if (!isForeignNs(c.ns)) return []
+        if (!mkPlacedApart(c)) return []
         const d: DeclSrc | not = findDeclSrc(g, s)
         if (d is not) return []
         return mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, w)
     }
 
     fn mkStarArms(g: Globals, sa: AS, file: string, e: AElem, v: StateView, c: MkCx, w: string) -> MkFault[] {
-        if (!isForeignNs(c.ns)) return []
+        if (!mkPlacedApart(c)) return []
         let out: MkFault[] = []
         for (const a of v.arms) { out = out.concat(mkAtUse(g, sa, file, e, file, a.body, c, w)) }
         return out
@@ -17556,7 +17617,7 @@ ${
     // `c` one level deeper (the inlined markup stands where the `<*x/>` does).
     fn mkKidOf(c: MkCx) -> MkCx {
         return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode }
+                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT }
     }
 
     fn nsWords(ns: string) -> string {
@@ -17592,6 +17653,45 @@ ${
             if (s != "") return s
         }
         return ""
+    }
+
+    // s475-boot-optgroup-narrow r1: where `d`'s `<slot/>` is placed (`mkPlaceOf` there, "" when no `<select>`
+    // holds it) when `d` is used at context `c` — the slot content's `selT`.
+    fn mkSlotPlace(g: Globals, d: DeclSrc, c: MkCx, depth: int) -> string {
+        const s: string = mkSlotPlIn(g, d.file, rendersNodes(d), mkRootAt(c.ns, depth, mkPlaceOf(c)), depth)
+        if (s == "?") return ""
+        return s
+    }
+
+    // "?" = no `<slot/>` in `nodes`.
+    fn mkSlotPlIn(g: Globals, file: string, nodes: ANode[], c: MkCx, depth: int) -> string {
+        if (depth > 16) return "?"
+        for (const n of nodes) {
+            const k: ANodeK = n.k
+            const s: string = match k {
+                .Elem(e: e) :> mkSlotPlElem(g, file, e, c, depth)
+                .Text(text: t) :> "?"
+                .Interp(e: x) :> "?"
+                .DeclNode(d: x) :> "?"
+                .Effect(w: x) :> "?"
+                .Css(c: x) :> "?"
+                .Gather(f: lf) :> mkSlotPlIn(g, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
+            }
+            if (s != "?") return s
+        }
+        return "?"
+    }
+
+    fn mkSlotPlElem(g: Globals, file: string, e: AElem, c0: MkCx, depth: int) -> string {
+        if (e.star) return "?"
+        let c: MkCx = c0
+        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
+        if (e.tag == "slot") return mkPlaceOf(c)
+        if (e.tag == "each") return mkSlotPlIn(g, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkSlotPlIn(g, file, e.kids, mkRootAt(c.ns, c.depth, mkSlotPlace(g, d, c, depth + 1)), depth + 1)
+        if (!isKnownElementName(e.tag)) return mkSlotPlIn(g, file, e.kids, c, depth)
+        return mkSlotPlIn(g, file, e.kids, mkKid(c.ns, e.tag.toLowerCase(), mkQuoted(e.attrs, "encoding"), c), depth)
     }
 
     fn mkSlotElem(g: Globals, file: string, e: AElem, ns: string, depth: int) -> string {
