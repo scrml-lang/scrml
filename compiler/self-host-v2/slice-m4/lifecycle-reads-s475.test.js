@@ -128,8 +128,15 @@ describe("the write contract (§66.11.6, §66.11.1)", () => {
     expect(codes(P(`${M}\nfunction f() { @m = 5; }\nfunction g() { @m = 6; }`, `<button onclick=f()>a</button><button onclick=g()>b</button>`))).toEqual([]);
   });
   // red on base: E-WRITE-NOT-GRANTED "`@m` is locked — nothing grants this write"
-  test("…and on a LOCKED cell: the lifecycle is the grant (§66.11.1; §13.9.4 writes a new `T` into a locked pending cell)", () => {
-    expect(codes(P(`<m:(not to int)=not/>\nfunction f() { @m = 5; }\nfunction g() { if (@m is not) return; @m = @m + 1; }`, `<button onclick=f()>a</button><button onclick=g()>b</button>`))).toEqual([]);
+  test("…and on a LOCKED cell the lifecycle grants the whole `not → T` write (§66.11.1)", () => {
+    expect(codes(P(`<m:(not to int)=not/>\nfunction f() { @m = 5; }`, `<button onclick=f()>a</button>`))).toEqual([]);
+  });
+  // s475 r1 (#1783 review F2b, INTERIM pending an owner ruling on `T → T′`): only `not → T`
+  test("…but a LOCKED cell's write where it is provably present already (`T → T′`) is E-WRITE-NOT-GRANTED", () => {
+    const e = errs(P(`<m:(not to int)=not/>\nfunction g() { if (@m is not) return; @m = @m + 1; }`, `<button onclick=g()>b</button>`));
+    expect(e.map((d) => d.code)).toEqual([WNG]);
+    expect(e[0].message).toContain("int → int");
+    expect(codes(P(`<m:(not to int)=not/>\nfunction g() { @m = 1; @m = 2; }`, `<button onclick=g()>b</button>`))).toEqual([WNG]);
   });
   test("a locked cell's writes print exactly as a `let` cell's (no new runtime representation)", () => {
     const body = (kw) => P(`${kw}<m:(not to int)=not/>\nfunction f() { @m = 5; }`, `<button onclick=f()>a</button><p if=@m>\${@m}</p>`);
@@ -140,8 +147,20 @@ describe("the write contract (§66.11.6, §66.11.1)", () => {
     };
     expect(js(body("    "))).toBe(js(body("let ")));
   });
-  test("a `T | not` value is not refused (provable-or-silent; §13.9.4 writes `!{ _ :> not }` into a pending cell)", () => {
-    expect(codes(P(`${M}\nfunction g() -> int | not { return not; }\nfunction f() { @m = g(); }`, `<button onclick=f()>a</button>`))).toEqual([]);
+  // s475 r1 (#1783 review F2a; red on #1783 head faa84ccff: compiled, and at run time the cell
+  // reverted to `not`). INTERIM: the capable form is S4's pending-cell handled waiting write (§13.9.4).
+  test("a value that MAY be `not` is E-WRITE-NOT-GRANTED — let and locked, call and ternary (§66.11.2)", () => {
+    const G = `function g() -> int | not { return not; }`;
+    for (const kw of ["let ", ""]) {
+      const e = errs(P(`${kw}<m:(not to int)=not/>\n${G}\nfunction f() { @m = g(); }`, `<button onclick=f()>a</button>`));
+      expect(e.map((d) => d.code)).toEqual([WNG]);
+      expect(e[0].message).toContain("may be `not`");
+      expect(e[0].message).toContain("§66.11.2");
+      expect(codes(P(`${kw}<m:(not to int)=not/>\nlet <k:bool=true/>\nfunction f() { @m = @k ? 1 : not; }`, `<button onclick=f()>a</button>`))).toEqual([WNG]);
+    }
+  });
+  test("a discriminated value is granted (`const v = g(); if (v is given) { @m = v; }`)", () => {
+    expect(codes(P(`${M}\nfunction g() -> int | not { return not; }\nfunction f() { const v = g(); if (v is given) { @m = v; } }`, `<button onclick=f()>a</button>`))).toEqual([]);
   });
   test("`reset(@m)` on a `let` cell is granted (its `replace`; §14.12.10 reverts the transition state)", () => {
     expect(codes(P(`${M}\nfunction r() { reset(@m); }`, `<button onclick=r()>r</button>`))).toEqual([]);
@@ -186,4 +205,87 @@ describe("the S475 r1 probes (docs/changes/s475-boot-lifecycle-type/probes/) —
   for (const [file, want] of Object.entries(WANT)) {
     test(file, () => expect(codes(readFileSync(join(dir, file), "utf8"))).toEqual(want));
   }
+});
+
+// ---- s475 r1 (#1783 review) — red on #1783 head faa84ccff unless noted ----------------------------
+const L = `<m:(not to int)=not/>`;
+const N = `let <n:int=0/>`;
+const B = `<button onclick=f()>b</button>`;
+
+// F1 — §42.2.3: "the present case is the arm after `not :>`". A wildcard / `else` with no `not :>`
+// before it is where `not` lands. Red on faa84ccff: all four compiled clean, and at run time
+// `@n = match @m { 5 :> 1, _ :> @m + 1 }` stored `not + 1` (→ 1) in the `int` cell.
+describe("F1: a match arm reached by `not` keeps `T | not`", () => {
+  const RED = {
+    lifeWild: [`${M}\n${N}\nfunction f() { @n = match @m { 5 :> 1, _ :> @m + 1 }; }`, [T1]],
+    lifeElse: [`${M}\n${N}\nfunction f() { @n = match @m { 5 :> 1, else :> @m + 1 }; }`, [T1]],
+    lifeStmt: [`${M}\n${N}\nfunction f() { match @m { 5 :> { @n = 1; }, _ :> { @n = @m + 1; } } }`, [T1]],
+    maybeWild: [`${MAYBE}\n${N}\nfunction f() { @n = match @m { 5 :> 1, _ :> @m + 1 }; }`, ["E-OPERAND-NOT-NARROWED"]],
+    maybeStmt: [`${MAYBE}\n${N}\nfunction f() { match @m { 5 :> { @n = 1; }, _ :> { @n = @m + 1; } } }`, ["E-OPERAND-NOT-NARROWED"]],
+  };
+  for (const [name, [body, want]] of Object.entries(RED)) {
+    test(name, () => expect(codes(P(body, B))).toEqual(want));
+  }
+  const OK = {
+    notArmFirst: `${M}\n${N}\nfunction f() { @n = match @m { not :> 0, _ :> @m + 1 }; }`,
+    notArmMid: `${MAYBE}\n${N}\nfunction f() { @n = match @m { 5 :> 1, not :> 0, else :> @m + 1 }; }`,
+    literalArmExcludesNot: `${M}\n${N}\nfunction f() { @n = match @m { 5 :> @m + 1, not :> 0, _ :> 2 }; }`,
+  };
+  for (const [name, body] of Object.entries(OK)) {
+    test(name + " (legal)", () => expect(codes(P(body, B))).toEqual([]));
+  }
+});
+
+// F2b — §66.11.1 "a write along the declared path `A → B`": a LOCKED cell is granted the whole
+// `not → T` write only (INTERIM pending an owner ruling on `T → T′`). Red on faa84ccff: every
+// edit and the bind compiled (the grant rode the whole `replace` channel).
+describe("F2b: a locked `(not to T)` cell takes no edit and no `bind:`", () => {
+  const S = `<xs:(not to int[])=not/>`;
+  const RED = {
+    append: [`${S}\nfunction f() { if (@xs is not) return; @xs.append(1); }`, B],
+    pop: [`${S}\nfunction f() { if (@xs is not) return; @xs.pop(); }`, B],
+    shape: [`${S}\nfunction f() { if (@xs is not) return; @xs = [...@xs, 1]; }`, B],
+    bind: [`<s:(not to string)=not/>`, `<input bind:value=@s/>`],
+    bindGated: [`<s:(not to string)=not/>`, `<div if=@s><input bind:value=@s/></div>`],
+  };
+  for (const [name, [body, main]] of Object.entries(RED)) {
+    test(name, () => {
+      const e = errs(P(body, main));
+      expect(e.map((d) => d.code)).toEqual([WNG]);
+      expect(e[0].message).toContain("locked `(not to");
+    });
+  }
+  test("the whole `not → T` write of a locked sequence is granted", () => {
+    expect(codes(P(`${S}\nfunction f() { @xs = [1]; }`, B))).toEqual([]);
+  });
+  test("a `let` cell keeps its `replace` (T → T′) and its reset", () => {
+    expect(codes(P(`${M}\nfunction f() { if (@m is given) { @m = @m + 1; } }\nfunction r() { reset(@m); }`, `${B}<button onclick=r()>r</button>`))).toEqual([]);
+  });
+});
+
+// F3 — §13.9.3 "Any other read SHALL be E-TYPE-001. That includes a whole-cell read". Red on faa84ccff: clean.
+describe("F3: `bind:value` on a `let` `(not to string)` cell reads it", () => {
+  test("undiscriminated: E-TYPE-001", () => {
+    const e = errs(P(`let <s:(not to string)=not/>`, `<input bind:value=@s/>`));
+    expect(e.map((d) => d.code)).toEqual([T1]);
+    expect(e[0].message).toContain("<div if=@s>");
+  });
+  test("under a presence gate: legal", () => {
+    expect(codes(P(`let <s:(not to string)=not/>`, `<div if=@s><input bind:value=@s/></div>`))).toEqual([]);
+  });
+});
+
+// F5 — a call's arguments are evaluated before the call (and before it suspends). Red on faa84ccff:
+// E-TYPE-001 at `save(@count)` (docs/tutorial.md 02b pinned it).
+describe("F5: a call's own writes do not un-narrow its arguments", () => {
+  const SAVE = `let <saveError:string=""/>\nfunction persistCount(n: int)! -> SqlError { ?{\`UPDATE t SET v = \${n}\`}.run(); return n; }\nfunction save(n: int) { persistCount(n) !{ _ :> { @saveError = "x"; } }; }`;
+  test("`@count = @count + 1; save(@count);` is legal", () => {
+    expect(codes(DB(`let <count:(not to int)=not/>\n${SAVE}\nfunction f() { if (@count is given) { @count = @count + 1; save(@count); } }`, B))).toEqual([]);
+  });
+  test("…and a read AFTER the call is still E-TYPE-001 (the call may write / suspend)", () => {
+    expect(codes(DB(`let <count:(not to int)=not/>\n${N}\n${SAVE}\nfunction f() { if (@count is given) { @count = @count + 1; save(@count); @n = @count; } }`, B))).toEqual([T1]);
+  });
+  test("a call nested IN an argument still un-narrows the arguments", () => {
+    expect(codes(P(`${M}\nfunction clr() -> int { @m = 5; return 1; }\nfunction h(a: int, b: int) -> int { return a + b; }\nfunction f() { if (@m is given) { h(clr(), @m); } }`, B))).toEqual([T1]);
+  });
 });
