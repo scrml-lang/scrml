@@ -29,7 +29,7 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, FieldMode, FieldRole,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
@@ -1685,7 +1685,10 @@ ${
         const state: RequestState = { loading: mkEffectDep(target.decl, target.inst, base), data: mkEffectDep(target.decl, target.inst, base + 1),
                                       error: mkEffectDep(target.decl, target.inst, base + 2), stale: mkEffectDep(target.decl, target.inst, base + 3) }
         const body: Block = loadBody(rq, cpsBody(lowerBlock(c, r.body), []))
-        return View.Request(target, deps, body, true, state, rq.handle)
+        // s475 (S5a): §6.7.7.1 rule 1 — analyze's class (requestReads); any request it did not prove READ is WRITE
+        let cls: ReqClass = ReqClass.ReqWrite
+        if (c.t.server.reqReads.indexOf(rq.nid) >= 0) cls = ReqClass.ReqRead
+        return View.Request(target, deps, body, true, state, rq.handle, cls)
     }
 
     // s475 (slice S3b) — `<#id>.loading` / `.data` / `.error` / `.stale` (§6.7.7

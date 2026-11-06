@@ -1639,8 +1639,8 @@ none
 - `linear/lin-004-recurring-ctx-timer-pos` — bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `linear/lin-005-shadow-lin-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
+- `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
 - `loop/loop-001-break-outside` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
@@ -1935,7 +1935,7 @@ none
 - `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
 - `server-fn/e-route-003-pos` — twin · bootstrap-unsupported: `snippet type` (§14.9) is not in the bootstrap yet; it is refused here by name rather than misread
 - `server-fn/e-route-004-pos` — twin · bootstrap-unsupported: `anonymous fn expression` (§48.2.1) is not in the bootstrap yet; it is refused here by name rather than misread — declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callba
-- `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `server-fn/session-value-in-tool-neg` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: a client call of `loadRows`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `loadRows` declares none and its returns do not prove one (the t
 - `sql/one-statement-trailing-semicolon-pos` — twin · bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 

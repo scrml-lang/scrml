@@ -359,7 +359,7 @@ ${
     // -------------------------------------------------------------------------
 
     // s475 (slice S3b): the handle of every `<request>` of the program (View.Request
-    // with a handle), in preorder — what a Core Refetch may name (check C-R2), and
+    // with a handle), in preorder — what a Core Refetch may name (check C-R3), and
     // the program-level slots the printer declares.
     export fn requestHandles(p: CoreProgram) -> Sym[] {
         let out: Sym[] = []

@@ -52,11 +52,12 @@ function requestCore(edit) {
     mount: true,
     state: { loading: dep(LOADING), data: dep(DATA), error: dep(ERROR), stale: dep(STALE) },
     handle: null,
+    cls: C.ReqClass.ReqWrite,
   };
   const bump = core.fns.find((f) => f.sym.hint === "bump");   // the counter's writing function (it writes @count)
   if (edit) edit(parts, { here, dep, bump, idx: { RES, LOADING, STALE, DATA, ERROR, OTHER, count } });
   const body = C.block([...parts.pre, C.Stmt.Suspend(v, parts.on, C.block(parts.then))]);
-  const req = C.View.Request(parts.target, parts.deps, body, parts.mount, parts.state, parts.handle);
+  const req = C.View.Request(parts.target, parts.deps, body, parts.mount, parts.state, parts.handle, parts.cls);
   const shown = C.el("p", [C.Attr.Static("id", "res")], [C.dyn(C.readField(P, here, RES))]);
   prog.renders = [...prog.renders, req, shown];
   return core;
@@ -154,6 +155,21 @@ describe("C-R1 r1 — no self-trigger, no write besides the target's (F1 / F2)",
   });
 });
 
+// s475 (S5a) — C-R2: a READ Request's load is ONE server call whose server work is SELECTs
+// (§6.7.7.1 rule 1). A WRITE Request is never checked (discard is never wrong).
+describe("C-R2 — a READ Request is one server call (§6.7.7.1 rule 1)", () => {
+  const msgs = (edit) => mods.check.checkCore(requestCore(edit)).join("\n");
+  test("the counter's load (a local value, no server call) is clean as WRITE, refused as READ", () => {
+    expect(msgs(() => {})).toBe("");
+    expect(msgs((p) => { p.cls = C.ReqClass.ReqRead; }))
+      .toMatch(/C-R2: a READ Request's load is not one server call/);
+  });
+  test("a READ Request calling something that is not a server function is refused", () => {
+    expect(msgs((p) => { p.cls = C.ReqClass.ReqRead; p.on = C.Expr.ServerCall(C.mkSym(919999, "ghost"), []); }))
+      .toMatch(/C-R2: a READ Request calls `ghost`, which is not a server function/);
+  });
+});
+
 describe("the request machine through the printer", () => {
   test("mount runs the load; the target lands on settle; a dependency change reloads with keep-stale", async () => {
     const { out, rt } = await loadProgram(requestCore(), "request");
@@ -215,7 +231,7 @@ describe("r1 — a request inside a Cond arm (the review's print repro)", () => 
       const v = C.mkSym(vid, "v");
       const body = C.block([C.Stmt.Suspend(v, C.prim2(C.PrimOp.Add, C.readField(P, here, count), C.litInt(add)),
         C.block([C.Stmt.Write(f.wcap, here, C.EditKind.Replace, C.Expr.Local(v), C.Check.Static)]))]);
-      return C.View.Request(dep(idxOf(f.sym.hint)), [dep(count)], body, true, st, handle);
+      return C.View.Request(dep(idxOf(f.sym.hint)), [dep(count)], body, true, st, handle, C.ReqClass.ReqWrite);
     };
     const even = C.prim2(C.PrimOp.EqPrim, C.prim2(C.PrimOp.Mod, C.readField(P, here, count), C.litInt(2)), C.litInt(0));
     prog.renders = [...prog.renders,
