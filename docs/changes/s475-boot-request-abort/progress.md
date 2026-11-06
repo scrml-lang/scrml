@@ -1,1 +1,3 @@
 - 2026-11-06T05:20:35-07:00 start lane s475-boot-request-abort at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-ac1e4116a8e3e4427, base ccbbbd1c5
+- 2026-11-06T05:34:56-07:00 core ReqClass on View.Request; analyze requestReads (ServerFacts.reqReads); lower/print/check C-R2; runtime Task.onAbort + call abort for READ. probes: SELECT load READ; write/server-no-sql/client WRITE
+- 2026-11-06T05:43:49-07:00 tests: slice-m4/request-abort-s475.test.js (12), slice-m1 request.runtime §6.7.7.1 block (4), request.core C-R2 (2). Mutation RED: Task(this) -> 4 READ fail; Task(this,true) -> 3 WRITE fail. Gap resolved; coverage rows §6.7.7/§6.7.7.1 flipped.

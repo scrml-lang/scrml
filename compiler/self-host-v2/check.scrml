@@ -98,7 +98,7 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
-             EditKind, Check, Stmt, View, EffectDep, RequestState, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, EffectDep, RequestState, ReqClass, SqlKind, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
@@ -1394,7 +1394,7 @@ ${
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
-            .Request(target: t, deps: ds, body: b, mount: m, state: st) :> checkRequest(p, encl, t, ds, b, m, st)
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, cls: k) :> checkRequest(p, encl, t, ds, b, m, st).concat(checkReadRequest(p, b, k))
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
             .Reach(fields: fs) :> checkGateFields(p, encl, fs)
@@ -1723,6 +1723,88 @@ ${
         }
         if (writes != 1) out = out.concat(["C-R1: a Request body holds " + writes + " Writes — it holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
         return out
+    }
+
+    // -------------------------------------------------------------------------
+    // C-R2 (s475 S5a) — a READ Request (§6.7.7.1 rule 1; the runtime ABORTS its
+    // superseded or torn-down transport, rules 2 / 3): its load — the last
+    // Suspend's `on` — is ONE server call (an Expr.ServerCall of a ServerFn of
+    // the program: rule 1(b) "the call lowers to a single server batch"), and
+    // every query that call reaches on the server — its own body and every
+    // function it calls there, transitively — is a SELECT (rule 1(a) "no
+    // non-`SELECT` SQL … reachable anywhere in the call graph"), with at least
+    // one; a host-backed function on the way fails it (§6.7.7.1 O-059-3, a
+    // non-SQL side effect, is not ruled: WRITE). Defence in depth over
+    // analyze's `requestReads`, which decides the class. A WRITE request is
+    // never checked here: discarding is never wrong ("Unclassifiable = write").
+    // -------------------------------------------------------------------------
+    fn checkReadRequest(p: CoreProgram, body: Block, cls: ReqClass) -> string[] {
+        if (cls != ReqClass.ReqRead) return []
+        const n: int = body.stmts.length
+        if (n == 0) return []                                   // C-R1 reports it
+        const on: Expr | not = suspendOnOf(body.stmts[n - 1])
+        if (on is not) return []                                // C-R1 reports it
+        const sf: Sym | not = exprServerCallSym(on)
+        if (sf is not) return ["C-R2: a READ Request's load is not one server call — §6.7.7.1 rule 1(b) classifies READ only a call that lowers to a single server batch; anything else is WRITE"]
+        if (findServerFn(p, sf) is not) return ["C-R2: a READ Request calls `" + sf.hint + "`, which is not a server function of the program"]
+        let seen: int[] = []
+        let todo: Sym[] = [sf]
+        let selects = 0
+        let k = 0
+        while (k < todo.length) {
+            const s: Sym = todo[k]
+            k = k + 1
+            if (seen.indexOf(s.id) < 0) {
+                seen = seen.concat([s.id])
+                let b: Block | not = not
+                const f: Fn | not = findFn(p, s)
+                if (f is given) {
+                    if (f.host is given) return ["C-R2: a READ Request's server call reaches the host-backed `" + s.hint + "` — a non-SQL side effect is not ruled READ (§6.7.7.1 O-059-3), so the request is WRITE"]
+                    b = f.body
+                }
+                const g: ServerFn | not = findServerFn(p, s)
+                if (g is given) b = g.body
+                if (b is not) return ["C-R2: a READ Request's server call reaches `" + s.hint + "`, which is not a function of the program — unclassifiable is WRITE (§6.7.7.1 rule 1)"]
+                for (const nd of allNodes(Node.NBlock(b))) {
+                    const q: SqlQuery | not = nodeQuery(nd)
+                    if (q is given) {
+                        if (q.kind != SqlKind.SqlSelect) return ["C-R2: a READ Request's server call reaches a query that is not provably a SELECT, in `" + s.hint + "` — §6.7.7.1 rule 1(a): READ iff no non-`SELECT` SQL is reachable"]
+                        selects = selects + 1
+                    }
+                    const c1: Sym | not = nodePlainCall(nd)
+                    if (c1 is given) todo = todo.concat([c1])
+                    const c2: Sym | not = nodeServerCallSym(nd)
+                    if (c2 is given) todo = todo.concat([c2])
+                }
+            }
+        }
+        if (selects == 0) return ["C-R2: a READ Request's server call reaches no query — the bootstrap classifies READ only a call whose server work is SELECTs (§6.7.7.1 O-059-3: a non-SQL effect is not ruled)"]
+        return []
+    }
+
+    fn suspendOnOf(s: Stmt) -> Expr | not {
+        return match s {
+            .Suspend(on: e) :> e
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
     }
 
     // r1 (F1) — the cell-identity refusals: a request whose run writes one of

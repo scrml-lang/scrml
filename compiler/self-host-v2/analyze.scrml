@@ -490,9 +490,11 @@ ${
     // s454 (U1b): `inherited` — the functions server-placed by inheritance
     // (§12.2 Trigger 5): their calls of server functions are made in place;
     // `plan` — the suspension plan (planPass) lower reads.
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[] }
+    // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
+    // requestReads); every other request is WRITE.
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -27886,6 +27888,90 @@ ${
         return ""
     }
 
+    // =========================================================================
+    // s475 (S5a) — §6.7.7.1 rule 1, CLASSIFICATION: "The compiler SHALL
+    // classify every `<request>` at compile time as READ or WRITE: Body form
+    // (`${ @x = call }`): READ iff (a) no non-`SELECT` SQL (`?{}`) is
+    // reachable anywhere in the call graph of the body's call expression —
+    // transitively, through every server function the call reaches — and (b)
+    // the call lowers to a single server batch … Every other request is WRITE —
+    // including any request the compiler cannot classify." A request is READ
+    // here iff:
+    //  (b) its load is the right-hand side's own call of a SERVER function
+    //      (the plan's SRemote — one request; a client function that waits,
+    //      SWaits, may make several and is WRITE);
+    //  (a) every callable that server function reaches (sum.nodes, along each
+    //      body's calls, itself included) is known to the summary, has no
+    //      unresolvable call (`scan.unproven`), is not host-backed and has no
+    //      `_{}` foreign block, and every `?{}` on the way is provably a SELECT
+    //      (sql.scrml `sqlFacts`; a query the reader cannot prove read-only is
+    //      SqlWrite) — and there is at least ONE such query.
+    // The last two clauses are INTERIM, fail closed to WRITE (discard is never
+    // wrong): §6.7.7.1 O-059-3 does not rule a non-SQL side effect (a host
+    // call, an outbound request), so a call graph that reaches one — or that
+    // reaches no SQL at all, whose server work the compiler cannot vouch for —
+    // is WRITE. The capable form, once O-059-3 is ruled: a non-SQL
+    // effect-freedom proof over the server call graph (pure functions READ).
+    // Body-own `?{}` sites are refused already (actionServerDiags, F1); one
+    // makes the request WRITE here too. check.scrml C-R2 re-checks a READ
+    // class against Core.
+    // =========================================================================
+    fn requestReads(t: Tables, sum: Summary, plan: SuspendPlan) -> int[] {
+        let out: int[] = []
+        for (const rq of t.requests) {
+            if (requestIsRead(t, sum, plan, rq)) out = out.concat([rq.nid])
+        }
+        return out
+    }
+
+    fn requestIsRead(t: Tables, sum: Summary, plan: SuspendPlan, rq: ReqFact) -> boolean {
+        if (sqlsInBlock(rq.req.body).length > 0) return false
+        let callee: int = -1
+        for (const a of plan.at) {
+            if (a.nid == rq.value.nid) callee = remoteCallee(a.kind)
+        }
+        if (callee < 0) return false
+        let seen: int[] = []
+        let todo: int[] = [callee]
+        let selects: int = 0
+        let k: int = 0
+        while (k < todo.length) {
+            const sym: int = todo[k]
+            k = k + 1
+            if (seen.indexOf(sym) < 0) {
+                seen = seen.concat([sym])
+                const i: int = nodeIdx(sum.nodes, sym)
+                if (i < 0) return false
+                const f: FnFacts = sum.nodes[i].f
+                if (hostBackedSym(t, sym)) return false
+                if (f.foreigns.length > 0) return false
+                if (f.scan.unproven.length > 0) return false
+                for (const q of f.sqls) {
+                    if (sqlFacts(q.q.chunks).kind != SqlKind.SqlSelect) return false
+                    selects = selects + 1
+                }
+                for (const r of f.scan.refs) { todo = todo.concat([r.sym]) }
+            }
+        }
+        return selects > 0
+    }
+
+    fn remoteCallee(k: SuspendK) -> int {
+        return match k {
+            .SRemote(callee: c) :> c.id
+            .SWaits(callee: c) :> -1
+            .SQuery :> -1
+            .SLocal(callee: c) :> -1
+        }
+    }
+
+    fn hostBackedSym(t: Tables, sym: int) -> boolean {
+        for (const f of t.fns) {
+            if (f.sym.id == sym) return f.host is given
+        }
+        return false
+    }
+
     // The Sym ids of the scrml functions an expression calls (at any depth).
     fn calledSyms(t: Tables, e: AExpr) -> int[] {
         let out: int[] = []
@@ -29970,7 +30056,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [] }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -35873,7 +35959,8 @@ ${
         }
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes,
+                                  reqReads: requestReads(typedT, sum, pl.plan) }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,

@@ -28,7 +28,7 @@
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, FieldRole, Field,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
@@ -2189,7 +2189,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
-            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h) :> requestJs(ctx, t, ds, b, m, st, h)
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
             .Reach(fields: fs) :> reachJs(ctx, fs, node)
@@ -2382,7 +2382,10 @@ ${
     // the scope this view list renders into (C12's owner rule, as an Effect).
     // r1 (F3): a `handle` binds the `{ refetch }` object requestOn returns, so
     // `<#id>.refetch()` (EC-4) has a route; with none the call is a statement.
-    fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not, handle: Sym | not) -> Rendered {
+    // s475 (S5a): a READ request (§6.7.7.1) prints `read: true` — the runtime
+    // then aborts its superseded / torn-down transport; a WRITE request prints
+    // nothing (the runtime's default is discard, the fail-closed class).
+    fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not, handle: Sym | not, cls: ReqClass) -> Rendered {
         const n: int = body.stmts.length
         if (n == 0) return only([sexpr(jid("malformedRequest$"))])          // C-R1 refuses it first
         const sp: SuspendParts | not = suspendPartsOf(body.stmts[n - 1])
@@ -2391,6 +2394,7 @@ ${
         const cont: JsExpr = JsExpr.JArrow([symName(ctx, sp.bind)], blockJs(ctx, sp.then))
         const load: JsStmt[] = blockJs(ctx, pre).concat([JsStmt.SReturn(JsExpr.JObject([{ key: "on", value: exprJs(ctx, sp.on) }, { key: "then", value: cont }]))])
         let opts: JsProp[] = [{ key: "mount", value: JsExpr.JBool(mount) }]
+        if (cls == ReqClass.ReqRead) opts = opts.concat([{ key: "read", value: JsExpr.JBool(true) }])
         if (st is given) {
             const sigs: JsExpr[] = depCells(ctx, [st.loading, st.data, st.error, st.stale])
             const so: JsExpr = JsExpr.JObject([{ key: "loading", value: sigs[0] }, { key: "data", value: sigs[1] }, { key: "error", value: sigs[2] }, { key: "stale", value: sigs[3] }])

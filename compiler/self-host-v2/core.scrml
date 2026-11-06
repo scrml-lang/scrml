@@ -691,6 +691,10 @@ ${
     // successful settle), `error` the failure's error value or `not`.
     export type RequestState:struct = { loading: EffectDep, data: EffectDep, error: EffectDep, stale: EffectDep }
 
+    // s475 (S5a) — a `<request>`'s §6.7.7.1 class: READ (its superseded or
+    // torn-down transport is aborted) or WRITE (discarded; unclassifiable = WRITE).
+    export type ReqClass:enum = { ReqRead, ReqWrite }
+
     export type View:enum = {
         El(tag: string, attrs: Attr[], kids: View[]),
         Text(text: string),
@@ -745,13 +749,19 @@ ${
         //    to the object `rt.requestOn` returns (`{ refetch }`), so a
         //    `<#id>.refetch()` (§6.7.7, EC-4) has a route to it; `not` when
         //    nothing names the request (a pending cell).
-        //  Unrepresented yet, owed by slice S5 (g-boot-request-read-abort-owed-s475):
-        //  the READ / WRITE class (§6.7.7.1 abort vs discard), `cache`
-        //  (§6.7.7.2) and the §6.7.7.3 baseline trigger (a provably-writing
-        //  request fires only on a LOCAL write that differs from its baseline).
+        //  - `cls` (s475 S5a, §6.7.7.1 rule 1): READ or WRITE, decided by
+        //    analyze (requestReads). A READ request's superseded (EC-2 / EC-4)
+        //    or torn-down (EC-3) transport is ABORTED (rules 2 / 3); a WRITE
+        //    request's is DISCARDED — its result is dropped, its transport runs
+        //    to completion. Unclassifiable = WRITE (fail closed to discard).
+        //    Either way an abandoned run sets no `error` (rule 4). A READ
+        //    request's load is one server call (check.scrml C-R2).
+        //  Unrepresented yet, owed by slice S5b: `cache` (§6.7.7.2) and the
+        //  §6.7.7.3 baseline trigger (a provably-writing request fires only on
+        //  a LOCAL write that differs from its baseline).
         //  C-R1 (check.scrml) refuses a request that would re-trigger itself:
         //  the target, a signal or a body write among its deps.
-        Request(target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, state: RequestState | not, handle: Sym | not),
+        Request(target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, state: RequestState | not, handle: Sym | not, cls: ReqClass),
         // s449 — `reset-on=[@a, @b]` on a program cell (§6.8.4): when any
         // `triggers` cell changes, run `reset` — exactly ONE Write of the cell's
         // reset value to the cell (its initializer; a transition for a cell with
