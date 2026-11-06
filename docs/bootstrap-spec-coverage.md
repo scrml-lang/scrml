@@ -33,10 +33,10 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 <!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
 | status | rows |
 |---|---:|
-| BUILT | 309 |
-| PARTIAL | 153 |
+| BUILT | 313 |
+| PARTIAL | 154 |
 | REFUSED-LOUD | 311 |
-| DEFERRED-RULED | 64 |
+| DEFERRED-RULED | 59 |
 | N/A | 220 |
 | SILENT-ACCEPT | 17 |
 | SILENT-ABSENT | 32 |
