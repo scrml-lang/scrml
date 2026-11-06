@@ -120,7 +120,11 @@ describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => 
     // F2b): a return that IS a recursive call contributes nothing (least fixpoint), so `gr` below is
     // a proven `int` — not a sequence; a recursive call inside an expression (`1 + gr(n - 1)`) stays
     // an unproven branch, which this check does not judge (provable-or-silent)
-    expect(inApp("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return 1; } }", "<each in=g() as c><p>x</p></each>")).toEqual([]);
+    // s475 (s475-boot-partial-followups): that unproven branch beside the proven `int` is a
+    // `Partial`, and `<each in=>` now judges its proven member — the base `return 1` is not a
+    // sequence. A genuinely unresolved call (no proven branch) stays silent.
+    expect(inApp("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return 1; } }", "<each in=g() as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }", "<each in=g() as c><p>x</p></each>")).toEqual([]);
     expect(inApp("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return gr(n - 1); } else { return 1; } }", "<each in=g() as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
   });
   test("provable-or-silent — a call DECLARED to return a non-sequence fires", () => {
@@ -512,7 +516,11 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
   test("provable-or-silent — an operand of unknown type (a call with no return type) is silent", () => {
     // s475 r1 (#1777 review F2b): a return that IS a recursive call contributes nothing (least
     // fixpoint), so the unproven operand is now a recursive call inside an expression
-    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return 1; } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
+    // s475 (s475-boot-partial-followups): a base `return 1` beside it makes the call a `Partial`
+    // whose proven `int` member IS judged (`@s + g()` may be `string + int`); with no proven
+    // branch at all the operand stays silent
+    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return 1; } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
 });
 
