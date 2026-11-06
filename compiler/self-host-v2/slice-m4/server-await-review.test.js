@@ -96,7 +96,11 @@ const REVIEW_EXPECT = {
   "s4/implicitProp": ["PASS"],
   "s4/implicitPropChain": ["PASS"],
   "s4/implicitRunStmt": ["PASS"],
-  "s4/matchFailable": ["REFUSED", ["E-COND-NOT-BOOLEAN"]],
+  // s475 (s475-boot-handled-landing-check): the `.Ok(x)` binder is `c4`'s success value, whose type
+  // (`bool`) is now inferred from its returns (§19.4.1) — the ternary test is a proven `bool`, so
+  // the program compiles, and RUNS: wrong → REJECTED, right → WELCOME (was E-COND-NOT-BOOLEAN on
+  // an untyped binder)
+  "s4/matchFailable": ["PASS"],
   "s4/queryMatch": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   // s469 #1471 review HIGH-1: a `-> T | not` function that falls off the end is refused;
   // with `return not` the `not` arm is taken (`== null`) — wrong → REJECTED

@@ -417,7 +417,13 @@ ${
     // different types, the result type is their union"). It is not Unknown: the
     // typer resolved every branch, so it is never provable-or-silent. (A
     // `match` whose arms disagree is §18.4 rule 3's E-TYPE-001 instead.)
-    export type VType:enum = { Known(t: Type), Absent, Unknown, OneOf(ts: Type[]) }
+    // `Partial(ts)` (s475 r1, #1777 review F2): a join where SOME branches are
+    // proven (`ts`) and at least one is Unknown — `@ok ? u() : "s"`, a `!{}`
+    // whose success type is proven and one arm's is not. Before, Unknown
+    // swallowed the join, so a provably wrong branch landed unchecked. A typed
+    // position checks every PROVEN member (checkPartial); every other consumer
+    // reads it as Unknown (provable-or-silent for the unproven branch).
+    export type VType:enum = { Known(t: Type), Absent, Unknown, OneOf(ts: Type[]), Partial(ts: Type[]) }
     export type ExprType:struct = { nid: int, vt: VType }
     // `presence`: the condition nodes (`if`, `if=`, a ternary test) whose
     // value is a `T | not` — a PRESENCE TEST (RULED S440, truthiness Q1: "a
@@ -801,7 +807,13 @@ ${
         voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
         hostSites: HostSite[],  // s472 (boot-math-port): every wrapper-shaped host call, judged (hostWrappers)
         consts: ConstInfo[],    // s472: the file-scope constants, in link order then source order (constPass)
+        succs: FnSucc[],        // s475: each failable function's INFERRED success type, where proven (failableSuccs)
     }
+
+    // s475 (s475-boot-handled-landing-check) — a failable function's success type,
+    // inferred from its returns (§19.4.1: no success-type slot). The resolver reads it
+    // where a `!{}` / `match` arm on a call of it has no position type (armWant).
+    type FnSucc:struct = { id: int, ty: Type }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
 
@@ -6140,8 +6152,34 @@ ${
         st = rk.st
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
+                             succs: failableSuccs(icx, rf.fs, ownTab) }
         return { g: g, st: st }
+    }
+
+    // s475 (s475-boot-handled-landing-check) — every failable function's success
+    // type that rule 5 (g)'s resolver-mode inference PROVES (ownProvenReturn: each
+    // `return`'s value determined, the returns joined; a `fail` leaves). §19.4.1
+    // gives a `!` function no success-type slot — "its success type is inferred from
+    // its returns" (the parser's E-PARSE-FN wording). Unproven: absent (the arm gets
+    // no struct context, as before). The typer infers it independently (inferReturn).
+    fn failableSuccs(cx: InferCx, fs: FnSrc[], own: OwnT[]) -> FnSucc[] {
+        let out: FnSucc[] = []
+        for (const f of fs) {
+            if (f.info.failable && f.info.ret is not && f.info.host is not) {
+                const r: RInf = ownProvenReturn(cx, f.f, [f.info.name + "()"], own)
+                const t: Type | not = r.r.ty
+                if (r.r.kind == 0 && t is given) out = out.concat([{ id: f.info.sym.id, ty: t }])
+            }
+        }
+        return out
+    }
+
+    fn succOf(g: Globals, f: FnInfo) -> Type | not {
+        for (const s of g.succs) {
+            if (s.id == f.sym.id) return s.ty
+        }
+        return not
     }
 
     // s462 — E-DERIVED-CIRCULAR-DEP (§6.6.10; §66.3 rule 8: "the cycle's
@@ -12980,7 +13018,7 @@ ${
                 .Guard(arms: x) :> rs0.x.ty
                 .MatchOn(arms: x) :> not
             }
-            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(sc, expected, !isMatchHow(hm)), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(env.g, sc, expected), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
         }
         // s469 — the §18 plain-value `match`: a subject that is not a failable result
         const pma: AArm[] | not = matchArmsOf(h.how)
@@ -13002,10 +13040,14 @@ ${
         // value — reading it (the handled form's value, or a `.Ok(v)` binder) would be `undefined`
         if (f is given) st = noSuccessUse(env, e, h, f, stmt, st)
         const how: AHow = h.how
+        // s475: a `!` callee's success type is its returns' (failableSuccs) — the value
+        // of `?` / `!{}` on success, as a declared `-> T` is for any other callee
+        let sty: Type | not = rs.x.ty
+        if (sty is not && f is given) sty = armWant(env.g, f, not)
         return match how {
-            .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
-            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(f, expected, true), st))
-            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(f, expected, false), st))
+            .Propagate :> plain(sty, propagate(env, e, subj, failable, err, stmt, st))
+            .Guard(arms: arms) :> plain(sty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(env.g, f, expected), st))
+            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(env.g, f, expected), st))
         }
     }
 
@@ -13018,18 +13060,23 @@ ${
     // built an arm as the callee's struct, and that value then landed in the position
     // unchecked (g-boot-handled-call-result-landing-unchecked-s473) — `const r: int =
     // match srv() { … :> { a: 1, b: 2 } … }` compiled.
-    // INTERIM (capable form: the landing check of g-boot-handled-call-result-landing-unchecked-s473,
-    // then a `!{}` arm takes the position's type here too): a `!{}` — whose value on success
-    // IS the call's success value — in a position of a DIFFERENT type gives its arms no
-    // struct context, so an object arm is refused (E-TYPE-STRUCT-CONTEXT) as before s475;
-    // taking the position's type would accept the arm and land the mismatched success
-    // value unchecked (`-> R` returning `srv() !{ .Transport(t) :> { a: 0, c: 0 } }`, srv -> S).
-    fn armWant(f: FnInfo | not, expected: Type | not, guard: boolean) -> Type | not {
-        let r: Type | not = not
-        if (f is given) r = f.ret
-        if (expected is not) return r
-        if (guard && r is given && !sameType(r, expected)) return not
-        return expected
+    // s475 (s475-boot-handled-landing-check) — the #1767 r1 INTERIM is lifted: a `!{}` in a
+    // position of a type other than the callee's success type gives its arms the
+    // position's type too. Its success value is no longer let through: the typer types
+    // the handled form as the join of the success type and its arms' values and checks
+    // it at the landing site (typeHandled; `-> R` returning `srv() !{ .Transport(t) :>
+    // { a: 0, c: 0 } }` with `srv -> S` is E-TYPE-031 on the success value, not
+    // E-TYPE-STRUCT-CONTEXT on a well-formed arm).
+    // The fallback is the callee's success type: declared (`-> T`), or — a `!` function,
+    // which has no success-type slot (§19.4.1) — the one its returns prove (failableSuccs);
+    // before s475 a `!` callee's arms got no struct context with no annotated binding.
+    fn armWant(g: Globals, f: FnInfo | not, expected: Type | not) -> Type | not {
+        if (expected is given) return expected
+        if (f is not) return not
+        const r: Type | not = f.ret
+        if (r is given) return r
+        if (!f.failable) return not
+        return succOf(g, f)
     }
 
     fn isMatchHow(h: AHow) -> boolean {
@@ -14151,7 +14198,10 @@ ${
         } else if (isMatch && pn.name == "Ok") {
             idx = -2
             if (pn.parens && pn.binds.length != 1) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`.Ok` carries one value (the success value, §19.7.3) — bind it as `.Ok(v)`, not with " + pn.binds.length + " binder(s)")
-            const rb: RBinds = bindArm(armEnv, pn.binds, [], st)
+            // s475 (s475-boot-handled-landing-check): `.Ok(v)` binds the success value — typed
+            // by the callee's success type (declared, or a `!` function's proven one), as
+            // the typer types it (typeHandled); before, `v` was untyped (`v.a` refused)
+            const rb: RBinds = bindArmTyped(armEnv, pn.binds, subjectSuccess(env, st, cx.subj), st)
             armEnv = rb.env
             st = rb.st
         } else {
@@ -14311,6 +14361,32 @@ ${
             i = i + 1
         }
         return { env: env, st: st }
+    }
+
+    // s475 — the `.Ok(v)` binder: one value, the success value, of type `ty` (not: untyped).
+    fn bindArmTyped(env0: Env, bs: ABind[], ty: Type | not, st0: AS) -> RBinds {
+        let env: Env = env0
+        let st: AS = st0
+        let i = 0
+        for (const b of bs) {
+            const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
+            st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+            let t: Type | not = not
+            if (i == 0) t = ty
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false })
+            i = i + 1
+        }
+        return { env: env, st: st }
+    }
+
+    // s475 — the success type of a handled subject that calls a function: its declared
+    // `-> T`, or a `!` function's proven one (armWant's fallback); else not.
+    fn subjectSuccess(env: Env, st: AS, subj: AExpr) -> Type | not {
+        const c: AExpr | not = calleeOf(subj.k)
+        if (c is not) return not
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return not
+        return armWant(env.g, f, not)
     }
 
     // s452 — what an arm's body is judged against: `stmt` — the form is a
@@ -17384,6 +17460,7 @@ ${
     fn oneOfNames(v: VType) -> string {
         const ts: Type[] = match v {
             .OneOf(ts: xs) :> xs
+            .Partial(ts: xs) :> []
             .Known(t: x) :> [x]
             .Absent :> []
             .Unknown :> []
@@ -17396,6 +17473,7 @@ ${
     fn isOneOfVT(v: VType) -> boolean {
         return match v {
             .OneOf(ts: x) :> true
+            .Partial(ts: x) :> false
             .Known(t: x) :> false
             .Absent :> false
             .Unknown :> false
@@ -20655,7 +20733,7 @@ ${
 
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
-                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs }
+                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -22511,12 +22589,25 @@ ${
     // already was (`let v = c ? "a" : 1`) is carried as one.
     fn joinContrib(a: VType, b: VType) -> VType {
         const j: VType = joinVT(a, b)
+        // s475 r1: a `Partial` is kept only when both values given ARE it (each
+        // read then holds a value with that proven branch); a new partial join of
+        // two different values given is flow-insensitive guesswork — Unknown, as before
+        if (isPartialVT(j)) {
+            if (sameVT(a, b)) return j
+            return VType.Unknown
+        }
         if (oneOfMembers(j).length == 0) return j
         if (sameVT(j, a) || sameVT(j, b)) return j
         return VType.Unknown
     }
 
     fn sameVT(a: VType, b: VType) -> boolean {
+        if (isPartialVT(a) || isPartialVT(b)) {
+            if (!(isPartialVT(a) && isPartialVT(b))) return false
+            const ps: Type[] = partialMembers(a)
+            const qs: Type[] = partialMembers(b)
+            return sameMembers(ps, qs) && sameMembers(qs, ps)
+        }
         const x: Type | not = knownOf(a)
         const y: Type | not = knownOf(b)
         if (x is given && y is given) return sameType(x, y)
@@ -22544,6 +22635,7 @@ ${
     fn oneOfMembers(v: VType) -> Type[] {
         return match v {
             .OneOf(ts: xs) :> xs
+            .Partial(ts: xs) :> []          // s475 r1: not a choice — an unproven branch rides along
             .Known(t: x) :> []
             .Absent :> []
             .Unknown :> []
@@ -22556,6 +22648,7 @@ ${
             .Known(t: x) :> false
             .Unknown :> false
             .OneOf(ts: xs) :> false
+            .Partial(ts: xs) :> false
         }
     }
 
@@ -22751,13 +22844,20 @@ ${
 
     // The type two values share (ternary arms, array elements), when provable.
     // s472: two KNOWN types with no common type are a choice of both
-    // (`OneOf`) — never Unknown; an Unknown side keeps the join Unknown.
+    // (`OneOf`) — never Unknown.
+    // s475 r1 (#1777 review F2): an Unknown side no longer swallows a PROVEN one —
+    // the join is `Partial` (its proven members, plus an unproven branch), so a
+    // provably wrong branch is still checked where the value lands (checkPartial).
+    // Before, `@n = @ok ? u(1) : "s"` and a `!{}` with one unproven arm put a
+    // `string` in an `int` cell with no diagnostic. (`not` beside an Unknown stays
+    // Unknown: `Partial` carries types, and `not` is not one.)
     fn joinVT(a: VType, b: VType) -> VType {
         return match a {
             .Known(t: x) :> joinKnown(x, b)
             .Absent :> joinAbsent(b)
-            .Unknown :> VType.Unknown
+            .Unknown :> joinUnknown(b)
             .OneOf(ts: xs) :> joinOneOf(xs, b)
+            .Partial(ts: xs) :> joinPartial(xs, b)
         }
     }
 
@@ -22765,8 +22865,9 @@ ${
         return match b {
             .Known(t: y) :> joinTypes(x, y)
             .Absent :> known(optional(x))
-            .Unknown :> VType.Unknown
+            .Unknown :> VType.Partial([x])
             .OneOf(ts: ys) :> joinOneOf(ys, known(x))
+            .Partial(ts: ys) :> VType.Partial(addMember(ys, x))
         }
     }
 
@@ -22776,6 +22877,7 @@ ${
             .Absent :> VType.Absent
             .Unknown :> VType.Unknown
             .OneOf(ts: ys) :> VType.OneOf(optionalAll(ys))
+            .Partial(ts: ys) :> VType.Partial(optionalAll(ys))
         }
     }
 
@@ -22783,8 +22885,51 @@ ${
         return match b {
             .Known(t: y) :> oneOfVT(addMember(xs, y))
             .Absent :> VType.OneOf(optionalAll(xs))
-            .Unknown :> VType.Unknown
+            .Unknown :> VType.Partial(xs)
             .OneOf(ts: ys) :> oneOfVT(addMembers(xs, ys))
+            .Partial(ts: ys) :> VType.Partial(addMembers(ys, xs))
+        }
+    }
+
+    // s475 r1 — an Unknown joined with `b`: `b`'s proven members, unproven beside them.
+    fn joinUnknown(b: VType) -> VType {
+        return match b {
+            .Known(t: y) :> VType.Partial([y])
+            .Absent :> VType.Unknown
+            .Unknown :> VType.Unknown
+            .OneOf(ts: ys) :> VType.Partial(ys)
+            .Partial(ts: ys) :> VType.Partial(ys)
+        }
+    }
+
+    // s475 r1 — a `Partial` joined with `b`: still partial (its unproven branch stays).
+    fn joinPartial(xs: Type[], b: VType) -> VType {
+        return match b {
+            .Known(t: y) :> VType.Partial(addMember(xs, y))
+            .Absent :> VType.Partial(optionalAll(xs))
+            .Unknown :> VType.Partial(xs)
+            .OneOf(ts: ys) :> VType.Partial(addMembers(xs, ys))
+            .Partial(ts: ys) :> VType.Partial(addMembers(xs, ys))
+        }
+    }
+
+    fn isPartialVT(v: VType) -> boolean {
+        return match v {
+            .Partial(ts: xs) :> true
+            .Known(t: x) :> false
+            .Absent :> false
+            .Unknown :> false
+            .OneOf(ts: xs) :> false
+        }
+    }
+
+    fn partialMembers(v: VType) -> Type[] {
+        return match v {
+            .Partial(ts: xs) :> xs
+            .Known(t: x) :> []
+            .Absent :> []
+            .Unknown :> []
+            .OneOf(ts: xs) :> []
         }
     }
 
@@ -22882,6 +23027,7 @@ ${
             .Absent :> not
             .Unknown :> not
             .OneOf(ts: xs) :> not
+            .Partial(ts: xs) :> not
         }
     }
 
@@ -23238,7 +23384,20 @@ ${
             .Absent :> checkAbsent(env, target, span, what, ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> checkOneOf(env, xs, target, span, what, ts)
+            .Partial(ts: xs) :> checkPartial(env, xs, target, span, what, ts)
         }
+    }
+
+    // s475 r1 (#1777 review F2) — a join with an unproven branch: each PROVEN
+    // member is the value when its branch is taken, so each must fit (§66.1 rule
+    // 5); the unproven branch stays provable-or-silent.
+    fn checkPartial(env: TEnv, xs: Type[], target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        for (const x of xs) {
+            if (mayBeNot(x, target) || fitsType(x, target) == Verdict.Fails) {
+                return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value may be " + shownT(env, x) + " — one of its branches (or arms) is " + shownT(env, x) + ", and each branch is the value when it is taken, so each must fit (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+            }
+        }
+        return ts
     }
 
     // A choice into a typed position: each branch is the value when it is
@@ -23815,6 +23974,7 @@ ${
             .Absent :> operandType(env, x, "not", what, "numbers", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> numOneOf(env, x, xs, what, ts)
+            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: an operand's proven members are not judged (capable form: each, as numOneOf)
         }
     }
 
@@ -23843,6 +24003,7 @@ ${
             .Absent :> operandType(env, x, "not", what, "booleans", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> boolOneOf(env, x, xs, what, ts)
+            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: as checkNumOperand
         }
     }
 
@@ -23943,6 +24104,7 @@ ${
             .Absent :> operandType(env, x, "not", "`+`", "two numbers or two strings", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> plusOneOf(env, x, xs, ts)
+            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: as checkNumOperand
         }
     }
 
@@ -24013,6 +24175,7 @@ ${
             // s472: a choice is judged as an unresolved condition was (S460 N1's
             // arm-by-arm rule — strict-direction: it admits nothing more)
             .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
+            .Partial(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
         }
     }
 
@@ -24180,6 +24343,7 @@ ${
             .Absent :> false
             .Unknown :> true
             .OneOf(ts: xs) :> true        // s472: no one type — a condition operand is refused as before
+            .Partial(ts: xs) :> true
         }
     }
 
@@ -24450,6 +24614,7 @@ ${
             .Absent :> notText(env, s, "`not` (an absent value has no text)", ts)
             .Unknown :> textUnresolved(env, s, ts)
             .OneOf(ts: xs) :> textOneOf(env, s, xs, ts)
+            .Partial(ts: xs) :> textUnresolved(env, s, ts)
         }
     }
 
@@ -24763,32 +24928,58 @@ ${
 
     // s451 (Ue) — a handling form: its subject, then each arm with its
     // binders typed by the payload field each takes (the binder's FArm /
-    // FHandled facts). `?` and `!{}` yield the subject's success type (a `!`
-    // signature has no success-type slot, §19.4.1, so it is Unknown unless
-    // inference knows it); a `match` yields Unknown (its arms' join is not
-    // computed — no check fires on Unknown).
+    // FHandled facts).
+    // s475 (g-boot-handled-call-result-landing-unchecked-s473) — the form's VALUE,
+    // which every landing site (a cell or field write, an annotated local, a
+    // `return`, an argument) checks against its type (§66.1 rule 5: "every cell
+    // and field write is type-checked against the target's declared type"):
+    //   `?`    — the subject's success type;
+    //   `!{}`  — the JOIN of the success type (the value on success) and each value
+    //            arm's value (the value on that failure) — §19.4.3: in a value
+    //            position every arm SHALL "Yield a value of the call's success type";
+    //   `match`— the JOIN of its value arms' values; the `.Ok(v)` binder is the
+    //            success value (§19.4.3: "The `match` form's `.Ok(v)` arm is an arm
+    //            like any other").
+    // The success type is the callee's declared `-> T`, or the one inferReturn
+    // proves (a `!` function has no success-type slot, §19.4.1, so its success type
+    // is inferred from its returns). An arm that leaves (`return` / `fail`) yields
+    // no value and joins nothing. Before this, `!{}` and `match` were Unknown, so a
+    // `string` success value reached an `int` cell with no diagnostic.
+    // s475 r1 (#1777 review F1/F2): a block arm's value is what it `lift`s
+    // (armValues), and an Unknown member no longer hides the proven ones — the
+    // join is `Partial`, whose proven members are checked where it lands. Still
+    // provable-or-silent for the unproven member itself — INTERIM (capable form:
+    // a proven type for every callee — a host function, a `?{}` row, §14.8
+    // schema types).
     fn typeHandled(env: TEnv, e: AExpr, h: AHandled, ts0: TypeState) -> RVT {
         const pm: PlainMatch | not = plainFactOf(failFact(env.t.fails, e.nid))
         if (pm is given) return typePlain(env, e, h, pm, ts0)
         const rs: RVT = typeExpr(env, h.subject, ts0)
         let ts: TypeState = rs.ts
         const err: Sym | not = handledErr(failFact(env.t.fails, e.nid))
+        const how: AHow = h.how
+        let vt: VType = rs.vt
+        let first: boolean = isMatchHow(how)            // a `match`'s value is its arms' alone
         for (const a of handledArms(h)) {
             let aenv: TEnv = env
-            const fs: FieldDef[] = armFields(env.t, err, failFact(env.t.fails, a.nid))
+            const af: FailFact | not = failFact(env.t.fails, a.nid)
+            const fs: FieldDef[] = armFields(env.t, err, af)
             const p: APat = a.pat
             // s452: a whole-error arm's binder is the whole error enum (§18.6.1)
-            const whole: boolean = armIdx(failFact(env.t.fails, a.nid)) == -4
+            const whole: boolean = armIdx(af) == -4
+            const ok: boolean = armIdx(af) == -2
             let i = 0
             for (const b of patBindsOf(p)) {
                 const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
-                let vt: VType = VType.Unknown
-                if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) vt = known(fs[i].ty)
-                if (whole && err is given) vt = known(Type.Named(err))
-                if (bs is given) aenv = tWithLocal(aenv, bs, vt)
+                let bvt: VType = VType.Unknown
+                if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) bvt = known(fs[i].ty)
+                if (whole && err is given) bvt = known(Type.Named(err))
+                if (ok && i == 0) bvt = rs.vt                // s475: `.Ok(v)` binds the success value
+                if (bs is given) aenv = tWithLocal(aenv, bs, bvt)
                 i = i + 1
             }
             const body: AArmBody = a.body
+            const one: AExpr | not = plainOneExpr(body)
             for (const x of armExprOf(body)) {
                 if (assignValue(x) is given) {
                     ts = typeStmtExpr(aenv, x, ts)
@@ -24797,10 +24988,48 @@ ${
                 }
             }
             for (const b2 of armBlockOf(body)) { ts = typeBlock(aenv, b2, ts) }
+            // the arm's value (none for an arm that leaves or writes — a value-position
+            // arm that yields nothing is E-ERROR-012's, the resolver's)
+            // s475 r1 (#1777 review F1): a block arm with statements yields what it
+            // `lift`s (§18.5, S469 — `{ const z = "q"; lift z; }`); each lifted
+            // value joins, as the one expression of `e` / `{ e }` does
+            for (const av of armValues(ts, body, one)) {
+                if (first) {
+                    vt = av
+                    first = false
+                } else {
+                    vt = joinVT(vt, av)
+                }
+            }
         }
-        const how: AHow = h.how
         if (how == AHow.Propagate) return rvt(rs.vt, ts)
-        return rvt(VType.Unknown, ts)
+        if (first) return rvt(VType.Unknown, ts)         // a `match` with no value arm
+        return rvt(vt, ts)
+    }
+
+    // s475 r1 (#1777 review F1) — the value a handler arm yields, already typed:
+    // its one expression (`e` / `{ e }`; none when that is a write), else what a
+    // statement-holding block arm `lift`s (§18.5, ruled S469 "block arms yield with
+    // lift" — `{ const z = "q"; lift z; }`). The parser keeps that `lift` as the
+    // block's LAST statement, an expression statement (the arm marked `lifted`), as
+    // the resolver reads it (resolveArm: `evalOf` of the last statement). A block
+    // that leaves (`return` / `fail`, blockDiverges) or ends in a write yields none.
+    fn armValues(ts: TypeState, body: AArmBody, one: AExpr | not) -> VType[] {
+        if (one is given) {
+            if (assignValue(one) is given) return []
+            return [exprType0(ts, one.nid)]
+        }
+        let out: VType[] = []
+        for (const b of armBlockOf(body)) {
+            const n: int = b.stmts.length
+            if (n > 0 && !blockDiverges(b)) {
+                const last: AExpr | not = evalOf(b.stmts[n - 1])
+                if (last is given) {
+                    if (assignValue(last) is not && !isWriteExpr(last)) out = out.concat([exprType0(ts, last.nid)])
+                }
+            }
+        }
+        return out
     }
 
     // s469 — the §18 plain-value `match` (the binder's FPlain fact). Its
@@ -24914,6 +25143,7 @@ ${
             .Absent :> 0
             .Unknown :> 0
             .OneOf(ts: xs) :> xs.length
+            .Partial(ts: xs) :> 0
         }
     }
 
@@ -24931,6 +25161,7 @@ ${
             .Absent :> "not"
             .Unknown :> "unresolved"
             .OneOf(ts: xs) :> typeName(xs[0])
+            .Partial(ts: xs) :> "unresolved"
         }
     }
 
@@ -25639,6 +25870,7 @@ ${
             .Absent :> report(ts, env, span, "E-TYPE-031", "a sequence index is an `int` position, and this index is `not` (§66.12.2 positions; `int` enforced, ruled S440 JS-WAT 7(a))")
             .Unknown :> ts
             .OneOf(ts: xs) :> checkOneOf(env, xs, Type.Int, span, "a sequence index (an `int` position, §66.12.2)", ts)
+            .Partial(ts: xs) :> checkPartial(env, xs, Type.Int, span, "a sequence index (an `int` position, §66.12.2)", ts)
         }
     }
 
@@ -25896,6 +26128,7 @@ ${
             // the typer's inference, not a value it resolved: deferred (filed).
             .Unknown :> ts
             .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, ts)
+            .Partial(ts: xs) :> ts
         }
     }
 
@@ -26455,15 +26688,20 @@ ${
     // it (a callee typed after its caller settles a pass later). Nothing is
     // contributed — the call stays Unknown, as before — for a written return type
     // (a declared one is FnInfo.ret; `-> void` / a refused one are not inferred),
-    // a failable function (no success-type slot, §19.4.1), a body with no value
-    // `return` or a bare one (E-RETURN-INCOMPLETE's), or a returned value whose
-    // type is not proven (Unknown joins to Unknown — provable-or-silent).
+    // a body with no value `return` or a bare one (E-RETURN-INCOMPLETE's), or a
+    // returned value whose type is not proven (Unknown joins to Unknown —
+    // provable-or-silent).
+    // s475 (g-boot-handled-call-result-landing-unchecked-s473): a FAILABLE function
+    // is inferred too — §19.4.1 gives it no success-type slot, so its success type
+    // IS its returns' join; typeHandled reads it as the value of `?` / `!{}` /
+    // the `.Ok(v)` binder (a `check()! E` that returns `true` stored into a
+    // `string` cell compiled before).
     // Two return sites of different types that join to a NEW choice: a `fn` is
     // E-FN-007 (§48.4.1 / §48.8; the call stays Unknown, so the mismatch is not
     // reported twice); a `function`'s call is that choice (`int | string` reads
     // "one of"), checked at every write as any choice is.
     fn inferReturn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {
-        if (af.ret is given || af.failable) return ts
+        if (af.ret is given) return ts
         const s: Sym | not = bindSym(bindFact(env.t.binds, af.nid))
         if (s is not) return ts
         const rs: ReturnSite[] = returnSites(af.body)
@@ -26471,9 +26709,20 @@ ${
         let acc: VType = VType.Unknown
         let first = true
         let fresh = false
+        let pend = false
         for (const r of rs) {
             const x: AExpr | not = r.e
             if (x is not) return ts
+            // s475 r1 (#1777 review F2b) — LEAST fixpoint: a `return` whose value is
+            // a call (or its `?`) of a function whose own return is not inferred yet
+            // contributes nothing now; it joins once that function settles (the
+            // typeProgram fixed point re-runs). So recursion contributes nothing to
+            // its own type — `r(i)! L { … return r(i - 1)?; return "s"; }` is `string`,
+            // where Unknown joined in from the recursive call left it unchecked.
+            if (pendingCall(env, x)) {
+                pend = true
+                continue
+            }
             const vt: VType = exprType0(ts, x.nid)
             if (first) {
                 acc = vt
@@ -26495,6 +26744,9 @@ ${
             const ts1: TypeState = report(ts, env, af.span, "E-FN-007", "`fn " + af.name + "` returns " + names.join(" and ") + " from different `return` statements, and declares no return type (§48.4.1, §48.8: an unannotated `fn`'s return type is inferred from its returns, and they must agree). Make every `return` carry the same type, or declare the union: `fn " + af.name + "(…) -> " + bare.join(" | ") + "`")
             return contribute(ts1, retKey(s), VType.Unknown)
         }
+        // every return pending: no value yet (bottom) — recorded so the next pass
+        // still treats a call of this function as pending (pendingCall)
+        if (first && pend) return contribute(ts, pendKey(s), VType.Unknown)
         return contribute(ts, retKey(s), acc)
     }
 
@@ -26502,6 +26754,37 @@ ${
     // negative id, so it never meets a local's Sym id (every Sym id is >= 0).
     fn retKey(s: Sym) -> Sym {
         return { id: -1 - s.id, hint: s.hint }
+    }
+
+    // s475 r1 — the key under which a function whose every `return` is still
+    // PENDING (pendingCall) is recorded: no inferred value yet. Below every retKey.
+    fn pendKey(s: Sym) -> Sym {
+        return { id: -1000000000 - s.id, hint: s.hint }
+    }
+
+    // s475 r1 (#1777 review F2b) — a `return` value that is a call, or the `?` of
+    // one, of an UNANNOTATED scrml function whose inferred return has not settled:
+    // in the first pass (nothing has settled), or while that function's own returns
+    // are all still pending (pendKey). A `!{}` / `match` is never pending — its
+    // arms yield values of their own. A host function or one with a written
+    // `-> T` is typed already.
+    fn pendingCall(env: TEnv, x: AExpr) -> boolean {
+        let c: AExpr = x
+        const h: AHandled | not = handledOf(x.k)
+        if (h is given) {
+            if (h.how != AHow.Propagate) return false
+            c = h.subject
+        }
+        const callee: AExpr | not = calleeOf(c.k)
+        if (callee is not) return false
+        const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
+        if (s is not) return false
+        const fi: FnInfo | not = fnInfoOf(env.t, s)
+        if (fi is not) return false
+        if (fi.ret is given || fi.host is given) return false
+        if (findLocalT(env.settled, retKey(s).id) is given) return false
+        if (env.settled.length == 0) return true
+        return findLocalT(env.settled, pendKey(s).id) is given
     }
 
     // The declared return type of a function (`not`: none, or untrusted).
@@ -34163,6 +34446,7 @@ ${
             .Absent :> not
             .Unknown :> not
             .OneOf(ts: xs) :> not
+            .Partial(ts: xs) :> not
         }
     }
 

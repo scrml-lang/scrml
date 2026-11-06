@@ -30,11 +30,15 @@ afterEach(() => expectNoPageErrors());
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const RUNTIME = join(import.meta.dir, "..", "slice-m1", "runtime", "runtime.js");
 
+// s475 (s475-boot-handled-landing-check): `check` succeeds with a STRING — the `!{}` shapes below
+// (BANG, the `else` catch-all) return `check(p) !{ … }` from a `-> string` function, and the
+// handled form's value is the join of the success value and the arms' (§19.4.3: arms "Yield a value
+// of the call's success type"); a `bool` success there is E-TYPE-031 now.
 const AUTH = `    type AuthErr:enum = { Denied, Locked }
     function check(p: string)! AuthErr {
         if (p == "locked") fail AuthErr.Locked;
         if (p != "secret") fail AuthErr.Denied;
-        return true;
+        return "ok";
     }`;
 const P = (fns) => `<program>\n    let <msg:string=""/>\n${AUTH}\n${fns}\n    function login() {\n        @msg = "x";\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="msg">\${@msg}</p>\n    </main>\n</program>\n`;
 // a value-position `match`: explicit error arms, then `else` (the accepted form)
