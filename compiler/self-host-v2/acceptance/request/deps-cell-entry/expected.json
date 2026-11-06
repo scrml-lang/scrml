@@ -1,0 +1,27 @@
+{
+  "id": "acceptance-request-deps-cell-entry",
+  "description": "The E-LIFECYCLE-022 resolution: list the CELL (`deps=[@u]`) and read its field in the body — a bare `@identifier` entry is the grammar. The load runs on mount.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 grammar `deps-list ::= ('@' identifier (',' '@' identifier)*)?`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-LIFECYCLE-022"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "11"
+      }
+    ]
+  }
+}

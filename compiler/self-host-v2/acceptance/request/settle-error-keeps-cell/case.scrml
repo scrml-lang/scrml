@@ -1,0 +1,11 @@
+// The expressible half of request-settle-error-rt (no `<#id>` read): a failed settle keeps the cell.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userName:string="before"/>
+    function loadName() -> string {
+        const u: User = ?{`SELECT id, name FROM users LIMIT 1`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    <request id="userReq">${ @userName = loadName(); }</request>
+    <main><p id="who">${@userName}</p></main>
+</program>

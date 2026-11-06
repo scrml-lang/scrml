@@ -1,0 +1,17 @@
+// §66 twin of conformance/cases/lifecycle/request-refetch-inline-multi-stmt-rt.
+// SLICE S3b PIN — the case reads `<#userReq>` (§6.7.7 Properties), which the bootstrap does not
+// parse yet; expected.json is the TARGET, slice-m4/acceptance.test.js STATUS pins today's parse error.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userId:int=1/>
+    let <userName:string=""/>
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    <request id="userReq" deps=[]>${ @userName = loadName(@userId); }</request>
+    <main>
+        <button id="again" onclick={ @userId = 2; <#userReq>.refetch(); }>user 2</button>
+        <p id="who">${@userName}</p>
+    </main>
+</program>

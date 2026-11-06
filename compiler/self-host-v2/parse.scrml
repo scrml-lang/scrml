@@ -46,7 +46,7 @@
 ${
     import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql, ASqlMode,
@@ -8450,6 +8450,7 @@ ${
             return { n: t, mp: mBump(m) }
         }
         if (isEffectOpener(ro.o)) return effectNode(finishEffect(ro.o, ro.mp))
+        if (isRequestBody(ro.o, ro.mp)) return requestNode(finishRequest(ro.o, ro.mp))
         const k: TagKind = tagKind(ro.o)
         return match k {
             .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
@@ -8650,6 +8651,55 @@ ${
             return { b: body, mp: mDiag(rest.mp, "E-PARSE-EFFECT", "an `<effect>` body is exactly one `" + interpOpen() + " … }` logic block (§6.7.4) — it renders nothing, so markup or text in it is an error", from, rest.mp.pos) }
         }
         return { b: body, mp: parseCloser(m, "effect") }
+    }
+
+    // ---- s475 (slice S3a): `<request id="…" deps=[…]>${ lin* @x = e }</>` (SPEC §6.7.7) ----
+    //   request-decl ::= '<request' id-attr (deps-attr)? (cache-attr)? '>' request-body '</' 'request'? '>'
+    //   request-body ::= '$' '{' lin-declaration* assignment-expression '}'
+    // A `<request>` whose body is a `${ … }` logic block. Every other shape —
+    // self-closing (E-LIFECYCLE-019, or the §60 `url=` / `api=` form), a markup
+    // body, an opener that declares (a user declaration named `request`) —
+    // stays an element and analyze judges it. The attributes are kept as
+    // written (analyze reads `id=`, `deps=`, `cache`); the body is parsed as
+    // statements (analyze classifies them).
+    type RRequestNode:struct = { r: ARequest, mp: MP }
+
+    fn isRequestBody(o: Opener, mp: MP) -> boolean {
+        if (o.star || o.name != "request" || o.selfClosing) return false
+        if (tagKind(o) != TagKind.IsElem) return false
+        const sh: ANode[] | not = o.short
+        if (sh is given) return false
+        return atInterp(skipTrivia(mp))
+    }
+
+    fn finishRequest(o: Opener, mp: MP) -> RRequestNode {
+        let m: MP = mp
+        const opener: ASpan = mkSpan(o.start, m.pos)
+        const rb: RBodyBlock = requestBody(mBump(m))
+        m = rb.mp
+        const r: ARequest = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, body: rb.b, opener: opener }
+        return { r: r, mp: mBump(m) }
+    }
+
+    // After `<request …>`: ONE `${ … }` block (statements), then the closer. Any
+    // other content is E-PARSE-ITEM (consumed to the closer, never rendered —
+    // a request renders nothing; §6.7.7 "and by nothing else").
+    fn requestBody(mp: MP) -> RBodyBlock {
+        let m: MP = skipTrivia(mp)
+        const tp: TP = regionTP(mAdv(m, 1), LexStop.Balanced)
+        const b: RBlock = parseBlock(tp)
+        m = skipTrivia(backToMarkup(m, expectRegionEnd(b.tp)))
+        if (!mLooking(m, "</")) {
+            const from: int = m.pos
+            const rest: RNodes = parseKids(m, "request")
+            return { b: b.b, mp: mDiag(rest.mp, "E-PARSE-ITEM", "a `<request>` body is exactly one `" + interpOpen() + " … }` logic block (§6.7.7) — it renders nothing, so markup or text after it is an error", from, rest.mp.pos) }
+        }
+        return { b: b.b, mp: parseCloser(m, "request") }
+    }
+
+    fn requestNode(r: RRequestNode) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.r.span, k: ANodeK.Request(r.r) }
+        return { n: n, mp: mBump(r.mp) }
     }
 
     fn effectNode(r: REffectNode) -> RNodeOne {
@@ -8987,6 +9037,14 @@ ${
             if (exported) em = mDiag(em, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<effect>`", re.w.span.start, re.w.span.end)
             const n: ANode = { nid: em.nid, span: re.w.span, k: ANodeK.Effect(re.w) }
             return mItem(mBump(em), re.w.span.start, AItemK.MarkupItem(n))
+        }
+        if (isRequestBody(o, ro.mp)) {
+            // s475 (S3a): a `<request>` at the program body top — owned by the program scope
+            const rr: RRequestNode = finishRequest(o, letOnNonDecl(ro.mp, o, isLet))
+            let rm: MP = rr.mp
+            if (exported) rm = mDiag(rm, "E-PARSE-EXPORT", "`export` applies to a declaration, not to a `<request>`", rr.r.span.start, rr.r.span.end)
+            const rn: ANode = { nid: rm.nid, span: rr.r.span, k: ANodeK.Request(rr.r) }
+            return mItem(mBump(rm), rr.r.span.start, AItemK.MarkupItem(rn))
         }
         const k: TagKind = tagKind(o)
         const od: Opener = isLet ? withLet(o) : o

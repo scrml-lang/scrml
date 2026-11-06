@@ -1,0 +1,46 @@
+{
+  "id": "acceptance-request-settle-error",
+  "description": "The settled machine, FAILURE (a raw HTTP 500): `.loading` false, `.error` populated (#err shows), `.data` absent (#who out of the DOM), and @userName keeps its value.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 \"Settled state (failure)\": \"`<#id>.data` retains previous value\", \"`<#id>.error` → caught error value\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": {
+        "__httpError": {
+          "status": 500,
+          "body": {
+            "error": "Internal server error",
+            "detail": "boom"
+          }
+        }
+      }
+    },
+    "state": {
+      "userName": ""
+    },
+    "domAnchored": [
+      {
+        "selector": "#loading",
+        "text": "false"
+      },
+      {
+        "selector": "#err",
+        "count": 1
+      },
+      {
+        "selector": "#who",
+        "count": 0
+      }
+    ]
+  }
+}

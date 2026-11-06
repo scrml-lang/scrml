@@ -1,0 +1,38 @@
+{
+  "id": "acceptance-request-settle-success",
+  "description": "The settled machine, SUCCESS: `.loading` false, `.data` populated (#who shows the name), `.error` absent.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 \"Settled state (success)\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": "Ada"
+    },
+    "state": {
+      "userName": "Ada"
+    },
+    "domAnchored": [
+      {
+        "selector": "#loading",
+        "text": "false"
+      },
+      {
+        "selector": "#who",
+        "text": "Ada"
+      },
+      {
+        "selector": "#err",
+        "count": 0
+      }
+    ]
+  }
+}

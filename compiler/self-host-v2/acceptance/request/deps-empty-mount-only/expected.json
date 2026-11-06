@@ -1,0 +1,47 @@
+{
+  "id": "acceptance-request-deps-empty-mount-only",
+  "description": "`deps=[]` is fetch-on-mount only: the body reads @userId, but the explicit empty list suppresses inference — setting @userId to 2 does not re-fetch, so the name stays user 1's.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"When present, `deps` overrides inference.\" + the SPEC example `<request id=\"config\" deps=[]>` \"Fetch on mount only — no reactive deps\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#setid"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "userId": 2,
+      "userName": "a"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "a"
+      }
+    ]
+  }
+}

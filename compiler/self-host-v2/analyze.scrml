@@ -48,7 +48,7 @@ ${
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql,
@@ -463,6 +463,7 @@ ${
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
         consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
+        requests: ReqFact[],   // s475 (S3a): the `<request>`s the binder accepted (§6.7.7) — lower builds a View.Request from each
         taliases: TypeAlias[],  // s474 r1 (#1715 F7): each type a file imports under an alias — diagnostics name it by the alias there
     }
 
@@ -653,7 +654,7 @@ ${
     // callers instead (§19.9.5: "Its client call fails with … the function's declared error variants … plus
     // `Transport(t: ServerCallError)`"), so analyzeRun drops these reports for it (dropTransportDiags).
     type TportAt:struct = { fnSym: int, d: Diag }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[] }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[], reqs: ReqFact[] }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -695,11 +696,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -750,38 +751,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     // =========================================================================
@@ -2006,6 +2007,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
         }
     }
 
@@ -4369,6 +4371,7 @@ ${
             .Css(c: c) :> noHandles(st)
             .Gather(f: lf) :> handlesIn(g0, gatherRows(lf), w, st)
             .Effect(w: w) :> noHandles(st)
+            .Request(r: r) :> noHandles(st)
         }
     }
 
@@ -6961,7 +6964,7 @@ ${
         // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
         // stands only for `m` used as a value.
         if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]), tport: st.tport }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]), tport: st.tport, reqs: st.reqs }
             return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
@@ -7178,7 +7181,7 @@ ${
             if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
         }
         if (isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1 }]), tport: st.tport }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1 }]), tport: st.tport, reqs: st.reqs }
             return diagX(env, e, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; read one of its exported cells: `@" + name + ".name` (§21.3)", sr)
         }
         // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
@@ -9260,6 +9263,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: x) :> not
         }
@@ -9455,7 +9459,7 @@ ${
         // s475 (g-boot-namespace-cell-read-s475) — `@m` with `m` a namespace import (no nearer binding):
         // recorded as resolveAtOf records a read, so `@m.x = …` is re-read with `m.x` one name.
         if (!namesInstance(env, name) && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1 }]), tport: st.tport }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1 }]), tport: st.tport, reqs: st.reqs }
             return noPlace(addDiag(sr, env.file, t.span, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; write one of its exported cells' fields: `@" + name + ".name.field = …` (§21.3)"))
         }
         // s475 (g-boot-namespace-cell-read-s475) — a whole-value write of an own value declared in ANOTHER
@@ -13981,7 +13985,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -14075,7 +14079,7 @@ ${
     }
 
     fn withTport(st: AS, fnSym: int, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]) }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]), reqs: st.reqs }
     }
 
     // `!{}` / `match` on the call: the arms resolve against the CLIENT set (the
@@ -14952,6 +14956,582 @@ ${
         return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in an effect's dependency list is " + why)
     }
 
+    // =========================================================================
+    // s475 (slice S3a of the §13.9 pending-cells plan) — `<request>` (SPEC §6.7.7),
+    // `<request id="…" deps=[…]>${ lin* @x = e }</>`, where markup stands in the
+    // program: its body, its trigger, its four `<#id>` signals. Lowered onto Core
+    // View.Request (lower.scrml requestView; the request machine, #1771).
+    //   E-LIFECYCLE-018 — "The `id` attribute is required (E-LIFECYCLE-018)";
+    //   E-LIFECYCLE-020 — "if the body contains more than one assignment" (S469:
+    //     a `lin` declaration is not one). Also a statement that is neither a
+    //     `lin` declaration nor the assignment ("MAY be preceded by `lin`
+    //     declarations and by nothing else"; ⚑ S475 PA reading, veto window: the
+    //     §6.7.7 / §34 row now reads "anything besides `lin` declarations and one
+    //     assignment"). Markup after the `${}` block is E-PARSE-ITEM (PA: kept);
+    //   E-LIFECYCLE-021 — "if the body contains logic but no `@var = expr`"
+    //     (S469: including a body of only `lin` declarations);
+    //   E-LIFECYCLE-022 — "if a `deps=` entry names an undeclared or non-`@`
+    //     variable" (and a `deps=` that is not a `[ ]` list, §34);
+    //   W-LIFECYCLE-013 — "when no reactive deps and no explicit `deps=[]`";
+    //   W-LIFECYCLE-011 — "if the assigned `@variable` is never read in enclosing
+    //     markup" (requestWarnPass, once every markup read is bound).
+    // The body is an ACTION position (§13.8 (i)): the assignment is "the
+    // sanctioned, compiler-managed write point" (§6.7.7 E-RI-002 exemption), and
+    // "The call that is the right-hand side of the body's assignment SHALL be
+    // handled by the request, and SHALL NOT be E-ERROR-002" — it is resolved as a
+    // handling form's subject (`withSubject`), and its failure sets `<#id>.error`
+    // at run time (rt.requestOn), leaving `@var` unchanged.
+    // DEPENDENCIES — "When absent, the compiler infers reactive dependencies from
+    // `@variable` reads within the fetch expression" (and, S469 PA reading (d),
+    // a `lin` initializer's). The ASSIGNED cell is never a dependency, read or
+    // not: "`<request>` is not a loop … the body executes once on mount, then
+    // only on dependency change or `refetch()`" — its own settle writes the
+    // target, so a target dependency would re-run it on every settle (Core C-R1
+    // refuses it). `@items = load(@page, @items)` therefore depends on `@page`
+    // only. An explicit `deps=` naming the target is refused by name (INTERIM).
+    // REFUSED (E-BOOTSTRAP-UNSUPPORTED, fail closed; each INTERIM unless noted):
+    //   `url=` / `api=` (§60 unbuilt), `cache` (§6.7.7.2 — O-060 open), an unknown
+    //   attribute; a request in a declaration's `renders` or an `<each>` / `for`
+    //   row (per-instance / per-row `<#id>` cells unbuilt — EC-6); a target that is
+    //   not a cell of this program, or a field path; a handling form (`!{}` /
+    //   `match`) on the right-hand side; a waiting call anywhere but the
+    //   right-hand side's own call (requestPlan — "single-shot", one suspension);
+    //   a body that writes anything besides its target, directly or through a
+    //   called function (requestPass — Core C-R1, PA ruling); a request whose
+    //   call reaches SQL that is not provably a SELECT and that has dependencies
+    //   (§6.7.7.3's write-request machine — no mount run, local-edit triggers,
+    //   baseline — is slice S5); a derived cell or a whole instance as a
+    //   dependency; two requests with one `id`.
+    // =========================================================================
+    export type ReqFact:struct = {
+        nid: int,               // the ARequest
+        id: string,             // its `id=` (S3b: `<#id>` names it)
+        file: string,
+        span: ASpan,
+        target: NameFact,       // the assigned cell — an NField of the program
+        targetName: string,
+        deps: NameFact[],       // explicit `deps=` or inferred — NFields of mutable cells, the target never among them
+        explicit: boolean,      // `deps=` was written
+        signals: Sym[],         // the four `<#id>` cells lower appends to the program: loading, data, error, stale
+        wcaps: Sym[],           // their write capabilities
+        handle: Sym,            // the request's identity: bound to the `{ refetch }` rt.requestOn returns
+        load: Sym,              // the load's bind when the right-hand side does not wait (lower wraps it)
+        rhs: int,               // the right-hand side's nid
+        dataTy: Type,           // `<#id>.data : T | not` (§6.7.7 Properties)
+        errTy: Type,            // `<#id>.error`: the call's failure set (`E + Transport` for a server call), or `Error`
+        err: Sym | not,         // that failure set's enum, when the call can fail (it ships in Core)
+        lins: int[],            // the nids of its body's `lin` declarations' initializers
+        req: ARequest,          // its syntax (the plan, the lin pass and the write pass walk its body)
+        value: AExpr,           // the right-hand side
+    }
+
+    fn addReq(st: AS, r: ReqFact) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs.concat([r]) }
+    }
+
+    // The body's shape (§6.7.7 grammar `lin-declaration* assignment-expression`).
+    type ReqShape:struct = { lins: AStmt[], assigns: AExpr[], others: AStmt[], last: boolean }
+
+    fn requestShape(b: ABlock) -> ReqShape {
+        let lins: AStmt[] = []
+        let assigns: AExpr[] = []
+        let others: AStmt[] = []
+        let i: int = 0
+        let last = false
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const isLin: boolean = match k {
+                .Local(lin: l) :> l
+                .Eval(e: x) :> false
+                .Return(e: x) :> false
+                .If(cond: x) :> false
+                .Given(name: x) :> false
+                .For(f: x) :> false
+                .Break(label: x) :> false
+                .Continue(label: x) :> false
+                .Lift(what: x) :> false
+                .EffectStmt(w: x) :> false
+                .Defer(body: x) :> false
+                .Fail(f: x) :> false
+            }
+            const ev: AExpr | not = match k {
+                .Eval(e: e) :> e
+                .Local(name: x) :> not
+                .Return(e: x) :> not
+                .If(cond: x) :> not
+                .Given(name: x) :> not
+                .For(f: x) :> not
+                .Break(label: x) :> not
+                .Continue(label: x) :> not
+                .Lift(what: x) :> not
+                .EffectStmt(w: x) :> not
+                .Defer(body: x) :> not
+                .Fail(f: x) :> not
+            }
+            let isAssign = false
+            if (ev is given) isAssign = assignTargetOf(ev.k) is given
+            if (isLin && assigns.length == 0) {
+                lins = lins.concat([s])
+            } else if (isAssign && ev is given) {
+                assigns = assigns.concat([ev])
+                if (i == b.stmts.length - 1) last = true
+            } else {
+                others = others.concat([s])
+            }
+            i = i + 1
+        }
+        return { lins: lins, assigns: assigns, others: others, last: last }
+    }
+
+    // A request id as a hint fragment: identifier characters only, and INJECTIVE (s475 r1 F4 —
+    // `id="a-b"` and `id="a_b"` both mapped to `a_b` and named two requests' signal cells alike).
+    // A letter or digit is itself, `_` is `__`, any other UTF-16 unit is `_` and four hex digits.
+    // A single `_` is therefore always followed by `_` or a hex digit run of four, so no hint ends
+    // in `_loading` / `_data` / `_error` / `_stale` (`t`, `r`, `l`, `s` are no hex digits): the
+    // handle `#H` and the signals `#H_<signal>` of distinct ids never collide.
+    fn reqHint(id: string) -> string {
+        let out: string = ""
+        let i: int = 0
+        while (i < id.length) {
+            const c: int = id.charCodeAt(i)
+            if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57)) {
+                out = out + id.substring(i, i + 1)
+            } else if (c == 95) {
+                out = out + "__"
+            } else {
+                out = out + "_" + reqHex4(c)
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // `<#id>` spelled for a message. Written as one literal, impl#1 (which compiles this file)
+    // reads it as an input-state reference and prints `_scrml_input_id_` into the message (s475 r1).
+    fn hashId() -> string {
+        return "<" + "#id>"
+    }
+
+    // A UTF-16 unit (0 … 0xFFFF) as four lower-case hex digits.
+    fn reqHex4(v: int) -> string {
+        let h: int = v
+        let out: string = ""
+        let k: int = 0
+        while (k < 4) {
+            const d: int = h % 16
+            out = "0123456789abcdef".substring(d, d + 1) + out
+            h = (h - d) / 16
+            k = k + 1
+        }
+        return out
+    }
+
+    fn isNoLift(l: LiftCtx) -> boolean {
+        return match l {
+            .NoLift :> true
+            .LiftTo(into: x) :> false
+            .LiftInArm :> false
+        }
+    }
+
+    fn reqUnsupported(env: Env, span: ASpan, msg: string, st: AS) -> AS {
+        return addDiag(st, env.file, span, "E-BOOTSTRAP-UNSUPPORTED", msg)
+    }
+
+    fn resolveRequest(env: Env, r: ARequest, st0: AS) -> AS {
+        let st: AS = st0
+        // a user declaration named `request` in scope: its use cannot take a `${ … }` body,
+        // and which reading wins for this spelling is not ruled (INTERIM, fail closed)
+        if (declNamed(env.g, env.file, "request") is given) {
+            return reqUnsupported(env, r.opener, "a declaration named `request` is in scope, and this `<request>` has a `" + interpOpen() + " … }` body — whether it is a use of that declaration or the §6.7.7 element is not settled; rename the declaration", st)
+        }
+        // INTERIM (capable form: per-instance request cells, owned by the instance that renders it)
+        if (!inProgramCtx(env) || env.own != "") {
+            return reqUnsupported(env, r.opener, "a `<request>` inside a declaration's `renders` is not in the bootstrap — its `" + hashId() + "` state (loading, data, error, stale) would live on each instance, and per-instance request state is not built (§6.7.7); write it in the program's markup", st)
+        }
+        // INTERIM (capable form: per-row request cells — §6.7.7 EC-6 "One instance per item", with W-LIFECYCLE-014)
+        if (env.rows.length > 0 || !isNoLift(env.lift)) {
+            return reqUnsupported(env, r.opener, "a `<request>` inside an `<each>` / `for` row is not in the bootstrap — §6.7.7 EC-6 makes it one request per row (W-LIFECYCLE-014), and per-row `" + hashId() + "` state is not built; write it outside the row", st)
+        }
+        // ---- the attributes ----
+        let id: string = ""
+        let hasId = false
+        let depsAttr: AAttr | not = not
+        for (const a of r.attrs) {
+            if (a.name == "id") {
+                const t: string | not = quotedAttrText(a.value)
+                if (t is given && t != "") {
+                    id = t
+                    hasId = true
+                } else {
+                    st = addDiag(st, env.file, a.span, "E-LIFECYCLE-018", "a `<request>`'s `id=` is a string literal naming it, `id=\"profile\"` (§6.7.7 grammar `id-attr ::= 'id=' string-literal`) — its `" + hashId() + "` state is reached by that name")
+                    hasId = true
+                }
+            } else if (a.name == "deps") {
+                depsAttr = a
+            } else if (a.name == "url" || a.name == "api") {
+                // INTERIM (capable form: the §60 `url=` / `api=` request)
+                st = reqUnsupported(env, a.span, "`" + a.name + "=` on a `<request>` (§60) is not in the bootstrap — write the fetch as a body, `<request id=\"…\">" + interpOpen() + " @x = load(…) }</>`, calling a server function", st)
+            } else if (a.name == "cache") {
+                // INTERIM (capable form: §6.7.7.2 — its cache key and lifetime are OPEN, O-060-1 / O-060-2)
+                st = reqUnsupported(env, a.span, "`cache` on a `<request>` (§6.7.7.2) is not in the bootstrap — its cache key and entry lifetime are not ruled (O-060-1, O-060-2); drop `cache` (the request still fetches on mount and on each dependency change)", st)
+            } else {
+                st = reqUnsupported(env, a.span, "`" + a.name + "=` is not an attribute of `<request>` — it takes `id=`, `deps=[…]` and `cache` (§6.7.7 grammar)", st)
+            }
+        }
+        if (!hasId) st = addDiag(st, env.file, r.opener, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state (`.loading`, `.data`, `.error`, `.stale`, `.refetch()`); add `id=\"…\"`")
+        if (id != "") {
+            for (const q of st.reqs) {
+                // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
+                if (q.id == id) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+            }
+        }
+        // ---- the body's shape ----
+        const sh: ReqShape = requestShape(r.body)
+        if (sh.assigns.length == 0) {
+            let what: string = "logic but no `@var = expr`"
+            if (r.body.stmts.length == 0) what = "an empty body"
+            if (r.body.stmts.length > 0 && sh.others.length == 0) what = "only `lin` declarations, and no `@var = expr`"
+            return addDiag(st, env.file, r.span, "E-LIFECYCLE-021", "this `<request>` body holds " + what + " — a request's body is ONE assignment `@var = load(…)` whose value it fetches into `@var` (§6.7.7), optionally after `lin` declarations")
+        }
+        if (sh.assigns.length > 1) {
+            return addDiag(st, env.file, sh.assigns[1].span, "E-LIFECYCLE-020", "this `<request>` body holds " + sh.assigns.length + " assignments — it holds exactly one, `@var = load(…)`, the request's write point (§6.7.7); split the others into their own requests, or derive them from `@var`")
+        }
+        if (sh.others.length > 0 || !sh.last) {
+            const bad: ASpan = sh.others.length > 0 ? sh.others[0].span : r.body.span
+            return addDiag(st, env.file, bad, "E-LIFECYCLE-020", "a `<request>` body holds `lin` declarations and then ONE `@var = expr`, and nothing else (§6.7.7, S469: \"which MAY be preceded by `lin` declarations and by nothing else\") — move other logic into the function the assignment calls")
+        }
+        const asg: AExpr = sh.assigns[0]
+        const tgt: AExpr | not = assignTargetOf(asg.k)
+        const rhs: AExpr | not = assignedValue(asg)
+        if (tgt is not || rhs is not) return st
+        // the target: a cell of this program, written `@name`
+        const tname: string = atName(tgt)
+        const pinfo: DeclInfo | not = programInfo(env)
+        let tidx: int = -1
+        if (tname != "" && pinfo is given) tidx = fieldIndex(pinfo, tname)
+        if (tname == "" || pinfo is not || tidx < 0) {
+            // INTERIM (capable form: a field path / another file's cell as a request target — not ruled)
+            return reqUnsupported(env, tgt.span, "a `<request>` assigns a cell of this program, written `@name` (§6.7.7 \"`@variable = expr`\") — `" + exprLabel(tgt) + "` is not one in the bootstrap", st)
+        }
+        const tfi: FieldInfo = pinfo.fields[tidx]
+        if (tfi.wcap is not) {
+            return addDiag(st, env.file, tgt.span, "E-LIFECYCLE-021", "`@" + tname + "` is not a writable cell — a request's `@var` is a `let` cell its settle writes (§6.7.7); declare it `let`")
+        }
+        // s475 r1 (F5) — one request per target. Two requests settling one cell leave each one's
+        // `<#id>.data` disagreeing with `@var` after the other settles, and which settle wins is
+        // ordering, not semantics. INTERIM (capable form: a SPEC ruling on a cell written by two
+        // requests — §6.7.7 names the request's write point, not a cell's single writer).
+        for (const q of st.reqs) {
+            if (q.targetName == tname) {
+                st = reqUnsupported(env, tgt.span, "`@" + tname + "` is already the target of `<request id=\"" + q.id + "\">` — a cell written by two requests is not in the bootstrap: each settle would leave the other's `" + hashId() + ".data` disagreeing with `@" + tname + "` (§6.7.7 \"`" + hashId() + ".data` → resolved value\"); load into separate cells, or derive one from the other", st)
+            }
+        }
+        // ---- the explicit deps (syntax) ----
+        let explicit = false
+        let deps: NameFact[] = []
+        const da: AAttr | not = depsAttr
+        if (da is given) {
+            explicit = true
+            const es: AExpr[] | not = reqDepsList(da.value)
+            if (es is not) {
+                st = addDiag(st, env.file, da.span, "E-LIFECYCLE-022", "`deps=` takes a `[ ]` list of cells, `deps=[@a, @b]` (§6.7.7 grammar `deps-attr ::= 'deps=' '[' deps-list ']'`); `deps=[]` fetches on mount only")
+            } else {
+                for (const d of es) {
+                    const rd: RDep = requestDep(env, d, tname, st)
+                    st = rd.st
+                    const f: NameFact | not = rd.f
+                    if (f is given) deps = deps.concat([f])
+                }
+            }
+        }
+        // ---- the body: `lin`s, then the assignment, its right-hand side handled by the request ----
+        // (a handling form there is refused — the request handles it; INTERIM: the author's own
+        // handler and the request's error would both claim the failure, not ruled)
+        if (handledOf(rhs.k) is given) {
+            st = reqUnsupported(env, rhs.span, "a handling form (`!{ … }` / `match`) on a `<request>`'s right-hand side is not in the bootstrap — the request handles its call itself (§6.7.7: its failure sets `" + hashId() + ".error` and keeps `@" + tname + "`); remove the handler", st)
+        }
+        let benv: Env = requestBodyEnv(env)
+        let lins: int[] = []
+        for (const ls of sh.lins) {
+            const rb: RB = resolveStmt(benv, ls, st)
+            benv = rb.env
+            st = rb.st
+            const li: AExpr | not = localInit(ls)
+            if (li is given) lins = lins.concat([li.nid])
+        }
+        st = resolveStmtExpr(withSubject(benv, rhs.nid), asg, st)
+        // ---- the inferred deps: the `@` cells read by the right-hand side and the `lin` initializers ----
+        if (!explicit) {
+            let reads: AExpr[] = atNodesIn(rhs)
+            for (const ls2 of sh.lins) {
+                const li2: AExpr | not = localInit(ls2)
+                if (li2 is given) reads = atNodesIn(li2).concat(reads)
+            }
+            for (const at of reads) {
+                const rd2: RDep = inferredDep(env, at, tname, st)
+                st = rd2.st
+                const f2: NameFact | not = rd2.f
+                if (f2 is given && !hasDepFact(deps, f2)) deps = deps.concat([f2])
+            }
+            if (deps.length == 0) st = addDiag(st, env.file, r.opener, "W-LIFECYCLE-013", "this `<request>` reads no reactive `@variable` and has no `deps=` — it fetches once, on mount (§6.7.7 EC-5); write `deps=[]` to say so")
+        }
+        // The fact is recorded whatever the body's own diagnostics: an Error there stops lowering
+        // (the diagnostics gate), and a Warning must not drop the request from the Core (fail closed —
+        // lower.scrml requestView finds every request it lowers here). No `id`: E-LIFECYCLE-018 above.
+        if (!hasId || id == "") return st
+        // ---- the request's facts: its four signal cells, its handle, its load bind ----
+        const hb: string = "#" + reqHint(id)
+        let sigs: Sym[] = []
+        let caps: Sym[] = []
+        for (const nm of ["loading", "data", "error", "stale"]) {
+            const ms: RSym = mint(st, hb + "_" + nm)
+            const mc: RSym = mint(ms.st, hb + "_" + nm)
+            st = mc.st
+            sigs = sigs.concat([ms.s])
+            caps = caps.concat([mc.s])
+        }
+        const mh: RSym = mint(st, hb)
+        const ml: RSym = mint(mh.st, "loaded")
+        st = ml.st
+        const cf: FnInfo | not = calledFn(env, nameFactOfCall(rhs, st))
+        let err: Sym | not = not
+        if (cf is given) {
+            if (cf.serverOwn) {
+                err = cf.rerr
+            } else if (cf.failable) {
+                err = cf.err
+            }
+        }
+        const e0: Sym | not = err
+        let errTy: Type = Type.Maybe(Type.Named(env.g.errorSym))
+        if (e0 is given) errTy = Type.Maybe(Type.Named(e0))
+        const tty: Type = tfi.ty
+        let dataTy: Type = Type.Maybe(tty)
+        if (isMaybeType(tty)) dataTy = tty
+        const fact: ReqFact = { nid: r.nid, id: id, file: env.file, span: r.span, target: NameFact.NField(env.g.program, programInst(env), tidx),
+                                targetName: tname, deps: deps, explicit: explicit, signals: sigs, wcaps: caps, handle: mh.s, load: ml.s,
+                                rhs: rhs.nid, dataTy: dataTy, errTy: errTy, err: err, lins: lins, req: r, value: rhs }
+        return addReq(st, fact)
+    }
+
+    // s475 (S3a) — a `<request>` that is NOT the `${ … }` body form (parse.scrml
+    // isRequestBody), with no user declaration of that name in scope:
+    //  - `url=` / `api=`: the §60 form — refused by name (INTERIM; §60 unbuilt).
+    //    That form is self-closing in the §6.7.7 grammar (`'<request'
+    //    request-attrs '/>'`), so it is not E-LIFECYCLE-019 here;
+    //  - no body (self-closing, or empty): E-LIFECYCLE-019 — "if `<request>` is
+    //    self-closing (no body)". The grammar's own self-closing alternative
+    //    contradicts this statement (a known SPEC defect); E-LIFECYCLE-019 wins
+    //    for the body form (PA, S475);
+    //  - a markup body: E-PARSE-ITEM — the body is one `${ … }` logic block.
+    // E-LIFECYCLE-018 rides along when `id=` is missing.
+    fn requestElemShape(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        const u: AAttr | not = attrNamed(e.attrs, "url")
+        const a: AAttr | not = attrNamed(e.attrs, "api")
+        if (u is given || a is given) {
+            const nm: string = u is given ? "url" : "api"
+            return reqUnsupported(env, e.span, "`" + nm + "=` on a `<request>` (§60) is not in the bootstrap — write the fetch as a body, `<request id=\"…\">" + interpOpen() + " @x = load(…); }</request>`, calling a server function", st)
+        }
+        if (attrNamed(e.attrs, "id") is not) st = addDiag(st, env.file, e.span, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state; add `id=\"…\"`")
+        let blank = true
+        for (const k of e.kids) {
+            if (!blankNode(k)) blank = false
+        }
+        if (blank) return addDiag(st, env.file, e.span, "E-LIFECYCLE-019", "this `<request>` has no body — a request's body is the `" + interpOpen() + " @var = load(…); }` it fetches with (§6.7.7: E-LIFECYCLE-019 \"if `<request>` is self-closing (no body)\"); without one it does nothing")
+        return addDiag(st, env.file, e.span, "E-PARSE-ITEM", "a `<request>` body is exactly one `" + interpOpen() + " … }` logic block — `lin` declarations and then ONE `@var = load(…)` (§6.7.7) — not markup; a request renders nothing")
+    }
+
+    fn isMaybeType(t: Type) -> boolean {
+        return match t {
+            .Maybe(inner: x) :> true
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: x) :> false
+            .Seq(elem: x) :> false
+        }
+    }
+
+    // The NameFact of a right-hand side's callee (`not` when it is not a call).
+    fn nameFactOfCall(e: AExpr, st: AS) -> NameFact | not {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return not
+        return nameFactIn(st, c.nid)
+    }
+
+    fn localInit(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(init: i) :> i
+            .Eval(e: x) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: x) :> not
+            .EffectStmt(w: x) :> not
+            .Defer(body: x) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    // A request body: an action position (§13.8 (i)) — a host call may stand in
+    // it (as in a handler); not an effect body (E-LIFECYCLE-016 is the effect's).
+    fn requestBodyEnv(env: Env) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: false, fx: env.fx, lift: LiftCtx.NoLift }
+    }
+
+    // `deps=[…]`: its entries, or `not` when the value is not a `[ ]` list.
+    fn reqDepsList(v: AAttrValue) -> AExpr[] | not {
+        const e: AExpr | not = match v {
+            .Bare(e: e) :> e
+            .Paren(e: x) :> not
+            .Quoted(v: x) :> not
+            .NoValue :> not
+            .Braced(b: x) :> not
+        }
+        if (e is not) return not
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Member(obj: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Index(obj: x) :> not
+            .Lambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    type RDep:struct = { f: NameFact | not, st: AS }
+
+    fn noDep(st: AS) -> RDep { return { f: not, st: st } }
+
+    // One `deps=` entry: a bare `@name` naming a declared mutable cell
+    // (E-LIFECYCLE-022 otherwise — §6.7.7 "names an undeclared or non-`@`
+    // variable"; §34: "a member access (`@u.id`), a call, a literal, or a name
+    // without the `@` sigil").
+    fn requestDep(env: Env, d: AExpr, target: string, st: AS) -> RDep {
+        const name: string = atName(d)
+        if (name == "") return noDep(addDiag(st, env.file, d.span, "E-LIFECYCLE-022", "a `deps=` entry is a bare `@name` (§6.7.7 grammar `deps-list ::= ('@' identifier (',' '@' identifier)*)?`) — `" + exprLabel(d) + "` is not one; list the cell itself (`@u` for `@u.id`)"))
+        const r: RX = resolveExpr(env, d, not, st)
+        if (r.st.diags.length > st.diags.length) return noDep(addDiag(st, env.file, d.span, "E-LIFECYCLE-022", "`@" + name + "` in a `<request>`'s `deps=` is not a declared `@variable` in scope (§6.7.7)"))
+        const f: NameFact | not = nameFactIn(r.st, d.nid)
+        if (f is not) return noDep(addDiag(st, env.file, d.span, "E-LIFECYCLE-022", "`@" + name + "` in a `<request>`'s `deps=` is not a declared `@variable` in scope (§6.7.7)"))
+        // INTERIM (capable form: a SPEC ruling on a settle that writes its own trigger — §6.7.7.3's
+        // server-origin rule says no for a provably-writing request only)
+        if (name == target) return noDep(reqUnsupported(env, d.span, "`@" + name + "` is this `<request>`'s own target and one of its `deps=` — its settle writes `@" + name + "`, which would re-run it on every settle (§6.7.7: \"`<request>` is not a loop\"); drop it from `deps=`", r.st))
+        return reqDepOf(env, d, name, f, true, r.st)
+    }
+
+    // An inferred dependency: an `@` read of the body (the target and anything
+    // that is not a cell is not one).
+    fn inferredDep(env: Env, at: AExpr, target: string, st: AS) -> RDep {
+        const name: string = atName(at)
+        if (name == "" || name == target) return noDep(st)
+        const f: NameFact | not = nameFactIn(st, at.nid)
+        if (f is not) return noDep(st)
+        return reqDepOf(env, at, name, f, false, st)
+    }
+
+    fn reqDepOf(env: Env, d: AExpr, name: string, f: NameFact, explicit: boolean, st: AS) -> RDep {
+        return match f {
+            .NField(decl: ds, inst: i, idx: idx) :> reqDepField(env, d, name, f, ds, idx, explicit, st)
+            // INTERIM (capable form: a whole-value dependency — whether an instance is a dependency is not settled, as for `<effect>`)
+            .NInst(decl: ds) :> noDep(reqUnsupported(env, d.span, "`@" + name + "` names a whole instance — a `<request>` dependency naming one is not in the bootstrap; list (or read) its fields' cells", st))
+            .NLocal(sym: s) :> reqNotCell(env, d, name, explicit, st)
+            .NStruct(owner: o) :> reqNotCell(env, d, name, explicit, st)
+            .NFn(sym: s) :> reqNotCell(env, d, name, explicit, st)
+            .NLength :> reqNotCell(env, d, name, explicit, st)
+            .NSurface(of: x) :> reqNotCell(env, d, name, explicit, st)
+            .NConst(sym: s) :> reqNotCell(env, d, name, explicit, st)
+        }
+    }
+
+    fn reqNotCell(env: Env, d: AExpr, name: string, explicit: boolean, st: AS) -> RDep {
+        if (!explicit) return noDep(st)
+        return noDep(addDiag(st, env.file, d.span, "E-LIFECYCLE-022", "`@" + name + "` in a `<request>`'s `deps=` is not a declared `@variable` cell (§6.7.7)"))
+    }
+
+    fn reqDepField(env: Env, d: AExpr, name: string, f: NameFact, ds: Sym, idx: int, explicit: boolean, st: AS) -> RDep {
+        const di: DeclInfo | not = declInfoIn(env.g, ds)
+        if (di is not || idx < 0 || idx >= di.fields.length) return noDep(st)
+        const fi: FieldInfo = di.fields[idx]
+        const w: Sym | not = fi.wcap
+        if (w is given) return { f: f, st: st }
+        const m: FieldMode = fi.mode
+        // a LOCKED field never changes — it triggers nothing, so it is no dependency (dropping it changes nothing)
+        if (m == FieldMode.Locked) return noDep(st)
+        // INTERIM (capable form: a derived cell's change as a trigger — Core's dependencies are mutable cells, C-R1 / C11)
+        return noDep(reqUnsupported(env, d.span, "`@" + name + "` is a derived cell — as a `<request>` dependency it is not in the bootstrap (a derived cell has no change event of its own in Core); list the `@variables` it is computed from in `deps=`", st))
+    }
+
+    fn hasDepFact(ds: NameFact[], f: NameFact) -> boolean {
+        for (const d of ds) {
+            if (d == f) return true
+        }
+        return false
+    }
+
+    // Every `@name` node an expression holds (in a lambda body and a handling form's arms too).
+    fn atNodesIn(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = []
+        if (atName(e) != "") out = [e]
+        for (const k of exprKids(e)) { out = out.concat(atNodesIn(k)) }
+        for (const b of exprBlocks(e)) { out = out.concat(atNodesInBlock(b)) }
+        return out
+    }
+
+    fn atNodesInBlock(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(atNodesIn(e)) }
+            for (const nb of stmtKidBlocks(s)) { out = out.concat(atNodesInBlock(nb)) }
+        }
+        return out
+    }
+
+    fn stmtKidBlocks(s: AStmt) -> ABlock[] {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: t, elseB: e) :> [t].concat(maybeBlockList(e))
+            .Given(name: n, body: b) :> [b]
+            .For(f: lf) :> [lf.body]
+            .Defer(body: b) :> [b]
+            .EffectStmt(w: w) :> [w.body]
+            .Eval(e: x) :> []
+            .Local(name: x) :> []
+            .Return(e: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: x) :> []
+            .Fail(f: x) :> []
+        }
+    }
+
     fn declInfoIn(g: Globals, s: Sym) -> DeclInfo | not {
         const ds: DeclSrc | not = findDeclSrc(g, s)
         if (ds is not) return not
@@ -15437,6 +16017,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
             .Css(c: c) :> not
             .Gather(f: f) :> not
         }
@@ -16929,7 +17510,12 @@ ${
     // match itself across updates); one blamed on an earlier error is not
     // reported again (Rule C).
     fn typeLoopKey(env: TEnv, key: AExpr, ts0: TypeState) -> TypeState {
-        const rk: RVT = typeExpr(env, key, ts0)
+        return checkLoopKey(env, key, typeExpr(env, key, ts0), true)
+    }
+
+    // The key rule on a typed key. `closed`: an unproven key fails closed (the
+    // header form). The `<each key=…>` attribute form (§17.7) passes false.
+    fn checkLoopKey(env: TEnv, key: AExpr, rk: RVT, closed: boolean) -> TypeState {
         if (hasErrIn(env.errs, key.span) || condBlamed(env, key, rk.ts)) return rk.ts
         const t: Type | not = knownOf(rk.vt)
         if (t is given) {
@@ -16938,7 +17524,13 @@ ${
             return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `" + typeName(t) + "`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
         }
         if (isOneOfVT(rk.vt)) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is ONE of a string or a number — it names the row across updates, and this one may be any of `" + oneOfNames(rk.vt) + "`. Key by a single primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        // s475 (#1777 review r1 F2): a `Partial` key is refused below either way (its
+        // unproven branch); a proven member that is no string or number is named
+        for (const m of partialMembers(rk.vt)) {
+            if (kindOf(m) > 2) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one may be `" + typeName(m) + "` (one of its branches is; another is not proven). Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        }
         if (isAbsentVT(rk.vt)) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `not`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        if (!closed) return rk.ts
         return report(rk.ts, env, key.span, "E-KEY-001", "the type of this loop `key` is not known — a `key` is a string or a number (it names the row across updates); key by a primitive field (`key x.id`) or annotate what it reads (§17.4b, §6.5.3)")
     }
 
@@ -17122,6 +17714,7 @@ ${
                 .Css(c: c) :> not
                 .Gather(f: x) :> not
                 .Effect(w: w) :> not
+                .Request(r: r) :> not
             }
             if (e is given) {
                 st = chainMember(env, e, prev, st)
@@ -17313,6 +17906,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> staticExecRows(t, file, gatherRows(lf), parent)
             .Effect(w: w) :> []
+            .Request(r: r) :> []
         }
     }
 
@@ -17462,6 +18056,7 @@ ${
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
             .Css(c: c) :> st
             .Effect(w: w) :> resolveEffect(env, w, st)
+            .Request(r: r) :> resolveRequest(env, r, st)
             .Gather(f: lf) :> resolveTier0(env, n, lf, st)                 // s469 (§17.4)
         }
     }
@@ -17516,6 +18111,8 @@ ${
         // SHALL NOT be treated as HTML elements") — refused, not rendered as
         // markup (it used to fall through to MHtml with no diagnostic). Only
         // when no declaration of that name is in scope (above).
+        // s475 (S3a): a `<request>` the parser left an element — not the `${ … }` body form
+        if (e.tag == "request") return requestElemShape(env, e, st)
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -17823,6 +18420,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: lf) :> not
         }
@@ -17835,6 +18433,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: lf) :> not
         }
@@ -17880,6 +18479,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
+            .Request(r: x) :> []
             .Css(c: x) :> []
             .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
         }
@@ -18183,6 +18783,7 @@ ${
                 .Interp(e: x) :> ""
                 .DeclNode(d: x) :> ""
                 .Effect(w: x) :> ""
+                .Request(r: x) :> ""
                 .Css(c: x) :> ""
                 .Gather(f: lf) :> mkSlotIn(g, file, rowsOfBlock(lf.body), ns, depth)
             }
@@ -18210,6 +18811,7 @@ ${
                 .Interp(e: x) :> "?"
                 .DeclNode(d: x) :> "?"
                 .Effect(w: x) :> "?"
+                .Request(r: x) :> "?"
                 .Css(c: x) :> "?"
                 .Gather(f: lf) :> mkSlotPlIn(g, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
             }
@@ -18342,6 +18944,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
             .Gather(f: f) :> not
         }
     }
@@ -18678,6 +19281,7 @@ ${
                 .Interp(e: x) :> []
                 .DeclNode(d: dd) :> []
                 .Effect(w: w) :> []
+                .Request(r: r) :> []
                 .Css(c: c) :> []
                 .Gather(f: f) :> slotsWalk(gatherRows(f), wantLooped, true)
             }
@@ -18727,6 +19331,7 @@ ${
                 .Css(c: c) :> not
                 .Gather(f: x) :> not
                 .Effect(w: w) :> not
+                .Request(r: r) :> not
             }
             if (e is given) {
                 const opens: boolean = attrNamed(e.attrs, "if") is given
@@ -18800,6 +19405,7 @@ ${
             .Interp(e: e) :> false
             .DeclNode(d: d) :> false
             .Effect(w: w) :> false
+            .Request(r: r) :> false
         }
     }
 
@@ -18813,6 +19419,7 @@ ${
             .Css(c: c) :> false
             .Gather(f: x) :> false
             .Effect(w: w) :> false
+            .Request(r: r) :> false
         }
     }
 
@@ -18826,7 +19433,6 @@ ${
     fn structuralOwner(tag: string) -> string {
         const t: string = tag.toLowerCase()
         return match t {
-            "request"       :> "§6.7.7 async request"
             "poll"          :> "§6.7 lifecycle"
             "timer"         :> "§6.7 lifecycle"
             "timeout"       :> "§6.7.8 lifecycle"
@@ -21170,6 +21776,7 @@ ${
             .Gather(f: lf) :> blockRedeclares(file, lf.body, [], false).concat(rowsRedeclares(file, gatherRows(lf)))
             // s449: an effect body is a block like an inline handler's
             .Effect(w: w) :> blockRedeclares(file, w.body, [], false)
+            .Request(r: r) :> blockRedeclares(file, r.body, [], false)
         }
     }
 
@@ -23659,8 +24266,37 @@ ${
             if (kindOf(unMaybe(x)) == 0 && kindOf(unMaybe(y)) == 0) {
                 return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s — `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
             }
+            return ts
+        }
+        // s475 r1 (#1782 review F3): a choice or a `Partial` operand — each PROVEN
+        // member is the operand when its branch is taken (`u(3) / 4`, `u` proven
+        // `int` in part, ran 1.5 into an `int` cell). Provable where one side's
+        // proven members are ALL `int` and the other side has an `int` member:
+        // that branch is `int / int` whatever the other side's branch is.
+        // INTERIM: two mixed sides (`(@ok ? 6 : 1.5) / (@ok ? 4 : 2.5)`) may pair
+        // `int` with `number` on every taken branch — branch correlation is not
+        // tracked, so it stays silent (capable form: correlated branch types).
+        const xs: Type[] = memberTypes(a)
+        const ys: Type[] = memberTypes(b)
+        if ((allIntMembers(xs) && anyIntMember(ys)) || (allIntMembers(ys) && anyIntMember(xs))) {
+            return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s on a branch — an operand is one of several branches (a choice, or a value proven only in part) and each branch is the operand when it is taken; `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
         }
         return ts
+    }
+
+    fn allIntMembers(xs: Type[]) -> boolean {
+        if (xs.length == 0) return false
+        for (const t of xs) {
+            if (kindOf(unMaybe(t)) != 0) return false
+        }
+        return true
+    }
+
+    fn anyIntMember(xs: Type[]) -> boolean {
+        for (const t of xs) {
+            if (kindOf(unMaybe(t)) == 0) return true
+        }
+        return false
     }
 
     // An arithmetic / relational operand: a number.
@@ -23670,7 +24306,10 @@ ${
             .Absent :> operandType(env, x, "not", what, "numbers", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> numOneOf(env, x, xs, what, ts)
-            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: an operand's proven members are not judged (capable form: each, as numOneOf)
+            // s475 (#1777 review r1 residual iv): each PROVEN member is the operand
+            // when its branch is taken (`(@ok ? "s" : u(1)) * 2` landed NaN); the
+            // unproven branch stays provable-or-silent, as `.Unknown`
+            .Partial(ts: xs) :> numOneOf(env, x, xs, what, ts)
         }
     }
 
@@ -23694,12 +24333,22 @@ ${
 
     // A `!` / `&&` / `||` operand: a bool.
     fn checkBoolOperand(env: TEnv, x: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
+        // s475 (s475-boot-partial-followups): a ternary operand whose type did not
+        // resolve to one (a choice, a `Partial`) is judged ARM BY ARM — each arm is
+        // the operand when taken, and the report lands at the arm (as the S460 N1
+        // condition walk blames it, condArmOperands, which then does not report it twice)
+        const arms: AExpr[] = armsOf(x)
+        if (arms.length > 0 && knownOf(v) is not && !isAbsentVT(v)) {
+            let out: TypeState = ts
+            for (const arm of arms) { out = checkBoolOperand(env, arm, exprType0(out, arm.nid), what, out) }
+            return out
+        }
         return match v {
             .Known(t: t) :> boolKnown(env, x, t, what, ts)
             .Absent :> operandType(env, x, "not", what, "booleans", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> boolOneOf(env, x, xs, what, ts)
-            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: as checkNumOperand
+            .Partial(ts: xs) :> boolOneOf(env, x, xs, what, ts)       // s475 r1 iv: as checkNumOperand
         }
     }
 
@@ -23738,11 +24387,50 @@ ${
         if (x0 is given) hosty = containsHost(env.t.types, x0, 0)
         if (y0 is given && !hosty) hosty = containsHost(env.t.types, y0, 0)
         if (hosty) return report(ts, env, e.span, "E-EQ-003", "equality on a value of a declared `:host` handle type — a host handle is not comparable (§21.3.3 rule 15, §45.2: there is no identity comparison in scrml, §45.6); test it with `is given` / `is not`, or declare a binding that compares on the host side")
-        if (x0 is not || y0 is not) return ts
+        if (x0 is not || y0 is not) return eqMembers(env, e, a, b, ts)
         const x: Type = unMaybe(x0)
         const y: Type = unMaybe(y0)
         if (eqSameType(env, x, y)) return ts
         return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and this is `" + typeName(x) + "` with `" + typeName(y) + "` — convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
+    }
+
+    // s475 (#1777 review r1 F2; r1 of #1782 F1) — an operand that is a choice or
+    // a `Partial`: each PROVEN member is the operand when its branch is taken.
+    // §45.3 / S469 "same type only" is broken on a branch only where a proven
+    // member of one side has NO same-type partner among the other side's proven
+    // members — that member can only ever meet another type (`(@ok ? 1 : "s") == 1`:
+    // the `string` branch meets `int`). Two choices of the same members
+    // (`(@ok ? 1 : "a") == (@ok ? 2 : "b")`, `a == a`) may pair each branch with
+    // its own type, so they are not refused (the branches' correlation is not
+    // tracked: not provable — silent). An unproven branch, and an operand with no
+    // proven member, stay provable-or-silent.
+    fn eqMembers(env: TEnv, e: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
+        const xs: Type[] = memberTypes(a)
+        const ys: Type[] = memberTypes(b)
+        if (xs.length == 0 || ys.length == 0) return ts
+        const lone: Type | not = eqLoneMember(env, xs, ys)
+        if (lone is given) return eqMemberReport(env, e, lone, ys, ts)
+        const lone2: Type | not = eqLoneMember(env, ys, xs)
+        if (lone2 is given) return eqMemberReport(env, e, lone2, xs, ts)
+        return ts
+    }
+
+    // A member of `xs` with no `eqSameType` partner in `ys`, if any.
+    fn eqLoneMember(env: TEnv, xs: Type[], ys: Type[]) -> Type | not {
+        for (const x0 of xs) {
+            let partner = false
+            for (const y0 of ys) {
+                if (eqSameType(env, unMaybe(x0), unMaybe(y0))) partner = true
+            }
+            if (!partner) return unMaybe(x0)
+        }
+        return not
+    }
+
+    fn eqMemberReport(env: TEnv, e: AExpr, x: Type, others: Type[], ts: TypeState) -> TypeState {
+        let names: string[] = []
+        for (const o of others) { names = names.concat(["`" + typeName(unMaybe(o)) + "`"]) }
+        return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and one side may be `" + typeName(x) + "` where the other is only ever " + names.join(" or ") + " — an operand is one of several branches (a choice, or a value proven only in part), and each branch is the operand when it is taken; convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
     }
 
     // RULED (user-voice S469, bryan: "Ratify: same type only (Rec)"): `==` / `!=`
@@ -23785,7 +24473,7 @@ ${
         if (ts.diags.length > ts0.diags.length) return ts
         const x0: Type | not = knownOf(a)
         const y0: Type | not = knownOf(b)
-        if (x0 is not || y0 is not) return ts
+        if (x0 is not || y0 is not) return plusPairMembers(env, e, a, b, ts)
         // an operand the check above let through as `T | not` (a joined local) counts as its `T`
         const x: Type = unMaybe(x0)
         const y: Type = unMaybe(y0)
@@ -23794,13 +24482,45 @@ ${
         return report(ts, env, e.span, "E-OPERATOR-OPERAND-TYPE", "`+` takes two numbers or two strings, and this is `" + typeName(x) + " + " + typeName(y) + "` — convert explicitly (ruled S440, Gotcha Q1)")
     }
 
+    // s475 (#1777 review r1 residual iv) — the pair rule where an operand is a
+    // `Partial` (or a choice): each PROVEN member is the operand when its branch
+    // is taken, so a proven member that cannot pair with a proven member of the
+    // other side is a provable wrong branch (`"x" + r(i - 1)` whose base `return 1`
+    // is an `int` joined "xx1" into an `int` cell). An unproven branch stays
+    // provable-or-silent; an operand with no proven member is not judged.
+    fn plusPairMembers(env: TEnv, e: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
+        const xs: Type[] = memberTypes(a)
+        const ys: Type[] = memberTypes(b)
+        for (const x0 of xs) {
+            for (const y0 of ys) {
+                const x: Type = unMaybe(x0)
+                const y: Type = unMaybe(y0)
+                const fits: boolean = (isNumericKind(x) && isNumericKind(y)) || (kindOf(x) == 2 && kindOf(y) == 2)
+                if (!fits) return report(ts, env, e.span, "E-OPERATOR-OPERAND-TYPE", "`+` takes two numbers or two strings, and this may be `" + typeName(x) + " + " + typeName(y) + "` — an operand is one of several branches (a choice, or a value proven only in part), and each branch is the operand when it is taken; convert explicitly (ruled S440, Gotcha Q1)")
+            }
+        }
+        return ts
+    }
+
+    // s475 — the PROVEN types a value may be: a known type, a choice's members, a
+    // `Partial`'s proven members; none for `not` or an unproven value.
+    fn memberTypes(v: VType) -> Type[] {
+        return match v {
+            .Known(t: x) :> [x]
+            .OneOf(ts: xs) :> xs
+            .Partial(ts: xs) :> xs
+            .Absent :> []
+            .Unknown :> []
+        }
+    }
+
     fn plusOperand(env: TEnv, x: AExpr, v: VType, ts: TypeState) -> TypeState {
         return match v {
             .Known(t: t) :> plusKnown(env, x, t, ts)
             .Absent :> operandType(env, x, "not", "`+`", "two numbers or two strings", ts)
             .Unknown :> ts
             .OneOf(ts: xs) :> plusOneOf(env, x, xs, ts)
-            .Partial(ts: xs) :> ts        // s475 r1 INTERIM: as checkNumOperand
+            .Partial(ts: xs) :> plusOneOf(env, x, xs, ts)     // s475 r1 iv: as checkNumOperand
         }
     }
 
@@ -24025,12 +24745,24 @@ ${
         let ts: TypeState = ts0
         for (const arm of arms) {
             ts = condOperand(env, arm, opName, armWhat(what), ts)
-            if (whole) ts = checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
+            // not a second report of an arm the operand rule already judged (checkBoolOperand
+            // walks the arms of a `&&` / `||` operand that did not resolve to one type)
+            if (whole && !reportedAt(env, ts, arm.span, ["E-OPERATOR-OPERAND-TYPE", "E-OPERAND-NOT-NARROWED"])) ts = checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
         }
         // strict-direction only: an unresolved ternary operand none of whose
         // arms was reported is refused whole, as before
         if (!whole || ts.diags.length > ts0.diags.length) return ts
         return condOperandUnresolved(env, x, opName, what, ts0)
+    }
+
+    // s475 — a diagnostic of this file, of one of `codes` (the family the caller
+    // would report), already stands at exactly `span`; another code there (an
+    // arity error on the arm, say) does not stand in for it.
+    fn reportedAt(env: TEnv, ts: TypeState, span: ASpan, codes: string[]) -> boolean {
+        for (const d of ts.diags) {
+            if (d.file == env.file && d.span.start == span.start && d.span.end == span.end && codes.indexOf(d.code) >= 0) return true
+        }
+        return false
     }
 
     fn unresolvedVT(v: VType) -> boolean {
@@ -24552,7 +25284,10 @@ ${
             const xv: VType = exprType0(out, x.nid)
             if (isNotLit(x)) {
                 out = checkAbsent(env, te, x.span, "an element of `" + typeName(target) + "`", out)
-            } else if (knownOf(xv) is given || oneOfMembers(xv).length > 0) {
+            } else if (knownOf(xv) is given || oneOfMembers(xv).length > 0 || isPartialVT(xv)) {
+                // s475 (#1777 review r1 F1): a Partial element's proven members are
+                // checked too (checkValue → checkPartial) — `[@ok ? "s" : u(2)]` into
+                // `int[]` held "s", where its OneOf twin `[@ok ? "s" : 2]` was refused
                 out = checkValue(env, xv, te, x.span, "an element of `" + typeName(target) + "`", out)
             } else {
                 out = checkNotElems(env, x, te, out)
@@ -24689,7 +25424,7 @@ ${
             // s475 r1 (#1777 review F1): a block arm with statements yields what it
             // `lift`s (§18.5, S469 — `{ const z = "q"; lift z; }`); each lifted
             // value joins, as the one expression of `e` / `{ e }` does
-            for (const av of armValues(ts, body, one)) {
+            for (const av of armValues(ts, body, one, a.lifted)) {
                 if (first) {
                     vt = av
                     first = false
@@ -24710,7 +25445,10 @@ ${
     // block's LAST statement, an expression statement (the arm marked `lifted`), as
     // the resolver reads it (resolveArm: `evalOf` of the last statement). A block
     // that leaves (`return` / `fail`, blockDiverges) or ends in a write yields none.
-    fn armValues(ts: TypeState, body: AArmBody, one: AExpr | not) -> VType[] {
+    // s475 (#1777 review r1 F3): only a `lifted` arm yields its last statement — a
+    // statement-holding block ending in a BARE expression yields nothing (it is
+    // E-ARM-TAIL-VALUE, the resolver's), so its tail is not checked a second time.
+    fn armValues(ts: TypeState, body: AArmBody, one: AExpr | not, lifted: boolean) -> VType[] {
         if (one is given) {
             if (assignValue(one) is given) return []
             return [exprType0(ts, one.nid)]
@@ -24718,7 +25456,7 @@ ${
         let out: VType[] = []
         for (const b of armBlockOf(body)) {
             const n: int = b.stmts.length
-            if (n > 0 && !blockDiverges(b)) {
+            if (n > 0 && lifted && !blockDiverges(b)) {
                 const last: AExpr | not = evalOf(b.stmts[n - 1])
                 if (last is given) {
                     if (assignValue(last) is not && !isWriteExpr(last)) out = out.concat([exprType0(ts, last.nid)])
@@ -24838,9 +25576,13 @@ ${
     // itself a choice (a ternary, §17.6 union) is judged the same way (s473 r1
     // LOW-1): `int | string` beside `int` unifies (the choice holds it);
     // `int | string` beside `bool` does not.
+    // s475 (s475-boot-partial-followups): a `Partial` arm (or join) counts by its
+    // PROVEN members, as a choice does — `"s"` beside an arm proven `int` in part
+    // does not unify; the unproven branch is not judged
     fn armsConflict(a: VType, b: VType, j: VType) -> boolean {
-        const n: int = oneOfMembers(j).length
-        if (n == 0) return false
+        let n: int = oneOfMembers(j).length
+        if (isPartialVT(j)) n = partialMembers(j).length
+        if (n < 2) return false
         return n > vtWidth(a) && n > vtWidth(b)
     }
 
@@ -24852,7 +25594,7 @@ ${
             .Absent :> 0
             .Unknown :> 0
             .OneOf(ts: xs) :> xs.length
-            .Partial(ts: xs) :> 0
+            .Partial(ts: xs) :> xs.length
         }
     }
 
@@ -24860,6 +25602,8 @@ ${
     fn vtTypesName(v: VType) -> string {
         const xs: Type[] = oneOfMembers(v)
         if (xs.length > 0) return oneOfName(xs)
+        const ps: Type[] = partialMembers(v)
+        if (ps.length > 0) return oneOfName(ps) + " (where its type is proven)"
         return "`" + vtName(v) + "`"
     }
 
@@ -25929,7 +26673,10 @@ ${
             // the typer's inference, not a value it resolved: deferred (filed).
             .Unknown :> ts
             .OneOf(ts: xs) :> markupTextOneOf(env, x, xs, ts)
-            .Partial(ts: xs) :> ts
+            // s475 (#1777 review r1 F2): each PROVEN member is the text when its
+            // branch is taken (`${@ok ? @pt : u(1)}` rendered "[object Object]");
+            // the unproven branch stays silent, as `.Unknown` above
+            .Partial(ts: xs) :> markupTextOneOf(env, x, xs, ts)
         }
     }
 
@@ -25970,6 +26717,7 @@ ${
             .DeclNode(d: d) :> ts
             .Css(c: c) :> ts
             .Effect(w: w) :> typeEffect(env, w, ts)
+            .Request(r: r) :> typeRequest(env, r, ts)
             .Gather(f: lf) :> typeGather(env, lf, ts)                     // s469 (§17.4); s473 r1
         }
     }
@@ -25980,6 +26728,12 @@ ${
     fn typeEffect(env: TEnv, w: AEffect, ts0: TypeState) -> TypeState {
         const ts: TypeState = typeExprs(env, w.deps, ts0)
         return typeBlock(env, w.body, ts)
+    }
+
+    // s475 (S3a): a `<request>` body — its `lin`s and its one assignment, typed as a handler's
+    // (the assignment's value is the call's success value: a failure never reaches `@var`, §6.7.7).
+    fn typeRequest(env: TEnv, r: ARequest, ts: TypeState) -> TypeState {
+        return typeBlock(env, r.body, ts)
     }
 
     fn typeElem(env: TEnv, e: AElem, ts: TypeState) -> TypeState {
@@ -26140,7 +26894,18 @@ ${
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
         if (bind is given) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
-        if (keyA is given) ts = typeAttrValue(renv, keyA.value, ts).ts
+        if (keyA is given) {
+            // s475 r1 (#1782 review): the attribute key is the header key's rule
+            // (E-KEY-001, §17.4b / §6.5.3) — `key=@pt` (a struct) compiled and threw
+            // "duplicate key [object Object]" at run time. INTERIM: provable-only
+            // (an unproven attribute key stays silent, where the header form fails
+            // closed — capable form: fail closed once every row type is proven;
+            // `key=@.id` over an unproven row is common in the corpus).
+            const kx: AExpr | not = valueExpr(keyA.value)
+            if (kx is given) {
+                ts = checkLoopKey(renv, kx, typeExpr(renv, kx, ts), false)
+            }
+        }
         return typeNodes(renv, e.kids, ts)
     }
 
@@ -26179,12 +26944,25 @@ ${
             return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=not>` — `not` is not a sequence (§17.7.2)")
         }
         const x: Type | not = knownOf(v)
-        if (x is not) return ts
+        if (x is not) {
+            // s475 (#1777 review r1 F2): a choice or a `Partial` — each PROVEN member
+            // is the source when its branch is taken, so each must be a sequence; an
+            // unproven branch stays provable-or-silent
+            for (const m of memberTypes(v)) {
+                if (!iterableType(m)) return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence (an array or a tuple), and this value may be `" + typeName(m) + "` — one of its branches is, and each branch is the source when it is taken; for a count, `<each of=N>` (§17.7.2)")
+            }
+            return ts
+        }
+        if (iterableType(x)) return ts
+        return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence (an array or a tuple), and this value is `" + typeName(x) + "` — for a count, `<each of=N>` (§17.7.2)")
+    }
+
+    // A sequence, or `S | not` over one (admitted, §17.7.4).
+    fn iterableType(x: Type) -> boolean {
         let s: Type = x
         const inner: Type | not = maybeInner(x)
-        if (inner is given) s = inner                     // `S | not` is admitted when `S` is a sequence (§17.7.4)
-        if (kindOf(s) == 5) return ts
-        return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence (an array or a tuple), and this value is `" + typeName(x) + "` — for a count, `<each of=N>` (§17.7.2)")
+        if (inner is given) s = inner
+        return kindOf(s) == 5
     }
 
     // ---- the program ------------------------------------------------------------
@@ -26539,8 +27317,8 @@ ${
         if (rs.length == 0) return ts
         let acc: VType = VType.Unknown
         let first = true
-        let fresh = false
         let pend = false
+        let sites: VType[] = []
         for (const r of rs) {
             const x: AExpr | not = r.e
             if (x is not) return ts
@@ -26555,17 +27333,24 @@ ${
                 continue
             }
             const vt: VType = exprType0(ts, x.nid)
+            sites = sites.concat([vt])
             if (first) {
                 acc = vt
                 first = false
             } else {
-                const j: VType = joinVT(acc, vt)
-                if (oneOfMembers(j).length > 0 && !sameVT(j, acc) && !sameVT(j, vt)) fresh = true
-                acc = j
+                acc = joinVT(acc, vt)
             }
         }
-        if (fresh && af.pure) {
-            const ms: Type[] = oneOfMembers(acc)
+        // s475 (#1777 review r1 F4; #1782 review r1 F2): §48.8 "If `return`
+        // statements produce different types, E-FN-007 fires" — the returns
+        // DISAGREE when their join has two or more proven types (a choice's
+        // members, or a `Partial`'s) and two `return`s' proven member sets differ.
+        // A `return` that is itself a choice (`return c ? 1 : "s"`) does not excuse
+        // a `return 1` beside it — §48.4.1's only way out is "an explicit union
+        // return type". Judged on the whole set of sites, so the order of the
+        // `return`s does not matter; a site with no proven member is not judged.
+        const ms: Type[] = memberTypes(acc)
+        if (ms.length > 1 && af.pure && sitesDiffer(sites)) {
             let names: string[] = []
             let bare: string[] = []
             for (const m of ms) {
@@ -26579,6 +27364,37 @@ ${
         // still treats a call of this function as pending (pendingCall)
         if (first && pend) return contribute(ts, pendKey(s), VType.Unknown)
         return contribute(ts, retKey(s), acc)
+    }
+
+    // s475 r1 (#1782 F2) — two return sites with proven members whose member
+    // sets differ (each a set under sameType).
+    fn sitesDiffer(sites: VType[]) -> boolean {
+        let first: Type[] = []
+        let have = false
+        for (const v of sites) {
+            const own: Type[] = memberTypes(v)
+            if (own.length > 0) {
+                if (!have) {
+                    first = own
+                    have = true
+                } else if (!typesWithin(own, first) || !typesWithin(first, own)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    // Every type of `xs` is (sameType) one of `ys`.
+    fn typesWithin(xs: Type[], ys: Type[]) -> boolean {
+        for (const x of xs) {
+            let found = false
+            for (const y of ys) {
+                if (sameType(x, y)) found = true
+            }
+            if (!found) return false
+        }
+        return true
     }
 
     // The settled-table key of a function's INFERRED return (inferReturn): a
@@ -27437,6 +28253,258 @@ ${
         return newDiag("E-EFFECT-WRITE-UNPROVEN", msg, r.file, r.span)
     }
 
+    // =========================================================================
+    // s475 (S3a) — a `<request>` body against the effect summary.
+    //  (1) ONE write — its target's. Core C-R1 refuses a Request body holding
+    //      any write besides its one Write of the target, directly or through a
+    //      called function (a write to a dependency or signal would re-run the
+    //      request forever; one before the load breaks keep-stale). INTERIM by
+    //      PA ruling (#1771): the capable form — a side-effecting request body —
+    //      needs a SPEC ruling first. A call the analysis cannot resolve fails
+    //      closed, as for `<effect>` (§6.7.4 rule 4).
+    //  (2) §6.7.7.3 — a request whose body (r1: its own `?{}` sites too — those
+    //      are also refused by actionServerDiags, F1) or whose call reaches SQL
+    //      that is not provably a
+    //      SELECT (sql.scrml `sqlFacts`: SqlWrite = a write verb, or not provably
+    //      read-only) and that has dependencies is refused (INTERIM: the
+    //      write-request machine — no mount run, local-edit triggers only,
+    //      baseline, one save in flight — is slice S5; the bootstrap would run
+    //      it on mount, the measured record-wiping defect §6.7.7.3 closes). With
+    //      `deps=[]` it is correct as built: rule 2 "a provably-writing request
+    //      with an explicit `deps=[]` … SHALL run once on each mount, as today",
+    //      and no dependency triggers it. Fail-closed over-approximation: a query
+    //      the reader cannot prove read-only counts.
+    // =========================================================================
+    fn requestPass(t: Tables, sum: Summary) -> Diag[] {
+        let out: Diag[] = requestCycles(t)
+        for (const rq of t.requests) {
+            const scan: BodyScan = scanBlock({ t: t, file: rq.file }, rq.req.body, emptyScan())
+            let ownSeen = false
+            for (const w of scan.writes) {
+                if (!ownSeen && w.cell == "@" + rq.targetName) {
+                    ownSeen = true
+                } else {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body writes `" + w.cell + "` besides its target `@" + rq.targetName + "` — a request body writes only its one `@var`, its settle (Core C-R1; a side-effecting request body is not ruled, §6.7.7); move the write into a handler", w.file, w.span)])
+                }
+            }
+            for (const r of scan.refs) {
+                const i: int = nodeIdx(sum.nodes, r.sym)
+                if (i < 0) {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body reaches `" + r.name + "`, which has no write summary — the compiler cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
+                } else {
+                    const sw: Witness | not = writeWitness(sum, i)
+                    const su: UWitness | not = openWitness(sum, i)
+                    if (sw is given) {
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "` — a request body writes only its one `@var`, its settle, not through a called function either (Core C-R1, INTERIM: a side-effecting request body is not ruled, §6.7.7); call a function that writes nothing, and make the other write in a handler", r.file, r.span)])
+                    } else if (su is given) {
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
+                    }
+                }
+            }
+            for (const u of scan.unproven) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove this `<request>` body writes nothing besides its target (Core C-R1), and the rule fails closed", u.file, u.span)])
+            }
+            const wq: string = requestWriteSql(t, sum, rq)
+            if (wq != "" && !(rq.explicit && rq.deps.length == 0)) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>`'s call reaches SQL that is not provably a SELECT (" + wq + ") — a request that writes runs only on its user's own edits, never on mount, against a baseline (§6.7.7.3), and that write-request machine is not in the bootstrap; give it `deps=[]` (it then runs once on mount, §6.7.7.3 rule 2) or make the write in a handler", rq.file, rq.span)])
+            }
+        }
+        return out
+    }
+
+    // s475 r1 (F2) — requests that trigger each other in a ring. Request j FOLLOWS request i
+    // when one of j's dependencies is i's target: i's settle writes it and re-runs j. A ring
+    // (`r1: @x = f(@y)`, `r2: @y = f(@x)`) re-runs forever — every settle is a dependency
+    // change of the next (the tab livelocks; with server loads, an endless request stream).
+    // The one-request ring (a target among its own deps) is refused at resolveRequest; a
+    // derived cell is never a dependency (refused there too), so the ring cannot pass
+    // through one. Each request on a ring is refused, naming the ring. INTERIM (capable form:
+    // a SPEC ruling on mutually-dependent requests — e.g. a settle that does not re-trigger
+    // when the value is unchanged, or a bounded fixpoint; §6.7.7 "`<request>` is not a loop"
+    // rules one request only — gap g-boot-request-cycle-unruled-s475).
+    fn requestCycles(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        const rs: ReqFact[] = t.requests
+        // next[i]: the requests that follow request i
+        let next: int[][] = []
+        for (const a of rs) {
+            let ns: int[] = []
+            let j: int = 0
+            for (const b of rs) {
+                for (const d of b.deps) {
+                    if (sameField(d, a.target) && ns.indexOf(j) < 0) ns = ns.concat([j])
+                }
+                j = j + 1
+            }
+            next = next.concat([ns])
+        }
+        let i: int = 0
+        while (i < rs.length) {
+            // breadth-first from i's followers, keeping each reached request's predecessor
+            let from: int[] = []
+            for (const x of rs) { from = from.concat([-2]) }
+            let todo: int[] = []
+            for (const n0 of next[i]) {
+                if (from[n0] == -2) {
+                    from = reqSetInt(from, n0, i)
+                    todo = todo.concat([n0])
+                }
+            }
+            let k: int = 0
+            while (k < todo.length && from[i] == -2) {
+                const c: int = todo[k]
+                k = k + 1
+                for (const n of next[c]) {
+                    if (from[n] == -2) {
+                        from = reqSetInt(from, n, c)
+                        todo = todo.concat([n])
+                    }
+                }
+            }
+            if (from[i] != -2) {
+                // the ring i → … → i: walk the predecessors back from i, then read it forward
+                let back: int[] = []
+                let c2: int = from[i]
+                let guard: int = 0
+                while (c2 != i && guard < rs.length) {
+                    back = [c2].concat(back)
+                    c2 = from[c2]
+                    guard = guard + 1
+                }
+                let ring: string[] = ["<request id=\"" + rs[i].id + "\"> writes @" + rs[i].targetName]
+                for (const b2 of back) { ring = ring.concat(["<request id=\"" + rs[b2].id + "\"> writes @" + rs[b2].targetName]) }
+                const rq: ReqFact = rs[i]
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request id=\"" + rq.id + "\">` is on a ring of requests that re-run each other: " + ring.join(" → ") + " → which re-runs <request id=\"" + rq.id + "\"> — every settle changes the next one's dependency, so the ring never stops (§6.7.7 \"`<request>` is not a loop\"). Mutually-dependent requests are not in the bootstrap; break the ring with an explicit `deps=` that leaves the other's target out", rq.file, rq.req.opener)])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    fn reqSetInt(xs: int[], i: int, v: int) -> int[] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    }
+
+    // s475 (S3a) — W-LIFECYCLE-011: "The compiler SHALL emit W-LIFECYCLE-011 if
+    // the assigned `@variable` is never read in enclosing markup." Every `@`
+    // read in the program's markup (interpolations, attribute values and
+    // handler bodies, `if=` / `<each>` bodies, Tier-0 rows) is a read; a
+    // request body's own reads are not.
+    fn requestWarnPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        if (t.requests.length == 0) return out
+        const ps: DeclSrc | not = findDeclSrc(g, g.program)
+        if (ps is not) return out
+        let reads: NameFact[] = []
+        for (const at of markupAtNodes(declMarkup(ps))) {
+            const f: NameFact | not = nameFact(t.names, at.nid)
+            if (f is given) reads = reads.concat([f])
+        }
+        for (const rq of t.requests) {
+            let seen = false
+            for (const f of reads) {
+                if (sameField(f, rq.target)) seen = true
+            }
+            if (!seen) out = out.concat([newDiag("W-LIFECYCLE-011", "`@" + rq.targetName + "`, which the `<request id=\"" + rq.id + "\">` loads, is never read in the markup (§6.7.7) — show it, or drop the request", rq.file, rq.req.opener)])
+        }
+        return out
+    }
+
+    fn sameField(a: NameFact, b: NameFact) -> boolean {
+        const ka: string = fieldKey(a)
+        return ka != "" && ka == fieldKey(b)
+    }
+
+    fn fieldKey(f: NameFact) -> string {
+        return match f {
+            .NField(decl: d, idx: i) :> "" + d.id + "." + i
+            .NLocal(sym: x) :> ""
+            .NInst(decl: x) :> ""
+            .NStruct(owner: x) :> ""
+            .NFn(sym: x) :> ""
+            .NLength :> ""
+            .NSurface(of: x) :> ""
+            .NConst(sym: x) :> ""
+        }
+    }
+
+    fn markupAtNodes(ns: ANode[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const more: AExpr[] = match k {
+                .Elem(e: e) :> elemAtNodes(e)
+                .Interp(e: e) :> atNodesIn(e)
+                .Gather(f: lf) :> markupAtNodes(gatherRows(lf))
+                .Text(text: x) :> []
+                .DeclNode(d: x) :> []
+                .Css(c: x) :> []
+                .Effect(w: x) :> []
+                .Request(r: x) :> []
+            }
+            out = out.concat(more)
+        }
+        return out
+    }
+
+    fn elemAtNodes(e: AElem) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const a of e.attrs) {
+            const v: AAttrValue = a.value
+            const more: AExpr[] = match v {
+                .Bare(e: x) :> atNodesIn(x)
+                .Paren(e: x) :> atNodesIn(x)
+                .Braced(b: b) :> atNodesInBlock(b)
+                .Quoted(v: x) :> []
+                .NoValue :> []
+            }
+            out = out.concat(more)
+        }
+        return out.concat(markupAtNodes(e.kids))
+    }
+
+    // The first `?{}` that is not provably a SELECT in the call graph of the
+    // request's right-hand side (""- none), as `f() → g()` for the message.
+    fn requestWriteSql(t: Tables, sum: Summary, rq: ReqFact) -> string {
+        // s475 r1 (F1): the body's OWN `?{}` sites first (its right-hand side, a `lin`
+        // initializer, an argument of the load) — not only what its calls reach
+        for (const q0 of sqlsInBlock(rq.req.body)) {
+            if (sqlFacts(q0.q.chunks).kind == SqlKind.SqlWrite) return "a query in the `<request>` body"
+        }
+        let seen: int[] = []
+        let todo: int[] = calledSyms(t, rq.value)
+        for (const s0 of rq.req.body.stmts) {
+            const li: AExpr | not = localInit(s0)
+            if (li is given) todo = todo.concat(calledSyms(t, li))
+        }
+        let k: int = 0
+        while (k < todo.length) {
+            const sym: int = todo[k]
+            k = k + 1
+            if (seen.indexOf(sym) < 0) {
+                seen = seen.concat([sym])
+                const i: int = nodeIdx(sum.nodes, sym)
+                if (i >= 0) {
+                    const f: FnFacts = sum.nodes[i].f
+                    for (const q of f.sqls) {
+                        if (sqlFacts(q.q.chunks).kind == SqlKind.SqlWrite) return "a query in `" + sum.nodes[i].label + "`"
+                    }
+                    for (const r of f.scan.refs) { todo = todo.concat([r.sym]) }
+                }
+            }
+        }
+        return ""
+    }
+
+    // The Sym ids of the scrml functions an expression calls (at any depth).
+    fn calledSyms(t: Tables, e: AExpr) -> int[] {
+        let out: int[] = []
+        const c: Sym | not = callSym(t, e)
+        if (c is given) out = out.concat([c.id])
+        for (const x of exprKids(e)) { out = out.concat(calledSyms(t, x)) }
+        return out
+    }
+
     fn chainText(labels: string[]) -> string {
         return labels.join(" → ")
     }
@@ -27571,6 +28639,7 @@ ${
             .DeclNode(d: d) :> []          // refused where it stands
             .Css(c: c) :> []
             .Effect(w: w) :> []            // a lifecycle body — the effect rule's (§6.7.4), not a value position
+            .Request(r: r) :> []            // a lifecycle body — the request rule's (§6.7.7), not a value position
             .Gather(f: lf) :> tier0Positions(t, lf, n.span, file)
         }
     }
@@ -28300,6 +29369,7 @@ ${
             .Text(text: t) :> st
             .Interp(e: x) :> st
             .Effect(w: w) :> st
+            .Request(r: r) :> st
         }
     }
 
@@ -28331,7 +29401,7 @@ ${
             for (const it of f.items) {
                 for (const n of markupOf(it)) {
                     for (const sp of effectSpans(n)) {
-                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "an effect outside `<program>` — no element scope owns it (§6.7.4); move it into the program")
+                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "an `<effect>` / `<request>` outside `<program>` — no element scope owns it (§6.7.4, §6.7.7); move it into the program")
                     }
                 }
             }
@@ -28343,6 +29413,7 @@ ${
         const k: ANodeK = n.k
         return match k {
             .Effect(w: w) :> [w.span]
+            .Request(r: r) :> [r.span]
             .Elem(e: e) :> kidEffectSpans(e.kids)
             .Text(text: t) :> []
             .Interp(e: x) :> []
@@ -29102,6 +30173,7 @@ ${
             .Elem(e: e) :> dbsInElem(g, file, e, scope, acc)
             .Interp(e: x) :> withSites(acc, sqlsInExpr(x), scope)
             .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
+            .Request(r: r) :> withSites(acc, sqlsInBlock(r.body), scope)
             .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
             .Css(c: c) :> acc
             .Gather(f: lf) :> dbsInRows(g, file, gatherRows(lf), scope, withSites(acc, sqlsInStmt(forAsStmt(lf)), scope))
@@ -29224,6 +30296,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
         }
     }
 
@@ -29411,6 +30484,7 @@ ${
         return match k {
             .Elem(e: e) :> elemActions(e, file)
             .Effect(w: w) :> [{ what: "this `<effect>` body", v: AAttrValue.Braced(w.body), file: file }]
+            .Request(r: r) :> []            // s475: a request body is planned by requestPlan (one suspension, its load)
             .Text(text: s) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
@@ -30593,7 +31667,7 @@ ${
             }
             if (!drop) out = out.concat([d])
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     // Why callable i's server calls need composing ("" — they do not): two or more
@@ -32499,6 +33573,21 @@ ${
                 st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }
         }
+        // s475 r1 (F1) — a `?{}` written directly in a `<request>` body (its right-hand side, a
+        // `lin` initializer, an argument of its load) is client code doing server work too: before
+        // r1 it compiled clean and the query was DROPPED (the load ran on `not`, no route). Refused
+        // as a handler's is. INTERIM — the capable form is a request whose load IS a query, routed
+        // server-side (gap g-boot-request-direct-sql-owed-s475). The right-hand side's own query is
+        // not also E-ERROR-002: "The call that is the right-hand side of the body's assignment SHALL
+        // be handled by the request, and SHALL NOT be E-ERROR-002" (§6.7.7); any other is.
+        for (const rq of t.requests) {
+            for (const s of sqlsInBlock(rq.req.body)) {
+                if (s.nid != rq.rhs) st = errorTwo(rq.file, s, false, st)
+                st = manualTxDiag(rq.file, s, "a `<request>` body, which is not a function declared '!'", "", st)
+                st = positionDb(g, rd, rq.file, s, st)
+                st = addDiag(st, rq.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<request id=\"" + rq.id + "\">` body runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d (a request whose load is itself a query is not built). Until then: put the query in a server function and load that, `@" + rq.targetName + " = load(…)`")
+            }
+        }
         return st
     }
 
@@ -33154,7 +34243,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -33322,7 +34411,46 @@ ${
             const cx2: PCx = { g: g, t: t, s: s, file: a.file, inFn: false, server: false }
             ps = planValue(cx2, a.v, ps)
         }
+        // s475 (S3a): each `<request>` body — ONE suspension, its load
+        for (const rq of t.requests) {
+            const cx3: PCx = { g: g, t: t, s: s, file: rq.file, inFn: false, server: false }
+            ps = requestPlan(cx3, rq, ps)
+        }
         return ps
+    }
+
+    // s475 (S3a) — a `<request>` body's suspension plan. The request has ONE
+    // suspension, its load (§6.7.7 "single-shot"; Core C-R1: `Let`s, then one
+    // Suspend, last, whose continuation never suspends): the right-hand side's
+    // own call, when it waits — a client call of a server function (SRemote: the
+    // request handles its failure, so no handling form is needed, §6.7.7) or of
+    // a client function that waits (SWaits). Any other waiting call — in a `lin`
+    // initializer, in an argument of the load, inside a larger right-hand side —
+    // would be a second suspension: refused (INTERIM; the capable form is an
+    // ordered multi-step load, not ruled). A right-hand side that does not wait
+    // is wrapped by lower in a Suspend on its value (the runtime settles it at
+    // once).
+    fn requestPlan(cx: PCx, rq: ReqFact, ps0: PS) -> PS {
+        let ps: PS = ps0
+        const one: string = " — a `<request>` has ONE suspension, its load: the call that is its right-hand side (§6.7.7 \"single-shot\"); a second wait in its body is not in the bootstrap. Fetch the value in the function the load calls"
+        for (const s0 of rq.req.body.stmts) {
+            const li: AExpr | not = localInit(s0)
+            if (li is given) ps = planExpr(cx, li, { refused: "a `lin` initializer of a `<request>` body" + one }, ps).ps
+        }
+        const v: AExpr = rq.value
+        let sp: SuspendK | not = suspendKindAt(cx, v)
+        const c: Sym | not = callSym(cx.t, v)
+        if (sp is not && c is given && handledOf(v.k) is not) {
+            const pk: PlaceK = placeOf(cx.s.places, c.id)
+            if (pk == PlaceK.Server || cx.s.inherited.indexOf(c.id) >= 0) sp = SuspendK.SRemote(c)
+        }
+        if (sp is given) {
+            ps = planKids(cx, suspendArgs(v), { refused: "an argument of a `<request>`'s load" + one }, ps).ps
+            ps = routedChecks(cx, v, sp, ps)
+            const rb: RPSym = pmint(ps, "settled")
+            return addAt(rb.ps, { nid: v.nid, bind: rb.s, kind: sp })
+        }
+        return planExpr(cx, v, { refused: "a `<request>`'s right-hand side outside its own call" + one }, ps).ps
     }
 
     fn withPlan(ps: PS, p: SuspendPlan) -> PS { return { st: ps.st, plan: p } }
@@ -34397,6 +35525,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
+                .Request(r: r) :> not
             }
             const e: AElem | not = match k {
                 .Elem(e: e) :> e
@@ -34406,6 +35535,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
+                .Request(r: r) :> not
             }
             if (c is given) a = cssBlock(g, prog, at, file, c, a)
             if (e is given) a = cssNodes(g, prog, below, file, e.kids, a)
@@ -34425,6 +35555,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Request(r: x) :> not
         }
     }
 
@@ -34595,6 +35726,12 @@ ${
                 const s2: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
                 st = linBlockAt(cx2, b, s2, 0).st
             }
+        }
+        // s475 (S3a): a `<request>` body — its `lin`s are consumed by its one assignment (§6.7.7 S469)
+        for (const rq of t.requests) {
+            const cx3: LinCx = { t: t, file: rq.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, rq.file), failable: false, caller: -1 }
+            const s3: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
+            st = linBlockAt(cx3, rq.req.body, s3, 0).st
         }
         return st.diags
     }
@@ -35281,7 +36418,7 @@ ${
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean, carriers: int[]) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
         const ra0: RGlobals = phaseA(files, entry, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
@@ -35309,14 +36446,14 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, taliases: typeAliases(ra.g.te.link, ra.g.types) }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types) }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound)
         st = rulesPass(sum, st)
         // s449: the no-write rule over every accepted effect (§6.7.4)
-        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
+        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum).concat(requestPass(bound, sum)).concat(requestWarnPass(ra.g, bound))
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
@@ -35329,7 +36466,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts, taliases: bound.taliases }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases }
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
         // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
@@ -35350,7 +36487,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts, taliases: bound.taliases }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
@@ -35609,6 +36746,7 @@ ${
             .Css(c: c) :> w
             .Gather(f: lf) :> ownerWalkRows(t, file, isProg, gatherRows(lf), w)
             .Effect(w: x) :> w
+            .Request(r: x) :> w
         }
     }
 
@@ -35689,6 +36827,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> gatesInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
+            .Request(r: r) :> []
         }
     }
 
@@ -35747,6 +36886,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> []
+            .Request(r: r) :> []
         }
     }
 
@@ -35947,6 +37087,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> formsInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
+            .Request(r: r) :> []
         }
     }
 
@@ -35996,6 +37137,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Request(r: r) :> not
         }
     }
 

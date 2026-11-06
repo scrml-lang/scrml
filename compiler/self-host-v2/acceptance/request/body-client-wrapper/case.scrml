@@ -1,0 +1,19 @@
+// §66 twin of conformance/cases/lifecycle/request-body-client-wrapper-rt. The `<#userReq>.loading`
+// paragraph is dropped (`<#id>` reads are slice S3b); `?.` is not in the bootstrap, so the name is a string cell.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userId:int=1/>
+    let <userName:string=""/>
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function pick(id: int) -> string {
+        return loadName(id) !{ .Transport(t) :> "?" };
+    }
+    <request id="userReq">${ @userName = pick(@userId); }</request>
+    <main>
+        <button id="setid" onclick={ @userId = 2; }>user 2</button>
+        <p id="who">${@userName}</p>
+    </main>
+</program>

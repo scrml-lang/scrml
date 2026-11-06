@@ -375,8 +375,13 @@ describe("1489-A — a swapped name under E-TYPE-UNKNOWN / E-VALUE-WRITES-STATE 
     expect(r.status).toBe(1);
   }, 120_000);
 
-  test("`@contacts` → `@contcts` (kickstarter block pinned E-VALUE-WRITES-STATE(@contacts))", () => {
-    const b = block("E-VALUE-WRITES-STATE(@contacts)");
+  // s475-boot-request-surface: the kickstarter's two `<request>` blocks no longer report
+  // E-VALUE-WRITES-STATE (the bootstrap builds `<request>`, SPEC §6.7.7), so their pins dropped it; the
+  // named-pin mechanism is exercised on a block of the same kind kept here (a write in a value position).
+  test("`@contacts` → `@contcts` (a block pinned E-VALUE-WRITES-STATE(@contacts))", () => {
+    const b = { marker: "<!-- gate: spec-ahead [E-VALUE-WRITES-STATE(@contacts)] — a value position may not write -->",
+                body: ["<program>", "    let <contacts:int=0/>", "    function bump() -> int {", "        @contacts = @contacts + 1;",
+                       "        return @contacts;", "    }", "    <main><p>" + "$" + "{bump()}</p></main>", "</program>"] };
     const ok = run("ks-contacts-ok.md", b, "@contacts", "@contacts");
     expect(ok.status).toBe(0);
     const r = run("ks-contacts-typo.md", b, "@contacts", "@contcts");

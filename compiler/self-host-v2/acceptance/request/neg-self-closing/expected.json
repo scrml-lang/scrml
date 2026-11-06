@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-request-neg-self-closing",
+  "description": "A self-closing `<request id=\"r\"/>` has no body: E-LIFECYCLE-019 (the §6.7.7 grammar's self-closing alternative is a known SPEC defect; the normative statement wins).",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The compiler SHALL emit E-LIFECYCLE-019 if `<request>` is self-closing (no body).\"",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-019"
+    ],
+    "severity": {
+      "E-LIFECYCLE-019": "error"
+    }
+  }
+}

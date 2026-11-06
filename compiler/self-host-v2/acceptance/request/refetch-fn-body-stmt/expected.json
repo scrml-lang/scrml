@@ -1,0 +1,47 @@
+{
+  "id": "acceptance-request-refetch-fn-body-stmt",
+  "description": "`<#id>.refetch()` as a statement of a program function re-executes a mount-only request: after the click the name is user 2's.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Properties: \"`<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body\"; EC-7.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#again"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "userId": 2,
+      "userName": "b"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "b"
+      }
+    ]
+  }
+}

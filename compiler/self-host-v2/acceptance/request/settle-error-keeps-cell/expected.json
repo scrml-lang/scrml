@@ -1,0 +1,41 @@
+{
+  "id": "acceptance-request-settle-error-keeps-cell",
+  "description": "The request handles its call's failure (a raw HTTP 500): no E-ERROR-002 at compile time, and the assigned cell keeps its value — the 500 body never lands in it.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The call that is the right-hand side of the body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002: its failure … SHALL set `<#id>.error` and leave `@var` and `<#id>.data` at their previous values\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ERROR-002"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": {
+        "__httpError": {
+          "status": 500,
+          "body": {
+            "error": "Internal server error",
+            "detail": "boom"
+          }
+        }
+      }
+    },
+    "state": {
+      "userName": "before"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "before"
+      }
+    ]
+  }
+}

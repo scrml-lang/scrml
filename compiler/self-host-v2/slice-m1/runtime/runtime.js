@@ -505,9 +505,21 @@ class Request {
     this.disposed = true;
     effectQueue.delete(this);
     for (const d of this.deps) d.observers.delete(this);
+    const inFlight = this.tasks.size > 0;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     stats.requests--;
+    // s475 r1 (F3): the signals are program cells and outlive the request. A run cancelled
+    // here never settles, so loading / stale would stay true — §6.7.7 "`<#id>.stale` SHALL be
+    // `true` iff `<#id>.data` is not `not` and a fetch is in flight": none is. `data` and
+    // `error` keep the last settle's (a torn-down request's resolution is discarded, EC-3).
+    const st = this.state;
+    if (st && (inFlight || st.loading.peek() || st.stale.peek())) {
+      batch(() => {
+        st.loading.set(false);
+        st.stale.set(false);
+      });
+    }
   }
 }
 

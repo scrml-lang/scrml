@@ -1,0 +1,34 @@
+{
+  "id": "acceptance-request-data-is-given-if-attr",
+  "description": "`<#userReq>.data is given` / `.error is given` in an `if=` attribute: on a 2xx settle #who mounts and #err never enters the DOM.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Properties: `<#id>.data` \"Most recent successful fetch result, or `not` before first success\"; `<#id>.error` \"Error from most recent failed fetch, or `not`\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": "Ada"
+    },
+    "state": {
+      "userName": "Ada"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "Ada"
+      },
+      {
+        "selector": "#err",
+        "count": 0
+      }
+    ]
+  }
+}

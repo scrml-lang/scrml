@@ -19,8 +19,10 @@ const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\
 
 // s449: `errors` left this list — `<errors of=…/>` (§55.8) is implemented (gate.test.js).
 // s452: `db` left it — `<db src=…>` (§4 state block, §8.1.1 scope) is implemented (error-rulings.test.js).
+// s475 (S3a): `request` left this list — `<request>` (§6.7.7) is built (acceptance/request/,
+// request-surface-s475.test.js); its non-body shapes are refused by their own codes (below).
 const STRUCTURAL = [
-  "request", "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
+  "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
   "page", "engine", "onTransition", "onTimeout", "onIdle", "match", "empty", "render", "outlet", "column",
   "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
@@ -35,9 +37,15 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(d[0].message).toContain("structural element");
     });
   }
-  test("`<request>` as the PA's survey wrote it: refused, and nothing of it reaches Core", () => {
+  test("s475: a `<request>` with a markup body is never an HTML element — E-PARSE-ITEM (its body is one `${ … }` block)", () => {
+    const d = run(inMain(`<request id="r"><p>inside</p></request>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-PARSE-ITEM"]);
+    expect(d[0].message).toContain("`<request>` body");
+  });
+  test("`<request>` as the PA's survey wrote it (the §60 `url=` form, INTERIM): refused, and nothing of it reaches Core", () => {
     const r = run(inMain(`<request id="users" url="/api/users"/>`));
     expect(r.diags.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toContain("`url=` on a `<request>` (§60)");
     // s451: a compile with an error lowers to NO Core (the diagnostics gate) — so nothing of it
     // can reach Core, or the printer, at all.
     expect(r.core == null).toBe(true);
@@ -53,7 +61,7 @@ describe("(1) a scrml structural element is never an HTML element", () => {
     "render", "page", "endpoint", "onchange", "theme", "defaults", "md"];
   const reserved = (n) => RESERVED.includes(n.toLowerCase());
   const declSrc = (name) => `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
-  for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer"].filter((n) => !reserved(n))) {
+  for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer", "request"].filter((n) => !reserved(n))) {
     test(`a user declaration named \`${name}\` is used as the declaration, not refused`, () => {
       const r = run(declSrc(name));
       expect(r.diags.map((x) => `${x.code}: ${x.message}`)).toEqual([]);
