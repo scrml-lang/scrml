@@ -438,3 +438,106 @@ describe("r1 — the rest of the review's runtime repros, on the all-four state"
     expect([rt.stats.requests, dep.observers.size]).toEqual([before, 0]);
   });
 });
+
+// s475 (S5a) — §6.7.7.1 rules 2 / 3 / 4: "a READ request's superseded transport SHALL be aborted. A
+// WRITE request's superseded fetch SHALL be discarded … its transport SHALL NOT be aborted"; "An
+// aborted fetch SHALL NOT set `<#id>.error`". The load is a real `rt.call` over a stub fetch that
+// never answers by itself and records each request's `init.signal` (rejecting on abort, as a
+// browser's fetch does).
+describe("§6.7.7.1 — abort READS, discard WRITES (rt.call's AbortController ↔ Task.cancel)", () => {
+  const route = { path: "/_scrml/call/1", params: [{ defs: [], root: { k: "int" } }], result: { defs: [], root: { k: "int" } }, error: null };
+  function stubFetch() {
+    const seen = [];
+    const prev = globalThis.fetch;
+    globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
+      const s = { signal: init.signal, answer: (n) => resolve(new Response(JSON.stringify(n), { status: 200 })) };
+      seen.push(s);
+      init.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; reject(e); });
+    });
+    return { seen, restore: () => { globalThis.fetch = prev; } };
+  }
+  function setup(read) {
+    if (globalThis.happyDOM && globalThis.location.protocol === "about:") globalThis.happyDOM.setURL("http://localhost/");
+    const scope = rt.root.child();
+    const dep = rt.cell(0), t = rt.cell(null), state = sigs();
+    const opts = read ? { read: true, state } : { state };
+    rt.requestOn(scope, t, [dep], (task) => ({ on: rt.call(route, [dep.peek()], task), then: (v) => t.set(v) }), opts);
+    return { scope, dep, t, state };
+  }
+  const reportedDuring = async (fn) => {
+    const reported = [];
+    const prev = rt.setHostErrorReporter((e) => reported.push(e));
+    try { await fn(); } finally { rt.setHostErrorReporter(prev); }
+    return reported;
+  };
+
+  test("READ superseded: the older call's signal fires, no error is set; the newer answer lands", async () => {
+    // mutation RED: `new Task(this)` in Request.run (the run's task not abortable) — discard-only
+    const f = stubFetch();
+    try {
+      const reported = await reportedDuring(async () => {
+        const { scope, dep, t, state } = setup(true);
+        await tick();
+        expect(f.seen.length).toBe(1);
+        dep.set(1);
+        await tick();
+        expect(f.seen.length).toBe(2);
+        expect([f.seen[0].signal.aborted, f.seen[1].signal.aborted]).toEqual([true, false]);
+        expect([state.loading.peek(), state.error.peek()]).toEqual([true, null]);
+        f.seen[1].answer(7);
+        for (let i = 0; i < 10; i++) await tick();
+        expect([t.peek(), state.loading.peek(), state.error.peek(), state.data.peek()]).toEqual([7, false, null, 7]);
+        scope.dispose();
+      });
+      expect(reported).toEqual([]);
+    } finally { f.restore(); }
+  });
+
+  test("READ torn down: the in-flight call's signal fires; loading / stale go false, error stays `not`", async () => {
+    // mutation RED: Request.unregister not cancelling (aborting) its tasks
+    const f = stubFetch();
+    try {
+      const { scope, t, state } = setup(true);
+      await tick();
+      scope.dispose();
+      expect(f.seen[0].signal.aborted).toBe(true);
+      await tick();
+      expect([t.peek(), state.loading.peek(), state.stale.peek(), state.error.peek()]).toEqual([null, false, false, null]);
+    } finally { f.restore(); }
+  });
+
+  test("WRITE (no `read`): superseded and torn down — never aborted; a late answer is discarded", async () => {
+    // mutation RED: making every request's task abortable (`new Task(this, true)`)
+    const f = stubFetch();
+    try {
+      const { scope, dep, t, state } = setup(false);
+      await tick();
+      dep.set(1);
+      await tick();
+      expect(f.seen.map((s) => s.signal.aborted)).toEqual([false, false]);
+      f.seen[1].answer(2);
+      for (let i = 0; i < 10; i++) await tick();
+      f.seen[0].answer(1);                         // the superseded transport completes …
+      for (let i = 0; i < 10; i++) await tick();
+      expect([t.peek(), state.error.peek()]).toEqual([2, null]);   // … and is dropped
+      dep.set(2);
+      await tick();
+      scope.dispose();
+      expect(f.seen[2].signal.aborted).toBe(false);
+    } finally { f.restore(); }
+  });
+
+  test("an effect's / handler's task is never abortable (Task.onAbort is a no-op there)", async () => {
+    // only a READ request makes an abortable task; rt.call with no task (a <db> cell load) or an
+    // ordinary task keeps its transport
+    const f = stubFetch();
+    try {
+      if (globalThis.happyDOM && globalThis.location.protocol === "about:") globalThis.happyDOM.setURL("http://localhost/");
+      const pending = rt.call(route, [1], null);
+      await tick();
+      expect(f.seen[0].signal.aborted).toBe(false);
+      f.seen[0].answer(1);
+      expect(await pending).toBe(1);
+    } finally { f.restore(); }
+  });
+});

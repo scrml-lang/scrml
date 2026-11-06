@@ -317,12 +317,32 @@ export function effect(scope, fn) {
 // is the conforming choice that needs no classification at run time.
 // ---------------------------------------------------------------------------
 class Task {
-  constructor(owner) {
+  constructor(owner, abortable = false) {
     this.owner = owner;
     this.cancelled = false;
     this.pending = 0;
+    // s475 (S5a, §6.7.7.1 rules 2 / 3): a READ request's run — its in-flight
+    // server calls register their transport abort here, and cancel() fires it.
+    // Every other task (a WRITE request's, an effect's, a handler's) only
+    // discards: `onAbort` is a no-op for it, so its transport completes.
+    this.aborts = abortable ? new Set() : null;
   }
-  cancel() { this.cancelled = true; }
+  cancel() {
+    this.cancelled = true;
+    const as = this.aborts;
+    if (as === null || as.size === 0) return;
+    this.aborts = new Set();
+    for (const a of as) {
+      try { a(); } catch (e) { reportHostError(e); }
+    }
+  }
+  /** Register `abort` to run when this task is cancelled; returns the un-registration. */
+  onAbort(abort) {
+    if (this.aborts === null) return () => {};
+    if (this.cancelled) { abort(); return () => {}; }
+    this.aborts.add(abort);
+    return () => { if (this.aborts !== null) this.aborts.delete(abort); };
+  }
 }
 
 class DepEffect {
@@ -416,20 +436,28 @@ export function effectOn(scope, deps, body) {
 // cell (check.scrml C-R1 refuses the same, plus any body write besides the
 // target's, statically — the runtime cannot see a write through a function).
 //
-// Discard-only (INTERIM): a superseded or torn-down run's transport is NOT
-// aborted — its result is dropped. §6.7.7.1 rules 2/3 owe an abort for a
-// READ request; that needs `call(route, args, task)`'s AbortController wired
-// to Task.cancel for a READ-classified request only (gap
-// g-boot-request-read-abort-owed-s475). Discarding is never wrong for a WRITE.
+// s475 (S5a) — ABORT READS, DISCARD WRITES (§6.7.7.1). A superseded (EC-2 /
+// EC-4) or torn-down (EC-3) run is always discarded — its task is cancelled,
+// so its continuation never runs and it sets no signal. For a READ request
+// (`opts.read`, the compiler's class — print.scrml requestJs) the run's task
+// is ABORTABLE: cancelling it aborts the in-flight `call`'s fetch (rules 2 /
+// 3: "a READ request's superseded transport SHALL be aborted"). A WRITE
+// request (the default — "Unclassifiable = write") is discard-only: "its
+// transport SHALL NOT be aborted — it runs to completion". Rule 4: the abort
+// is transport-only — the server may have committed — and "An aborted fetch
+// SHALL NOT set `<#id>.error`": the aborted call settles on a cancelled task,
+// which drops it like any discarded result (never a failure settle, never a
+// host error).
 // ---------------------------------------------------------------------------
 const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 
 class Request {
-  constructor(scope, target, deps, body, state) {
+  constructor(scope, target, deps, body, state, read) {
     this.target = target;
     this.deps = deps;
     this.body = body;
     this.state = state;                 // { loading, data, error, stale } | null
+    this.read = read;                   // §6.7.7.1: READ — a superseded / torn-down run's transport is aborted
     this.disposed = false;
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
@@ -445,7 +473,7 @@ class Request {
     if (this.disposed) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
-    const task = new Task(this);
+    const task = new Task(this, this.read);
     this.tasks.add(task);
     const st = this.state;
     try {
@@ -529,7 +557,9 @@ class Request {
  * once, on mount); `body(task)` returns `{ on, then }`. `opts.mount` (default
  * true) runs it on mount — false for a provably-writing request (§6.7.7.3),
  * which then needs a dependency; `opts.state` is the full signal set
- * `{ loading, data, error, stale }` or absent (a pending cell). Returns
+ * `{ loading, data, error, stale }` or absent (a pending cell); `opts.read`
+ * (default false — WRITE, discard-only) the §6.7.7.1 READ class: a superseded
+ * or torn-down run's server call is aborted, not only discarded. Returns
  * `{ refetch }` (§6.7.7 `<#id>.refetch()`: a new run, superseding an
  * in-flight one — EC-4); requestJs binds it to the request's handle.
  */
@@ -553,7 +583,7 @@ export function requestOn(scope, target, deps, body, opts = {}) {
       seen.add(c);
     }
   }
-  const r = new Request(scope, target, deps, body, st);
+  const r = new Request(scope, target, deps, body, st, opts.read === true);
   if (opts.mount !== false) r.markStale();
   return { refetch: () => r.markStale() };
 }
@@ -4390,15 +4420,31 @@ export function call(route, args, task) {
     // s454 fix round F3 — resource hygiene ONLY: when the deadline passes the call has already FAILED
     // (Unreachable); aborting the fetch stops holding the socket (the abort also errors a body read in
     // progress — no separate `body.cancel()`: the body is locked by `text()`, and cancelling a locked
-    // stream returns a REJECTED promise, an unhandled rejection; re-review N1). It is
-    // not the supersede / teardown abort (§6.7.7.1) — that stays "nothing aborts, the result is dropped".
+    // stream returns a REJECTED promise, an unhandled rejection; re-review N1).
+    // s475 (S5a) — the SAME controller is the §6.7.7.1 supersede / teardown abort, for a READ
+    // request's task only (Task.onAbort is a no-op on every other task, which keeps discard-only:
+    // a WRITE's transport "runs to completion"). The abort settles the call at once — on a task
+    // that is already cancelled, so `suspend` drops the value: no continuation, no `error`, no
+    // host-error report (rule 4: "An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be
+    // treated as a failure settle"). It covers every transport of the call — the CSRF retry
+    // (`send(1)`) shares the controller, and a retry after the abort is never sent (`settled`).
     const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let unAbort = () => {};
     const settle = (v) => {
       if (settled) return;
       settled = true;
       if (timer !== null) clearTimeout(timer);
+      unAbort();
       resolve(v);
     };
+    if (task && controller && typeof task.onAbort === "function") {
+      unAbort = task.onAbort(() => {
+        if (settled) return;
+        settle(unreachable());
+        try { controller.abort(); } catch { /* best effort */ }
+      });
+      if (settled) return;            // the task was cancelled before the call began: nothing is sent
+    }
     timer = setTimeout(() => {
       if (settled) return;
       settle(unreachable());
