@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, renameSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
+import { runActionsStep } from "../helpers/actions-shell.js";
 
 const REPO = join(import.meta.dir, "../../..");
 const SCRIPT = join(REPO, "scripts/bot-owned-untouched.sh");
@@ -236,10 +237,10 @@ describe("ci.yml wiring", () => {
     // main the merge ref was built on: a bot regen in between was charged to the PR — #1711).
     expect(step.env.BASE).toBeUndefined();
     // The diff is HEAD^1...HEAD^2 (main tip ... PR head = GitHub's PR diff), and HEAD^2 must be the PR
-    // head (#1719 r1 F1/F2).
-    expect(String(step.run)).toContain("git rev-parse --verify -q HEAD^1");
-    expect(String(step.run)).toContain("git rev-parse --verify -q HEAD^2");
-    expect(String(step.run)).toContain('[ "$HEAD2" = "$PR_HEAD" ]');
+    // head (#1719 r1 F1/F2). S475: that check is scripts/ci-pr-base.sh, and is EXECUTED below.
+    expect(String(step.run)).toMatch(/BASE=\$\(scripts\/ci-pr-base\.sh\) \|\|/);
+    expect(String(step.run)).toContain("HEAD2=$PR_HEAD");
+    expect(String(step.env.EVENT_NAME)).toContain("github.event_name");
     expect(String(step.run)).toMatch(/bot-owned-untouched\.sh --bot "\$BASE" "\$HEAD2"/);
     expect(String(step.run)).toMatch(/else scripts\/bot-owned-untouched\.sh "\$BASE" "\$HEAD2"/);
     expect(String(step.env.PR_HEAD)).toContain("github.event.pull_request.head.sha");
@@ -253,6 +254,51 @@ describe("ci.yml wiring", () => {
     expect(String(step.env.IS_BOT)).toContain("github.event.pull_request.head.repo.full_name == github.repository");
     expect(String(step.run)).toMatch(/IS_BOT.*--bot/s);
   });
+  // g-ci-bot-owned-guard-fail-closed-branch-untested-s474: the step's own shell, extracted from ci.yml and
+  // run under the shell its own `shell:` key selects (helpers/actions-shell.js: none → `bash -e`, as
+  // Actions does; S475 r1) with the real scripts, against a FAST-FORWARD checkout (HEAD
+  // has no second parent) and against a merge ref whose HEAD^2 is not the PR head. Both must refuse BEFORE
+  // the diff — a PR that edits docs/generated/ would otherwise be judged against the wrong pair.
+  function runGuardStep(s, env) {
+    mkdirSync(join(s.root, "scripts"), { recursive: true });
+    for (const f of ["ci-pr-base.sh", "bot-owned-untouched.sh"]) copyFileSync(join(REPO, "scripts", f), join(s.root, "scripts", f));
+    const r = runActionsStep(step, { cwd: s.root, env: { ...ENV, EVENT_NAME: "pull_request", IS_BOT: "false", ...env },
+      job: ci.jobs.checks, workflow: ci });
+    return { rc: r.rc, out: r.out };
+  }
+  const prWithCleanDocs = () => {
+    const s = sandbox();
+    writeFileSync(join(s.root, "docs/known-gaps.md"), "ledger\nnew gap\n");
+    s.commit("pr work");                                  // touches NO bot-owned file: the diff alone would pass
+    return s;
+  };
+  test("EXECUTED: on the merge ref with HEAD^2 = PR head, the step passes a clean PR (0)", () => {
+    const s = prWithCleanDocs();
+    const prHead = s.g("rev-parse", "pr").trim();
+    s.g("checkout", "-q", "--detach", "main");
+    s.g("merge", "-q", "--no-ff", "--no-edit", "pr");
+    const r = runGuardStep(s, { PR_HEAD: prHead });
+    expect(r.rc).toBe(0);
+    expect(r.out).toContain("no file under docs/generated/ changed");
+  });
+  test("EXECUTED BITE (fail closed): a FAST-FORWARD checkout (HEAD = PR head, one parent) is refused (1), though the diff is clean", () => {
+    const s = prWithCleanDocs();
+    const prHead = s.g("rev-parse", "HEAD").trim();       // checkout of the PR head itself — no merge ref
+    const r = runGuardStep(s, { PR_HEAD: prHead });
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("HEAD is not the PR's merge ref");
+    expect(r.out).not.toContain("no file under docs/generated/ changed");   // refused before any diff
+  });
+  test("EXECUTED BITE (fail closed): a merge whose HEAD^2 is NOT the PR head is refused (1)", () => {
+    const s = prWithCleanDocs();
+    const stalePrHead = s.g("rev-parse", "pr~1").trim();  // e.g. the event's head.sha after a later push
+    s.g("checkout", "-q", "--detach", "main");
+    s.g("merge", "-q", "--no-ff", "--no-edit", "pr");
+    const r = runGuardStep(s, { PR_HEAD: stalePrHead });
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("HEAD is not the PR's merge ref");
+  });
+
   test("generated-regen.yml writes exactly the files this guard protects (and no hand-edited file)", () => {
     const regen = Bun.YAML.parse(readFileSync(join(REPO, ".github/workflows/generated-regen.yml"), "utf8"));
     const files = String(regen.jobs.regen.env.FILES).trim().split(/\s+/);

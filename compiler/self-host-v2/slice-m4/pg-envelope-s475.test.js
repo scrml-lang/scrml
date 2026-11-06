@@ -39,6 +39,20 @@ if (!PG_OK) {
 }
 const d = PG_OK ? describe : describe.skip;
 const LIVE_TIMEOUT_MS = 60_000;
+// S475 (gap g-boot-pg-envelope-nowait-unproven-on-real-pg-s475): §19.10.6 "A statement from another
+// request runs on another pool connection and SHALL NOT wait" can only be observed on a server with one
+// backend per connection. PGlite (pglite-socket) serves every socket from ONE backend session and, while
+// a transaction is open, serves only that transaction's socket — so there B always waits. The no-wait
+// and no-dirty-read assertions therefore run only when SCRML_TEST_PG_REAL=1 says the URL is a real
+// PostgreSQL server (the `postgres-live` job in .github/workflows/ci.yml sets it, with a postgres service
+// container). INTERIM: the capable form is to detect PGlite from the server itself (`version()`); until
+// that is measured to tell them apart, the job declares it.
+const REAL_PG = PG_OK && process.env.SCRML_TEST_PG_REAL === "1";
+const NOWAIT_MS = 5_000;
+if (PG_OK && !REAL_PG) {
+  // eslint-disable-next-line no-console
+  console.log("[pg-envelope-s475] SCRML_TEST_PG_REAL!=1 — the §19.10.6 no-wait assertions are skipped (PGlite serialises sockets).");
+}
 
 const LOG = `s475e_log_${process.pid}`;
 const UNIQ = `s475e_uniq_${process.pid}`;
@@ -98,9 +112,25 @@ d("Postgres: the runtime — an envelope runs on a connection reserved for it", 
         await begun;
         // request B: an autocommit write from OUTSIDE A's scope, issued while A's transaction is open
         const b = logA(conn, 99);
+        // §19.10.6 "runs on another pool connection and SHALL NOT wait": B is acknowledged while A's
+        // transaction is still open (A is parked on `inTx` until release()) — and another request's
+        // read, also on another connection, sees B's committed row but not A's uncommitted one
+        // (§19.10.6 "SHALL NOT read its uncommitted writes"). Measured BEFORE release(), asserted AFTER
+        // it, so a failure never leaves A's transaction open to wedge the later tests.
+        let early = "not-measured", seen = "not-measured";
+        if (REAL_PG && max > 1) {
+          early = await Promise.race([b.then(() => "done"), new Promise((res) => setTimeout(() => res("waited"), NOWAIT_MS))]);
+          if (early === "done") {
+            seen = await rt.query(conn, "all", rt.sqlText([`SELECT a FROM ${LOG} ORDER BY a`]), [], []).catch((e) => `threw: ${e}`);
+          }
+        }
         await tick();
         release();
         const [ra, rb] = await Promise.all([a, b]);
+        if (REAL_PG && max > 1) {
+          expect(early).toBe("done");
+          expect(seen).toEqual([{ a: 99 }]);
+        }
         expect(rt.failed(ra)).toBe(true);
         expect(rt.failed(rb)).toBe(false);
         // before s475, max 1: [] — B's acknowledged write ran inside A's transaction and was rolled back
