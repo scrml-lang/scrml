@@ -13,33 +13,32 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 302 | 16.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 238 | 13.0% |
+| FAIL | 243 | 13.3% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 685 | 37.5% |
-| UNSUPPORTED | 602 | 33.0% |
+| NOT-TWINNED | 649 | 35.5% |
+| UNSUPPORTED | 633 | 34.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 540; of those, 302 hold (55.9%). Runtime half executed on the bootstrap for 109 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 545; of those, 302 hold (55.4%). Runtime half executed on the bootstrap for 109 case(s).
 
 - **Vacuous** passes: 17 of 302 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **285**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 74 of 238; the other 164 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 243; the other 168 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 602.
+UNSUPPORTED by reason: bootstrap-unsupported 633.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 185 · FAIL 202 · UNSUPPORTED 411. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **834** — PASS 185 · FAIL 207 · UNSUPPORTED 442. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- 67 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- 58 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- 68 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 51 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
 - 51 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
@@ -57,6 +56,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - 11 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- 8 — rhs-decl: anonymous record type annotation (no §66 spelling — a named `…` is owed)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — rhs-decl: object literal needs a struct type (CTX)
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
@@ -72,6 +72,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - 3 — program-move: `…` outside `…` (where it renders is not mechanical)
 - 3 — rhs-decl: Shape 2 `…` (→ `…`, CTX — ⚑ O25)
 - 3 — rhs-decl: initializer extent could not be verified against impl#1's AST
+- 3 — rhs-decl: type `…` has a space at its top level that is not a union's `…` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only)
 - 2 — const-cell: declaration in a markup position (⚑ O38)
 - 2 — engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
 - 2 — engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
@@ -107,7 +108,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
-| condition | 36 | 19 | · | 9 | · | 8 | · | · | · |
+| condition | 36 | 19 | · | 11 | · | 2 | 4 | · | · |
 | control-flow | 76 | 23 | · | 14 | · | 21 | 18 | · | · |
 | defer | 51 | 15 | · | 11 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -126,7 +127,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
 | hostmethod | 1 | · | · | 1 | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 56 | 15 | · | 4 | · | 32 | 5 | · | · |
+| lifecycle | 56 | 15 | · | 4 | · | 26 | 11 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -149,8 +150,8 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 29 | · | 14 | · | 65 | 7 | · | · |
-| refinement | 57 | · | · | 10 | · | 25 | 22 | · | · |
+| reactive | 115 | 29 | · | 14 | · | 44 | 28 | · | · |
+| refinement | 57 | · | · | 12 | · | 23 | 22 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
@@ -161,9 +162,9 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | style | 27 | 1 | · | 1 | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
-| type-state-codes | 32 | 5 | · | 1 | · | 3 | 23 | · | · |
+| type-state-codes | 32 | 5 | · | 2 | · | 2 | 23 | · | · |
 
-### FAIL (238)
+### FAIL (243)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -284,6 +285,16 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
   - E-PARSE-ARM: expected `:>` after the arm's pattern, found `given`
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
+- `condition/is-given-expr-twin` (twin · parse-reject)
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `given`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"both"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"absent"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `condition/is-some-deprecated-expr` (twin · parse-reject)
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `some`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"both"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"absent"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `condition/known-int-while-neg` (parse-reject)
   - missing E-COND-NOT-BOOLEAN
   - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 1
@@ -928,6 +939,15 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - E-PARSE-EXPECTED: expected `=`, found `(`
   - E-PARSE-EXPR: expected an expression, found `>`
   - E-PARSE-EXPECTED: expected `)`, found `0`
+- `refinement/union-shaped-member-accept-neg` (twin · parse-reject)
+  - E-PARSE-TAG: unexpected `(` in the tag `<d`
+  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
+  - E-PARSE-TAG: unexpected `(` in the tag `<t`
+- `refinement/union-unjudgeable-member-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
+  - missing E-CONTRACT-002
+  - E-PARSE-TAG: unexpected `(` in the tag `<m`
+  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
+  - E-PARSE-CLOSER: `</program>` closes `<m>`
 - `refinement/unknown-shape-boundary-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
   - missing E-CONTRACT-002
   - severity: E-CONTRACT-002 did not fire (expected error)
@@ -1069,6 +1089,10 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 - `style/program-scope-overlap-soft` (codes; not in the bootstrap: W-STYLE-CONFLICT-POSSIBLE)
   - missing W-STYLE-CONFLICT-POSSIBLE
   - severity: W-STYLE-CONFLICT-POSSIBLE did not fire (expected info)
+- `type-state-codes/e-type-045-prefix-not-negation-neg` (twin · parse-reject)
+  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
+  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
+  - E-PARSE-EXPECTED: expected `}`, found ``
 - `type-state-codes/e-type-045-prefix-not-negation-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-045)
   - missing E-TYPE-045
   - severity: E-TYPE-045 did not fire (expected error)
@@ -1389,7 +1413,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (602)
+### UNSUPPORTED (633)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1479,6 +1503,10 @@ none
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `components/invalid-prop-decl-syntax-clean` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `components/invalid-prop-decl-syntax-reject` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
+- `condition/given-cell-guard-multi-all-or-nothing-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `condition/given-cell-guard-worked-example-absent-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `condition/given-cell-guard-worked-example-present-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `condition/given-rebind-no-presence-lint` — twin · bootstrap-unsupported: `given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)
 - `control-flow/ctrl-010-for-lift-in-match-arm-neg` — twin · bootstrap-unsupported: `for … else { … }` (the empty-state block, §17.4a) is not in the bootstrap yet — test `xs.length == 0` before the loop
 - `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-multiline-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1630,6 +1658,12 @@ none
 - `lifecycle/effect-write-unproven-pos` — twin · bootstrap-unsupported: `beacon` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `beacon(…)`
 - `lifecycle/effect-writes-state-function-value-pos` — twin · bootstrap-unsupported: `bump` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `bump(…)`
 - `lifecycle/on-transition-from` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/request-body-client-wrapper-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-deps-empty-mount-only-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-deps-explicit-listed-refire-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-refetch-fn-body-stmt-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-refetch-inline-multi-stmt-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `linear/lin-001-never-consumed-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-002-consumed-in-loop-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-002-consumed-in-loop-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
@@ -1839,7 +1873,28 @@ none
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `raw-content/match-arm-raw-body-displays-as-text` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `reactive/narrowing-ends-at-server-call-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-ends-callee-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `noop` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `noop(…)`
+- `reactive/narrowing-ends-direct-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-ends-loop-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-ends-nested-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `noop` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `noop(…)`
+- `reactive/narrowing-gated-handler-keeps-rt` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-gated-handler-nested-gates-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-gated-handler-other-cell-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-gated-handler-write-inside-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-not-inherited-by-lambda-reject` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `reactive/narrowing-resumes-after-fresh-test-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-show-gated-handler-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUpp
+- `reactive/narrowing-survives-exiting-branch-write-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-survives-non-writing-call-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-survives-other-cell-write-pos` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `reactive/narrowing-survives-write-after-loop-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/narrowing-sync-callback-keeps-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/no-write-unproven-pos` — bootstrap-unsupported: `one` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `one(…)`
+- `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/reset-to-default` — twin · bootstrap-unsupported: `default` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/server-fn-ambient-identity-clean` — twin · bootstrap-unsupported: `@currentUser` (§52.15.1) is not in the bootstrap yet; it is refused here by name rather than misread — read the session in a server function and pass the value in
@@ -1994,7 +2049,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: `map literal [k: v]` (§59) is not in the bootstrap yet; it is refused here by name rather than misread — maps (§59, O44) are not in the bootstrap
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a struct literal (a file-scope struct constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at c
 
-### NOT-TWINNED (685)
+### NOT-TWINNED (649)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -2127,14 +2182,8 @@ none
 - `components/unresolved-component-ref-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/unslotted-children-no-spread-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/unslotted-children-no-spread-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
-- `condition/given-cell-guard-multi-all-or-nothing-pos` — not mechanical: rhs-decl: type `Item | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/given-cell-guard-worked-example-absent-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/given-cell-guard-worked-example-present-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/given-presence-canonical-markup-twin` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/given-presence-deprecated-markup` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/given-rebind-no-presence-lint` — not mechanical: rhs-decl: type `string | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/is-given-expr-twin` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `condition/is-some-deprecated-expr` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `condition/given-presence-canonical-markup-twin` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `condition/given-presence-deprecated-markup` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-010-else-on-for-without-lift-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-011-for-in-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
@@ -2154,7 +2203,7 @@ none
 - `control-flow/loop-007-while-as-expr-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `while-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/loop-007-while-as-expr-no-lift-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/loop-007-while-as-expr-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `control-flow/markup-if-presence-arm-reads-rerender-pos` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `control-flow/markup-if-presence-arm-reads-rerender-pos` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `control-flow/markup-statement-not-rendered-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `defer/later-shadow-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -2338,18 +2387,12 @@ none
 - `lifecycle/effect-on-derived-engine` — not mechanical: engine-simple: engine surface beyond the simple rule: effect, derived (⚑ O5 surface)
 - `lifecycle/on-transition-to` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `lifecycle/ontransition-once-if-attrs` — not mechanical: engine-simple: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
-- `lifecycle/request-body-client-wrapper-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `lifecycle/request-data-is-some-if-attr-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
-- `lifecycle/request-data-is-some-value-bool-class-attr-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
-- `lifecycle/request-deps-empty-mount-only-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `lifecycle/request-deps-explicit-listed-refire-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-data-is-some-if-attr-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `lifecycle/request-data-is-some-value-bool-class-attr-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-neg` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-pos` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
-- `lifecycle/request-refetch-fn-body-stmt-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `lifecycle/request-refetch-inline-multi-stmt-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `lifecycle/request-settle-error-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
-- `lifecycle/request-settle-success-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
+- `lifecycle/request-settle-error-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `lifecycle/request-settle-success-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `lifecycle/reset-on-cycle-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - `lifecycle/reset-on-cycle-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - `lifecycle/reset-on-cycle-self-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
@@ -2433,7 +2476,7 @@ none
 - `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's continuation of a single-expression arm body past a line break that ends in `+` (`.Boom(m) :> "a:" +⏎ m,`). The arm-comma codemod (f0c9d4bb7) gave the arm
-- `match-leave/given-arm-in-derived-match` — not mechanical: rhs-decl: type `number | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against impl#1's 
+- `match-leave/given-arm-in-derived-match` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-match-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
@@ -2523,34 +2566,13 @@ none
 - `reactive/is-literal-rhs-reject` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `reactive/mutating-method-multi-arg-cell-read` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `reactive/mutating-method-string-arg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- `reactive/narrowing-ends-at-server-call-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-callee-write-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-destructured-callee-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-direct-write-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-loop-write-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-nested-write-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-ends-unresolvable-call-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-gated-handler-keeps-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-gated-handler-nested-gates-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-gated-handler-other-cell-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-gated-handler-write-inside-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-not-inherited-by-lambda-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-renarrows-on-present-write-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-04
-- `reactive/narrowing-resumes-after-fresh-test-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-show-gated-handler-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-survives-builtin-call-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-survives-exiting-branch-write-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-survives-non-writing-call-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-survives-other-cell-write-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-survives-write-after-loop-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/narrowing-sync-callback-keeps-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/narrowing-renarrows-on-present-write-pos` — not mechanical: unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-046) — not restructured, no `${}` unwrapped
 - `reactive/nested-path-method-call-not-first-stmt` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
-- `reactive/optional-member-access-absent` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/optional-member-access-block-arrow-reject` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/optional-member-access-if-twin` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/optional-member-access-not` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/optional-member-access-render` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- `reactive/optional-member-access-show-reject` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/optional-member-access-absent` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `reactive/optional-member-access-if-twin` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `reactive/optional-member-access-not` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `reactive/optional-member-access-render` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `reactive/optional-member-access-show-reject` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `reactive/reactive-map-insert-bare-variant` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/reset-compound-all` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
 - `reactive/reset-compound-field` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
@@ -2566,7 +2588,7 @@ none
 - `reactive/shape4-refinement-satisfied-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `reactive/shape4-struct-not-lifecycle` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `refinement/bind-refined-field-reject-rt` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
-- `refinement/bind-unrefined-field-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: type `number(>0) | string` has a space 
+- `refinement/bind-unrefined-field-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - `refinement/cell-write-origins-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
 - `refinement/cell-write-origins-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `refinement/copy-in-define-property-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
@@ -2583,13 +2605,11 @@ none
 - `refinement/shared-collection-delta-reject-rt` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
 - `refinement/ssr-seed-legit-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35)
 - `refinement/ssr-seed-refused-keeps-initial-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35)
-- `refinement/subset-dead-arm-pos` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
-- `refinement/subset-narrowed-exhaustive-neg` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
-- `refinement/subset-notin-dead-arm-pos` — not mechanical: rhs-decl: type `Role notIn([.Guest])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against i
+- `refinement/subset-dead-arm-pos` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initiali
+- `refinement/subset-narrowed-exhaustive-neg` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initiali
+- `refinement/subset-notin-dead-arm-pos` — not mechanical: rhs-decl: type `Role notIn([.Guest])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initializer exten
 - `refinement/union-nonprimitive-member-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `refinement/union-shaped-member-accept-neg` — not mechanical: rhs-decl: type `number(>0) | date` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · rhs-decl: type `number(>0) | timestamp` has a space at its top le
-- `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: type `number(>0) | date` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · rhs-decl: type `number(>0) | timestamp` has a space at its top le
-- `refinement/union-unjudgeable-member-pos` — not mechanical: rhs-decl: type `number(>0) | [string: number(>0)]` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `route-region/cn10-keepalive-reentry` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `server-db/cps-batch-field-write-refused` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `server-db/server-fn-in-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
@@ -2614,8 +2634,8 @@ none
 - `server-fn/cps-call-in-if-arm` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-fn/error-boundary-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `server-fn/error-boundary-value-server-call-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `server-fn/optional-absent` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: non-literal initializer needs a type (CTX — O35)
-- `server-fn/optional-present` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `server-fn/optional-absent` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `server-fn/optional-present` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `server-fn/sequence-two-fns` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-fn/sse-generator-binding-seed-survives` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `server-fn/value-server-call-init-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
@@ -2680,4 +2700,3 @@ none
 - `table-for/tablefor-variant-payload-enum` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `type-state-codes/e-state-undeclared-pos` — not mechanical: program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `${}` unwrapped
-- `type-state-codes/e-type-045-prefix-not-negation-neg` — not mechanical: rhs-decl: type `string | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
