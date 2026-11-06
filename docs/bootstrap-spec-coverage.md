@@ -34,16 +34,16 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 | status | rows |
 |---|---:|
 | BUILT | 308 |
-| PARTIAL | 149 |
-| REFUSED-LOUD | 312 |
+| PARTIAL | 153 |
+| REFUSED-LOUD | 311 |
 | DEFERRED-RULED | 64 |
 | N/A | 220 |
-| SILENT-ACCEPT | 20 |
+| SILENT-ACCEPT | 17 |
 | SILENT-ABSENT | 32 |
 | UNVERIFIED | 9 |
 | **total** | **1114** |
 
-SILENT rows carrying a gap id: 52 of 52.
+SILENT rows carrying a gap id: 49 of 49.
 <!-- @generated:coverage-totals END -->
 
 ## How the six parts were merged
