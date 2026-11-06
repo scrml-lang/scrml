@@ -40,23 +40,24 @@ let k = 0;
 
 describe("g-boot-namespace-cell-read-s475: `@m.x` is the module's exported declaration", () => {
   // `@m.count` resolves to the declaration `import { count }` binds (§21.3 rule 2). That declaration's OWN
-  // value is not built in the bootstrap (a file-scope declaration outside `<program>`): every spelling read
-  // the instance and rendered "[object Object]" with no diagnostic (measured on origin/main for `@count`
-  // after `import { count }` and in the declaring file). Now refused by name, fail closed, INTERIM
-  // (g-boot-file-scope-own-value-read-unbuilt-s475).
-  test("`@m.count` resolves to the exported declaration — one refusal naming its own value and its file (was: E-STATE-UNDECLARED on `@m` + E-BOOTSTRAP-UNSUPPORTED on `.count`)", () => {
-    const src = app(`<p id="c">\${@m.count}</p>`);
-    const e = errs(fe([LIB, src]));
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(src.src.slice(e[0].span.start, e[0].span.end)).toBe("@m.count");
-    expect(e[0].message).toContain("the own value of `<count>`, declared outside `<program>` in `lib.scrml`");
+  // value was not built (s475-boot-small-gaps2 refused the read by name); s475-boot-file-scope-own-value
+  // builds it as its instance's value (g-boot-file-scope-own-value-read-unbuilt-s475), so every spelling
+  // reads 7. The full matrix: boot-file-scope-own-value-s475.test.js.
+  test("`@m.count` reads the exported declaration's own value (was: E-STATE-UNDECLARED on `@m` + E-BOOTSTRAP-UNSUPPORTED on `.count`; then refused by name)", async () => {
+    const r = fe([LIB, app(`<p id="c">\${@m.count}</p>`)]);
+    expect(errs(r)).toEqual([]);
+    await loadProgram(r.core, "s475-g2-nscount-" + k++);
+    expect($("#c").textContent).toBe("7");
   });
-  test("the same refusal for `@count` after `import { count }`, and in the declaring file (was: no diagnostic, rendered \"[object Object]\")", () => {
-    const e1 = errs(fe([LIB, named("count", `<p id="c">\${@count}</p>`)]));
-    expect(e1.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e1[0].message).toContain("the own value of `<count>`");
-    const e2 = errs(fe([{ path: ENTRY, src: `let <count:int=7/>\n<program>\n<p id="c">\${@count}</p>\n</program>\n` }]));
-    expect(e2.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("the same value for `@count` after `import { count }`, and in the declaring file (was: no diagnostic, rendered \"[object Object]\"; then refused by name)", async () => {
+    const r1 = fe([LIB, named("count", `<p id="c">\${@count}</p>`)]);
+    expect(errs(r1)).toEqual([]);
+    await loadProgram(r1.core, "s475-g2-namedcount-" + k++);
+    expect($("#c").textContent).toBe("7");
+    const r2 = fe([{ path: ENTRY, src: `let <count:int=7/>\n<program>\n<p id="c">\${@count}</p>\n</program>\n` }]);
+    expect(errs(r2)).toEqual([]);
+    await loadProgram(r2.core, "s475-g2-samecount-" + k++);
+    expect($("#c").textContent).toBe("7");
   });
   test("near-miss: a cell inside `<program>` reads its value (unchanged)", async () => {
     const r = fe([{ path: ENTRY, src: `<program>\nlet <count:int=7/>\n<p id="c">\${@count}</p>\n</program>\n` }]);

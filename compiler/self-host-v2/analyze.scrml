@@ -2933,7 +2933,21 @@ ${
             }
         }
         const sd: Sym | not = declTypeNamed(cx.te, n)     // s472: the shared instance of a declaration in scope here
-        if (sd is given) return rinf(infOk(Type.Named(sd)), done)
+        if (sd is given) {
+            // s475-boot-file-scope-own-value: an own-valued declaration's `@x` is its own value — its
+            // written type, else its literal's (§66.3 rules 3, 9: an exported non-literal one is typed)
+            for (const ds of cx.decls) {
+                const d: ADecl | not = ds.d
+                if (ds.sym.id == sd.id && d is given) {
+                    if (ownValued(cx.te, d)) {
+                        const ot: Type | not = writtenOrLiteral(cx, d.ty, d.own)
+                        if (ot is given) return rinf(infOk(baseOf(ot)), done)
+                        return rinf(infUnres("`@" + n + "` reads the own value of `<" + n + ">`, whose type is neither written nor a literal's"), done)
+                    }
+                }
+            }
+            return rinf(infOk(Type.Named(sd)), done)
+        }
         // E-SCOPE-001 (the binder's) — the typer finds it inside the initializer
         return rinf(infOut("`@" + n + "`, which names no cell"), done)
     }
@@ -3504,7 +3518,7 @@ ${
     // member path through declared types is resolved, whatever a sub-call is).
     fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
         let stack: string[] = []
-        if (where == 2) stack = ["@" + name]
+        if (where == 2 || where == 3) stack = ["@" + name]
         let hs: int = -1
         if (where == 2) hs = cx.prog
         const r: RInf = inferValue(withHscope(withRes(cx, true), hs), init, stack, [], tab)
@@ -3537,7 +3551,9 @@ ${
     // `vals` / `where` (s444 Phase B): the field's validators, and where the
     // field stands — 0 an attribute (it has none, §66.4 rule 1), 1 a child
     // field of a user declaration, 2 a program cell (a top-level value — it
-    // has the surface, §55.5.1, S447). Both 1 and 2 are honored.
+    // has the surface, §55.5.1, S447). Both 1 and 2 are honored. 3 (s475-boot-file-scope-own-value) a
+    // declaration's own value built as its instance's field (userFields; no validators reach it, and its
+    // name is the declaration's own, not a field name the surface could shadow).
     // s462 (§66.3 rules 5–10): `ix` / `tab` — the own-value inference context
     // and the program's table (ownTable); `bnd` — where the type leaves the
     // compile (boundaryOf: "persist" / "server" / "export", or "").
@@ -3629,7 +3645,7 @@ ${
         // value's own name is "Not affected" (where 2). Case 2 (a field of a
         // validated value's STRUCT type) cannot arise here: the bootstrap admits
         // validators only on string / number values (fieldVals).
-        if (where != 2 && isSurfaceProp(name)) {
+        if (where != 2 && where != 3 && isSurfaceProp(name)) {
             st = addDiag(st, te.file, span, "E-VALIDITY-RESERVED-NAME", "`" + name + "` is a reserved validity-surface name — a field or attribute by this name would hide the declaration's synthesized `." + name + "` (§55.5.3); rename it")
         }
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
@@ -4109,7 +4125,43 @@ ${
             out = out.concat([r2.f])
             st = r2.st
         }
+        // s475-boot-file-scope-own-value — a declaration with an OWN VALUE (`let <count:int=7/>` written
+        // outside `<program>`, the shape a library exports): §66.7.1 "`@x` … reads … the SHARED instance
+        // of `x`"; §66.6.4 "Every USER declaration has its own unnamed shared instance". The instance's
+        // value is the own value, so it is built as the instance's one field — the field carries the
+        // declaration's own nid (ownFieldOf finds it by that), its name, `let`, `export`, type and
+        // initializer, exactly as a program cell's are (`where` 3: a file-scope own value — no program
+        // table, no surface-name check). `@count` reads it (resolveAtOf), a write in the defining file
+        // writes it (placeAt, §66.14 rule 2); another file's write stays refused (⚑ O2 / O39).
+        if (ownValued(te, d)) {
+            const r3: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, [], 3, ix, tab, boundaryOf(d.exported, d.mods), st)
+            out = out.concat([r3.f])
+            st = r3.st
+        }
         return { fs: out, st: st }
+    }
+
+    // s475-boot-file-scope-own-value — the declarations whose own value is built as their instance's value:
+    // an own value written (`=`), and nothing else that would make `@x` mean a struct of fields — no typed
+    // attribute (that is ⚑ O19, refused: o19Diags), no child field, and not a named shared instance
+    // (`<acc:swatch …/>`, §66.8.2 — refused: namedInstanceDiags). A reserved-prefix name is already refused
+    // where it is declared (userDeclStub). A `single` declaration's state-children are not child fields.
+    fn ownValued(te: TypeEnv, d: ADecl) -> boolean {
+        if (!hasOwnValue(d.own)) return false
+        if (d.attrs.length > 0 || childFields(d.body).length > 0) return false
+        if (te.declNames.indexOf(ownTypeName(d)) >= 0) return false
+        return !(d.name.indexOf("_scrml_") == 0 || d.name.indexOf("__scrml_") == 0)
+    }
+
+    // The index of a declaration's own-value field (userFields), or -1: the field that carries the
+    // declaration's own nid.
+    fn ownFieldOf(info: DeclInfo) -> int {
+        let i = 0
+        for (const f of info.fields) {
+            if (f.nid == info.nid) return i
+            i = i + 1
+        }
+        return -1
     }
 
     // The program's fields: the declarations directly in its body (L14).
@@ -6809,6 +6861,9 @@ ${
         if (d is given) {
             if (!d.isProgram && d.info.sym.hint == name) {
                 const inst: InstRef = InstRef.Lexical(0)
+                // s475-boot-file-scope-own-value: an own-valued declaration's instance IS its own value
+                const oi0: int = ownFieldOf(d.info)
+                if (oi0 >= 0) return plain(d.info.fields[oi0].ty, addName(st, e.nid, NameFact.NField(d.info.sym, inst, oi0)))
                 return { x: { ty: Type.Named(d.info.sym), inst: inst, iDecl: d.info.sym, maybe: false },
                          st: addName(st, e.nid, NameFact.NInst(d.info.sym, inst)) }
             }
@@ -6831,17 +6886,23 @@ ${
         }
         const ud: DeclSrc | not = visibleDecl(env, name)
         if (ud is given) {
-            // s475-boot-small-gaps2 (g-boot-file-scope-own-value-read-unbuilt-s475) — a declaration OUTSIDE
-            // `<program>` that has an own value (`let <count:int=7/>` at a file's top, the shape a library
-            // exports): the bootstrap builds its instance but not its own value, so `@count` read the
-            // instance and rendered "[object Object]" — silently (same file, `import { count }`, and
-            // `@m.count`). Refused, fail closed. INTERIM: the capable form is the declaration's own value
-            // built as its instance's value (§66.2.2 (i), §66.3), read here.
+            // s475-boot-file-scope-own-value (g-boot-file-scope-own-value-read-unbuilt-s475) — a declaration
+            // with an own value (`let <count:int=7/>` outside `<program>`, the shape a library exports):
+            // §66.7.1 "`@x` … reads … the SHARED instance of `x`", and that instance's value is its own
+            // value (§66.2.2 (i), §66.3) — its own-value field (userFields). One shared instance per
+            // declaration (§66.6.4), whichever file names it: the declaring file, `import { count }`,
+            // `import { count as c }`, `@m.count` (§21.3 rule 2: "the same declaration").
+            const si: InstRef = InstRef.Shared(ud.info.sym)
+            const oi1: int = ownFieldOf(ud.info)
+            if (oi1 >= 0) return plain(ud.info.fields[oi1].ty, addName(st, e.nid, NameFact.NField(ud.info.sym, si, oi1)))
+            // An own value the bootstrap does not build as the instance's value — one beside child fields, or a
+            // typed own value with no `=` (§66.2.2 O31): `@x` would read the instance, not its value — refused,
+            // never read as "[object Object]". INTERIM. (Beside typed attributes it is ⚑ O19, refused where it
+            // is declared — o19Diags; a named shared instance likewise — namedInstanceDiags.)
             const ud0: ADecl | not = ud.d
             if (ud0 is given) {
-                if (!isNoValue(ud0.own)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` reads the own value of `<" + ud.info.sym.hint + ">`, declared outside `<program>` in `" + ud.file + "` — a file-scope declaration's own value is not built in the bootstrap (it would read the instance, not its value); declare the cell inside `<program>`, or read it through a function `" + ud.file + "` exports", st)
+                if ((hasOwnValue(ud0.own) || hasOwnType(ud0)) && ud0.attrs.length == 0 && env.g.te.declNames.indexOf(ownTypeName(ud0)) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` reads the own value of `<" + ud.info.sym.hint + ">`, declared in `" + ud.file + "` — the bootstrap builds a declaration's own value as its instance's value only for an own value written with `=` and no attributes or child fields beside it (`let <" + ud.info.sym.hint + ":T=v/>`), so it would read the instance, not its value", st)
             }
-            const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
         }
@@ -9142,9 +9203,40 @@ ${
         // §66.14 ⚑ O2 / O39 — whether module `export` makes a declaration's own value writable from other
         // files "is not ruled"; "§66.19 routes every cross-file write of an own value through a function
         // exported from the defining file". Capable form: the write, once O2 / O39 rules it writable.
+        // s475-boot-file-scope-own-value — `@x` of an own-valued declaration is its own-value field
+        // (userFields): inside its own renders / initializer the current instance's (O54 (a)), else the
+        // shared instance's (§66.7.1).
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is given && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
+            const coi: int = ownFieldOf(cd.info)
+            if (!cd.isProgram && cd.info.sym.hint == name && coi >= 0) {
+                return { place: { decl: cd.info, inst: InstRef.Lexical(0), idx: coi, path: [], ty: cd.info.fields[coi].ty, maybe: false },
+                         local: not, st: st }
+            }
+        }
         const xd: DeclSrc | not = visibleDecl(env, name)
-        if (xd is given && xd.file != env.file && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
-            return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` writes the own value of `" + xd.info.sym.hint + "`, declared in `" + xd.file + "`, from another file — whether a module `export` makes an own value writable from other files is not ruled (§66.14, ⚑ O2 / O39), so the bootstrap refuses it; write it through a function `" + xd.file + "` exports (§66.19)"))
+        if (xd is given && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
+            const xoi: int = ownFieldOf(xd.info)
+            // §66.14 rule 2: "A write lexically inside the file that defines the declaration is governed only
+            // by the field's contract" — the own-value field's `let` / lock / derived mode (the classifier).
+            if (xoi >= 0 && xd.file == env.file) {
+                return { place: { decl: xd.info, inst: InstRef.Shared(xd.info.sym), idx: xoi, path: [], ty: xd.info.fields[xoi].ty, maybe: false },
+                         local: not, st: st }
+            }
+            // r1 N2: only a declaration WITH an own value has one to write from another file; a write of a
+            // whole instance of one without (`@box = 5`) keeps the whole-instance message below.
+            const xdd: ADecl | not = xd.d
+            if (xd.file != env.file && xdd is given && hasOwnValue(xdd.own)) {
+                return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "this writes the own value of `<" + xd.info.sym.hint + ">` (`@" + name + "`, or a part of it), declared in `" + xd.file + "`, from another file — whether a module `export` makes an own value writable from other files is not ruled (§66.14, ⚑ O2 / O39), so the bootstrap refuses it; write it through a function `" + xd.file + "` exports (§66.19)"))
+            }
+        }
+        // r1 N3 — `@m.nope = …` (`m` a namespace import, re-read with `m.nope` one name): a member the
+        // module does not export is E-IMPORT-004, as the read is (§21.3 rule 5).
+        const nh: NsHit = nsMember(env.g.te.link, env.file, name)
+        if (nh.ns != "" && !namesInstance(env, name)) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a cell or a declaration")
+            if (nm.code == "-") return noPlace(st)
+            if (nm.code != "") return noPlace(addDiag(st, env.file, t.span, nm.code, nm.why))
         }
         if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + "` is written here, but it is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
@@ -29015,10 +29107,42 @@ ${
         return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt }
     }
 
+    // s475-boot-file-scope-own-value (#1772 review N4): an exit AFTER a `return` / `fail` / `break` /
+    // `continue` of the same block never runs (`if (bad()) { fail .Bad; fail .ConnectionLost; }`), so it is
+    // not one of the run's `exitAt` (E-TX-FAIL-AFTER-COMMIT reported the unreachable second `fail`). Only
+    // `exitAt` is withheld; every other fact of the run is folded as before.
     fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
         let a: CFold = a0
-        for (const s of ss) { a = cfStmt(s, a) }
+        let dead = false
+        for (const s of ss) {
+            const b: CFold = cfStmt(s, a)
+            if (dead) {
+                a = { names: b.names, assigns: b.assigns, rets: b.rets, exits: b.exits, effects: b.effects, handled: b.handled, clocks: b.clocks, exitAt: a.exitAt }
+            } else {
+                a = b
+            }
+            if (stmtLeaves(s)) dead = true
+        }
         return a
+    }
+
+    // A statement after which nothing in its block runs.
+    fn stmtLeaves(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: e) :> true
+            .Fail(f: f) :> true
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Lift(what: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: b) :> false
+        }
     }
 
     fn cfMaybeBlock(b: ABlock | not, a: CFold) -> CFold {

@@ -323,7 +323,11 @@ const BASE_66_19 = [
   // s475-boot-small-gaps2: + one E-BOOTSTRAP-UNSUPPORTED — `toggleMode`'s `@mode` read is the own value of a
   // file-scope declaration (`export let <mode:Mode=.Light/>`, outside `<program>`), which the bootstrap does not
   // build; it read the instance instead (g-boot-file-scope-own-value-read-unbuilt-s475), now refused by name.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
+  // s475-boot-file-scope-own-value: - two E-BOOTSTRAP-UNSUPPORTED — the own value is built as its instance's
+  // value, so `toggleMode`'s `@mode` read and its same-file write `@mode = …` (§66.14 rule 2; it was "writing a
+  // whole instance is not in bootstrap slice M2") both compile. Left: `<theme>`, the `style="…${hex}"` template,
+  // the two named shared instances.
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
   // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
   // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
   // s473 D29: both are `@x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).

@@ -1,1 +1,2 @@
 - 2026-11-06T00:07:10-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a3ac9bcd8748b1960, base 8bca057ff
+- 2026-11-06T00:27:49-07:00 built file-scope own value as the instance's one field (analyze.scrml userFields/ownValued/ownFieldOf; resolveAtOf, placeAt, inferAt); N2/N3 in placeAt; N4 in cfStmts. Probe (43+ cases) green; new test slice-m4/boot-file-scope-own-value-s475.test.js 48 pass; typer.test.js theme pin -2; small-gaps2 read tests flipped to value reads. Gap marked resolved.
