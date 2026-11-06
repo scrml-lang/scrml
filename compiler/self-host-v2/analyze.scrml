@@ -7284,7 +7284,10 @@ ${
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
-        const st: AS = resolveExprs(env, args, not, rc.st)
+        // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
+        // against its parameter's declared type — §18.5 reads an object in an argument "exactly as
+        // `f({ … })`", and §14.10 names "a function parameter type" as a position's type
+        const st: AS = resolveArgs(env, args, paramTypesOf(env, calledFn(env, nameFactIn(rc.st, callee.nid))), rc.st)
         const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
         if (cf is given) {
             const sp: AS = callPurity(env, e, cf, st)
@@ -7312,6 +7315,43 @@ ${
             return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only a declared scrml function is callable in the bootstrap — `" + exprName(callee) + "` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap"))
         }
         return plain(not, st)
+    }
+
+    // s475 (g-boot-object-literal-struct-context-positions-s475) — a declared
+    // parameter's type, as the position type of the argument passed to it. `ty`
+    // is `not` where the parameter has no annotation or its annotation does not
+    // resolve (that annotation's own report is the callee's, never repeated here).
+    type ParamWant:struct = { ty: Type | not }
+
+    fn paramTypesOf(env: Env, f: FnInfo | not) -> ParamWant[] {
+        if (f is not) return []
+        const fs: FnSrc | not = fnSrcOf(env.g, f.sym.id)
+        if (fs is not) return []
+        const te: TypeEnv = teAt(env.g.te, fs.info.file)
+        let out: ParamWant[] = []
+        for (const p of fs.f.params) {
+            let ty: Type | not = not
+            const at: AType | not = p.ty
+            if (at is given && !hasErrIn(fileErrs(env.g.files, fs.info.file), at.span)) {
+                const rt: RType = resolveType(te, at, emptyAS())
+                if (!rt.unresolved && rt.st.diags.length == 0) ty = rt.t
+            }
+            out = out.concat([{ ty: ty }])
+        }
+        return out
+    }
+
+    // Each argument against its parameter's type (a surplus or unannotated one: no position type).
+    fn resolveArgs(env: Env, args: AExpr[], ps: ParamWant[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            let want: Type | not = not
+            if (i < ps.length) want = ps[i].ty
+            st = resolveExpr(env, a, want, st).st
+            i = i + 1
+        }
+        return st
     }
 
     fn calledFn(env: Env, f: NameFact | not) -> FnInfo | not {
@@ -12549,7 +12589,7 @@ ${
                 .Guard(arms: x) :> rs0.x.ty
                 .MatchOn(arms: x) :> not
             }
-            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, noSuccessUse(env, e, h, sc, stmt, rs0.st)))
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(sc, expected), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
         }
         // s469 — the §18 plain-value `match`: a subject that is not a failable result
         const pma: AArm[] | not = matchArmsOf(h.how)
@@ -12573,9 +12613,20 @@ ${
         const how: AHow = h.how
         return match how {
             .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
-            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, st))
-            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, st))
+            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(f, expected), st))
+            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(f, expected), st))
         }
+    }
+
+    // s475 (g-boot-object-literal-struct-context-positions-s475) — the type a value
+    // arm of a handler on a call yields: §19.4.3 "Yield a value of the call's success
+    // type"; for a callee with no declared success type (or a `?{}`), the position's.
+    fn armWant(f: FnInfo | not, expected: Type | not) -> Type | not {
+        if (f is given) {
+            const r: Type | not = f.ret
+            if (r is given) return r
+        }
+        return expected
     }
 
     // §19.5.4: "`?` SHALL be valid only inside a `!` function body … E-ERROR-003";
@@ -12701,7 +12752,7 @@ ${
 
 
     // `!{ arms }` / `match subject { arms }`.
-    fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
+    fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         if (!failable) {
             if (isMatch) st = plainMatchBinderDiags(env, arms, st)
@@ -12711,7 +12762,7 @@ ${
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
         if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(err))
-        const ra: RArms = resolveArms(env, subj, arms, err, not, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, err, not, isMatch, stmt, want, st)
         st = ra.st
         for (const d of coverDiags(env, e, subj, err, isMatch, ra, -1, err.hint)) { st = withDiag(st, d) }
         return handledFact(env, e, err, stmt, not, [], not, st)
@@ -13122,7 +13173,7 @@ ${
             }
             parms = parms.concat([{ nid: a.nid, inner: inner }])
             if (stmt) {
-                st = resolveArmBody(ra.env, a, a.body, { stmt: true, subj: subj, isMatch: true, what: "" }, st)
+                st = resolveArmBody(ra.env, a, a.body, { stmt: true, subj: subj, isMatch: true, what: "", want: not }, st)
             } else {
                 const rv: RX = plainArmValue(ra.env, a, want, st)
                 st = rv.st
@@ -13191,7 +13242,7 @@ ${
     // covers nothing the wildcard could have missed.
     type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean, coveredBefore: int[], armErr: boolean }
 
-    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, own: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
+    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, own: Sym | not, isMatch: boolean, stmt: boolean, want: Type | not, st0: AS) -> RArms {
         let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let covered: int[] = []
@@ -13205,7 +13256,7 @@ ${
         let coveredBefore: int[] = []   // s475: `covered`, counting only the arms before the first wildcard
         let armErr = false        // s475: an arm up to and including the first wildcard drew an Error
         for (const a of arms) {
-            const ra: RArm = resolveArm(env, a, err, own, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
+            const ra: RArm = resolveArm(env, a, err, own, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat, want: want }, st)
             st = ra.st
             const d0: int = st.diags.length     // s475 r1: past the arm's body — only this arm-position check's diagnostics
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
@@ -13450,7 +13501,7 @@ ${
     // a client call is `f`'s declared variants plus `Transport(t:
     // ServerCallError)` (FnInfo.rerr — E's variants first, so an arm resolved
     // against it reads the same in E); of a server→server call, `f`'s own.
-    fn remoteHandled(env: Env, e: AExpr, h: AHandled, subj: AExpr, f: FnInfo, site: SiteK, stmt: boolean, st0: AS) -> AS {
+    fn remoteHandled(env: Env, e: AExpr, h: AHandled, subj: AExpr, f: FnInfo, site: SiteK, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         const rset: Sym | not = f.rerr
         const how: AHow = h.how
@@ -13460,8 +13511,8 @@ ${
             st = bySite(env, site, conflictDiags(env, f, e), [], st)
             return match how {
                 .Propagate :> propagate(env, e, subj, f.failable, f.err, stmt, st)
-                .Guard(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, false, stmt, st)
-                .MatchOn(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, true, stmt, st)
+                .Guard(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, false, stmt, want, st)
+                .MatchOn(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, true, stmt, want, st)
             }
         }
         // Ue2 (a handled form nested in a larger expression): on a client call the
@@ -13471,8 +13522,8 @@ ${
         const nE: int = localCount(env, f)
         return match how {
             .Propagate :> remotePropagate(env, e, subj, f, rset, nE, site, stmt, st)
-            .Guard(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, false, site, stmt, st)
-            .MatchOn(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, true, site, stmt, st)
+            .Guard(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, false, site, stmt, want, st)
+            .MatchOn(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, true, site, stmt, want, st)
         }
     }
 
@@ -13525,10 +13576,10 @@ ${
     // callee is declared `!`, only the `.Transport` arm is dead; it SHALL be
     // reported as dead handling in the manner of E-ERROR-013 (the message names
     // the callee and says the call is server→server)").
-    fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, st0: AS) -> AS {
+    fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         if (isMatch && variantIndex(env.g.types, rset, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(rset))
-        const ra: RArms = resolveArms(env, subj, arms, rset, f.err, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, rset, f.err, isMatch, stmt, want, st)
         st = ra.st
         const remote: Diag[] = coverDiags(env, e, subj, rset, isMatch, ra, -1, setLabel(env, f, rset)).concat(conflictDiags(env, f, e))
         let local: Diag[] = []
@@ -13827,7 +13878,10 @@ ${
     // s452 — what an arm's body is judged against: `stmt` — the form is a
     // statement (its result is not read); otherwise it stands in a VALUE
     // position `what` (§19.4.3 ruling 1a), and every arm yields a value or leaves.
-    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string }
+    // s475 (g-boot-object-literal-struct-context-positions-s475): `want` — the type a
+    // value arm yields (§19.4.3: "a value of the call's success type"), the position
+    // type its value is resolved against (an object literal takes its struct from it)
+    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string, want: Type | not }
 
     // An arm's body. As a statement's arm, an expression is a statement (a
     // write, a call) and an arm MAY fall through. In a value position (§19.4.3
@@ -13856,7 +13910,7 @@ ${
     // function that yields nothing falls through.
     fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
         if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
-        const st: AS = resolveExpr(withStmtCall(withWholeAt(env, x.nid, "the value of an enclosing arm"), x.nid), x, not, st0).st
+        const st: AS = resolveExpr(withStmtCall(withWholeAt(env, x.nid, "the value of an enclosing arm"), x.nid), x, cx.want, st0).st
         return pendNoValue(env, a, cx, x, st)
     }
 
@@ -14371,7 +14425,17 @@ ${
         // anywhere else a `return` operand is a value position
         let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
-        return resolveExpr(renv, e, not, st).st
+        // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
+        // type is the enclosing function's declared return type — §18.5 reads an object
+        // there "exactly as `return { … }`", and §14.10 names "a function return type"
+        return resolveExpr(renv, e, enclosingRet(env), st).st
+    }
+
+    fn enclosingRet(env: Env) -> Type | not {
+        if (env.fx.fnSym < 0) return not
+        const fs: FnSrc | not = fnSrcOf(env.g, env.fx.fnSym)
+        if (fs is not) return not
+        return fs.info.ret
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
