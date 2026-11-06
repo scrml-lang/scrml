@@ -314,7 +314,9 @@ describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fa
   });
 
   test("a host call (`Date.now()`) cannot fail either", () => {
-    const src = P(`    function go() {\n        @n = Date.now() !{ _ :> 0 };\n    }`);
+    // s475 r1 (#1777 review F2a): a `number` cell — `Date.now()` is a `number`, and into the `int`
+    // `@n` that value is its own E-TYPE-031 now that an unproven arm no longer hides it (Partial)
+    const src = P(`    let <t:number=0/>\n    function go() {\n        @t = Date.now() !{ _ :> 0 };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-013"]);
   });
 

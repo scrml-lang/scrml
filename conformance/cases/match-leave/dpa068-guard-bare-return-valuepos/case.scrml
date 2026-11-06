@@ -14,7 +14,7 @@ ${
             .Boom(m) :> return "early:" + m,
             .Other :> 0
         };
-        return "got:" + v;
+        return `got:${v}`;
     }
     function go() {
         @out = calc(-1);
