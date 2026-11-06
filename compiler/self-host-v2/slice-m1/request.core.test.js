@@ -177,13 +177,14 @@ describe("the request machine through the printer", () => {
 });
 
 describe("r1 F3 — the request's handle and its full state", () => {
-  test("a handle binds the `{ refetch }` requestOn returns (a `const`, not a discarded expression); refetch re-runs the load", async () => {
+  test("a handle names a program-level slot (s475 S3b: `const <h> = rt.requestSlot()`) the request fills while mounted", async () => {
     const h = C.mkSym(910040, "req");
     const core = requestCore((p) => { p.handle = h; });
     expect(mods.check.checkCore(core)).toEqual([]);
     const { out } = await loadProgram(core, "request-handle");
-    expect(out.js).toMatch(/const req\w* = rt\.requestOn\(scope\$, /);
-    expect(out.js).not.toMatch(/^\s*rt\.requestOn\(/m);
+    expect(out.js).toMatch(/^const req\w* = rt\.requestSlot\(\);$/m);
+    expect(out.js).toMatch(/^\s*rt\.requestOn\(scope\$, /m);
+    expect(out.js).toMatch(/slot: req\w* \}\);/);
     expect(out.js).toContain("state: {");
   });
 

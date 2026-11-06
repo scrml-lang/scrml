@@ -472,6 +472,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
         // by name only (the type-judged kinds — `on…`, a navigation — are left to the
@@ -507,6 +508,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -631,6 +633,10 @@ ${
             } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Keyword) {
                 const kname: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, kname))
+            } else if (t.cls == TC.Variant && touching(prev, t) && isHashRefExpr(r.e)) {
+                // s475 (S3b): `<#id>.data` — after the `>` the lexer reads `.data` as one
+                // bare-variant token (a `.` in value position); touching `<#id>` it is the member
+                r = mkE(adv(r.tp), start, AExprK.Member(r.e, t.v))
             } else if (t.cls == TC.Punct && tk(t, "(") && t.line == endLine(prev)) {
                 const args: RExprs = parseList(adv(r.tp), ")")
                 r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
@@ -1561,6 +1567,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -1862,8 +1869,58 @@ ${
         if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
         if (t.cls == TC.TChunk) return parseTemplate(tp)  // s469: a logic backtick template (§14.13.3)
         if (t.cls == TC.Foreign) return parseForeign(tp)  // s473: a `_={ … }=` foreign code block (§23.2)
+        if (hashRefAhead(tp)) return mkE(adv(adv(adv(adv(tp)))), start, AExprK.HashRef(peekAt(tp, 2).v))   // s475 (S3b)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // s475 (slice S3b) — `<#id>`, a reference by id (SPEC §6.7.7 Properties:
+    // `<#id>.loading`, `.data`, `.error`, `.stale`, `.refetch()`): the four
+    // tokens `<` `#` id `>` with nothing between them. Only an expression's
+    // primary position reads it, where `<` is never the less-than operator (an
+    // operator has a left operand), and `#` follows `<` nowhere else in logic,
+    // so it takes nothing from markup or a comparison. In a string literal it
+    // is text (the lexer made the literal one token).
+    fn isHashRefExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .HashRef(id: x) :> true
+            .Name(name: x) :> false
+            .At(name: x) :> false
+            .AtItem :> false
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: x) :> false
+            .Member(obj: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: x) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+            .Foreign(f: x) :> false
+        }
+    }
+
+    fn hashRefAhead(tp: TP) -> boolean {
+        const lt: PTok = cur(tp)
+        if (!(tk(lt, "<") && lt.cls == TC.Punct)) return false
+        const h: PTok = peekAt(tp, 1)
+        const nm: PTok = peekAt(tp, 2)
+        const gt: PTok = peekAt(tp, 3)
+        if (!(touching(lt, h) && h.cls == TC.Other && h.text == "#")) return false
+        if (!(touching(h, nm) && nm.cls == TC.Ident)) return false
+        return touching(nm, gt) && tk(gt, ">") && gt.cls == TC.Punct
     }
 
     // =========================================================================
@@ -2572,6 +2629,7 @@ ${
             .Recovered :> not
             .Sql(q: q) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -2628,6 +2686,7 @@ ${
             .Recovered :> none
             .Sql(q: q) :> none
             .Template(quasis: qs) :> none
+            .HashRef(id: hr0) :> none
             .Foreign(f: fb0) :> none
             .Name(name: n) :> none
             .At(name: n) :> none
@@ -2708,6 +2767,7 @@ ${
             .Spread(e: x) :> exprHasEffect(x)
             .Index(obj: o, idx: i) :> exprHasEffect(o) || exprHasEffect(i)
             .Template(quasis: qs, slots: ss) :> anyEffect(ss)
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> true      // s473: host code — the compiler cannot see what it does (§23.2.3)
         }
     }
@@ -2834,6 +2894,7 @@ ${
             .Recovered :> true
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
@@ -3143,6 +3204,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -3988,6 +4050,7 @@ ${
             .Sql(q: x) :> e
             .Handled(h: x) :> e
             .Template(quasis: x) :> e
+            .HashRef(id: hr0) :> e
             .Foreign(f: x) :> e
         }
     }
@@ -4029,6 +4092,7 @@ ${
             .Sql(q: x) :> e
             .Handled(h: x) :> e
             .Template(quasis: x) :> e
+            .HashRef(id: hr0) :> e
             .Foreign(f: x) :> e
         }
     }
@@ -5486,6 +5550,7 @@ ${
             .Recovered :> false
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -6278,6 +6343,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -6842,6 +6908,7 @@ ${
             .Recovered :> false
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -8626,6 +8693,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -8823,6 +8891,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -8854,6 +8923,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }

@@ -102,7 +102,7 @@ ${
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
-    import { Node, allNodes, requestStateDeps } from "./walk.scrml"
+    import { Node, allNodes, requestStateDeps, requestHandles } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
@@ -274,6 +274,7 @@ ${
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
             .SeqCall(op: x) :> -1
+            .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
@@ -1055,6 +1056,7 @@ ${
             .Handle(inst: x) :> "names an instance"
             .Assigned(local: x) :> ""
             .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
+            .Refetch(req: rf0) :> "re-runs a `<request>` (`refetch()`)"
             .Validity(of: x) :> "reads a validity surface"
             .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
             .Query(q: x) :> ""
@@ -1113,6 +1115,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
         }
@@ -1188,6 +1191,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -1331,6 +1335,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
@@ -1355,6 +1360,7 @@ ${
             .Host(call: x) :> "(not a cell read)"
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
+            .Refetch(req: rf0) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
             .ServerCall(fn: x) :> "(not a cell read)"
             .Query(q: x) :> "(not a cell read)"
@@ -1467,6 +1473,16 @@ ${
         const isErrors: boolean = pr == SurfaceProp.Errors
         if (isErrors) return ["C14: `errors` is read as a value — the bootstrap reads it only through `<errors of=…/>` (§55.8)"]
         return checkSurface(p, encl, v)
+    }
+
+    // C-R2 (s475, slice S3b) — a Refetch names a request of THIS program: the
+    // handle of one of its View.Requests (§6.7.7 `<#id>.refetch()`), the slot
+    // the printer declares. (Server code never holds one: exprTouchesClient.)
+    fn checkRefetch(p: CoreProgram, s: Sym) -> string[] {
+        for (const h of requestHandles(p)) {
+            if (h.id == s.id) return []
+        }
+        return ["C-R2: a Refetch names `" + s.hint + "`, which is the handle of no Request of the program"]
     }
 
     // C15 (s449) — a Gate stands only on a `form`, at most once (§55.17.3).
@@ -2236,6 +2252,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -2804,6 +2821,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
@@ -2964,6 +2982,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
         }
     }
@@ -3922,6 +3941,7 @@ ${
             .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Refetch(req: rf0) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
             .ServerCall(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Query(q: x) :> "a Commit write's value is not a Local (the snapshot)"
@@ -4010,6 +4030,7 @@ ${
             .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Refetch(req: rf0) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Query(q: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -4050,6 +4071,7 @@ ${
             .InitOf(decl: x) :> bad
             .Host(call: x) :> bad
             .Lambda(params: x) :> bad
+            .Refetch(req: rf0) :> bad
             .Validity(of: x) :> bad
             .ServerCall(fn: x) :> bad
             .Query(q: x) :> bad
@@ -4224,6 +4246,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -4513,6 +4536,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -4548,6 +4572,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -4648,6 +4673,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -4803,6 +4829,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -4837,6 +4864,7 @@ ${
             .Host(call: c) :> unreadableHost(c)
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
+            .Refetch(req: rf0) :> checkRefetch(p, rf0)
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
@@ -4909,6 +4937,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not

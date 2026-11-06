@@ -94,6 +94,12 @@ ${
         // A `string`. What each slot may hold (a primitive) is analyze's.
         Template(quasis: string[], slots: AExpr[]),
         Foreign(f: AForeign),                        // s473: a §23.2 `_={ … }=` foreign code block
+        // s475 (slice S3b) — a reference by id to a lifecycle element, written
+        // `<` `#` id `>` with nothing between (SPEC §6.7.7 Properties: the
+        // `<request>`'s `.loading` / `.data` / `.error` / `.stale` and
+        // `.refetch()`). It is read only through one of those properties —
+        // analyze resolves it against the program's requests; alone it is no value.
+        HashRef(id: string),
     }
 
     // s473 — a §23.2 foreign code block (§23.2.2 ForeignBlock). `body` is the
@@ -543,6 +549,7 @@ ${
             .Recovered :> false
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -612,6 +619,7 @@ ${
             .Sql(q: q) :> hv(-1, "")
             .Handled(h: x) :> hv(-1, "")
             .Template(quasis: qs) :> hv(-1, "")
+            .HashRef(id: hr0) :> hv(-1, "")
             .Foreign(f: fb) :> hv(-1, "")
         }
     }

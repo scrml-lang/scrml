@@ -94,6 +94,7 @@ ${
             .Host(call: x) :> "Host"
             .Lambda(params: x) :> "Lambda"
             .SeqCall(op: x) :> "SeqCall"
+            .Refetch(req: rf0) :> "Refetch"
             .Validity(of: x) :> "Validity"
             .ServerCall(fn: x) :> "ServerCall"
             .Query(q: x) :> "Query"
