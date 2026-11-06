@@ -37,6 +37,8 @@ const DECLS = [
   "    type S:struct = { a: int, b: int }",
   "    let <pt:S=({ a: 0, b: 0 })/>",
   "    type L:enum = { NotFound(id: string), Timeout }",
+  "    type K:enum = { A, B }",
+  "    let <k:K=.A/>",
   // a value the typer proves only in part: `q * u(q - 1)` is an unproven branch beside
   // the proven `return 1`, so a call of u is `Partial([int])`
   "    function u(q: int) { if (q <= 1) return 1; return q * u(q - 1); }",
@@ -64,6 +66,8 @@ const RED = {
   "iv `&&` on a Partial int": [`    function h() { @ok = (@ok ? 1 : u(1)) && @ok; }`, "", ["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]],
   "iv `&&` on a Partial call": [`    function h() { @ok = u(1) && @ok; }`, "", ["E-OPERATOR-OPERAND-TYPE"]],
   "iv `+` Partial mixing int and string": [`    function h() { @msg = "" + (@ok ? (@ok ? 1 : "s") : u(1)); }`, "", ["E-OPERATOR-OPERAND-TYPE"]],
+  // a `match` whose arms are `string` and an `int` proven in part do not unify (§18.4 rule 3)
+  "F2 match arms: string beside a Partial int": [`    function h() { const v = match @k { .A :> "s", .B :> u(1) }; @n = 1; }`, "", ["E-TYPE-001"]],
   // F3 — one diagnostic, no cascade
   "F3 bare block-arm tail": [GI + `    function h() { @n = gi(-1) !{ .NotFound(id) :> 0, .Timeout :> { const z = "q"; z; } }; }`, "", ["E-ARM-TAIL-VALUE"]],
 };

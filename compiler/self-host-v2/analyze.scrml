@@ -24652,9 +24652,13 @@ ${
     // itself a choice (a ternary, §17.6 union) is judged the same way (s473 r1
     // LOW-1): `int | string` beside `int` unifies (the choice holds it);
     // `int | string` beside `bool` does not.
+    // s475 (s475-boot-partial-followups): a `Partial` arm (or join) counts by its
+    // PROVEN members, as a choice does — `"s"` beside an arm proven `int` in part
+    // does not unify; the unproven branch is not judged
     fn armsConflict(a: VType, b: VType, j: VType) -> boolean {
-        const n: int = oneOfMembers(j).length
-        if (n == 0) return false
+        let n: int = oneOfMembers(j).length
+        if (isPartialVT(j)) n = partialMembers(j).length
+        if (n < 2) return false
         return n > vtWidth(a) && n > vtWidth(b)
     }
 
@@ -24666,7 +24670,7 @@ ${
             .Absent :> 0
             .Unknown :> 0
             .OneOf(ts: xs) :> xs.length
-            .Partial(ts: xs) :> 0
+            .Partial(ts: xs) :> xs.length
         }
     }
 
@@ -24674,6 +24678,8 @@ ${
     fn vtTypesName(v: VType) -> string {
         const xs: Type[] = oneOfMembers(v)
         if (xs.length > 0) return oneOfName(xs)
+        const ps: Type[] = partialMembers(v)
+        if (ps.length > 0) return oneOfName(ps) + " (where its type is proven)"
         return "`" + vtName(v) + "`"
     }
 
