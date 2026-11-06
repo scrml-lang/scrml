@@ -6831,9 +6831,36 @@ ${
         }
         const ud: DeclSrc | not = visibleDecl(env, name)
         if (ud is given) {
+            // s475-boot-small-gaps2 (g-boot-file-scope-own-value-read-unbuilt-s475) — a declaration OUTSIDE
+            // `<program>` that has an own value (`let <count:int=7/>` at a file's top, the shape a library
+            // exports): the bootstrap builds its instance but not its own value, so `@count` read the
+            // instance and rendered "[object Object]" — silently (same file, `import { count }`, and
+            // `@m.count`). Refused, fail closed. INTERIM: the capable form is the declaration's own value
+            // built as its instance's value (§66.2.2 (i), §66.3), read here.
+            const ud0: ADecl | not = ud.d
+            if (ud0 is given) {
+                if (!isNoValue(ud0.own)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` reads the own value of `<" + ud.info.sym.hint + ">`, declared outside `<program>` in `" + ud.file + "` — a file-scope declaration's own value is not built in the bootstrap (it would read the instance, not its value); declare the cell inside `<program>`, or read it through a function `" + ud.file + "` exports", st)
+            }
             const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
+        }
+        // s475 (g-boot-namespace-cell-read-s475) — `@m` with no nearer binding (above: a narrowing, the
+        // current declaration, a handle, a program cell, a visible declaration) and `m` a namespace import
+        // of this file: §21.3 rule 4 "A dotted head resolves by what its first name is bound to" — `@m.x`
+        // is the module member `x` (rule 2: "the same declaration a named import … would bind").
+        // Recorded (nsAt, at the `m` token after the `@`): analyzeSources re-reads the file with `m.x` one
+        // name there, so `@m.x` is resolved as `@x` after `import { x }` is (visibleDecl, the alias entry
+        // the linkage binds). This report stands only for `@m` with no member, or without the source.
+        const nh: NsHit = nsMember(env.g.te.link, env.file, name)
+        if (nh.ns != "") {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a cell or a declaration")
+            if (nm.code == "-") return plain(not, st)
+            if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
+        }
+        if (isNsBinding(env.g.te.link, env.file, name)) {
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1 }]), tport: st.tport }
+            return diagX(env, e, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; read one of its exported cells: `@" + name + ".name` (§21.3)", sr)
         }
         // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
         // "Read-side fire"), as the write side is (placeName). Was E-SCOPE-001
@@ -7327,7 +7354,10 @@ ${
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
-        const st: AS = resolveExprs(env, args, not, rc.st)
+        // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
+        // against its parameter's declared type — §18.5 reads an object in an argument "exactly as
+        // `f({ … })`", and §14.10 names "a function parameter type" as a position's type
+        const st: AS = resolveArgs(env, args, paramTypesOf(env, calledFn(env, nameFactIn(rc.st, callee.nid))), rc.st)
         const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
         if (cf is given) {
             const sp: AS = callPurity(env, e, cf, st)
@@ -7355,6 +7385,43 @@ ${
             return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only a declared scrml function is callable in the bootstrap — `" + exprName(callee) + "` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap"))
         }
         return plain(not, st)
+    }
+
+    // s475 (g-boot-object-literal-struct-context-positions-s475) — a declared
+    // parameter's type, as the position type of the argument passed to it. `ty`
+    // is `not` where the parameter has no annotation or its annotation does not
+    // resolve (that annotation's own report is the callee's, never repeated here).
+    type ParamWant:struct = { ty: Type | not }
+
+    fn paramTypesOf(env: Env, f: FnInfo | not) -> ParamWant[] {
+        if (f is not) return []
+        const fs: FnSrc | not = fnSrcOf(env.g, f.sym.id)
+        if (fs is not) return []
+        const te: TypeEnv = teAt(env.g.te, fs.info.file)
+        let out: ParamWant[] = []
+        for (const p of fs.f.params) {
+            let ty: Type | not = not
+            const at: AType | not = p.ty
+            if (at is given && !hasErrIn(fileErrs(env.g.files, fs.info.file), at.span)) {
+                const rt: RType = resolveType(te, at, emptyAS())
+                if (!rt.unresolved && rt.st.diags.length == 0) ty = rt.t
+            }
+            out = out.concat([{ ty: ty }])
+        }
+        return out
+    }
+
+    // Each argument against its parameter's type (a surplus or unannotated one: no position type).
+    fn resolveArgs(env: Env, args: AExpr[], ps: ParamWant[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const a of args) {
+            let want: Type | not = not
+            if (i < ps.length) want = ps[i].ty
+            st = resolveExpr(env, a, want, st).st
+            i = i + 1
+        }
+        return st
     }
 
     fn calledFn(env: Env, f: NameFact | not) -> FnInfo | not {
@@ -9064,6 +9131,21 @@ ${
         // declaration in scope are **`E-STATE-UNDECLARED`**" — not a "whole
         // instance" write. (The read side still reports E-SCOPE-001:
         // g-bootstrap-undeclared-cell-read-code-s473.)
+        // s475 (g-boot-namespace-cell-read-s475) — `@m` with `m` a namespace import (no nearer binding):
+        // recorded as resolveAtOf records a read, so `@m.x = …` is re-read with `m.x` one name.
+        if (!namesInstance(env, name) && isNsBinding(env.g.te.link, env.file, name)) {
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1 }]), tport: st.tport }
+            return noPlace(addDiag(sr, env.file, t.span, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; write one of its exported cells' fields: `@" + name + ".name.field = …` (§21.3)"))
+        }
+        // s475 (g-boot-namespace-cell-read-s475) — a whole-value write of an own value declared in ANOTHER
+        // file (`@m.count = v` through a namespace, or `@count = v` after `import { count }`). INTERIM:
+        // §66.14 ⚑ O2 / O39 — whether module `export` makes a declaration's own value writable from other
+        // files "is not ruled"; "§66.19 routes every cross-file write of an own value through a function
+        // exported from the defining file". Capable form: the write, once O2 / O39 rules it writable.
+        const xd: DeclSrc | not = visibleDecl(env, name)
+        if (xd is given && xd.file != env.file && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
+            return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` writes the own value of `" + xd.info.sym.hint + "`, declared in `" + xd.file + "`, from another file — whether a module `export` makes an own value writable from other files is not ruled (§66.14, ⚑ O2 / O39), so the bootstrap refuses it; write it through a function `" + xd.file + "` exports (§66.19)"))
+        }
         if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + "` is written here, but it is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
     }
@@ -12592,7 +12674,7 @@ ${
                 .Guard(arms: x) :> rs0.x.ty
                 .MatchOn(arms: x) :> not
             }
-            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, noSuccessUse(env, e, h, sc, stmt, rs0.st)))
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(sc, expected, !isMatchHow(hm)), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
         }
         // s469 — the §18 plain-value `match`: a subject that is not a failable result
         const pma: AArm[] | not = matchArmsOf(h.how)
@@ -12616,8 +12698,39 @@ ${
         const how: AHow = h.how
         return match how {
             .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
-            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, st))
-            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, st))
+            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(f, expected, true), st))
+            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(f, expected, false), st))
+        }
+    }
+
+    // s475 (g-boot-object-literal-struct-context-positions-s475) — the type a value
+    // arm of a handler on a call is resolved against (an object literal arm takes its
+    // struct from it). s475 r1 (#1767 review F1): the POSITION's type wins — the arm's
+    // value is what lands there (§14.10: an object literal's struct is its position's);
+    // the callee's declared success type (§19.4.3 "a value of the call's success type")
+    // is the fallback only where the position has none. Preferring the callee's type
+    // built an arm as the callee's struct, and that value then landed in the position
+    // unchecked (g-boot-handled-call-result-landing-unchecked-s473) — `const r: int =
+    // match srv() { … :> { a: 1, b: 2 } … }` compiled.
+    // INTERIM (capable form: the landing check of g-boot-handled-call-result-landing-unchecked-s473,
+    // then a `!{}` arm takes the position's type here too): a `!{}` — whose value on success
+    // IS the call's success value — in a position of a DIFFERENT type gives its arms no
+    // struct context, so an object arm is refused (E-TYPE-STRUCT-CONTEXT) as before s475;
+    // taking the position's type would accept the arm and land the mismatched success
+    // value unchecked (`-> R` returning `srv() !{ .Transport(t) :> { a: 0, c: 0 } }`, srv -> S).
+    fn armWant(f: FnInfo | not, expected: Type | not, guard: boolean) -> Type | not {
+        let r: Type | not = not
+        if (f is given) r = f.ret
+        if (expected is not) return r
+        if (guard && r is given && !sameType(r, expected)) return not
+        return expected
+    }
+
+    fn isMatchHow(h: AHow) -> boolean {
+        return match h {
+            .MatchOn(arms: x) :> true
+            .Guard(arms: x) :> false
+            .Propagate :> false
         }
     }
 
@@ -12749,7 +12862,7 @@ ${
 
 
     // `!{ arms }` / `match subject { arms }`.
-    fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
+    fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         if (!failable) {
             if (isMatch) st = plainMatchBinderDiags(env, arms, st)
@@ -12759,7 +12872,7 @@ ${
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
         if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(err))
-        const ra: RArms = resolveArms(env, subj, arms, err, not, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, err, not, isMatch, stmt, want, st)
         st = ra.st
         for (const d of coverDiags(env, e, subj, err, isMatch, ra, -1, err.hint)) { st = withDiag(st, d) }
         return handledFact(env, e, err, stmt, not, [], not, st)
@@ -13170,7 +13283,7 @@ ${
             }
             parms = parms.concat([{ nid: a.nid, inner: inner }])
             if (stmt) {
-                st = resolveArmBody(ra.env, a, a.body, { stmt: true, subj: subj, isMatch: true, what: "" }, st)
+                st = resolveArmBody(ra.env, a, a.body, { stmt: true, subj: subj, isMatch: true, what: "", want: not }, st)
             } else {
                 const rv: RX = plainArmValue(ra.env, a, want, st)
                 st = rv.st
@@ -13239,7 +13352,7 @@ ${
     // covers nothing the wildcard could have missed.
     type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean, absorb: boolean, absorbSpan: ASpan | not, okBefore: boolean, coveredBefore: int[], armErr: boolean }
 
-    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, own: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
+    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, own: Sym | not, isMatch: boolean, stmt: boolean, want: Type | not, st0: AS) -> RArms {
         let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let covered: int[] = []
@@ -13253,7 +13366,7 @@ ${
         let coveredBefore: int[] = []   // s475: `covered`, counting only the arms before the first wildcard
         let armErr = false        // s475: an arm up to and including the first wildcard drew an Error
         for (const a of arms) {
-            const ra: RArm = resolveArm(env, a, err, own, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
+            const ra: RArm = resolveArm(env, a, err, own, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat, want: want }, st)
             st = ra.st
             const d0: int = st.diags.length     // s475 r1: past the arm's body — only this arm-position check's diagnostics
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
@@ -13498,7 +13611,7 @@ ${
     // a client call is `f`'s declared variants plus `Transport(t:
     // ServerCallError)` (FnInfo.rerr — E's variants first, so an arm resolved
     // against it reads the same in E); of a server→server call, `f`'s own.
-    fn remoteHandled(env: Env, e: AExpr, h: AHandled, subj: AExpr, f: FnInfo, site: SiteK, stmt: boolean, st0: AS) -> AS {
+    fn remoteHandled(env: Env, e: AExpr, h: AHandled, subj: AExpr, f: FnInfo, site: SiteK, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         const rset: Sym | not = f.rerr
         const how: AHow = h.how
@@ -13508,8 +13621,8 @@ ${
             st = bySite(env, site, conflictDiags(env, f, e), [], st)
             return match how {
                 .Propagate :> propagate(env, e, subj, f.failable, f.err, stmt, st)
-                .Guard(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, false, stmt, st)
-                .MatchOn(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, true, stmt, st)
+                .Guard(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, false, stmt, want, st)
+                .MatchOn(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, true, stmt, want, st)
             }
         }
         // Ue2 (a handled form nested in a larger expression): on a client call the
@@ -13519,8 +13632,8 @@ ${
         const nE: int = localCount(env, f)
         return match how {
             .Propagate :> remotePropagate(env, e, subj, f, rset, nE, site, stmt, st)
-            .Guard(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, false, site, stmt, st)
-            .MatchOn(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, true, site, stmt, st)
+            .Guard(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, false, site, stmt, want, st)
+            .MatchOn(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, true, site, stmt, want, st)
         }
     }
 
@@ -13595,10 +13708,10 @@ ${
     // callee is declared `!`, only the `.Transport` arm is dead; it SHALL be
     // reported as dead handling in the manner of E-ERROR-013 (the message names
     // the callee and says the call is server→server)").
-    fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, st0: AS) -> AS {
+    fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, want: Type | not, st0: AS) -> AS {
         let st: AS = st0
         if (isMatch && variantIndex(env.g.types, rset, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(rset))
-        const ra: RArms = resolveArms(env, subj, arms, rset, f.err, isMatch, stmt, st)
+        const ra: RArms = resolveArms(env, subj, arms, rset, f.err, isMatch, stmt, want, st)
         st = ra.st
         const remote: Diag[] = coverDiags(env, e, subj, rset, isMatch, ra, -1, setLabel(env, f, rset)).concat(conflictDiags(env, f, e))
         let local: Diag[] = []
@@ -13897,7 +14010,10 @@ ${
     // s452 — what an arm's body is judged against: `stmt` — the form is a
     // statement (its result is not read); otherwise it stands in a VALUE
     // position `what` (§19.4.3 ruling 1a), and every arm yields a value or leaves.
-    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string }
+    // s475 (g-boot-object-literal-struct-context-positions-s475): `want` — the type a
+    // value arm yields (§19.4.3: "a value of the call's success type"), the position
+    // type its value is resolved against (an object literal takes its struct from it)
+    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string, want: Type | not }
 
     // An arm's body. As a statement's arm, an expression is a statement (a
     // write, a call) and an arm MAY fall through. In a value position (§19.4.3
@@ -13926,7 +14042,7 @@ ${
     // function that yields nothing falls through.
     fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
         if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
-        const st: AS = resolveExpr(withStmtCall(withWholeAt(env, x.nid, "the value of an enclosing arm"), x.nid), x, not, st0).st
+        const st: AS = resolveExpr(withStmtCall(withWholeAt(env, x.nid, "the value of an enclosing arm"), x.nid), x, cx.want, st0).st
         return pendNoValue(env, a, cx, x, st)
     }
 
@@ -14444,7 +14560,17 @@ ${
         // anywhere else a `return` operand is a value position
         let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
-        return resolveExpr(renv, e, not, st).st
+        // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
+        // type is the enclosing function's declared return type — §18.5 reads an object
+        // there "exactly as `return { … }`", and §14.10 names "a function return type"
+        return resolveExpr(renv, e, enclosingRet(env), st).st
+    }
+
+    fn enclosingRet(env: Env) -> Type | not {
+        if (env.fx.fnSym < 0) return not
+        const fs: FnSrc | not = fnSrcOf(env.g, env.fx.fnSym)
+        if (fs is not) return not
+        return fs.info.ret
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
@@ -17142,20 +17268,47 @@ ${
     //   inSel  a `<select>` is open in (default) scope: an `<input>` or a
     //          `<select>` start tag there closes it (HTML §13.2.6.4.7, the
     //          customizable-`<select>` "in body" rules), an `<hr>` directly in
-    //          an `<option>` / `<optgroup>` closes them;
+    //          an `<option>` / `<optgroup>` closes them, and so does an
+    //          `<optgroup>` directly in an `<optgroup>` (s475-boot-optgroup-narrow);
     //   root   the node list is a template's ROOT (its first element decides
     //          the "in template" mode, HTML §13.2.6.4.18);
     //   tmode  the template's root mode is a table mode, so outside a cell or a
     //          caption a `<table>` start tag is dropped (HTML §13.2.6.4.9 "in
     //          table": no table in table scope). Measured in Chromium 152.
+    //   selT   (s475-boot-optgroup-narrow r1) NOT a parse fact: this template is
+    //          PLACED inside a `<select>` — an arm / row / use's renders / slot
+    //          content inserted (by DOM calls) under one. "" = it is not; else the
+    //          tag of the element its root nodes are inserted into. It crosses
+    //          template boundaries the way `ns` does, and a scope boundary inside
+    //          the template ends it, as it ends `inSel`. It feeds ONE content-model
+    //          rule (E-HTML-OPTGROUP-NESTED: an `<optgroup>` directly inside an
+    //          `<optgroup>` of a `<select>` holds options the `<select>` does not
+    //          list) and nothing else — the `inSel` rules are the parser's, and the
+    //          parser never sees across a template boundary. INTERIM: the capable
+    //          form is a general content-model check across composition (every
+    //          template judged in the element it is inserted into).
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
                          inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string,
-                         inSel: boolean, root: boolean, tmode: boolean }
+                         inSel: boolean, root: boolean, tmode: boolean, selT: string }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
+        return mkRootAt(ns, depth, "")
+    }
+
+    // A template's root context, placed at `place` (`mkPlaceOf` of where it is inserted).
+    fn mkRootAt(ns: string, depth: int, place: string) -> MkCx {
         return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "",
-                 inSel: false, root: true, tmode: false }
+                 inSel: false, root: true, tmode: false, selT: place }
+    }
+
+    // Where a template inserted at context `c` is placed: "" when no `<select>` holds that point
+    // (in this template, or in the one this template is placed in); else the element it goes into.
+    fn mkPlaceOf(c: MkCx) -> string {
+        if (!c.inSel && c.selT == "") return ""
+        if (c.parent != "") return c.parent
+        if (c.selT != "") return c.selT
+        return "select"
     }
 
     fn markupParseDiags(g: Globals, st0: AS) -> AS {
@@ -17239,7 +17392,7 @@ ${
                         out = out.concat(mkRepairFault(file, e, rootTableMsg(e.tag, mode)))
                     }
                     cn = { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-" }
+                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT }
                 }
             } else if (mode == "col") {
                 const tx: string | not = mkTextOf(k)
@@ -17318,7 +17471,7 @@ ${
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
             .Css(c: x) :> []
-            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRoot(c.ns, c.depth))
+            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
         }
     }
 
@@ -17356,9 +17509,9 @@ ${
         if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
         // an `if=` / `else-if=` / `else` element is its arm's own template
         let c: MkCx = c0
-        if (isArmElem(e)) c = mkRoot(c0.ns, c0.depth)
+        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
         if (e.star) return mkStar(g, sa, file, e, c)
-        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRoot(c.ns, c.depth))
+        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
         if (d is given) return mkUse(g, sa, file, e, d, c)
@@ -17413,7 +17566,7 @@ ${
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
                      inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "",
-                     inSel: c.inSel && !bound, root: false, tmode: c.tmode }
+                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -17428,7 +17581,8 @@ ${
                  // s475: a `<select>` is in scope until a scope boundary; a cell / caption parses its content "in body"
                  inSel: t == "select" || (c.inSel && !bound),
                  root: false,
-                 tmode: c.tmode && t != "td" && t != "th" && t != "caption" }
+                 tmode: c.tmode && t != "td" && t != "th" && t != "caption",
+                 selT: bound ? "" : c.selT }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
@@ -17456,10 +17610,39 @@ ${
         if (t == "button" && c.inButton) return mkRepairFault(file, e, "a `<button>` inside a `<button>` closes the outer one (HTML §13.2.6.4.7): buttons do not nest")
         if (t == "nobr" && c.inNobr) return mkRepairFault(file, e, "a `<nobr>` inside a `<nobr>` closes the outer one (HTML §13.2.6.4.7)")
         if (t == "option" && c.parent == "option") return mkRepairFault(file, e, "an `<option>` directly inside an `<option>` closes it (HTML §13.2.6.4.7): options do not nest")
-        if (t == "optgroup" && (c.parent == "option" || c.parent == "optgroup")) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` / `<optgroup>` closes it (HTML §13.2.6.4.7)")
+        // s475-boot-optgroup-narrow: an `<optgroup>` start tag pops an open `<option>` always, but closes
+        // an open `<optgroup>` only with a `<select>` in scope ("generate implied end tags"); with none,
+        // `<optgroup><optgroup>` is built as written (HTML §13.2.6.4.7; measured Chromium 152).
+        if (t == "optgroup" && c.parent == "option") return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` closes the `<option>` (HTML §13.2.6.4.7): it becomes the `<option>`'s next sibling — write it after the `<option>`")
+        if (t == "optgroup" && c.parent == "optgroup" && c.inSel) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<optgroup>` of a `<select>` closes the outer one (HTML §13.2.6.4.7, the `<select>` rules): option groups do not nest in a `<select>` — write it after the outer `<optgroup>`")
         if ((t == "rt" || t == "rp") && ["rb", "rp", "rt"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
         if ((t == "rb" || t == "rtc") && ["rb", "rp", "rt", "rtc"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
+        // s475-boot-optgroup-narrow r1 (review F2): with a `<select>` in scope, an `<optgroup>` / `<hr>`
+        // start tag first "generates implied end tags" (pops every open dd dt li optgroup option p rb rp rt
+        // rtc that is the current node, in a chain), and an `<option>` does the same except for optgroup
+        // (HTML §13.2.6.4.7). So the parent decides: one pop already moves the element out of it. Measured
+        // Chromium 152: `<select><optgroup><li><optgroup>` → select(optgroup(li), optgroup),
+        // `<select><p><option>` → select(p, option, p); `<select><optgroup><div><optgroup>` is kept.
+        if (c.inSel && (t == "optgroup" || t == "hr") && impliedEndTag(c.parent)) return mkRepairFault(file, e, impliedEndMsg(tg, c.parent))
+        if (c.inSel && t == "option" && c.parent != "optgroup" && impliedEndTag(c.parent)) return mkRepairFault(file, e, impliedEndMsg(tg, c.parent))
+        // s475-boot-optgroup-narrow r1 (review F1) — a CONTENT-MODEL rule, not a parser repair: the
+        // template is placed inside a `<select>` (selT), so the DOM is select > … optgroup > optgroup, built
+        // as written, and the inner group's options are not in the `<select>`'s option list (Chromium 152:
+        // `select.options` skips them; `select.value` cannot be set to one). INTERIM (see MkCx `selT`).
+        if (t == "optgroup" && !c.inSel && c.selT != "" && (c.parent == "optgroup" || (c.parent == "" && c.selT == "optgroup"))) {
+            return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-OPTGROUP-NESTED",
+                      msg: "an `<optgroup>` directly inside an `<optgroup>`, placed inside a `<select>` (by an `if=` arm, an `<each>` / `for … lift` row, a component's renders or a `<slot/>`): option groups do not nest in a `<select>` — the inner group's options are not in the `<select>`'s option list, so they cannot be chosen (SPEC §24.5) — write the inner `<optgroup>` after the outer one" }]
+        }
         return []
+    }
+
+    // HTML §13.2.6.4.7 "generate implied end tags": the elements it pops.
+    fn impliedEndTag(t: string) -> boolean {
+        return ["dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"].indexOf(t) >= 0
+    }
+
+    fn impliedEndMsg(tg: string, parent: string) -> string {
+        return tg + " directly inside `<" + parent + ">` with a `<select>` open closes the `<" + parent + ">` first (HTML §13.2.6.4.7, the `<select>` rules \"generate implied end tags\"): it is built after it, not inside — write it after the `<" + parent + ">`"
     }
 
     fn tableHint(mode: string, t: string) -> string {
@@ -17476,20 +17659,29 @@ ${
     // reported here, at the use.
     fn mkUse(g: Globals, sa: AS, file: string, e: AElem, d: DeclSrc, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
-        if (isForeignNs(c.ns) && c.depth < 16) out = mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, "`<" + e.tag + ">` is used")
+        if (mkPlacedApart(c) && c.depth < 16) out = mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, "`<" + e.tag + ">` is used")
         if (e.kids.length > 0 && c.depth < 16) {
-            out = out.concat(mkNodes(g, sa, file, e.kids, mkRoot(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1)))
+            out = out.concat(mkNodes(g, sa, file, e.kids, mkRootAt(mkSlotNs(g, d, c.ns, c.depth + 1), c.depth + 1, mkSlotPlace(g, d, c, c.depth + 1))))
         }
         return out
     }
 
+    // A template inserted here is judged in this context, not only alone: a FOREIGN context (the parser
+    // builds it there), or (s475-boot-optgroup-narrow r1) a point inside a `<select>` (the content-model
+    // rule E-HTML-OPTGROUP-NESTED).
+    fn mkPlacedApart(c: MkCx) -> boolean {
+        return isForeignNs(c.ns) || mkPlaceOf(c) != ""
+    }
+
     // The faults `nodes` (from `dfile`) have as their OWN template in the use's
-    // FOREIGN context and not alone (walked in HTML, where they are judged at
-    // their own site), reported at the use `e`.
+    // FOREIGN / `<select>` context and not alone (walked in HTML, where they are
+    // judged at their own site), reported at the use `e`.
     fn mkAtUse(g: Globals, sa: AS, file: string, e: AElem, dfile: string, nodes: ANode[], c: MkCx, what: string) -> MkFault[] {
-        const inner: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(c.ns, c.depth + 1))
+        const inner: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRootAt(c.ns, c.depth + 1, mkPlaceOf(c)))
         const alone: MkFault[] = mkNodes(g, sa, dfile, nodes, mkRoot(htmlNs(), c.depth + 1))
-        return mkRelabel(file, e, inner, alone, what + " inside " + nsWords(c.ns) + ", where its renders do not hold: ")
+        let where: string = "a `<select>`"
+        if (isForeignNs(c.ns)) where = nsWords(c.ns)
+        return mkRelabel(file, e, inner, alone, what + " inside " + where + ", where its renders do not hold: ")
     }
 
     fn mkRelabel(file: string, e: AElem, inner: MkFault[], alone: MkFault[], head: string) -> MkFault[] {
@@ -17535,14 +17727,14 @@ ${
     }
 
     fn mkStarShared(g: Globals, sa: AS, file: string, e: AElem, s: Sym, c: MkCx, w: string) -> MkFault[] {
-        if (!isForeignNs(c.ns)) return []
+        if (!mkPlacedApart(c)) return []
         const d: DeclSrc | not = findDeclSrc(g, s)
         if (d is not) return []
         return mkAtUse(g, sa, file, e, d.file, rendersNodes(d), c, w)
     }
 
     fn mkStarArms(g: Globals, sa: AS, file: string, e: AElem, v: StateView, c: MkCx, w: string) -> MkFault[] {
-        if (!isForeignNs(c.ns)) return []
+        if (!mkPlacedApart(c)) return []
         let out: MkFault[] = []
         for (const a of v.arms) { out = out.concat(mkAtUse(g, sa, file, e, file, a.body, c, w)) }
         return out
@@ -17551,7 +17743,7 @@ ${
     // `c` one level deeper (the inlined markup stands where the `<*x/>` does).
     fn mkKidOf(c: MkCx) -> MkCx {
         return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode }
+                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT }
     }
 
     fn nsWords(ns: string) -> string {
@@ -17587,6 +17779,45 @@ ${
             if (s != "") return s
         }
         return ""
+    }
+
+    // s475-boot-optgroup-narrow r1: where `d`'s `<slot/>` is placed (`mkPlaceOf` there, "" when no `<select>`
+    // holds it) when `d` is used at context `c` — the slot content's `selT`.
+    fn mkSlotPlace(g: Globals, d: DeclSrc, c: MkCx, depth: int) -> string {
+        const s: string = mkSlotPlIn(g, d.file, rendersNodes(d), mkRootAt(c.ns, depth, mkPlaceOf(c)), depth)
+        if (s == "?") return ""
+        return s
+    }
+
+    // "?" = no `<slot/>` in `nodes`.
+    fn mkSlotPlIn(g: Globals, file: string, nodes: ANode[], c: MkCx, depth: int) -> string {
+        if (depth > 16) return "?"
+        for (const n of nodes) {
+            const k: ANodeK = n.k
+            const s: string = match k {
+                .Elem(e: e) :> mkSlotPlElem(g, file, e, c, depth)
+                .Text(text: t) :> "?"
+                .Interp(e: x) :> "?"
+                .DeclNode(d: x) :> "?"
+                .Effect(w: x) :> "?"
+                .Css(c: x) :> "?"
+                .Gather(f: lf) :> mkSlotPlIn(g, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
+            }
+            if (s != "?") return s
+        }
+        return "?"
+    }
+
+    fn mkSlotPlElem(g: Globals, file: string, e: AElem, c0: MkCx, depth: int) -> string {
+        if (e.star) return "?"
+        let c: MkCx = c0
+        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
+        if (e.tag == "slot") return mkPlaceOf(c)
+        if (e.tag == "each") return mkSlotPlIn(g, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
+        const d: DeclSrc | not = declNamed(g, file, e.tag)
+        if (d is given) return mkSlotPlIn(g, file, e.kids, mkRootAt(c.ns, c.depth, mkSlotPlace(g, d, c, depth + 1)), depth + 1)
+        if (!isKnownElementName(e.tag)) return mkSlotPlIn(g, file, e.kids, c, depth)
+        return mkSlotPlIn(g, file, e.kids, mkKid(c.ns, e.tag.toLowerCase(), mkQuoted(e.attrs, "encoding"), c), depth)
     }
 
     fn mkSlotElem(g: Globals, file: string, e: AElem, ns: string, depth: int) -> string {
@@ -28822,7 +29053,9 @@ ${
                     const nm: string = "`" + sum.nodes[j].f.name + "`"
                     if (remote.indexOf(nm) < 0) remote = remote.concat([nm])
                 } else if (dr[j]) {
-                    if (browser == "") browser = "a call of `" + sum.nodes[j].label + "`, which uses the browser"
+                    // s475 (g-boot-tx-fail-after-commit-precision-s475 (c)): every reader appends what the browser
+                    // work means ("…, which needs the browser") — was "…, which uses the browser" here too, doubled
+                    if (browser == "") browser = "a call of `" + sum.nodes[j].label + "`"
                 } else if (tq.remote[j] > 0) {
                     if (via == "") via = sum.nodes[j].label
                 } else if (pk == PlaceK.Client) {
@@ -29453,7 +29686,7 @@ ${
             const one: CFold = cfStmt(s, cf0())
             const cw: CellWrite | not = plainCellWrite(sum, tq, places, dr, f, s)
             if (cpIsDefer(s)) return composeRefuse(st, file, s.span, name, why, "this `defer` would run when the server batch ends, not when '" + name + "' returns (§19.16). Move it before the first server call")
-            if (x.browser != "") return composeRefuse(st, file, s.span, name, why, "this statement, after the last server call, uses " + x.browser + " and reads a value the batch computes: it stays in the browser, and the value would come back with the batch's result (§19.9.9.8 rule 3). Return the value from '" + name + "' and use it in the browser where it is called")
+            if (x.browser != "") return composeRefuse(st, file, s.span, name, why, "this statement, after the last server call, uses " + x.browser + ", which needs the browser, and reads a value the batch computes: it stays in the browser, and the value would come back with the batch's result (§19.9.9.8 rule 3). Return the value from '" + name + "' and use it in the browser where it is called")
             if (one.effects) return composeRefuse(st, file, s.span, name, why, "this statement holds an effect, which belongs to the page. Move it out of the function")
             if (x.via != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.via + "`, a client function that makes a server call: composed, it would run in place in the batch (§19.9.9.8 rule 1). Call the server function from '" + name + "' directly")
             if (x.client != "") return composeRefuse(st, file, s.span, name, why, "this statement calls `" + x.client + "`, which reads or writes client state: composed, it would run in the server batch with its cells marshalled into the request and written back with the result (§6.6.9, §19.9.9.8 rule 1). Move the call before the first server call or after the last one")
@@ -29791,7 +30024,10 @@ ${
                 let why: string = blocked
                 if (why == "") why = reason0
                 if (why == "") why = "a statement before it cannot join the batch"
-                out = out.concat([lateDiag(g, fs, calls, ss[k].span, why)])
+                // s475 (g-boot-tx-fail-after-commit-precision-s475 (b)): one report at each `fail` / `?` of the
+                // statement (CFold.exitAt: a `fail` statement's span, a `?`'s expression), as the path walk
+                // reports an exit beside the call (lateHits) — was one report at the whole statement
+                for (const xa of fk.exitAt) { out = out.concat([lateDiag(g, fs, calls, xa, why)]) }
             }
             if (blocked == "" && fk.rets) blocked = "a `return` before it would end the batch with client work after it (the batch's exit flag is not built)"
             k = k + 1
@@ -34907,6 +35143,9 @@ ${
         for (const f of g.files) {
             if (f.path == file) {
                 for (const imp of importsOfItems(f.items)) {
+                    // s475 (g-boot-namespace-host-import-clash-s475): a namespace import binds its
+                    // own name too (§21.3 rule 1: `m` is a file-scope binding)
+                    if (imp.ns != "" && imp.ns == name) return "`import * as " + name + " from \"" + imp.from + "\"`"
                     for (const m of imp.names) {
                         if (m.name == name && m.orig != name) return "`import { " + m.orig + " as " + name + " } from \"" + imp.from + "\"`"   // s474: an alias
                         if (m.name == name) return "`import { " + name + " } from \"" + imp.from + "\"`"
