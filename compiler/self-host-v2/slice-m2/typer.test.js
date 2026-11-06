@@ -320,7 +320,10 @@ const BASE_66_19 = [
   // s451 (Ue): - two E-PARSE-EXPECTED, two E-PARSE-TRAILING — the theme's `match @mode { .Light :> …  .Dark :> … }`
   // tokens parse now (parse.scrml parseMatch); its theme refusal stands.
   // s473 D29: one `@x` read naming nothing in scope is E-STATE-UNDECLARED (was E-SCOPE-001).
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
+  // s475-boot-small-gaps2: + one E-BOOTSTRAP-UNSUPPORTED — `toggleMode`'s `@mode` read is the own value of a
+  // file-scope declaration (`export let <mode:Mode=.Light/>`, outside `<program>`), which the bootstrap does not
+  // build; it read the instance instead (g-boot-file-scope-own-value-read-unbuilt-s475), now refused by name.
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
   // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
   // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
   // s473 D29: both are `@x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).

@@ -11,26 +11,26 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 299 | 16.4% |
+| PASS | 302 | 16.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 242 | 13.2% |
+| FAIL | 239 | 13.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.5% |
 | UNSUPPORTED | 601 | 32.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 541; of those, 299 hold (55.3%). Runtime half executed on the bootstrap for 106 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 541; of those, 302 hold (55.8%). Runtime half executed on the bootstrap for 109 case(s).
 
-- **Vacuous** passes: 17 of 299 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **282**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 242; the other 167 are implemented checks that answered wrong.
+- **Vacuous** passes: 17 of 302 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **285**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 239; the other 164 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 601.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 182 · FAIL 206 · UNSUPPORTED 410. Twin holds 182 (non-vacuous 169). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 185 · FAIL 203 · UNSUPPORTED 410. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -108,7 +108,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 19 | · | 9 | · | 8 | · | · | · |
-| control-flow | 76 | 20 | · | 17 | · | 21 | 18 | · | · |
+| control-flow | 76 | 23 | · | 14 | · | 21 | 18 | · | · |
 | defer | 51 | 15 | · | 11 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 3 | 22 | · | · |
 
-### FAIL (242)
+### FAIL (239)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -354,17 +354,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `<li>${x}</>`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `control-flow/ctrl-013-braceless-for-of-head-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `<li>${x}</>`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"Admin"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"User"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `control-flow/ctrl-023-value-form-sugar-bound-position-pos` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `label`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"pos"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `label`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` (twin · parse-reject)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `else` (other statements at logic-block level are not in the bootstrap)
@@ -609,7 +598,7 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - E-PARSE-EXPECTED: expected `}`, found ``
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
 - `hostmethod/substring-match-typed` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-STRING-METHOD-UNKNOWN, E-TYPE-STRUCT-CONTEXT)
+  - runtime: no artifact — the compile reported an error (E-STRING-METHOD-UNKNOWN)
 - `lifecycle/cleanup-error-call-expression` (parse-reject; not in the bootstrap: E-LIFECYCLE-002)
   - missing E-LIFECYCLE-002
   - E-PARSE-EXPECTED: expected `}`, found `closeConnection`
@@ -1101,7 +1090,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (299)
+### PASS / CODES-ONLY (302)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1163,7 +1152,10 @@ none
 - `control-flow/ctrl-002-orphan-else-if-program-pos` — PASS
 - `control-flow/ctrl-003-extend-past-else-program-pos` — PASS (also emitted, unasserted: E-CTRL-001)
 - `control-flow/ctrl-005-else-and-if-same-element-program-pos` — PASS
+- `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — PASS · TWIN
 - `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — PASS · TWIN
+- `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — PASS · TWIN
+- `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-attr-expr-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-logic-block-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-match-neg` — PASS · TWIN

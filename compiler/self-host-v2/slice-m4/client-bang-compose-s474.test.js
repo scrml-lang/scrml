@@ -394,7 +394,9 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(w[0].message).toContain("move the check before the first server call");
     expect(() => compile(src)).toThrow("E-TX-FAIL-AFTER-COMMIT");
     expect(w[0].message).toContain("the `<host>` binding `title`");
-    expect(src.slice(w[0].span.start, w[0].span.end)).toContain("title()");
+    // s475-boot-small-gaps2 (g-boot-tx-fail-after-commit-precision-s475 (b)): at the `fail`, not the whole
+    // statement (was: the `if`, whose text holds `title()`)
+    expect(src.slice(w[0].span.start, w[0].span.end)).toBe("fail .Bad");
   });
 
   // the same treatment for ONE server call
