@@ -105,8 +105,13 @@ describe("F4 E-FN-007 is order-independent and names the types", () => {
       expect(ds[0].message).toContain("`string`");
     });
   }
-  test("one return of a choice is not a disagreement (unchanged)", () => {
-    expect(codes(P(`    fn f(c: bool) { if (c) { return c ? 1 : "s"; } return 1; }\n    function h() { @n = 1; }`))).toEqual([]);
+  test("one return of a choice is not a disagreement", () => {
+    expect(codes(P(`    fn f(c: bool) { return c ? 1 : "s"; }\n    function h() { @n = 1; }`))).toEqual([]);
+  });
+  // (#1782 review r1 F2, §48.8 literal: a choice `return` beside `return 1` is two
+  // different types — E-FN-007; was asserted silent here before r1)
+  test("a choice return beside one of its members disagrees (§48.8)", () => {
+    expect(codes(P(`    fn f(c: bool) { if (c) { return c ? 1 : "s"; } return 1; }\n    function h() { @n = 1; }`))).toEqual(["E-FN-007"]);
   });
 });
 

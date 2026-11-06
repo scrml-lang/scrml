@@ -16900,7 +16900,12 @@ ${
     // match itself across updates); one blamed on an earlier error is not
     // reported again (Rule C).
     fn typeLoopKey(env: TEnv, key: AExpr, ts0: TypeState) -> TypeState {
-        const rk: RVT = typeExpr(env, key, ts0)
+        return checkLoopKey(env, key, typeExpr(env, key, ts0), true)
+    }
+
+    // The key rule on a typed key. `closed`: an unproven key fails closed (the
+    // header form). The `<each key=…>` attribute form (§17.7) passes false.
+    fn checkLoopKey(env: TEnv, key: AExpr, rk: RVT, closed: boolean) -> TypeState {
         if (hasErrIn(env.errs, key.span) || condBlamed(env, key, rk.ts)) return rk.ts
         const t: Type | not = knownOf(rk.vt)
         if (t is given) {
@@ -16915,6 +16920,7 @@ ${
             if (kindOf(m) > 2) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one may be `" + typeName(m) + "` (one of its branches is; another is not proven). Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
         }
         if (isAbsentVT(rk.vt)) return report(rk.ts, env, key.span, "E-KEY-001", "a loop `key` is a string or a number — it names the row across updates, and this one is `not`. Key by a primitive field (`key x.id`) (§17.4b, §6.5.3)")
+        if (!closed) return rk.ts
         return report(rk.ts, env, key.span, "E-KEY-001", "the type of this loop `key` is not known — a `key` is a string or a number (it names the row across updates); key by a primitive field (`key x.id`) or annotate what it reads (§17.4b, §6.5.3)")
     }
 
@@ -23409,8 +23415,37 @@ ${
             if (kindOf(unMaybe(x)) == 0 && kindOf(unMaybe(y)) == 0) {
                 return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s — `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
             }
+            return ts
+        }
+        // s475 r1 (#1782 review F3): a choice or a `Partial` operand — each PROVEN
+        // member is the operand when its branch is taken (`u(3) / 4`, `u` proven
+        // `int` in part, ran 1.5 into an `int` cell). Provable where one side's
+        // proven members are ALL `int` and the other side has an `int` member:
+        // that branch is `int / int` whatever the other side's branch is.
+        // INTERIM: two mixed sides (`(@ok ? 6 : 1.5) / (@ok ? 4 : 2.5)`) may pair
+        // `int` with `number` on every taken branch — branch correlation is not
+        // tracked, so it stays silent (capable form: correlated branch types).
+        const xs: Type[] = memberTypes(a)
+        const ys: Type[] = memberTypes(b)
+        if ((allIntMembers(xs) && anyIntMember(ys)) || (allIntMembers(ys) && anyIntMember(xs))) {
+            return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s on a branch — an operand is one of several branches (a choice, or a value proven only in part) and each branch is the operand when it is taken; `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
         }
         return ts
+    }
+
+    fn allIntMembers(xs: Type[]) -> boolean {
+        if (xs.length == 0) return false
+        for (const t of xs) {
+            if (kindOf(unMaybe(t)) != 0) return false
+        }
+        return true
+    }
+
+    fn anyIntMember(xs: Type[]) -> boolean {
+        for (const t of xs) {
+            if (kindOf(unMaybe(t)) == 0) return true
+        }
+        return false
     }
 
     // An arithmetic / relational operand: a number.
@@ -23508,20 +23543,43 @@ ${
         return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and this is `" + typeName(x) + "` with `" + typeName(y) + "` — convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
     }
 
-    // s475 (#1777 review r1 F2) — an operand that is a choice or a `Partial`:
-    // each PROVEN member is the operand when its branch is taken, so a proven
-    // member of a different kind from a proven member of the other side is a
-    // provable cross-type comparison on that branch (§45 E-EQ-001). An unproven
-    // branch, and an operand with no proven member, stay provable-or-silent.
+    // s475 (#1777 review r1 F2; r1 of #1782 F1) — an operand that is a choice or
+    // a `Partial`: each PROVEN member is the operand when its branch is taken.
+    // §45.3 / S469 "same type only" is broken on a branch only where a proven
+    // member of one side has NO same-type partner among the other side's proven
+    // members — that member can only ever meet another type (`(@ok ? 1 : "s") == 1`:
+    // the `string` branch meets `int`). Two choices of the same members
+    // (`(@ok ? 1 : "a") == (@ok ? 2 : "b")`, `a == a`) may pair each branch with
+    // its own type, so they are not refused (the branches' correlation is not
+    // tracked: not provable — silent). An unproven branch, and an operand with no
+    // proven member, stay provable-or-silent.
     fn eqMembers(env: TEnv, e: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
-        for (const x0 of memberTypes(a)) {
-            for (const y0 of memberTypes(b)) {
-                const x: Type = unMaybe(x0)
-                const y: Type = unMaybe(y0)
-                if (!eqSameType(env, x, y)) return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and this may be `" + typeName(x) + "` with `" + typeName(y) + "` — an operand is one of several branches (a choice, or a value proven only in part), and each branch is the operand when it is taken; convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
-            }
-        }
+        const xs: Type[] = memberTypes(a)
+        const ys: Type[] = memberTypes(b)
+        if (xs.length == 0 || ys.length == 0) return ts
+        const lone: Type | not = eqLoneMember(env, xs, ys)
+        if (lone is given) return eqMemberReport(env, e, lone, ys, ts)
+        const lone2: Type | not = eqLoneMember(env, ys, xs)
+        if (lone2 is given) return eqMemberReport(env, e, lone2, xs, ts)
         return ts
+    }
+
+    // A member of `xs` with no `eqSameType` partner in `ys`, if any.
+    fn eqLoneMember(env: TEnv, xs: Type[], ys: Type[]) -> Type | not {
+        for (const x0 of xs) {
+            let partner = false
+            for (const y0 of ys) {
+                if (eqSameType(env, unMaybe(x0), unMaybe(y0))) partner = true
+            }
+            if (!partner) return unMaybe(x0)
+        }
+        return not
+    }
+
+    fn eqMemberReport(env: TEnv, e: AExpr, x: Type, others: Type[], ts: TypeState) -> TypeState {
+        let names: string[] = []
+        for (const o of others) { names = names.concat(["`" + typeName(unMaybe(o)) + "`"]) }
+        return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and one side may be `" + typeName(x) + "` where the other is only ever " + names.join(" or ") + " — an operand is one of several branches (a choice, or a value proven only in part), and each branch is the operand when it is taken; convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
     }
 
     // RULED (user-voice S469, bryan: "Ratify: same type only (Rec)"): `==` / `!=`
@@ -23838,7 +23896,7 @@ ${
             ts = condOperand(env, arm, opName, armWhat(what), ts)
             // not a second report of an arm the operand rule already judged (checkBoolOperand
             // walks the arms of a `&&` / `||` operand that did not resolve to one type)
-            if (whole && !reportedAt(env, ts, arm.span)) ts = checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
+            if (whole && !reportedAt(env, ts, arm.span, ["E-OPERATOR-OPERAND-TYPE", "E-OPERAND-NOT-NARROWED"])) ts = checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
         }
         // strict-direction only: an unresolved ternary operand none of whose
         // arms was reported is refused whole, as before
@@ -23846,10 +23904,12 @@ ${
         return condOperandUnresolved(env, x, opName, what, ts0)
     }
 
-    // s475 — a diagnostic of this file already stands at exactly `span`.
-    fn reportedAt(env: TEnv, ts: TypeState, span: ASpan) -> boolean {
+    // s475 — a diagnostic of this file, of one of `codes` (the family the caller
+    // would report), already stands at exactly `span`; another code there (an
+    // arity error on the arm, say) does not stand in for it.
+    fn reportedAt(env: TEnv, ts: TypeState, span: ASpan, codes: string[]) -> boolean {
         for (const d of ts.diags) {
-            if (d.file == env.file && d.span.start == span.start && d.span.end == span.end) return true
+            if (d.file == env.file && d.span.start == span.start && d.span.end == span.end && codes.indexOf(d.code) >= 0) return true
         }
         return false
     }
@@ -25834,7 +25894,18 @@ ${
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
         if (bind is given) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
-        if (keyA is given) ts = typeAttrValue(renv, keyA.value, ts).ts
+        if (keyA is given) {
+            // s475 r1 (#1782 review): the attribute key is the header key's rule
+            // (E-KEY-001, §17.4b / §6.5.3) — `key=@pt` (a struct) compiled and threw
+            // "duplicate key [object Object]" at run time. INTERIM: provable-only
+            // (an unproven attribute key stays silent, where the header form fails
+            // closed — capable form: fail closed once every row type is proven;
+            // `key=@.id` over an unproven row is common in the corpus).
+            const kx: AExpr | not = valueExpr(keyA.value)
+            if (kx is given) {
+                ts = checkLoopKey(renv, kx, typeExpr(renv, kx, ts), false)
+            }
+        }
         return typeNodes(renv, e.kids, ts)
     }
 
@@ -26270,13 +26341,16 @@ ${
                 acc = joinVT(acc, vt)
             }
         }
-        // s475 (#1777 review r1 F4): the returns DISAGREE when their join has two or
-        // more proven types (a choice's members, or a `Partial`'s) and no one `return`
-        // already carries them all — judged on the whole join, so the order of the
-        // `return`s does not matter (before, a `Partial` met mid-way hid the
-        // disagreement, or reported it with an empty list of types)
+        // s475 (#1777 review r1 F4; #1782 review r1 F2): §48.8 "If `return`
+        // statements produce different types, E-FN-007 fires" — the returns
+        // DISAGREE when their join has two or more proven types (a choice's
+        // members, or a `Partial`'s) and two `return`s' proven member sets differ.
+        // A `return` that is itself a choice (`return c ? 1 : "s"`) does not excuse
+        // a `return 1` beside it — §48.4.1's only way out is "an explicit union
+        // return type". Judged on the whole set of sites, so the order of the
+        // `return`s does not matter; a site with no proven member is not judged.
         const ms: Type[] = memberTypes(acc)
-        if (ms.length > 1 && af.pure && !oneSiteCarries(sites, ms)) {
+        if (ms.length > 1 && af.pure && sitesDiffer(sites)) {
             let names: string[] = []
             let bare: string[] = []
             for (const m of ms) {
@@ -26292,22 +26366,35 @@ ${
         return contribute(ts, retKey(s), acc)
     }
 
-    // s475 — one return site whose proven types are every one of `ms` (a `return`
-    // of a choice already, `return c ? 1 : "s"`, is that choice — not a disagreement).
-    fn oneSiteCarries(sites: VType[], ms: Type[]) -> boolean {
+    // s475 r1 (#1782 F2) — two return sites with proven members whose member
+    // sets differ (each a set under sameType).
+    fn sitesDiffer(sites: VType[]) -> boolean {
+        let first: Type[] = []
+        let have = false
         for (const v of sites) {
             const own: Type[] = memberTypes(v)
-            let all = true
-            for (const m of ms) {
-                let found = false
-                for (const o of own) {
-                    if (sameType(m, o)) found = true
+            if (own.length > 0) {
+                if (!have) {
+                    first = own
+                    have = true
+                } else if (!typesWithin(own, first) || !typesWithin(first, own)) {
+                    return true
                 }
-                if (!found) all = false
             }
-            if (all) return true
         }
         return false
+    }
+
+    // Every type of `xs` is (sameType) one of `ys`.
+    fn typesWithin(xs: Type[], ys: Type[]) -> boolean {
+        for (const x of xs) {
+            let found = false
+            for (const y of ys) {
+                if (sameType(x, y)) found = true
+            }
+            if (!found) return false
+        }
+        return true
     }
 
     // The settled-table key of a function's INFERRED return (inferReturn): a
