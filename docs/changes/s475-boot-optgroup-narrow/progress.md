@@ -13,3 +13,9 @@
 - 22:25 slice-m4/optgroup-narrow-s475.test.js: base 6 pass / 3 fail; head 9 pass.
 - known-gaps g-boot-parser-restructure-residue-s474 item 3 marked RESOLVED (the gap stays open for items 1, 2, 4, 5).
 - Map (.claude/maps/bootstrap.map.md) has no markupParseDiags anchor: not load-bearing; locus found by grep.
+- 2026-11-05 r1 (review of #1769) start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a956a7a7921068337 from 89395c52c, merged origin/main f4dcbc8e1 (docs only).
+- r1 F1: analyze.scrml MkCx gains `selT` ("placed inside a `<select>`", "" or the element the template's roots go into), carried by mkRootAt/mkPlaceOf across arm / each / lift / use renders (mkAtUse, now also for HTML contexts in a select) / slot (mkSlotPlace) / `<*x/>` shared+state arms; cleared by scope boundaries. Feeds only new code E-HTML-OPTGROUP-NESTED (content model; INTERIM). Note: a `placeOf` already exists in analyze.scrml (PlaceFact) — the helper is `mkPlaceOf`.
+- r1 F2: with inSel, `<optgroup>`/`<hr>` whose parent is in {dd dt li optgroup option p rb rp rt rtc}, and `<option>` (minus optgroup), refused E-HTML-PARSER-REPAIR. Chromium 152.0.7977.82 measured 24 shapes (scratch chrome.mjs): all as modelled.
+- r1 options-list probe (Chromium 152): DOM-built select>optgroup>optgroup>option → options.length excludes it, value unsettable; static select>optgroup>div>optgroup>option also excluded (kept by parser, compiles) → filed as item 6 of g-boot-parser-restructure-residue-s474.
+- r1 tests: optgroup-narrow-s475.test.js 18 red on 89395c52c, 40/40 green. slice-m4 4970 pass 0 fail; e2e-render-map 259 pass; types-gate OK; s34-census PASS; spec-coverage 0 violations; gen-bootstrap-severity --check exit 4 (answer-neutral: new code fail-closed Error == §34 Error; bot regen). Sweep (reviewer sweep.ts) 2228 files, 0 verdict changes vs base 16ffdaee8.
+- r1 hook: sharded run died on memory (shard 5, 3362 MB) → reran with SCRML_HOOK_SHARDS=1, passed.
