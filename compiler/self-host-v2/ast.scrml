@@ -199,7 +199,13 @@ ${
     // `deps=`, `cache` and refuses any other by name. `body` is the block's
     // statements as written (analyze classifies them: `lin`* then ONE assignment).
     // `opener`: the opener's span (the element's diagnostics point at it).
-    export type ARequest:struct = { nid: int, span: ASpan, attrs: AAttr[], body: ABlock, opener: ASpan }
+    // s475 (slice S4) — `pend`: -1 for a request the author wrote; else the nid
+    // of the PENDING CELL declaration this request is the compiler-written half
+    // of (§13.9.2: a pending cell "means exactly a plain cell initialized to
+    // `not`, plus a `<request>` … whose body is the declared initializer
+    // assigned to the cell"). The parser never builds one; analyze.scrml
+    // pendFiles does (it has no `id`, no signals and no reachable controls).
+    export type ARequest:struct = { nid: int, span: ASpan, attrs: AAttr[], body: ABlock, opener: ASpan, pend: int }
 
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)

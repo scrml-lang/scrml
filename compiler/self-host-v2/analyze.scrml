@@ -1457,7 +1457,10 @@ ${
         // (`where` 0, a typed attribute: refused where it is read, parse.scrml scanAttr — every attribute, fieldOf'd or not)
         if (where == 0) return ""
         if (where == 1) return "a lifecycle type on the child field `" + name + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3)" + fix
-        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer " + derivedHow(reads) + ", §66.9 rule 3), and a lifecycle type on a derived value is not in the bootstrap yet — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written; write `let` before the `<` for a writable cell, or `T | not` for the derived value"
+        // s475 (S4): PERMANENT — ruling S475 item 7 "A derived cell with a lifecycle type is refused,
+        // PERMANENT (a derived cell is never written; a lifecycle is a write contract)". The code stays
+        // E-BOOTSTRAP-UNSUPPORTED until §34 names one (owner/SPEC lane).
+        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer " + derivedHow(reads) + ", §66.9 rule 3), and a derived cell cannot carry a lifecycle type — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written (ruled S475). Write `let` before the `<` for a writable cell (a `(not to T)` cell whose initializer waits is then a pending cell, §13.9), or `T | not` for the derived value"
         if (bodyLen > 0) return "a lifecycle type on the declaration `" + name + "`, which has a body (child fields or state-children), is not in the bootstrap — it builds `(not to T)` only on a plain program cell (§14.12.3; an engine cell never carries one, §14.12.4)" + fix
         return ""
     }
@@ -3682,7 +3685,7 @@ ${
     // compile (boundaryOf: "persist" / "server" / "export", or "").
     fn fieldOf(te: TypeEnv, g: TypeInfo[], nid: int, span: ASpan, name: string, isLet: boolean, exported: boolean,
                aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int,
-               ix: InferCx, tab: OwnT[], bnd: string, st0: AS) -> RField {
+               ix: InferCx, tab: OwnT[], bnd: string, pend: boolean, st0: AS) -> RField {
         let st: AS = st0
         const rs: RSym = mint(reservedName(st, te.file, span, name), name)
         st = rs.st
@@ -3715,7 +3718,10 @@ ${
             if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
         // s469 review r2: through `| not` too — `let <xs:int[] | not=…/>` is `let` on a sequence
-        if (isLet && seqElem(unMaybe(ty)) is given) {
+        // s475 (slice S4): except a PENDING tape (ruling S475 item 1: "`let` is allowed on a `(not to
+        // S[…])` pending tape") — there `let` says only that its load re-runs when a cell it reads
+        // changes (a locked one with reads is derived); its writes are the lifecycle's (`life` below)
+        if (isLet && seqElem(unMaybe(ty)) is given && !pend) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
         }
         const rg: RGraph = graphOf(te, g, ty, body, st)
@@ -4256,7 +4262,7 @@ ${
         let st: AS = st0
         let out: FieldInfo[] = []
         for (const a of d.attrs) {
-            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, [], 0, ix, tab, "", st)
+            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, [], 0, ix, tab, "", false, st)
             out = out.concat([r.f])
             st = r.st
         }
@@ -4266,7 +4272,7 @@ ${
                 // inside N instances cannot be one instance.
                 st = addDiag(st, te.file, c.span, "E-COMPONENT-ENGINE-SCOPE", "`<" + c.name + " … single>` is a `single` declaration inside the multi-instance declaration `<" + d.name + ">` — every `<" + d.name + ">` instance would share one `" + c.name + "`. Drop `single`: an ordinary child field gives each `<" + d.name + ">` its own `" + c.name + "` (§66.13.4)")
             }
-            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, c.validators, 1, ix, tab, boundaryOf(c.exported, c.mods), st)
+            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, c.validators, 1, ix, tab, boundaryOf(c.exported, c.mods), false, st)
             out = out.concat([r2.f])
             st = r2.st
         }
@@ -4279,7 +4285,7 @@ ${
         // table, no surface-name check). `@count` reads it (resolveAtOf), a write in the defining file
         // writes it (placeAt, §66.14 rule 2); another file's write stays refused (⚑ O2 / O39).
         if (ownValued(te, d)) {
-            const r3: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, [], 3, ix, tab, boundaryOf(d.exported, d.mods), st)
+            const r3: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, [], 3, ix, tab, boundaryOf(d.exported, d.mods), false, st)
             out = out.concat([r3.f])
             st = r3.st
         }
@@ -4318,18 +4324,52 @@ ${
     fn programFields(te: TypeEnv, g: TypeInfo[], p: AProgram, ix: InferCx, tab: OwnT[], st0: AS) -> RFields {
         let st: AS = st0
         let out: FieldInfo[] = []
+        const pend: int[] = pendingDeclNids(p.items)
         for (const it of p.items) {
             for (const d of declsOfItem(it)) {
                 if (isNestedUserDecl(d)) {
                     // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
-                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, ix, tab, boundaryOf(d.exported, d.mods), st)
+                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, ix, tab, boundaryOf(d.exported, d.mods), pend.indexOf(d.nid) >= 0, st)
                     out = out.concat([r.f])
                     st = r.st
                 }
             }
         }
         return { fs: out, st: st }
+    }
+
+    // s475 (slice S4) — the pending cells of a program body: the declarations a compiler-written
+    // `<request>` loads (ARequest.pend; analyze.scrml pendFiles).
+    fn pendingDeclNids(items: AItem[]) -> int[] {
+        let out: int[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const n: ANode | not = match k {
+                .MarkupItem(n: n) :> n
+                .DeclItem(d: x) :> not
+                .ImportItem(i: x) :> not
+                .TypeItem(t: x) :> not
+                .FnItem(f: x) :> not
+                .ProgramItem(p: x) :> not
+                .ConstItem(c: x) :> not
+            }
+            if (n is given) {
+                const nk: ANodeK = n.k
+                const pd: int = match nk {
+                    .Request(r: r) :> r.pend
+                    .Elem(e: x) :> -1
+                    .Interp(e: x) :> -1
+                    .Text(text: x) :> -1
+                    .DeclNode(d: x) :> -1
+                    .Css(c: x) :> -1
+                    .Effect(w: x) :> -1
+                    .Gather(f: x) :> -1
+                }
+                if (pd >= 0) out = out.concat([pd])
+            }
+        }
+        return out
     }
 
     fn declsOfItem(it: AItem) -> ADecl[] {
@@ -10840,6 +10880,14 @@ ${
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
         }
+        // s475 (slice S4) — §13.9.2: "A reset of a pending cell (§6.8) is the request's re-run" and
+        // "The compiler SHALL NOT reset the cell by re-running the initializer outside the request".
+        // After the desugar the cell's initializer is `not`, so the plain reset would write `not` —
+        // neither. Refused by name, INTERIM: the capable form re-runs the hidden request through the
+        // program-level request route `<#id>.refetch()` uses (slice S3b, Core Expr.Refetch).
+        if (p.decl.sym.id == env.g.program.id && isPendingDecl(env.g, f.nid)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset(@" + f.sym.hint + ")`", f.sym.hint))
+        }
         // s475 (s475-boot-lifecycle-reads): a LOCKED `(not to T)` cell's write grant is its
         // lifecycle (fieldOf rides it on `replace`), and a reset writes the pre-state `not`
         // — not along `not → T` (§66.11.6). A `let` cell's own `replace` grants the reset,
@@ -15025,6 +15073,12 @@ ${
         lins: int[],            // the nids of its body's `lin` declarations' initializers
         req: ARequest,          // its syntax (the plan, the lin pass and the write pass walk its body)
         value: AExpr,           // the right-hand side
+        // s475 (slice S4) — -1 for a request the author wrote; else the nid of the PENDING CELL
+        // declaration this request is the compiler-written half of (§13.9.2; ARequest.pend). Such
+        // a request has no `id`, no signals (lower: View.Request `state: not`) and no reachable
+        // controls (§13.9.2 "exposes no `.refetch()`, `.loading` or `.stale` … no `.error`"); its
+        // right-hand side is the declared initializer, handled by the author (§13.9.5).
+        pend: int,
     }
 
     fn addReq(st: AS, r: ReqFact) -> AS {
@@ -15141,6 +15195,7 @@ ${
     }
 
     fn resolveRequest(env: Env, r: ARequest, st0: AS) -> AS {
+        if (r.pend >= 0) return resolvePending(env, r, st0)
         let st: AS = st0
         // a user declaration named `request` in scope: its use cannot take a `${ … }` body,
         // and which reading wins for this spelling is not ruled (INTERIM, fail closed)
@@ -15225,7 +15280,10 @@ ${
         // ordering, not semantics. INTERIM (capable form: a SPEC ruling on a cell written by two
         // requests — §6.7.7 names the request's write point, not a cell's single writer).
         for (const q of st.reqs) {
-            if (q.targetName == tname) {
+            if (q.targetName == tname && q.pend >= 0) {
+                // s475 (S4): the cell's own declaration loads it (§13.9.2) — INTERIM as above
+                st = reqUnsupported(env, tgt.span, "`@" + tname + "` is a pending cell — its declaration already loads it (§13.9.2: a `(not to T)` cell whose initializer waits means a cell plus a compiler-written `<request>`), and a cell written by two requests is not in the bootstrap; load into another cell, or declare `@" + tname + "` `=not` and keep only this request", st)
+            } else if (q.targetName == tname) {
                 st = reqUnsupported(env, tgt.span, "`@" + tname + "` is already the target of `<request id=\"" + q.id + "\">` — a cell written by two requests is not in the bootstrap: each settle would leave the other's `" + hashId() + ".data` disagreeing with `@" + tname + "` (§6.7.7 \"`" + hashId() + ".data` → resolved value\"); load into separate cells, or derive one from the other", st)
             }
         }
@@ -15313,7 +15371,77 @@ ${
         if (isMaybeType(tty)) dataTy = tty
         const fact: ReqFact = { nid: r.nid, id: id, file: env.file, span: r.span, target: NameFact.NField(env.g.program, programInst(env), tidx),
                                 targetName: tname, deps: deps, explicit: explicit, signals: sigs, wcaps: caps, handle: mh.s, load: ml.s,
-                                rhs: rhs.nid, dataTy: dataTy, errTy: errTy, err: err, lins: lins, req: r, value: rhs }
+                                rhs: rhs.nid, dataTy: dataTy, errTy: errTy, err: err, lins: lins, req: r, value: rhs, pend: -1 }
+        return addReq(st, fact)
+    }
+
+    // s475 (slice S4) — the compiler-written `<request>` of a PENDING CELL (§13.9.2:
+    // "a plain cell initialized to `not`, plus a `<request>` (§6.7.7) whose body is
+    // the declared initializer assigned to the cell"; built by pendFiles). It is the
+    // author request's resolution with these differences, each from §13.9:
+    //  - no `id`, no signals, no handle the author can reach (§13.9.2 "The hidden
+    //    request's controls are not reachable") — so no E-LIFECYCLE-018 and no
+    //    W-LIFECYCLE-013 / W-LIFECYCLE-011 (the author wrote no `<request>`);
+    //  - the right-hand side is the declared initializer, resolved as the value it
+    //    is, NOT as the request's handled subject: "The desugared request does NOT
+    //    handle the call on the author's behalf" (§13.9.5) — an unhandled failable
+    //    initializer is E-ERROR-002, a `!{}` on it is the author's handler, and each
+    //    arm yields the cell's type, `not`, or leaves (E-ERROR-012);
+    //  - deps: "inferred from the initializer's `@` reads, as `<request>` infers
+    //    them" (§13.9.2; ruling S475 item 1: `let` + reads re-runs on a change, no
+    //    reads loads once on mount; a locked initializer with reads is derived and
+    //    never reaches here — E-VALUE-SERVER-CALL, pendingCells).
+    // The settle write is the compiler's, exempt from grant checks (ruling S475 item 1)
+    // and from the not-admitting-write refusal (item 2) — checkWrite, pendingSettle.
+    fn resolvePending(env: Env, r: ARequest, st0: AS) -> AS {
+        let st: AS = st0
+        const sh: ReqShape = requestShape(r.body)
+        if (sh.assigns.length != 1) return st              // pendFiles writes exactly one
+        const asg: AExpr = sh.assigns[0]
+        const tgt: AExpr | not = assignTargetOf(asg.k)
+        const rhs: AExpr | not = assignedValue(asg)
+        if (tgt is not || rhs is not) return st
+        const tname: string = atName(tgt)
+        const pinfo: DeclInfo | not = programInfo(env)
+        let tidx: int = -1
+        if (tname != "" && pinfo is given) tidx = fieldIndex(pinfo, tname)
+        if (pinfo is not || tidx < 0) return st
+        const tfi: FieldInfo = pinfo.fields[tidx]
+        if (tfi.wcap is not) {
+            return reqUnsupported(env, r.span, "`@" + tname + "` is a pending cell (§13.9: a `(not to T)` cell whose initializer waits), but the bootstrap gives it no write capability, so its load cannot settle into it — declare it `let`", st)
+        }
+        for (const q of st.reqs) {
+            // INTERIM, as resolveRequest's one-request-per-target rule (r1 F5)
+            if (q.targetName == tname) st = reqUnsupported(env, r.span, "`@" + tname + "` is a pending cell — its declaration loads it (§13.9.2) — and it is also the target of `<request id=\"" + q.id + "\">`; a cell written by two requests is not in the bootstrap. Load into another cell, or declare `@" + tname + "` `=not` and keep only the `<request>`", st)
+        }
+        const before: int = st.diags.length
+        st = resolveStmtExpr(requestBodyEnv(env), asg, st)
+        // §13.9.5 "An unhandled failable initializer SHALL be E-ERROR-002" — said of the declaration
+        // (the resolver's text names an event handler, the action position the request body is)
+        let ds: Diag[] = st.diags.slice(0, before)
+        for (const d of st.diags.slice(before)) {
+            if (d.code == "E-ERROR-002") {
+                ds = ds.concat([newDiag("E-ERROR-002", "the initializer of the pending cell `@" + tname + "` is failable and not handled — a pending cell's failure is handled at its declaration (§13.9.5: \"The desugared request does NOT handle the call on the author's behalf\"; a client call of a server function can fail on the wire, §19.9.10). Handle it there: `=(load(…) !{ _ :> not })` — a failed load returns the cell to `not` — or make the arm yield a value of the cell's type", d.file, d.span)])
+            } else {
+                ds = ds.concat([d])
+            }
+        }
+        st = { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        let deps: NameFact[] = []
+        for (const at of atNodesIn(rhs)) {
+            const rd: RDep = inferredDep(env, at, tname, st)
+            st = rd.st
+            const f: NameFact | not = rd.f
+            if (f is given && !hasDepFact(deps, f)) deps = deps.concat([f])
+        }
+        const mh: RSym = mint(st, "#pending_" + tname)
+        const ml: RSym = mint(mh.st, "loaded")
+        st = ml.st
+        let dataTy: Type = Type.Maybe(tfi.ty)
+        if (isMaybeType(tfi.ty)) dataTy = tfi.ty
+        const fact: ReqFact = { nid: r.nid, id: "", file: env.file, span: r.span, target: NameFact.NField(env.g.program, programInst(env), tidx),
+                                targetName: tname, deps: deps, explicit: false, signals: [], wcaps: [], handle: mh.s, load: ml.s,
+                                rhs: rhs.nid, dataTy: dataTy, errTy: Type.Maybe(Type.Named(env.g.errorSym)), err: not, lins: [], req: r, value: rhs, pend: r.pend }
         return addReq(st, fact)
     }
 
@@ -22756,16 +22884,29 @@ ${
         const inner: Type | not = maybeInner(t)
         if (inner is not) return rvt(vt, ts)                   // narrowed: post-transition
         if (ts.quiet.indexOf(e.nid) >= 0) return rvt(vt, ts)  // the discrimination itself
-        return rvt(known(inner), report(ts, env, e.span, "E-TYPE-001", lifeReadMsg(f, inner)))
+        return rvt(known(inner), report(ts, env, e.span, "E-TYPE-001", lifeReadMsg(env.t, f, inner)))
     }
 
-    // TODO(S4, g-boot-pending-cells-unbuilt-s473): for a PENDING cell (a waiting
-    // initializer, §13.9.1) §13.9.3 says "The message SHALL say that the value may
-    // still be in flight and name the declaration's load" — add that limb when the
-    // pending cell is built. This wording is the plain lifecycle cell's.
-    fn lifeReadMsg(f: FieldInfo, inner: Type) -> string {
+    // s475 (slice S4): for a PENDING cell (a waiting initializer, §13.9.1) §13.9.3 says "The
+    // message SHALL say that the value may still be in flight and name the declaration's load".
+    fn lifeReadMsg(t: Tables, f: FieldInfo, inner: Type) -> string {
         const n: string = f.sym.hint
+        const rq: ReqFact | not = pendingOf(t, f)
+        if (rq is given) return "`@" + n + "` is read before it is discriminated — it is a pending cell, declared `(not to " + typeName(inner) + ")` with a waiting initializer, so here its load (" + pendLoadText(rq) + ") may still be in flight and the cell still `not` (§13.9.3). Discriminate it first on this path: `if (@" + n + " is not) return`, `if (@" + n + " is given) { … }`, `<p if=@" + n + ">…</p>` or `match @" + n + " { … }` (§13.9.3, §14.12.3)"
         return "`@" + n + "` is read before it is discriminated — it is declared `(not to " + typeName(inner) + ")`, so here it may still hold `not` (its pre-transition state). Discriminate it first on this path: `if (@" + n + " is not) return`, `if (@" + n + " is given) { … }`, `<p if=@" + n + ">…</p>` or `match @" + n + " { … }`; or assign it a `" + typeName(inner) + "` before the read (§13.9.3, §14.12.3)"
+    }
+
+    // The load a pending cell's declaration runs, named for a message: `cnt(…)`, else its initializer.
+    fn pendLoadText(rq: ReqFact) -> string {
+        let e: AExpr = rq.value
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) e = h.subject
+        const c: AExpr | not = calleeOfCall(e)
+        if (c is given) {
+            const nm: string = exprName(c)
+            if (nm != "") return "`" + nm + "(…)` in its declaration"
+        }
+        return "its declared initializer"
     }
 
     fn lifeBackMsg(f: FieldInfo) -> string {
@@ -22786,7 +22927,7 @@ ${
     fn lifeMaybeMsg(f: FieldInfo, v: VType) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to a `" + post + "`), or declare `@" + n + "` `" + post + " | not` if it may become absent again (a pending cell's handled waiting write, §13.9.4, is not in the bootstrap yet)"
+        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to a `" + post + "`), or declare `@" + n + "` `" + post + " | not` if it may become absent again (only a pending cell's own load may land a `not` in it: its declared `= f() !{ _ :> not }`, §13.9.4, §13.9.5)"
     }
 
     // s475 r1 F2b: a whole write of a LOCKED `(not to T)` cell that is provably present
@@ -26446,6 +26587,17 @@ ${
         // waiting write (§13.9.4 `@members = teamCount(@team) !{ _ :> not }`, §13.9.5),
         // whose `not` re-enters the waiting state by rule; until S4 builds it, every
         // `(not to T)` cell (let or locked) refuses a `not`-admitting write.
+        // s475 (slice S4) — the carve-out: the SETTLE write of a pending cell's compiler-written
+        // request (§13.9.2) is the compiler's, "exempt from grant checks" (ruling S475 item 1), and
+        // its `not` (a failed load, §13.9.5 "`not` is a value of `(not to T)`: it returns the cell
+        // to its pre-state") is the one place a value that admits `not` may land in a `(not to T)`
+        // cell (item 2: "only as a pending cell's own handled load (§13.9.4); elsewhere refused").
+        // Its value is still checked against the cell's type (each arm yields `T` or `not`, §13.9.5).
+        if (f.life && w.edit == EditKind.Replace && pendingSettle(env.t, value.nid)) {
+            const pt: Type | not = writeValueType(env.t, w)
+            if (pt is not) return ts
+            return checkNotElems(env, value, pt, checkLitFields(env, value, checkValue(env, v, pt, value.span, what, ts)))
+        }
         if (f.life && w.edit == EditKind.Replace && isAbsentVT(v)) return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeBackMsg(f))
         if (f.life && w.edit == EditKind.Replace && admitsNotVT(v)) return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeMaybeMsg(f, v))
         // s475 r1 (#1783 review F2b) — a LOCKED `(not to T)` cell is granted the
@@ -26454,12 +26606,54 @@ ${
         // discrimination, an earlier write, a presence gate) is `T → T′`. INTERIM pending
         // an owner ruling on `T → T′` for a locked lifecycle; an un-narrowed write is not
         // refused (the bootstrap does not track a cell proven ABSENT — provable-or-silent).
-        if (f.life && w.edit == EditKind.Replace && lockedMode(f.mode) && env.narrowed.indexOf("@" + f.sym.hint) >= 0) {
+        // s475 (S4): ruling S475 item 3 — "Locked `(not to T)` cell: no `T → T′` write for a plain
+        // lifecycle cell; allowed for a pending cell (it reloads)"
+        if (f.life && w.edit == EditKind.Replace && lockedMode(f.mode) && env.narrowed.indexOf("@" + f.sym.hint) >= 0 && !pendingField(env.t, f)) {
             return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeAgainMsg(f))
         }
         const target: Type | not = writeValueType(env.t, w)
         if (target is not) return ts
         return checkNotElems(env, value, target, checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts)))
+    }
+
+    // s475 (S4) — `nid` is the right-hand side of a pending cell's settle write (§13.9.2).
+    fn pendingSettle(t: Tables, nid: int) -> boolean {
+        for (const rq of t.requests) {
+            if (rq.pend >= 0 && rq.rhs == nid) return true
+        }
+        return false
+    }
+
+    // s475 (S4) — `f` is a pending cell: the target of a pending cell's request.
+    fn pendingField(t: Tables, f: FieldInfo) -> boolean {
+        return pendingOf(t, f) is given
+    }
+
+    fn pendingOf(t: Tables, f: FieldInfo) -> ReqFact | not {
+        for (const rq of t.requests) {
+            if (rq.pend >= 0) {
+                const k: NameFact = rq.target
+                const hit: boolean = match k {
+                    .NField(decl: d, idx: i) :> fieldSymAt(t, d, i) == f.sym.id
+                    .NLocal(sym: x) :> false
+                    .NInst(decl: x) :> false
+                    .NStruct(owner: x) :> false
+                    .NFn(sym: x) :> false
+                    .NLength :> false
+                    .NSurface(of: x) :> false
+                    .NConst(sym: x) :> false
+                }
+                if (hit) return rq
+            }
+        }
+        return not
+    }
+
+    fn fieldSymAt(t: Tables, d: Sym, i: int) -> int {
+        for (const di of t.decls) {
+            if (di.sym.id == d.id && i >= 0 && i < di.fields.length) return di.fields[i].sym.id
+        }
+        return -1
     }
 
     // The struct literals inside a written value: each named property against
@@ -28287,32 +28481,49 @@ ${
                 if (!ownSeen && w.cell == "@" + rq.targetName) {
                     ownSeen = true
                 } else {
-                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body writes `" + w.cell + "` besides its target `@" + rq.targetName + "` — a request body writes only its one `@var`, its settle (Core C-R1; a side-effecting request body is not ruled, §6.7.7); move the write into a handler", w.file, w.span)])
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " writes `" + w.cell + "` besides its target `@" + rq.targetName + "` — a request body writes only its one `@var`, its settle (Core C-R1; a side-effecting request body is not ruled, §6.7.7); move the write into a handler", w.file, w.span)])
                 }
             }
             for (const r of scan.refs) {
                 const i: int = nodeIdx(sum.nodes, r.sym)
                 if (i < 0) {
-                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body reaches `" + r.name + "`, which has no write summary — the compiler cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " reaches `" + r.name + "`, which has no write summary — the compiler cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
                 } else {
                     const sw: Witness | not = writeWitness(sum, i)
                     const su: UWitness | not = openWitness(sum, i)
                     if (sw is given) {
-                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "` — a request body writes only its one `@var`, its settle, not through a called function either (Core C-R1, INTERIM: a side-effecting request body is not ruled, §6.7.7); call a function that writes nothing, and make the other write in a handler", r.file, r.span)])
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "` — a request body writes only its one `@var`, its settle, not through a called function either (Core C-R1, INTERIM: a side-effecting request body is not ruled, §6.7.7); call a function that writes nothing, and make the other write in a handler", r.file, r.span)])
                     } else if (su is given) {
-                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>` body reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)])
                     }
                 }
             }
             for (const u of scan.unproven) {
-                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove this `<request>` body writes nothing besides its target (Core C-R1), and the rule fails closed", u.file, u.span)])
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + reqBody(rq) + " writes nothing besides its target (Core C-R1), and the rule fails closed", u.file, u.span)])
             }
             const wq: string = requestWriteSql(t, sum, rq)
-            if (wq != "" && !(rq.explicit && rq.deps.length == 0)) {
+            if (wq != "" && rq.pend >= 0 && rq.deps.length > 0) {
+                // s475 (S4): a pending cell's load re-runs on each change of the cells it reads — the same
+                // §6.7.7.3 write-request machine is owed (INTERIM); one that reads no cell loads once on
+                // mount, which is rule 2's `deps=[]` request
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " reaches SQL that is not provably a SELECT (" + wq + ") and re-runs whenever a cell it reads changes — a request that writes runs only on its user's own edits, never on mount, against a baseline (§6.7.7.3), and that write-request machine is not in the bootstrap; load with a function that only reads, and make the write in a handler", rq.file, rq.span)])
+            } else if (wq != "" && rq.pend < 0 && !(rq.explicit && rq.deps.length == 0)) {
                 out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request>`'s call reaches SQL that is not provably a SELECT (" + wq + ") — a request that writes runs only on its user's own edits, never on mount, against a baseline (§6.7.7.3), and that write-request machine is not in the bootstrap; give it `deps=[]` (it then runs once on mount, §6.7.7.3 rule 2) or make the write in a handler", rq.file, rq.span)])
             }
         }
         return out
+    }
+
+    // s475 (S4) — a request as a diagnostic names it: an author's `<request>` body, or a pending
+    // cell's load (its declaration's initializer, §13.9.2 — the author wrote no `<request>`).
+    fn reqBody(rq: ReqFact) -> string {
+        if (rq.pend >= 0) return "the load of the pending cell `@" + rq.targetName + "` (its declared initializer, which §13.9.2 runs as a `<request>`)"
+        return "this `<request>` body"
+    }
+
+    fn reqLabel(rq: ReqFact) -> string {
+        if (rq.pend >= 0) return "the pending cell @" + rq.targetName + "'s load"
+        return "<request id=\"" + rq.id + "\">"
     }
 
     // s475 r1 (F2) — requests that trigger each other in a ring. Request j FOLLOWS request i
@@ -28374,10 +28585,10 @@ ${
                     c2 = from[c2]
                     guard = guard + 1
                 }
-                let ring: string[] = ["<request id=\"" + rs[i].id + "\"> writes @" + rs[i].targetName]
-                for (const b2 of back) { ring = ring.concat(["<request id=\"" + rs[b2].id + "\"> writes @" + rs[b2].targetName]) }
+                let ring: string[] = [reqLabel(rs[i]) + " writes @" + rs[i].targetName]
+                for (const b2 of back) { ring = ring.concat([reqLabel(rs[b2]) + " writes @" + rs[b2].targetName]) }
                 const rq: ReqFact = rs[i]
-                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this `<request id=\"" + rq.id + "\">` is on a ring of requests that re-run each other: " + ring.join(" → ") + " → which re-runs <request id=\"" + rq.id + "\"> — every settle changes the next one's dependency, so the ring never stops (§6.7.7 \"`<request>` is not a loop\"). Mutually-dependent requests are not in the bootstrap; break the ring with an explicit `deps=` that leaves the other's target out", rq.file, rq.req.opener)])
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqLabel(rq) + " is on a ring of requests that re-run each other: " + ring.join(" → ") + " → which re-runs " + reqLabel(rq) + " — every settle changes the next one's dependency, so the ring never stops (§6.7.7 \"`<request>` is not a loop\"). Mutually-dependent requests are not in the bootstrap; break the ring with an explicit `deps=` that leaves the other's target out", rq.file, rq.req.opener)])
             }
             i = i + 1
         }
@@ -28404,7 +28615,8 @@ ${
             if (f is given) reads = reads.concat([f])
         }
         for (const rq of t.requests) {
-            let seen = false
+            // s475 (S4): a pending cell's request is not the author's — W-LIFECYCLE-011 names a `<request>`
+            let seen: boolean = rq.pend >= 0
             for (const f of reads) {
                 if (sameField(f, rq.target)) seen = true
             }
@@ -28723,7 +28935,10 @@ ${
     // `pending`: the own initializer of a program cell declared with the presence
     // lifecycle `(not to T)` — §13.9.1's one position that MAY wait (a pending
     // cell), which the bootstrap does not build yet (valueServerDiags).
-    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean }
+    // `cellInit` (s475 S4): the own initializer of a program cell with no body — where
+    // `(not to T)` would make it a pending cell, so E-VALUE-SERVER-CALL offers that fix
+    // (§13.7 "It is offered only for a cell initializer, the one value position §13.9 opens").
+    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean, cellInit: boolean }
 
     fn valuePositions(g: Globals, t: Tables) -> ValuePos[] {
         let out: ValuePos[] = []
@@ -28748,9 +28963,9 @@ ${
     // with a body are refused the lifecycle by analyze's lifeCellWhy).
     fn declInits(d: ADecl, path: string, file: string, cell: boolean) -> ValuePos[] {
         let out: ValuePos[] = []
-        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file, cell && d.body.length == 0 && presenceDecl(d))])
+        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file, cell && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0)])
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file, false)])
+            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false)])
         }
         for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file, false)) }
         return out
@@ -28777,9 +28992,78 @@ ${
     // anything else is an initializer (a `let` seed, a locked constant).
     // `life`: the declaration is a `(not to T)` program cell — its INITIALIZER (never
     // a derived formula: §13.9.1 "A derived cell cannot be a pending cell") is pending.
-    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean) -> ValuePos {
-        if (!isLet && valueReads(v).length > 0) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false }
-        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life }
+    // s475 (S4): a locked initializer that calls a function but reads no cell is NOT a derived
+    // formula when the cell is `(not to T)`: it is a pending cell that "loads once, on mount"
+    // (ruling S475 item 1; pendingCells). valueReads counts a call as a read ("()").
+    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean) -> ValuePos {
+        const derived: boolean = life ? cellReads(v) : valueReads(v).length > 0
+        if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false }
+        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell }
+    }
+
+    // s475 (slice S4) — THE PENDING CELLS (§13.9.1): the program cells declared with
+    // the presence lifecycle `(not to T)`, with no declaration body, whose own
+    // initializer WAITS — it calls a server function, or a client function that
+    // reaches one (§13.8). Each is desugared by pendFiles (§13.9.2) and the program
+    // analyzed again (analyzeSources). Not pending, so judged as before:
+    //  - a LOCKED cell whose initializer reads a cell (`@`): it is derived, and
+    //    "A derived cell cannot be a pending cell" (§13.9.1; ruling S475 item 1,
+    //    PERMANENT) — E-VALUE-SERVER-CALL. A locked initializer that reads no cell
+    //    "loads once, on mount" (§13.9.2; item 1);
+    //  - an initializer that runs a `?{}` itself: refused by name (INTERIM, waitDiag —
+    //    capable form: a pending cell whose load is a query, routed server-side);
+    //  - an initializer that is a `{ … }` block (only an expression is a request's
+    //    right-hand side; waitDiag refuses it, INTERIM).
+    // Returns the declarations' nids.
+    fn pendingCells(g: Globals, t: Tables, ps: PlaceFact[], sum: Summary) -> int[] {
+        let out: int[] = []
+        for (const ds of g.decls) {
+            const p: AProgram | not = ds.p
+            if (p is given) {
+                for (const fd of fieldDecls(ds)) {
+                    if (pendingCell(t, ds.file, fd, ps, sum)) out = out.concat([fd.nid])
+                }
+            }
+        }
+        return out
+    }
+
+    fn pendingCell(t: Tables, file: string, d: ADecl, ps: PlaceFact[], sum: Summary) -> boolean {
+        if (d.body.length > 0 || !presenceDecl(d)) return false
+        if (pendingInit(d.own) is not) return false
+        if (!d.isLet && cellReads(d.own)) return false
+        if (sqlsInValue(d.own).length > 0) return false
+        return initWaits(t, file, d.own, ps, sum)
+    }
+
+    // The initializer as a request's right-hand side: an expression (`=f()`, `=(f() !{ … })`).
+    fn pendingInit(v: AAttrValue) -> AExpr | not {
+        return match v {
+            .Bare(e: e) :> e
+            .Paren(e: e) :> e
+            .Braced(b: x) :> not
+            .Quoted(v: x) :> not
+            .NoValue :> not
+        }
+    }
+
+    // Does the value read a cell (`@name`)? (valueReads also counts a call, "()".)
+    fn cellReads(v: AAttrValue) -> boolean {
+        for (const r of valueReads(v)) {
+            if (r.substring(0, 1) == "@") return true
+        }
+        return false
+    }
+
+    // Does the value wait — call a server function, or a client function that reaches one
+    // (the test valueServerDiags applies, §13.7 items 1-2 and 4)?
+    fn initWaits(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[], sum: Summary) -> boolean {
+        const scan: BodyScan = scanValue({ t: t, file: file }, v, emptyScan())
+        for (const r of scan.refs) {
+            if (placeOf(ps, r.sym) == PlaceK.Server) return true
+            if (waitsOf(sum, r.sym) is given) return true
+        }
+        return false
     }
 
     fn nodePositions(t: Tables, n: ANode, file: string) -> ValuePos[] {
@@ -28801,13 +29085,13 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false }]
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false, cellInit: false }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
-        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false }
+        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false, cellInit: false }
     }
 
     fn elemPositions(t: Tables, e: AElem, file: string) -> ValuePos[] {
@@ -28849,7 +29133,7 @@ ${
         // field (§6.15 list item 1, §66.9 rule 8)
         let vk: ValueKind = ValueKind.RenderKind
         if (isConstructAttr(k)) vk = ValueKind.InitKind
-        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false }
+        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false, cellInit: false }
     }
 
     fn isConstructAttr(k: AttrKind | not) -> boolean {
@@ -29001,6 +29285,8 @@ ${
         }
         const f: FieldInfo = prog.info.fields[target]
         const gr: TransitionGraph | not = f.graph
+        // s475 (slice S4): as `reset(@x)` (resolveReset) — INTERIM
+        if (isPendingDecl(g, d.nid)) return { e: not, st: addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset-on=` on `@" + d.name + "`", d.name)) }
         if (gr is given) {
             const refused: string = engineRefusals(g, gr, f.init)
             if (refused != "") {
@@ -29021,6 +29307,19 @@ ${
         }
         if (!ok) return { e: not, st: st }
         return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+    }
+
+    // s475 (slice S4) — the declaration `nid` is a pending cell of the program (pendFiles desugared it).
+    fn isPendingDecl(g: Globals, nid: int) -> boolean {
+        const ps: DeclSrc | not = findDeclSrc(g, g.program)
+        if (ps is not) return false
+        const p: AProgram | not = ps.p
+        if (p is not) return false
+        return pendingDeclNids(p.items).indexOf(nid) >= 0
+    }
+
+    fn pendResetMsg(what: string, n: string) -> string {
+        return what + " resets a pending cell, and §13.9.2 makes that a re-run of its load (\"A reset of a pending cell (§6.8) is the request's re-run\" — never its initializer again, never back to `not`). Re-running the hidden request from here is not in the bootstrap yet; to reload on demand, declare `@" + n + "` `=not` and load it with a `<request>` written by hand (§6.7.7)"
     }
 
     fn resetEntries(v: AAttrValue) -> AExpr[] | not {
@@ -32670,6 +32969,58 @@ ${
     // (a marshalled parameter, or a carried write's local).
     type CMap:struct = { strip: int[], drop: int[], rn: string[], rv: string[] }
 
+    // ---- the pending-cell desugar (s475, slice S4; §13.9.2) ----------------------------
+    // Each pending cell's declaration `[let] <x:(not to T)=e/>` becomes `[let] <x:(not to T)=not/>`
+    // followed, in the same item list, by the compiler-written request
+    // `<request>${ @x = e }</>` (ARequest.pend = the declaration's nid — no `id`, no
+    // attributes). `e` keeps its node ids and spans (a later report points at what the author
+    // wrote); every synthesized node takes a fresh id from `next`, and the request and its
+    // target point at the declaration.
+    fn pendFiles(files: FileAst[], pend: int[], next0: int) -> RFiles {
+        let next: int = next0
+        let out: FileAst[] = []
+        for (const f of files) {
+            const r: RItems = pendItems(f.items, pend, next)
+            next = r.next
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, first: f.first }])
+        }
+        return { files: out, next: next }
+    }
+
+    fn pendItems(items: AItem[], pend: int[], next0: int) -> RItems {
+        let next: int = next0
+        let out: AItem[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const p: AProgram | not = cpProgramOf(k)
+            const ds: ADecl[] = declsOfItem(it)
+            if (p is given) {
+                const r: RItems = pendItems(p.items, pend, next)
+                next = r.next
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: r.items }) }])
+            } else if (ds.length == 1 && pend.indexOf(ds[0].nid) >= 0 && pendingInit(ds[0].own) is given) {
+                const d: ADecl = ds[0]
+                const e0: AExpr | not = pendingInit(d.own)
+                if (e0 is given) {
+                    const notE: AExpr = { nid: next, span: e0.span, k: AExprK.NotLit }
+                    const d2: ADecl = { nid: d.nid, span: d.span, exported: d.exported, isLet: d.isLet, name: d.name, ty: d.ty, own: AAttrValue.Bare(notE),
+                                        attrs: d.attrs, mods: d.mods, body: d.body, renders: d.renders, validators: d.validators }
+                    const tgt: AExpr = { nid: next + 1, span: d.span, k: AExprK.At(d.name) }
+                    const asg: AExpr = { nid: next + 2, span: e0.span, k: AExprK.Assign(tgt, e0, false, false) }
+                    const stmt: AStmt = { nid: next + 3, span: e0.span, k: AStmtK.Eval(asg) }
+                    const body: ABlock = { nid: next + 4, span: e0.span, stmts: [stmt] }
+                    const rq: ARequest = { nid: next + 5, span: d.span, attrs: [], body: body, opener: d.span, pend: d.nid }
+                    const node: ANode = { nid: next + 6, span: d.span, k: ANodeK.Request(rq) }
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.DeclItem(d2) }, { nid: next + 7, span: d.span, k: AItemK.MarkupItem(node) }])
+                    next = next + 8
+                }
+            } else {
+                out = out.concat([it])
+            }
+        }
+        return { items: out, next: next }
+    }
+
     fn composeFiles(files: FileAst[], plans: ComposePlan[], next0: int) -> FileAst[] {
         let next: int = next0
         let out: FileAst[] = []
@@ -33669,20 +34020,24 @@ ${
     fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], sum: Summary, rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
         for (const p of valuePositions(g, t)) {
-            for (const s of sqlsInValue(p.v)) {
+            const sqls: SqlSite[] = sqlsInValue(p.v)
+            for (const s of sqls) {
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, s, st)
-                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix())
+                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix(p), true)
             }
-            const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
-            for (const r of scan.refs) {
-                const pk: PlaceK = placeOf(ps, r.sym)
-                const c: Reach | not = waitsOf(sum, r.sym)
-                if (pk == PlaceK.Server) {
-                    st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix())
-                } else if (c is given) {
-                    st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix())
+            // s475 (S4): a pending initializer's query is its one refusal (waitDiag)
+            if (!p.pending || sqls.length == 0) {
+                const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
+                for (const r of scan.refs) {
+                    const pk: PlaceK = placeOf(ps, r.sym)
+                    const c: Reach | not = waitsOf(sum, r.sym)
+                    if (pk == PlaceK.Server) {
+                        st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix(p), false)
+                    } else if (c is given) {
+                        st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix(p), false)
+                    }
                 }
             }
         }
@@ -33692,16 +34047,31 @@ ${
     // s475 r1 (s475-boot-lifecycle-type F1) — a waiting value at `p`: §13.7's
     // E-VALUE-SERVER-CALL, except the own initializer of a `(not to T)` program
     // cell. §13.9.1: "A `(not to T)`-declared cell initializer is no longer
-    // E-VALUE-SERVER-CALL" — it is a PENDING cell, which the bootstrap does not
-    // build yet: E-BOOTSTRAP-UNSUPPORTED naming §13.9. INTERIM; the capable form
-    // is slice S4's pending-cell desugar (§13.9.2: a plain cell plus a `<request>`).
-    fn waitDiag(st: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string) -> AS {
+    // E-VALUE-SERVER-CALL" — it is a PENDING cell. s475 (slice S4): a pending cell
+    // is desugared before the run that reports (pendingCells / pendFiles), so a
+    // pending initializer still waiting here is one the bootstrap does not desugar,
+    // refused by name (each INTERIM):
+    //  - `sql`: it runs a `?{}` itself (capable form: a pending cell whose load is a
+    //    query, routed server-side — as g-boot-request-direct-sql-owed-s475 owes for
+    //    a `<request>`);
+    //  - otherwise: a `{ … }` block initializer, or a front end run without the
+    //    linker's node ids (analyze(); the desugar mints nodes).
+    fn waitDiag(st: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string, sql: boolean) -> AS {
         if (!p.pending) return addDiag(st, file, span, "E-VALUE-SERVER-CALL", head + " " + fix)
-        return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — pending cells are not in the bootstrap yet. Declare the cell `=not` and load the value into it with a `<request>` (§6.7.7)")
+        if (sql) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) whose load is a `" + sqlSigil() + "}` written in its declaration — not in the bootstrap. Put the query in a function and initialize the cell with a handled call of it, `=(load() !{ _ :> not })` (§13.9.5)")
+        return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — the bootstrap builds one from an expression initializer, `=(load() !{ _ :> not })` (§13.9.5), in a linked build; write the initializer that way")
     }
 
-    fn waitFix() -> string {
-        return "a value position cannot wait for the server (§13.7). Load the value with a `<request>` (§6.7.7) into a cell and read the cell here — or, where the cell is server-authoritative, a `<x server>` declaration (§52)"
+    // §13.7 "the fix: a value position cannot wait for the server; load the value with a
+    // `<request>` (§6.7.7) into a cell and read the cell here — and, where the cell is
+    // server-authoritative, a `<x server>` declaration (§52)". s475 (S4): "the second fix:
+    // "or declare the cell `(not to T)` (§13.9)". It is offered only for a cell initializer,
+    // the one value position §13.9 opens" — a program cell's own (cellInit; the bootstrap
+    // builds the lifecycle only there).
+    fn waitFix(p: ValuePos) -> string {
+        let pend: string = ""
+        if (p.vk == ValueKind.InitKind && p.cellInit) pend = ", or declare the cell `(not to T)` (§13.9) so it loads the value itself: `let <x:(not to T)=(load() !{ _ :> not })/>` — a pending cell, read only after a discrimination (`if=@x`, `@x is given`)"
+        return "a value position cannot wait for the server (§13.7). Load the value with a `<request>` (§6.7.7) into a cell and read the cell here" + pend + " — or, where the cell is server-authoritative, a `<x server>` declaration (§52)"
     }
 
     // E-SQL-004 for a `?{}` that stands in no function: its OWN nearest
@@ -34599,6 +34969,10 @@ ${
         if (sp is given) {
             ps = planKids(cx, suspendArgs(v), { refused: "an argument of a `<request>`'s load" + one }, ps).ps
             ps = routedChecks(cx, v, sp, ps)
+            // s475 (S4): a pending cell's load is handled by the author (§13.9.5) — its arms run in
+            // the continuation, and none may wait (a second suspension), as planExpr's
+            const hh: AHandled | not = handledOf(v.k)
+            if (hh is given) ps = planArms(cx, hh, ps)
             const rb: RPSym = pmint(ps, "settled")
             return addAt(rb.ps, { nid: v.nid, bind: rb.s, kind: sp })
         }
@@ -36446,7 +36820,8 @@ ${
     // s475 r1: `nsAt` — the namespace member reads the run found (AS.nsAt).
     // s475-boot-caller-transport: `carriers` — the transport carriers' AFn nids (transportCarriers), which the
     // composed program's analysis is given (FnInfo.derr).
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[] }
+    // s475 (slice S4): `pend` — the pending cells the run found (pendingCells): their declarations' nids.
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[] }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
@@ -36475,13 +36850,27 @@ ${
                 r1 = analyzeRun(files, entry, keyBase, nextId >= 0, [])
             }
         }
+        // s475 (slice S4): the pending cells (§13.9.2 "means exactly a plain cell initialized to
+        // `not`, plus a `<request>` … whose body is the declared initializer assigned to the cell")
+        // are desugared literally (pendFiles) and the program analyzed again — so the request's
+        // dependencies, plan, class, lowering and checks are a `<request>`'s "by construction,
+        // because the desugar is literal". Which initializers wait is known only after placement,
+        // hence the second run. The desugar mints nodes from the linker's first unused id; without
+        // one (-1) nothing is desugared and waitDiag refuses the cell by name.
+        let next: int = nextId
+        if (r1.pend.length > 0 && next >= 0) {
+            const pf: RFiles = pendFiles(files, r1.pend, next)
+            files = pf.files
+            next = pf.next
+            r1 = analyzeRun(files, entry, keyBase, nextId >= 0, [])
+        }
         // s475-boot-caller-transport: a transport carrier's callers are judged against `E + Transport`
         // (FnInfo.derr) — known only once this run composed; the program is analyzed again with them,
         // so a caller's `.Transport` arm, a handler that omits it, and a `?` carrying it up are judged as
         // the composed program will run
         if (r1.carriers.length > 0) r1 = analyzeRun(files, entry, keyBase, nextId >= 0, r1.carriers)
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
-        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false, r1.carriers)
+        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
         let notes: Diag[] = []
@@ -36650,7 +37039,7 @@ ${
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
         return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum) }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {

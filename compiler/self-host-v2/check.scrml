@@ -1721,8 +1721,64 @@ ${
                 if (tw != "") out = out.concat(["C-R1: a Request body writes reactive state besides its one Write of the target — " + tw + " (§6.7.7: the one assignment is the body's only write; a write to a dependency or signal re-runs the request forever, and one before the load breaks keep-stale)"])
             }
         }
-        if (writes != 1) out = out.concat(["C-R1: a Request body holds " + writes + " Writes — it holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
+        // s475 (slice S4) — exactly one Write of the target PER CONTROL PATH: a handled load's
+        // success and failure arms (§13.9.5 `@x = f() !{ _ :> not }`; an Attempt's ok arm and each
+        // error arm, an If's branches) are alternatives, each the request's one settle — counting
+        // them as two Writes refused the desugar §13.9.2 prescribes (the #1771 r1 trap). A Write in
+        // a Loop or Gather counts twice (it may run more than once — refused, fail closed).
+        const pw: int = pathWrites(body)
+        if (writes == 0) out = out.concat(["C-R1: a Request body holds no Write — it holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
+        if (writes > 0 && pw != 1) out = out.concat(["C-R1: a Request body's path performs " + pw + " Writes — each path holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
         return out
+    }
+
+    // The most Writes one control path through `b` performs: an If's branches and an Attempt's
+    // arms are alternatives; a Loop / Gather body may run more than once (counted twice).
+    fn pathWrites(b: Block) -> int {
+        let n: int = 0
+        for (const s of b.stmts) { n = n + stmtPathWrites(s) }
+        return n
+    }
+
+    fn stmtPathWrites(s: Stmt) -> int {
+        return match s {
+            .Write(cap: x) :> 1
+            .Commit(writes: ws) :> ws.length
+            .If(cond: c, thenB: t, elseB: e) :> maxWrites(pathWrites(t), elseWrites(e))
+            .Attempt(ok: o, arms: xs) :> attemptWrites(o, xs)
+            .Suspend(then: t) :> pathWrites(t)
+            .Defer(body: b) :> pathWrites(b)
+            .Join(body: b) :> pathWrites(b)
+            .Loop(body: b) :> 2 * pathWrites(b)
+            .Gather(g: g) :> 2 * pathWrites(g.body)
+            .Let(sym: x) :> 0
+            .Assign(local: x) :> 0
+            .Return(e: x) :> 0
+            .Eval(e: x) :> 0
+            .ResetSurface(of: x) :> 0
+            .Unpersist(decl: x) :> 0
+            .Fail(err: x) :> 0
+            .Jump(k: x) :> 0
+            .Break(target: x) :> 0
+            .Continue(target: x) :> 0
+            .Lift(into: x) :> 0
+        }
+    }
+
+    fn elseWrites(e: Block | not) -> int {
+        if (e is given) return pathWrites(e)
+        return 0
+    }
+
+    fn attemptWrites(o: OkArm, xs: ErrArm[]) -> int {
+        let m: int = pathWrites(o.body)
+        for (const a of xs) { m = maxWrites(m, pathWrites(a.body)) }
+        return m
+    }
+
+    fn maxWrites(a: int, b: int) -> int {
+        if (a > b) return a
+        return b
     }
 
     // -------------------------------------------------------------------------

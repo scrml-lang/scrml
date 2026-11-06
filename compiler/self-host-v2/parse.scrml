@@ -8677,7 +8677,7 @@ ${
         const opener: ASpan = mkSpan(o.start, m.pos)
         const rb: RBodyBlock = requestBody(mBump(m))
         m = rb.mp
-        const r: ARequest = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, body: rb.b, opener: opener }
+        const r: ARequest = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, body: rb.b, opener: opener, pend: -1 }
         return { r: r, mp: mBump(m) }
     }
 

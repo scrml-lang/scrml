@@ -1660,8 +1660,10 @@ ${
     fn requestView(c: LC, r: ARequest) -> View {
         let k: int = 0
         let at: int = -1
+        let stateful: int = 0          // the requests with signals before this one (a pending cell's has none)
         for (const rq0 of c.t.requests) {
             if (rq0.nid == r.nid) at = k
+            if (at < 0 && rq0.pend < 0) stateful = stateful + 1
             k = k + 1
         }
         if (at < 0) return View.Text("")         // analyze refused it (the diagnostics gate stops lowering)
@@ -1671,13 +1673,17 @@ ${
         const target: EffectDep = tds[0]
         let deps: EffectDep[] = []
         for (const d of rq.deps) { deps = deps.concat(effectDep(c, d)) }
-        const base: int = programFieldCount(c.t) + 4 * at
+        const base: int = programFieldCount(c.t) + 4 * stateful
         const state: RequestState = { loading: mkEffectDep(target.decl, target.inst, base), data: mkEffectDep(target.decl, target.inst, base + 1),
                                       error: mkEffectDep(target.decl, target.inst, base + 2), stale: mkEffectDep(target.decl, target.inst, base + 3) }
         const body: Block = loadBody(rq, cpsBody(lowerBlock(c, r.body), []))
         // s475 (S5a): §6.7.7.1 rule 1 — analyze's class (requestReads); any request it did not prove READ is WRITE
         let cls: ReqClass = ReqClass.ReqWrite
         if (c.t.server.reqReads.indexOf(rq.nid) >= 0) cls = ReqClass.ReqRead
+        // s475 (slice S4): a PENDING CELL's request (§13.9.2) — no signals and no handle ("The
+        // hidden request's controls are not reachable"; "no `.error`", §13.9.5): its body's own
+        // Attempt handles the failure, and its one settle Write is the cell's
+        if (rq.pend >= 0) return View.Request(target, deps, body, true, not, not, cls)
         return View.Request(target, deps, body, true, state, rq.handle, cls)
     }
 
