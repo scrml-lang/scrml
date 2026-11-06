@@ -261,3 +261,90 @@ describe("(N4) an unreachable exit is not reported", () => {
     expect(txAt(TX(`        hold(a)?;\n        if (bad()) {\n            fail .Bad;\n        } else {\n            fail .ConnectionLost;\n        }`))).toEqual(["fail .Bad", "fail .ConnectionLost"]);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Fix round r1 (#1778 review).
+// F1 — SPEC §6.6.10 (a derived value cannot depend on itself) and §66.3 rule 8 ("the cycle's diagnostic is
+// reported and E-DECL-TYPE-NOT-INFERABLE is not"): a cycle through file-scope own values compiled clean and
+// overflowed the stack at mount (RangeError). It is E-DERIVED-CIRCULAR-DEP, once, with its path.
+const AF = (src) => ({ path: "a.scrml", src });
+const BF = (src) => ({ path: "b.scrml", src });
+// The entry importing `n` (from a.scrml for `a`, else lib.scrml) and rendering `@n` unless a body is given.
+const named0 = (n, body = '<p id="c">${@' + n + "}</p>") =>
+  ({ path: ENTRY, src: `import { ${n} } from "./${n === "a" ? "a" : "lib"}.scrml";\n<program>\n${body}\n</program>\n` });
+const cyc = (files) => {
+  const r = fe(files);
+  return errs(r).map((d) => `${d.code}@${d.file}: ${d.message.split(" — ")[0]}`);
+};
+
+describe("(r1 F1) a cycle through file-scope own values is E-DERIVED-CIRCULAR-DEP (was: clean compile, RangeError at mount)", () => {
+  const CYCLES = [
+    ["same file", [one("<a:int=(@b + 1)/>\n<b:int=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @b → @a"],
+    ["itself", [one("<a:int=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @a"],
+    ["untyped, same file (the cycle code, not E-DECL-TYPE-NOT-INFERABLE)", [one("<a=(@b + 1)/>\n<b=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @b → @a"],
+    ["across files, named imports", [AF('import { b } from "./b.scrml";\nexport <a:int=(@b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
+    ["across files, an aliased import", [AF('import { b as bb } from "./b.scrml";\nexport <a:int=(@bb + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
+    ["across files, a namespace import", [AF('import * as m from "./b.scrml";\nexport <a:int=(@m.b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
+    ["through a program cell", [one("<a:int=(@q + 1)/>", '<q:int=(@a + 1)/>\n<p id="c">${@q}</p>')], "app.scrml: `@a` is derived from itself: @a → @q → @a"],
+    ["file → program → file", [one("<a:int=(@q + 1)/>\n<b:int=(@a + 1)/>", '<q:int=(@b + 1)/>\n<p id="c">${@q}</p>')], "app.scrml: `@a` is derived from itself: @a → @q → @b → @a"],
+  ];
+  for (const [label, files, want] of CYCLES) {
+    test(label, () => {
+      expect(cyc(files)).toEqual(["E-DERIVED-CIRCULAR-DEP@" + want]);
+    });
+  }
+  // Near-misses: a chain that is not a cycle still compiles and renders.
+  const CHAINS = [
+    ["a chain in one file", [one("<c:int=1/>\n<b:int=(@c + 1)/>\n<a:int=(@b + 1)/>", '<p id="c">${@a}</p>')], "3"],
+    ["a file-scope value derived from a program cell (§7.6: a program cell is a file-scope binding)", [one("<a:int=(@q + 1)/>", 'let <q:int=1/>\n<p id="c">${@a}</p>')], "2"],
+    ["across files", [AF('import { b } from "./b.scrml";\nexport <a:int=(@b + 1)/>\n'), BF("export let <b:int=1/>\n"), named0("a")], "2"],
+    ["a program cell derived from a file-scope derived value", [one("let <c:int=1/>\n<b:int=(@c + 1)/>", '<q:int=(@b + 1)/>\n<p id="c">${@q}</p>')], "3"],
+    ["a `let` (seeded) shape is no cycle", [one("let <a:int=(@b + 1)/>\nlet <b:int=2/>", '<p id="c">${@a}</p>')], "3"],
+    ["a program cell and a library value of one name are two values", [{ path: "lib.scrml", src: "<b=(@c + 1)/>\nlet <c:int=1/>\nexport <x:int=(@b + 1)/>\n" }, named0("x", '<b=(@x + 1)/>\n<p id="c">${@b}</p>')], "4"],
+  ];
+  for (const [label, files, want] of CHAINS) {
+    test(`near-miss: ${label}`, async () => {
+      expect((await run(files)).before).toBe(want);
+    });
+  }
+});
+
+describe("(r1 F2) an untyped derived own value is inferred through another's initializer, as a program cell is (§66.3 rule 5)", () => {
+  const CHAINS = [
+    ["outside `<program>` (was: E-DECL-TYPE-NOT-INFERABLE on `a`)", [one("<c:int=1/>\n<b=(@c + 1)/>\n<a=(@b + 1)/>", '<p id="c">${@a}</p>')], "3"],
+    ["control: inside `<program>`", [one("", '<cc:int=1/>\n<b=(@cc + 1)/>\n<a=(@b + 1)/>\n<p id="c">${@a}</p>')], "3"],
+    ["a program cell over an untyped file-scope one", [one("<c:int=1/>\n<b=(@c + 1)/>", '<a=(@b + 1)/>\n<p id="c">${@a}</p>')], "3"],
+    ["strings", [one('<c="x"/>\n<b=(@c + "y")/>\n<a=(@b + "z")/>', '<p id="c">${@a}</p>')], "xyz"],
+    ["through a namespace import", [{ path: "lib.scrml", src: "export let <c:int=1/>\n" }, { path: ENTRY, src: 'import * as m from "./lib.scrml";\n<b=(@m.c + 1)/>\n<a=(@b + 1)/>\n<program>\n<p id="c">${@a}</p>\n</program>\n' }], "3"],
+  ];
+  for (const [label, files, want] of CHAINS) {
+    test(label, async () => {
+      expect((await run(files)).before).toBe(want);
+    });
+  }
+  test("the chain recomputes when its root is written", async () => {
+    const r = await run([one("let <c:int=1/>\n<b=(@c + 1)/>\n<a=(@b * 2)/>\nfunction inc() { @c = @c + 1; }", '<button id="b" onclick=inc()>b</button><p id="c">${@a}</p>')], { clicks: 1 });
+    expect([r.before, r.after]).toEqual(["4", "6"]);
+  });
+  test("a SEEDED untyped cycle has no cycle code — E-DECL-TYPE-NOT-INFERABLE names the path (as a program cell's does)", () => {
+    const e = errs(fe([one("let <a=(@b + 1)/>\nlet <b=(@a + 1)/>", '<p id="c">${@a}</p>')]));
+    expect(e.map((d) => d.code)).toEqual(["E-DECL-TYPE-NOT-INFERABLE", "E-DECL-TYPE-NOT-INFERABLE"]);
+    expect(e[0].message).toContain("reads itself back through @a → @b");
+    expect(e[0].message).not.toContain("#");
+  });
+});
+
+describe("(r1 F3) a diagnostic names a file-scope own value `@count`, not `@count.count`", () => {
+  const SRV = [
+    ["a named import", [{ path: "lib.scrml", src: "export let <count:int=7/>\n" }, named("count", 'server function g() -> int { return @count; }\n<p id="c">${@count}</p>')], "@count"],
+    ["the same file", [one("let <c2:int=9/>", 'server function g() -> int { return @c2; }\n<p id="c">${@c2}</p>')], "@c2"],
+    ["a struct own value's field", [LIB, named("pt", 'server function g() -> int { return @pt.v; }\n<p id="c">${@pt.v}</p>')], "@pt"],
+  ];
+  for (const [label, files, name] of SRV) {
+    test(`E-REACTIVE-003, ${label}`, () => {
+      const e = errs(fe(files)).filter((d) => d.code === "E-REACTIVE-003");
+      expect(e.length).toBe(1);
+      expect(e[0].message).toContain("reads `" + name + "` —");
+    });
+  }
+});
