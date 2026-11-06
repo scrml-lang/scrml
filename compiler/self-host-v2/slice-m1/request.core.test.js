@@ -4,10 +4,11 @@
 // node is grafted by hand onto the counter program — the hand-built Core, or,
 // with SLICE_CORE=lowered, the Core the M2 front end lowers from the same source.
 //
-//   counter + let <res:int=0/>, let <loading:bool=false/>, let <stale:bool=false/>
+//   counter + let <res:int=0/>, let <loading:bool=false/>, let <stale:bool=false/>,
+//             let <data:int?=not/>, let <error:?=not/>
 //   renders += Request(target @res, deps [@count],
 //                      body: Suspend(v, @count + 100, { @res = v }),
-//                      mount: true, state: { loading, stale })
+//                      mount: true, state: { loading, data, error, stale }, handle: not)
 //              <p id="res">${@res}</p>
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
@@ -34,19 +35,28 @@ function requestCore(edit) {
   const fRes = mkField(910001, "res", C.Type.Int, C.litInt(0));
   const fLoading = mkField(910003, "loading", C.Type.Bool, C.Expr.Lit(C.Literal.Bool(false)));
   const fStale = mkField(910005, "stale", C.Type.Bool, C.Expr.Lit(C.Literal.Bool(false)));
-  prog.fields = [...prog.fields, fRes, fLoading, fStale];
-  const RES = idxOf("res"), LOADING = idxOf("loading"), STALE = idxOf("stale");
+  const fData = mkField(910007, "data", C.Type.Int, C.litInt(0));
+  const fError = mkField(910009, "error", C.Type.Int, C.litInt(0));
+  const fOther = mkField(910011, "other", C.Type.Int, C.litInt(0));
+  prog.fields = [...prog.fields, fRes, fLoading, fStale, fData, fError, fOther];
+  const RES = idxOf("res"), LOADING = idxOf("loading"), STALE = idxOf("stale"), DATA = idxOf("data"), ERROR = idxOf("error"), OTHER = idxOf("other");
   const dep = (idx) => ({ decl: P, inst: here, idx });
   const v = C.mkSym(910010, "v");
   const parts = {
     pre: [],
     on: C.prim2(C.PrimOp.Add, C.readField(P, here, count), C.litInt(100)),
     then: [C.Stmt.Write(fRes.wcap, here, C.EditKind.Replace, C.Expr.Local(v), C.Check.Static)],
-    wcaps: { res: fRes.wcap, count: template.wcap },
+    wcaps: { res: fRes.wcap, count: template.wcap, other: fOther.wcap },
+    target: dep(RES),
+    deps: [dep(count)],
+    mount: true,
+    state: { loading: dep(LOADING), data: dep(DATA), error: dep(ERROR), stale: dep(STALE) },
+    handle: null,
   };
-  if (edit) edit(parts, { here });
+  const bump = core.fns.find((f) => f.sym.hint === "bump");   // the counter's writing function (it writes @count)
+  if (edit) edit(parts, { here, dep, bump, idx: { RES, LOADING, STALE, DATA, ERROR, OTHER, count } });
   const body = C.block([...parts.pre, C.Stmt.Suspend(v, parts.on, C.block(parts.then))]);
-  const req = C.View.Request(dep(RES), [dep(count)], body, true, { loading: dep(LOADING), data: null, error: null, stale: dep(STALE) });
+  const req = C.View.Request(parts.target, parts.deps, body, parts.mount, parts.state, parts.handle);
   const shown = C.el("p", [C.Attr.Static("id", "res")], [C.dyn(C.readField(P, here, RES))]);
   prog.renders = [...prog.renders, req, shown];
   return core;
@@ -88,6 +98,62 @@ describe("C-R1 — a Request's body is its load (check.scrml)", () => {
   });
 });
 
+// s475 r1 — the adversarial review of #1771 (repros H1–H4, H7 from
+// ~/.cache/scrml/review/s475-1771/adv.check.test.js): each checked CLEAN on
+// dfeeb6fc5, and each is a request that re-triggers itself forever (F1) or
+// writes before its load (F2).
+describe("C-R1 r1 — no self-trigger, no write besides the target's (F1 / F2)", () => {
+  const msgs = (edit) => mods.check.checkCore(requestCore(edit)).join("\n");
+  const call = (f) => C.Expr.Call(f.sym, []);
+
+  test("H1: the continuation calls a function that writes a dependency (bump writes @count) — refused", () => {
+    expect(msgs((p, x) => { p.then = [C.Stmt.Eval(call(x.bump)), ...p.then]; }))
+      .toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `bump\(\)`: a Write of <program>\.count/);
+  });
+
+  test("H2 / H7: a Let initializer calls a writing function (a write before the load) — refused", () => {
+    expect(msgs((p, x) => { p.pre = [C.Stmt.Let(C.mkSym(910030, "z"), call(x.bump))]; }))
+      .toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `bump\(\)`/);
+  });
+
+  test("H7: a Let that calls a function writing the TARGET before the load — refused", () => {
+    // the target is @count; bump writes @count before the load settles (keep-stale broken)
+    expect(msgs((p, x) => {
+      p.target = x.dep(x.idx.count); p.deps = [x.dep(x.idx.OTHER)];
+      p.then = [C.Stmt.Write(p.wcaps.count, x.here, C.EditKind.Replace, C.litInt(7), C.Check.Static)];
+      p.pre = [C.Stmt.Let(C.mkSym(910031, "z"), call(x.bump))];
+    })).toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `bump\(\)`: a Write of <program>\.count/);
+  });
+
+  test("the one Write's value calling a writing function — refused", () => {
+    expect(msgs((p, x) => { p.then = [C.Stmt.Write(p.wcaps.res, x.here, C.EditKind.Replace, call(x.bump), C.Check.Static)]; }))
+      .toMatch(/through `bump\(\)`/);
+  });
+
+  test("H3: the target is one of its dependencies — refused", () => {
+    expect(msgs((p, x) => { p.deps = [x.dep(x.idx.RES)]; })).toMatch(/C-R1: a Request's target is one of its dependencies/);
+  });
+
+  test("H4: a signal among the deps, a signal equal to the target, two signals on one cell — refused", () => {
+    const m = msgs((p, x) => {
+      p.deps = [x.dep(x.idx.LOADING)];
+      p.state = { ...p.state, data: x.dep(x.idx.RES), stale: x.dep(x.idx.LOADING) };
+    });
+    expect(m).toMatch(/C-R1: a Request's `loading` signal is one of its dependencies/);
+    expect(m).toMatch(/C-R1: a Request's `data` signal is its target/);
+    expect(m).toMatch(/C-R1: a Request's `stale` signal shares its cell with another signal/);
+  });
+
+  test("`mount: false` with no dependencies can never run — refused", () => {
+    expect(msgs((p) => { p.mount = false; p.deps = []; })).toMatch(/C-R1: a Request with `mount: false` and no dependencies can never run/);
+  });
+
+  test("`mount: false` with a dependency, and `deps=[]` with `mount: true`, check clean", () => {
+    expect(msgs((p) => { p.mount = false; })).toBe("");
+    expect(msgs((p) => { p.deps = []; })).toBe("");
+  });
+});
+
 describe("the request machine through the printer", () => {
   test("mount runs the load; the target lands on settle; a dependency change reloads with keep-stale", async () => {
     const { out, rt } = await loadProgram(requestCore(), "request");
@@ -108,4 +174,24 @@ describe("the request machine through the printer", () => {
   });
   // supersede (EC-2) and teardown (EC-3) need loads the test settles out of order:
   // request.runtime.test.js drives them through rt.requestOn directly.
+});
+
+describe("r1 F3 — the request's handle and its full state", () => {
+  test("a handle binds the `{ refetch }` requestOn returns (a `const`, not a discarded expression); refetch re-runs the load", async () => {
+    const h = C.mkSym(910040, "req");
+    const core = requestCore((p) => { p.handle = h; });
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const { out } = await loadProgram(core, "request-handle");
+    expect(out.js).toMatch(/const req\w* = rt\.requestOn\(scope\$, /);
+    expect(out.js).not.toMatch(/^\s*rt\.requestOn\(/m);
+    expect(out.js).toContain("state: {");
+  });
+
+  test("without a handle the call is a statement; without state no `state:` is printed", async () => {
+    const core = requestCore((p) => { p.state = null; });
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const { out } = await loadProgram(core, "request-nostate");
+    expect(out.js).toMatch(/^\s*rt\.requestOn\(scope\$, /m);
+    expect(out.js).not.toContain("state: {");
+  });
 });

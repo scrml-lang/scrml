@@ -12,6 +12,16 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
+/** The full `<#id>` signal set (r1, F3: all four or none). */
+function sigs(init = {}) {
+  return {
+    loading: rt.cell(init.loading ?? false),
+    data: rt.cell(init.data ?? null),
+    error: rt.cell(init.error ?? null),
+    stale: rt.cell(init.stale ?? false),
+  };
+}
+
 /** A promise the test settles by hand. */
 function held() {
   let resolve, reject;
@@ -66,9 +76,10 @@ describe("§6.7.7 mount", () => {
     // mutation RED: settle() not clearing loading
     const scope = rt.root.child();
     const target = rt.cell(null);
-    const loading = rt.cell(false), data = rt.cell(null), error = rt.cell("old"), stale = rt.cell(true);
+    const state = sigs({ error: "old", stale: true });
+    const { loading, data, error, stale } = state;
     const hosts = [held()];
-    rt.requestOn(scope, target, [], loader(target, hosts, []), { loading, data, error, stale });
+    rt.requestOn(scope, target, [], loader(target, hosts, []), { state });
     expect([loading.peek(), error.peek(), stale.peek()]).toEqual([true, null, false]);
     hosts[0].resolve(7);
     await tick();
@@ -121,10 +132,11 @@ describe("§6.7.7 EC-3 teardown — the mounted guard", () => {
     // mutation RED: unregister() not cancelling the in-flight tasks
     const scope = rt.root.child();
     const target = rt.cell("kept");
-    const loading = rt.cell(false);
+    const state = sigs();
+    const { loading } = state;
     const hosts = [held()];
-    rt.requestOn(scope, target, [], loader(target, hosts, []), { loading });
-    expect(rt.stats.depEffects).toBeGreaterThan(0);
+    rt.requestOn(scope, target, [], loader(target, hosts, []), { state });
+    expect(rt.stats.requests).toBeGreaterThan(0);
     scope.dispose();
     hosts[0].resolve("late");
     await tick();
@@ -151,9 +163,10 @@ describe("§6.7.7 re-execution / §13.9.4 keep-stale", () => {
     const scope = rt.root.child();
     const dep = rt.cell("core");
     const target = rt.cell(null);
-    const data = rt.cell(null), stale = rt.cell(false), loading = rt.cell(false);
+    const state = sigs();
+    const { data, stale, loading } = state;
     const hosts = [held(), held()];
-    rt.requestOn(scope, target, [dep], loader(target, hosts, []), { data, stale, loading });
+    rt.requestOn(scope, target, [dep], loader(target, hosts, []), { state });
     hosts[0].resolve(3);
     await tick();
     dep.set("infra");                                    // reload
@@ -166,14 +179,15 @@ describe("§6.7.7 re-execution / §13.9.4 keep-stale", () => {
 });
 
 describe("§6.7.7 settled state (failure)", () => {
-  test("with an error signal: a failure keeps the target and data, sets error; the next run resets error (EC-1)", async () => {
-    // mutation RED: settle() running `then` on a Failure when an error signal exists
+  test("with its state: a failure keeps the target and data, sets error; the next run resets error (EC-1)", async () => {
+    // mutation RED: settle() running `then` on a Failure when the request has its state
     const scope = rt.root.child();
     const dep = rt.cell(0);
     const target = rt.cell(null);
-    const data = rt.cell(null), error = rt.cell(null), loading = rt.cell(false);
+    const state = sigs();
+    const { data, error, loading } = state;
     const hosts = [held(), held(), held()];
-    rt.requestOn(scope, target, [dep], loader(target, hosts, []), { data, error, loading });
+    rt.requestOn(scope, target, [dep], loader(target, hosts, []), { state });
     hosts[0].resolve(1);
     await tick();
     dep.set(1);
@@ -188,8 +202,8 @@ describe("§6.7.7 settled state (failure)", () => {
     scope.dispose();
   });
 
-  test("without an error signal (§13.9.5 a pending cell): the body's own handling runs — `then` sees the failure", async () => {
-    // mutation RED: settle() swallowing a Failure when no error signal exists
+  test("without state (§13.9.5 a pending cell): the body's own handling runs — `then` sees the failure", async () => {
+    // mutation RED: settle() swallowing a Failure when the request has no state
     const scope = rt.root.child();
     const target = rt.cell(4);
     const hosts = [held()];
@@ -212,10 +226,167 @@ describe("requestOn guards", () => {
     const body = () => ({ on: 1, then: () => {} });
     expect(() => rt.requestOn(scope, d, [], body)).toThrow(/target must be a mutable cell/);
     expect(() => rt.requestOn(scope, c, [d], body)).toThrow(/dependency must be a mutable cell/);
-    expect(() => rt.requestOn(scope, c, [], body, { loading: d })).toThrow(/`loading` signal must be a mutable cell/);
+    expect(() => rt.requestOn(scope, c, [], body, { state: { ...sigs(), loading: d } })).toThrow(/`loading` signal must be a mutable cell/);
+    // r1 (F3): all four signals or none
+    expect(() => rt.requestOn(scope, c, [], body, { state: { loading: rt.cell(false) } })).toThrow(/`data` signal must be a mutable cell \(all four signals, or none\)/);
     const dead = rt.root.child();
     dead.dispose();
     expect(() => rt.requestOn(dead, c, [], body)).toThrow(/live owning scope/);
+    scope.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s475 r1 — the adversarial review of #1771 (repros A1–A5, A11 from
+// ~/.cache/scrml/review/s475-1771/adv.runtime.test.js), each RED on dfeeb6fc5.
+// A request that re-triggers itself LIVELOCKS (A1/A2 on dfeeb6fc5): the
+// guards below throw at registration, so these never loop on head.
+// ---------------------------------------------------------------------------
+describe("r1 F1 — a request never re-triggers itself (requestOn refuses it)", () => {
+  const body = (t) => () => ({ on: 1, then: (v) => t.set(v) });
+
+  test("A1: the target among the deps is refused", () => {
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    expect(() => rt.requestOn(scope, t, [t], body(t))).toThrow(/target cannot be one of its dependencies/);
+    expect(rt.stats.requests).toBe(0);
+    scope.dispose();
+  });
+
+  test("A2: a signal among the deps is refused", () => {
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    const state = sigs();
+    expect(() => rt.requestOn(scope, t, [state.loading], body(t), { state })).toThrow(/`loading` signal cannot be one of its dependencies/);
+    scope.dispose();
+  });
+
+  test("a signal that is the target, and two signals on one cell, are refused", () => {
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    expect(() => rt.requestOn(scope, t, [], body(t), { state: { ...sigs(), data: t } })).toThrow(/`data` signal cannot be its target/);
+    const shared = rt.cell(false);
+    expect(() => rt.requestOn(scope, t, [], body(t), { state: { ...sigs(), loading: shared, stale: shared } })).toThrow(/`stale` signal shares its cell/);
+    scope.dispose();
+  });
+
+  test("`mount: false` with no dependencies can never run — refused", () => {
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    expect(() => rt.requestOn(scope, t, [], body(t), { mount: false })).toThrow(/can never run/);
+    scope.dispose();
+  });
+
+  test("requests are counted apart from <effect>s", () => {
+    const scope = rt.root.child();
+    const before = { ...rt.stats };
+    const t = rt.cell(null);
+    rt.requestOn(scope, t, [], () => ({ on: held().p, then: (v) => t.set(v) }));
+    expect([rt.stats.requests - before.requests, rt.stats.depEffects - before.depEffects]).toEqual([1, 0]);
+    scope.dispose();
+    expect(rt.stats.requests).toBe(before.requests);
+  });
+});
+
+describe("r1 F4 — a host error ends the run: loading / stale reset, error untouched, nothing escapes", () => {
+  function capture() {
+    const errs = [];
+    const prev = rt.setHostErrorReporter((e) => errs.push(e));
+    return { errs, restore: () => rt.setHostErrorReporter(prev) };
+  }
+
+  test("A3: a throwing `then` — loading / stale go false; error stays `not`; the throw is reported", async () => {
+    // mutation RED: settle() without its `finally`
+    const scope = rt.root.child();
+    const t = rt.cell(null);
+    const state = sigs({ data: 1 });                     // prior data → stale is true while loading
+    const { errs, restore } = capture();
+    try {
+      rt.requestOn(scope, t, [], () => ({ on: Promise.resolve(1), then: () => { throw new Error("boom"); } }), { state });
+      expect([state.loading.peek(), state.stale.peek()]).toEqual([true, true]);
+      await tick(); await tick();
+      expect([state.loading.peek(), state.stale.peek(), state.error.peek()]).toEqual([false, false, null]);
+      expect(errs.map((e) => e.message)).toEqual(["boom"]);
+    } finally { restore(); scope.dispose(); }
+  });
+
+  test("A4: a load that rejects (a host error, not a failure) — loading / stale go false; error stays `not`", async () => {
+    // mutation RED: suspend() not calling the owner's onLiveReject
+    const scope = rt.root.child();
+    const t = rt.cell(null);
+    const state = sigs({ data: 1 });
+    const { errs, restore } = capture();
+    try {
+      rt.requestOn(scope, t, [], () => ({ on: Promise.reject(new Error("x")), then: (v) => t.set(v) }), { state });
+      await tick(); await tick();
+      expect([state.loading.peek(), state.stale.peek(), state.error.peek(), t.peek()]).toEqual([false, false, null, null]);
+      expect(errs.map((e) => e.message)).toEqual(["x"]);
+    } finally { restore(); scope.dispose(); }
+  });
+
+  test("A4b: a SUPERSEDED run's rejection resets nothing (the newer run owns the signals)", async () => {
+    const scope = rt.root.child();
+    const dep = rt.cell(0), t = rt.cell(null);
+    const state = sigs();
+    const hs = [held(), held()];
+    let k = 0;
+    const { errs, restore } = capture();
+    try {
+      rt.requestOn(scope, t, [dep], () => { const h = hs[k++]; return { on: h.p, then: (v) => t.set(v) }; }, { state });
+      dep.set(1);
+      hs[0].reject(new Error("old"));
+      await tick();
+      expect(state.loading.peek()).toBe(true);
+      expect(errs).toEqual([]);
+      hs[1].resolve(2);
+      await tick();
+      expect([state.loading.peek(), t.peek()]).toEqual([false, 2]);
+    } finally { restore(); scope.dispose(); }
+  });
+
+  test("A5: a body that throws synchronously (a Let initializer) — reported, loading false, and the author's write does not throw", async () => {
+    // mutation RED: run() letting the body's throw unwind into drainQueues
+    const scope = rt.root.child();
+    const t = rt.cell(null), dep = rt.cell(0);
+    const state = sigs();
+    let bad = false;
+    const { errs, restore } = capture();
+    try {
+      rt.requestOn(scope, t, [dep], () => { if (bad) throw new Error("let init"); return { on: 1, then: (v) => t.set(v) }; }, { state });
+      await tick();
+      bad = true;
+      expect(() => dep.set(1)).not.toThrow();
+      expect([state.loading.peek(), state.stale.peek(), state.error.peek()]).toEqual([false, false, null]);
+      expect(errs.map((e) => e.message)).toEqual(["let init"]);
+      bad = false;
+      dep.set(2);                                        // the request still works after a host error
+      await tick();
+      expect(t.peek()).toBe(1);
+    } finally { restore(); scope.dispose(); }
+  });
+});
+
+describe("r1 F3 — stale is computed from `data` only (§6.7.7 Mount behavior step 4)", () => {
+  test("A11: a target already holding a value (initial / optimistic) with no data yet — stale is false", () => {
+    // mutation RED: stale computed from the target
+    const scope = rt.root.child();
+    const t = rt.cell("init");
+    const state = sigs();
+    rt.requestOn(scope, t, [], () => ({ on: held().p, then: (v) => t.set(v) }), { state });
+    expect([state.loading.peek(), state.stale.peek()]).toEqual([true, false]);
+    scope.dispose();
+  });
+
+  test("A9: an older run settling after a newer one changes nothing", async () => {
+    const scope = rt.root.child();
+    const dep = rt.cell(0), t = rt.cell(null);
+    const state = sigs();
+    const hs = [];
+    rt.requestOn(scope, t, [dep], () => { const h = held(); hs.push(h); return { on: h.p, then: (v) => t.set(v) }; }, { state });
+    dep.set(1);
+    hs[1].resolve("new"); await tick();
+    hs[0].resolve("old"); await tick();
+    expect([t.peek(), state.data.peek(), state.loading.peek(), state.stale.peek()]).toEqual(["new", "new", false, false]);
     scope.dispose();
   });
 });

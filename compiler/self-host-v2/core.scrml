@@ -682,11 +682,14 @@ ${
     export type EffectDep:struct = { decl: Sym, inst: InstRef, idx: int }
 
     // s475 — a `<request>`'s signals (§6.7.7 Properties): each ONE cell
-    // (an EffectDep — field `idx` of `decl` through `inst`), each optional.
-    // `loading` / `stale` hold a boolean, `data` the last successful value
-    // (the target's value after a successful settle), `error` the failure's
-    // error value or `not`.
-    export type RequestState:struct = { loading: EffectDep | not, data: EffectDep | not, error: EffectDep | not, stale: EffectDep | not }
+    // (an EffectDep — field `idx` of `decl` through `inst`). ALL FOUR or none
+    // (r1, F3): a request carries its full `<#id>` state (it handles a failed
+    // settle itself, §6.7.7) or none at all (`state: not` — a pending cell,
+    // whose body's own Attempt handles the failure, §13.9.5); no partial set
+    // decides that by which signals happen to exist. `loading` / `stale` hold
+    // a boolean, `data` the last successful value (the target's value after a
+    // successful settle), `error` the failure's error value or `not`.
+    export type RequestState:struct = { loading: EffectDep, data: EffectDep, error: EffectDep, stale: EffectDep }
 
     export type View:enum = {
         El(tag: string, attrs: Attr[], kids: View[]),
@@ -732,13 +735,23 @@ ${
         //    and teardown discards an in-flight result (EC-3, mounted guard).
         //  - `mount`: run the load when the request mounts (§6.7.7 "Mount
         //    behavior"); false for a provably-writing request (§6.7.7.3).
-        //  - `state`: the `<#id>` signals, or `not` (a pending cell: §13.9.2
-        //    "The hidden request's controls are not reachable"). With `state`,
-        //    a FAILED settle leaves `target` unchanged and sets `error`
-        //    (§6.7.7 "Settled state (failure)"; the request handles its
-        //    body's call); without it the body's own Attempt handles the
+        //  - `state`: the full `<#id>` signal set, or `not` (a pending cell:
+        //    §13.9.2 "The hidden request's controls are not reachable"). With
+        //    `state`, a FAILED settle leaves `target` unchanged and sets
+        //    `error` (§6.7.7 "Settled state (failure)"; the request handles
+        //    its body's call); without it the body's own Attempt handles the
         //    failure (§13.9.5).
-        Request(target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, state: RequestState | not),
+        //  - `handle`: the request's identity — the name its printed form binds
+        //    to the object `rt.requestOn` returns (`{ refetch }`), so a
+        //    `<#id>.refetch()` (§6.7.7, EC-4) has a route to it; `not` when
+        //    nothing names the request (a pending cell).
+        //  Unrepresented yet, owed by slice S5 (g-boot-request-read-abort-owed-s475):
+        //  the READ / WRITE class (§6.7.7.1 abort vs discard), `cache`
+        //  (§6.7.7.2) and the §6.7.7.3 baseline trigger (a provably-writing
+        //  request fires only on a LOCAL write that differs from its baseline).
+        //  C-R1 (check.scrml) refuses a request that would re-trigger itself:
+        //  the target, a signal or a body write among its deps.
+        Request(target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, state: RequestState | not, handle: Sym | not),
         // s449 — `reset-on=[@a, @b]` on a program cell (§6.8.4): when any
         // `triggers` cell changes, run `reset` — exactly ONE Write of the cell's
         // reset value to the cell (its initializer; a transition for a cell with

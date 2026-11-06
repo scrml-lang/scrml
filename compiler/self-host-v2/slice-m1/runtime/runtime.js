@@ -32,7 +32,7 @@
 // ---------------------------------------------------------------------------
 // Stats — live effect / listener counts, for tests and devtools.
 // ---------------------------------------------------------------------------
-export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0, depEffects: 0 };
+export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0, depEffects: 0, requests: 0 };
 
 // ---------------------------------------------------------------------------
 // Scopes.
@@ -390,17 +390,31 @@ export function effectOn(scope, deps, body) {
 //   1. starts a new TASK and cancels every earlier one — the newest run wins
 //      (EC-2 / EC-4: "only the most recently initiated fetch's result is
 //      applied"; the task IS the per-instance sequence number);
-//   2. sets the signals (§6.7.7 "Mount behavior"): loading true, error `not`,
-//      stale = (data is not `not`); `data` and the TARGET keep their values
-//      ("On re-execution, `<#id>.data` is NOT cleared"; §13.9.4 keep-stale);
+//   2. for a request WITH its state (r1, F3: all four signals or none), sets
+//      the signals (§6.7.7 "Mount behavior"): loading true, error `not`,
+//      stale = (data is not `not`) — computed from `data` only (§6.7.7 step 4;
+//      the target may hold an optimistic or initial value); `data` and the
+//      TARGET keep their values ("On re-execution, `<#id>.data` is NOT
+//      cleared"; §13.9.4 keep-stale);
 //   3. evaluates the load: `body(task)` returns `{ on, then }` — `on` the
 //      waiting value, `then(v)` the continuation that writes the target.
 // When the load settles on a LIVE task (not superseded, not torn down —
-// EC-3's mounted guard): with an `error` signal and a Failure, the error is
-// set and the target is untouched (§6.7.7 "Settled state (failure)": "data
-// retains previous value"); otherwise `then(v)` runs (for a pending cell its
-// own Attempt handles a failure, §13.9.5) and `data` takes the target's new
-// value. loading / stale go false in the same batch.
+// EC-3's mounted guard): a request with its state takes a Failure itself —
+// error is set and the target is untouched (§6.7.7 "Settled state (failure)":
+// "data retains previous value"); otherwise `then(v)` runs (a pending cell has
+// no state: its body's own Attempt handles a failure, §13.9.5) and `data`
+// takes the target's new value. loading / stale go false in the same batch.
+//
+// r1 (F4) — A HOST ERROR (a scrml bug, never a scrml failure: `then` throws,
+// the load rejects, a Let initializer throws) ends the run: it is reported
+// through the one host-error reporter, loading / stale go false, and `error`
+// is NOT set (it holds scrml failures only). A synchronous throw from the body
+// is caught here, so it never escapes into the write that triggered the run.
+//
+// r1 (F1) — a request never re-triggers itself: requestOn refuses a target or
+// signal among the deps, a signal that is the target and two signals on one
+// cell (check.scrml C-R1 refuses the same, plus any body write besides the
+// target's, statically — the runtime cannot see a write through a function).
 //
 // Discard-only (INTERIM): a superseded or torn-down run's transport is NOT
 // aborted — its result is dropped. §6.7.7.1 rules 2/3 owe an abort for a
@@ -408,19 +422,18 @@ export function effectOn(scope, deps, body) {
 // to Task.cancel for a READ-classified request only (gap
 // g-boot-request-read-abort-owed-s475). Discarding is never wrong for a WRITE.
 // ---------------------------------------------------------------------------
+const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
+
 class Request {
-  constructor(scope, target, deps, body, opts) {
+  constructor(scope, target, deps, body, state) {
     this.target = target;
     this.deps = deps;
     this.body = body;
-    this.loading = opts.loading ?? null;
-    this.data = opts.data ?? null;
-    this.error = opts.error ?? null;
-    this.stale = opts.stale ?? null;
+    this.state = state;                 // { loading, data, error, stale } | null
     this.disposed = false;
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
-    stats.depEffects++;
+    stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
   markStale() {
@@ -434,27 +447,55 @@ class Request {
     this.tasks.clear();
     const task = new Task(this);
     this.tasks.add(task);
+    const st = this.state;
     try {
-      batch(() => {
-        if (this.loading) this.loading.set(true);
-        if (this.error) this.error.set(null);
-        if (this.stale) this.stale.set(this.data ? this.data.peek() != null : this.target.peek() != null);
-      });
-      const load = untrack(() => this.body(task));
-      suspend(task, load.on, (v) => this.settle(v, load.then));
+      if (st) {
+        batch(() => {
+          st.loading.set(true);
+          st.error.set(null);
+          st.stale.set(st.data.peek() != null);
+        });
+      }
+      let load;
+      try {
+        load = untrack(() => this.body(task));
+      } catch (e) {
+        // F4 (A5): a Let initializer threw — a host error; the run is over
+        task.cancel();
+        reportHostError(e);
+        this.idle();
+        return;
+      }
+      suspend(task, load.on, (v) => this.settle(v, load.then), () => this.idle());
     } finally {
       this.settled(task);
     }
   }
   settle(v, then) {
-    if (this.error && failed(v)) {
-      this.error.set(v.error);
-    } else {
-      then(v);
-      if (this.data) this.data.set(this.target.peek());
+    const st = this.state;
+    try {
+      if (st && failed(v)) {
+        st.error.set(v.error);
+      } else {
+        then(v);
+        if (st) st.data.set(this.target.peek());
+      }
+    } finally {
+      // F4 (A3): a throwing `then` (reported by suspend) still ends the run
+      if (st) {
+        st.loading.set(false);
+        st.stale.set(false);
+      }
     }
-    if (this.loading) this.loading.set(false);
-    if (this.stale) this.stale.set(false);
+  }
+  /** A live run ended in a host error: loading / stale go false; error is untouched. */
+  idle() {
+    const st = this.state;
+    if (!st || this.disposed) return;
+    batch(() => {
+      st.loading.set(false);
+      st.stale.set(false);
+    });
   }
   settled(task) {
     if (task.pending === 0) this.tasks.delete(task);
@@ -466,17 +507,19 @@ class Request {
     for (const d of this.deps) d.observers.delete(this);
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
-    stats.depEffects--;
+    stats.requests--;
   }
 }
 
 /**
  * Register a request in `scope` (§6.7.7 / §13.9.2). `target` is the cell the
  * load writes; `deps` the cells whose change re-runs it (may be empty: load
- * once); `body(task)` returns `{ on, then }`. `opts.mount` (default true) runs
- * it on mount — false for a provably-writing request (§6.7.7.3); `opts.loading
- * / data / error / stale` are the optional signal cells. Returns `{ refetch }`
- * (§6.7.7 `<#id>.refetch()`: a new run, superseding an in-flight one — EC-4).
+ * once, on mount); `body(task)` returns `{ on, then }`. `opts.mount` (default
+ * true) runs it on mount — false for a provably-writing request (§6.7.7.3),
+ * which then needs a dependency; `opts.state` is the full signal set
+ * `{ loading, data, error, stale }` or absent (a pending cell). Returns
+ * `{ refetch }` (§6.7.7 `<#id>.refetch()`: a new run, superseding an
+ * in-flight one — EC-4); requestJs binds it to the request's handle.
  */
 export function requestOn(scope, target, deps, body, opts = {}) {
   requireScope(scope, "a <request>");
@@ -484,10 +527,21 @@ export function requestOn(scope, target, deps, body, opts = {}) {
   for (const d of deps) {
     if (!(d instanceof Cell)) throw new Error("a <request> dependency must be a mutable cell (§6.7.7, E-LIFECYCLE-022)");
   }
-  for (const k of ["loading", "data", "error", "stale"]) {
-    if (opts[k] != null && !(opts[k] instanceof Cell)) throw new Error(`a <request>'s \`${k}\` signal must be a mutable cell`);
+  if (deps.includes(target)) throw new Error("a <request> target cannot be one of its dependencies — its settle would re-run it forever");
+  if (opts.mount === false && deps.length === 0) throw new Error("a <request> with `mount: false` and no dependencies can never run (§6.7.7.3)");
+  const st = opts.state ?? null;
+  if (st !== null) {
+    const seen = new Set();
+    for (const k of REQUEST_SIGNALS) {
+      const c = st[k];
+      if (!(c instanceof Cell)) throw new Error(`a <request>'s \`${k}\` signal must be a mutable cell (all four signals, or none)`);
+      if (c === target) throw new Error(`a <request>'s \`${k}\` signal cannot be its target`);
+      if (deps.includes(c)) throw new Error(`a <request>'s \`${k}\` signal cannot be one of its dependencies — every run writes it`);
+      if (seen.has(c)) throw new Error(`a <request>'s \`${k}\` signal shares its cell with another signal`);
+      seen.add(c);
+    }
   }
-  const r = new Request(scope, target, deps, body, opts);
+  const r = new Request(scope, target, deps, body, st);
   if (opts.mount !== false) r.markStale();
   return { refetch: () => r.markStale() };
 }
@@ -510,7 +564,7 @@ export function requestOn(scope, target, deps, body, opts = {}) {
  *    unhandled rejection — the bootstrap twin of impl#1's handler-rejection
  *    logging fix (#1283 / #1296).
  */
-export function suspend(task, value, k) {
+export function suspend(task, value, k, onLiveReject) {
   task.pending++;
   Promise.resolve(value).then(
     (v) => {
@@ -527,7 +581,13 @@ export function suspend(task, value, k) {
     },
     (e) => {
       task.pending--;
-      if (!task.cancelled && e !== REPORTED) reportHostError(e);
+      if (!task.cancelled) {
+        if (e !== REPORTED) reportHostError(e);
+        // s475 r1 (F4): the owner's own end-of-run on a live host rejection (a request's signals)
+        if (onLiveReject) {
+          try { onLiveReject(e); } catch (e2) { reportHostError(e2); }
+        }
+      }
       task.owner.settled(task);
     },
   );

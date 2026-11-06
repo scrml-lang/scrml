@@ -2189,7 +2189,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
-            .Request(target: t, deps: ds, body: b, mount: m, state: st) :> requestJs(ctx, t, ds, b, m, st)
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h) :> requestJs(ctx, t, ds, b, m, st, h)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
             .Reach(fields: fs) :> reachJs(ctx, fs, node)
@@ -2370,17 +2370,19 @@ ${
     }
 
     // s475 — the request machine (§6.7.7 / §13.9.2), modelled on effectJs:
-    //   rt.requestOn(scope$, <target cell>, [<dependency cells>],
+    //   [const <handle> =] rt.requestOn(scope$, <target cell>, [<dependency cells>],
     //     (task$) => { <Lets>; return { on: <the load>, then: (x) => { <then> } }; },
-    //     { mount, loading, data, error, stale })
+    //     { mount[, state: { loading, data, error, stale }] })
     // The body's ONE Suspend (C-R1) is not printed as `rt.suspend`: the
     // runtime owns the load's suspension, so it knows the run (newest wins —
     // EC-2), drops a late settle after teardown (EC-3), sets the signals, and,
-    // with an `error` signal, takes a failure itself (target unchanged, §6.7.7
-    // "Settled state (failure)") instead of running `then`. `then` closes over
-    // the Lets. Registered into the scope this view list renders into (C12's
-    // owner rule, as an Effect).
-    fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not) -> Rendered {
+    // for a request WITH its state (r1: all four signals or none), takes a
+    // failure itself (target unchanged, §6.7.7 "Settled state (failure)")
+    // instead of running `then`. `then` closes over the Lets. Registered into
+    // the scope this view list renders into (C12's owner rule, as an Effect).
+    // r1 (F3): a `handle` binds the `{ refetch }` object requestOn returns, so
+    // `<#id>.refetch()` (EC-4) has a route; with none the call is a statement.
+    fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not, handle: Sym | not) -> Rendered {
         const n: int = body.stmts.length
         if (n == 0) return only([sexpr(jid("malformedRequest$"))])          // C-R1 refuses it first
         const sp: SuspendParts | not = suspendPartsOf(body.stmts[n - 1])
@@ -2390,16 +2392,14 @@ ${
         const load: JsStmt[] = blockJs(ctx, pre).concat([JsStmt.SReturn(JsExpr.JObject([{ key: "on", value: exprJs(ctx, sp.on) }, { key: "then", value: cont }]))])
         let opts: JsProp[] = [{ key: "mount", value: JsExpr.JBool(mount) }]
         if (st is given) {
-            opts = opts.concat(signalProp(ctx, "loading", st.loading)).concat(signalProp(ctx, "data", st.data))
-            opts = opts.concat(signalProp(ctx, "error", st.error)).concat(signalProp(ctx, "stale", st.stale))
+            const sigs: JsExpr[] = depCells(ctx, [st.loading, st.data, st.error, st.stale])
+            const so: JsExpr = JsExpr.JObject([{ key: "loading", value: sigs[0] }, { key: "data", value: sigs[1] }, { key: "error", value: sigs[2] }, { key: "stale", value: sigs[3] }])
+            opts = opts.concat([{ key: "state", value: so }])
         }
         const args: JsExpr[] = [scopeVar(), depCells(ctx, [target])[0], JsExpr.JArray(depCells(ctx, deps)), JsExpr.JArrow(["task$"], load), JsExpr.JObject(opts)]
-        return only([sexpr(rtCall(ctx, "requestOn", args))])
-    }
-
-    fn signalProp(ctx: Ctx, key: string, dep: EffectDep | not) -> JsProp[] {
-        if (dep is not) return []
-        return [{ key: key, value: depCells(ctx, [dep])[0] }]
+        const call: JsExpr = rtCall(ctx, "requestOn", args)
+        if (handle is given) return only([JsStmt.SConst(symName(ctx, handle), call)])
+        return only([sexpr(call)])
     }
 
     // s454 (U1b): a Suspend at ANY depth (a Join body, an If branch after a

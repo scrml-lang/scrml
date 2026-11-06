@@ -310,19 +310,11 @@ ${
         return out
     }
 
-    // s475 — a request's signal cells, in the fixed order loading, data, error, stale.
+    // s475 — a request's signal cells, in the fixed order loading, data, error, stale
+    // (r1: all four or none — RequestState's fields are mandatory).
     export fn requestStateDeps(st: RequestState | not) -> EffectDep[] {
         if (st is not) return []
-        let out: EffectDep[] = []
-        const l: EffectDep | not = st.loading
-        if (l is given) out = out.concat([l])
-        const d: EffectDep | not = st.data
-        if (d is given) out = out.concat([d])
-        const e: EffectDep | not = st.error
-        if (e is given) out = out.concat([e])
-        const s: EffectDep | not = st.stale
-        if (s is given) out = out.concat([s])
-        return out
+        return [st.loading, st.data, st.error, st.stale]
     }
 
     fn attrKids(a: Attr) -> Node[] {
@@ -531,12 +523,17 @@ ${
             .Slot :> []
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
-            .Request(deps: ds) :> []
+            .Request(handle: h) :> optSym(h)                // s475 r1: the request's handle (bound by requestJs)
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
             .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§17.4)
         }
+    }
+
+    fn optSym(s: Sym | not) -> Sym[] {
+        if (s is not) return []
+        return [s]
     }
 
     fn patternBinds(pat: Pattern) -> Sym[] {
