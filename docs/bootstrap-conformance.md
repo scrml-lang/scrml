@@ -13,24 +13,24 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 302 | 16.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 239 | 13.1% |
+| FAIL | 238 | 13.0% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 685 | 37.5% |
-| UNSUPPORTED | 601 | 32.9% |
+| UNSUPPORTED | 602 | 33.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 541; of those, 302 hold (55.8%). Runtime half executed on the bootstrap for 109 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 540; of those, 302 hold (55.9%). Runtime half executed on the bootstrap for 109 case(s).
 
 - **Vacuous** passes: 17 of 302 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **285**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 239; the other 164 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 74 of 238; the other 164 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 601.
+UNSUPPORTED by reason: bootstrap-unsupported 602.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 185 · FAIL 203 · UNSUPPORTED 410. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 185 · FAIL 202 · UNSUPPORTED 411. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -161,9 +161,9 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
 | style | 27 | 1 | · | 1 | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
-| type-state-codes | 32 | 5 | · | 2 | · | 3 | 22 | · | · |
+| type-state-codes | 32 | 5 | · | 1 | · | 3 | 23 | · | · |
 
-### FAIL (239)
+### FAIL (238)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -1075,12 +1075,6 @@ NOT-TWINNED by reason (685 cases; a case counts once per distinct reason):
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-EXPECTED: expected `}`, found ``
-- `type-state-codes/e-type-lifecycle-on-engine-cell-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-LIFECYCLE-ON-ENGINE-CELL)
-  - missing E-TYPE-LIFECYCLE-ON-ENGINE-CELL
-  - severity: E-TYPE-LIFECYCLE-ON-ENGINE-CELL did not fire (expected error)
-  - E-PARSE-TYPE: expected a type after `:`
-  - E-PARSE-TAG: unexpected `(` in the tag `<phase`
-  - E-PARSE-TAG: unexpected `.` in the tag `<phase`
 
 ### CRASH (0)
 
@@ -1395,7 +1389,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (601)
+### UNSUPPORTED (602)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1991,8 +1985,9 @@ none
 - `type-state-codes/e-type-062-is-non-enum-lhs-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-081-partial-match-render-pos` — twin · bootstrap-unsupported: `partial match` (§18.18) is not in the bootstrap yet; it is refused here by name rather than misread — write a full `match` with an `else :>` arm
 - `type-state-codes/e-type-any-forbidden-neg` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
-- `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · bootstrap-unsupported: `is <variant>` (§18.17) is not in the bootstrap yet; it is refused here by name rather than misread — test the variant with a `match` (an `else :>` arm for the rest)
-- `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · bootstrap-unsupported: `is <variant>` (§18.17) is not in the bootstrap yet; it is refused here by name rather than misread — test the variant with a `match` (an `else :>` arm for the rest)
+- `type-state-codes/e-type-lifecycle-on-engine-cell-pos` — twin · bootstrap-unsupported: the lifecycle `(.Idle to .Active)` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not built
+- `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · bootstrap-unsupported: the lifecycle `(.Draft to .Published)` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not b
+- `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · bootstrap-unsupported: the lifecycle `(.Draft to .Published)` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not b
 - `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `items` holds a tape literal (a file-scope tape constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at com
 - `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a call or a payload-variant value (a file-scope payload-variant constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const`
 - `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: `map literal [k: v]` (§59) is not in the bootstrap yet; it is refused here by name rather than misread — maps (§59, O44) are not in the bootstrap
