@@ -552,16 +552,25 @@ describe("run time — the request machine, through the server artifact (slice-m
     expect(shown()).toBe("c");
   });
 
-  // r2 N2 — the newest STARTED write or load of a pending cell wins (PA reading ⚑, recorded in the
-  // §13.9.4 coverage row): starting one supersedes any older one in flight — its result is discarded,
-  // and a READ load's transport aborted (Task.onAbort). Red on b093477e8 (probe p9): R1 "b" (the stale
-  // reload overwrote the author's "c"), R2 "c" (the older author write overwrote the reload's "b"),
-  // R3 "a" (the first load overwrote the author's "c"); no transport aborted.
-  const RACE = (decl = PEND) => APP(decl).replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
-    `<button id="w" onclick={ @who = loadName(3) !{ _ :> not }; }>w</button>\n        <button id="z" onclick={ if (@who is given) { @who = "z"; } }>z</button>`);
-  async function race(name) {
-    const r = compile(RACE());
-    expect(printCore(r.core, "race").js).toContain("rt.suspendClaim(task$");
+  // N2 (r3 — start stamps compared when a write LANDS): the most recently STARTED write or load of a
+  // pending cell wins (PA reading ⚑, recorded in the §13.9.4 coverage row). A load's run and every
+  // wait take a start stamp; a continuation's writes carry its wait's stamp (ambient, so a write from a
+  // Join body, a helper function or a loop carries it too); a write with no wait starts as it lands.
+  // A landing write older than the cell's last load start or last landed write is discarded (that
+  // write only); a winning write supersedes the load in flight — result discarded, a READ's transport
+  // aborted. Nothing is aborted before a write lands. Red on b093477e8 (probe p9): R1 "b", R2 "c",
+  // R3 "a", no transport aborted. Red on ec2850635 (r2's claim at call start, probe p11): A "a" (the
+  // reload aborted though no write followed), A' `not` forever, B / F "c" (an unclaimed write aborted a
+  // reload that started after it).
+  const RACE = (decl = PEND, extra = "", btn = `@who = loadName(3) !{ _ :> not };`) => APP(decl).replace(LOAD, LOAD + extra)
+    .replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
+      `<button id="w" onclick={ ${btn} }>w</button>\n        <button id="w1" onclick={ @who = loadName(1) !{ _ :> not }; }>w1</button>\n        <button id="z" onclick={ if (@who is given) { @who = "z"; } }>z</button>\n        <button id="za" onclick={ if (@who is given) { @who = "a"; } }>za</button>`);
+  async function race(name, extra, btn) {
+    const r = compile(RACE(PEND, extra, btn));
+    expect(errsOf(RACE(PEND, extra, btn))).toEqual([]);
+    expect(check(r.core)).toEqual([]);
+    const js = printCore(r.core, "race").js;
+    expect(js).not.toContain("suspendClaim");         // r3: no claim at a call's start
     const { srv } = await serve(r.core, await realDb(DDL, ROWS));
     const held = heldTransport(srv);
     const { rt } = await loadProgram(r.core, name + k++);
@@ -569,19 +578,20 @@ describe("run time — the request machine, through the server artifact (slice-m
     return { rt, held };
   }
 
-  test("R1: the own reload in flight, then an author write — the reload is aborted, the author's value stays", async () => {
+  test("R1: the own reload in flight, then an author write — the write lands and aborts the reload; its value stays", async () => {
     const { rt, held } = await race("pend-r1-");
     await held[0].go();
     await settle();
     click(document.querySelector("#u2"));            // the own reload (READ) starts
     await settle(5);
-    click(document.querySelector("#w"));             // the author write starts: it supersedes the reload
+    click(document.querySelector("#w"));             // the author write starts (after the reload)
     await settle(5);
     expect(held.length).toBe(3);
-    expect(held[1].aborted).toBe(true);
+    expect(held[1].aborted).toBe(false);             // r3: nothing is aborted before a write lands
     expect(cells(rt).who).toBe("a");                 // keeps its value meanwhile (§13.9.4)
-    await held[2].go();
+    await held[2].go();                              // the author write lands: newer than the reload
     await settle();
+    expect(held[1].aborted).toBe(true);
     expect(cells(rt).who).toBe("c");
     expect(shown()).toBe("c");
   });
@@ -604,14 +614,15 @@ describe("run time — the request machine, through the server artifact (slice-m
     expect(shown()).toBe("b");
   });
 
-  test("R3: an author write during the FIRST load — the first load is aborted, the author's value lands", async () => {
+  test("R3: an author write during the FIRST load — the write lands and aborts the first load", async () => {
     const { rt, held } = await race("pend-r3-");
     click(document.querySelector("#w"));
     await settle(5);
     expect(held.length).toBe(2);
-    expect(held[0].aborted).toBe(true);
+    expect(held[0].aborted).toBe(false);
     await held[1].go();
     await settle();
+    expect(held[0].aborted).toBe(true);
     expect(cells(rt).who).toBe("c");
     expect(shown()).toBe("c");
   });
@@ -629,6 +640,151 @@ describe("run time — the request machine, through the server artifact (slice-m
     click(document.querySelector("#u3"));            // a later dependency change reloads as before
     await settle(5);
     await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
+  });
+
+  test("a no-op write (the value the cell holds) leaves the in-flight load alone (r3: Object.is first)", async () => {
+    const { rt, held } = await race("pend-noop-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the reload starts
+    await settle(5);
+    click(document.querySelector("#za"));            // `@who = "a"` — what it already holds
+    await settle(5);
+    expect(held[1].aborted).toBe(false);
+    await held[1].go();
+    await settle();
+    expect(cells(rt).who).toBe("b");
+  });
+
+  // p11 A / A′ (red on ec2850635): a wait whose continuation writes NOTHING leaves the load alone.
+  const NOWRITE = `const n: string = loadName(3) !{ _ :> "?" }; if (n == "nope") { @who = n; }`;
+  test("A: a waiting handler whose write is not taken leaves the in-flight reload alone (red r2: stale \"a\")", async () => {
+    const { rt, held } = await race("pend-a-", "", NOWRITE);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the reload starts
+    await settle(5);
+    click(document.querySelector("#w"));             // the handler's call starts — no write follows
+    await settle(5);
+    expect(held.length).toBe(3);
+    await held[2].go();
+    await settle();
+    expect(held[1].aborted).toBe(false);
+    await held[1].go();
+    await settle();
+    expect(cells(rt)).toEqual({ userId: 2, show: true, who: "b" });
+    expect(shown()).toBe("b");
+  });
+
+  test("A′: the same during the FIRST load — the load lands (red r2: `not`, loading forever)", async () => {
+    const { rt, held } = await race("pend-a1-", "", NOWRITE);
+    click(document.querySelector("#w"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    await held[1].go();
+    await settle();
+    expect(held[0].aborted).toBe(false);
+    await held[0].go();
+    await settle();
+    expect(cells(rt).who).toBe("a");
+    expect(shown()).toBe("a");
+  });
+
+  // p11 B / F (red on ec2850635): a write the r2 claim analysis could not see — after a Join, through
+  // a helper function — carries its continuation's start stamp, so a reload that started after the
+  // call still wins.
+  test("B: a write after a Join, older than a reload, is discarded; the reload is not aborted (red r2: \"c\")", async () => {
+    const { rt, held } = await race("pend-b-", "",
+      `let n: string = "x"; if (@userId > 0) { n = loadName(3) !{ _ :> "?" }; } @who = n;`);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#w"));             // the author call starts
+    await settle(5);
+    click(document.querySelector("#u2"));            // the reload starts after it
+    await settle(5);
+    expect(held.length).toBe(3);
+    await held[1].go();                              // the older author write lands first: discarded
+    await settle();
+    expect(cells(rt).who).toBe("a");
+    expect(held[2].aborted).toBe(false);
+    await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("b");
+    expect(shown()).toBe("b");
+  });
+
+  test("F: a write through a synchronous helper function carries the call's stamp the same way (red r2: \"c\")", async () => {
+    const { rt, held } = await race("pend-f-", `    function setWho(v: string) { @who = v; }\n`,
+      `const n: string = loadName(3) !{ _ :> "?" }; setWho(n);`);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#w"));
+    await settle(5);
+    click(document.querySelector("#u2"));
+    await settle(5);
+    await held[1].go();
+    await settle();
+    expect(cells(rt).who).toBe("a");
+    expect(held[2].aborted).toBe(false);
+    await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("b");
+  });
+
+  test("F′: the helper's write, newer than the reload, wins and aborts it", async () => {
+    const { rt, held } = await race("pend-f1-", `    function setWho(v: string) { @who = v; }\n`,
+      `const n: string = loadName(3) !{ _ :> "?" }; setWho(n);`);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the reload starts
+    await settle(5);
+    click(document.querySelector("#w"));             // the author call starts after it
+    await settle(5);
+    await held[2].go();
+    await settle();
+    expect(held[1].aborted).toBe(true);
+    expect(cells(rt).who).toBe("c");
+  });
+
+  test("C: two author writes landing in reverse order — the later-started one stays", async () => {
+    const { rt, held } = await race("pend-c-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#w"));             // loadName(3) starts
+    await settle(5);
+    click(document.querySelector("#w1"));            // loadName(1) starts after it
+    await settle(5);
+    await held[2].go();                              // the newer lands — "a" (a no-op, still the newest)
+    await settle();
+    await held[1].go();                              // the older lands: discarded
+    await settle();
+    expect(cells(rt).who).toBe("a");
+    expect(shown()).toBe("a");
+  });
+
+  // p11 D — PINNED behaviour: an author write started after a reload lands `not` through its
+  // `_ :> not` arm (§13.9.5: "`not` … returns the cell to its pre-state"). It is the newest start, so it
+  // WINS: the reload is aborted and the cell shows its pre-state with no load in flight until the next
+  // dependency change. (Not re-loading here is the PA reading's consequence — a SPEC line is suggested.)
+  test("D: a newer author write that fails to `not` wins over the reload — the cell is `not`, nothing in flight", async () => {
+    const { rt, held } = await race("pend-d-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the reload starts
+    await settle(5);
+    click(document.querySelector("#w"));             // the author write starts after it
+    await settle(5);
+    held[2].fail();                                  // the author call fails: its arm yields `not`
+    await settle();
+    expect(held[1].aborted).toBe(true);
+    expect(cells(rt).who).toBe(null);
+    expect(waiting()).toBe(true);
+    expect(held.length).toBe(3);                     // no reload follows
+    click(document.querySelector("#u3"));            // the next dependency change loads again
+    await settle(5);
+    await held[3].go();
     await settle();
     expect(cells(rt).who).toBe("c");
   });
@@ -666,8 +822,8 @@ describe("run time — the request machine, through the server artifact (slice-m
 // classification and abort-reads / discard-writes … apply to a pending cell by construction"), so:
 //   #1794 — a server call that reaches NO SQL is READ (S475 ruling: "the #1787 '≥1 SELECT' clause …
 //     is dropped — SPEC §6.7.7.1 rule 1 makes it READ"), so a no-SQL pending load is now abortable —
-//     superseded by a dependency change or by an author write's claim (rt.suspendClaim), its transport
-//     is aborted (before the merge it was WRITE: run to completion, discarded). C-R2 re-checks it clean.
+//     superseded by a dependency change or by a newer author write landing (r3 start stamps), its
+//     transport is aborted (before the merge it was WRITE: run to completion, discarded). C-R2 re-checks it clean.
 //   #1797 — every client `!` function that `?`-propagates a server call is a transport carrier
 //     (ruling S475 item 4): an author's waiting write of one into a pending cell (§13.9.4 ¶2) must
 //     cover `E + Transport` (or `_`), and a wire failure reaches that arm.
@@ -717,7 +873,7 @@ describe("merge with #1794 / #1797 — a pending cell's load under the new READ 
     expect(check(r.core).join("\n")).toMatch(/C-R2: a READ Request's server call reaches a query that is not provably a SELECT, in `loadName`/);
   });
 
-  test("a superseded no-SQL load's transport is aborted, by a dependency change and by an author write's claim", async () => {
+  test("a superseded no-SQL load's transport is aborted, by a dependency change and by a newer author write landing", async () => {
     const src = APP(PEND).replace(LOAD, NOSQL).replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
       `<button id="w" onclick={ @who = loadName(3) !{ _ :> not }; }>w</button>`);
     const r = compile(src);
@@ -734,13 +890,14 @@ describe("merge with #1794 / #1797 — a pending cell's load under the new READ 
     await settle(5);
     expect(held.length).toBe(3);
     expect(held[1].aborted).toBe(true);              // RED before the merge: a no-SQL load was WRITE
-    click(document.querySelector("#w"));             // the author write claims the cell
+    click(document.querySelector("#w"));             // the author write starts (after reload 2)
     await settle(5);
     expect(held.length).toBe(4);
-    expect(held[2].aborted).toBe(true);
+    expect(held[2].aborted).toBe(false);             // r3: nothing aborted before the write lands
     expect(cells(rt).who).toBe("a");                 // keeps its value meanwhile (§13.9.4)
     await held[3].go();
     await settle();
+    expect(held[2].aborted).toBe(true);
     expect(cells(rt).who).toBe("c");
   });
 

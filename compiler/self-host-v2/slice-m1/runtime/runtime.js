@@ -195,14 +195,14 @@ export class Cell {
     // A seed still owed (an initializer queued during construction, see
     // `construct`), SEEDING while it runs, or null once the value is settled.
     this.pending = null;
-    // s475 r2 (N2): a PENDING cell's supersede record (§13.9.2; set by its Request) — null otherwise
+    // s475 r3 (N2): a PENDING cell's supersede record (§13.9.2; set by its Request) — null otherwise
     this.pend = null;
   }
   get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
-    if (this.pend !== null && !pendWrite(this)) return;     // s475 r2 (N2): a superseded write is discarded
+    if (this.pend !== null && !pendWrite(this, v)) return;   // s475 r3 (N2): a stale or no-op write
     this.pending = null;
     if (Object.is(v, this.value)) return;
     this.value = v;
@@ -454,58 +454,45 @@ export function effectOn(scope, deps, body) {
 // ---------------------------------------------------------------------------
 const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 
-// s475 r2 (N2) — SUPERSEDE ACROSS A PENDING CELL'S WRITES AND LOADS (PA reading, recorded in the
+// s475 r3 (N2) — SUPERSEDE ACROSS A PENDING CELL'S WRITES AND LOADS (PA reading, recorded in the
 // coverage row / gap text: "the MOST RECENTLY STARTED write or load of a pending cell wins. Starting
 // a new one supersedes any older one in flight: the older one's result is discarded, and for
 // READ-class loads it is aborted, the same way a request's own reload already supersedes").
-// A pending cell's Request gives its target a record `{ seq, req, settling }`:
-//  - a run of the cell's own load stamps `seq` (Request.run) — an older author write still in
-//    flight then lands on a stale stamp and is discarded;
-//  - an author's WAITING write claims the cell when its call STARTS (print.scrml suspendJs →
-//    suspendClaim): it cancels the load's in-flight task (rt.call's Task.onAbort — a READ's
-//    transport is aborted; a WRITE's runs to completion, discarded) and stamps `seq`; when it
-//    lands, it writes only if its stamp is still the newest;
-//  - any other write (a plain `@who = "z"`) starts and lands at once: it supersedes the same way.
-// The load's own settle (`settling`) is never re-checked: a superseded run's task is cancelled, so
-// its continuation never runs. Only a pending cell carries the record (a `<request>` with state
-// keeps §6.7.7's own rules: an author write does not supersede its fetch).
+// START STAMPS, compared when a write LANDS (r3 — r2's claim-at-call-start aborted a load even
+// when no write followed, and missed writes it could not see statically):
+//  - one global monotonic counter (`pendSeq`). A run of a pending cell's own load takes a fresh
+//    stamp (Request.run → `p.load`). Every `suspend` takes a fresh stamp when it is CALLED (the
+//    wait's start) and its continuation runs with that stamp AMBIENT (`curStamp`, restored on
+//    exit and on throw) — so a write from any code the continuation runs synchronously (a Join
+//    body, a helper function, a loop, a nested arm) carries it. A write outside any continuation
+//    (a handler's synchronous part — no wait) takes a fresh stamp: it starts as it lands ("now").
+//  - a write of value `v` with stamp `s` landing on a pending cell:
+//      · a load started after it (`p.load > s`) or a newer write already landed (`p.wrote > s`):
+//        DISCARDED — this write only; the rest of its continuation runs;
+//      · otherwise it WINS (`p.wrote = s`: an older write still in flight is discarded when it
+//        lands). `Object.is(v, current)` — a no-op, as for every cell: it notifies nothing and
+//        leaves the in-flight load alone. Any other value supersedes an in-flight load (started
+//        before `s`): its task is cancelled — its result discarded, a READ's transport aborted
+//        (Task.onAbort).
+//  - nothing is superseded before a write actually lands (a wait whose continuation then writes
+//    nothing — an untaken `if`, a failure arm that skips the write, an early exit — leaves the
+//    load alone).
+//  - the load's own settle is never re-checked: a write that would beat it cancelled its task, so
+//    a load whose continuation runs is the newest start (`settling` lets its write through).
+// Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
+// author write does not supersede its fetch).
 let pendSeq = 0;
-let landing = null;               // the claims of the continuation now running ({ cell, tok }[])
+let curStamp = 0;                 // the running continuation's start stamp; 0 = none (a synchronous write)
 
-function pendWrite(cell) {
+function pendWrite(cell, v) {
   const p = cell.pend;
   if (p.settling) return true;
-  if (landing !== null) {
-    for (const c of landing) {
-      if (c.cell === cell) return c.tok === p.seq;
-    }
-  }
-  pendSupersede(p);
+  const s = curStamp !== 0 ? curStamp : ++pendSeq;
+  if (p.load > s || p.wrote > s) return false;        // a newer load started, or a newer write landed
+  p.wrote = s;                                        // older writes still in flight now lose
+  if (Object.is(v, cell.peek())) return false;        // a no-op: the in-flight load is left alone
+  if (p.load < s) p.req.supersede();                  // the load in flight started before this write
   return true;
-}
-
-function pendSupersede(p) {
-  p.req.supersede();
-  p.seq = ++pendSeq;
-  return p.seq;
-}
-
-/**
- * `suspend`, for a continuation that writes pending cells (print.scrml suspendJs): each cell is
- * claimed NOW — the write starts with its call — and the continuation's writes to it land only
- * if no newer write or load of it started meanwhile.
- */
-export function suspendClaim(task, value, k, cells) {
-  const claims = [];
-  for (const cell of cells) {
-    if (cell instanceof Cell && cell.pend !== null) claims.push({ cell, tok: pendSupersede(cell.pend) });
-  }
-  if (claims.length === 0) return suspend(task, value, k);
-  return suspend(task, value, (v) => {
-    const prev = landing;
-    landing = claims;
-    try { return k(v); } finally { landing = prev; }
-  });
 }
 
 class Request {
@@ -518,8 +505,8 @@ class Request {
     this.disposed = false;
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
-    // s475 r2 (N2): a pending cell (no state) — its writes and loads supersede one another
-    if (state === null) target.pend = { seq: 0, req: this, settling: false };
+    // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
+    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -528,7 +515,7 @@ class Request {
     effectQueue.add(this);
     if (batchDepth === 0) flush();
   }
-  /** s475 r2 (N2): a newer write of the pending cell started — the in-flight run is superseded. */
+  /** s475 r3 (N2): a write of the pending cell that started after this run landed — the run is superseded. */
   supersede() {
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
@@ -540,7 +527,7 @@ class Request {
     const task = new Task(this, this.read);
     this.tasks.add(task);
     const p = this.target.pend;
-    if (p !== null && p.req === this) p.seq = ++pendSeq;      // N2: this load is now the newest
+    if (p !== null && p.req === this) p.load = ++pendSeq;     // N2: this load's start stamp
     const st = this.state;
     try {
       if (st) {
@@ -681,12 +668,14 @@ export function requestOn(scope, target, deps, body, opts = {}) {
  */
 export function suspend(task, value, k, onLiveReject) {
   task.pending++;
+  // s475 r3 (N2): this wait's start stamp — ambient while its continuation runs (pendWrite)
+  const stamp = ++pendSeq;
   Promise.resolve(value).then(
     (v) => {
       task.pending--;
       if (task.cancelled) return;
       try {
-        batch(() => untrack(() => k(v)));
+        batch(() => untrack(() => withStamp(stamp, k, v)));
       } catch (e) {
         reportHostError(e);
         abandonWaiting(task);
@@ -733,6 +722,13 @@ export function waiting(task, executor) {
       reject(e);
     }
   });
+}
+
+// s475 r3 (N2): run a continuation with its wait's start stamp ambient (restored on exit and on throw).
+function withStamp(stamp, k, v) {
+  const prev = curStamp;
+  curStamp = stamp;
+  try { return k(v); } finally { curStamp = prev; }
 }
 
 // The rejection a waiting function's Promise is abandoned with after its host error was REPORTED
