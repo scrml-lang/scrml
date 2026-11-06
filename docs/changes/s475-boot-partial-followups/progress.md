@@ -1,0 +1,2 @@
+- 2026-11-06T03:16:34-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-ae15bf46a43619cbc, base 8045e0e35. Lanes: F1 tape elems, F2 markup/==/key/each, (iv) operands, F3 armValues lifted, F4 E-FN-007.
+- 2026-11-06T03:29:59-07:00 F1/F2/iv/F3/F4 implemented in analyze.scrml; new slice-m4/partial-followups-s475.test.js (19 red on 8045e0e35, green on head); fixtures typer-s460/s440/s462 updated honestly. First hook attempt died: memory ceiling + load timeouts (not test failures).

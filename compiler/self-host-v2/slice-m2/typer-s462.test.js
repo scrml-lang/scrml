@@ -243,7 +243,10 @@ describe("rule 10 — an unproven annotation is an error", () => {
   test("fix round 1, F2 — what the typer determines proves: a typed local, a member path through declared types, a comparison", () => {
     expect(codes("    function mk() { const k: int = 5;\n return k; }\n    <v:int=(mk())/>")).toEqual([]);
     expect(codes("    type U:struct = { name: string }\n    <u:U=({ name: \"a\" })/>\n    function nm() { return @u.name; }\n    <v:string=(nm())/>")).toEqual([]);
-    expect(codes(MK + "    <r:bool=(mk(true) == 1)/>")).toEqual([]);
+    // s475 (s475-boot-partial-followups): `==` judges a choice's members (§45 E-EQ-001) —
+    // `mk`'s `"five"` branch compared with `1` is refused; a comparison of one type proves `bool`
+    expect(codes(MK + "    <r:bool=(mk(true) == 1)/>")).toEqual(["E-EQ-001"]);
+    expect(codes("    function m1(b: bool) { if (b) { return 5; } else { return 6; } }\n    <r:bool=(m1(true) == 1)/>")).toEqual([]);
   });
   test("fix round 1, F1 — a returned name resolves through the body's scopes: an arm binder shadowing a parameter is untyped", () => {
     const pre = "    type E:enum = { Bad, Worse }\n    function bad()! E { fail .Bad; }\n    function g(e: int) { bad() !{ _ e :> { return e; } };\n return e; }\n";
