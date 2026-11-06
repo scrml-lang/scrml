@@ -9,9 +9,12 @@
 //    callee's struct, and that value then landed in the position unchecked
 //    (g-boot-handled-call-result-landing-unchecked-s473): wrong-typed programs that
 //    were refused (E-TYPE-STRUCT-CONTEXT) before s475 compiled. Each is refused again.
-//    INTERIM: a `!{}` in a position of a type other than the callee's success type gives
-//    its arms no struct context (its success value would land unchecked) — refused as
-//    before s475 until that gap's landing check exists.
+//    (The r1 INTERIM — a `!{}` in a position of a type other than the callee's success
+//    type gave its arms no struct context — is LIFTED by s475-boot-handled-landing-check:
+//    the typer now checks the handled form's value, the join of the success value and
+//    the arms', at the landing site, so the arm takes the position's type and the
+//    mismatched SUCCESS value is what is refused, E-TYPE-031. See
+//    handled-landing-check-s475.test.js.)
 // F2 — a value-`if` arm brace re-read as a statement list (statement-position form)
 //    reports its soft diagnostics once, not once per reading.
 // F3 — a statement `match` as the LAST of two or more statements in a value-position
@@ -56,14 +59,23 @@ describe("F1 — a handler arm takes its position's type, not the callee's succe
     "an argument `x: R` from a match whose arms build S": `    function g(x: R) -> int { return x.c; }\n    function h() -> int { return g(${SRV_MATCH_SB}); }`,
     "`const r: int` from a `!{}` whose arm builds S": `    function h() -> int { const r: int = srv() !{ .Transport(t) :> { a: 0, b: 0 } }; return r; }`,
     "a `-> int` function returns a `!{}` whose arm builds S": `    function h() -> int { return srv() !{ .Transport(t) :> { a: 0, b: 0 } }; }`,
-    // INTERIM (g-boot-handled-call-result-landing-unchecked-s473): S's success value would land in R
-    "a `-> R` function returns a `!{}` on an `-> S` call (arm builds R)": `    function h() -> R { return srv() !{ .Transport(t) :> { a: 0, c: 0 } }; }`,
   };
   for (const [name, d] of Object.entries(refused)) {
     test(`refused: ${name}`, () => {
       expect(errs(P(d)).length).toBeGreaterThan(0);
     });
   }
+
+  // s475-boot-handled-landing-check lifted the r1 INTERIM (was: no struct context for the arm,
+  // E-TYPE-STRUCT-CONTEXT): the arm is built as R (the position's), and the refusal is the
+  // landing check's — S's success value lands in R
+  test("refused: a `-> R` function returns a `!{}` on an `-> S` call (arm builds R) — E-TYPE-031 on the success value", () => {
+    const d = `    function h() -> R { return srv() !{ .Transport(t) :> { a: 0, c: 0 } }; }`;
+    expect(errs(P(d))).toEqual(["E-TYPE-031"]);
+    const msg = run(P(d)).diags.find((x) => x.code === "E-TYPE-031").message;
+    expect(msg).toContain("`R`");
+    expect(msg).toContain("`S`");
+  });
 
   test("a `-> R` function returning a match whose arms build R compiles", () => {
     compiles(P(`    function h() -> R { return match srv() { .Ok(s) :> { a: 1, c: 1 }, .Transport(t) :> { a: 0, c: 0 } }; }`));
