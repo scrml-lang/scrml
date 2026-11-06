@@ -202,7 +202,15 @@ export class Cell {
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
-    if (this.pend !== null && !pendWrite(this, v)) return;   // s475 r3 (N2): a stale or no-op write
+    if (this.pend !== null) {                       // s475 r3/r4: a pending cell's write (pendWrite)
+      const w = pendWrite(this, v);
+      if (w === PEND_STALE) return;
+      if (w === PEND_RELOAD) { const req = this.pend.req; batch(() => { req.markStale(); this.land(v); }); return; }
+    }
+    this.land(v);
+  }
+  /** The write itself, once it is let through. */
+  land(v) {
     this.pending = null;
     if (Object.is(v, this.value)) return;
     this.value = v;
@@ -470,10 +478,19 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 //      · a load started after it (`p.load > s`) or a newer write already landed (`p.wrote > s`):
 //        DISCARDED — this write only; the rest of its continuation runs;
 //      · otherwise it WINS (`p.wrote = s`: an older write still in flight is discarded when it
-//        lands). `Object.is(v, current)` — a no-op, as for every cell: it notifies nothing and
-//        leaves the in-flight load alone. Any other value supersedes an in-flight load (started
-//        before `s`): its task is cancelled — its result discarded, a READ's transport aborted
-//        (Task.onAbort).
+//        lands) and supersedes an in-flight load started before `s`: its task is cancelled — its
+//        result discarded, a READ's transport aborted (Task.onAbort). This holds for EVERY winning
+//        write, a no-op (`Object.is(v, current)`) included (r4 F-A): the no-op only skips the
+//        notify, as for every cell — it is still the newest start, so an older load must not land
+//        over it (red r3: the reload's "b" overwrote a newer `@who = "a"`).
+//      · a winning write of `not` RE-RUNS the load (r4 D, PA reading ⚑): §13.9.2 "A reset of a
+//        pending cell … is the request's re-run — never … back to `not`", and §13.9.5 "`not` …
+//        returns the cell to its pre-state" — a pending cell's pre-state is `not` WITH its load
+//        running. The older load is superseded, then `markStale` queues a fresh run, which the
+//        write's batch flushes once the write has landed: its own newer stamp (`p.load > s`).
+//        No loop: the load's own settle takes the `settling` bypass below, so a load that fails to
+//        `not` lands `not` and never re-triggers itself (red r3: `not` with nothing in flight —
+//        loading forever).
 //  - nothing is superseded before a write actually lands (a wait whose continuation then writes
 //    nothing — an untaken `if`, a failure arm that skips the write, an early exit — leaves the
 //    load alone).
@@ -484,15 +501,18 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 let pendSeq = 0;
 let curStamp = 0;                 // the running continuation's start stamp; 0 = none (a synchronous write)
 
+const PEND_STALE = 0;              // discarded: a newer load started, or a newer write landed
+const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
+const PEND_RELOAD = 2;             // lands `not`, then the cell's load re-runs (r4 D)
+
 function pendWrite(cell, v) {
   const p = cell.pend;
-  if (p.settling) return true;
+  if (p.settling) return PEND_LAND;                   // the load's own settle (never re-checked, never reloads)
   const s = curStamp !== 0 ? curStamp : ++pendSeq;
-  if (p.load > s || p.wrote > s) return false;        // a newer load started, or a newer write landed
+  if (p.load > s || p.wrote > s) return PEND_STALE;   // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
-  if (Object.is(v, cell.peek())) return false;        // a no-op: the in-flight load is left alone
-  if (p.load < s) p.req.supersede();                  // the load in flight started before this write
-  return true;
+  if (p.load < s) p.req.supersede();                  // r4 F-A: every winning write, a no-op included
+  return v === null || v === undefined ? PEND_RELOAD : PEND_LAND;
 }
 
 class Request {

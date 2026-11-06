@@ -662,18 +662,21 @@ describe("run time — the request machine, through the server artifact (slice-m
     expect(cells(rt).who).toBe("c");
   });
 
-  test("a no-op write (the value the cell holds) leaves the in-flight load alone (r3: Object.is first)", async () => {
+  // r4 F-A (probe p20 N2, red on a154c6c57: "b"): a no-op write is still the newest START — it only
+  // skips the notify. It supersedes the older reload, which must not land over it (as test C: a no-op
+  // write already beat older WRITES).
+  test("a no-op write (the value the cell holds) is still the newest start: it supersedes the in-flight load (r4 F-A)", async () => {
     const { rt, held } = await race("pend-noop-");
     await held[0].go();
     await settle();
     click(document.querySelector("#u2"));            // the reload starts
     await settle(5);
-    click(document.querySelector("#za"));            // `@who = "a"` — what it already holds
+    click(document.querySelector("#za"));            // `@who = "a"` — what it already holds, newer than the reload
     await settle(5);
-    expect(held[1].aborted).toBe(false);
-    await held[1].go();
-    await settle();
-    expect(cells(rt).who).toBe("b");
+    expect(held[1].aborted).toBe(true);
+    expect(held.length).toBe(2);
+    expect(cells(rt)).toEqual({ userId: 2, show: true, who: "a" });
+    expect(shown()).toBe("a");
   });
 
   // p11 A / A′ (red on ec2850635): a wait whose continuation writes NOTHING leaves the load alone.
@@ -782,11 +785,13 @@ describe("run time — the request machine, through the server artifact (slice-m
     expect(shown()).toBe("a");
   });
 
-  // p11 D — PINNED behaviour: an author write started after a reload lands `not` through its
-  // `_ :> not` arm (§13.9.5: "`not` … returns the cell to its pre-state"). It is the newest start, so it
-  // WINS: the reload is aborted and the cell shows its pre-state with no load in flight until the next
-  // dependency change. (Not re-loading here is the PA reading's consequence — a SPEC line is suggested.)
-  test("D: a newer author write that fails to `not` wins over the reload — the cell is `not`, nothing in flight", async () => {
+  // r4 D (PA reading ⚑, recorded in the §13.9.4 coverage row): a WINNING author write that lands `not`
+  // re-runs the cell's load. §13.9.2: "A reset of a pending cell (§6.8) is the request's re-run — never
+  // … back to `not`"; §13.9.5: "`not` … returns the cell to its pre-state" — and a pending cell's
+  // pre-state is `not` with its load running. The older load is superseded; a fresh load starts with its
+  // own newer stamp. Red on a154c6c57: `not` with nothing in flight (loading forever) — and, through the
+  // no-op check, whether the older load survived depended on what the cell held (p20 N1 vs N1b).
+  test("D: a newer author write that fails to `not` wins over the reload — and re-runs the load (r4)", async () => {
     const { rt, held } = await race("pend-d-");
     await held[0].go();
     await settle();
@@ -796,13 +801,72 @@ describe("run time — the request machine, through the server artifact (slice-m
     await settle(5);
     held[2].fail();                                  // the author call fails: its arm yields `not`
     await settle();
-    expect(held[1].aborted).toBe(true);
+    expect(held[1].aborted).toBe(true);              // the older reload is superseded
     expect(cells(rt).who).toBe(null);
     expect(waiting()).toBe(true);
-    expect(held.length).toBe(3);                     // no reload follows
-    click(document.querySelector("#u3"));            // the next dependency change loads again
-    await settle(5);
+    expect(held.length).toBe(4);                     // ... and the load re-runs (its pre-state)
+    expect(held[3].aborted).toBe(false);
     await held[3].go();
+    await settle();
+    expect(cells(rt).who).toBe("b");                 // the fresh load lands (`@userId` is 2)
+    expect(shown()).toBe("b");
+    expect(held.length).toBe(4);
+  });
+
+  // p20 N1 (red on a154c6c57: the first load survived the `not` — the no-op check returned first).
+  test("N1: during the FIRST load, a newer author write failing to `not` re-runs the load the same way (r4)", async () => {
+    const { rt, held } = await race("pend-n1-");
+    click(document.querySelector("#w"));             // the author write starts after the first load
+    await settle(5);
+    held[1].fail();                                  // `not` — what the cell already holds
+    await settle();
+    expect(held[0].aborted).toBe(true);
+    expect(held.length).toBe(3);                     // a fresh load runs
+    expect(waiting()).toBe(true);
+    await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("a");
+    expect(shown()).toBe("a");
+  });
+
+  // p20 N1b (red on a154c6c57: `not`, nothing in flight, loading forever).
+  test("N1b: during a reload, the same — the cell loads again and lands the load's value (r4)", async () => {
+    const { rt, held } = await race("pend-n1b-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));
+    await settle(5);
+    click(document.querySelector("#w"));
+    await settle(5);
+    held[2].fail();
+    await settle();
+    expect(held[1].aborted).toBe(true);
+    expect(held.length).toBe(4);
+    expect(waiting()).toBe(true);
+    await held[3].go();
+    await settle();
+    expect(cells(rt)).toEqual({ userId: 2, show: true, who: "b" });
+  });
+
+  // r4 D no-loop: the load's OWN settle takes the `settling` bypass, so a load that fails to `not`
+  // lands `not` and never re-triggers itself (first load and reload alike).
+  test("no loop: the load's own failure to `not` does not re-run the load (r4 D)", async () => {
+    const { rt, held } = await race("pend-noloop-");
+    held[0].fail();                                  // the first load fails: its arm yields `not`
+    await settle();
+    expect(held.length).toBe(1);
+    expect(waiting()).toBe(true);
+    click(document.querySelector("#u2"));            // a dependency change still reloads
+    await settle(5);
+    expect(held.length).toBe(2);
+    held[1].fail();
+    await settle();
+    expect(held.length).toBe(2);                     // no self-triggered reload
+    expect(cells(rt).who).toBe(null);
+    click(document.querySelector("#u3"));
+    await settle(5);
+    expect(held.length).toBe(3);
+    await held[2].go();
     await settle();
     expect(cells(rt).who).toBe("c");
   });

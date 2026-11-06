@@ -64,3 +64,10 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
   analyze pendingOf gains the NReq arm (impl#1 E-TYPE-020 otherwise); lower reqSignalRead indexes signal cells
   among the requests WITH signals (signalIndex) — a pending cell declared before an author request read the
   wrong cells (test red without it). A pending cell has no `<#id>`; refetch of one is refused (test).
+
+## 2026-11-06T22:10Z — r4 (re-review at a154c6c57)
+- merged origin/main (clean)
+- F-A: pendWrite supersedes an older load on EVERY winning write (no-op included); the no-op only skips the notify (Cell.land)
+- D: a winning write of `not` re-runs the load (PEND_RELOAD → req.markStale() in the write's batch); load's own settle bypasses (no loop)
+- tests: no-op flipped, D flipped, N1 / N1b / no-loop added — 62 pass; red on a154c6c57 runtime: no-op / D / N1 / N1b
+- coverage §13.9.4 row: PA readings (1)–(4); known-gaps g-boot-plan-arms-nested-wait-s475 (marker only)
