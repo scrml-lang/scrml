@@ -10446,16 +10446,18 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >   - It still emits E-BATCH-001 and W-BATCH-001 (`compiler/src/batch-planner.ts`), which three conformance cases
 >     and two unit-test files pin (`g-impl1-retired-batch-codes-still-emitted-s474`,
 >     `g-retired-batch-codes-unit-test-pins-s474`).
-> - **Bootstrap: Nominal** for a body that reaches one query once, and for a set of `.nobatch()` queries only.
->   - Its trigger counts no `.nobatch()` query (`compiler/self-host-v2/analyze.scrml` `envelopeOf` requires two
->     counted queries, a repeat or a loop).
->   - Its E-SQL-011 and pooled-database messages still offer the `.nobatch()` remedy
->     (`g-boot-envelope-nobatch-count-and-remedy-s474`).
+> - **Bootstrap: Conforming** for items 1–2 (S475, #1748 and #1756).
+>   - Every `!` server body that reaches a query runs in the envelope, one query and `.nobatch()`-only sets included
+>     (`compiler/self-host-v2/analyze.scrml` `envelopeOf`); a client `!` function's server calls compose into one
+>     enveloped batch whenever a callee reaches any query (`composeTrigger`), and the `.nobatch()` remedy is gone from
+>     its messages (`g-boot-envelope-nobatch-count-and-remedy-s474`, resolved). A MySQL envelope is refused by name
+>     (INTERIM; the capable form is a reserved-connection path proven on a live server).
 >   - It refuses `transaction { }` and manual transaction control in a `!` function with
 >     `E-BOOTSTRAP-UNSUPPORTED`. That is an INTERIM refusal; the capable form is item 3's savepoint.
 > - **E-TX-UNMATCHED-END** is emitted by neither compiler (`g-tx-unmatched-end-unbuilt-s474`). The statement
->   savepoint for a handled query (item 4) and the server-error rule for envelope failures (item 1) are unbuilt
->   on both and are owed with the envelope (`g-impl1-envelope-site-handled-pg-abort-s474`,
+>   savepoint for a handled query (item 4) and the server-error rule for envelope failures (item 1) are built in the
+>   bootstrap (S475: #1744 the savepoint, SQLite and Postgres; #1748 a failed `BEGIN` / `COMMIT` answers a server
+>   error) and unbuilt in impl#1 (`g-impl1-envelope-site-handled-pg-abort-s474`,
 >    `g-impl1-envelope-failure-reported-success-s474`).
 
 **Normative statements:**
@@ -28743,7 +28745,7 @@ So such markup SHALL be a compile error. This is a **PERMANENT** refusal on sema
    - an element (with any hole in it) inside an HTML raw-text or RCDATA element, `textarea` `title` `xmp` `iframe` `noembed` `noframes` `noscript` `plaintext`: the parser reads that content as text (an interpolated value inside one stays legal);
    - a raw U+0000 (NUL) in markup text, which the parser drops or replaces;
    - (S475) a table part (`caption` `col` `colgroup` `tbody` `thead` `tfoot` `tr` `td` `th`) that is not a child of the table part that holds it: "in body" drops the tag, and inside an open `<td>` / `<th>` / `<caption>` it closes that element first (a `<td>` inside a `<td>`);
-   - (S475) at a template's root, where the first element sets how the rest of the template is parsed (HTML §13.2.6.4.18, "in template"): a root table part of another kind than the first root element (`<tr>` then `<td>`, `<span>` then `<td>`); after a first root `<col>`, any element but `<col>`, or text; and a `<table>` outside a cell when the first root element is a table part;
+   - (S475) at a template's root, where the first element sets how the rest of the template is parsed (HTML §13.2.6.4.18, "in template"): a root table part of another kind than the first root element (`<tr>` then `<td>`, `<span>` then `<td>`); after a first root `<col>`, any element but `<col>`, or text; and a `<table>` outside a cell or caption when the first root element is a table part (a `<caption>` keeps its `<table>`, measured Chromium 152);
    - (S475) with a `<select>` open in scope (the customizable-`<select>` rules of "in body"): an `<input>` or a `<select>`, which closes the open `<select>`; an `<hr>` directly inside an `<option>` / `<optgroup>`, which closes it;
    - (S475) `<plaintext>`, which has no end tag: the rest of the template is read as its text.
 
