@@ -137,11 +137,17 @@ describe("§6.7.7 EC-3 teardown — the mounted guard", () => {
     const hosts = [held()];
     rt.requestOn(scope, target, [], loader(target, hosts, []), { state });
     expect(rt.stats.requests).toBeGreaterThan(0);
+    expect(loading.peek()).toBe(true);
     scope.dispose();
+    // s475 r1 (#1781 F3): teardown ends the run — loading / stale go false (§6.7.7 "`<#id>.stale`
+    // SHALL be `true` iff … a fetch is in flight"); before r1 they stayed true for good
+    expect(loading.peek()).toBe(false);
+    expect(state.stale.peek()).toBe(false);
     hosts[0].resolve("late");
     await tick();
-    expect(target.peek()).toBe("kept");
-    expect(loading.peek()).toBe(true);                   // nothing of the dead run is applied
+    expect(target.peek()).toBe("kept");                  // nothing of the dead run is applied
+    expect(state.data.peek()).toBe(null);
+    expect(loading.peek()).toBe(false);
   });
 
   test("teardown unregisters: a later dependency change starts no run", () => {

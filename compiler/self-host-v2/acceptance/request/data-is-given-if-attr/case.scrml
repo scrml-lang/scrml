@@ -1,0 +1,16 @@
+// §66 twin of conformance/cases/lifecycle/request-data-is-some-if-attr-rt.
+// SLICE S3b PIN — the case reads `<#userReq>` (§6.7.7 Properties), which the bootstrap does not
+// parse yet; expected.json is the TARGET, slice-m4/acceptance.test.js STATUS pins today's parse error.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userName:string=""/>
+    function loadName() -> string {
+        const u: User = ?{`SELECT id, name FROM users LIMIT 1`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    <request id="userReq">${ @userName = loadName(); }</request>
+    <main>
+        <p id="who" if=(<#userReq>.data is given)>${@userName}</p>
+        <div id="err" if=(<#userReq>.error is given)>failed</div>
+    </main>
+</program>

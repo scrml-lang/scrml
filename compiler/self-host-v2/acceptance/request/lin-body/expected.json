@@ -1,0 +1,27 @@
+{
+  "id": "acceptance-request-lin-body",
+  "description": "A `lin` declaration before the one assignment, consumed by it, is valid (not E-LIN-006); the initializer's `@seed` read is a dependency.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 (S469): \"The body SHALL contain exactly one assignment expression of the form `@variable = expr`, which MAY be preceded by `lin` declarations and by nothing else\"; PA reading (d).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-LIN-006"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#v",
+        "text": "31"
+      }
+    ]
+  }
+}

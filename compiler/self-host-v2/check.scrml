@@ -1697,7 +1697,7 @@ ${
                     .ROther :> not
                 }
                 if (t is not) {
-                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<#id>.data` is NOT cleared\")"])
+                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<" + "#id>.data` is NOT cleared\")"])
                 } else {
                     if (suspendCount(t) > 0) out = out.concat(["C-R1: a Request's continuation suspends again — a request has ONE suspension, its load (§6.7.7 \"single-shot\")"])
                 }
@@ -1741,7 +1741,7 @@ ${
             const k: string = depKey(sg)
             const nm: string = names[i]
             if (dk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal is one of its dependencies — every run writes it, so it would re-run forever"])
-            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<#id>` signal"])
+            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<" + "#id>` signal"])
             if (sk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal shares its cell with another signal"])
             sk = sk.concat([k])
             i = i + 1
@@ -2527,6 +2527,7 @@ ${
         let calls: int = 0
         let queries: int = 0
         let settled: int = 0
+        const loads: int[] = requestLoadBinds(p)
         for (const n of allNodes(Node.NProgram(p))) {
             if (nodeServerCallSym(n) is given) calls = calls + 1
             if (nodeQuery(n) is given) queries = queries + 1
@@ -2543,7 +2544,12 @@ ${
                     legalQuery = legalQuery + 1
                     out = out.concat(checkSqlQuery(p, q))
                 }
-                out = out.concat(checkSuspendCall(p, sp))
+                // s475 (S3a): the load of a Request WITH its state is handled by the request
+                // (§6.7.7: "The call that is the right-hand side of the body's assignment SHALL
+                // be handled by the request"): rt.requestOn takes a failed settle itself
+                // (`error` set, the target unchanged) and runs `then` on a success value only,
+                // so its `then` begins with no Attempt (C-S7 does not apply)
+                if (loads.indexOf(sp.bind.id) < 0) out = out.concat(checkSuspendCall(p, sp))
                 const first: Stmt | not = firstStmt(sp.then)
                 if (first is given) {
                     const fs: Sym | not = stmtSettled(first)
@@ -2597,6 +2603,66 @@ ${
         }
         if (waitCalls != waitOn) out = out.concat(["C-S8s: " + (waitCalls - waitOn) + " call(s) of a waiting function stand outside a Suspend's `on` (its value arrives later — on the server, a call not awaited; S467 §13 gate)"])
         return out
+    }
+
+    // s475 (S3a) — the binds of the loads (each the last statement, a Suspend, of
+    // its body — C-R1) of the Requests that carry their state: rt.requestOn
+    // inspects their settled outcome (`failed(v)` → `error`), so their `then`
+    // runs on a success value only. A Request without state (a pending cell,
+    // §13.9.5) keeps C-S7: its body's own Attempt handles the failure.
+    fn requestLoadBinds(p: CoreProgram) -> int[] {
+        let out: int[] = []
+        for (const n of allNodes(Node.NProgram(p))) {
+            const v: View | not = reqNodeView(n)
+            if (v is given) out = out.concat(requestLoadBind(v))
+        }
+        return out
+    }
+
+    fn reqNodeView(n: Node) -> View | not {
+        return match n {
+                .NView(v: v) :> v
+                .NStmt(s: x) :> not
+                .NExpr(e: x) :> not
+                .NProgram(p: x) :> not
+                .NDecl(d: x) :> not
+                .NField(f: x) :> not
+                .NFn(f: x) :> not
+                .NServerFn(f: x) :> not
+                .NBlock(b: x) :> not
+                .NPlace(pl: x) :> not
+                .NInst(i: x) :> not
+                .NPattern(pat: x) :> not
+                .NEdit(k: x) :> not
+                .NAttr(a: x) :> not
+        }
+    }
+
+    fn requestLoadBind(v: View) -> int[] {
+        return match v {
+            .Request(body: b, state: st) :> loadBindIf(b, st is given)
+            .Effect(body: x) :> []
+            .ResetOn(reset: x) :> []
+            .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
+            .Gather(g: x) :> []
+            .El(tag: x) :> []
+            .Text(text: x) :> []
+            .RawText(text: x) :> []
+            .Dyn(e: x) :> []
+            .Cond(arms: x) :> []
+            .Each(src: x) :> []
+            .Instance(decl: x) :> []
+            .Slot :> []
+            .Star(decl: x) :> []
+        }
+    }
+
+    fn loadBindIf(b: Block, withState: boolean) -> int[] {
+        if (!withState || b.stmts.length == 0) return []
+        const sp: SuspendParts | not = stmtSuspendParts(b.stmts[b.stmts.length - 1])
+        if (sp is not) return []
+        return [sp.bind.id]
     }
 
     // Is `s` a function (a Fn or a ServerFn) whose Core says it waits?

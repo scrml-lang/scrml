@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-request-neg-deps-member-entry",
+  "description": "A `deps=` entry that is a member access (`deps=[@u.id]`) is not a bare `@identifier`: E-LIFECYCLE-022.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an undeclared or non-`@` variable\"; §34 E-LIFECYCLE-022 names a member access.",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-022"
+    ],
+    "codeCounts": {
+      "E-LIFECYCLE-022": 1
+    },
+    "severity": {
+      "E-LIFECYCLE-022": "error"
+    }
+  }
+}

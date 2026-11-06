@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-request-neg-url-form",
+  "description": "The `url=` form (§60) is not in the bootstrap: refused by name.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7.1 rule 1 names the `url=` / `api=` form (§60); not built.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  }
+}

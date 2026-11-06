@@ -1,0 +1,17 @@
+// §66 twin of conformance/cases/lifecycle/request-deps-empty-mount-only-rt.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userId:int=1/>
+    let <ver:int=0/>
+    let <userName:string=""/>
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    <request id="userReq" deps=[]>${ @userName = loadName(@userId); }</request>
+    <main>
+        <button id="setid" onclick={ @userId = 2; }>user 2</button>
+        <button id="bump" onclick={ @ver = @ver + 1; }>reload</button>
+        <p id="who">${@userName}</p>
+    </main>
+</program>

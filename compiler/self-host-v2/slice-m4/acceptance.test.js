@@ -334,6 +334,36 @@ const STATUS = {
   // s475-boot-pg-envelopes: a Postgres envelope is built (was neg-pooled-unsupported); MySQL stays refused
   "envelope/pooled-postgres": ["PASS", []],
   "envelope/neg-mysql-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s475-boot-request-surface (slice S3a): `<request>` (§6.7.7) lowered onto Core View.Request —
+  // §66 twins of the 12 conformance/cases/lifecycle/request-* cases (NOT-TWINNED: the generator is impl#1),
+  // each runtime case RUN on the bootstrap (a real SQLite or the server stub)
+  "request/body-client-wrapper": ["PASS", []],
+  "request/deps-empty-mount-only": ["PASS", []],
+  "request/deps-explicit-listed-refire": ["PASS", []],
+  "request/deps-explicit-unlisted-no-refire": ["PASS", []],
+  "request/deps-cell-entry": ["PASS", []],
+  "request/neg-deps-member-entry": ["PASS", ["E-LIFECYCLE-022"]],
+  "request/settle-success-cell": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/settle-error-keeps-cell": ["PASS", ["W-LIFECYCLE-013"]],
+  // … SLICE S3b PINS: the case reads `<#userReq>` (its signals / refetch), which does not parse yet —
+  // expected.json is the target; these flip when S3b builds `<#id>`
+  "request/data-is-given-if-attr": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
+  "request/data-is-given-value-attrs": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
+  "request/settle-success": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
+  "request/settle-error": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
+  "request/refetch-fn-body-stmt": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPR", "E-SCOPE-001"]],
+  "request/refetch-inline-multi-stmt": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPR", "E-SCOPE-001"]],
+  // … and the rest of §6.7.7 S3a carries: the target is never a dependency, `lin` in the body, each code
+  "request/target-read-not-dep": ["PASS", []],
+  "request/lin-body": ["PASS", []],
+  "request/warn-no-deps": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/warn-unread": ["PASS", ["W-LIFECYCLE-011"]],
+  "request/neg-no-id": ["PASS", ["E-LIFECYCLE-018"]],
+  "request/neg-self-closing": ["PASS", ["E-LIFECYCLE-019"]],
+  "request/neg-two-assignments": ["PASS", ["E-LIFECYCLE-020"]],
+  "request/neg-only-lin": ["PASS", ["E-LIFECYCLE-021"]],
+  "request/neg-url-form": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],     // INTERIM: §60 unbuilt
+  "request/neg-writer-call": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],  // INTERIM: Core C-R1 (PA ruling)
 };
 
 let verdicts;
@@ -367,6 +397,13 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   test("the runtime halves executed where the case has one", () => {
     for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe", "termination/guard-next-line", "termination/fail-next-line", "termination/defer-next-line",
       "envelope/fail-rolls-back", "envelope/via-helper", "envelope/savepoint", "envelope/loop"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s475 S3a: every positive `<request>` case RAN on the bootstrap (output checked, not merely compiled)", () => {
+    for (const rel of ["request/body-client-wrapper", "request/deps-empty-mount-only", "request/deps-explicit-listed-refire",
+      "request/deps-explicit-unlisted-no-refire", "request/deps-cell-entry", "request/settle-success-cell", "request/settle-error-keeps-cell",
+      "request/target-read-not-dep", "request/lin-body", "request/warn-no-deps"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

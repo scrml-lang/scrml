@@ -1,0 +1,39 @@
+{
+  "id": "acceptance-request-data-is-given-value-attrs",
+  "description": "`<#userReq>.data is given` in a boolean and a class attribute: after a 2xx settle #btn is disabled and #box's class is `ready`.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Properties (`<#id>.data`); §42.2.4 `is given` over the whole left-hand side.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "serverStub": {
+      "loadName": "Ada"
+    },
+    "domAnchored": [
+      {
+        "selector": "#btn",
+        "attr": {
+          "disabled": ""
+        }
+      },
+      {
+        "selector": "#box",
+        "attr": {
+          "class": "ready"
+        }
+      },
+      {
+        "selector": "#nm",
+        "text": "Ada"
+      }
+    ]
+  }
+}

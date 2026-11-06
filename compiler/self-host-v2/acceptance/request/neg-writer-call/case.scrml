@@ -1,0 +1,13 @@
+// Core C-R1 (PA ruling, INTERIM): a request body writes only its target — not through a called function either.
+<program>
+    let <a:int=1/>
+    let <x:int=0/>
+    let <y:int=0/>
+    fn f(n: int) -> int { return n + 1; }
+    function g(n: int) -> int {
+        @y = n;
+        return n;
+    }
+    <request id="r">${ @x = g(@a); }</request>
+    <main><p>${@x}</p></main>
+</program>

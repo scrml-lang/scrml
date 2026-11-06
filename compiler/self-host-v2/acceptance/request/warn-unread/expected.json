@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-request-warn-unread",
+  "description": "A request whose assigned cell no markup reads: W-LIFECYCLE-011.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: \"The compiler SHALL emit W-LIFECYCLE-011 if the assigned `@variable` is never read in enclosing markup.\"",
+  "expect": {
+    "codes": [
+      "W-LIFECYCLE-011"
+    ],
+    "severity": {
+      "W-LIFECYCLE-011": "warning"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-request-neg-writer-call",
+  "description": "A request whose call writes another cell (@y) is refused by name, naming the write chain.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7: the one assignment is \"the sanctioned, compiler-managed write point\"; Core C-R1 refuses any other write in a Request body, directly or through a called function (INTERIM by PA ruling).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  }
+}
