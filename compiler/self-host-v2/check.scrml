@@ -128,7 +128,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p))
     }
 
     // =========================================================================
@@ -2381,9 +2381,127 @@ ${
     }
 
     fn callWriteWitness(p: CoreProgram, e: Expr, seen: int[]) -> string {
+        // s475 r1 (#1788 F3) — §6.7.4 "What counts as a write": "`<#id>.refetch()`, which
+        // writes the `<request>`'s assigned cell" — in an Effect body (C11), a Request body
+        // (C-R1's write accounting), a formula or a render loop (C20), directly or through a call
+        const rq: Sym | not = refetchedReq(e)
+        if (rq is given) return "re-runs a `<request>` (`refetch()` of " + rq.hint + ", which writes its target — §6.7.4)"
         const callee: Sym | not = calledSym(e)
         if (callee is not) return ""
         return fnWriteWitness(p, callee, seen)
+    }
+
+    fn refetchedReq(e: Expr) -> Sym | not {
+        return match e {
+            .Refetch(req: r) :> r
+            .Call(callee: x) :> not
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    // C-R3 (s475 r1, #1788 F3) — a Refetch is `() -> void` (§6.7.7 Properties): it stands
+    // only where its value is discarded, as the whole expression of an Eval. Every Refetch
+    // node of the program must be one an Eval holds (defence in depth over analyze's
+    // E-TYPE-001 "cannot be used as a value").
+    fn checkRefetchPositions(p: CoreProgram) -> string[] {
+        let roots: Node[] = []
+        for (const d of p.decls) { roots = roots.concat([Node.NDecl(d)]) }
+        for (const f of p.fns) { roots = roots.concat([Node.NFn(f)]) }
+        for (const s of p.server) { roots = roots.concat([Node.NServerFn(s)]) }
+        let all = 0
+        let evals = 0
+        for (const r of roots) {
+            for (const n of allNodes(r)) {
+                all = all + nodeRefetches(n)
+                evals = evals + evalRefetches(n)
+            }
+        }
+        if (all != evals) return ["C-R3: " + (all - evals) + " Refetch(es) stand where a value is used — a Refetch is `() -> void` (§6.7.7 Properties) and stands only as the whole expression of an Eval"]
+        return []
+    }
+
+    fn nodeRefetches(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> refetchCount(e)
+            .NStmt(s: x) :> 0
+            .NView(v: x) :> 0
+            .NAttr(a: x) :> 0
+            .NProgram(p: x) :> 0
+            .NDecl(d: x) :> 0
+            .NField(f: x) :> 0
+            .NFn(f: x) :> 0
+            .NServerFn(f: x) :> 0
+            .NBlock(b: x) :> 0
+            .NPlace(pl: x) :> 0
+            .NInst(i: x) :> 0
+            .NPattern(pat: x) :> 0
+            .NEdit(k: x) :> 0
+        }
+    }
+
+    fn refetchCount(e: Expr) -> int {
+        if (refetchedReq(e) is given) return 1
+        return 0
+    }
+
+    fn evalRefetches(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> evalRefetch(s)
+            .NExpr(e: x) :> 0
+            .NView(v: x) :> 0
+            .NAttr(a: x) :> 0
+            .NProgram(p: x) :> 0
+            .NDecl(d: x) :> 0
+            .NField(f: x) :> 0
+            .NFn(f: x) :> 0
+            .NServerFn(f: x) :> 0
+            .NBlock(b: x) :> 0
+            .NPlace(pl: x) :> 0
+            .NInst(i: x) :> 0
+            .NPattern(pat: x) :> 0
+            .NEdit(k: x) :> 0
+        }
+    }
+
+    fn evalRefetch(s: Stmt) -> int {
+        return match s {
+            .Eval(e: e) :> refetchCount(e)
+            .Let(sym: x) :> 0
+            .Suspend(bind: x) :> 0
+            .Write(cap: x) :> 0
+            .Commit(writes: x) :> 0
+            .Assign(local: x) :> 0
+            .If(cond: x) :> 0
+            .Return(e: x) :> 0
+            .ResetSurface(of: x) :> 0
+            .Defer(body: x) :> 0
+            .Unpersist(decl: x) :> 0
+            .Attempt(result: x) :> 0
+            .Fail(err: x) :> 0
+            .Join(k: x) :> 0
+            .Jump(k: x) :> 0
+            .Loop(label: x) :> 0
+            .Break(target: x) :> 0
+            .Continue(target: x) :> 0
+            .Gather(g: x) :> 0
+            .Lift(into: x) :> 0
+        }
     }
 
     fn fnWriteWitness(p: CoreProgram, callee: Sym, seen: int[]) -> string {

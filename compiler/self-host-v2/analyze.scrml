@@ -15783,19 +15783,29 @@ ${
     }
 
     // Every `@name` node an expression holds (in a lambda body and a handling form's arms too).
-    fn atNodesIn(e: AExpr) -> AExpr[] {
+    fn atNodesIn(e: AExpr) -> AExpr[] { return readNodesIn(e, false) }
+
+    fn atNodesInBlock(b: ABlock) -> AExpr[] { return readNodesInBlock(b, false) }
+
+    // `reqs`: also every `<#id>.prop` member node (a request property read — s475 r1,
+    // #1788 F2: W-LIFECYCLE-011 counts a `<#id>.data` read as a read of the target).
+    fn readNodesIn(e: AExpr, reqs: boolean) -> AExpr[] {
         let out: AExpr[] = []
         if (atName(e) != "") out = [e]
-        for (const k of exprKids(e)) { out = out.concat(atNodesIn(k)) }
-        for (const b of exprBlocks(e)) { out = out.concat(atNodesInBlock(b)) }
+        if (reqs && memberName(e.k) != "") {
+            const o: AExpr | not = memberObj(e)
+            if (o is given && hashRefId(o) is given) out = [e]
+        }
+        for (const k of exprKids(e)) { out = out.concat(readNodesIn(k, reqs)) }
+        for (const b of exprBlocks(e)) { out = out.concat(readNodesInBlock(b, reqs)) }
         return out
     }
 
-    fn atNodesInBlock(b: ABlock) -> AExpr[] {
+    fn readNodesInBlock(b: ABlock, reqs: boolean) -> AExpr[] {
         let out: AExpr[] = []
         for (const s of b.stmts) {
-            for (const e of stmtExprs(s)) { out = out.concat(atNodesIn(e)) }
-            for (const nb of stmtKidBlocks(s)) { out = out.concat(atNodesInBlock(nb)) }
+            for (const e of stmtExprs(s)) { out = out.concat(readNodesIn(e, reqs)) }
+            for (const nb of stmtKidBlocks(s)) { out = out.concat(readNodesInBlock(nb, reqs)) }
         }
         return out
     }
@@ -22337,10 +22347,21 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
-            .HashRef(id: hr0) :> ""
+            .HashRef(id: hr0) :> reqKey(hr0)                        // s475 r1 (#1788 F1): `<#id>.data` / `.error` narrow like a cell
             .Foreign(f: fb0) :> ""
         }
     }
+
+    // s475 r1 (#1788 review F1) — a request's properties are PROGRAM CELLS (lower:
+    // requestSignalFields; only the request's runs write them, §6.7.7), so their
+    // narrowing key is a CELL key (`@…`): `<#id>.data` is the place `@<#id>.data`.
+    // Every cell rule then holds for it unchanged — a suspension point / waiting
+    // call ends it ("*", tUnnarrowCells), a handler starts without it unless an
+    // enclosing `if=` gate proves it (tDropCellNarrowing / gateMarks), a deferred
+    // body drops it (tDeferEnv) — and `<#id>.refetch()` writes it (callEffect /
+    // resetKey: the key `@<#id>`, which drops every property under it). No cell's
+    // key can collide: a cell name is an identifier, and `<#` is none.
+    fn reqKey(id: string) -> string { return "@" + hashRefText(id) }
 
     // s474 (§50.3.1): the kept assignment's value IS the local's new value, so a
     // presence test of `(m = e)` is a presence test of `m` (`((m = re.exec(s))
@@ -22677,9 +22698,20 @@ ${
             return []
         }
         if (n != "") return ["()" + n]
+        // s475 r1 (#1788 F1): `<#id>.refetch()` writes the request's properties (reqKey)
+        const rid: string | not = refetchedId(c)
+        if (rid is given) return [reqKey(rid)]
         const m: MethodCall | not = methodCall(c)
         if (m is given) return [placeKey(m.obj)]
         return []
+    }
+
+    // The id of the request a `<#id>.refetch` callee names (s475 r1, #1788 F1).
+    fn refetchedId(c: AExpr) -> string | not {
+        if (memberName(c.k) != "refetch") return not
+        const o: AExpr | not = memberObj(c)
+        if (o is not) return not
+        return hashRefId(o)
     }
 
     fn blockEffects(b: ABlock, al: Alias[]) -> string[] {
@@ -22931,6 +22963,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -23032,6 +23065,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x, prop: pr) :> not
+            .NReq(id: rq0, sig: rs0) :> not        // a request's property is no `(not to T)` field (§6.7.7)
             .NConst(sym: s) :> not
             not :> not
         }
@@ -26263,6 +26297,9 @@ ${
 
     fn resetKey(env: TEnv, c: AExpr, a: AExpr[]) -> string {
         if (exprName(c) == "reset" && a.length == 1) return nKey(env, a[0])
+        // s475 r1 (#1788 F1): a `<#id>.refetch()` statement ends the narrowing of `<#id>`'s properties
+        const rid: string | not = refetchedId(c)
+        if (rid is given) return reqKey(rid)
         return ""
     }
 
@@ -28759,10 +28796,33 @@ ${
             let seen = false
             for (const f of reads) {
                 if (sameField(f, rq.target)) seen = true
+                // s475 r1 (#1788 F2): `<#id>.data` IS the target's last loaded value (§6.7.7
+                // Properties) — reading it in the markup reads what the request loads
+                if (reqDataOf(f) == rq.id) seen = true
             }
             if (!seen) out = out.concat([newDiag("W-LIFECYCLE-011", "`@" + rq.targetName + "`, which the `<request id=\"" + rq.id + "\">` loads, is never read in the markup (§6.7.7) — show it, or drop the request", rq.file, rq.req.opener)])
         }
         return out
+    }
+
+    // The request id of a `<#id>.data` read ("" — any other fact).
+    fn reqDataOf(f: NameFact) -> string {
+        return match f {
+            .NReq(id: i, sig: s) :> reqDataSig(i, s)
+            .NField(decl: x) :> ""
+            .NLocal(sym: x) :> ""
+            .NInst(decl: x) :> ""
+            .NStruct(owner: x) :> ""
+            .NFn(sym: x) :> ""
+            .NLength :> ""
+            .NSurface(of: x) :> ""
+            .NConst(sym: x) :> ""
+        }
+    }
+
+    fn reqDataSig(id: string, s: ReqSig) -> string {
+        if (s == ReqSig.Data) return id
+        return ""
     }
 
     fn sameField(a: NameFact, b: NameFact) -> boolean {
@@ -28790,7 +28850,7 @@ ${
             const k: ANodeK = n.k
             const more: AExpr[] = match k {
                 .Elem(e: e) :> elemAtNodes(e)
-                .Interp(e: e) :> atNodesIn(e)
+                .Interp(e: e) :> readNodesIn(e, true)
                 .Gather(f: lf) :> markupAtNodes(gatherRows(lf))
                 .Text(text: x) :> []
                 .DeclNode(d: x) :> []
@@ -28808,9 +28868,9 @@ ${
         for (const a of e.attrs) {
             const v: AAttrValue = a.value
             const more: AExpr[] = match v {
-                .Bare(e: x) :> atNodesIn(x)
-                .Paren(e: x) :> atNodesIn(x)
-                .Braced(b: b) :> atNodesInBlock(b)
+                .Bare(e: x) :> readNodesIn(x, true)
+                .Paren(e: x) :> readNodesIn(x, true)
+                .Braced(b: b) :> readNodesInBlock(b, true)
                 .Quoted(v: x) :> []
                 .NoValue :> []
             }

@@ -170,6 +170,39 @@ describe("C-R2 — a READ Request is one server call (§6.7.7.1 rule 1)", () => 
   });
 });
 
+// s475 r1 (#1788 review F3) — a Refetch is `() -> void` (§6.7.7 Properties) and a WRITE of the
+// request's target (§6.7.4 "What counts as a write": "`<#id>.refetch()`, which writes the
+// `<request>`'s assigned cell"). C-R3 refuses one whose value is used; C-R1 counts one in a
+// request body (directly or through a called function) as a write besides the target's.
+describe("C-R3 / C-R1 — a Refetch is discarded, and is a write (s475 r1 F3)", () => {
+  const msgs = (edit) => mods.check.checkCore(requestCore(edit)).join("\n");
+  const H = () => C.mkSym(910060, "req");
+  test("a Refetch as a whole Eval in a function checks clean", () => {
+    const h = H();
+    const core = requestCore((p) => { p.handle = h; });
+    core.fns = [...core.fns, { ...clone(core.fns[0]), sym: C.mkSym(910061, "re"), params: [], body: C.block([C.Stmt.Eval(C.Expr.Refetch(h))]) }];
+    expect(mods.check.checkCore(core).filter((m) => m.startsWith("C-R"))).toEqual([]);
+  });
+  test("a Refetch whose value is used (a Let initializer) is refused — C-R3", () => {
+    const h = H();
+    const core = requestCore((p) => { p.handle = h; });
+    core.fns = [...core.fns, { ...clone(core.fns[0]), sym: C.mkSym(910062, "re"), params: [], body: C.block([C.Stmt.Let(C.mkSym(910063, "z"), C.Expr.Refetch(h))]) }];
+    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R3: 1 Refetch\(es\) stand where a value is used/);
+  });
+  test("a request body that refetches (its continuation) is refused — C-R1 write accounting", () => {
+    const h = H();
+    expect(msgs((p) => { p.handle = h; p.then = [C.Stmt.Eval(C.Expr.Refetch(h)), ...p.then]; }))
+      .toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — re-runs a `<request>`/);
+  });
+  test("a request body that calls a function that refetches is refused — C-R1, through the call", () => {
+    const h = H();
+    const re = C.mkSym(910064, "re");
+    const core = requestCore((p) => { p.handle = h; p.then = [C.Stmt.Eval(C.Expr.Call(re, [])), ...p.then]; });
+    core.fns = [...core.fns, { ...clone(core.fns[0]), sym: re, params: [], body: C.block([C.Stmt.Eval(C.Expr.Refetch(h))]) }];
+    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `re\(\)`: re-runs a `<request>`/);
+  });
+});
+
 describe("the request machine through the printer", () => {
   test("mount runs the load; the target lands on settle; a dependency change reloads with keep-stale", async () => {
     const { out, rt } = await loadProgram(requestCore(), "request");
