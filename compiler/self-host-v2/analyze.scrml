@@ -10475,6 +10475,10 @@ ${
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
+        // s475-boot-request-followups (#1783 review LOW 2): a cell whose WRITTEN type was refused
+        // (FieldInfo.trusted, r8 — e.g. `(not to int[append])`) is never judged against the grants
+        // of a type it was not given: one report per construct (the refusal), no second one here.
+        if (!f.trusted) return { w: not, st: st }
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
         if (grantsHasEdits(f.grants)) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
@@ -10991,6 +10995,7 @@ ${
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
+        if (!f.trusted) return st     // s475-boot-request-followups: a refused written type — no second report (as wholeFieldWrite)
         return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "(…)` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
     }
 
@@ -22786,21 +22791,30 @@ ${
     fn lifeMaybeMsg(f: FieldInfo, v: VType) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to a `" + post + "`), or declare `@" + n + "` `" + post + " | not` if it may become absent again (a pending cell's handled waiting write, §13.9.4, is not in the bootstrap yet)"
+        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to " + aCode(post) + "), or declare `@" + n + "` `" + post + " | not` if it may become absent again (a pending cell's handled waiting write, §13.9.4, is not in the bootstrap yet)"
     }
 
     // s475 r1 F2b: a whole write of a LOCKED `(not to T)` cell that is provably present
     fn lifeAgainMsg(f: FieldInfo) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return "`@" + n + "` is a locked `(not to " + post + ")` cell, and here it is already a `" + post + "` (discriminated or written on this path), so this write is `" + post + " → " + post + "` — its lifecycle grants the one write `not → " + post + "` only (§66.11.1, §66.11.6). Declare it `let` to rewrite it (a `let` cell's `replace`, bounded by its lifecycle)"
+        return "`@" + n + "` is a locked `(not to " + post + ")` cell, and here it is already " + aCode(post) + " (discriminated or written on this path), so this write is `" + post + " → " + post + "` — its lifecycle grants the one write `not → " + post + "` only (§66.11.1, §66.11.6). Declare it `let` to rewrite it (a `let` cell's `replace`, bounded by its lifecycle)"
     }
 
     // s475 r1 F2b: a locked `(not to T)` cell's edit — its lifecycle grants the whole `not → T` write only
     fn lifeEditMsg(f: FieldInfo, what: string) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return what + " of `@" + n + "`, a locked `(not to " + post + ")` cell — its lifecycle grants the one whole write `not → " + post + "` only (§66.11.1, §66.11.6); an edit changes a `" + post + "` it already holds (`" + post + " → " + post + "`). " + lifeEditFix(f, post)
+        return what + " of `@" + n + "`, a locked `(not to " + post + ")` cell — its lifecycle grants the one whole write `not → " + post + "` only (§66.11.1, §66.11.6); an edit changes " + aCode(post) + " it already holds (`" + post + " → " + post + "`). " + lifeEditFix(f, post)
+    }
+
+    // s475-boot-request-followups (#1783 review LOW 3): the indefinite article before a code-quoted
+    // type name — "an `int`", "a `string`" (a leading vowel letter; `User` / `uint`-like names read
+    // "a", the safe default).
+    fn aCode(name: string) -> string {
+        const c: string = name.charAt(0)
+        if (c == "a" || c == "e" || c == "i" || c == "o" || c == "A" || c == "E" || c == "I" || c == "O") return "an `" + name + "`"
+        return "a `" + name + "`"
     }
 
     fn lifeEditFix(f: FieldInfo, post: string) -> string {
