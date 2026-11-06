@@ -28120,13 +28120,16 @@ ${
     //      unresolvable call (`scan.unproven`), is not host-backed and has no
     //      `_{}` foreign block, and every `?{}` on the way is provably a SELECT
     //      (sql.scrml `sqlFacts`; a query the reader cannot prove read-only is
-    //      SqlWrite) — and there is at least ONE such query.
-    // The last two clauses are INTERIM, fail closed to WRITE (discard is never
-    // wrong): §6.7.7.1 O-059-3 does not rule a non-SQL side effect (a host
-    // call, an outbound request), so a call graph that reaches one — or that
-    // reaches no SQL at all, whose server work the compiler cannot vouch for —
-    // is WRITE. The capable form, once O-059-3 is ruled: a non-SQL
-    // effect-freedom proof over the server call graph (pure functions READ).
+    //      SqlWrite). A call graph that reaches NO `?{}` holds (a) vacuously
+    //      and is READ (ruling:user-voice-scrml.md S475 "PA self-correction
+    //      adopted: the #1787 '≥1 SELECT' clause (a no-SQL server call classed
+    //      WRITE) is dropped — SPEC §6.7.7.1 rule 1 makes it READ").
+    // The host-backed / `_{}` / unresolvable clauses are INTERIM, fail closed to
+    // WRITE (discard is never wrong): §6.7.7.1 O-059-3 does not rule a non-SQL
+    // side effect (a host call, a foreign block, an outbound request), so a
+    // call graph that reaches one — or a call the compiler cannot resolve — is
+    // WRITE. The capable form, once O-059-3 is ruled: a non-SQL effect-freedom
+    // proof over the host / foreign calls the server call graph reaches.
     // Body-own `?{}` sites are refused already (actionServerDiags, F1); one
     // makes the request WRITE here too. check.scrml C-R2 re-checks a READ
     // class against Core.
@@ -28198,11 +28201,10 @@ ${
 
     // rule 1(a) over the server call graph from `roots`: every callable reached is known, has no
     // unresolvable call, is not host-backed, has no `_{}` block, and every `?{}` is provably a
-    // SELECT — and there is at least one.
+    // SELECT. No `?{}` at all is READ (rule 1(a) holds vacuously; S475 ruling).
     fn serverReadOnly(t: Tables, sum: Summary, roots: int[]) -> boolean {
         let seen: int[] = []
         let todo: int[] = roots
-        let selects: int = 0
         let k: int = 0
         while (k < todo.length) {
             const sym: int = todo[k]
@@ -28217,12 +28219,11 @@ ${
                 if (f.scan.unproven.length > 0) return false
                 for (const q of f.sqls) {
                     if (sqlFacts(q.q.chunks).kind != SqlKind.SqlSelect) return false
-                    selects = selects + 1
                 }
                 for (const r of f.scan.refs) { todo = todo.concat([r.sym]) }
             }
         }
-        return selects > 0
+        return true
     }
 
     fn remoteCallee(k: SuspendK) -> int {
