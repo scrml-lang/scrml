@@ -316,7 +316,11 @@ ${HOLD_CHARGE}    let <n:int=0/>
     expect(e[0].message).toContain("writes `@n` with a value the batch computes inside a nested statement");
   });
 
-  test("E-ERROR-010: the error type has no `Transport` — the composed request can fail on the wire", () => {
+  // s475-boot-caller-transport — BUILT (was E-ERROR-010 "add `Transport(t: ServerCallError)` to `F`"): the
+  // composed request's wire failure goes to the function's CALLERS. §19.9.5: "Its client call fails with the
+  // §19.9.10 failure set: the function's declared error variants, if it is declared `!`, plus `Transport(t:
+  // ServerCallError)`". The handler's `_ :>` covers it (§19.9.10: "or with `_ :>` / `_ err :>`").
+  test("the error type has no `Transport` — composes; the wire failure is the caller's (was E-ERROR-010)", () => {
     const src = `<program db="./app.db">
     type F:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
     let <r:int=0/>
@@ -332,9 +336,10 @@ ${HOLD_CHARGE}    let <n:int=0/>
     <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
 </program>
 `;
-    const e = errs(src);
-    expect(e.map((d) => d.code)).toEqual(["E-ERROR-010"]);
-    expect(e[0].message).toContain("add `Transport(t: ServerCallError)` to `F`");
+    expect(errs(src)).toEqual([]);
+    const r = compile(src);
+    expect(check(r.core)).toEqual([]);
+    expect(r.core.server.find((s) => s.sym.hint === "move#batch")).toBeTruthy();
   });
 });
 
@@ -637,7 +642,10 @@ ${HOLD_CHARGE}    let <r:int=0/>
     expect(e[0].message).toContain("Declare a new local inside the batch");
   });
 
-  test("N4: a single call whose composition needs `Transport` — the error says so", () => {
+  // s475-boot-caller-transport: composing no longer needs `Transport` in `F2` (§19.9.5 — the callers get it), so
+  // the late `fail` joins the batch and the function compiles (was E-TX-FAIL-AFTER-COMMIT, whose message named
+  // the missing `Transport` as the reason the check could not join).
+  test("N4: a single call + a later `fail`, no `Transport` in the error type — composes, the `fail` joins the batch (was E-TX-FAIL-AFTER-COMMIT)", () => {
     const src = `<program db="./app.db">
     type F2:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
     let <r:int=0/>
@@ -654,10 +662,8 @@ ${HOLD_CHARGE}    let <r:int=0/>
 </program>
 `;
     expect(warns(src)).toEqual([]);
-    const w = errs(src);
-    expect(w.map((d) => d.code)).toEqual(["E-TX-FAIL-AFTER-COMMIT"]);
-    expect(w[0].message).toContain("Transport(t: ServerCallError)");
-    expect(w[0].message).not.toContain("a statement before it cannot join");
+    expect(errs(src)).toEqual([]);
+    expect(compile(src).core.server.find((s) => s.sym.hint === "book#batch")).toBeTruthy();
   });
 
   test("N6: the mapped name replaces whole tokens and drops its `()`", () => {
