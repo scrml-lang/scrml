@@ -1,3 +1,7 @@
 # progress — s475-boot-struct-context-valueif-followups
 
 - 2026-11-05T19:41:40-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a7ebeb4ff85c9b565, base origin/main ca3b3c7a1 (PR #1762 merged)
+- 2026-11-05T20:05 item 1 committed (7ade3dc63): analyze.scrml — `return` operand takes the declared return type (enclosingRet), call arguments their parameter types (paramTypesOf/resolveArgs), `!{}`/failable-match arm values ArmCx.want (armWant: callee success type, else the position's). Corpus: 0 changes. Hook: default sharding hit the per-shard memory ceiling (shards 2, 9 killed, not test failures) — re-run with SCRML_HOOK_SHARDS=1, all green.
+- 2026-11-05T21:00 items 2–4 committed (31d7027fe): parse.scrml — bareHeadAt (paren-led bare markup head), valueIfBrace + armTails/stmtArmReread (value-if arm brace; statement position re-read as statements; stmtChecks/armTails return the statement), parseObject computed/number key = one E-PARSE-OBJECT, literal Recovered. Corpus: 1 errs-changed (cascade E-TYPE-STRUCT-CONTEXT gone in an already-refused file). Conformance --json: 0 bucket changes, 2 emitted-set changes (cascades removed).
+- 2026-11-05T21:30 item 5 committed (6207bb034): ctrl-021/023/024 get the missing `;` (e0875a92e method: impl#1 codes + artifacts identical modulo hashes). Bootstrap: all three PASS (twin, runtime executed).
+- 2026-11-05T22:00 docs: gap g-boot-object-literal-struct-context-positions-s475 resolved; value-if gap notes the follow-ups; coverage rows §18.5 / §17.6.10.
