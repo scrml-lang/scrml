@@ -20,7 +20,7 @@
 //
 // The acceptance twins of the 12 conformance/cases/lifecycle/request-* cases live in
 // compiler/self-host-v2/acceptance/request/ (graded in acceptance.test.js). This file grades what
-// they cannot reach: the four `<#id>` signal cells (their S3b reads do not parse yet), the newest-wins
+// they cannot reach: the four `<#id>` signal cells as cells (their reads: request-refs-s475.test.js), the newest-wins
 // and teardown edges (a controlled transport), the Core shape, and every S3a refusal by its message.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
@@ -101,7 +101,10 @@ describe("Core: a `<request>` lowers onto View.Request (C-R1 accepts it)", () =>
     expect(req.mount).toBe(true);
     expect(req.handle.hint).toBe("#userReq");
     const out = mods().print.printProgram(r.core, "app.client.js", "scrml-runtime.js");
-    expect(out.js).toMatch(/const _userReq\w* = rt\.requestOn\(scope\$, /);
+    // s475 S3b: the handle is a program-level slot the request fills while mounted
+    expect(out.js).toMatch(/^const (_userReq\w*) = rt\.requestSlot\(\);$/m);
+    const slot = out.js.match(/^const (_userReq\w*) = rt\.requestSlot\(\);$/m)[1];
+    expect(out.js).toContain("slot: " + slot + " });");
   });
 
   test("the right-hand side's server call is handled by the request: no E-ERROR-002 (RED on base: E-BOOTSTRAP-UNSUPPORTED + E-VALUE-WRITES-STATE)", () => {
@@ -128,7 +131,8 @@ describe("Core: a `<request>` lowers onto View.Request (C-R1 accepts it)", () =>
     const r = compile(src);
     expect(check(r.core)).toEqual([]);
     const js = mods().print.printProgram(r.core, "app.client.js", "scrml-runtime.js").js;
-    const names = [...js.matchAll(/const (\w+) = rt\.requestOn\(/g)].map((m) => m[1]);
+    const names = [...js.matchAll(/^const (\w+) = rt\.requestSlot\(\);$/gm)].map((m) => m[1]);
+    for (const n of names) expect(js).toContain("slot: " + n + " });");
     expect(names.length).toBe(2);
     expect(new Set(names).size).toBe(2);
     expect(js).toContain("#a_loading");

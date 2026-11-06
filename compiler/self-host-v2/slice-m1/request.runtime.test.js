@@ -527,6 +527,62 @@ describe("§6.7.7.1 — abort READS, discard WRITES (rt.call's AbortController �
     } finally { f.restore(); }
   });
 
+  // s475 (merge of S3b refs × S5a abort): `<#id>.refetch()` is rt.refetch(slot) — EC-4 "Starts a
+  // new fetch immediately, superseding the in-flight one" — so rule 2 governs it as it does a
+  // dependency change: the superseded READ transport is aborted, a WRITE one discarded.
+  function setupSlot(read) {
+    if (globalThis.happyDOM && globalThis.location.protocol === "about:") globalThis.happyDOM.setURL("http://localhost/");
+    const scope = rt.root.child();
+    const t = rt.cell(null), state = sigs(), slot = rt.requestSlot();
+    let n = 0;
+    const opts = read ? { read: true, state, slot } : { state, slot };
+    rt.requestOn(scope, t, [], (task) => ({ on: rt.call(route, [n++], task), then: (v) => t.set(v) }), opts);
+    return { scope, t, state, slot };
+  }
+
+  test("READ refetched while in flight (EC-4): the superseded call's signal fires, no error; the refetch's answer lands", async () => {
+    // mutation RED: rt.refetch bypassing Request.run's cancel (or `new Task(this)` in run)
+    const f = stubFetch();
+    try {
+      const reported = await reportedDuring(async () => {
+        const { scope, t, state, slot } = setupSlot(true);
+        await tick();
+        expect(f.seen.length).toBe(1);
+        rt.refetch(slot);
+        await tick();
+        expect(f.seen.length).toBe(2);
+        expect([f.seen[0].signal.aborted, f.seen[1].signal.aborted]).toEqual([true, false]);
+        expect([state.loading.peek(), state.error.peek()]).toEqual([true, null]);
+        f.seen[1].answer(9);
+        for (let i = 0; i < 10; i++) await tick();
+        expect([t.peek(), state.loading.peek(), state.error.peek(), state.data.peek()]).toEqual([9, false, null, 9]);
+        scope.dispose();
+        rt.refetch(slot);                            // torn down: nothing to re-execute
+        await tick();
+        expect(f.seen.length).toBe(2);
+      });
+      expect(reported).toEqual([]);
+    } finally { f.restore(); }
+  });
+
+  test("WRITE refetched while in flight (EC-4): never aborted; the superseded late answer is discarded", async () => {
+    // mutation RED: making a refetched run's task abortable regardless of class
+    const f = stubFetch();
+    try {
+      const { scope, t, state, slot } = setupSlot(false);
+      await tick();
+      rt.refetch(slot);
+      await tick();
+      expect(f.seen.map((s) => s.signal.aborted)).toEqual([false, false]);
+      f.seen[1].answer(2);
+      for (let i = 0; i < 10; i++) await tick();
+      f.seen[0].answer(1);                           // the superseded transport completes …
+      for (let i = 0; i < 10; i++) await tick();
+      expect([t.peek(), state.error.peek()]).toEqual([2, null]);   // … and is dropped
+      scope.dispose();
+    } finally { f.restore(); }
+  });
+
   test("an effect's / handler's task is never abortable (Task.onAbort is a no-op there)", async () => {
     // only a READ request makes an abortable task; rt.call with no task (a <db> cell load) or an
     // ordinary task keeps its transport

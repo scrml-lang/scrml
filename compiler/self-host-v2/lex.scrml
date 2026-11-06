@@ -1543,7 +1543,7 @@ ${
         if (!atDepthZero(st)) return false
         const c0: int = peekCode(st.cur, 0)
         return match stop {
-            .BareValue :> isTrivia(c0) || c0 == 62 || (c0 == 47 && peekCode(st.cur, 1) == 62)
+            .BareValue :> isTrivia(c0) || (c0 == 62 && !closesHashRef(st.cur)) || (c0 == 47 && peekCode(st.cur, 1) == 62)
             .Line      :> lineEndsAt(skipBlanks(st.cur))
             .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
             .CodeBody  :> startsMarkup(skipTriviaAhead(st.cur))
@@ -1563,6 +1563,18 @@ ${
             .Shorthand :> false
             .CodeBody  :> false
         }
+    }
+
+    // s475 r1 (#1788 F5) — is the `>` at `c` the closer of a `<#id>` reference
+    // (SPEC state-ref ::= '<#' identifier '>') written just before it, nothing
+    // between? Then it ends the reference, not the tag: a bare attribute value
+    // `onclick=<#r>.refetch()` reads on, as `onclick=f()` does.
+    fn closesHashRef(c: Cursor) -> boolean {
+        let i: int = c.pos - 1
+        while (i >= 0 && isIdentCont(c.source.charCodeAt(i))) { i = i - 1 }
+        if (i == c.pos - 1 || i < 1) return false
+        if (!isIdentStart(c.source.charCodeAt(i + 1))) return false
+        return c.source.charCodeAt(i) == 35 && c.source.charCodeAt(i - 1) == 60
     }
 
     // A newline, or a line comment running to one.

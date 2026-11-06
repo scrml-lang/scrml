@@ -272,6 +272,14 @@ ${
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
         // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
         Validity(of: ValidityOf, prop: SurfaceProp),
+        // s475 (slice S3b) — `<#id>.refetch()` (§6.7.7 Properties `() -> void`;
+        // EC-4): re-run the request whose View.Request carries `req` as its
+        // handle — a new run, superseding an in-flight one. CLIENT code only,
+        // and only where its value is discarded (an Eval: check.scrml C-R3). The
+        // printer reaches the request through a program-level slot the request
+        // fills on mount and clears on teardown, so a refetch from a function or
+        // another scope sees it; a refetch while it is not mounted does nothing.
+        Refetch(req: Sym),
         // s454 (U1b) — a CLIENT call of a server function (§12.3 "a client fetch
         // call", §19.9.10): `fn` names a ServerFn, `args` its arguments (encoded
         // by the §57 codec against its parameter types). Legal ONLY as the `on`

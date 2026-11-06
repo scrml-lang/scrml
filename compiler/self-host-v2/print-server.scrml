@@ -285,6 +285,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .Query(q: x) :> not
         }
@@ -381,6 +382,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
         }
@@ -450,6 +452,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
             .Query(q: x) :> false
         }

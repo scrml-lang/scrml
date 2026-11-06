@@ -616,3 +616,93 @@ ${E}
     expect(unhandled).toEqual([]);
   });
 });
+
+// s475 (merge of S3b refs × S5a abort) — `<#id>.refetch()` (EC-4: "Starts a new fetch immediately,
+// superseding the in-flight one") is a supersede, so rule 2 governs it: a READ request's
+// superseded transport is aborted, a WRITE request's discarded. The printed options carry both the
+// class (`read: true`) and the program-level slot (`slot: <h>`).
+describe("rule 2 via `<#id>.refetch()` — a refetch supersedes: READ aborted, WRITE discarded", () => {
+  const HREF = "<" + "#userReq>";
+  const withRefetch = (src) => src.replace('<p id="who">', `<button id="rf" onclick={ ${HREF}.refetch(); }>again</button>\n        <p id="who">`);
+
+  test("a READ request with a handle prints `read: true` and `slot: <h>`; a WRITE one only the slot", () => {
+    const rd = clsOf(withRefetch(APP(READ_FN)));
+    expect(name(rd.cls)).toBe(READ);
+    const slots = [...rd.js.matchAll(/^const (\w+) = rt\.requestSlot\(\);$/gm)].map((m) => m[1]);
+    expect(slots.length).toBe(1);
+    expect(rd.js).toContain("}, { mount: true, read: true, state: {");
+    expect(rd.js).toContain("slot: " + slots[0] + " });");
+    expect(rd.js).toContain("rt.refetch(" + slots[0] + ")");
+    const wr = clsOf(withRefetch(APP(WRITE_FN)));
+    expect(name(wr.cls)).toBe(WRITE);
+    expect(wr.js).not.toContain("read: true");
+    expect(wr.js).toMatch(/slot: \w+ \}\);/);
+  });
+
+  async function refetchRun(fn, tag) {
+    const r = compile(withRefetch(APP(fn)));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    globalThis.fetch = bridge(srv);
+    const { rt } = await loadProgram(r.core, tag + k++);
+    return { rt, srv };
+  }
+
+  test("READ refetched while in flight: the superseded fetch's signal fires, no error; the refetch's answer lands", async () => {
+    // mutation RED: rt.refetch / Request.run making a non-abortable task for a READ request
+    const { rt, srv } = await refetchRun(READ_FN, "refetch-read-");
+    const reported = [];
+    const prev = rt.setHostErrorReporter((e) => reported.push(e));
+    try {
+      await settle();
+      expect(who()).toBe("a");
+      const held = abortableTransport(srv);
+      click(document.querySelector("#u2"));   // run 1: user 2
+      await settle(5);
+      expect(held.length).toBe(1);
+      click(document.querySelector("#rf"));   // the refetch supersedes run 1
+      await settle(5);
+      expect(held.length).toBe(2);
+      expect([held[0].aborted, held[0].signal.aborted, held[1].aborted]).toEqual([true, true, false]);
+      expect(sig(cells(rt))).toEqual({ loading: true, data: "a", error: null, stale: true });
+      await held[1].go();
+      await settle();
+      expect(who()).toBe("b");
+      expect(sig(cells(rt))).toEqual({ loading: false, data: "b", error: null, stale: false });
+      expect(reported).toEqual([]);
+    } finally {
+      rt.setHostErrorReporter(prev);
+    }
+  });
+
+  test("WRITE refetched while in flight: the superseded fetch is NOT aborted; it completes and is dropped", async () => {
+    // mutation RED: every request's task abortable regardless of class
+    const { rt, srv } = await refetchRun(WRITE_FN, "refetch-write-");
+    const reported = [];
+    const prev = rt.setHostErrorReporter((e) => reported.push(e));
+    try {
+      await settle();
+      expect(who()).toBe("a");
+      const held = abortableTransport(srv);
+      click(document.querySelector("#u2"));   // run 1: pre(2) held
+      await settle(5);
+      click(document.querySelector("#rf"));   // the refetch (run 2) supersedes run 1: pre(2) held
+      await settle(5);
+      expect(held.length).toBe(2);
+      expect(held.map((h) => h.aborted)).toEqual([false, false]);
+      await held[1].go();                      // run 2 goes on to nm(2) (WRITE_FN: two server calls a run)
+      await settle(5);
+      expect(held.length).toBe(3);
+      await held[2].go();
+      await settle();
+      expect(who()).toBe("b");
+      await held[0].go();                      // the superseded transport completes …
+      await settle();
+      expect(held.length).toBe(3);             // … run 1 never continues to its second call
+      expect(who()).toBe("b");                 // … and is discarded
+      expect(sig(cells(rt))).toEqual({ loading: false, data: "b", error: null, stale: false });
+      expect(reported).toEqual([]);
+    } finally {
+      rt.setHostErrorReporter(prev);
+    }
+  });
+});

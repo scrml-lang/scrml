@@ -233,6 +233,7 @@ ${
             .Host(call: c) :> []
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
+            .Refetch(req: rf0) :> []
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
             .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
             .Query(q: q) :> exprNodes(q.params)                 // s468 (U1c): its values (the text is data)
@@ -357,6 +358,54 @@ ${
     // Folds built on allNodes — each a total match over Node.
     // -------------------------------------------------------------------------
 
+    // s475 (slice S3b): the handle of every `<request>` of the program (View.Request
+    // with a handle), in preorder — what a Core Refetch may name (check C-R3), and
+    // the program-level slots the printer declares.
+    export fn requestHandles(p: CoreProgram) -> Sym[] {
+        let out: Sym[] = []
+        for (const n of allNodes(Node.NProgram(p))) { out = out.concat(nodeRequestHandle(n)) }
+        return out
+    }
+
+    fn nodeRequestHandle(n: Node) -> Sym[] {
+        return match n {
+            .NView(v: v) :> viewRequestHandle(v)
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NStmt(s: x) :> []
+            .NExpr(e: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn viewRequestHandle(v: View) -> Sym[] {
+        return match v {
+            .Request(handle: h) :> optSym(h)
+            .Each(bind: x) :> []
+            .El(tag: x) :> []
+            .Text(text: x) :> []
+            .RawText(text: x) :> []
+            .Dyn(e: x) :> []
+            .Cond(arms: x) :> []
+            .Instance(decl: x) :> []
+            .Slot :> []
+            .Star(decl: x) :> []
+            .Effect(deps: x) :> []
+            .ResetOn(triggers: x) :> []
+            .Errors(of: x) :> []
+            .Reach(fields: x) :> []
+            .Gather(g: x) :> []
+        }
+    }
+
     // The declarations whose SHARED instance is referenced under `root`
     // (dpa-051 §5.2 (4): `shared_<decl>` is emitted only if `.Shared(decl)`
     // appears in Core — lazy by construction). May contain duplicates.
@@ -444,6 +493,7 @@ ${
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
+            .Refetch(req: rf0) :> []
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
@@ -591,6 +641,7 @@ ${
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
             .SeqCall(op: x) :> -1
+            .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
