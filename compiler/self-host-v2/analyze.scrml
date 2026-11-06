@@ -2887,27 +2887,41 @@ ${
         return infOut("the name `" + n + "` (not a typed `@` reference)")
     }
 
-    fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
-        const key: string = "@" + n
-        const at: int = stack.indexOf(key)
-        if (at >= 0) {
-            let seg: string[] = []
-            let viaFn = false
-            let i = at
-            while (i < stack.length) {
-                const s: string = stack[i]
-                if (s.substring(0, 1) == "@") {
-                    seg = seg.concat([s.substring(1)])
-                } else {
-                    viaFn = true
-                }
-                i = i + 1
+    // The cells on the stack from `at` on: a cycle — or, through a function's return, unproven (rule 5 (g)).
+    fn stackCycle(stack: string[], at: int, n: string) -> Inf {
+        let seg: string[] = []
+        let viaFn = false
+        let i = at
+        while (i < stack.length) {
+            const s: string = stack[i]
+            if (s.substring(0, 1) == "@") {
+                seg = seg.concat([s.substring(1)])
+            } else {
+                viaFn = true
             }
-            // through a function's return: that return is not proven (rule 5 (g))
-            if (viaFn) return rinf(infUnres("`@" + n + "` is read back through a function's return"), done)
-            return rinf(infCycle(seg), done)
+            i = i + 1
         }
-        if (srcIndex(cx.srcs, n) >= 0) {
+        if (viaFn) return infUnres("`@" + n + "` is read back through a function's return")
+        return infCycle(seg)
+    }
+
+    // s475-boot-file-scope-own-value r1 — a declaration's own value on the inference stack: "@name#file"
+    // (a program cell's is "@name"). cycName: the name a cycle path shows.
+    fn ownKey(name: string, file: string) -> string { return "@" + name + "#" + file }
+
+    fn cycName(x: string) -> string {
+        const h: int = x.indexOf("#")
+        if (h < 0) return x
+        return x.substring(0, h)
+    }
+
+    fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
+        // s475-boot-file-scope-own-value r1: `@n` is a program cell only in the program's own file (§7.6.1,
+        // programInfo — a library's `@n` never reaches the app's cells), so only there is "@n" on the stack it
+        const isCell: boolean = cx.te.file == cx.progFile && srcIndex(cx.srcs, n) >= 0
+        const at: int = stack.indexOf("@" + n)
+        if (isCell && at >= 0) return rinf(stackCycle(stack, at, n), done)
+        if (isCell) {
             const ro: ROwn = ownResolve(cx, n, stack, done)
             return rinf(refInf(ro.t, stack), ro.done)
         }
@@ -2942,7 +2956,16 @@ ${
                     if (ownValued(cx.te, d)) {
                         const ot: Type | not = writtenOrLiteral(cx, d.ty, d.own)
                         if (ot is given) return rinf(infOk(baseOf(ot)), done)
-                        return rinf(infUnres("`@" + n + "` reads the own value of `<" + n + ">`, whose type is neither written nor a literal's"), done)
+                        // r1 F2 — else inferred from its own initializer, as a program cell's is (ownResolve:
+                        // rule 5, MEMBERSHIP mode, in its own file's scope). Its stack key carries its file
+                        // (ownKey), so a library's `b` is never a program cell `b`, nor another library's.
+                        const okey: string = ownKey(d.name, ds.file)
+                        const oat: int = stack.indexOf(okey)
+                        if (oat >= 0) return rinf(stackCycle(stack, oat, n), done)
+                        const dcx: InferCx = withHscope(withRes(cxAt(cx, ds.file), false), -1)
+                        const r: RInf = inferValue(dcx, d.own, stack.concat([okey]), [], done)
+                        const t: OwnT = { name: okey.substring(1), ty: r.r.ty, origin: originOf(r.r, okey.substring(1), literalInit(dcx, d.own)) }
+                        return rinf(refInf(t, stack), r.done)
                     }
                 }
             }
@@ -3506,11 +3529,18 @@ ${
         }
         const lit: Type | not = literalOf(init)
         if (lit is given) return { name: name, ty: lit, origin: TypeOrigin.Literal }
-        const r: RInf = inferValue(cx, init, [], [], tab)
+        // r1 F2: a declaration's own value (where 3) is on its own stack, so a cycle back to it is ITS cycle
+        let stack: string[] = []
+        let key: string = name
+        if (where == 3) {
+            stack = [ownKey(name, cx.te.file)]
+            key = stack[0].substring(1)
+        }
+        const r: RInf = inferValue(cx, init, stack, [], tab)
         const isLit: boolean = literalInit(cx, init)
         const isAttr: boolean = role == FieldRole.Attribute
         if (isAttr && !isLit) return { name: name, ty: not, origin: TypeOrigin.Blamed }
-        return { name: name, ty: r.r.ty, origin: originOf(r.r, name, isLit) }
+        return { name: name, ty: r.r.ty, origin: originOf(r.r, key, isLit) }
     }
 
     // Rule 10: a WRITTEN type over an initializer whose value's type cannot be
@@ -3518,7 +3548,8 @@ ${
     // member path through declared types is resolved, whatever a sub-call is).
     fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
         let stack: string[] = []
-        if (where == 2 || where == 3) stack = ["@" + name]
+        if (where == 2) stack = ["@" + name]
+        if (where == 3) stack = [ownKey(name, cx.te.file)]
         let hs: int = -1
         if (where == 2) hs = cx.prog
         const r: RInf = inferValue(withHscope(withRes(cx, true), hs), init, stack, [], tab)
@@ -4162,6 +4193,11 @@ ${
             i = i + 1
         }
         return -1
+    }
+
+    // r1 F3 — `f` is `d`'s own-value field: the author spells it `@d`, never `@d.d`.
+    fn isOwnField(d: DeclInfo, f: FieldInfo) -> boolean {
+        return d.kind != DeclKind.Program && f.nid == d.nid
     }
 
     // The program's fields: the declarations directly in its body (L14).
@@ -6006,7 +6042,7 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const rc: RCycles = derivedCycles(decls, files, st)
+        const rc: RCycles = derivedCycles(decls, files, lk, handles, st)
         st = rc.st
         decls = rc.decls
         // s472: the file-scope constants' Syms and written types (their values: constPass)
@@ -6031,65 +6067,148 @@ ${
     // the cycle owns it), whether that report would have been
     // E-DECL-TYPE-NOT-INFERABLE, -REQUIRED-AT-BOUNDARY or -UNPROVEN.
     type DEdge:struct = { from: int, to: int }
+    type DNode:struct = { di: int, fi: int }
     type RCycles:struct = { st: AS, decls: DeclSrc[] }
 
-    fn derivedCycles(decls: DeclSrc[], files: FileAst[], st0: AS) -> RCycles {
+    // s475-boot-file-scope-own-value r1 (F1): the graph is the WHOLE program's derived values, not the
+    // `<program>`'s alone — every derived program cell and every derived OWN VALUE of a declaration
+    // outside `<program>` (`<a:int=(@b + 1)/>`, built as its instance's one field: userFields /
+    // ownFieldOf), in every linked file, so a cycle through file-scope own values (same file, across
+    // files by named / aliased / namespace import, or through a program cell) is reported as a program
+    // cell's is. Was: it compiled clean and overflowed the stack at mount (RangeError). An edge is a
+    // direct `@x` read resolved as the binder resolves it (atNode, after resolveAtOf).
+    fn derivedCycles(decls: DeclSrc[], files: FileAst[], lk: Linkage, hs: HandleInfo[], st0: AS) -> RCycles {
         let st: AS = st0
+        const ns: DNode[] = derivedNodes(decls)
+        let es: DEdge[] = []
+        let u = 0
+        for (const n of ns) {
+            const f: FieldInfo = decls[n.di].info.fields[n.fi]
+            for (const r of f.reads) {
+                if (r.substring(0, 1) == "@") {
+                    const v: int = atNode(decls, ns, lk, hs, n, r.substring(1))
+                    if (v >= 0) es = es.concat([{ from: u, to: v }])
+                }
+            }
+            u = u + 1
+        }
+        let members: int[] = []
+        let k = 0
+        while (k < ns.length) {
+            const path: int[] = derivedPath(es, k, k, [])
+            const at: DeclSrc = decls[ns[k].di]
+            const fk: FieldInfo = at.info.fields[ns[k].fi]
+            if (path.length > 0 && !hasErrIn(fileErrs(files, at.file), fk.span)) {
+                let names: string[] = []
+                for (const p of path) { names = names.concat([nodeLabel(decls, ns[p], at.file)]) }
+                names = names.concat([nodeLabel(decls, ns[k], at.file)])
+                st = addDiag(st, at.file, fk.span, "E-DERIVED-CIRCULAR-DEP", "`@" + fk.sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
+                members = members.concat(path).concat([k])
+            }
+            k = k + 1
+        }
+        if (members.length == 0) return { st: st, decls: decls }
         let out: DeclSrc[] = []
+        let di = 0
         for (const ds of decls) {
-            let members: int[] = []
-            if (ds.isProgram) {
-                const fs: FieldInfo[] = ds.info.fields
-                const errs: ASpan[] = fileErrs(files, ds.file)
-                let es: DEdge[] = []
-                let i = 0
-                for (const f of fs) {
-                    const m: FieldMode = f.mode
-                    if (m == FieldMode.Derived) {
-                        for (const r of f.reads) {
-                            if (r.substring(0, 1) == "@") {
-                                const j: int = fieldIndex(ds.info, r.substring(1))
-                                if (j >= 0) {
-                                    const mj: FieldMode = fs[j].mode
-                                    if (mj == FieldMode.Derived) es = es.concat([{ from: i, to: j }])
-                                }
-                            }
-                        }
-                    }
-                    i = i + 1
+            let hit = false
+            let nf: FieldInfo[] = []
+            let j = 0
+            for (const f of ds.info.fields) {
+                if (members.indexOf(nodeIndex(ns, di, j)) >= 0) {
+                    nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
+                    hit = true
+                } else {
+                    nf = nf.concat([f])
                 }
-                let k = 0
-                while (k < fs.length) {
-                    const path: int[] = derivedPath(es, k, k, [])
-                    if (path.length > 0 && !hasErrIn(errs, fs[k].span)) {
-                        let names: string[] = []
-                        for (const p of path) { names = names.concat(["@" + fs[p].sym.hint]) }
-                        names = names.concat(["@" + fs[k].sym.hint])
-                        st = addDiag(st, ds.file, fs[k].span, "E-DERIVED-CIRCULAR-DEP", "`@" + fs[k].sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
-                        members = members.concat(path).concat([k])
-                    }
-                    k = k + 1
-                }
+                j = j + 1
             }
-            if (members.length == 0) {
-                out = out.concat([ds])
-            } else {
-                let nf: FieldInfo[] = []
-                let j2 = 0
-                for (const f of ds.info.fields) {
-                    if (members.indexOf(j2) >= 0) {
-                        nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
-                    } else {
-                        nf = nf.concat([f])
-                    }
-                    j2 = j2 + 1
-                }
-                const di: DeclInfo = ds.info
-                const ni: DeclInfo = { nid: di.nid, span: di.span, sym: di.sym, kind: di.kind, single: di.single, file: di.file, fields: nf, handles: di.handles }
+            if (hit) {
+                const oi: DeclInfo = ds.info
+                const ni: DeclInfo = { nid: oi.nid, span: oi.span, sym: oi.sym, kind: oi.kind, single: oi.single, file: oi.file, fields: nf, handles: oi.handles }
                 out = out.concat([{ info: ni, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
+            } else {
+                out = out.concat([ds])
             }
+            di = di + 1
         }
         return { st: st, decls: out }
+    }
+
+    // The graph's nodes, in source order: each DERIVED program cell, and each declaration's DERIVED own value.
+    fn derivedNodes(decls: DeclSrc[]) -> DNode[] {
+        let out: DNode[] = []
+        let di = 0
+        for (const ds of decls) {
+            let j = 0
+            const oi: int = ownFieldOf(ds.info)
+            for (const f of ds.info.fields) {
+                const m: FieldMode = f.mode
+                if (m == FieldMode.Derived && (ds.isProgram || j == oi)) out = out.concat([{ di: di, fi: j }])
+                j = j + 1
+            }
+            di = di + 1
+        }
+        return out
+    }
+
+    fn nodeIndex(ns: DNode[], di: int, fi: int) -> int {
+        let i = 0
+        for (const n of ns) {
+            if (n.di == di && n.fi == fi) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    // `@x` as the cycle path spells it — with its file when that is not the reported one.
+    fn nodeLabel(decls: DeclSrc[], n: DNode, file: string) -> string {
+        const ds: DeclSrc = decls[n.di]
+        const l: string = "@" + ds.info.fields[n.fi].sym.hint
+        if (ds.file == file) return l
+        return l + " (" + ds.file + ")"
+    }
+
+    // The node a direct `@name` read in node `n`'s initializer reaches, else -1 (not a derived value of the
+    // graph). The binder's order (resolveAtOf): the reader's own name (a declaration's own value: O54 (a));
+    // a program cell's sibling cells; a handle of the reader's scope (no edge: it names an instance); from a
+    // declaration in the program's own file, the program's cells (§7.6.1 — a library never reaches them);
+    // then the user declaration `name` denotes in the reader's file (declared there, or imported — an alias
+    // or, re-read as one name, `m.x` — §21.3 rule 2: "the same declaration").
+    fn atNode(decls: DeclSrc[], ns: DNode[], lk: Linkage, hs: HandleInfo[], n: DNode, name: string) -> int {
+        const rd: DeclSrc = decls[n.di]
+        if (rd.isProgram) {
+            const j: int = fieldIndex(rd.info, name)
+            if (j >= 0) return nodeIndex(ns, n.di, j)
+        } else if (rd.info.sym.hint == name) {
+            return nodeIndex(ns, n.di, n.fi)
+        }
+        for (const h of hs) {
+            if (h.name == name && h.owner == rd.info.nid) return -1
+        }
+        if (!rd.isProgram) {
+            let pi = 0
+            for (const pd of decls) {
+                if (pd.isProgram && pd.file == rd.file) {
+                    const j2: int = fieldIndex(pd.info, name)
+                    if (j2 >= 0) return nodeIndex(ns, pi, j2)
+                }
+                pi = pi + 1
+            }
+        }
+        const from: string = scopeFrom(lk, rd.file, NameKind.KDecl, name)
+        if (from == "") return -1
+        const orig: string = scopeOrig(lk, rd.file, NameKind.KDecl, name)
+        let qi = 0
+        for (const qd of decls) {
+            if (!qd.isProgram && qd.info.sym.hint == orig && qd.file == from) {
+                const oi: int = ownFieldOf(qd.info)
+                if (oi < 0) return -1
+                return nodeIndex(ns, qi, oi)
+            }
+            qi = qi + 1
+        }
+        return -1
     }
 
     // A written / literal / inferred origin is kept (there is nothing to withdraw).
@@ -25626,7 +25745,7 @@ ${
         if (initBlamed(env, f, ts)) return ts
         const n2: string = f.sym.hint
         let path: string[] = []
-        for (const x of ns) { path = path.concat(["@" + x]) }
+        for (const x of ns) { path = path.concat(["@" + cycName(x)]) }
         return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n2 + "` has no `:Type`, and its value reads itself back through " + path.join(" → ") + " — a type is not inferred around a cycle (§66.3 rule 8). Write the type: `" + n2 + ":T=…`")
     }
 
@@ -25945,7 +26064,7 @@ ${
         for (const d of t.decls) {
             for (const f of d.fields) {
                 if (f.sym.id == fi.sym.id) {
-                    if (d.kind == DeclKind.Program) return "formula of @" + fi.sym.hint
+                    if (d.kind == DeclKind.Program || isOwnField(d, f)) return "formula of @" + fi.sym.hint
                     return "formula of @" + d.sym.hint + "." + fi.sym.hint
                 }
             }
@@ -26211,7 +26330,7 @@ ${
             for (const f of d.fields) {
                 const w: Sym | not = f.wcap
                 if (w is given && w.id == cap.id) {
-                    if (d.kind == DeclKind.Program) return "@" + f.sym.hint
+                    if (d.kind == DeclKind.Program || isOwnField(d, f)) return "@" + f.sym.hint
                     return "@" + d.sym.hint + "." + f.sym.hint
                 }
             }
@@ -27865,7 +27984,7 @@ ${
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not || idx < 0 || idx >= di.fields.length) return "@" + d.hint
         const f: FieldInfo = di.fields[idx]
-        if (di.kind == DeclKind.Program) return "@" + f.sym.hint
+        if (di.kind == DeclKind.Program || isOwnField(di, f)) return "@" + f.sym.hint
         return "@" + d.hint + "." + f.sym.hint
     }
 
