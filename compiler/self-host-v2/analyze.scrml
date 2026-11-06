@@ -1428,17 +1428,33 @@ ${
     // carries it; §13.9.1 names "A Shape-1 cell declaration (§6.2)". The bootstrap
     // builds that one place: a PROGRAM cell (`where` 2), `let` or locked, not
     // derived, with no declaration body. Every refusal here is INTERIM (the
-    // capable form: §14.12.3's every-typed-location rule), except the derived one,
-    // which waits on a ruling (a lifecycle is a write contract, §66.11.6, and a
-    // derived value is never written — §13.9.1 refuses only its PENDING form).
-    fn lifeCellWhy(name: string, where: int, mode: FieldMode, bodyLen: int) -> string {
+    // capable form: §14.12.3's every-typed-location rule). The derived one is
+    // INTERIM too until the owner rules: §13.9.1 rules out only a derived PENDING
+    // cell; whether a derived value may carry a lifecycle (a write contract,
+    // §66.11.6, on a value that is never written) awaits an owner ruling — the
+    // PA's recommendation to the owner is PERMANENT, and when ruled so this
+    // refusal becomes PERMANENT; ruled the other way, its capable form is the
+    // lifecycle read rule (§13.9.3) applied to a derived cell's reads.
+    // `reads`: the initializer's valueReads (an `@name`, or "()" for a call).
+    fn lifeCellWhy(name: string, where: int, mode: FieldMode, bodyLen: int, reads: string[]) -> string {
         const fix: string = "; write `T | not` here"
         // (`where` 0, a typed attribute: refused where it is read, parse.scrml scanAttr — every attribute, fieldOf'd or not)
         if (where == 0) return ""
         if (where == 1) return "a lifecycle type on the child field `" + name + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3)" + fix
-        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer reads cells, §66.9 rule 3), and a lifecycle type on a derived value is not in the bootstrap — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written; write `let` before the `<` for a writable cell, or `T | not` for the derived value"
+        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer " + derivedHow(reads) + ", §66.9 rule 3), and a lifecycle type on a derived value is not in the bootstrap yet — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written; write `let` before the `<` for a writable cell, or `T | not` for the derived value"
         if (bodyLen > 0) return "a lifecycle type on the declaration `" + name + "`, which has a body (child fields or state-children), is not in the bootstrap — it builds `(not to T)` only on a plain program cell (§14.12.3; an engine cell never carries one, §14.12.4)" + fix
         return ""
+    }
+
+    // s475 r1 (F5) — why a locked initializer made its declaration derived: it reads
+    // a cell, or it calls a function (a call may read cells, so the bootstrap counts
+    // it as a read — valueReads gives "()").
+    fn derivedHow(reads: string[]) -> string {
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@") return "reads the cell `" + r + "`"
+        }
+        if (reads.indexOf("()") >= 0) return "calls a function, which the bootstrap counts as reading cells"
+        return "runs a query, which the bootstrap counts as reading cells"
     }
 
     // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
@@ -3677,7 +3693,7 @@ ${
         // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
         // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
         if (aty is given && isPresenceLife(aty)) {
-            const why: string = lifeCellWhy(name, where, mode, body.length)
+            const why: string = lifeCellWhy(name, where, mode, body.length, reads)
             if (why != "") {
                 st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", why)
                 resolved = false
@@ -26488,7 +26504,10 @@ ${
     // Which of §6.15's three kinds a position is — it picks the fix text.
     type ValueKind:enum = { InitKind, FormulaKind, RenderKind }
     // A value position: what it is (for the message), its kind, its value, where.
-    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string }
+    // `pending`: the own initializer of a program cell declared with the presence
+    // lifecycle `(not to T)` — §13.9.1's one position that MAY wait (a pending
+    // cell), which the bootstrap does not build yet (valueServerDiags).
+    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean }
 
     fn valuePositions(g: Globals, t: Tables) -> ValuePos[] {
         let out: ValuePos[] = []
@@ -26496,9 +26515,9 @@ ${
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file)) }
+                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file, true)) }
             } else if (d is given) {
-                out = out.concat(declInits(d, "@" + d.name, ds.file))
+                out = out.concat(declInits(d, "@" + d.name, ds.file, false))
             }
             for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
         }
@@ -26508,14 +26527,23 @@ ${
     // A declaration's own value, its attribute fields' defaults and its child
     // fields' initializers (at any depth); `path` is the cell as the author
     // spells it (`@x`, `@box.k`).
-    fn declInits(d: ADecl, path: string, file: string) -> ValuePos[] {
+    // `cell`: `d` is a program cell (s475 — its own initializer may be a pending
+    // cell's, §13.9.1; a child field, an attribute default and a declaration
+    // with a body are refused the lifecycle by analyze's lifeCellWhy).
+    fn declInits(d: ADecl, path: string, file: string, cell: boolean) -> ValuePos[] {
         let out: ValuePos[] = []
-        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file)])
+        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file, cell && d.body.length == 0 && presenceDecl(d))])
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file)])
+            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file, false)])
         }
-        for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file)) }
+        for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file, false)) }
         return out
+    }
+
+    fn presenceDecl(d: ADecl) -> boolean {
+        const at: AType | not = d.ty
+        if (at is given) return isPresenceLife(at)
+        return false
     }
 
     // A value with something to evaluate (a quoted string is a literal).
@@ -26531,9 +26559,11 @@ ${
 
     // A locked initializer that reads cells is a derived FORMULA (§66.9 rule 3);
     // anything else is an initializer (a `let` seed, a locked constant).
-    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string) -> ValuePos {
-        if (!isLet && valueReads(v).length > 0) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file }
-        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file }
+    // `life`: the declaration is a `(not to T)` program cell — its INITIALIZER (never
+    // a derived formula: §13.9.1 "A derived cell cannot be a pending cell") is pending.
+    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean) -> ValuePos {
+        if (!isLet && valueReads(v).length > 0) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false }
+        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life }
     }
 
     fn nodePositions(t: Tables, n: ANode, file: string) -> ValuePos[] {
@@ -26554,13 +26584,13 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file }]
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
-        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file }
+        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false }
     }
 
     fn elemPositions(t: Tables, e: AElem, file: string) -> ValuePos[] {
@@ -26602,7 +26632,7 @@ ${
         // field (§6.15 list item 1, §66.9 rule 8)
         let vk: ValueKind = ValueKind.RenderKind
         if (isConstructAttr(k)) vk = ValueKind.InitKind
-        return { what: what, vk: vk, v: a.value, span: a.span, file: file }
+        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false }
     }
 
     fn isConstructAttr(k: AttrKind | not) -> boolean {
@@ -31389,20 +31419,31 @@ ${
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, s, st)
-                st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
+                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix())
             }
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
             for (const r of scan.refs) {
                 const pk: PlaceK = placeOf(ps, r.sym)
                 const c: Reach | not = waitsOf(sum, r.sym)
                 if (pk == PlaceK.Server) {
-                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
+                    st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix())
                 } else if (c is given) {
-                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`) — " + waitFix())
+                    st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix())
                 }
             }
         }
         return st
+    }
+
+    // s475 r1 (s475-boot-lifecycle-type F1) — a waiting value at `p`: §13.7's
+    // E-VALUE-SERVER-CALL, except the own initializer of a `(not to T)` program
+    // cell. §13.9.1: "A `(not to T)`-declared cell initializer is no longer
+    // E-VALUE-SERVER-CALL" — it is a PENDING cell, which the bootstrap does not
+    // build yet: E-BOOTSTRAP-UNSUPPORTED naming §13.9. INTERIM; the capable form
+    // is slice S4's pending-cell desugar (§13.9.2: a plain cell plus a `<request>`).
+    fn waitDiag(st: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string) -> AS {
+        if (!p.pending) return addDiag(st, file, span, "E-VALUE-SERVER-CALL", head + " " + fix)
+        return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — pending cells are not in the bootstrap yet. Declare the cell `=not` and load the value into it with a `<request>` (§6.7.7)")
     }
 
     fn waitFix() -> string {

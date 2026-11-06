@@ -14,7 +14,8 @@
 //
 // INTERIM (this slice): a `(not to T)` cell is typed exactly as a `T | not` cell — the
 // pre-transition read rule (E-TYPE-001, §13.9.3 / §14.12.3) is slice S1, a waiting initializer
-// (a pending cell, §13.9.1) is slice S4 and still gives E-VALUE-SERVER-CALL here (pinned below).
+// (a pending cell, §13.9.1) is slice S4 and gives a named E-BOOTSTRAP-UNSUPPORTED here (pinned
+// below — r1 F1: §13.9.1 "A `(not to T)`-declared cell initializer is no longer E-VALUE-SERVER-CALL").
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -132,6 +133,22 @@ describe("other lifecycles and other declarations are refused by name", () => {
     const e = errs(P(`let <a:int=1/>\n<m:(not to int)=(@a + 1)/>`));
     expect(e.map((d) => d.code)).toEqual([U]);
     expect(e[0].message).toContain("derived");
+    expect(e[0].message).toContain("reads the cell `@a`");
+  });
+  // r1 F5 (red on 91e235c2c: "whose initializer reads cells" — `g` reads none)
+  test("a derived cell whose initializer only calls: the message says it calls, not that it reads cells", () => {
+    const e = errs(P(`function g() -> int { return 1; }\n<m:(not to int)=(g())/>`));
+    expect(e.map((d) => d.code)).toEqual([U]);
+    expect(e[0].message).toContain("calls a function, which the bootstrap counts as reading cells");
+    expect(e[0].message).not.toContain("initializer reads cells");
+  });
+  // r1 F5 (red on 91e235c2c: E-PARSE-TYPE "expected `)` … found `(`")
+  test("a refinement as the second state `(not to number(>0))`: the open refinement limb, named", () => {
+    for (const src of [`let <m:(not to number(>0))=not/>`, `function f(p: (not to number(>0))) -> int { return 1; }`]) {
+      const e = errs(P(src));
+      expect(e.map((d) => d.code)).toEqual([U]);
+      expect(e[0].message).toContain("refinement type (§53)");
+    }
   });
   test("a granted tape inside the lifecycle", () => {
     const e = errs(P(`<m:(not to int[append])=not/>`));
@@ -145,7 +162,7 @@ describe("other lifecycles and other declarations are refused by name", () => {
   });
 });
 
-describe("S4 pin: a waiting initializer is NOT a pending cell yet (§13.9.1, slice S4 flips this)", () => {
+describe("S4 pin: a waiting initializer is a pending cell, not built yet (§13.9.1, slice S4 flips this)", () => {
   const SRC = `<program db="./app.db">
 let <u:int=1/>
 function cnt(id: int) -> int {
@@ -156,7 +173,42 @@ let <m:(not to int)=(cnt(@u) !{ _ :> not })/>
 <main><p>x</p></main>
 </program>
 `;
-  test("E-VALUE-SERVER-CALL, exactly as an undeclared cell", () => expect(codes(SRC)).toEqual(["E-VALUE-SERVER-CALL"]));
+  // r1 F1 (red on 91e235c2c: E-VALUE-SERVER-CALL with §13.7's fix — §13.9.1: "A `(not to T)`-declared
+  // cell initializer is no longer E-VALUE-SERVER-CALL")
+  test("E-BOOTSTRAP-UNSUPPORTED naming §13.9 — not §13.7's E-VALUE-SERVER-CALL", () => {
+    const e = errs(SRC);
+    expect(e.map((d) => d.code)).toEqual([U]);
+    expect(e[0].message).toContain("pending cell (§13.9");
+    expect(e[0].message).not.toContain("§13.7");
+  });
+  test("the same initializer on a `T | not` cell keeps E-VALUE-SERVER-CALL (§13.9.1: no marker, no pending)", () => {
+    expect(codes(SRC.replace("(not to int)", "int | not"))).toEqual(["E-VALUE-SERVER-CALL"]);
+  });
+  test("a DERIVED `(not to T)` cell that waits keeps E-VALUE-SERVER-CALL (§13.9.1: a derived cell cannot be a pending cell)", () => {
+    expect(codes(SRC.replace("let <m:", "<m:"))).toEqual([U, "E-VALUE-SERVER-CALL"]);
+  });
+});
+
+// r1 F3 (red on 91e235c2c: a `)` inside `[…]` or a string closed the lifecycle early — E-PARSE-TAG
+// cascades, and `int[(]` swallowed the markup to `</program>` (E-PARSE-CLOSER, E-PARSE-UNCLOSED))
+describe("the opener's paren matcher skips `[…]` and strings: a malformed lifecycle swallows nothing", () => {
+  test("`int[a)b]`", () => {
+    const cs = codes(P(`let <m:(not to int[a)b])=not/>\n<p>after</p>`));
+    expect(cs).toContain(U);
+    expect(cs.some((c) => c.startsWith("E-PARSE-"))).toBe(false);
+  });
+  test("`int[(]` does not swallow the markup after it", () => {
+    const cs = codes(P(`let <m:(not to int[(])=not/>\n<p>after</p>\nfunction f() -> int { return 1; }\n<p>z)</p>`));
+    expect(cs.some((c) => c.startsWith("E-PARSE-"))).toBe(false);
+    expect(cs).not.toContain("E-DECL-STATE-CHILD");
+  });
+  test("a `)` inside a string", () => {
+    expect(codes(P(`let <m:(not to string(=="a)"))=not/>\n<p>after</p>`))).toEqual([U]);
+  });
+  test("an unclosed `[` falls back to the plain paren count (no longer swallow)", () => {
+    const cs = codes(P(`let <m:(not to int[)=not/>\n<p>after</p>`));
+    expect(cs).not.toContain("E-PARSE-UNCLOSED");
+  });
 });
 
 describe("the s473 probes (docs/changes/s473-spec-coverage/probes/part-2/s14a/b3/)", () => {

@@ -4657,7 +4657,9 @@ ${
         }
         if (!bad && !isP(t, ")")) {
             const c: PTok = cur(t)
-            if (isWord(t, "to")) {
+            if (isP(t, "(")) {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", lifeRefineWhy(), c)
+            } else if (isWord(t, "to")) {
                 t = diagAt(t, "E-PARSE-TYPE", "a lifecycle chain `(A to B to C)` is not v1 scrml — a lifecycle has two states (§14.12.6.4)", c)
             } else {
                 t = diagAt(t, "E-PARSE-TYPE", "expected `)` to close the lifecycle type, found `" + c.text + "`", c)
@@ -4676,19 +4678,33 @@ ${
     }
 
     // Past the `)` that closes the lifecycle type the reader is inside (depth 1
-    // at `tp`); at the end of input when it never closes.
+    // at `tp`); at the end of input when it never closes. s475 r1 (F3): a `(` /
+    // `)` inside a `[…]` (a grant list) does not count — a string is one token
+    // already (isP) — so a malformed inside cannot pull the reader past its own
+    // `)`. When a `[` never closes, the plain paren count decides (no swallow).
+    type RClose:struct = { tp: TP, ok: boolean }
+
     fn lifeCloseTok(tp: TP) -> TP {
+        const r: RClose = lifeCloseTokIn(tp, true)
+        if (r.ok) return r.tp
+        return lifeCloseTokIn(tp, false).tp
+    }
+
+    fn lifeCloseTokIn(tp: TP, brackets: boolean) -> RClose {
         let t: TP = tp
         let depth: int = 1
+        let sq: int = 0
         while (!atEnd(t)) {
-            if (isP(t, "(")) depth = depth + 1
-            if (isP(t, ")")) {
+            if (brackets && isP(t, "[")) sq = sq + 1
+            if (brackets && isP(t, "]") && sq > 0) sq = sq - 1
+            if (sq == 0 && isP(t, "(")) depth = depth + 1
+            if (sq == 0 && isP(t, ")")) {
                 depth = depth - 1
-                if (depth == 0) return adv(t)
+                if (depth == 0) return { tp: adv(t), ok: true }
             }
             t = adv(t)
         }
-        return t
+        return { tp: t, ok: false }
     }
 
     // THE one judge of a READ lifecycle type, both readers (the opener's
@@ -4696,10 +4712,20 @@ ${
     // not build `(from to to)` in ANY position, "" when it is the presence
     // lifecycle `(not to T)` written with `to`. `text` = the type as written.
     fn lifeRefusal(fromT: AType, toT: AType, arrow: boolean, text: string) -> string {
+        // s475 r1 (F4): `(int -> int)` may be a function type, meant — say that too
+        if (arrow && !isNotType(fromT) && !variantAType(fromT)) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`). If `" + text + "` is meant as a function type, function types are not in the bootstrap either — declare a named function and pass its name"
         if (arrow) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`)"
         if (!isNotType(fromT) || variantAType(toT)) return "the lifecycle `" + text + "` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not built — for a variant graph, declare an engine (`<x:T=.A single>` with state-children, §66.13)"
         if (grantedSeq(toT)) return "a granted sequence in a lifecycle type (`" + text + "`) is not in the bootstrap — its grants are not checked through the lifecycle (§14.12); declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)"
         return ""
+    }
+
+    // s475 r1 (F5) — `(not to number(>0))`: a refinement (§53) as the lifecycle's
+    // second state. The bootstrap reads no refinement type in any position yet —
+    // INTERIM, the open refinement limb (g-bootstrap-opener-refinement-lifecycle-type-rejected,
+    // g-bootstrap-refinement-types-unbuilt-all-positions-s473); the capable form is §53.
+    fn lifeRefineWhy() -> string {
+        return "a refinement type (§53) as the lifecycle's second state is not in the bootstrap yet — it reads no refinement type in any position (an opener's `<hp:number(>0)=5/>` included); write `(not to T)` with the base type and check the value where it is written"
     }
 
     fn blankAType(t: AType) -> AType {
@@ -5680,7 +5706,9 @@ ${
         }
         if (!bad && chAt(m, 0) != ")") {
             const w: RWord = readName(m)
-            if (w.w == "to") {
+            if (chAt(m, 0) == "(") {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", lifeRefineWhy(), m.pos, m.pos + 1)
+            } else if (w.w == "to") {
                 m = mDiag(m, "E-PARSE-TYPE", "a lifecycle chain `(A to B to C)` is not v1 scrml — a lifecycle has two states (§14.12.6.4)", m.pos, w.mp.pos)
             } else {
                 m = mDiag(m, "E-PARSE-TYPE", "expected `)` to close the lifecycle type, found `" + chAt(m, 0) + "`", m.pos, m.pos + 1)
@@ -5721,14 +5749,39 @@ ${
         return false
     }
 
-    // The index of the `)` matching the `(` at `open`, or -1.
+    // The index of the `)` matching the `(` at `open`, or -1. s475 r1 (F3): a
+    // `(` / `)` inside a `[…]` (a grant list) or a quoted string (a refinement's
+    // `=="a)"`) does not count, so a malformed lifecycle cannot swallow the
+    // markup after it. When a `[` or a quote never closes, the plain paren count
+    // decides (the old reading — never a longer swallow than before).
     fn lifeCloseCh(src: string, open: int) -> int {
+        const shielded: int = lifeCloseChIn(src, open, true)
+        if (shielded >= 0) return shielded
+        return lifeCloseChIn(src, open, false)
+    }
+
+    fn lifeCloseChIn(src: string, open: int, shield: boolean) -> int {
         let depth: int = 0
+        let sq: int = 0
+        let q: string = ""
         let i: int = open
         while (i < src.length) {
             const c: string = src.substring(i, i + 1)
-            if (c == "(") depth = depth + 1
-            if (c == ")") {
+            if (q != "") {
+                if (c == "\\") {
+                    i = i + 1
+                } else if (c == q) {
+                    q = ""
+                }
+            } else if (shield && (c == "\"" || c == "'" || c == "`")) {
+                q = c
+            } else if (shield && c == "[") {
+                sq = sq + 1
+            } else if (shield && c == "]" && sq > 0) {
+                sq = sq - 1
+            } else if (sq == 0 && c == "(") {
+                depth = depth + 1
+            } else if (sq == 0 && c == ")") {
                 depth = depth - 1
                 if (depth == 0) return i
             }
