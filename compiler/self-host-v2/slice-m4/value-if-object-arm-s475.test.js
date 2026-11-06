@@ -238,12 +238,13 @@ describe("2 — an arm body that reads as an object literal is that object (§18
     expect($("#v").textContent).toBe("12 31 2");
   });
 
-  test("a `!{}` handler arm reads the object too; its struct type is not carried into handler arms yet (g-boot-object-literal-struct-context-positions-s475)", () => {
-    // the parse is §18.5's (no E-STMT-MISSING-SEMICOLON / E-PARSE-EXPR, as before);
-    // the annotated binding's struct type does not reach a `!{}` arm's value —
-    // fails closed, E-TYPE-STRUCT-CONTEXT, as `return { … }` does today
-    expect(codes(P(`    function get(id: string)! L { if (id == "x") fail L.NotFound(id); const s: S = { a: 9, b: 9 }; return s; }
-    function h(id: string) -> int { const v: S = get(id) !{ .NotFound(i) :> { a: 1, b: 0 }, .Timeout :> { a: 2, b: 0 } }; return v.a; }`))).toEqual(["E-TYPE-STRUCT-CONTEXT", "E-TYPE-STRUCT-CONTEXT"]);
+  test("a `!{}` handler arm reads the object too, and takes the annotated binding's struct type (runtime; s475-boot-struct-context-valueif-followups)", async () => {
+    // the parse is §18.5's (no E-STMT-MISSING-SEMICOLON / E-PARSE-EXPR); the callee declares
+    // no success type, so the arm's value takes the position's (the annotated `const v: S`)
+    await load(P(`    function get(id: string)! L { if (id == "x") fail L.NotFound(id); const s: S = { a: 9, b: 9 }; return s; }
+    function h(id: string) -> int { const v: S = get(id) !{ .NotFound(i) :> { a: 1, b: 0 }, .Timeout :> { a: 2, b: 0 } }; return v.a; }`,
+      `        <p id="v">\${h("x")} \${h("y")}</p>`));
+    expect($("#v").textContent).toBe("1 9");
   });
 
   test("the object's position gives its struct type, as for any object literal (an unannotated one is E-TYPE-STRUCT-CONTEXT, like `const v = { … }`)", () => {
