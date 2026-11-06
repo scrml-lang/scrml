@@ -101,6 +101,7 @@ ${
         vals: ValInfo[],        // s444 Phase B: its validators, as the bootstrap honors them (their HTML-native lowering)
         valsWritten: int,       // s449: how many validators the source wrote (a refused one is absent from `vals`)
         origin: TypeOrigin,     // s462: where `ty` came from (§66.3 rules 3, 5–10) — what the typer reports
+        life: boolean,          // s475 (s475-boot-lifecycle-reads): an accepted presence-lifecycle `(not to T)` program cell — its reads need a discrimination (E-TYPE-001, §13.9.3 / §14.12.10), its writes follow `not → T` (§66.11.6)
     }
 
     // s462 — O35(d), RULED S462 ("go on the package", SPEC §66.3 rules 5–10).
@@ -3715,7 +3716,7 @@ ${
         let elemEdits: EditKind[] = []
         const et: Type | not = seqElem(ty)
         if (et is given) elemEdits = subFieldEdits(g, et)
-        const grantRep: boolean = isLet || seqRep
+        let grantRep: boolean = isLet || seqRep
         const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
@@ -3739,13 +3740,24 @@ ${
         }
         // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
         // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
+        let life: boolean = false
         if (aty is given && isPresenceLife(aty)) {
             const why: string = lifeCellWhy(name, where, mode, body.length, reads)
             if (why != "") {
                 st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", why)
                 resolved = false
+            } else {
+                life = true
             }
         }
+        // s475 (s475-boot-lifecycle-reads) — §66.11.1: "a lifecycle `(A to B)` | a write
+        // along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6)".
+        // A LOCKED `(not to T)` cell is writable along it: the grant rides the `replace`
+        // channel, and the typer refuses what does not follow the path (a write of
+        // `not`, checkWrite; a `reset`, which writes the pre-state, resolveReset). A
+        // `T → T′` write stays legal: §13.9.4 writes a new `T` into a locked pending
+        // cell (`@members = teamCount(@team) !{ _ :> not }`) from a handler.
+        if (life) grantRep = true
 
         let wcap: Sym | not = not
         if (grantsAny(fieldGrantSet(grantRep, grantEdits))) {
@@ -3768,7 +3780,7 @@ ${
         const f: FieldInfo = {
             nid: nid, span: span, annotated: aty is given, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: fieldGrantSet(grantRep, grantEdits), graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs, valsWritten: vals.length,
-            origin: origin,
+            origin: origin, life: life,
         }
         return { f: f, st: st }
     }
@@ -5683,7 +5695,7 @@ ${
             out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
                                 graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten,
-                                origin: f.origin }])
+                                origin: f.origin, life: f.life }])
         }
         return out
     }
@@ -6315,7 +6327,7 @@ ${
         if (keep) o = cur
         return { nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted, typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode,
                  role: f.role, grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads,
-                 shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten, origin: o }
+                 shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten, origin: o, life: f.life }
     }
 
     // A path from `at` back to `start` through cells numbered above `start`
@@ -10778,6 +10790,13 @@ ${
         // means on the client (the loaded value again, or a new load) is not built: refused
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
+        }
+        // s475 (s475-boot-lifecycle-reads): a LOCKED `(not to T)` cell's write grant is its
+        // lifecycle (fieldOf rides it on `replace`), and a reset writes the pre-state `not`
+        // — not along `not → T` (§66.11.6). A `let` cell's own `replace` grants the reset,
+        // which reverts the per-access transition state (§14.12.10).
+        if (f.life && f.mode != FieldMode.Let && f.mode != FieldMode.Seeded) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` writes `@" + f.sym.hint + "` back to `not`, and its lifecycle grants writes along `not → T` only (§66.11.6); a locked cell has no `replace` — declare it `let` to reset it (§14.12.10)")
         }
         if (!grantsAdmit(f.grants, EditKind.Replace) || cap is not) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` is a replace (§66.11.2) and `" + f.sym.hint + "` does not grant `replace` — declare it `let`")
@@ -16781,7 +16800,7 @@ ${
 
     fn typeLoopCond(env0: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
         const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10)
-        const rc: RVT = typeExpr(env, c, ts0)
+        const rc: RVT = typeExpr(env, c, quietCond(env, c, ts0))
         const ts: TypeState = checkCond(env, c, rc.vt, "a `for` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
         return typeBlock(tCallUnnarrow(tNarrow(env, n.yes), c), body, ts)
@@ -16794,7 +16813,7 @@ ${
         let ts: TypeState = ri.ts
         let benv: TEnv = env
         if (cond is given) {
-            const rc: RVT = typeExpr(env, cond, ts)
+            const rc: RVT = typeExpr(env, cond, quietCond(env, cond, ts))
             ts = checkCond(env, cond, rc.vt, "a `for` condition", rc.ts)
             benv = tCallUnnarrow(tNarrow(env, condNarrowing(env, cond).yes), cond)
         }
@@ -21156,7 +21175,7 @@ ${
     // `contribs`: every value an UNANNOTATED `let` local is given — its
     // initializer and each later assignment (a local's type is their join).
     // `presence`: the presence-test condition nodes (Typing.presence).
-    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[] }
+    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[] }
     type RTyping:struct = { typing: Typing, diags: Diag[] }
     type LocalT:struct = { id: int, vt: VType }
     // The typer's view of where it is: the tables, the file, the locals'
@@ -21899,19 +21918,113 @@ ${
     }
 
     fn record(ts: TypeState, nid: int, vt: VType) -> TypeState {
-        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence }
+        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
     }
 
     fn report(ts: TypeState, env: TEnv, span: ASpan, code: string, msg: string) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence }
+        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
     }
 
     fn contribute(ts: TypeState, s: Sym, vt: VType) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence, quiet: ts.quiet }
     }
 
     fn markPresence(ts: TypeState, nid: int) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]) }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]), quiet: ts.quiet }
+    }
+
+    // ---- THE LIFECYCLE READ RULE (s475-boot-lifecycle-reads, slice S1) -----------
+    // §14.12.10: "Per-access transition-state tracking SHALL fire `E-TYPE-001` at
+    // every read of a lifecycle-annotated location whose local transition state is
+    // `pre`." §14.12.3 (S160): a `(not to T)` cell "transitions to `post` on EITHER a
+    // `T`-shaped assignment … OR a presence-discrimination on the cell". §13.9.3: "Any
+    // other read SHALL be E-TYPE-001. That includes a whole-cell read (`${@users}`,
+    // `f(@users)`), not only a member access."
+    // The transition state IS the narrowing: a `T`-shaped assignment narrows the place
+    // for the rest of its block (typeEvalStmt), a discrimination narrows where it
+    // holds (condNarrowing, typePlain), and a suspension point ends it (§42.3.5 —
+    // tCallUnnarrow: a server call's write set is UNKNOWN). The local state starts
+    // `pre` at every function / markup entry, whatever the initializer: another
+    // handler may have written the cell (and a write of a `T | not` value is legal,
+    // §13.9.4), so only a local discrimination or assignment proves it present.
+    // `quiet`: the reads that ARE the discrimination — the operand of `is given` /
+    // `is not`, the subject of `match` / `given`, a whole bare-place condition (a
+    // presence test, §42.4) and a side of the refused `x == not` (E-EQ-002 reports
+    // it). They are typed `T | not` as before; every other un-narrowed read reports
+    // E-TYPE-001 ONCE and is typed `T` after it, so no `T | not` operand code
+    // (E-OPERAND-NOT-NARROWED, E-COND-NOT-BOOLEAN, …) follows for the same read.
+    fn quietPlace(ts: TypeState, x: AExpr) -> TypeState {
+        if (atName(x) == "") return ts
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet.concat([x.nid]) }
+    }
+
+    // A whole condition `c` that is a bare place is a presence test — except a
+    // `bool | not` one, which §42.4 / S442 refuse as ambiguous: for a lifecycle cell
+    // that bare read is a read before discrimination (§13.9.3's worked example,
+    // `${@taken ? "taken" : "free"}` on a `(not to bool)` cell, is E-TYPE-001).
+    fn quietCond(env: TEnv, c: AExpr, ts: TypeState) -> TypeState {
+        if (atName(c) == "") return ts
+        const t: Type | not = knownOf(nameType(env, nameFact(env.t.names, c.nid)))
+        if (t is given) {
+            const inner: Type | not = maybeInner(t)
+            if (inner is given && kindOf(inner) == 3) return ts
+        }
+        return quietPlace(ts, c)
+    }
+
+    // The presence-lifecycle cell a name fact reads, if it reads one.
+    fn lifeFieldOf(t: Tables, f: NameFact | not) -> FieldInfo | not {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> lifeFieldAt(t, d, x)
+            .NLocal(sym: s) :> not
+            .NInst(decl: d, inst: i) :> not
+            .NStruct(owner: o, idx: x) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            .NSurface(of: x, prop: pr) :> not
+            .NConst(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn lifeFieldAt(t: Tables, d: Sym, idx: int) -> FieldInfo | not {
+        const di: DeclInfo | not = declInfo(t, d)
+        if (di is not) return not
+        if (idx < 0 || idx >= di.fields.length) return not
+        const f: FieldInfo = di.fields[idx]
+        if (!f.life || !f.trusted) return not
+        return f
+    }
+
+    // A cell read `@x`: narrowed (`narrowRead`), or — for a presence-lifecycle cell
+    // whose read is neither narrowed nor the discrimination itself — E-TYPE-001.
+    fn lifeRead(env: TEnv, e: AExpr, nf: NameFact | not, ts: TypeState) -> RVT {
+        const vt: VType = narrowRead(env, e, nameType(env, nf))
+        const f: FieldInfo | not = lifeFieldOf(env.t, nf)
+        if (f is not) return rvt(vt, ts)
+        const t: Type | not = knownOf(vt)
+        if (t is not) return rvt(vt, ts)
+        const inner: Type | not = maybeInner(t)
+        if (inner is not) return rvt(vt, ts)                   // narrowed: post-transition
+        if (ts.quiet.indexOf(e.nid) >= 0) return rvt(vt, ts)  // the discrimination itself
+        return rvt(known(inner), report(ts, env, e.span, "E-TYPE-001", lifeReadMsg(f, inner)))
+    }
+
+    // TODO(S4, g-boot-pending-cells-unbuilt-s473): for a PENDING cell (a waiting
+    // initializer, §13.9.1) §13.9.3 says "The message SHALL say that the value may
+    // still be in flight and name the declaration's load" — add that limb when the
+    // pending cell is built. This wording is the plain lifecycle cell's.
+    fn lifeReadMsg(f: FieldInfo, inner: Type) -> string {
+        const n: string = f.sym.hint
+        return "`@" + n + "` is read before it is discriminated — it is declared `(not to " + typeName(inner) + ")`, so here it may still hold `not` (its pre-transition state). Discriminate it first on this path: `if (@" + n + " is not) return`, `if (@" + n + " is given) { … }`, `<p if=@" + n + ">…</p>` or `match @" + n + " { … }`; or assign it a `" + typeName(inner) + "` before the read (§13.9.3, §14.12.3)"
+    }
+
+    fn lifeBackMsg(f: FieldInfo) -> string {
+        const n: string = f.sym.hint
+        let post: string = typeName(f.ty)
+        const inner: Type | not = maybeInner(f.ty)
+        if (inner is given) post = typeName(inner)
+        return "`@" + n + " = not` writes `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only (§66.11.6: a lifecycle is a write contract; a write that does not follow it is E-WRITE-NOT-GRANTED). Write a `" + post + "`, or declare it `" + post + " | not` if it may become absent again"
     }
 
     // A local's written type (`let a: T = …`), if it has one.
@@ -22881,7 +22994,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .Name(name: n) :> rvt(narrowRead(env, e, nameType(env, nf)), ts)
-            .At(name: n) :> rvt(narrowRead(env, e, nameType(env, nf)), ts)
+            .At(name: n) :> lifeRead(env, e, nf, ts)     // s475: the lifecycle read rule (E-TYPE-001)
             .AtItem :> rvt(nameType(env, nf), ts)
             .Num(raw: r) :> rvt(valueType(vf), ts)
             .Str(v: s) :> rvt(valueType(vf), ts)
@@ -23107,7 +23220,12 @@ ${
         // s469: a qualified unit variant `E.V` (the binder's VVariant; `E` is a type, not typed)
         const vf: ValueFact | not = valueFact(env.t.values, e.nid)
         if (isVariantFact(vf)) return rvt(valueType(vf), ts)
-        const ro: RVT = typeExpr(env, obj, ts)
+        // s475: a member access an earlier pass refused (a `T | not` receiver's member is
+        // E-BOOTSTRAP-UNSUPPORTED in the resolver) gets no lifecycle report too (§42.4
+        // statement 6: no second report)
+        let ts1: TypeState = ts
+        if (hasErrIn(env.blame.spans, e.span)) ts1 = quietPlace(ts, obj)
+        const ro: RVT = typeExpr(env, obj, ts1)
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
 
@@ -23117,7 +23235,9 @@ ${
         return ts
     }
 
-    fn typeUnary(env: TEnv, e: AExpr, o: UnOp, x: AExpr, ts: TypeState) -> RVT {
+    fn typeUnary(env: TEnv, e: AExpr, o: UnOp, x: AExpr, ts0: TypeState) -> RVT {
+        let ts: TypeState = ts0
+        if (o == UnOp.IsGiven || o == UnOp.IsNot) ts = quietPlace(ts, x)     // s475: the discrimination is no read
         const r: RVT = typeExpr(env, x, ts)
         // s460: `x is given` / `x is not` is a `bool` over an operand of any
         // type (§42.2.4) — the operand needs no narrowing; it is what narrows
@@ -23138,7 +23258,14 @@ ${
 
     // `&&` / `||`: the right operand is evaluated only when the left one is
     // true / false, so it is typed under that narrowing (`x is given && x > 0`).
-    fn typeBinary(env: TEnv, e: AExpr, f: ValueFact | not, bop: BinOp, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
+    fn typeBinary(env: TEnv, e: AExpr, f: ValueFact | not, bop: BinOp, l: AExpr, r: AExpr, ts0: TypeState) -> RVT {
+        // s475: `x == not` / `x != not` is a presence comparison (refused by the binder,
+        // E-EQ-002) — its place is no lifecycle read (one report)
+        let ts: TypeState = ts0
+        if (bop == BinOp.Eq || bop == BinOp.Ne) {
+            if (isNotLit(r)) ts = quietPlace(ts, l)
+            if (isNotLit(l)) ts = quietPlace(ts, r)
+        }
         const rl: RVT = typeExpr(env, l, ts)
         let renv: TEnv = env
         const isAnd: boolean = bop == BinOp.And
@@ -23843,7 +23970,7 @@ ${
     // s475: `viaIf` — written as a value-form `if` (§17.6), so the condition is
     // named as the author wrote it.
     fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean, ts: TypeState) -> RVT {
-        const rt: RVT = typeExpr(env, test, ts)
+        const rt: RVT = typeExpr(env, test, quietCond(env, test, ts))
         const n: Narrowing = condNarrowing(env, test)
         let what = "a ternary test"
         if (viaIf) what = "an `if` condition"
@@ -24252,7 +24379,7 @@ ${
     // non-exhaustive match also yields `not` (§18.16.3). Where the binder did
     // not know the subject's type, the arms are checked against it here.
     fn typePlain(env: TEnv, e: AExpr, h: AHandled, m: PlainMatch, ts0: TypeState) -> RVT {
-        const rs: RVT = typeExpr(env, h.subject, ts0)
+        const rs: RVT = typeExpr(env, h.subject, quietPlace(ts0, h.subject))     // s475: a `match` discriminates (§13.9.3)
         let ts: TypeState = plainSubjectCheck(env, e, h.subject, m, rs.vt, rs.ts)
         let present: string[] = []
         const st0: Type | not = knownOf(rs.vt)
@@ -24793,7 +24920,7 @@ ${
     // calls may undo); the statement leaves the join of both paths.
     fn typeIf(env0: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
         const env: TEnv = tKeptUnnarrow(env0, c)      // s474 (§50, D10): the head rebinds its kept locals
-        const rc: RVT = typeExpr(env, c, ts0)
+        const rc: RVT = typeExpr(env, c, quietCond(env, c, ts0))
         let ts: TypeState = checkCond(env, c, rc.vt, "an `if` condition", rc.ts)
         const n: Narrowing = condNarrowing(env, c)
         const rt: RTEnv = typeBlockEnv(tCallUnnarrow(tNarrow(env, n.yes), c), tb, ts)
@@ -24805,7 +24932,7 @@ ${
 
     // The body may not run: what it leaves is joined with the path around it.
     fn typeGiven(env: TEnv, s: AStmt, subject: AExpr, body: ABlock, ts: TypeState) -> RTEnv {
-        const r: RVT = typeExpr(env, subject, ts)
+        const r: RVT = typeExpr(env, subject, quietPlace(ts, subject))     // s475: the discrimination is no read
         const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
         const around: TEnv = tCallUnnarrow(env, subject)
         let inner: TEnv = around
@@ -25183,6 +25310,14 @@ ${
         const f: FieldInfo | not = fieldOfCap(env.t, w.cap)
         if (f is not) return ts
         if (!f.trusted) return ts
+        // s475 (s475-boot-lifecycle-reads) — §66.11.6: "a write that does not follow
+        // `A → B` is `E-WRITE-NOT-GRANTED`": an AUTHOR write of `not` (back to the
+        // pre-state) into a `(not to T)` cell. Provable-or-silent: a `T | not` value is
+        // not refused — §13.9.4 writes one (`@members = teamCount(@team) !{ _ :> not }`)
+        // into a pending cell. HOOK (S4): the compiler-generated settle write of a
+        // pending cell's desugared `<request>` (§13.9.2) is no author write and is
+        // exempt — it is lowered, never typed here.
+        if (f.life && w.edit == EditKind.Replace && isAbsentVT(v)) return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeBackMsg(f))
         const target: Type | not = writeValueType(env.t, w)
         if (target is not) return ts
         return checkNotElems(env, value, target, checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts)))
@@ -25257,10 +25392,74 @@ ${
     }
 
     // ---- views -----------------------------------------------------------------
+    // s475 (s475-boot-lifecycle-reads) — an `if=` / `else-if=` / `else` chain (§17.1.1:
+    // "Exactly the first true branch is in the DOM"): an `else-if=` / `else` member is
+    // typed under what every EARLIER member's condition proves when it is false (its
+    // Narrowing `.no` — `<p if=(@m is not)>…</p><p else>${@m}</p>` reads `@m` present),
+    // un-narrowed by what those conditions' calls write (tCallUnnarrow), and marked as a
+    // gate (`gateMarks`, s462 Q18: the member is removed synchronously when an earlier
+    // condition turns true). The chain is chainCheck's: whitespace-only text between
+    // members does not break it.
     fn typeNodes(env: TEnv, ns: ANode[], ts0: TypeState) -> TypeState {
         let ts: TypeState = ts0
-        for (const n of ns) { ts = typeNode(env, n, ts) }
+        let no: string[] = []          // what the open chain's conditions prove false so far
+        let conds: AExpr[] = []        // … and those conditions (their calls un-narrow)
+        let open: boolean = false
+        for (const n of ns) {
+            const e: AElem | not = nodeElem(n)
+            if (e is given) {
+                const isIf: boolean = attrNamed(e.attrs, "if") is given
+                const member: boolean = !isIf && open && (attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given)
+                let nenv: TEnv = env
+                if (member && no.length > 0) {
+                    nenv = tNarrow(env, no.concat(gateMarks(no)))
+                    for (const c of conds) { nenv = tCallUnnarrow(nenv, c) }
+                }
+                ts = typeNode(nenv, n, ts)
+                const c: AExpr | not = chainCondOf(e)
+                if (isIf && c is given) {
+                    no = condNarrowing(env, c).no
+                    conds = [c]
+                    open = true
+                } else if (member && c is given) {
+                    no = no.concat(condNarrowing(nenv, c).no)
+                    conds = conds.concat([c])
+                } else {
+                    no = []
+                    conds = []
+                    open = false
+                }
+            } else {
+                ts = typeNode(env, n, ts)
+                if (!blankNode(n) && !isCssNode(n)) {
+                    no = []
+                    conds = []
+                    open = false
+                }
+            }
+        }
         return ts
+    }
+
+    fn nodeElem(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: x) :> x
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Css(c: c) :> not
+            .Gather(f: x) :> not
+            .Effect(w: w) :> not
+        }
+    }
+
+    // The condition an `if=` / `else-if=` element carries (`not` for `else` or a
+    // non-expression value, which chainCheck refuses).
+    fn chainCondOf(e: AElem) -> AExpr | not {
+        const a: AAttr | not = condAttrOf(e.attrs)
+        if (a is not) return not
+        return valueExpr(a.value)
     }
 
     // A markup `${x}`: typed; a `T | not` there is NOT an un-narrowed operand —
@@ -25426,7 +25625,7 @@ ${
         if (a is not) return keepTEnv(env, ts)
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return keepTEnv(env, ts)
-        const r: RVT = typeExpr(env, x, ts)
+        const r: RVT = typeExpr(env, x, quietCond(env, x, ts))
         // s460 N3 — name the attribute the condition stands in (`if=` / `else-if=`)
         // s462 Q18 — the gate also marks the cells it narrows (`gateMark`), so an
         // event handler in the gated subtree keeps them (`tDropCellNarrowing`).
@@ -25437,7 +25636,7 @@ ${
     fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return ts
-        const r: RVT = typeExpr(env, x, ts)
+        const r: RVT = typeExpr(env, x, quietCond(env, x, ts))
         return checkCond(env, x, r.vt, "`show=`", r.ts)
     }
 
@@ -25603,7 +25802,7 @@ ${
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[], lk: Linkage) -> TypeState {
-        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
+        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [] }
         const fnw: FnW[] = fnWrites(files, lk)
         const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
@@ -25747,7 +25946,7 @@ ${
             // s473: rule 10 (E-DECL-TYPE-UNPROVEN, originReport) is the initializer's one
             // report — what the typer now knows of an unproven callee's returns (a
             // `function`'s `int | string`, inferReturn) is not reported inside it again
-            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence }
+            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
             // s473: an initializer whose value §66.3 rule 10 reports unproven
             // (E-DECL-TYPE-UNPROVEN, originReport) is not ALSO checked against
             // the annotation — the typer may know it as a choice (a `function`'s
@@ -34683,7 +34882,7 @@ ${
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
-        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [] }
+        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [] }
         const fns: int[] = refusedReturns(files, t)
         for (const di of t.decls) {
             const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }
