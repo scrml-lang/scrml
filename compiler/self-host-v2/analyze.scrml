@@ -17142,7 +17142,8 @@ ${
     //   inSel  a `<select>` is open in (default) scope: an `<input>` or a
     //          `<select>` start tag there closes it (HTML §13.2.6.4.7, the
     //          customizable-`<select>` "in body" rules), an `<hr>` directly in
-    //          an `<option>` / `<optgroup>` closes them;
+    //          an `<option>` / `<optgroup>` closes them, and so does an
+    //          `<optgroup>` directly in an `<optgroup>` (s475-boot-optgroup-narrow);
     //   root   the node list is a template's ROOT (its first element decides
     //          the "in template" mode, HTML §13.2.6.4.18);
     //   tmode  the template's root mode is a table mode, so outside a cell or a
@@ -17456,7 +17457,11 @@ ${
         if (t == "button" && c.inButton) return mkRepairFault(file, e, "a `<button>` inside a `<button>` closes the outer one (HTML §13.2.6.4.7): buttons do not nest")
         if (t == "nobr" && c.inNobr) return mkRepairFault(file, e, "a `<nobr>` inside a `<nobr>` closes the outer one (HTML §13.2.6.4.7)")
         if (t == "option" && c.parent == "option") return mkRepairFault(file, e, "an `<option>` directly inside an `<option>` closes it (HTML §13.2.6.4.7): options do not nest")
-        if (t == "optgroup" && (c.parent == "option" || c.parent == "optgroup")) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` / `<optgroup>` closes it (HTML §13.2.6.4.7)")
+        // s475-boot-optgroup-narrow: an `<optgroup>` start tag pops an open `<option>` always, but closes
+        // an open `<optgroup>` only with a `<select>` in scope ("generate implied end tags"); with none,
+        // `<optgroup><optgroup>` is built as written (HTML §13.2.6.4.7; measured Chromium 152).
+        if (t == "optgroup" && c.parent == "option") return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<option>` closes the `<option>` (HTML §13.2.6.4.7): it becomes the `<option>`'s next sibling — write it after the `<option>`")
+        if (t == "optgroup" && c.parent == "optgroup" && c.inSel) return mkRepairFault(file, e, "an `<optgroup>` directly inside an `<optgroup>` of a `<select>` closes the outer one (HTML §13.2.6.4.7, the `<select>` rules): option groups do not nest in a `<select>` — write it after the outer `<optgroup>`")
         if ((t == "rt" || t == "rp") && ["rb", "rp", "rt"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
         if ((t == "rb" || t == "rtc") && ["rb", "rp", "rt", "rtc"].indexOf(c.parent) >= 0) return mkRepairFault(file, e, tg + " directly inside `<" + c.parent + ">` closes it (HTML §13.2.6.4.7, ruby's implied end tags)")
         return []
