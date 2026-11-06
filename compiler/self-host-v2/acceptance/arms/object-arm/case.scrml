@@ -1,0 +1,15 @@
+// §18.5: an arm body that reads as an object literal is that object — keyed, string-keyed,
+// shorthand entries; a brace holding one expression stays that expression.
+<program>
+    type Size:enum = { Small, Big, Custom }
+    type Box:struct = { w: int, h: int }
+    let <s:Size=.Small/>
+    function box(k: Size, w: int, h: int) -> int {
+        const b: Box = match k { .Small :> { w: 1, h: 2 }, .Big :> { "w": 10, "h": 20 }, .Custom :> { w, h }, };
+        return b.w * 100 + b.h;
+    }
+    <main>
+        <button id="big" onclick={ @s = .Big; }>big</button>
+        <p id="o">${box(@s, 3, 4)} ${box(.Custom, 3, 4)}</p>
+    </main>
+</program>

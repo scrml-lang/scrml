@@ -22286,7 +22286,7 @@ ${
             .Call(callee: c, args: args) :> typeCall(env, e, c, args, ts)
             .Unary(op: o, e: x) :> typeUnary(env, e, o, x, ts)
             .Binary(op: o, l: l, r: r) :> typeBinary(env, e, vf, o, l, r, ts)
-            .Ternary(test: x, yes: y, no: n) :> typeTernary(env, x, y, n, ts)
+            .Ternary(test: x, yes: y, no: n, viaIf: vi) :> typeTernary(env, x, y, n, vi, ts)
             .Assign(target: x, value: v, kept: kp) :> typeAssignValue(env, e, x, v, kp, ts)   // s474 (§50, D10)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
@@ -23233,10 +23233,14 @@ ${
     }
 
     // The test is a condition (checkCond); each arm is typed under its narrowing.
-    fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, ts: TypeState) -> RVT {
+    // s475: `viaIf` — written as a value-form `if` (§17.6), so the condition is
+    // named as the author wrote it.
+    fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean, ts: TypeState) -> RVT {
         const rt: RVT = typeExpr(env, test, ts)
         const n: Narrowing = condNarrowing(env, test)
-        const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.yes), test), yes, checkCond(env, test, rt.vt, "a ternary test", rt.ts))
+        let what = "a ternary test"
+        if (viaIf) what = "an `if` condition"
+        const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.yes), test), yes, checkCond(env, test, rt.vt, what, rt.ts))
         const rn: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.no), test), no, ry.ts)
         return rvt(joinVT(ry.vt, rn.vt), rn.ts)
     }
@@ -30462,7 +30466,7 @@ ${
             .Call(callee: c, args: a) :> AExprK.Call(mExpr(c, m), mExprs(a, m))
             .Unary(op: o, e: x) :> AExprK.Unary(o, mExpr(x, m))
             .Binary(op: o, l: l, r: r) :> AExprK.Binary(o, mExpr(l, m), mExpr(r, m))
-            .Ternary(test: t, yes: y, no: no) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m))
+            .Ternary(test: t, yes: y, no: no, viaIf: vi) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m), vi)
             .Assign(target: t, value: v, paren: p, kept: kp) :> AExprK.Assign(mExpr(t, { strip: m.strip, drop: m.drop, rn: [], rv: [] }), mExpr(v, m), p, kp)
             .ArrayLit(elems: es) :> AExprK.ArrayLit(mExprs(es, m))
             .ObjectLit(props: ps) :> AExprK.ObjectLit(mProps(ps, m))

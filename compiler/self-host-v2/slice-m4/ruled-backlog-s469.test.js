@@ -355,8 +355,10 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
     const msgs = run(src).diags.map((d) => d.message);
     expect(msgs.filter((m) => m.includes("yields to nothing"))).toEqual([]);
   });
-  test("the value-form `if` is not in the bootstrap: refused by name (never read as a name `if`)", () => {
-    expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y"; } else { "n"; }}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(diag(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y"; } else { "n"; }}</p>`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("an `if` used as a value");
+  // s475-boot-value-if-object-arm: the value-form `if` is built (it was refused by
+  // name here); its branch rule is graded in value-if-object-arm-s475.test.js
+  test("the value-form `if` compiles (never read as a name `if`); a statement-holding branch must `lift`", () => {
+    expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y"; } else { "n"; }}</p>`))).toEqual([]);
+    expect(codes(prog(`    let <b:bool=true/>\n    function one() -> int { return 1; }`, `        <p>\${if (@b) { one(); "y"; } else { "n"; }}</p>`))).toEqual(["E-ARM-TAIL-VALUE"]);
   });
 });
