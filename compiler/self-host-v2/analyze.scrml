@@ -2962,27 +2962,41 @@ ${
         return infOut("the name `" + n + "` (not a typed `@` reference)")
     }
 
-    fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
-        const key: string = "@" + n
-        const at: int = stack.indexOf(key)
-        if (at >= 0) {
-            let seg: string[] = []
-            let viaFn = false
-            let i = at
-            while (i < stack.length) {
-                const s: string = stack[i]
-                if (s.substring(0, 1) == "@") {
-                    seg = seg.concat([s.substring(1)])
-                } else {
-                    viaFn = true
-                }
-                i = i + 1
+    // The cells on the stack from `at` on: a cycle — or, through a function's return, unproven (rule 5 (g)).
+    fn stackCycle(stack: string[], at: int, n: string) -> Inf {
+        let seg: string[] = []
+        let viaFn = false
+        let i = at
+        while (i < stack.length) {
+            const s: string = stack[i]
+            if (s.substring(0, 1) == "@") {
+                seg = seg.concat([s.substring(1)])
+            } else {
+                viaFn = true
             }
-            // through a function's return: that return is not proven (rule 5 (g))
-            if (viaFn) return rinf(infUnres("`@" + n + "` is read back through a function's return"), done)
-            return rinf(infCycle(seg), done)
+            i = i + 1
         }
-        if (srcIndex(cx.srcs, n) >= 0) {
+        if (viaFn) return infUnres("`@" + n + "` is read back through a function's return")
+        return infCycle(seg)
+    }
+
+    // s475-boot-file-scope-own-value r1 — a declaration's own value on the inference stack: "@name#file"
+    // (a program cell's is "@name"). cycName: the name a cycle path shows.
+    fn ownKey(name: string, file: string) -> string { return "@" + name + "#" + file }
+
+    fn cycName(x: string) -> string {
+        const h: int = x.indexOf("#")
+        if (h < 0) return x
+        return x.substring(0, h)
+    }
+
+    fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
+        // s475-boot-file-scope-own-value r1: `@n` is a program cell only in the program's own file (§7.6.1,
+        // programInfo — a library's `@n` never reaches the app's cells), so only there is "@n" on the stack it
+        const isCell: boolean = cx.te.file == cx.progFile && srcIndex(cx.srcs, n) >= 0
+        const at: int = stack.indexOf("@" + n)
+        if (isCell && at >= 0) return rinf(stackCycle(stack, at, n), done)
+        if (isCell) {
             const ro: ROwn = ownResolve(cx, n, stack, done)
             return rinf(refInf(ro.t, stack), ro.done)
         }
@@ -3008,7 +3022,30 @@ ${
             }
         }
         const sd: Sym | not = declTypeNamed(cx.te, n)     // s472: the shared instance of a declaration in scope here
-        if (sd is given) return rinf(infOk(Type.Named(sd)), done)
+        if (sd is given) {
+            // s475-boot-file-scope-own-value: an own-valued declaration's `@x` is its own value — its
+            // written type, else its literal's (§66.3 rules 3, 9: an exported non-literal one is typed)
+            for (const ds of cx.decls) {
+                const d: ADecl | not = ds.d
+                if (ds.sym.id == sd.id && d is given) {
+                    if (ownValued(cx.te, d)) {
+                        const ot: Type | not = writtenOrLiteral(cx, d.ty, d.own)
+                        if (ot is given) return rinf(infOk(baseOf(ot)), done)
+                        // r1 F2 — else inferred from its own initializer, as a program cell's is (ownResolve:
+                        // rule 5, MEMBERSHIP mode, in its own file's scope). Its stack key carries its file
+                        // (ownKey), so a library's `b` is never a program cell `b`, nor another library's.
+                        const okey: string = ownKey(d.name, ds.file)
+                        const oat: int = stack.indexOf(okey)
+                        if (oat >= 0) return rinf(stackCycle(stack, oat, n), done)
+                        const dcx: InferCx = withHscope(withRes(cxAt(cx, ds.file), false), -1)
+                        const r: RInf = inferValue(dcx, d.own, stack.concat([okey]), [], done)
+                        const t: OwnT = { name: okey.substring(1), ty: r.r.ty, origin: originOf(r.r, okey.substring(1), literalInit(dcx, d.own)) }
+                        return rinf(refInf(t, stack), r.done)
+                    }
+                }
+            }
+            return rinf(infOk(Type.Named(sd)), done)
+        }
         // E-SCOPE-001 (the binder's) — the typer finds it inside the initializer
         return rinf(infOut("`@" + n + "`, which names no cell"), done)
     }
@@ -3567,11 +3604,18 @@ ${
         }
         const lit: Type | not = literalOf(init)
         if (lit is given) return { name: name, ty: lit, origin: TypeOrigin.Literal }
-        const r: RInf = inferValue(cx, init, [], [], tab)
+        // r1 F2: a declaration's own value (where 3) is on its own stack, so a cycle back to it is ITS cycle
+        let stack: string[] = []
+        let key: string = name
+        if (where == 3) {
+            stack = [ownKey(name, cx.te.file)]
+            key = stack[0].substring(1)
+        }
+        const r: RInf = inferValue(cx, init, stack, [], tab)
         const isLit: boolean = literalInit(cx, init)
         const isAttr: boolean = role == FieldRole.Attribute
         if (isAttr && !isLit) return { name: name, ty: not, origin: TypeOrigin.Blamed }
-        return { name: name, ty: r.r.ty, origin: originOf(r.r, name, isLit) }
+        return { name: name, ty: r.r.ty, origin: originOf(r.r, key, isLit) }
     }
 
     // Rule 10: a WRITTEN type over an initializer whose value's type cannot be
@@ -3580,6 +3624,7 @@ ${
     fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
         let stack: string[] = []
         if (where == 2) stack = ["@" + name]
+        if (where == 3) stack = [ownKey(name, cx.te.file)]
         let hs: int = -1
         if (where == 2) hs = cx.prog
         const r: RInf = inferValue(withHscope(withRes(cx, true), hs), init, stack, [], tab)
@@ -3612,7 +3657,9 @@ ${
     // `vals` / `where` (s444 Phase B): the field's validators, and where the
     // field stands — 0 an attribute (it has none, §66.4 rule 1), 1 a child
     // field of a user declaration, 2 a program cell (a top-level value — it
-    // has the surface, §55.5.1, S447). Both 1 and 2 are honored.
+    // has the surface, §55.5.1, S447). Both 1 and 2 are honored. 3 (s475-boot-file-scope-own-value) a
+    // declaration's own value built as its instance's field (userFields; no validators reach it, and its
+    // name is the declaration's own, not a field name the surface could shadow).
     // s462 (§66.3 rules 5–10): `ix` / `tab` — the own-value inference context
     // and the program's table (ownTable); `bnd` — where the type leaves the
     // compile (boundaryOf: "persist" / "server" / "export", or "").
@@ -3713,7 +3760,7 @@ ${
         // value's own name is "Not affected" (where 2). Case 2 (a field of a
         // validated value's STRUCT type) cannot arise here: the bootstrap admits
         // validators only on string / number values (fieldVals).
-        if (where != 2 && isSurfaceProp(name)) {
+        if (where != 2 && where != 3 && isSurfaceProp(name)) {
             st = addDiag(st, te.file, span, "E-VALIDITY-RESERVED-NAME", "`" + name + "` is a reserved validity-surface name — a field or attribute by this name would hide the declaration's synthesized `." + name + "` (§55.5.3); rename it")
         }
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
@@ -4193,7 +4240,48 @@ ${
             out = out.concat([r2.f])
             st = r2.st
         }
+        // s475-boot-file-scope-own-value — a declaration with an OWN VALUE (`let <count:int=7/>` written
+        // outside `<program>`, the shape a library exports): §66.7.1 "`@x` … reads … the SHARED instance
+        // of `x`"; §66.6.4 "Every USER declaration has its own unnamed shared instance". The instance's
+        // value is the own value, so it is built as the instance's one field — the field carries the
+        // declaration's own nid (ownFieldOf finds it by that), its name, `let`, `export`, type and
+        // initializer, exactly as a program cell's are (`where` 3: a file-scope own value — no program
+        // table, no surface-name check). `@count` reads it (resolveAtOf), a write in the defining file
+        // writes it (placeAt, §66.14 rule 2); another file's write stays refused (⚑ O2 / O39).
+        if (ownValued(te, d)) {
+            const r3: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, [], 3, ix, tab, boundaryOf(d.exported, d.mods), st)
+            out = out.concat([r3.f])
+            st = r3.st
+        }
         return { fs: out, st: st }
+    }
+
+    // s475-boot-file-scope-own-value — the declarations whose own value is built as their instance's value:
+    // an own value written (`=`), and nothing else that would make `@x` mean a struct of fields — no typed
+    // attribute (that is ⚑ O19, refused: o19Diags), no child field, and not a named shared instance
+    // (`<acc:swatch …/>`, §66.8.2 — refused: namedInstanceDiags). A reserved-prefix name is already refused
+    // where it is declared (userDeclStub). A `single` declaration's state-children are not child fields.
+    fn ownValued(te: TypeEnv, d: ADecl) -> boolean {
+        if (!hasOwnValue(d.own)) return false
+        if (d.attrs.length > 0 || childFields(d.body).length > 0) return false
+        if (te.declNames.indexOf(ownTypeName(d)) >= 0) return false
+        return !(d.name.indexOf("_scrml_") == 0 || d.name.indexOf("__scrml_") == 0)
+    }
+
+    // The index of a declaration's own-value field (userFields), or -1: the field that carries the
+    // declaration's own nid.
+    fn ownFieldOf(info: DeclInfo) -> int {
+        let i = 0
+        for (const f of info.fields) {
+            if (f.nid == info.nid) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    // r1 F3 — `f` is `d`'s own-value field: the author spells it `@d`, never `@d.d`.
+    fn isOwnField(d: DeclInfo, f: FieldInfo) -> boolean {
+        return d.kind != DeclKind.Program && f.nid == d.nid
     }
 
     // The program's fields: the declarations directly in its body (L14).
@@ -6041,7 +6129,7 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const rc: RCycles = derivedCycles(decls, files, st)
+        const rc: RCycles = derivedCycles(decls, files, lk, handles, st)
         st = rc.st
         decls = rc.decls
         // s472: the file-scope constants' Syms and written types (their values: constPass)
@@ -6066,65 +6154,148 @@ ${
     // the cycle owns it), whether that report would have been
     // E-DECL-TYPE-NOT-INFERABLE, -REQUIRED-AT-BOUNDARY or -UNPROVEN.
     type DEdge:struct = { from: int, to: int }
+    type DNode:struct = { di: int, fi: int }
     type RCycles:struct = { st: AS, decls: DeclSrc[] }
 
-    fn derivedCycles(decls: DeclSrc[], files: FileAst[], st0: AS) -> RCycles {
+    // s475-boot-file-scope-own-value r1 (F1): the graph is the WHOLE program's derived values, not the
+    // `<program>`'s alone — every derived program cell and every derived OWN VALUE of a declaration
+    // outside `<program>` (`<a:int=(@b + 1)/>`, built as its instance's one field: userFields /
+    // ownFieldOf), in every linked file, so a cycle through file-scope own values (same file, across
+    // files by named / aliased / namespace import, or through a program cell) is reported as a program
+    // cell's is. Was: it compiled clean and overflowed the stack at mount (RangeError). An edge is a
+    // direct `@x` read resolved as the binder resolves it (atNode, after resolveAtOf).
+    fn derivedCycles(decls: DeclSrc[], files: FileAst[], lk: Linkage, hs: HandleInfo[], st0: AS) -> RCycles {
         let st: AS = st0
+        const ns: DNode[] = derivedNodes(decls)
+        let es: DEdge[] = []
+        let u = 0
+        for (const n of ns) {
+            const f: FieldInfo = decls[n.di].info.fields[n.fi]
+            for (const r of f.reads) {
+                if (r.substring(0, 1) == "@") {
+                    const v: int = atNode(decls, ns, lk, hs, n, r.substring(1))
+                    if (v >= 0) es = es.concat([{ from: u, to: v }])
+                }
+            }
+            u = u + 1
+        }
+        let members: int[] = []
+        let k = 0
+        while (k < ns.length) {
+            const path: int[] = derivedPath(es, k, k, [])
+            const at: DeclSrc = decls[ns[k].di]
+            const fk: FieldInfo = at.info.fields[ns[k].fi]
+            if (path.length > 0 && !hasErrIn(fileErrs(files, at.file), fk.span)) {
+                let names: string[] = []
+                for (const p of path) { names = names.concat([nodeLabel(decls, ns[p], at.file)]) }
+                names = names.concat([nodeLabel(decls, ns[k], at.file)])
+                st = addDiag(st, at.file, fk.span, "E-DERIVED-CIRCULAR-DEP", "`@" + fk.sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
+                members = members.concat(path).concat([k])
+            }
+            k = k + 1
+        }
+        if (members.length == 0) return { st: st, decls: decls }
         let out: DeclSrc[] = []
+        let di = 0
         for (const ds of decls) {
-            let members: int[] = []
-            if (ds.isProgram) {
-                const fs: FieldInfo[] = ds.info.fields
-                const errs: ASpan[] = fileErrs(files, ds.file)
-                let es: DEdge[] = []
-                let i = 0
-                for (const f of fs) {
-                    const m: FieldMode = f.mode
-                    if (m == FieldMode.Derived) {
-                        for (const r of f.reads) {
-                            if (r.substring(0, 1) == "@") {
-                                const j: int = fieldIndex(ds.info, r.substring(1))
-                                if (j >= 0) {
-                                    const mj: FieldMode = fs[j].mode
-                                    if (mj == FieldMode.Derived) es = es.concat([{ from: i, to: j }])
-                                }
-                            }
-                        }
-                    }
-                    i = i + 1
+            let hit = false
+            let nf: FieldInfo[] = []
+            let j = 0
+            for (const f of ds.info.fields) {
+                if (members.indexOf(nodeIndex(ns, di, j)) >= 0) {
+                    nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
+                    hit = true
+                } else {
+                    nf = nf.concat([f])
                 }
-                let k = 0
-                while (k < fs.length) {
-                    const path: int[] = derivedPath(es, k, k, [])
-                    if (path.length > 0 && !hasErrIn(errs, fs[k].span)) {
-                        let names: string[] = []
-                        for (const p of path) { names = names.concat(["@" + fs[p].sym.hint]) }
-                        names = names.concat(["@" + fs[k].sym.hint])
-                        st = addDiag(st, ds.file, fs[k].span, "E-DERIVED-CIRCULAR-DEP", "`@" + fs[k].sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
-                        members = members.concat(path).concat([k])
-                    }
-                    k = k + 1
-                }
+                j = j + 1
             }
-            if (members.length == 0) {
-                out = out.concat([ds])
-            } else {
-                let nf: FieldInfo[] = []
-                let j2 = 0
-                for (const f of ds.info.fields) {
-                    if (members.indexOf(j2) >= 0) {
-                        nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
-                    } else {
-                        nf = nf.concat([f])
-                    }
-                    j2 = j2 + 1
-                }
-                const di: DeclInfo = ds.info
-                const ni: DeclInfo = { nid: di.nid, span: di.span, sym: di.sym, kind: di.kind, single: di.single, file: di.file, fields: nf, handles: di.handles }
+            if (hit) {
+                const oi: DeclInfo = ds.info
+                const ni: DeclInfo = { nid: oi.nid, span: oi.span, sym: oi.sym, kind: oi.kind, single: oi.single, file: oi.file, fields: nf, handles: oi.handles }
                 out = out.concat([{ info: ni, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
+            } else {
+                out = out.concat([ds])
             }
+            di = di + 1
         }
         return { st: st, decls: out }
+    }
+
+    // The graph's nodes, in source order: each DERIVED program cell, and each declaration's DERIVED own value.
+    fn derivedNodes(decls: DeclSrc[]) -> DNode[] {
+        let out: DNode[] = []
+        let di = 0
+        for (const ds of decls) {
+            let j = 0
+            const oi: int = ownFieldOf(ds.info)
+            for (const f of ds.info.fields) {
+                const m: FieldMode = f.mode
+                if (m == FieldMode.Derived && (ds.isProgram || j == oi)) out = out.concat([{ di: di, fi: j }])
+                j = j + 1
+            }
+            di = di + 1
+        }
+        return out
+    }
+
+    fn nodeIndex(ns: DNode[], di: int, fi: int) -> int {
+        let i = 0
+        for (const n of ns) {
+            if (n.di == di && n.fi == fi) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    // `@x` as the cycle path spells it — with its file when that is not the reported one.
+    fn nodeLabel(decls: DeclSrc[], n: DNode, file: string) -> string {
+        const ds: DeclSrc = decls[n.di]
+        const l: string = "@" + ds.info.fields[n.fi].sym.hint
+        if (ds.file == file) return l
+        return l + " (" + ds.file + ")"
+    }
+
+    // The node a direct `@name` read in node `n`'s initializer reaches, else -1 (not a derived value of the
+    // graph). The binder's order (resolveAtOf): the reader's own name (a declaration's own value: O54 (a));
+    // a program cell's sibling cells; a handle of the reader's scope (no edge: it names an instance); from a
+    // declaration in the program's own file, the program's cells (§7.6.1 — a library never reaches them);
+    // then the user declaration `name` denotes in the reader's file (declared there, or imported — an alias
+    // or, re-read as one name, `m.x` — §21.3 rule 2: "the same declaration").
+    fn atNode(decls: DeclSrc[], ns: DNode[], lk: Linkage, hs: HandleInfo[], n: DNode, name: string) -> int {
+        const rd: DeclSrc = decls[n.di]
+        if (rd.isProgram) {
+            const j: int = fieldIndex(rd.info, name)
+            if (j >= 0) return nodeIndex(ns, n.di, j)
+        } else if (rd.info.sym.hint == name) {
+            return nodeIndex(ns, n.di, n.fi)
+        }
+        for (const h of hs) {
+            if (h.name == name && h.owner == rd.info.nid) return -1
+        }
+        if (!rd.isProgram) {
+            let pi = 0
+            for (const pd of decls) {
+                if (pd.isProgram && pd.file == rd.file) {
+                    const j2: int = fieldIndex(pd.info, name)
+                    if (j2 >= 0) return nodeIndex(ns, pi, j2)
+                }
+                pi = pi + 1
+            }
+        }
+        const from: string = scopeFrom(lk, rd.file, NameKind.KDecl, name)
+        if (from == "") return -1
+        const orig: string = scopeOrig(lk, rd.file, NameKind.KDecl, name)
+        let qi = 0
+        for (const qd of decls) {
+            if (!qd.isProgram && qd.info.sym.hint == orig && qd.file == from) {
+                const oi: int = ownFieldOf(qd.info)
+                if (oi < 0) return -1
+                return nodeIndex(ns, qi, oi)
+            }
+            qi = qi + 1
+        }
+        return -1
     }
 
     // A written / literal / inferred origin is kept (there is nothing to withdraw).
@@ -6896,6 +7067,9 @@ ${
         if (d is given) {
             if (!d.isProgram && d.info.sym.hint == name) {
                 const inst: InstRef = InstRef.Lexical(0)
+                // s475-boot-file-scope-own-value: an own-valued declaration's instance IS its own value
+                const oi0: int = ownFieldOf(d.info)
+                if (oi0 >= 0) return plain(d.info.fields[oi0].ty, addName(st, e.nid, NameFact.NField(d.info.sym, inst, oi0)))
                 return { x: { ty: Type.Named(d.info.sym), inst: inst, iDecl: d.info.sym, maybe: false },
                          st: addName(st, e.nid, NameFact.NInst(d.info.sym, inst)) }
             }
@@ -6918,17 +7092,23 @@ ${
         }
         const ud: DeclSrc | not = visibleDecl(env, name)
         if (ud is given) {
-            // s475-boot-small-gaps2 (g-boot-file-scope-own-value-read-unbuilt-s475) — a declaration OUTSIDE
-            // `<program>` that has an own value (`let <count:int=7/>` at a file's top, the shape a library
-            // exports): the bootstrap builds its instance but not its own value, so `@count` read the
-            // instance and rendered "[object Object]" — silently (same file, `import { count }`, and
-            // `@m.count`). Refused, fail closed. INTERIM: the capable form is the declaration's own value
-            // built as its instance's value (§66.2.2 (i), §66.3), read here.
+            // s475-boot-file-scope-own-value (g-boot-file-scope-own-value-read-unbuilt-s475) — a declaration
+            // with an own value (`let <count:int=7/>` outside `<program>`, the shape a library exports):
+            // §66.7.1 "`@x` … reads … the SHARED instance of `x`", and that instance's value is its own
+            // value (§66.2.2 (i), §66.3) — its own-value field (userFields). One shared instance per
+            // declaration (§66.6.4), whichever file names it: the declaring file, `import { count }`,
+            // `import { count as c }`, `@m.count` (§21.3 rule 2: "the same declaration").
+            const si: InstRef = InstRef.Shared(ud.info.sym)
+            const oi1: int = ownFieldOf(ud.info)
+            if (oi1 >= 0) return plain(ud.info.fields[oi1].ty, addName(st, e.nid, NameFact.NField(ud.info.sym, si, oi1)))
+            // An own value the bootstrap does not build as the instance's value — one beside child fields, or a
+            // typed own value with no `=` (§66.2.2 O31): `@x` would read the instance, not its value — refused,
+            // never read as "[object Object]". INTERIM. (Beside typed attributes it is ⚑ O19, refused where it
+            // is declared — o19Diags; a named shared instance likewise — namedInstanceDiags.)
             const ud0: ADecl | not = ud.d
             if (ud0 is given) {
-                if (!isNoValue(ud0.own)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` reads the own value of `<" + ud.info.sym.hint + ">`, declared outside `<program>` in `" + ud.file + "` — a file-scope declaration's own value is not built in the bootstrap (it would read the instance, not its value); declare the cell inside `<program>`, or read it through a function `" + ud.file + "` exports", st)
+                if ((hasOwnValue(ud0.own) || hasOwnType(ud0)) && ud0.attrs.length == 0 && env.g.te.declNames.indexOf(ownTypeName(ud0)) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` reads the own value of `<" + ud.info.sym.hint + ">`, declared in `" + ud.file + "` — the bootstrap builds a declaration's own value as its instance's value only for an own value written with `=` and no attributes or child fields beside it (`let <" + ud.info.sym.hint + ":T=v/>`), so it would read the instance, not its value", st)
             }
-            const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
         }
@@ -9231,9 +9411,40 @@ ${
         // §66.14 ⚑ O2 / O39 — whether module `export` makes a declaration's own value writable from other
         // files "is not ruled"; "§66.19 routes every cross-file write of an own value through a function
         // exported from the defining file". Capable form: the write, once O2 / O39 rules it writable.
+        // s475-boot-file-scope-own-value — `@x` of an own-valued declaration is its own-value field
+        // (userFields): inside its own renders / initializer the current instance's (O54 (a)), else the
+        // shared instance's (§66.7.1).
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is given && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
+            const coi: int = ownFieldOf(cd.info)
+            if (!cd.isProgram && cd.info.sym.hint == name && coi >= 0) {
+                return { place: { decl: cd.info, inst: InstRef.Lexical(0), idx: coi, path: [], ty: cd.info.fields[coi].ty, maybe: false },
+                         local: not, st: st }
+            }
+        }
         const xd: DeclSrc | not = visibleDecl(env, name)
-        if (xd is given && xd.file != env.file && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
-            return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` writes the own value of `" + xd.info.sym.hint + "`, declared in `" + xd.file + "`, from another file — whether a module `export` makes an own value writable from other files is not ruled (§66.14, ⚑ O2 / O39), so the bootstrap refuses it; write it through a function `" + xd.file + "` exports (§66.19)"))
+        if (xd is given && lookupNarrow(env, name) is not && lookupHandle(env, name) is not) {
+            const xoi: int = ownFieldOf(xd.info)
+            // §66.14 rule 2: "A write lexically inside the file that defines the declaration is governed only
+            // by the field's contract" — the own-value field's `let` / lock / derived mode (the classifier).
+            if (xoi >= 0 && xd.file == env.file) {
+                return { place: { decl: xd.info, inst: InstRef.Shared(xd.info.sym), idx: xoi, path: [], ty: xd.info.fields[xoi].ty, maybe: false },
+                         local: not, st: st }
+            }
+            // r1 N2: only a declaration WITH an own value has one to write from another file; a write of a
+            // whole instance of one without (`@box = 5`) keeps the whole-instance message below.
+            const xdd: ADecl | not = xd.d
+            if (xd.file != env.file && xdd is given && hasOwnValue(xdd.own)) {
+                return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "this writes the own value of `<" + xd.info.sym.hint + ">` (`@" + name + "`, or a part of it), declared in `" + xd.file + "`, from another file — whether a module `export` makes an own value writable from other files is not ruled (§66.14, ⚑ O2 / O39), so the bootstrap refuses it; write it through a function `" + xd.file + "` exports (§66.19)"))
+            }
+        }
+        // r1 N3 — `@m.nope = …` (`m` a namespace import, re-read with `m.nope` one name): a member the
+        // module does not export is E-IMPORT-004, as the read is (§21.3 rule 5).
+        const nh: NsHit = nsMember(env.g.te.link, env.file, name)
+        if (nh.ns != "" && !namesInstance(env, name)) {
+            const nm: NsMiss = nsMiss(env.g.te.link, env.file, name, "a cell or a declaration")
+            if (nm.code == "-") return noPlace(st)
+            if (nm.code != "") return noPlace(addDiag(st, env.file, t.span, nm.code, nm.why))
         }
         if (!namesInstance(env, name)) return noPlace(addDiag(st, env.file, t.span, "E-STATE-UNDECLARED", "`@" + name + "` is written here, but it is not declared — no cell, declaration or `as=` handle named `" + name + "` is in scope (§6.1.1: a write is not a declaration; declare it, e.g. `let <" + name + ":T=(…)/>`)"))
         return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
@@ -25626,7 +25837,7 @@ ${
         if (initBlamed(env, f, ts)) return ts
         const n2: string = f.sym.hint
         let path: string[] = []
-        for (const x of ns) { path = path.concat(["@" + x]) }
+        for (const x of ns) { path = path.concat(["@" + cycName(x)]) }
         return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n2 + "` has no `:Type`, and its value reads itself back through " + path.join(" → ") + " — a type is not inferred around a cycle (§66.3 rule 8). Write the type: `" + n2 + ":T=…`")
     }
 
@@ -25945,7 +26156,7 @@ ${
         for (const d of t.decls) {
             for (const f of d.fields) {
                 if (f.sym.id == fi.sym.id) {
-                    if (d.kind == DeclKind.Program) return "formula of @" + fi.sym.hint
+                    if (d.kind == DeclKind.Program || isOwnField(d, f)) return "formula of @" + fi.sym.hint
                     return "formula of @" + d.sym.hint + "." + fi.sym.hint
                 }
             }
@@ -26211,7 +26422,7 @@ ${
             for (const f of d.fields) {
                 const w: Sym | not = f.wcap
                 if (w is given && w.id == cap.id) {
-                    if (d.kind == DeclKind.Program) return "@" + f.sym.hint
+                    if (d.kind == DeclKind.Program || isOwnField(d, f)) return "@" + f.sym.hint
                     return "@" + d.sym.hint + "." + f.sym.hint
                 }
             }
@@ -27879,7 +28090,7 @@ ${
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not || idx < 0 || idx >= di.fields.length) return "@" + d.hint
         const f: FieldInfo = di.fields[idx]
-        if (di.kind == DeclKind.Program) return "@" + f.sym.hint
+        if (di.kind == DeclKind.Program || isOwnField(di, f)) return "@" + f.sym.hint
         return "@" + d.hint + "." + f.sym.hint
     }
 
@@ -29226,10 +29437,42 @@ ${
         return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt }
     }
 
+    // s475-boot-file-scope-own-value (#1772 review N4): an exit AFTER a `return` / `fail` / `break` /
+    // `continue` of the same block never runs (`if (bad()) { fail .Bad; fail .ConnectionLost; }`), so it is
+    // not one of the run's `exitAt` (E-TX-FAIL-AFTER-COMMIT reported the unreachable second `fail`). Only
+    // `exitAt` is withheld; every other fact of the run is folded as before.
     fn cfStmts(ss: AStmt[], a0: CFold) -> CFold {
         let a: CFold = a0
-        for (const s of ss) { a = cfStmt(s, a) }
+        let dead = false
+        for (const s of ss) {
+            const b: CFold = cfStmt(s, a)
+            if (dead) {
+                a = { names: b.names, assigns: b.assigns, rets: b.rets, exits: b.exits, effects: b.effects, handled: b.handled, clocks: b.clocks, exitAt: a.exitAt }
+            } else {
+                a = b
+            }
+            if (stmtLeaves(s)) dead = true
+        }
         return a
+    }
+
+    // A statement after which nothing in its block runs.
+    fn stmtLeaves(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: e) :> true
+            .Fail(f: f) :> true
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Lift(what: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: b) :> false
+        }
     }
 
     fn cfMaybeBlock(b: ABlock | not, a: CFold) -> CFold {
