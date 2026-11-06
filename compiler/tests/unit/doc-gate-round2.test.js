@@ -147,6 +147,8 @@ describe("1489-B — every key pinKey makes is one the pin grammar accepts (the 
       ["E-TYPE-UNKNOWN", "unknown type `Map<K, V>`", "E-TYPE-UNKNOWN(Map)"],
       ["E-VALUE-WRITES-STATE", "writes `<x>, (y)`", "E-VALUE-WRITES-STATE()"],
       ["E-SCOPE-001", "no backticks at all", "E-SCOPE-001"],
+      // a `<#id>` element reference keys by its id, so a misspelled `<#stat>` is not pin-blind
+      ["E-SCOPE-001", "`<#stats>` names no `<request>` of this program — `<#stats>.send()` reaches …", "E-SCOPE-001(#stats)"],
     ];
     const keys = msgs.map(([code, message, want]) => {
       const k = pinKey({ code, message });
