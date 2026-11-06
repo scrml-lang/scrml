@@ -390,3 +390,45 @@ describe("r1 F3 — stale is computed from `data` only (§6.7.7 Mount behavior s
     scope.dispose();
   });
 });
+
+describe("r1 — the rest of the review's runtime repros, on the all-four state", () => {
+  test("A10 (EC-1): a failure, then refetch — error clears, data kept, stale true while loading", async () => {
+    const scope = rt.root.child();
+    const t = rt.cell(null);
+    const state = sigs();
+    const hs = [];
+    const r = rt.requestOn(scope, t, [], () => { const h = held(); hs.push(h); return { on: h.p, then: (v) => t.set(v) }; }, { state });
+    hs[0].resolve(1); await tick();
+    r.refetch(); hs[1].resolve(rt.failure("Bad")); await tick();
+    expect([t.peek(), state.data.peek(), state.error.peek(), state.loading.peek(), state.stale.peek()]).toEqual([1, 1, "Bad", false, false]);
+    r.refetch();
+    expect([state.error.peek(), state.loading.peek(), state.stale.peek(), state.data.peek()]).toEqual([null, true, true, 1]);
+    scope.dispose();
+  });
+
+  test("A13: the target's write disposes the request's own scope mid-settle — the settle still completes", async () => {
+    const outer = rt.root.child();
+    const arm = outer.child();
+    const t = rt.cell(null);
+    const state = sigs();
+    t.observers.add({ markStale() { arm.dispose(); } });
+    rt.requestOn(arm, t, [], () => ({ on: Promise.resolve(3), then: (v) => t.set(v) }), { state });
+    await tick();
+    expect([t.peek(), state.loading.peek(), state.data.peek(), arm.disposed]).toEqual([3, false, 3, true]);
+    outer.dispose();
+  });
+
+  test("A7: a thousand rapid dependency changes — the newest wins; nothing leaks", async () => {
+    const before = rt.stats.requests;
+    const scope = rt.root.child();
+    const dep = rt.cell(0), t = rt.cell(null);
+    const hosts = [];
+    rt.requestOn(scope, t, [dep], () => { const h = held(); hosts.push(h); return { on: h.p, then: (v) => t.set(v) }; });
+    for (let i = 1; i <= 1000; i++) dep.set(i);
+    hosts.forEach((h, i) => h.resolve(i));
+    await tick();
+    expect(t.peek()).toBe(1000);
+    scope.dispose();
+    expect([rt.stats.requests, dep.observers.size]).toEqual([before, 0]);
+  });
+});

@@ -195,3 +195,40 @@ describe("r1 F3 — the request's handle and its full state", () => {
     expect(out.js).not.toContain("state: {");
   });
 });
+
+describe("r1 — a request inside a Cond arm (the review's print repro)", () => {
+  test("an arm switch tears the arm's request down and the other arm's starts; requests never accumulate", async () => {
+    const core = clone(cores.counter());
+    const prog = core.decls.find((d) => d.sym.id === core.program.id);
+    const P = prog.sym, here = C.InstRef.Lexical(0);
+    const idxOf = (h) => prog.fields.findIndex((f) => f.sym.hint === h);
+    const count = idxOf("count"), template = prog.fields[count];
+    const mk = (id, hint, ty, init) => ({ ...clone(template), sym: C.mkSym(id, hint), ty, init, wcap: C.mkSym(id + 1, hint) });
+    const fA = mk(920001, "a", C.Type.Int, C.litInt(0)), fB = mk(920003, "b", C.Type.Int, C.litInt(0));
+    const sig = [mk(920005, "lo", C.Type.Bool, C.Expr.Lit(C.Literal.Bool(false))), mk(920007, "da", C.Type.Int, C.litInt(0)),
+                 mk(920009, "er", C.Type.Int, C.litInt(0)), mk(920011, "st", C.Type.Bool, C.Expr.Lit(C.Literal.Bool(false)))];
+    prog.fields = [...prog.fields, fA, fB, ...sig];
+    const dep = (idx) => ({ decl: P, inst: here, idx });
+    const state = { loading: dep(idxOf("lo")), data: dep(idxOf("da")), error: dep(idxOf("er")), stale: dep(idxOf("st")) };
+    const mkReq = (vid, f, add, st, handle) => {
+      const v = C.mkSym(vid, "v");
+      const body = C.block([C.Stmt.Suspend(v, C.prim2(C.PrimOp.Add, C.readField(P, here, count), C.litInt(add)),
+        C.block([C.Stmt.Write(f.wcap, here, C.EditKind.Replace, C.Expr.Local(v), C.Check.Static)]))]);
+      return C.View.Request(dep(idxOf(f.sym.hint)), [dep(count)], body, true, st, handle);
+    };
+    const even = C.prim2(C.PrimOp.EqPrim, C.prim2(C.PrimOp.Mod, C.readField(P, here, count), C.litInt(2)), C.litInt(0));
+    prog.renders = [...prog.renders,
+      C.View.Cond([{ test: even, body: [mkReq(920020, fA, 100, state, C.mkSym(920030, "ra")), C.el("span", [], [])] },
+                   { test: C.Expr.Lit(C.Literal.Bool(true)), body: [mkReq(920021, fB, 200, null, null)] }]),
+      C.el("p", [C.Attr.Static("id", "ab")], [C.dyn(C.readField(P, here, idxOf("a"))), C.textView(","), C.dyn(C.readField(P, here, idxOf("b")))])];
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const { rt } = await loadProgram(core, "request-cond");
+    const ab = () => document.querySelector("#ab").textContent;
+    await tick();
+    expect([ab(), rt.stats.requests]).toEqual(["100,0", 1]);
+    click(incButton()); await tick();                     // odd: arm 2 mounts, arm 1's request is torn down
+    expect([ab(), rt.stats.requests]).toEqual(["100,201", 1]);
+    click(incButton()); await tick();
+    expect([ab(), rt.stats.requests]).toEqual(["102,201", 1]);
+  });
+});
