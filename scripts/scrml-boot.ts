@@ -720,41 +720,118 @@ export function writeNewFile(path: string, data: string | Uint8Array, mode = 0o6
 }
 
 /**
- * One directory of the output tree, held so that a path component renamed or swapped for a symbolic link
- * AFTER the checks cannot redirect a write, a delete or a prune out of `-o`
- * (g-boot-output-check-then-write-race-s474). On Linux the directory is held OPEN and every operation
- * names its entry through `/proc/self/fd/<fd>/<name>`, which the kernel resolves against the directory
- * the fd holds (an `openat` in all but name), and each sub-directory is opened `O_NOFOLLOW`. Elsewhere
- * (no `/proc`, Windows) the directory is its real path, re-checked by `realpath` right before each
- * operation — INTERIM: that narrows the window but does not close it; the capable form is a real
- * `openat`/`O_NOFOLLOW` walk (a native call through `bun:ffi`), which Node's fs does not offer.
+ * One directory of the output tree, held so that a path component moved, removed or swapped for a symbolic
+ * link AFTER the checks cannot redirect a write, a delete or a prune out of `-o` without the build failing
+ * (g-boot-output-check-then-write-race-s474).
+ *
+ * Held mode (Linux): each directory is held OPEN and every operation names its entry through
+ * `/proc/self/fd/<fd>/<name>`, which the kernel resolves against the directory the fd holds (an `openat` in
+ * all but name), and each sub-directory is opened `O_NOFOLLOW`, so a symbolic link swapped in is refused,
+ * never followed. A held fd FOLLOWS its directory when that directory is renamed, so `check()` compares the
+ * fd's dev/ino with the entry it was opened from, ancestor by ancestor up to `-o` itself. It runs when a
+ * directory is opened, before and after every write, and on every held directory before and after the
+ * final manifest. A move that lands between a check and the next operation can carry THAT operation (one
+ * file or one delete per directory) to where the mover put the directory; the check after it then fails
+ * the build. A build never reports success with a directory moved out from under it.
+ *
+ * Paths mode (no `/proc`: macOS, Windows; `writeOutputs(…, "paths")` forces it): the directory is its real
+ * path, and `check()` re-reads `realpath` of `-o` and the dev/ino of every directory up to it right before
+ * each operation. INTERIM (g-boot-output-race-non-linux-fallback-s475): that narrows the window but does not
+ * close it; the capable form is a real `openat`/`O_NOFOLLOW` walk (a native call through `bun:ffi`), which
+ * Node's fs does not offer.
+ *
+ * `-o` itself is pinned to the directory `writeOutputs` first looked at. When `-o` is a symbolic link (the
+ * user may name one), that is the directory it pointed at then; a later re-pointing of the link fails the
+ * build. A link swapped in for `-o` BEFORE that first look is indistinguishable from one the user named, and
+ * is followed: doing it needs write access to the directory that holds `-o`.
  */
-type OutDirHandle = { rel: string; fd: number | null; real: string; at: (name: string) => string };
+type Ident = { dev: number; ino: number };
+type OutDirHandle = {
+  rel: string;
+  seg: string;
+  parent: OutDirHandle | null;
+  fd: number | null;
+  real: string;
+  id: Ident;
+  at: (name: string) => string;
+  check: () => void;
+};
+
+const sameId = (a: Ident, b: Ident | null) => b !== null && a.dev === b.dev && a.ino === b.ino;
+/** Two `realpath` answers for one directory (Windows: case-insensitive names). */
+const samePath = (a: string, b: string) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+function statOrNull(p: string): ReturnType<typeof statSync> | null {
+  try {
+    return statSync(p);
+  } catch {
+    return null;
+  }
+}
 
 class OutTree {
   readonly root: OutDirHandle;
   private readonly dirs = new Map<string, OutDirHandle>();
   private readonly fds: number[] = [];
-  constructor(readonly outDir: string) {
-    const real = realpathSync(outDir);
+  constructor(readonly outDir: string, pinned: Ident, held: boolean) {
+    let real: string;
+    try {
+      real = realpathSync(outDir);
+    } catch {
+      throw changedUnder(outDir, ".");
+    }
     let fd: number | null = null;
-    if (process.platform === "linux" && fsc.O_DIRECTORY !== undefined && fsc.O_NOFOLLOW !== undefined) {
+    if (held && process.platform === "linux" && fsc.O_DIRECTORY !== undefined && fsc.O_NOFOLLOW !== undefined) {
       try {
         fd = openSync(real, fsc.O_RDONLY | fsc.O_DIRECTORY);
-        const a = statSync(`/proc/self/fd/${fd}`), b = fstatSync(fd);
-        if (a.ino !== b.ino || a.dev !== b.dev) throw new Error("no /proc/self/fd");
       } catch {
-        if (fd !== null) closeSync(fd);
+        throw changedUnder(outDir, ".");
+      }
+      try {
+        const a = statSync(`/proc/self/fd/${fd}`), b = fstatSync(fd);
+        if (!sameId(b, a)) throw new Error("no /proc/self/fd");
+      } catch {
+        // no usable /proc (a container without it mounted): paths mode
+        closeSync(fd);
         fd = null;
       }
     }
-    this.root = this.handle("", fd, real);
+    const id = fd !== null ? fstatSync(fd) : statOrNull(real);
+    if (id === null || !sameId(pinned, id)) {
+      if (fd !== null) closeSync(fd);
+      throw changedUnder(outDir, ".");
+    }
+    this.root = this.handle("", "", null, fd, real, id);
     this.dirs.set("", this.root);
+    this.root.check();
   }
-  private handle(rel: string, fd: number | null, real: string): OutDirHandle {
+  private handle(rel: string, seg: string, parent: OutDirHandle | null, fd: number | null, real: string, id: Ident): OutDirHandle {
     if (fd !== null) this.fds.push(fd);
     const at = fd !== null ? (name: string) => `/proc/self/fd/${fd}/${name}` : (name: string) => join(real, name);
-    return { rel, fd, real, at };
+    const h: OutDirHandle = { rel, seg, parent, fd, real, id: { dev: id.dev, ino: id.ino }, at, check: () => this.check(h) };
+    return h;
+  }
+  /**
+   * `h` is still the directory it was when opened, at the same place under `-o`: each directory up the chain
+   * is still the entry it was opened from (dev/ino), and `-o` still names the pinned directory. Throws OutDirError.
+   */
+  private check(h: OutDirHandle) {
+    for (let c: OutDirHandle | null = h; c !== null; c = c.parent) {
+      const now = c.parent === null ? statOrNull(this.outDir) : lstatOrNull(c.parent.fd !== null ? c.parent.at(c.seg) : c.real);
+      if (now === null || !now.isDirectory() || !sameId(c.id, now)) throw changedUnder(this.outDir, c.rel || ".");
+    }
+    // paths mode: no component of the path is a link now. Last, so it sits closest to the operation it guards.
+    if (h.fd === null) {
+      let r: string | null = null;
+      try {
+        r = realpathSync(h.real);
+      } catch {}
+      if (r === null || !samePath(r, h.real)) throw changedUnder(this.outDir, h.rel || ".");
+    }
+  }
+  /** Every directory the build still holds passes `check()`. */
+  checkAll() {
+    for (const h of this.dirs.values()) h.check();
   }
   /** The directory `relDir` (a `/`-path, "" for the root), created when `create`; null when absent and not created. */
   dir(relDir: string, create: boolean): OutDirHandle | null {
@@ -765,10 +842,11 @@ class OutTree {
     if (parent === null) return null;
     const seg = relDir.slice(cut + 1);
     if (create) {
-      checkUnmoved(parent, this.outDir);
+      parent.check();
       try {
         mkdirSync(parent.at(seg));
       } catch (e: any) {
+        if (e?.code === "ENOENT" || e?.code === "ENOTDIR") throw changedUnder(this.outDir, parent.rel || ".");
         if (e?.code !== "EEXIST") throw e;
       }
     }
@@ -779,17 +857,19 @@ class OutTree {
         fd = openSync(parent.at(seg), fsc.O_RDONLY | fsc.O_DIRECTORY | fsc.O_NOFOLLOW);
       } catch (e: any) {
         if (e?.code === "ENOENT" && !create) return null;
-        if (e?.code === "ENOTDIR" || e?.code === "ELOOP") throw changedUnder(this.outDir, relDir);
+        if (e?.code === "ENOENT" || e?.code === "ENOTDIR" || e?.code === "ELOOP") throw changedUnder(this.outDir, relDir);
         throw e;
       }
-      h = this.handle(relDir, fd, join(parent.real, seg));
+      h = this.handle(relDir, seg, parent, fd, join(parent.real, seg), fstatSync(fd));
     } else {
-      checkUnmoved(parent, this.outDir);
-      const st = lstatOrNull(parent.at(seg));
+      parent.check();
+      const st = lstatOrNull(join(parent.real, seg));
       if (st === null && !create) return null;
       if (st === null || st.isSymbolicLink() || !st.isDirectory()) throw changedUnder(this.outDir, relDir);
-      h = this.handle(relDir, null, join(parent.real, seg));
+      h = this.handle(relDir, seg, parent, null, join(parent.real, seg), st);
     }
+    // before its first write: the directory opened is the entry it was opened from, all the way up to `-o`
+    h.check();
     this.dirs.set(relDir, h);
     return h;
   }
@@ -808,19 +888,37 @@ class OutTree {
 
 function changedUnder(outDir: string, rel: string): OutDirError {
   return new OutDirError(
-    `refusing to write into ${shown(outDir)}: ${rel} stopped being a real directory while the build was writing ` +
-      `(something replaced it, perhaps with a symbolic link). Nothing was written or deleted through it.`,
+    `refusing to go on writing into ${shown(outDir)}: ${rel === "." ? "the directory itself" : rel} stopped being the directory ` +
+      `the build opened (something moved, removed or replaced it, perhaps with a symbolic link). The build stopped and its ` +
+      `output is incomplete; nothing was written through a symbolic link. Build again.`,
   );
 }
 
-/** The fallback's re-check: the directory is still the real directory it was when opened. */
-function checkUnmoved(d: OutDirHandle, outDir: string) {
-  if (d.fd !== null) return;
-  let now: string | null = null;
-  try {
-    now = realpathSync(d.real);
-  } catch {}
-  if (now !== d.real) throw changedUnder(outDir, d.rel || ".");
+const RENAME_RETRY_MS = [10, 20, 40, 80, 160, 250, 250];
+
+/**
+ * `rename(from, to)` that replaces `to`. A refusal for a file in use (EPERM / EBUSY / EACCES — on Windows,
+ * another program holding `to` open without delete sharing: a running server, an editor, a virus scanner)
+ * is retried briefly on Windows, then reported as an OutDirError; it is never ignored. Exported for the tests.
+ */
+export function renameOver(from: string, to: string, what: string, rename: (a: string, b: string) => void = renameSync, platform: string = process.platform) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (e: any) {
+      const code = e?.code;
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw e;
+      if (platform === "win32" && attempt < RENAME_RETRY_MS.length) {
+        Bun.sleepSync(RENAME_RETRY_MS[attempt]);
+        continue;
+      }
+      throw new OutDirError(
+        `cannot replace ${what} (${code})` +
+          (platform === "win32" ? ": another program has it open (a running server, an editor, a virus scanner?). Close it and build again." : ": permission denied."),
+      );
+    }
+  }
 }
 
 /**
@@ -829,24 +927,34 @@ function checkUnmoved(d: OutDirHandle, outDir: string) {
  * (g-boot-output-hardlink-overwrite-s474), and a symbolic link at `name` is replaced, never followed.
  */
 function replaceFile(d: OutDirHandle, name: string, data: string | Uint8Array, mode = 0o666, outDir = d.real) {
-  const tmp = `.${name}.${process.pid}.tmp`;
-  checkUnmoved(d, outDir);
+  // a name near the 255-byte limit gets a short temp name (files are written one at a time, so it is unique)
+  const tmp = Buffer.byteLength(name) > 200 ? `.scrml-boot.${process.pid}.tmp` : `.${name}.${process.pid}.tmp`;
+  const rel = d.rel ? `${d.rel}/${name}` : name;
+  d.check();
   try {
     writeNewFile(d.at(tmp), data, mode);
   } catch (e: any) {
     if (e?.code === "EEXIST")
       throw new OutDirError(`refusing to write into ${shown(outDir)}: ${d.rel ? d.rel + "/" : ""}${tmp} already exists (a temp file scrml-boot did not create now). Remove it and build again.`);
+    if (e?.code === "ENOENT" || e?.code === "ENOTDIR") throw changedUnder(outDir, d.rel || ".");
     throw e;
   }
   try {
-    checkUnmoved(d, outDir);
-    renameSync(d.at(tmp), d.at(name));
+    d.check();
+    try {
+      renameOver(d.at(tmp), d.at(name), `${rel} in ${shown(outDir)}`);
+    } catch (e: any) {
+      if (e?.code === "ENOENT" || e?.code === "ENOTDIR") throw changedUnder(outDir, d.rel || ".");
+      throw e;
+    }
   } catch (e) {
     try {
       unlinkSync(d.at(tmp));
     } catch {}
     throw e;
   }
+  // after: a move between the check above and the rename carried this one file with it; fail the build
+  d.check();
 }
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
@@ -878,10 +986,15 @@ function unsafeAncestor(outDir: string, rel: string): string | null {
   return null;
 }
 
-/** Write (or check) the build's files. Exported for the tests. */
-export function writeOutputs(outDir: string, outs: OutputFile[]) {
+/**
+ * Write (or check) the build's files. Exported for the tests. `mode` "paths" forces the paths mode of
+ * `OutTree` (the one macOS and Windows run), so the tests exercise it on Linux too.
+ */
+export function writeOutputs(outDir: string, outs: OutputFile[], mode: "auto" | "paths" = "auto") {
   const top = lstatOrNull(outDir);
-  if (top !== null && !statSync(outDir).isDirectory()) throw new OutDirError(`refusing to write into ${shown(outDir)}: it is not a directory`);
+  // the directory `-o` names now (through a link the user named): the build is pinned to it (see OutTree)
+  const topDir = top !== null ? statOrNull(outDir) : null;
+  if (top !== null && (topDir === null || !topDir.isDirectory())) throw new OutDirError(`refusing to write into ${shown(outDir)}: it is not a directory`);
   const prev = readOutputManifest(outDir);
   const owned = new Set(prev ?? []);
   const next = new Set(outs.map((o) => o.rel));
@@ -918,9 +1031,19 @@ export function writeOutputs(outDir: string, outs: OutputFile[]) {
     );
   }
   mkdirSync(outDir, { recursive: true });
-  // From here every operation goes through held directories (OutTree): the checks above are the
-  // user-facing refusals, and a swap made after them cannot carry an operation out of `-o`.
-  const tree = new OutTree(outDir);
+  let pinned: Ident;
+  if (topDir !== null) pinned = topDir;
+  else {
+    // created just now: it must be a real directory, not a link someone put there since
+    const now = lstatOrNull(outDir);
+    if (now === null || !now.isDirectory()) throw changedUnder(outDir, ".");
+    pinned = now;
+  }
+  // From here every operation goes through OutTree: the checks above are the user-facing refusals. On
+  // Linux a symbolic link swapped in after them is never followed; a directory moved or removed after
+  // them fails the build (OutDirError) instead of letting it report success. Off Linux the same is
+  // narrowed, not closed (g-boot-output-race-non-linux-fallback-s475). See OutTree for the exact claim.
+  const tree = new OutTree(outDir, pinned, mode !== "paths");
   const split = (rel: string) => {
     const cut = rel.lastIndexOf("/");
     return { dir: cut < 0 ? "" : rel.slice(0, cut), name: rel.slice(cut + 1) };
@@ -942,17 +1065,22 @@ export function writeOutputs(outDir: string, outs: OutputFile[]) {
       const { dir, name } = split(rel);
       const d = tree.dir(dir, false);
       if (d === null) continue;
-      checkUnmoved(d, outDir);
       const st = lstatOrNull(d.at(name));
       if (st === null || (!st.isFile() && !st.isSymbolicLink())) continue;
-      unlinkSync(d.at(name));
+      d.check(); // right before the unlink: in paths mode the window between check and operation is the residue
+      try {
+        unlinkSync(d.at(name));
+      } catch (e: any) {
+        if (e?.code !== "ENOENT") throw e; // already gone: what this step wanted
+      }
+      d.check();
       // prune: rmdir refuses a non-empty directory and never follows a link
       for (let sub = dir; sub !== ""; ) {
         const up = split(sub);
         const parent = tree.dir(up.dir, false);
         if (parent === null) break;
+        parent.check();
         try {
-          checkUnmoved(parent, outDir);
           rmdirSync(parent.at(up.name));
         } catch {
           break;
@@ -961,7 +1089,10 @@ export function writeOutputs(outDir: string, outs: OutputFile[]) {
         sub = up.dir;
       }
     }
+    // 4. Before the build may report success, every directory it holds is still where it was.
+    tree.checkAll();
     writeOutputManifest(tree.root, [...next]);
+    tree.checkAll();
   } finally {
     tree.close();
   }

@@ -165,3 +165,44 @@ describe("g-boot-output-check-then-write-race-s474 — a swap made after the che
     expect(r.deletes).toBe(0);
   }, 120000);
 });
+
+// S475 r1 (review F1): a held directory FOLLOWS a rename, so a sub-directory moved out of `-o` mid-build
+// used to take every later write with it while the build reported success (head before r1, /proc mode:
+// err null, 4000 of 4000 files outside, 0 in `-o`). Now `OutTree.check()` compares each held directory's
+// dev/ino with the entry it was opened from, up to `-o`, around every write and before success: the build
+// fails (OutDirError) instead. A mover process renames `<out>/_scrml` away once the build has written f50.
+const MOVER = `
+const fs = require("node:fs");
+const [X, E] = process.argv.slice(1);
+for (;;) { if (fs.existsSync(X + "/_scrml/f50.js")) { try { fs.renameSync(X + "/_scrml", E + "/_scrml"); } catch {} break; } }
+`;
+describe("review F1 — a directory moved out of `-o` mid-build fails the build", () => {
+  for (const mode of ["auto", "paths"]) {
+    test.skipIf(process.platform !== "linux")(`${mode} mode: the build throws OutDirError, never reports success with \`_scrml\` gone`, async () => {
+      const { writeOutputs, OutDirError } = await import(CLI);
+      const w = fresh(`moveout-${mode}`);
+      const out = join(w, "X");
+      const elsewhere = join(w, "elsewhere");
+      mkdirSync(elsewhere);
+      const outs = Array.from({ length: 4000 }, (_, i) => ({ rel: `_scrml/f${i}.js`, text: "BUILD\n" }));
+      const mover = Bun.spawn(["bun", "-e", MOVER, out, elsewhere], { stdout: "ignore", stderr: "ignore" });
+      let err = null;
+      try {
+        writeOutputs(out, outs, mode);
+      } catch (e) {
+        err = e;
+      }
+      const t = setTimeout(() => mover.kill(9), 5000);
+      await mover.exited;
+      clearTimeout(t);
+      const moved = existsSync(join(elsewhere, "_scrml"));
+      if (!moved) {
+        // the mover lost the race outright (the build finished first): then everything is in `-o`
+        expect(err).toBeNull();
+        expect(readdirSync(join(out, "_scrml")).length).toBe(4000);
+        return;
+      }
+      expect(err).toBeInstanceOf(OutDirError);
+    }, 60000);
+  }
+});
