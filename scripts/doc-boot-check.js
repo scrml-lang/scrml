@@ -79,12 +79,16 @@ export function isCascadeKey(k) {
  * A diagnostic's pin key: its code, with the name it is about for a NAMED_CODES code
  * (`E-SCOPE-001(addRow)`). The name is the first backticked text of the message, cut to its leading
  * identifier (#1723 review 1489-B: `` `flush()` is retired `` keys as `flush`, so the key is one the
- * pin grammar accepts), and may be empty (`` unknown type `` `` keys as `E-TYPE-UNKNOWN()`).
+ * pin grammar accepts) or to `#id` for a `<#id>` reference, and may be empty (`` unknown type `` `` keys as `E-TYPE-UNKNOWN()`).
  */
 export function pinKey(d) {
   if (!NAMED_CODES.has(d.code)) return d.code;
   const m = /`([^`]*)`/.exec(String(d.message ?? ""));
   if (!m) return d.code;
+  // a `<#id>` element reference (§6.7.7 — `` `<#stats>` names no `<request>` ``) keys as `#stats`, so a
+  // misspelled id stays pin-visible instead of collapsing to the empty name
+  const ref = /^<#([A-Za-z_$][\w$]*)>/.exec(m[1]);
+  if (ref) return `${d.code}(#${ref[1]})`;
   const id = /^@?[A-Za-z_$][\w$.]*/.exec(m[1]);
   return `${d.code}(${id ? id[0] : ""})`;
 }

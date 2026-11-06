@@ -260,7 +260,10 @@ ${
         NLength,                                          // `.length` of a sequence or a string (a primitive read)
         NSurface(of: ValidityOf, prop: SurfaceProp),      // s449: a read of the validity surface (§55.5 / §55.6) — read-only
         NConst(sym: Sym),                                 // s472: a file-scope constant (§7.6) — lowered to Core `Local(sym)` of CoreProgram.consts
+        NReq(id: string, sig: ReqSig, inst: InstRef),                  // s475 (S3b): `<#id>.loading` / `.data` / `.error` / `.stale` (a member node) or `.refetch` (a call's callee) — §6.7.7 Properties; read-only
     }
+    // s475 (S3b) — a `<request>`'s property (§6.7.7 Properties), in requestSignalFields order; `Refetch` is its method.
+    export type ReqSig:enum = { Loading, Data, Error, Stale, Refetch }
     export type ValueFact:enum = {
         VLit(lit: Literal),                               // a literal (int vs number resolved)
         VVariant(enumSym: Sym, idx: int),                 // a bare variant
@@ -2382,6 +2385,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -2420,6 +2424,7 @@ ${
             .Sql(q: q) :> { name: "", ok: false }
             .Handled(h: x) :> { name: "", ok: false }
             .Template(quasis: qs) :> { name: "", ok: false }
+            .HashRef(id: hr0) :> { name: "", ok: false }
             .Foreign(f: fb0) :> { name: "", ok: false }
         }
     }
@@ -2460,6 +2465,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -2505,6 +2511,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -2536,6 +2543,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -2619,6 +2627,7 @@ ${
             .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Handled(h: h) :> listReads(handledKids(h)).concat(blocksReads(exprBlocks(e)))      // s451 (Ue): the subject and the arms' values; r2 (N1): the arm blocks
             .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> listReads(fb0.crossings)            // s473: a foreign block reads its crossings (§23.2.4a)
             .Name(name: n) :> []
             .Num(raw: r) :> []
@@ -2709,6 +2718,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -3031,6 +3041,7 @@ ${
             .Sql(q: q) :> rinf(infOut("a query"), done)
             .Handled(h: x) :> rinf(infOut("a handled failable value"), done)
             .Template(quasis: qs) :> rinf(infOk(Type.Str), done)      // s469: a template is a `string` (§14.13.3); its slots are typed where it is resolved
+            .HashRef(id: hr0) :> rinf(infOut("`" + hashRefText(hr0) + "` (a request property is typed by the request, which an inferred type does not reach)"), done)
             .Foreign(f: fb0) :> rinf(infOut("a foreign code block (its value is an untyped JavaScript-boundary value, §23.2.4a)"), done)
         }
     }
@@ -3662,6 +3673,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -4042,6 +4054,7 @@ ${
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
+            .HashRef(id: hr0) :> -1
             .Foreign(f: fb0) :> -1
         }
     }
@@ -4080,6 +4093,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -4313,6 +4327,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -4536,6 +4551,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -5558,6 +5574,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -6597,6 +6614,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -6859,6 +6877,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -6988,6 +7007,7 @@ ${
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
+            .HashRef(id: hr0) :> resolveHashRef(env, e, hr0, st)
             .Foreign(f: fb0) :> resolveForeign(env, e, fb0, st)                 // s473 (§23.2.4a)
         }
     }
@@ -7210,6 +7230,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -7380,6 +7401,9 @@ ${
         // as one. A payload variant is construction, which Core has no value for.
         const qv: RX | not = qualVariantValue(env, e, obj, name, st0)
         if (qv is given) return qv
+        // s475 (S3b): `<#id>.loading` / `.data` / `.error` / `.stale` (§6.7.7 Properties)
+        const hr: string | not = hashRefId(obj)
+        if (hr is given) return resolveReqMember(env, e, hr, name, st0)
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
@@ -7506,6 +7530,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -7567,6 +7592,7 @@ ${
             .NFn(sym: s) :> 0
             .NLength :> 0
             .NSurface(of: x) :> 0
+            .NReq(id: rq0, sig: rs0) :> 0
             .NConst(sym: s) :> 0
             not :> 0
         }
@@ -7635,6 +7661,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -7749,6 +7776,11 @@ ${
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
+            // s475 (S3b): `<#id>.refetch()` (§6.7.7 Properties)
+            if (m is given) {
+                const hr: string | not = hashRefId(m.obj)
+                if (hr is given) return resolveRefetch(env, e, callee, hr, m.method, args, st0)
+            }
             if (m is given) {
                 // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
                 // E-HOST-HANDLE-MEMBER (the receiver is peeked: its resolution is redone below)
@@ -7871,6 +7903,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -8711,6 +8744,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -8741,6 +8775,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -8905,6 +8940,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -8965,6 +9001,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
@@ -8995,6 +9032,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -9074,6 +9112,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -9104,6 +9143,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -9276,6 +9316,7 @@ ${
     fn foreignOf(e: AExpr) -> AForeign | not {
         const k: AExprK = e.k
         return match k {
+            .HashRef(id: hr0) :> not
             .Foreign(f: f) :> f
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -9530,6 +9571,7 @@ ${
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Template(quasis: qs) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .HashRef(id: hr0) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Foreign(f: fb0) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
@@ -9640,6 +9682,10 @@ ${
     }
 
     fn placeMember(env: Env, t: AExpr, obj: AExpr, name: string, st0: AS) -> RPlace {
+        // s475 (S3b): a request's property is read-only — only the request's own runs write it
+        // (§6.7.7 "Mount behavior" / "Settled state"); the row `@.` precedent's code
+        const hr: string | not = hashRefId(obj)
+        if (hr is given) return noPlace(addDiag(st0, env.file, t.span, "E-WRITE-NOT-GRANTED", "`" + hashRefText(hr) + "." + name + "` is read-only — a request's `.loading`, `.data`, `.error` and `.stale` are set by the request itself (§6.7.7); write its `@var` (EC-7: an optimistic update), or call `" + hashRefText(hr) + ".refetch()`"))
         // obj names an instance → a field of its declaration
         const ro: RX = resolveHandleSubject(env, obj, st0)
         const st: AS = ro.st
@@ -9759,6 +9805,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -9942,6 +9989,7 @@ ${
             .Variant(name: n) :> sinkV(0, "", not, not)
             .Sql(q: q) :> sinkV(0, "", not, not)
             .Template(quasis: qs) :> sinkV(0, "", not, not)
+            .HashRef(id: hr0) :> sinkV(0, "", not, not)
             .Foreign(f: fb0) :> sinkV(0, "", not, not)
         }
     }
@@ -10171,6 +10219,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
         if (isNum) return true
@@ -10777,6 +10826,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
@@ -10839,6 +10889,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> hashRefText(hr0)
             .Foreign(f: fb0) :> ""
         }
     }
@@ -10921,6 +10972,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
@@ -11018,6 +11070,7 @@ ${
             .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
             .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, not, st).st   // s451 (Ue)
             .Template(quasis: qs) :> resolveExpr(env, e, not, st).st
+            .HashRef(id: hr0) :> resolveExpr(env, e, not, st).st
             .Foreign(f: fb0) :> resolveForeignAt(env, e, fb0, true, st).st      // s473: a bare foreign block (§23.2.4 form 3)
         }
     }
@@ -11080,6 +11133,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -11535,6 +11589,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -11930,6 +11985,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -11960,6 +12016,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -11991,6 +12048,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12021,6 +12079,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12144,6 +12203,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -12257,6 +12317,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12287,6 +12348,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12400,6 +12462,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12488,6 +12551,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -12521,6 +12585,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -13641,6 +13706,7 @@ ${
             .Sql(q: q) :> litOf(0, "")
             .Handled(h: hx) :> litOf(0, "")
             .Template(quasis: qs) :> litOf(0, "")
+            .HashRef(id: hr0) :> litOf(0, "")
             .Foreign(f: fb0) :> litOf(0, "")
         }
     }
@@ -14307,6 +14373,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> hashRefText(hr0)
             .Foreign(f: fb0) :> ""
         }
         if (lit != "") return lit
@@ -15062,6 +15129,7 @@ ${
             .NFn(sym: s) :> notMutableDep(env, d, name, st)
             .NLength :> notMutableDep(env, d, name, st)
             .NSurface(of: x) :> notMutableDep(env, d, name, st)
+            .NReq(id: rq0, sig: rs0) :> notMutableDep(env, d, name, st)
             .NConst(sym: s) :> notMutableDep(env, d, name, st)
         }
     }
@@ -15144,7 +15212,7 @@ ${
         explicit: boolean,      // `deps=` was written
         signals: Sym[],         // the four `<#id>` cells lower appends to the program: loading, data, error, stale
         wcaps: Sym[],           // their write capabilities
-        handle: Sym,            // the request's identity: bound to the `{ refetch }` rt.requestOn returns
+        handle: Sym,            // the request's identity: its program-level slot (S3b — `<#id>.refetch()`)
         load: Sym,              // the load's bind when the right-hand side does not wait (lower wraps it)
         rhs: int,               // the right-hand side's nid
         dataTy: Type,           // `<#id>.data : T | not` (§6.7.7 Properties)
@@ -15246,6 +15314,220 @@ ${
     // reads it as an input-state reference and prints `_scrml_input_id_` into the message (s475 r1).
     fn hashId() -> string {
         return "<" + "#id>"
+    }
+
+    // =========================================================================
+    // s475 (slice S3b) — `<#id>`: a request's properties (SPEC §6.7.7 Properties):
+    //   `<#id>.loading` `boolean` "`true` while fetch is in flight"
+    //   `<#id>.data`    `T | not` "Most recent successful fetch result, or `not` before first success"
+    //   `<#id>.error`   `Error | not` "Error from most recent failed fetch, or `not`"
+    //   `<#id>.stale`   `boolean` "`true` when data exists AND a new fetch is in flight"
+    //   `<#id>.refetch()` `() -> void` "Imperatively re-execute the fetch body"
+    // A property READ is a read of the request's signal cell (lower: the program
+    // cell requestSignalFields appends; rt.requestOn writes it) — so it is
+    // reactive wherever it stands, and read-only (only the request's runs write
+    // it: a write is refused by name). `.error`'s type: the Normative Statement
+    // "its failure — the callee's declared error, or the transport failure of a
+    // call to a server function (§19.9.10) — SHALL set `<#id>.error`" makes its
+    // value the CALL's failure (ReqFact.errTy: the callee's enum, `E + Transport`
+    // for a server call); `Error` — the table's type — when the call cannot fail.
+    // `.refetch()` names the request (NReq … Refetch on the callee); lower makes
+    // it Core Refetch(handle). It is a WRITE of the request's target for every
+    // write rule (§6.7.4 "What counts as a write": "`<#id>.refetch()`, which
+    // writes the `<request>`'s assigned cell") — scanCall records it.
+    // ORDER: `.data` / `.error` take the request's types, known once the request
+    // is resolved. Function bodies are resolved after all markup, so a function
+    // always sees them; markup or an initializer that reads `.data` / `.error`
+    // ABOVE its request is refused by name (INTERIM — capable form: the request
+    // facts gathered before the binder walks markup). `.loading` / `.stale` /
+    // `.refetch()` need no type and are read anywhere.
+    // An id no `<request>` of the program carries: E-SCOPE-001 (§34 "not
+    // resolvable in scope"; §6.7.7 names no code — PA reading). An id another
+    // element carries (`<timer>`, `<poll>`, `<timeout>`, an input-state element —
+    // §6.7.5 ff., §36): those are not in the bootstrap (E-BOOTSTRAP-UNSUPPORTED).
+    // =========================================================================
+
+    // The id of a `<#id>` expression.
+    fn hashRefId(e: AExpr) -> string | not {
+        const k: AExprK = e.k
+        return match k {
+            .HashRef(id: i) :> i
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Member(obj: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Index(obj: x) :> not
+            .Lambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    // `<#id>` spelled for a message (in two pieces — see hashId).
+    fn hashRefText(id: string) -> string { return "<" + "#" + id + ">" }
+
+    fn reqSigName(s: ReqSig) -> string {
+        return match s {
+            .Loading :> "loading"
+            .Data :> "data"
+            .Error :> "error"
+            .Stale :> "stale"
+            .Refetch :> "refetch"
+        }
+    }
+
+    fn reqSigOf(name: string) -> ReqSig | not {
+        if (name == "loading") return ReqSig.Loading
+        if (name == "data") return ReqSig.Data
+        if (name == "error") return ReqSig.Error
+        if (name == "stale") return ReqSig.Stale
+        if (name == "refetch") return ReqSig.Refetch
+        return not
+    }
+
+    // The signal's index among the request's four cells (requestSignalFields order); -1 for `refetch`.
+    export fn reqSigIndex(s: ReqSig) -> int {
+        return match s {
+            .Loading :> 0
+            .Data :> 1
+            .Error :> 2
+            .Stale :> 3
+            .Refetch :> -1
+        }
+    }
+
+    fn reqNamedIn(rs: ReqFact[], id: string) -> ReqFact | not {
+        for (const r of rs) {
+            if (r.id == id) return r
+        }
+        return not
+    }
+
+    // The type of a property (§6.7.7 Properties), from the request's facts.
+    fn reqSigTy(rq: ReqFact | not, s: ReqSig) -> Type | not {
+        const sig: ReqSig = s
+        if (sig == ReqSig.Loading || sig == ReqSig.Stale) return Type.Bool
+        if (rq is not) return not
+        if (sig == ReqSig.Data) return rq.dataTy
+        if (sig == ReqSig.Error) return rq.errTy
+        return not
+    }
+
+    // The typer's view (every request is resolved by then).
+    fn reqSigType(t: Tables, id: string, s: ReqSig) -> VType {
+        const ty: Type | not = reqSigTy(reqNamedIn(t.requests, id), s)
+        if (ty is not) return VType.Unknown
+        return known(ty)
+    }
+
+    // What element of the program carries `id=<id>`: "request", another tag, or "" (none).
+    fn hashTargetTag(env: Env, id: string) -> string {
+        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (ps is not) return ""
+        // the program's requests are reachable from its own file only, as its cells are
+        // (§7.6.1 — programInfo): another file's `<#id>` names nothing
+        if (ps.file != env.file) return ""
+        return hashTagIn(declMarkup(ps), id)
+    }
+
+    fn hashTagIn(ns: ANode[], id: string) -> string {
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const got: string = match k {
+                .Request(r: r) :> hashTagOfAttrs(r.attrs, id, "request")
+                .Elem(e: e) :> hashTagOfElem(e, id)
+                .Effect(w: x) :> ""
+                .Text(text: x) :> ""
+                .Interp(e: x) :> ""
+                .DeclNode(d: x) :> ""
+                .Css(c: x) :> ""
+                .Gather(f: x) :> ""
+            }
+            if (got != "") return got
+        }
+        return ""
+    }
+
+    fn hashTagOfElem(e: AElem, id: string) -> string {
+        const own: string = hashTagOfAttrs(e.attrs, id, e.tag)
+        if (own != "") return own
+        return hashTagIn(e.kids, id)
+    }
+
+    fn hashTagOfAttrs(as: AAttr[], id: string, tag: string) -> string {
+        for (const a of as) {
+            if (a.name == "id") {
+                const t: string | not = quotedAttrText(a.value)
+                if (t is given && t == id) return tag
+            }
+        }
+        return ""
+    }
+
+    // Is `<#id>` a request of the program? Reports the reference otherwise (`what`: how it is used).
+    fn hashRefMiss(env: Env, e: AExpr, id: string, what: string, st: AS) -> RX | not {
+        const tag: string = hashTargetTag(env, id)
+        if (tag == "request") return not
+        if (tag != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "` names the `<" + tag + " id=\"" + id + "\">` — a `" + hashId() + "` reference is in the bootstrap only for a `<request>` (§6.7.7); the `<" + tag + ">` state it would read is not built", st)
+        return diagX(env, e, "E-SCOPE-001", "`" + hashRefText(id) + "` names no `<request>` of this program — " + what + " reaches a request by its `id=` (§6.7.7: `<request id=\"" + id + "\">`)", st)
+    }
+
+    // A bare `<#id>`: no value of its own (§6.7.7 gives it only its properties).
+    fn resolveHashRef(env: Env, e: AExpr, id: string, st: AS) -> RX {
+        const miss: RX | not = hashRefMiss(env, e, id, "a `" + hashId() + "` reference", st)
+        if (miss is given) return miss
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "` is read through one of its properties — `.loading`, `.data`, `.error`, `.stale` — or called, `.refetch()` (§6.7.7 Properties); the request itself is no value in the bootstrap", st)
+    }
+
+    // `<#id>.prop` — a property read (a member node whose object is the HashRef).
+    fn resolveReqMember(env: Env, e: AExpr, id: string, name: string, st: AS) -> RX {
+        const miss: RX | not = hashRefMiss(env, e, id, "`" + hashRefText(id) + "." + name + "`", st)
+        if (miss is given) return miss
+        const sig: ReqSig | not = reqSigOf(name)
+        if (sig is not) return diagX(env, e, "E-SCOPE-001", "a `<request>` has no property `." + name + "` — `" + hashRefText(id) + "` has `.loading`, `.data`, `.error`, `.stale` and `.refetch()` (§6.7.7 Properties)", st)
+        if (sig == ReqSig.Refetch) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + ".refetch` names the request's method without calling it — call it, `" + hashRefText(id) + ".refetch()` (a function value is not in the bootstrap)", st)
+        // INTERIM (capable form: a request's state read in server code passed to it as an argument)
+        if (env.fx.serverOwn) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "." + name + "` is client state (§6.7.7) read in server code — pass the value to the server function as an argument", st)
+        const rq: ReqFact | not = reqNamedIn(st.reqs, id)
+        const ty: Type | not = reqSigTy(rq, sig)
+        if (ty is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "." + name + "` is read above its `<request id=\"" + id + "\">` — its type is the request's (§6.7.7 Properties), which the bootstrap knows only once it has read the request; move the request above this read", st)
+        return plain(ty, addName(st, e.nid, NameFact.NReq(id, sig, programInst(env))))
+    }
+
+    // `<#id>.refetch()` (§6.7.7 Properties `() -> void`; EC-4 "Starts a new fetch
+    // immediately, superseding the in-flight one"). `void`: a statement, never a value.
+    fn resolveRefetch(env: Env, e: AExpr, callee: AExpr, id: string, method: string, args: AExpr[], st0: AS) -> RX {
+        const st: AS = resolveExprs(env, args, not, st0)
+        const miss: RX | not = hashRefMiss(env, e, id, "`" + hashRefText(id) + "." + method + "()`", st)
+        if (miss is given) return miss
+        const sig: ReqSig | not = reqSigOf(method)
+        if (sig is not || sig != ReqSig.Refetch) {
+            let what: string = "has no method `." + method + "()`"
+            if (sig is given) what = "has `." + method + "` as a property, not a method — read it, `" + hashRefText(id) + "." + method + "`"
+            return diagX(env, e, "E-SCOPE-001", "a `<request>` " + what + " (§6.7.7 Properties: `.loading`, `.data`, `.error`, `.stale`, `.refetch()`)", st)
+        }
+        if (args.length > 0) return diagX(env, e, "E-CALL-ARITY", "`" + hashRefText(id) + ".refetch()` takes no arguments (§6.7.7 Properties: `() -> void`) — it re-runs the request's own body", st)
+        // INTERIM (capable form: a server body's refetch carried back to the client — no SPEC ruling)
+        if (env.fx.serverOwn) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + ".refetch()` in server code — a request runs on the client (§6.7.7); call `refetch()` from client code after the server call", st)
+        const st2: AS = addName(st, callee.nid, NameFact.NReq(id, ReqSig.Refetch, programInst(env)))
+        if (env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(st2, env.file, e.span, "E-TYPE-001", "`" + hashRefText(id) + ".refetch()` is `void` (§6.7.7 Properties: `() -> void`) — it cannot be used as a value (§18.3); call it as a statement"))
+        return plain(not, st2)
     }
 
     // A UTF-16 unit (0 … 0xFFFF) as four lower-case hex digits.
@@ -15634,6 +15916,7 @@ ${
             .Sql(q: x) :> not
             .Handled(h: x) :> not
             .Template(quasis: x) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: x) :> not
         }
     }
@@ -15679,6 +15962,7 @@ ${
             .NFn(sym: s) :> reqNotCell(env, d, name, explicit, st)
             .NLength :> reqNotCell(env, d, name, explicit, st)
             .NSurface(of: x) :> reqNotCell(env, d, name, explicit, st)
+            .NReq(id: rq0, sig: rs0) :> reqNotCell(env, d, name, explicit, st)
             .NConst(sym: s) :> reqNotCell(env, d, name, explicit, st)
         }
     }
@@ -15709,19 +15993,29 @@ ${
     }
 
     // Every `@name` node an expression holds (in a lambda body and a handling form's arms too).
-    fn atNodesIn(e: AExpr) -> AExpr[] {
+    fn atNodesIn(e: AExpr) -> AExpr[] { return readNodesIn(e, false) }
+
+    fn atNodesInBlock(b: ABlock) -> AExpr[] { return readNodesInBlock(b, false) }
+
+    // `reqs`: also every `<#id>.prop` member node (a request property read — s475 r1,
+    // #1788 F2: W-LIFECYCLE-011 counts a `<#id>.data` read as a read of the target).
+    fn readNodesIn(e: AExpr, reqs: boolean) -> AExpr[] {
         let out: AExpr[] = []
         if (atName(e) != "") out = [e]
-        for (const k of exprKids(e)) { out = out.concat(atNodesIn(k)) }
-        for (const b of exprBlocks(e)) { out = out.concat(atNodesInBlock(b)) }
+        if (reqs && memberName(e.k) != "") {
+            const o: AExpr | not = memberObj(e)
+            if (o is given && hashRefId(o) is given) out = [e]
+        }
+        for (const k of exprKids(e)) { out = out.concat(readNodesIn(k, reqs)) }
+        for (const b of exprBlocks(e)) { out = out.concat(readNodesInBlock(b, reqs)) }
         return out
     }
 
-    fn atNodesInBlock(b: ABlock) -> AExpr[] {
+    fn readNodesInBlock(b: ABlock, reqs: boolean) -> AExpr[] {
         let out: AExpr[] = []
         for (const s of b.stmts) {
-            for (const e of stmtExprs(s)) { out = out.concat(atNodesIn(e)) }
-            for (const nb of stmtKidBlocks(s)) { out = out.concat(atNodesInBlock(nb)) }
+            for (const e of stmtExprs(s)) { out = out.concat(readNodesIn(e, reqs)) }
+            for (const nb of stmtKidBlocks(s)) { out = out.concat(readNodesInBlock(nb, reqs)) }
         }
         return out
     }
@@ -16901,6 +17195,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -16931,6 +17226,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -17227,6 +17523,7 @@ ${
                 .NFn(sym: s) :> false
                 .NLength :> false
                 .NSurface(of: o) :> false
+                .NReq(id: rq0, sig: rs0) :> false
                 .NConst(sym: s) :> false
                 not :> false
             }
@@ -17489,6 +17786,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -18389,6 +18687,7 @@ ${
             .Recovered :> false
             .Sql(q: q) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -19409,6 +19708,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -20742,6 +21042,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -21111,6 +21412,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -21135,6 +21437,7 @@ ${
             .Binary(op: o, l: l, r: r) :> binaryBlocker(e, o, l, r)
             .Ternary(test: t, yes: y, no: n) :> firstBlocker([t, y, n])
             .Template(quasis: q, slots: ss) :> firstBlocker(ss)
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not      // s473: the binder's E-FOREIGN-004 (§23.2.4), not this refusal
             .At(name: n) :> e
             .AtItem :> e
@@ -21190,6 +21493,7 @@ ${
             .Unary(op: o) :> "an operator"
             .Ternary(test: t) :> "a conditional"
             .Template(quasis: q) :> "a template"
+            .HashRef(id: hr0) :> "a `" + hashRefText(hr0) + "` reference"
             .Foreign(f: fb0) :> "a foreign code block"
         }
     }
@@ -21230,6 +21534,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
         if (variant) return "a call or a payload-variant value (a file-scope payload-variant constant is not in the bootstrap yet)"
@@ -22255,9 +22560,21 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> reqKey(hr0)                        // s475 r1 (#1788 F1): `<#id>.data` / `.error` narrow like a cell
             .Foreign(f: fb0) :> ""
         }
     }
+
+    // s475 r1 (#1788 review F1) — a request's properties are PROGRAM CELLS (lower:
+    // requestSignalFields; only the request's runs write them, §6.7.7), so their
+    // narrowing key is a CELL key (`@…`): `<#id>.data` is the place `@<#id>.data`.
+    // Every cell rule then holds for it unchanged — a suspension point / waiting
+    // call ends it ("*", tUnnarrowCells), a handler starts without it unless an
+    // enclosing `if=` gate proves it (tDropCellNarrowing / gateMarks), a deferred
+    // body drops it (tDeferEnv) — and `<#id>.refetch()` writes it (callEffect /
+    // resetKey: the key `@<#id>`, which drops every property under it). No cell's
+    // key can collide: a cell name is an identifier, and `<#` is none.
+    fn reqKey(id: string) -> string { return "@" + hashRefText(id) }
 
     // s474 (§50.3.1): the kept assignment's value IS the local's new value, so a
     // presence test of `(m = e)` is a presence test of `m` (`((m = re.exec(s))
@@ -22279,6 +22596,7 @@ ${
             .NFn(sym: s) :> ""
             .NLength :> ""
             .NSurface(of: x) :> ""
+            .NReq(id: rq0, sig: rs0) :> ""
             .NConst(sym: s) :> ""
             not :> ""
         }
@@ -22310,6 +22628,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -22341,6 +22660,7 @@ ${
             .Sql(q: q) :> noNarrowing()
             .Handled(h: x) :> noNarrowing()
             .Template(quasis: qs) :> noNarrowing()
+            .HashRef(id: hr0) :> noNarrowing()
             .Foreign(f: fb0) :> noNarrowing()
         }
     }
@@ -22471,6 +22791,7 @@ ${
             .Sql(q: q) :> q.params
             .Handled(h: h) :> handledKids(h)      // s451 (Ue): the subject, then each expression arm (block arms: exprBlocks)
             .Template(quasis: qs, slots: ss) :> ss      // s469: the slots, left to right
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> fb0.crossings           // s473: the crossings, left to right
             .Name(name: n) :> []
             .At(name: n) :> []
@@ -22578,6 +22899,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -22589,9 +22911,20 @@ ${
             return []
         }
         if (n != "") return ["()" + n]
+        // s475 r1 (#1788 F1): `<#id>.refetch()` writes the request's properties (reqKey)
+        const rid: string | not = refetchedId(c)
+        if (rid is given) return [reqKey(rid)]
         const m: MethodCall | not = methodCall(c)
         if (m is given) return [placeKey(m.obj)]
         return []
+    }
+
+    // The id of the request a `<#id>.refetch` callee names (s475 r1, #1788 F1).
+    fn refetchedId(c: AExpr) -> string | not {
+        if (memberName(c.k) != "refetch") return not
+        const o: AExpr | not = memberObj(c)
+        if (o is not) return not
+        return hashRefId(o)
     }
 
     fn blockEffects(b: ABlock, al: Alias[]) -> string[] {
@@ -22843,6 +23176,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -22944,6 +23278,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x, prop: pr) :> not
+            .NReq(id: rq0, sig: rs0) :> not        // a request's property is no `(not to T)` field (§6.7.7)
             .NConst(sym: s) :> not
             not :> not
         }
@@ -23575,6 +23910,7 @@ ${
             .NFn(sym: s) :> VType.Unknown
             .NLength :> known(Type.Int)
             .NSurface(of: x, prop: pr) :> surfaceType(pr)
+            .NReq(id: rq0, sig: rs0) :> reqSigType(env.t, rq0, rs0)
             .NConst(sym: s) :> constVType(env.t, s)
             not :> VType.Unknown
         }
@@ -23607,6 +23943,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
             .NConst(sym: s) :> false
             not :> false
         }
@@ -23661,6 +23998,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -24025,6 +24363,7 @@ ${
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
+            .HashRef(id: hr0) :> -1
             .Foreign(f: fb0) :> -1
         }
     }
@@ -24146,6 +24485,7 @@ ${
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
             .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
             .Template(quasis: qs, slots: ss) :> typeTemplate(env, ss, ts)   // s469 (§14.13.3)
+            .HashRef(id: hr0) :> rvt(VType.Unknown, ts)
             .Foreign(f: fb0) :> typeForeign(env, fb0, ts)                  // s473 (§23.2.4a)
             .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
         }
@@ -24888,6 +25228,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x2) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -24937,6 +25278,7 @@ ${
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
             .Template(quasis: qs) :> ts
+            .HashRef(id: hr0) :> ts
             .Foreign(f: fb0) :> ts
         }
     }
@@ -25038,6 +25380,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x2) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -25091,6 +25434,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -25112,6 +25456,7 @@ ${
             .NFn(sym: s) :> false
             .NLength :> false
             .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
             .NConst(sym: s) :> false
             // a name the binder did not resolve: undeclared (reported by the
             // scope rules) or inside a construct already refused (`if=` on a
@@ -26101,6 +26446,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -26132,6 +26478,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -26185,6 +26532,9 @@ ${
 
     fn resetKey(env: TEnv, c: AExpr, a: AExpr[]) -> string {
         if (exprName(c) == "reset" && a.length == 1) return nKey(env, a[0])
+        // s475 r1 (#1788 F1): a `<#id>.refetch()` statement ends the narrowing of `<#id>`'s properties
+        const rid: string | not = refetchedId(c)
+        if (rid is given) return reqKey(rid)
         return ""
     }
 
@@ -26326,6 +26676,7 @@ ${
             .Sql(q: q) :> typeExpr(env, e, ts).ts
             .Handled(h: x) :> typeExpr(env, e, ts).ts
             .Template(quasis: qs) :> typeExpr(env, e, ts).ts
+            .HashRef(id: hr0) :> typeExpr(env, e, ts).ts
             .Foreign(f: fb0) :> typeExpr(env, e, ts).ts
         }
     }
@@ -26378,6 +26729,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -26630,6 +26982,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -26762,6 +27115,7 @@ ${
                     .NLength :> false
                     .NSurface(of: x) :> false
                     .NConst(sym: x) :> false
+                    .NReq(id: x) :> false
                 }
                 if (hit) return rq
             }
@@ -26788,6 +27142,7 @@ ${
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
             .Template(quasis: qs) :> ts
+            .HashRef(id: hr0) :> ts
             .Foreign(f: fb0) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
@@ -27960,6 +28315,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -27986,6 +28342,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: v) :> sharedOf(validityInst(v))
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -28012,6 +28369,10 @@ ${
         // receiver is read; the arrow function is an argument (scanned by the caller)
         if (isHostOrSeq(valueFact(cx.t.values, e.nid))) return scanExprs(cx, receiverOf(callee), acc)
         const f: NameFact | not = nameFact(cx.t.names, callee.nid)
+        // s475 (S3b) — §6.7.4 "What counts as a write": "`<#id>.refetch()`, which writes
+        // the `<request>`'s assigned cell"
+        const rf: ReqFact | not = refetchedReq(cx.t, f)
+        if (rf is given) return addWrite(acc, { cell: "@" + rf.targetName, span: e.span, file: cx.file, fix: FixShape.OtherFix })
         const s: Sym | not = fnSymOf(f)
         if (s is given) return addRef(acc, { sym: s.id, name: s.hint + "()", span: e.span, file: cx.file, asValue: false })
         // A callee name with no fact was already reported (E-SCOPE-001), and any
@@ -28022,6 +28383,27 @@ ${
             return addUnproven(acc, { what: "`" + exprName(callee) + "(…)` calls through `" + exprName(callee) + "`, which is " + calleeKind(f) + ", not a declared scrml function", span: e.span, file: cx.file })
         }
         return scanExprs(cx, receiverOf(callee), acc)
+    }
+
+    // s475 (S3b): the request a `<#id>.refetch()` callee re-runs.
+    fn refetchedReq(t: Tables, f: NameFact | not) -> ReqFact | not {
+        return match f {
+            .NReq(id: i, sig: s) :> refetchSig(t, i, s)
+            .NFn(sym: x) :> not
+            .NLocal(sym: x) :> not
+            .NField(decl: x) :> not
+            .NInst(decl: x) :> not
+            .NStruct(owner: x) :> not
+            .NLength :> not
+            .NSurface(of: x) :> not
+            .NConst(sym: x) :> not
+            not :> not
+        }
+    }
+
+    fn refetchSig(t: Tables, id: string, s: ReqSig) -> ReqFact | not {
+        if (s != ReqSig.Refetch) return not
+        return reqNamedIn(t.requests, id)
     }
 
     // Rule 3: a scrml function NAMED without being called.
@@ -28041,6 +28423,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -28054,6 +28437,7 @@ ${
             .NStruct(owner: o) :> "a struct field"
             .NLength :> "a length"
             .NSurface(of: x) :> "a validity surface"
+            .NReq(id: rq0, sig: rs0) :> "a request property (`" + hashRefText(rq0) + "`)"
             .NConst(sym: s) :> "a file-scope constant"
             .NFn(sym: s) :> "a function"
         }
@@ -28114,6 +28498,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -28145,6 +28530,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -28177,6 +28563,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -28295,6 +28682,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -28325,6 +28713,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -28357,6 +28746,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
             .Foreign(f: fb0) :> ""
         }
     }
@@ -28739,10 +29129,33 @@ ${
             let seen: boolean = rq.pend >= 0
             for (const f of reads) {
                 if (sameField(f, rq.target)) seen = true
+                // s475 r1 (#1788 F2): `<#id>.data` IS the target's last loaded value (§6.7.7
+                // Properties) — reading it in the markup reads what the request loads
+                if (reqDataOf(f) == rq.id) seen = true
             }
             if (!seen) out = out.concat([newDiag("W-LIFECYCLE-011", "`@" + rq.targetName + "`, which the `<request id=\"" + rq.id + "\">` loads, is never read in the markup (§6.7.7) — show it, or drop the request", rq.file, rq.req.opener)])
         }
         return out
+    }
+
+    // The request id of a `<#id>.data` read ("" — any other fact).
+    fn reqDataOf(f: NameFact) -> string {
+        return match f {
+            .NReq(id: i, sig: s) :> reqDataSig(i, s)
+            .NField(decl: x) :> ""
+            .NLocal(sym: x) :> ""
+            .NInst(decl: x) :> ""
+            .NStruct(owner: x) :> ""
+            .NFn(sym: x) :> ""
+            .NLength :> ""
+            .NSurface(of: x) :> ""
+            .NConst(sym: x) :> ""
+        }
+    }
+
+    fn reqDataSig(id: string, s: ReqSig) -> string {
+        if (s == ReqSig.Data) return id
+        return ""
     }
 
     fn sameField(a: NameFact, b: NameFact) -> boolean {
@@ -28759,6 +29172,7 @@ ${
             .NFn(sym: x) :> ""
             .NLength :> ""
             .NSurface(of: x) :> ""
+            .NReq(id: rq0, sig: rs0) :> ""
             .NConst(sym: x) :> ""
         }
     }
@@ -28769,7 +29183,7 @@ ${
             const k: ANodeK = n.k
             const more: AExpr[] = match k {
                 .Elem(e: e) :> elemAtNodes(e)
-                .Interp(e: e) :> atNodesIn(e)
+                .Interp(e: e) :> readNodesIn(e, true)
                 .Gather(f: lf) :> markupAtNodes(gatherRows(lf))
                 .Text(text: x) :> []
                 .DeclNode(d: x) :> []
@@ -28787,9 +29201,9 @@ ${
         for (const a of e.attrs) {
             const v: AAttrValue = a.value
             const more: AExpr[] = match v {
-                .Bare(e: x) :> atNodesIn(x)
-                .Paren(e: x) :> atNodesIn(x)
-                .Braced(b: b) :> atNodesInBlock(b)
+                .Bare(e: x) :> readNodesIn(x, true)
+                .Paren(e: x) :> readNodesIn(x, true)
+                .Braced(b: b) :> readNodesInBlock(b, true)
                 .Quoted(v: x) :> []
                 .NoValue :> []
             }
@@ -29556,6 +29970,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -30352,6 +30767,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -30382,6 +30798,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: h) :> h
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -30475,6 +30892,7 @@ ${
             .NField(decl: d, inst: i, idx: x) :> fieldUseLabel(t, d, x)
             .NInst(decl: d) :> "@" + d.hint
             .NSurface(of: v) :> "the validity surface of @" + validityDecl(v).hint
+            .NReq(id: rq0, sig: rs0) :> hashRefText(rq0) + "." + reqSigName(rs0)
             .NConst(sym: s) :> ""
             .NLocal(sym: s) :> ""
             .NStruct(owner: o) :> ""
@@ -30573,6 +30991,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: o) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
         }
     }
@@ -31949,6 +32368,7 @@ ${
             .Lambda(params: lp) :> a
             .Sql(q: q) :> a
             .Template(quasis: qs) :> a
+            .HashRef(id: hr0) :> a
             .Foreign(f: fb0) :> a
         }
     }
@@ -31996,6 +32416,7 @@ ${
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
+            .HashRef(id: hr0) :> -1
             .Foreign(f: fb0) :> -1
         }
     }
@@ -32012,6 +32433,7 @@ ${
             .NFn(sym: s) :> -1
             .NLength :> -1
             .NSurface(of: o) :> -1
+            .NReq(id: rq0, sig: rs0) :> -1
             .NConst(sym: s) :> -1
             not :> -1
         }
@@ -33018,6 +33440,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -33681,6 +34104,7 @@ ${
             .NotLit :> k
             .Recovered :> k
             .Variant(name: n) :> k
+            .HashRef(id: hr0) :> k
             .Foreign(f: fb0) :> k
             .Member(obj: o, name: n) :> AExprK.Member(mExpr(o, m), n)
             .Call(callee: c, args: a) :> AExprK.Call(mExpr(c, m), mExprs(a, m))
@@ -35374,6 +35798,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -35405,6 +35830,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -35435,6 +35861,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -35545,6 +35972,7 @@ ${
             .Lambda(params: lp, body: b) :> planExpr(cx, b, { refused: "a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)
             .Handled(h: h) :> planHandledArms(cx, h, pos, ps)
             .Template(quasis: qs, slots: ss) :> planKids(cx, ss, pos, ps)
+            .HashRef(id: hr0) :> { found: false, ps: ps }
             .Foreign(f: fb0) :> planKids(cx, fb0.crossings, pos, ps)
             .Member(obj: o) :> planKids(cx, [o], pos, ps)
             .Call(callee: c, args: a) :> planKids(cx, a, pos, ps)
@@ -35619,6 +36047,7 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
     }
@@ -35787,6 +36216,7 @@ ${
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs, slots: ss) :> keyOfList("tpl(" + JSON.stringify(qs) + "|", ss)
+            .HashRef(id: hr0) :> hashRefText(hr0)
             .Foreign(f: fb0) :> ""      // s473 (#1646 review F3): an awaited host effect, never deduplicated — like a nested query
             .Recovered :> ""
         }
@@ -35891,6 +36321,7 @@ ${
             .Sql(q: q) :> distinctSqlParams(q.params)
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -36810,6 +37241,7 @@ ${
             .Spread(e: x) :> linExpr(cx, x, s)
             .Index(obj: o, idx: i) :> linExprs(cx, [o, i], s)
             .Template(quasis: qs, slots: ss) :> linExprs(cx, ss, s)
+            .HashRef(id: hr0) :> linGo(s)
             .Foreign(f: fb0) :> linExprs(cx, fb0.crossings, s)
             .At(name: n) :> linGo(s)
             .AtItem :> linGo(s)
@@ -36833,6 +37265,7 @@ ${
             .NFn(sym: x) :> -1
             .NLength :> -1
             .NSurface(of: x) :> -1
+            .NReq(id: rq0, sig: rs0) :> -1
             .NConst(sym: sy) :> -1
             not :> -1
         }
@@ -37040,6 +37473,7 @@ ${
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
+            .HashRef(id: hr0) :> false
             .Foreign(f: fb0) :> false
         }
         if (bare) return r

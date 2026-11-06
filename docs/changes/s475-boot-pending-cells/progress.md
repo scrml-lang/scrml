@@ -58,3 +58,9 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
 - F3: stmtKidBlocks walks a counted for's init block (blocksReads / calledSymsBlock / atNodesInBlock).
 - Cosmetic: a pending init through a client ! carrier is one refusal ("but `pick()` is not a server function"); the
   Ue2 diag on the same initializer is dropped (waitDiag → dropUe2At).
+
+## 2026-11-06T21:32Z — merge origin/main 2d714762e (#1788 s475-boot-request-refs)
+- Textual merge clean (known-gaps via the generated-merge driver; gap ids = union, 2805). Semantic fixes:
+  analyze pendingOf gains the NReq arm (impl#1 E-TYPE-020 otherwise); lower reqSignalRead indexes signal cells
+  among the requests WITH signals (signalIndex) — a pending cell declared before an author request read the
+  wrong cells (test red without it). A pending cell has no `<#id>`; refetch of one is refused (test).

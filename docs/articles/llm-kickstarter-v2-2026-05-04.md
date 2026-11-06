@@ -2066,7 +2066,7 @@ Three first-class scrml primitives for compute that needs isolation from the mai
 
 > **Known gaps:** the bootstrap has no nested `<program>` yet. impl#1 compiles the older-dialect version of this program but does not write the worker's own bundle (`stats.worker.js`), so its `new Worker(...)` fails to load at runtime.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-EXPR×2, E-PARSE-ITEM×11, E-SCOPE-001(stats)] — the bootstrap has no nested <program> (workers), when message / when error handlers or <#name>.send yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-ITEM×11, E-SCOPE-001(#stats), E-TYPE-STRUCT-CONTEXT] — the bootstrap has no nested <program> (workers), when message / when error handlers or <#name>.send yet (its <#name> reaches only a <request>) -->
 ```scrml
 <program>
 

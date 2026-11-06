@@ -619,9 +619,11 @@ class Request {
  * which then needs a dependency; `opts.state` is the full signal set
  * `{ loading, data, error, stale }` or absent (a pending cell); `opts.read`
  * (default false — WRITE, discard-only) the §6.7.7.1 READ class: a superseded
- * or torn-down run's server call is aborted, not only discarded. Returns
- * `{ refetch }` (§6.7.7 `<#id>.refetch()`: a new run, superseding an
- * in-flight one — EC-4); requestJs binds it to the request's handle.
+ * or torn-down run's server call is aborted, not only discarded; `opts.slot`
+ * the request's program-level slot (rt.requestSlot()) that `<#id>.refetch()`
+ * (rt.refetch) reaches it through. Returns `{ refetch }` (§6.7.7
+ * `<#id>.refetch()`: a new run, superseding an in-flight one — EC-4; a READ
+ * run's transport is aborted then, a WRITE run's discarded).
  */
 export function requestOn(scope, target, deps, body, opts = {}) {
   requireScope(scope, "a <request>");
@@ -644,8 +646,40 @@ export function requestOn(scope, target, deps, body, opts = {}) {
     }
   }
   const r = new Request(scope, target, deps, body, st, opts.read === true);
+  // s475 (slice S3b): the program-level slot `<#id>.refetch()` reaches the request through —
+  // filled while the request is mounted, cleared when its scope is torn down
+  const slot = opts.slot ?? null;
+  if (slot !== null) {
+    if (!slot || typeof slot !== "object" || !Object.prototype.hasOwnProperty.call(slot, "request")) throw new Error("a <request>'s `slot` must come from rt.requestSlot()");
+    slot.request = r;
+    scope.ownEffect(() => {
+      if (slot.request === r) slot.request = null;
+    });
+  }
   if (opts.mount !== false) r.markStale();
   return { refetch: () => r.markStale() };
+}
+
+/**
+ * s475 (slice S3b) — a request's program-level slot (print.scrml requestSlotStmts):
+ * `requestOn(…, { slot })` puts the mounted request in it and its teardown takes
+ * it out, so `<#id>.refetch()` written anywhere in the program reaches it.
+ */
+export function requestSlot() {
+  return { request: null };
+}
+
+/**
+ * s475 (slice S3b) — `<#id>.refetch()` (SPEC §6.7.7 Properties `() -> void`:
+ * "Imperatively re-execute the fetch body"): a new run of the mounted request,
+ * superseding an in-flight one (EC-4 — the newest run wins, as on a dependency
+ * change). While the request is not mounted (its `if=` arm is torn down) there
+ * is nothing to re-execute and the call does nothing: a torn-down request's
+ * results are discarded (EC-3), so a run started then could never be applied.
+ */
+export function refetch(slot) {
+  const r = slot ? slot.request : null;
+  if (r) r.markStale();
 }
 
 /**

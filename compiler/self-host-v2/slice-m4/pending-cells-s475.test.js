@@ -960,3 +960,62 @@ describe("merge with #1794 / #1797 — a pending cell's load under the new READ 
     expect(shown()).toBe("offline");
   });
 });
+
+// Merge with #1788 (s475-boot-request-refs, slice S3b): `<#id>` reads and `.refetch()`. A pending cell's
+// request has no signals and no id, so `<#id>.loading` / `.data` of an AUTHOR request must index the
+// signal cells among the requests WITH signals (lower signalIndex — red before: `4 · k` counted the
+// pending cell's request, reading the wrong cell / past the program's fields). A pending cell has no
+// `<#id>` (§13.9.2 "The hidden request's controls are not reachable"), so it cannot be refetched.
+describe("merge with #1788 — `<#id>` refs beside a pending cell", () => {
+  const RH = "<" + "#userReq>";
+  const REFS = (pendFirst) => {
+    const pend = `    let <who:(not to string)=(loadName(3) !{ _ :> not })/>\n`;
+    const req = `    <request id="userReq">${D} @userName = loadName(@userId); }</request>\n`;
+    return `<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <userId:int=1/>
+    let <userName:string=""/>
+${LOAD}${pendFirst ? pend + req : req + pend}    <main>
+        <button id="u2" onclick={ @userId = 2; }>2</button>
+        <button id="again" onclick={ ${RH}.refetch(); }>again</button>
+        <p id="loading">${D}${RH}.loading}</p>
+        <p id="data" if=(${RH}.data is given)>${D}@userName}</p>
+        <p id="who" if=@who>${D}@who}</p>
+    </main>
+</program>
+`;
+  };
+  for (const pendFirst of [true, false]) {
+    test(`an author request's signals read right with a pending cell declared ${pendFirst ? "before" : "after"} it`, async () => {
+      const r = compile(REFS(pendFirst));
+      expect(errsOf(REFS(pendFirst))).toEqual([]);
+      expect(check(r.core)).toEqual([]);
+      const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+      const held = heldTransport(srv);
+      const { rt } = await loadProgram(r.core, "pend-refs-" + k++);
+      await settle(5);
+      expect(held.length).toBe(2);
+      const txt = (s) => (document.querySelector(s) ? document.querySelector(s).textContent : null);
+      expect(txt("#loading")).toBe("true");
+      for (const h of held) await h.go();
+      await settle();
+      expect(txt("#loading")).toBe("false");
+      expect(txt("#data")).toBe("a");
+      expect(txt("#who")).toBe("c");
+      expect(cells(rt)["#userReq_data"]).toBe("a");
+      click(document.querySelector("#again"));        // refetch the author request only
+      await settle(5);
+      expect(held.length).toBe(3);
+      expect(txt("#loading")).toBe("true");
+      await held[2].go();
+      await settle();
+      expect(txt("#loading")).toBe("false");
+    });
+  }
+
+  test("a pending cell has no `<#id>`: its declaration name is not a request ref", () => {
+    const src = APP(PEND).replace(`<p id="wait" else>loading</p>`, `<p id="wait" else>loading</p>\n        <button onclick={ ${"<" + "#who>"}.refetch(); }>r</button>`);
+    const e = errsOf(src);
+    expect(e.length).toBeGreaterThan(0);
+  });
+});

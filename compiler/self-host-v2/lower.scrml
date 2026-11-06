@@ -42,7 +42,7 @@ ${
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact, ReqSig, reqSigIndex,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
@@ -201,6 +201,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
@@ -232,6 +233,7 @@ ${
             .Host(call: x) :> op
             .Lambda(params: x) :> op
             .SeqCall(op: x) :> op
+            .Refetch(req: rf0) :> op
             .Validity(of: x) :> op
             .ServerCall(fn: x) :> op
             .Query(q: x) :> op
@@ -293,6 +295,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
@@ -418,6 +421,7 @@ ${
             .NFn(sym: s) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -461,6 +465,7 @@ ${
             .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
             .Handled(h: h) :> handledRead(c, e)
             .Template(quasis: qs, slots: ss) :> templateExpr(c, e, qs, ss)   // s469 (§14.13.3)
+            .HashRef(id: hr0) :> missing()
             .Foreign(f: fb0) :> Expr.Host(HostCall.Unreadable)   // s473: unreachable — analyze refuses every foreign block (foreignEmitMsg); C-R1 refuses it if one ever got here
         }
     }
@@ -532,6 +537,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -565,6 +571,7 @@ ${
             .NFn(sym: s) :> missing()
             .NLength :> missing()
             .NSurface(of: x) :> missing()
+            .NReq(id: rq0, sig: rs0) :> missing()
             .NConst(sym: s) :> Expr.Local(s)
             not :> missing()
         }
@@ -656,6 +663,7 @@ ${
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
             .NSurface(of: v, prop: pr) :> Expr.Validity(validityOf(c, v), pr)
+            .NReq(id: rq0, sig: rs0, inst: ri0) :> reqSignalRead(c, rq0, rs0, ri0)
             .NConst(sym: s) :> missing()
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
@@ -685,6 +693,7 @@ ${
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
+            .Refetch(req: rf0) :> missing()
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
             .Query(q: x) :> missing()
@@ -708,6 +717,7 @@ ${
             .NStruct(owner: o) :> missing()
             .NLength :> missing()
             .NSurface(of: x) :> missing()
+            .NReq(id: rq0, sig: rs0) :> refetchExpr(c, rq0, rs0, args)
             .NConst(sym: s) :> missing()
             not :> missing()
         }
@@ -1132,6 +1142,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -1306,6 +1317,7 @@ ${
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
+            .Refetch(req: rf0) :> missing()
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
             .Query(q: x) :> missing()
@@ -1322,6 +1334,7 @@ ${
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
@@ -1623,6 +1636,7 @@ ${
             .NFn(sym: s) :> []
             .NLength :> []
             .NSurface(of: x) :> []
+            .NReq(id: rq0, sig: rs0) :> []
             .NConst(sym: s) :> []
             not :> []
         }
@@ -1643,15 +1657,11 @@ ${
     //    a request torn down with its `if=` arm keeps its data, and on remount
     //    §6.7.7 "`<#id>.data` retains its previous value if one exists";
     //  - handle: the request's own Sym (hint `#<id>`, minted once per request,
-    //    so its printed name is unique): bound, where the request's view list
-    //    renders, to the `{ refetch }` rt.requestOn returns. S3b NOTE: that
-    //    binding is local to the render scope the request stands in — the
-    //    program's render, or an `if=` arm's. A `<#id>.loading` / `.data` /
-    //    `.error` / `.stale` read anywhere in the program reads the program cell
-    //    (`signals`, reachable from any scope); a `<#id>.refetch()` OUTSIDE the
-    //    request's own scope (a program function, a sibling handler) cannot see
-    //    the const — S3b needs a program-level route to it (e.g. a program-scope
-    //    slot requestOn fills on mount and clears on teardown).
+    //    so its printed name is unique). s475 (S3b): it names a PROGRAM-LEVEL
+    //    slot (print.scrml requestSlotStmts) the request fills while mounted, so
+    //    `<#id>.refetch()` (Core Refetch, refetchExpr) reaches it from a program
+    //    function or another scope; `<#id>.loading` / … read the program cell
+    //    (`signals`, reqSignalRead) from any scope.
     //  - body: the `lin` Lets, then ONE Suspend, last (C-R1). A load that waits
     //    is already a Suspend (the plan's point, hoisted by lowerBlock + cpsBody);
     //    a load that does not wait is wrapped: `Suspend(load, <value>, [Write(@x,
@@ -1685,6 +1695,48 @@ ${
         // Attempt handles the failure, and its one settle Write is the cell's
         if (rq.pend >= 0) return View.Request(target, deps, body, true, not, not, cls)
         return View.Request(target, deps, body, true, state, rq.handle, cls)
+    }
+
+    // s475 (slice S3b) — `<#id>.loading` / `.data` / `.error` / `.stale` (§6.7.7
+    // Properties): a read of the request's signal cell, the program field
+    // requestView's `state` names (programFieldCount + 4·k + j). A read in
+    // markup is therefore reactive like any cell read. `i` is the program
+    // instance as the READING site reaches it (analyze programInst: Lexical(0)
+    // in the program's markup, Shared(program) in a function), as for `@x`.
+    fn reqSignalRead(c: LC, id: string, s: ReqSig, i: InstRef) -> Expr {
+        const k: int = signalIndex(c.t, id)
+        const j: int = reqSigIndex(s)
+        if (k < 0 || j < 0) return missing()            // analyze refused it (the diagnostics gate stops lowering)
+        const idx: int = programFieldCount(c.t) + 4 * k + j
+        return cellRead(c, c.t.program, instOf(c, i), [{ owner: c.t.program, idx: idx }])
+    }
+
+    // s475 (slice S3b) — `<#id>.refetch()`: Core Refetch of the request's handle
+    // (the printer's program-level slot — EC-4; a no-op while it is not mounted).
+    fn refetchExpr(c: LC, id: string, s: ReqSig, args: AExpr[]) -> Expr {
+        const k: int = requestIndex(c.t, id)
+        if (k < 0 || s != ReqSig.Refetch || args.length > 0) return missing()
+        return Expr.Refetch(c.t.requests[k].handle)
+    }
+
+    // s475 (slice S4, merge with S3b): the request's position among the requests WITH signals —
+    // a pending cell's request (§13.9.2) has none (lowerDecl / requestView count the same way)
+    fn signalIndex(t: Tables, id: string) -> int {
+        let k: int = 0
+        for (const rq of t.requests) {
+            if (rq.id == id) return k
+            if (rq.pend < 0) k = k + 1
+        }
+        return -1
+    }
+
+    fn requestIndex(t: Tables, id: string) -> int {
+        let k: int = 0
+        for (const rq of t.requests) {
+            if (rq.id == id) return k
+            k = k + 1
+        }
+        return -1
     }
 
     fn programFieldCount(t: Tables) -> int {
@@ -1992,6 +2044,7 @@ ${
             .NStruct(owner: o) :> not
             .NLength :> not
             .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
             .NConst(sym: s) :> not
             not :> not
         }
@@ -2802,6 +2855,7 @@ ${
             .Sql(q: x) :> noCall()
             .Handled(h: x) :> noCall()
             .Template(quasis: qs) :> noCall()
+            .HashRef(id: hr0) :> noCall()
             .Foreign(f: fb0) :> noCall()
         }
     }
@@ -2820,6 +2874,7 @@ ${
             .NStruct(owner: o) :> noCall()
             .NLength :> noCall()
             .NSurface(of: x) :> noCall()
+            .NReq(id: rq0, sig: rs0) :> noCall()
             .NConst(sym: s) :> noCall()
             not :> noCall()
         }
@@ -3053,6 +3108,7 @@ ${
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
     }
@@ -3061,6 +3117,7 @@ ${
         return match k {
             .Handled(h: h) :> h
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -3091,6 +3148,7 @@ ${
             .Sql(q: q) :> q
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
@@ -3301,6 +3359,7 @@ ${
             .Lambda(params: lp) :> []
             .Handled(h: h) :> [h.subject]
             .Template(quasis: qs, slots: ss) :> ss
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> fb0.crossings
             .Member(obj: o) :> [o]
             .Call(callee: x, args: a) :> a
@@ -3362,6 +3421,7 @@ ${
             .Sql(q: q) :> distinctSqlParams(q.params)     // s468 (U1c): a query's distinct values (§8.2), evaluated before it waits
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
             .Foreign(f: fb0) :> []
         }
     }
@@ -4250,6 +4310,7 @@ ${
             .Host(call: x) :> []
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
+            .Refetch(req: rf0) :> []
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []

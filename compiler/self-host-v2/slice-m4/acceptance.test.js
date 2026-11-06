@@ -345,14 +345,13 @@ const STATUS = {
   "request/neg-deps-member-entry": ["PASS", ["E-LIFECYCLE-022"]],
   "request/settle-success-cell": ["PASS", ["W-LIFECYCLE-013"]],
   "request/settle-error-keeps-cell": ["PASS", ["W-LIFECYCLE-013"]],
-  // … SLICE S3b PINS: the case reads `<#userReq>` (its signals / refetch), which does not parse yet —
-  // expected.json is the target; these flip when S3b builds `<#id>`
-  "request/data-is-given-if-attr": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
-  "request/data-is-given-value-attrs": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
-  "request/settle-success": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
-  "request/settle-error": ["FAIL", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TRAILING", "W-LIFECYCLE-013"]],
-  "request/refetch-fn-body-stmt": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPR", "E-SCOPE-001"]],
-  "request/refetch-inline-multi-stmt": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPR", "E-SCOPE-001"]],
+  // … slice S3b (s475-boot-request-refs): the cases that read `<#userReq>` (its signals / refetch) — built
+  "request/data-is-given-if-attr": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/data-is-given-value-attrs": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/settle-success": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/settle-error": ["PASS", ["W-LIFECYCLE-013"]],
+  "request/refetch-fn-body-stmt": ["PASS", []],
+  "request/refetch-inline-multi-stmt": ["PASS", []],
   // … and the rest of §6.7.7 S3a carries: the target is never a dependency, `lin` in the body, each code
   "request/target-read-not-dep": ["PASS", []],
   "request/lin-body": ["PASS", []],
@@ -404,6 +403,12 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     for (const rel of ["request/body-client-wrapper", "request/deps-empty-mount-only", "request/deps-explicit-listed-refire",
       "request/deps-explicit-unlisted-no-refire", "request/deps-cell-entry", "request/settle-success-cell", "request/settle-error-keeps-cell",
       "request/target-read-not-dep", "request/lin-body", "request/warn-no-deps"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s475 S3b: every `<#id>` case RAN on the bootstrap (output checked, not merely compiled)", () => {
+    for (const rel of ["request/data-is-given-if-attr", "request/data-is-given-value-attrs", "request/settle-success",
+      "request/settle-error", "request/refetch-fn-body-stmt", "request/refetch-inline-multi-stmt"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

@@ -87,7 +87,8 @@ const SEPARATOR_RE = /^(?:—|–|--|-|:)/;
 const PIN_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:\s*×\s*([1-9][0-9]{0,3}))?$/;
 const PIN_NAMED_RE = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*)\s*\(([^()]*)\)$/;
 // a name may be empty: `E-TYPE-UNKNOWN()` (the bootstrap's `` unknown type `` `` names nothing)
-const PIN_NAME_RE = /^(?:@?[A-Za-z_$][\w$.]*)?$/;
+// `#stats` is a `<#stats>` element reference (§6.7.7), keyed by doc-boot-check.js pinKey
+const PIN_NAME_RE = /^(?:@?[A-Za-z_$][\w$.]*|#[A-Za-z_$][\w$]*)?$/;
 
 /** Split a pin list on the commas that are not inside a `( … )` name list. */
 function splitPinList(list) {
