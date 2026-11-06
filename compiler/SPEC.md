@@ -12222,7 +12222,8 @@ body is the declared initializer assigned to the cell:
 - **Everything else is the `<request>`'s.** Mount, supersede (EC-2: the newest load wins), teardown (EC-3), §6.7.7.1
   READ / WRITE classification and abort-reads / discard-writes, and §6.7.7.3's rule that a provably-writing request
   does not run on mount all apply to a pending cell by construction, because the desugar is literal. (DD Open
-  Question 3 asks for this confirmation; this sentence gives it.)
+  Question 3 asks for this confirmation; this sentence gives it.) Author writes also take part in the supersede
+  order, which the literal desugar does not give: §13.9.4 "Which write or load wins" (S475, ⚑ PA reading).
 - **No new runtime representation.** At run time the cell holds `not` until the load settles, which is the existing
   representation of `(not to T)`. The difference between pending and `T` is **static only**.
 - **The compiler SHALL NOT reset the cell by re-running the initializer outside the request.** A reset of a pending
@@ -12294,7 +12295,8 @@ behaviour only. Statically, §13.9.3 already requires every read to discriminate
 
 **A waiting write from an action position.** An action-position write of a waiting value into a pending cell
 (`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its suspension point
-(§13.8 (i)) and lands when the value arrives. Until then the cell SHALL keep its current value. It SHALL NOT revert
+(§13.8 (i)) and lands when the value arrives, unless a newer write or load has started by then (§13.9.4 "Which
+write or load wins", S475, ⚑ PA reading). Until then the cell SHALL keep its current value. It SHALL NOT revert
 to `not` when the write starts, as a reload keeps its last value above. The write does not transition the cell by
 itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point ends narrowing (§42.3.5).
 
