@@ -201,6 +201,18 @@ describe("C-R3 / C-R1 — a Refetch is discarded, and is a write (s475 r1 F3)", 
     core.fns = [...core.fns, { ...clone(core.fns[0]), sym: re, params: [], body: C.block([C.Stmt.Eval(C.Expr.Refetch(h))]) }];
     expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `re\(\)`: re-runs a `<request>`/);
   });
+  // C-R2 × Refetch: a READ load through a client wrapper that refetches is not one server batch —
+  // the refetch writes its request's target (§6.7.4) and starts that request's own load. Refused
+  // whatever the wrapper's server-call count.
+  test("a READ load through a client wrapper that refetches is refused", () => {
+    const h = H();
+    const re = C.mkSym(910065, "re");
+    const core = requestCore((p) => { p.handle = h; p.cls = C.ReqClass.ReqRead; p.on = C.Expr.Call(re, []); });
+    core.fns = [...core.fns, { ...clone(core.fns[0]), sym: re, params: [], body: C.block([C.Stmt.Eval(C.Expr.Refetch(h))]) }];
+    // C-R1 refuses it on the load's own call, so C-R2's server-call count (which a Refetch adds
+    // nothing to) is never what admits it
+    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: a Request body writes reactive state besides its one Write of the target — through `re\(\)`: re-runs a `<request>`/);
+  });
 });
 
 describe("the request machine through the printer", () => {
