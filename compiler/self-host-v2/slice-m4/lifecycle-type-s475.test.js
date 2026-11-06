@@ -144,7 +144,7 @@ describe("other lifecycles and other declarations are refused by name", () => {
   test("a derived cell whose initializer only calls: the message says it calls, not that it reads cells", () => {
     const e = errs(P(`function g() -> int { return 1; }\n<m:(not to int)=(g())/>`));
     expect(e.map((d) => d.code)).toEqual([U]);
-    expect(e[0].message).toContain("calls a function, which the bootstrap counts as reading cells");
+    expect(e[0].message).toContain("calls `g()`, which the bootstrap counts as reading cells");   // r2: names the call
     expect(e[0].message).not.toContain("initializer reads cells");
   });
   // r1 F5 (red on 91e235c2c: E-PARSE-TYPE "expected `)` … found `(`")

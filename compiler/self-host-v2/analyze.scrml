@@ -1476,8 +1476,51 @@ ${
         for (const r of reads) {
             if (r.substring(0, 1) == "@") return "reads the cell `" + r + "`"
         }
-        if (reads.indexOf("()") >= 0) return "calls a function, which the bootstrap counts as reading cells"
+        for (const r of reads) {
+            if (isCallRead(r)) return callsPhrase(r) + ", which the bootstrap counts as reading cells"
+        }
         return "runs a query, which the bootstrap counts as reading cells"
+    }
+
+    fn callsPhrase(r: string) -> string {
+        if (r == "()") return "calls a function"
+        return "calls `" + r + "`"
+    }
+
+    // s475 r2 (cosmetic) — what a derived initializer reads, for E-DERIVED-WRITE: its cells by
+    // name, each once ("reads `@a`, `@b`"), then the calls it makes by name ("and calls
+    // `load()`") — a call counts as a read (valueReads); never the bare "()" tokens.
+    fn readsPhrase(reads: string[]) -> string {
+        let cells: string[] = []
+        let calls: string[] = []
+        let sql: boolean = false
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@") {
+                if (cells.indexOf("`" + r + "`") < 0) cells = cells.concat(["`" + r + "`"])
+            } else if (r == "()") {
+                if (calls.indexOf("a function") < 0) calls = calls.concat(["a function"])
+            } else if (isCallRead(r)) {
+                if (calls.indexOf("`" + r + "`") < 0) calls = calls.concat(["`" + r + "`"])
+            } else {
+                sql = true
+            }
+        }
+        let parts: string[] = []
+        if (cells.length > 0) parts = parts.concat(["reads " + cells.join(", ")])
+        if (calls.length > 0) parts = parts.concat(["calls " + calls.join(", ") + " (a call counts as reading cells)"])
+        if (sql) parts = parts.concat(["runs a query (a query counts as reading cells)"])
+        if (parts.length == 0) return "reads cells"
+        return parts.join(" and ")
+    }
+
+    // The same, as what a seeded value stops following ("`@a`, `@b`", or "its initializer's inputs").
+    fn followsPhrase(reads: string[]) -> string {
+        let cells: string[] = []
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@" && cells.indexOf("`" + r + "`") < 0) cells = cells.concat(["`" + r + "`"])
+        }
+        if (cells.length > 0) return cells.join(", ")
+        return "its initializer's inputs"
     }
 
     // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
@@ -2552,14 +2595,18 @@ ${
         }
     }
 
-    // The `@names` an expression reads ("()" for a call), for E-DERIVED-WRITE's message.
+    // The `@names` an expression reads ("f()" for a call of `f`, "()" for a call it cannot
+    // name), for E-DERIVED-WRITE's message. s475 r2 (N1): a handling form's BLOCK arms are
+    // walked too (handledArmBlockReads) — `!{ _ :> { lift @nm } }` reads `@nm`, so a locked
+    // `(not to T)` cell reading it is derived (ruling S475 item 1), a `let` one re-runs on it,
+    // and derived cycles / field modes see it.
     fn exprReads(e: AExpr) -> string[] {
         const k: AExprK = e.k
         return match k {
             .At(name: n) :> ["@" + n]
             .AtItem :> ["@."]
             .Member(obj: o) :> exprReads(o)
-            .Call(callee: c, args: args) :> ["()"].concat(listReads(args))
+            .Call(callee: c, args: args) :> [callRead(c)].concat(exprReads(c)).concat(listReads(args))
             .Unary(op: o, e: x) :> exprReads(x)
             .Binary(op: o, l: l, r: r) :> exprReads(l).concat(exprReads(r))
             .Ternary(test: t, yes: y, no: n) :> exprReads(t).concat(exprReads(y)).concat(exprReads(n))
@@ -2570,7 +2617,7 @@ ${
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
             .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
-            .Handled(h: h) :> listReads(handledKids(h))      // s451 (Ue): the subject and the arms' values
+            .Handled(h: h) :> listReads(handledKids(h)).concat(blocksReads(exprBlocks(e)))      // s451 (Ue): the subject and the arms' values; r2 (N1): the arm blocks
             .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
             .Foreign(f: fb0) :> listReads(fb0.crossings)            // s473: a foreign block reads its crossings (§23.2.4a)
             .Name(name: n) :> []
@@ -2581,6 +2628,29 @@ ${
             .Recovered :> []
             .Variant(name: n) :> []
         }
+    }
+
+    // A call's read token: "name()" for a named callee, "()" otherwise (a method, a lambda).
+    fn callRead(c: AExpr) -> string {
+        const n: string = exprName(c)
+        if (n != "") return n + "()"
+        return "()"
+    }
+
+    fn isCallRead(r: string) -> boolean {
+        return r.length >= 2 && r.substring(r.length - 2) == "()"
+    }
+
+    // s475 r2 (N1) — what statement blocks read: every statement's expressions, at any depth.
+    fn blocksReads(bs: ABlock[]) -> string[] {
+        let out: string[] = []
+        for (const b of bs) {
+            for (const s of b.stmts) {
+                out = out.concat(listReads(stmtExprs(s)))
+                out = out.concat(blocksReads(stmtKidBlocks(s)))
+            }
+        }
+        return out
     }
 
     fn listReads(es: AExpr[]) -> string[] {
@@ -9634,10 +9704,11 @@ ${
     }
 
     fn derivedMessage(p: WPlace, f: FieldInfo) -> string {
-        const deps: string = f.reads.join(", ")
+        const how: string = readsPhrase(f.reads)
+        const deps: string = followsPhrase(f.reads)
         // s469 review r2: `let` on a sequence is E-GRANT-LET-ON-SEQUENCE — a tape is never seeded by `let`
-        if (seqElem(unMaybe(f.ty)) is given) return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. A sequence is not made writable by `let` (`let` on a sequence is E-GRANT-LET-ON-SEQUENCE): its grants live on the type (`T[replace]`, §66.12.2, §66.12.3)."
-        return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. If you want a value that STARTS from that expression and is then written independently, declare it `let` — it becomes SEEDED: computed once, and it no longer follows " + deps + " (§66.9)."
+        if (seqElem(unMaybe(f.ty)) is given) return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer " + how + ") — it recomputes and cannot be written. To change it, write one of its dependencies. A sequence is not made writable by `let` (`let` on a sequence is E-GRANT-LET-ON-SEQUENCE): its grants live on the type (`T[replace]`, §66.12.2, §66.12.3)."
+        return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer " + how + ") — it recomputes and cannot be written. To change it, write one of its dependencies. If you want a value that STARTS from that expression and is then written independently, declare it `let` — it becomes SEEDED: computed once, and it no longer follows " + deps + " (§66.9)."
     }
 
     // L8: a transition is Static only when Core can prove the edge — a literal
@@ -28892,12 +28963,25 @@ ${
         return false
     }
 
-    // The Sym ids of the scrml functions an expression calls (at any depth).
+    // The Sym ids of the scrml functions an expression calls (at any depth). s475 r2 (N1
+    // audit): a handling form's arm BLOCKS too, as every other read walk does. (Today a call
+    // there that reaches SQL waits, and a waiting call in an arm is refused by name — the U1b
+    // arm-continuation follow-up — so this closes the walk ahead of that, not a live hole.)
     fn calledSyms(t: Tables, e: AExpr) -> int[] {
         let out: int[] = []
         const c: Sym | not = callSym(t, e)
         if (c is given) out = out.concat([c.id])
         for (const x of exprKids(e)) { out = out.concat(calledSyms(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(calledSymsBlock(t, b)) }
+        return out
+    }
+
+    fn calledSymsBlock(t: Tables, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const s of b.stmts) {
+            for (const x of stmtExprs(s)) { out = out.concat(calledSyms(t, x)) }
+            for (const nb of stmtKidBlocks(s)) { out = out.concat(calledSymsBlock(t, nb)) }
+        }
         return out
     }
 

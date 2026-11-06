@@ -97,6 +97,10 @@ ${
         // (renderViews), and, for a hole being wired, the context AT the hole
         // (wireHole): `htmlNs()`, or "svg" / "math" / "math-text" / "annot".
         ns: string,
+        // s475 r2 (N2): the PENDING CELLS (§13.9.2) — each a `<request>` with no state's target,
+        // as "<decl sym id>:<field idx>" (pendTargets). A client Suspend whose continuation writes
+        // one CLAIMS it at its start (suspendJs → rt.suspendClaim): the newest write or load wins.
+        pend: string[],
     }
 
     // s474: `key` — a KEYED loop's (§17.4b) iteration-key local (its name and
@@ -863,7 +867,7 @@ ${
     fn withCycle(ctx: Ctx, c: CycleJs) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
-                 cycles: ctx.cycles.concat([c]), ns: ctx.ns }
+                 cycles: ctx.cycles.concat([c]), ns: ctx.ns, pend: ctx.pend }
     }
 
     fn cycleOf(ctx: Ctx, t: Sym) -> CycleJs | not {
@@ -1167,12 +1171,12 @@ ${
 
     fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns, pend: ctx.pend }
     }
 
     fn withNs(ctx: Ctx, ns: string) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns, pend: ctx.pend }
     }
 
     // -------------------------------------------------------------------------
@@ -1785,7 +1789,121 @@ ${
     // C12 puts a Suspend only at the tail of an effect body, whose arrow binds
     // `task$`.
     fn suspendJs(ctx: Ctx, b: Sym, on: Expr, t: Block) -> JsStmt {
-        return sexpr(rtCall(ctx, "suspend", [jid("task$"), exprJs(ctx, on), JsExpr.JArrow([symName(ctx, b)], blockJs(ctx, t))]))
+        const k: JsExpr = JsExpr.JArrow([symName(ctx, b)], blockJs(ctx, t))
+        // s475 r2 (N2): a waiting write into a pending cell claims the cell at the call's start —
+        // superseding the cell's in-flight load (aborted, a READ) or older write (its result
+        // discarded); its own landing is discarded in turn if a newer write or load started
+        // (PA reading: the MOST RECENTLY STARTED write or load of a pending cell wins)
+        const claims: JsExpr[] = pendClaims(ctx, t)
+        if (claims.length > 0) return sexpr(rtCall(ctx, "suspendClaim", [jid("task$"), exprJs(ctx, on), k, JsExpr.JArray(claims)]))
+        return sexpr(rtCall(ctx, "suspend", [jid("task$"), exprJs(ctx, on), k]))
+    }
+
+    // The pending cells a continuation writes before it suspends again (its own Writes, in
+    // its Ifs and Commits too — never past a nested Suspend: that write is the next one's).
+    fn pendClaims(ctx: Ctx, t: Block) -> JsExpr[] {
+        if (ctx.server || ctx.pend.length == 0) return []
+        let out: JsExpr[] = []
+        for (const s of t.stmts) { out = out.concat(pendClaimsStmt(ctx, s)) }
+        return out
+    }
+
+    fn pendClaimsStmt(ctx: Ctx, s: Stmt) -> JsExpr[] {
+        return match s {
+            .Write(cap: cap, inst: inst) :> pendClaimWrite(ctx, cap, inst)
+            .Commit(writes: ws) :> pendClaimsList(ctx, ws)
+            .If(cond: c, thenB: tb, elseB: eb) :> pendClaims(ctx, tb).concat(pendClaimsMaybe(ctx, eb))
+            .Let(sym: x) :> []
+            .Assign(local: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .Suspend(bind: x) :> []
+            .ResetSurface(of: x) :> []
+            .Defer(body: x) :> []
+            .Unpersist(decl: x) :> []
+            .Attempt(result: x) :> []
+            .Fail(err: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
+            .Loop(label: x) :> []
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
+            .Gather(g: x) :> []
+            .Lift(into: x) :> []
+        }
+    }
+
+    fn pendClaimsList(ctx: Ctx, ws: Stmt[]) -> JsExpr[] {
+        let out: JsExpr[] = []
+        for (const s of ws) { out = out.concat(pendClaimsStmt(ctx, s)) }
+        return out
+    }
+
+    fn pendClaimsMaybe(ctx: Ctx, b: Block | not) -> JsExpr[] {
+        if (b is not) return []
+        return pendClaims(ctx, b)
+    }
+
+    fn pendClaimWrite(ctx: Ctx, cap: Sym, inst: InstRef) -> JsExpr[] {
+        const owner: CapOwner | not = capOwner(ctx.p, cap)
+        if (owner is not) return []
+        if (ctx.pend.indexOf(owner.decl.sym.id + ":" + owner.idx) < 0) return []
+        return [fieldCell(instJs(ctx, inst), owner.decl, owner.idx)]
+    }
+
+    // s475 r2 (N2) — the pending cells' keys: every View.Request with no state (a pending
+    // cell's, §13.9.2 — lower requestView), at any depth of any declaration's renders.
+    fn pendTargets(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const n of allNodes(Node.NProgram(p))) {
+            const k: string = pendTargetOf(n)
+            if (k != "" && out.indexOf(k) < 0) out = out.concat([k])
+        }
+        return out
+    }
+
+    fn pendTargetOf(n: Node) -> string {
+        return match n {
+            .NView(v: v) :> pendViewKey(v)
+            .NStmt(s: x) :> ""
+            .NExpr(e: x) :> ""
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> ""
+            .NServerFn(f: x) :> ""
+            .NBlock(b: x) :> ""
+            .NPlace(pl: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NAttr(a: x) :> ""
+        }
+    }
+
+    fn pendViewKey(v: View) -> string {
+        return match v {
+            .Request(target: t, state: st) :> pendKey(t, st)
+            .El(tag: x) :> ""
+            .Text(text: x) :> ""
+            .RawText(text: x) :> ""
+            .Dyn(e: x) :> ""
+            .Cond(arms: x) :> ""
+            .Each(src: x) :> ""
+            .Instance(decl: x) :> ""
+            .Slot :> ""
+            .Star(decl: x) :> ""
+            .Effect(deps: x) :> ""
+            .ResetOn(triggers: x) :> ""
+            .Errors(of: x) :> ""
+            .Reach(fields: x) :> ""
+            .Gather(g: x) :> ""
+        }
+    }
+
+    fn pendKey(t: EffectDep, st: RequestState | not) -> string {
+        if (st is given) return ""
+        return t.decl.id + ":" + t.idx
     }
 
     fn letJs(ctx: Ctx, sym: Sym, init: Expr, assigned: int[]) -> JsStmt {
@@ -2106,7 +2224,7 @@ ${
                 stmts = stmts.concat([JsStmt.SConst(nodeVar(h.path), rtCall(ctx, "at", args))])
             }
         }
-        let templates: Template[] = [{ id: tid, nodes: built.nodes, ns: ctx.ns }]
+        let templates: Template[] = [{ id: tid, nodes: built.nodes, ns: ctx.ns, pend: ctx.pend }]
         // Instance holes are numbered in document order — the order in which
         // the factory created them (mountedInstances) when this is a
         // declaration's own renders (ctx.prebuilt, L12 (b)).
@@ -2127,7 +2245,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, pend: ctx.pend }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -2265,7 +2383,7 @@ ${
     // s474 — a keyed row's snapshot locals are CELLS in its markup (`x.get()`).
     fn withRowCells(ctx: Ctx, ids: int[]) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, pend: ctx.pend }
     }
 
     // The loop's locals (`local`: the Syms the Gather binds, at any depth of
@@ -2635,7 +2753,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, pend: ctx.pend,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -2811,7 +2929,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs() }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs(), pend: pendTargets(p) }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -2821,7 +2939,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns, pend: ctx.pend }
     }
 
     // s474: `uses` — the contexts each declaration is used in (declNsUses); its
@@ -3410,7 +3528,7 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns, pend: ctx.pend }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -3436,7 +3554,7 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs() }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs(), pend: [] }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {

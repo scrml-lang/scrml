@@ -40,7 +40,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mods, compile, check, realDb, serve, bridge } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
-import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf } from "../slice-m1/load-program.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf, printCore } from "../slice-m1/load-program.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 300000 });
 const realFetch = globalThis.fetch;
@@ -323,6 +323,51 @@ ${LOAD}export let <who:(not to string)=(loadName(1) !{ _ :> not })/>
     expect(m.message).toContain("a derived cell cannot carry a lifecycle type");
   });
 
+  // r2 N1 (red on b093477e8: both compiled clean as pending cells, deps 1 — exprReads walked a
+  // handling form's subject and EXPRESSION arms only, never its BLOCK arms): a cell read inside a
+  // block arm is a read (ruling S475 item 1 "locked + reads is derived and stays refused").
+  test("locked + a cell read in a BLOCK arm is DERIVED: E-VALUE-SERVER-CALL (r2 N1, both spellings)", () => {
+    const nm = (decl) => APP(decl).replace("    let <show", "    let <nm:string=\"n\"/>\n    let <show");
+    for (const decl of [
+      `<who:(not to string)=(loadName(1) !{ _ :> { const q: string = @nm; lift q; } })/>`,
+      `<who:(not to string)=(loadName(1) !{ .Transport(t) :> { lift @nm; } })/>`,
+    ]) {
+      const e = errsOf(nm(decl));
+      expect(e.map((d) => d.code)).toContain("E-VALUE-SERVER-CALL");
+      expect(e.find((d) => d.code === "E-VALUE-SERVER-CALL").message).toContain("the formula of derived `@who`");
+      expect(e.find((d) => d.code === U).message).toContain("reads the cell `@nm`");
+    }
+  });
+
+  test("`let` + a cell read in a BLOCK arm: the read is a dependency, so the load re-runs on it (r2 N1)", () => {
+    const src = APP(`let <who:(not to string)=(loadName(@userId) !{ _ :> { const q: string = @nm; lift q; } })/>`)
+      .replace("    let <show", "    let <nm:string=\"n\"/>\n    let <show");
+    const r = fe(src);
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.deps.map((d) => d.hint ?? d.sym?.hint ?? JSON.stringify(d)).length).toBe(2);
+  });
+
+  test("E-DERIVED-WRITE names the reads and the calls — never \"reads (), ()\" (r2 cosmetic)", () => {
+    // the reviewer's case: a `(not to T)` cell made derived by its call, then written
+    const src = APP(`<who:(not to string)=(loadName(one()) !{ _ :> not })/>`).replace(LOAD, LOAD + CUR)
+      .replace(`onclick={ @userId = 2; }`, `onclick={ @who = "z"; }`);
+    const m = errsOf(src).find((d) => d.code === "E-DERIVED-WRITE");
+    expect(m.message).not.toContain("reads ()");
+    expect(m.message).toContain("calls `loadName()`, `one()`");
+    const src2 = `<program>
+    let <a:int=1/>
+    function f(x: int) -> int { return x; }
+    <b:int=(f(@a) + f(2))/>
+    <main><button onclick={ @b = 3; }>x</button><p>${D}@b}</p></main>
+</program>
+`;
+    const m2 = errsOf(src2).find((d) => d.code === "E-DERIVED-WRITE");
+    expect(m2.message).toContain("initializer reads `@a` and calls `f()`");
+    expect(m2.message).toContain("no longer follows `@a`");
+    expect(m2.message).not.toContain("(), ()");
+  });
+
   test("a `?{}` written in the initializer is refused by name (INTERIM)", () => {
     const e = errsOf(APP(`let <who:(not to User)=(${SQ}\`SELECT id, name FROM users WHERE id = \${@userId}\`}.get() !{ _ :> not })/>`));
     expect(e.some((d) => d.code === U && d.message.includes("whose load is a `" + SQ + "}` written in its declaration"))).toBe(true);
@@ -505,6 +550,87 @@ describe("run time — the request machine, through the server artifact (slice-m
     await held[2].go();
     await settle();
     expect(shown()).toBe("c");
+  });
+
+  // r2 N2 — the newest STARTED write or load of a pending cell wins (PA reading ⚑, recorded in the
+  // §13.9.4 coverage row): starting one supersedes any older one in flight — its result is discarded,
+  // and a READ load's transport aborted (Task.onAbort). Red on b093477e8 (probe p9): R1 "b" (the stale
+  // reload overwrote the author's "c"), R2 "c" (the older author write overwrote the reload's "b"),
+  // R3 "a" (the first load overwrote the author's "c"); no transport aborted.
+  const RACE = (decl = PEND) => APP(decl).replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
+    `<button id="w" onclick={ @who = loadName(3) !{ _ :> not }; }>w</button>\n        <button id="z" onclick={ if (@who is given) { @who = "z"; } }>z</button>`);
+  async function race(name) {
+    const r = compile(RACE());
+    expect(printCore(r.core, "race").js).toContain("rt.suspendClaim(task$");
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, name + k++);
+    await settle(5);
+    return { rt, held };
+  }
+
+  test("R1: the own reload in flight, then an author write — the reload is aborted, the author's value stays", async () => {
+    const { rt, held } = await race("pend-r1-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the own reload (READ) starts
+    await settle(5);
+    click(document.querySelector("#w"));             // the author write starts: it supersedes the reload
+    await settle(5);
+    expect(held.length).toBe(3);
+    expect(held[1].aborted).toBe(true);
+    expect(cells(rt).who).toBe("a");                 // keeps its value meanwhile (§13.9.4)
+    await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
+    expect(shown()).toBe("c");
+  });
+
+  test("R2: an author write in flight, then a dependency change — the reload wins, the older write is discarded", async () => {
+    const { rt, held } = await race("pend-r2-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#w"));             // the author write starts
+    await settle(5);
+    click(document.querySelector("#u2"));            // the reload starts after it: the newest
+    await settle(5);
+    expect(held.length).toBe(3);
+    await held[2].go();                              // the reload lands
+    await settle();
+    expect(cells(rt).who).toBe("b");
+    await held[1].go();                              // the older author write lands: discarded
+    await settle();
+    expect(cells(rt).who).toBe("b");                 // agrees with its dependency (`@userId` = 2)
+    expect(shown()).toBe("b");
+  });
+
+  test("R3: an author write during the FIRST load — the first load is aborted, the author's value lands", async () => {
+    const { rt, held } = await race("pend-r3-");
+    click(document.querySelector("#w"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    expect(held[0].aborted).toBe(true);
+    await held[1].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
+    expect(shown()).toBe("c");
+  });
+
+  test("a plain write supersedes the in-flight load the same way (it starts and lands at once)", async () => {
+    const { rt, held } = await race("pend-r4-");
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));            // the reload starts
+    await settle(5);
+    click(document.querySelector("#z"));             // `@who = "z"`: newer than the reload
+    await settle(5);
+    expect(held[1].aborted).toBe(true);
+    expect(cells(rt).who).toBe("z");
+    click(document.querySelector("#u3"));            // a later dependency change reloads as before
+    await settle(5);
+    await held[2].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
   });
 
   test("a pending `(not to S[…])` tape loads and re-renders its rows", async () => {

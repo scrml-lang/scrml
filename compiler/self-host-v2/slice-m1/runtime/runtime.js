@@ -195,11 +195,14 @@ export class Cell {
     // A seed still owed (an initializer queued during construction, see
     // `construct`), SEEDING while it runs, or null once the value is settled.
     this.pending = null;
+    // s475 r2 (N2): a PENDING cell's supersede record (§13.9.2; set by its Request) — null otherwise
+    this.pend = null;
   }
   get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    if (this.pend !== null && !pendWrite(this)) return;     // s475 r2 (N2): a superseded write is discarded
     this.pending = null;
     if (Object.is(v, this.value)) return;
     this.value = v;
@@ -451,6 +454,60 @@ export function effectOn(scope, deps, body) {
 // ---------------------------------------------------------------------------
 const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 
+// s475 r2 (N2) — SUPERSEDE ACROSS A PENDING CELL'S WRITES AND LOADS (PA reading, recorded in the
+// coverage row / gap text: "the MOST RECENTLY STARTED write or load of a pending cell wins. Starting
+// a new one supersedes any older one in flight: the older one's result is discarded, and for
+// READ-class loads it is aborted, the same way a request's own reload already supersedes").
+// A pending cell's Request gives its target a record `{ seq, req, settling }`:
+//  - a run of the cell's own load stamps `seq` (Request.run) — an older author write still in
+//    flight then lands on a stale stamp and is discarded;
+//  - an author's WAITING write claims the cell when its call STARTS (print.scrml suspendJs →
+//    suspendClaim): it cancels the load's in-flight task (rt.call's Task.onAbort — a READ's
+//    transport is aborted; a WRITE's runs to completion, discarded) and stamps `seq`; when it
+//    lands, it writes only if its stamp is still the newest;
+//  - any other write (a plain `@who = "z"`) starts and lands at once: it supersedes the same way.
+// The load's own settle (`settling`) is never re-checked: a superseded run's task is cancelled, so
+// its continuation never runs. Only a pending cell carries the record (a `<request>` with state
+// keeps §6.7.7's own rules: an author write does not supersede its fetch).
+let pendSeq = 0;
+let landing = null;               // the claims of the continuation now running ({ cell, tok }[])
+
+function pendWrite(cell) {
+  const p = cell.pend;
+  if (p.settling) return true;
+  if (landing !== null) {
+    for (const c of landing) {
+      if (c.cell === cell) return c.tok === p.seq;
+    }
+  }
+  pendSupersede(p);
+  return true;
+}
+
+function pendSupersede(p) {
+  p.req.supersede();
+  p.seq = ++pendSeq;
+  return p.seq;
+}
+
+/**
+ * `suspend`, for a continuation that writes pending cells (print.scrml suspendJs): each cell is
+ * claimed NOW — the write starts with its call — and the continuation's writes to it land only
+ * if no newer write or load of it started meanwhile.
+ */
+export function suspendClaim(task, value, k, cells) {
+  const claims = [];
+  for (const cell of cells) {
+    if (cell instanceof Cell && cell.pend !== null) claims.push({ cell, tok: pendSupersede(cell.pend) });
+  }
+  if (claims.length === 0) return suspend(task, value, k);
+  return suspend(task, value, (v) => {
+    const prev = landing;
+    landing = claims;
+    try { return k(v); } finally { landing = prev; }
+  });
+}
+
 class Request {
   constructor(scope, target, deps, body, state, read) {
     this.target = target;
@@ -461,6 +518,8 @@ class Request {
     this.disposed = false;
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
+    // s475 r2 (N2): a pending cell (no state) — its writes and loads supersede one another
+    if (state === null) target.pend = { seq: 0, req: this, settling: false };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -469,12 +528,19 @@ class Request {
     effectQueue.add(this);
     if (batchDepth === 0) flush();
   }
+  /** s475 r2 (N2): a newer write of the pending cell started — the in-flight run is superseded. */
+  supersede() {
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+  }
   run() {
     if (this.disposed) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
+    const p = this.target.pend;
+    if (p !== null && p.req === this) p.seq = ++pendSeq;      // N2: this load is now the newest
     const st = this.state;
     try {
       if (st) {
@@ -505,7 +571,13 @@ class Request {
       if (st && failed(v)) {
         st.error.set(v.error);
       } else {
-        then(v);
+        const p = this.target.pend;
+        if (p !== null && p.req === this) {
+          p.settling = true;
+          try { then(v); } finally { p.settling = false; }
+        } else {
+          then(v);
+        }
         if (st) st.data.set(this.target.peek());
       }
     } finally {
@@ -533,6 +605,7 @@ class Request {
     this.disposed = true;
     effectQueue.delete(this);
     for (const d of this.deps) d.observers.delete(this);
+    if (this.target.pend !== null && this.target.pend.req === this) this.target.pend = null;
     const inFlight = this.tasks.size > 0;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();

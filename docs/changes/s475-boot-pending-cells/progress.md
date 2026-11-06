@@ -32,3 +32,10 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
   walks Counted heads; message "at most one per path". L1: file-scope/module pending cell refused by name (new gap
   g-boot-pending-cell-outside-program-s475). L2: E-ERROR-002 re-word only for the initializer's own call. Block-initializer
   wording fixed (parser refuses it). Tests: pending-cells 33 pass, request.core 22 pass.
+- 2026-11-06T21:00Z — FIX ROUND r2 (re-review of #1796 at b093477e8). origin/main ca31847a8 already merged (#1794/#1797
+  not on main yet). N1: `exprReads` walks a handling form's BLOCK arms (blocksReads over exprBlocks) — the shared
+  walker under valueReads / cellReads / derivedCycles / field modes; a call's callee is walked too; `calledSyms`
+  walks arm blocks (defensive — a waiting call in an arm is refused today). N2 BUILT: newest-started write or load of
+  a pending cell wins (PA reading ⚑) — runtime `Cell.pend` record set by a stateless Request, `rt.suspendClaim`
+  (print suspendJs claims the pending cells a continuation writes), `pendWrite` in Cell.set; READ loads aborted
+  through Task.onAbort. Cosmetic: E-DERIVED-WRITE names reads + calls (readsPhrase / followsPhrase).
