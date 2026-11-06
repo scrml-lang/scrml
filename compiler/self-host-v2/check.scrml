@@ -1808,8 +1808,8 @@ ${
     // the program: rule 1(b) "the call lowers to a single server batch"), and
     // every query that call reaches on the server — its own body and every
     // function it calls there, transitively — is a SELECT (rule 1(a) "no
-    // non-`SELECT` SQL … reachable anywhere in the call graph"), with at least
-    // one; a host-backed function on the way fails it (§6.7.7.1 O-059-3, a
+    // non-`SELECT` SQL … reachable anywhere in the call graph"; none at all
+    // holds vacuously — S475 ruling); a host-backed function on the way fails it (§6.7.7.1 O-059-3, a
     // non-SQL side effect, is not ruled: WRITE). Defence in depth over
     // analyze's `requestReads`, which decides the class. A WRITE request is
     // never checked here: discarding is never wrong ("Unclassifiable = write").
@@ -1829,6 +1829,8 @@ ${
         const cf: Sym | not = calledSym(on)
         if (cf is not) return ["C-R2: a READ Request's load is not one server call — §6.7.7.1 rule 1(b) classifies READ only a call that lowers to a single server batch; anything else is WRITE"]
         let cseen: int[] = []
+        let dir: int[] = []                                     // per cseen entry: its own ServerCall nodes
+        let outs: int[][] = []                                  // per cseen entry: the client functions it calls, once per call
         let ctodo: Sym[] = [cf]
         let roots: Sym[] = []
         let j = 0
@@ -1841,15 +1843,52 @@ ${
                 const f0: Fn | not = findFn(p, s0)
                 if (f0 is not) return ["C-R2: a READ Request's load calls `" + s0.hint + "`, which is not a client function of the program — unclassifiable is WRITE (§6.7.7.1 rule 1)"]
                 if (f0.host is given) return ["C-R2: a READ Request's load reaches the host-backed `" + s0.hint + "` on the client — it is WRITE (§6.7.7.1 O-059-3)"]
+                let own = 0
+                let callees: int[] = []
                 for (const nd of allNodes(Node.NBlock(f0.body))) {
                     if (nodeIsLoop(nd)) return ["C-R2: a READ Request's load runs a loop in `" + s0.hint + "` — not provably one server batch (§6.7.7.1 rule 1(b))"]
                     const sc: Sym | not = nodeServerCallSym(nd)
-                    if (sc is given) roots = roots.concat([sc])
+                    if (sc is given) {
+                        roots = roots.concat([sc])
+                        own = own + 1
+                    }
                     const pc: Sym | not = nodePlainCall(nd)
-                    if (pc is given) ctodo = ctodo.concat([pc])
+                    if (pc is given) {
+                        ctodo = ctodo.concat([pc])
+                        callees = callees.concat([pc.id])
+                    }
                 }
+                dir = dir.concat([own])
+                outs = outs.concat([callees])
             }
         }
+        // s475 (request-followups) — the requests the load makes are counted along EVERY call, not
+        // once per function: a function called twice (`h(id) + h(id + 1)`, or a diamond b → d,
+        // c → d) makes its server call twice. A least fixpoint of total(f) = own(f) + Σ total(g)
+        // over f's calls, capped at 2 (≥ 2 is WRITE whatever the count); a cycle through a server
+        // call saturates at 2. Monotone and capped, so it terminates.
+        let tot: int[] = dir
+        let changed = true
+        while (changed) {
+            changed = false
+            let nt: int[] = []
+            let i = 0
+            while (i < cseen.length) {
+                let t: int = dir[i]
+                for (const c of outs[i]) {
+                    const ci: int = cseen.indexOf(c)
+                    if (ci >= 0) t = t + tot[ci]
+                }
+                if (t > 2) t = 2
+                if (t != tot[i]) changed = true
+                nt = nt.concat([t])
+                i = i + 1
+            }
+            tot = nt
+        }
+        let total = 0
+        if (cseen.length > 0) total = tot[0]
+        if (total >= 2) return ["C-R2: a READ Request's load makes 2 or more server calls (counted along every call) — §6.7.7.1 rule 1(b) classifies READ only one server batch"]
         if (roots.length != 1) return ["C-R2: a READ Request's load makes " + roots.length + " server calls — §6.7.7.1 rule 1(b) classifies READ only one server batch"]
         return readServerWalk(p, roots[0])
     }
@@ -1899,11 +1938,10 @@ ${
     }
 
     // C-R2's rule 1(a) walk: from the READ request's one server call, every function it reaches on
-    // the server holds only SELECT queries (at least one) and no host-backed function.
+    // the server holds only SELECT queries (none is READ too) and no host-backed function.
     fn readServerWalk(p: CoreProgram, sf: Sym) -> string[] {
         let seen: int[] = []
         let todo: Sym[] = [sf]
-        let selects = 0
         let k = 0
         while (k < todo.length) {
             const s: Sym = todo[k]
@@ -1923,7 +1961,6 @@ ${
                     const q: SqlQuery | not = nodeQuery(nd)
                     if (q is given) {
                         if (q.kind != SqlKind.SqlSelect) return ["C-R2: a READ Request's server call reaches a query that is not provably a SELECT, in `" + s.hint + "` — §6.7.7.1 rule 1(a): READ iff no non-`SELECT` SQL is reachable"]
-                        selects = selects + 1
                     }
                     const c1: Sym | not = nodePlainCall(nd)
                     if (c1 is given) todo = todo.concat([c1])
@@ -1932,7 +1969,6 @@ ${
                 }
             }
         }
-        if (selects == 0) return ["C-R2: a READ Request's server call reaches no query — the bootstrap classifies READ only a call whose server work is SELECTs (§6.7.7.1 O-059-3: a non-SQL effect is not ruled)"]
         return []
     }
 

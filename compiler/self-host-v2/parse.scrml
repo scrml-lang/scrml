@@ -5723,12 +5723,16 @@ ${
         }
         let pre: AType = fromT
         if (bad) pre = blankAType(fromT)     // as parseLifeType: no second report downstream
+        let why: string = ""
+        if (!bad) why = lifeRefusal(fromT, toT, arrow, mp.src.substring(start, m.pos))
+        // s475-boot-request-followups (#1783 review LOW 2): a REFUSED lifecycle keeps a blank first
+        // state too — one report per construct. Before, `<xs:(not to int[append])=not/>` was refused
+        // here AND every `@xs.append(…)` was E-WRITE-NOT-GRANTED against a `(not to int[])` it
+        // never declared (the grant list dropped from the type text).
+        if (why != "") pre = blankAType(fromT)
         const ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TLife(pre, toT) }
         m = mBump(m)
-        if (!bad) {
-            const why: string = lifeRefusal(fromT, toT, arrow, mp.src.substring(start, m.pos))
-            if (why != "") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", why, start, m.pos)
-        }
+        if (why != "") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", why, start, m.pos)
         return { t: ty, mp: m }
     }
 

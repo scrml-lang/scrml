@@ -10590,6 +10590,10 @@ ${
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
+        // s475-boot-request-followups (#1783 review LOW 2): a cell whose WRITTEN type was refused
+        // (FieldInfo.trusted, r8 — e.g. `(not to int[append])`) is never judged against the grants
+        // of a type it was not given: one report per construct (the refusal), no second one here.
+        if (!f.trusted) return { w: not, st: st }
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
         if (grantsHasEdits(f.grants)) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
@@ -11114,6 +11118,7 @@ ${
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
+        if (!f.trusted) return st     // s475-boot-request-followups: a refused written type — no second report (as wholeFieldWrite)
         return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "(…)` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
     }
 
@@ -23004,21 +23009,30 @@ ${
     fn lifeMaybeMsg(f: FieldInfo, v: VType) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to a `" + post + "`), or declare `@" + n + "` `" + post + " | not` if it may become absent again (only a pending cell's own handled load may land a `not` in it — its declared `= f() !{ _ :> not }`, or an `@x = f() !{ _ :> not }` of a function that waits, §13.9.4, §13.9.5)"
+        return "this value may be `not` (it is " + vtTypesName(v) + "), so `@" + n + " = …` may write `@" + n + "` back to its pre-state — its lifecycle `(not to " + post + ")` grants writes along `not → " + post + "` only, and a write is judged by the transition it can perform, not by how it is spelled (§66.11.2, §66.11.6). Discriminate the value first (`const v = …; if (v is given) { @" + n + " = v; }`, or `match` it to " + aCode(post) + "), or declare `@" + n + "` `" + post + " | not` if it may become absent again (only a pending cell's own handled load may land a `not` in it — its declared `= f() !{ _ :> not }`, or an `@x = f() !{ _ :> not }` of a function that waits, §13.9.4, §13.9.5)"
     }
 
     // s475 r1 F2b: a whole write of a LOCKED `(not to T)` cell that is provably present
     fn lifeAgainMsg(f: FieldInfo) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return "`@" + n + "` is a locked `(not to " + post + ")` cell, and here it is already a `" + post + "` (discriminated or written on this path), so this write is `" + post + " → " + post + "` — its lifecycle grants the one write `not → " + post + "` only (§66.11.1, §66.11.6). Declare it `let` to rewrite it (a `let` cell's `replace`, bounded by its lifecycle)"
+        return "`@" + n + "` is a locked `(not to " + post + ")` cell, and here it is already " + aCode(post) + " (discriminated or written on this path), so this write is `" + post + " → " + post + "` — its lifecycle grants the one write `not → " + post + "` only (§66.11.1, §66.11.6). Declare it `let` to rewrite it (a `let` cell's `replace`, bounded by its lifecycle)"
     }
 
     // s475 r1 F2b: a locked `(not to T)` cell's edit — its lifecycle grants the whole `not → T` write only
     fn lifeEditMsg(f: FieldInfo, what: string) -> string {
         const n: string = f.sym.hint
         const post: string = lifePost(f)
-        return what + " of `@" + n + "`, a locked `(not to " + post + ")` cell — its lifecycle grants the one whole write `not → " + post + "` only (§66.11.1, §66.11.6); an edit changes a `" + post + "` it already holds (`" + post + " → " + post + "`). " + lifeEditFix(f, post)
+        return what + " of `@" + n + "`, a locked `(not to " + post + ")` cell — its lifecycle grants the one whole write `not → " + post + "` only (§66.11.1, §66.11.6); an edit changes " + aCode(post) + " it already holds (`" + post + " → " + post + "`). " + lifeEditFix(f, post)
+    }
+
+    // s475-boot-request-followups (#1783 review LOW 3): the indefinite article before a code-quoted
+    // type name — "an `int`", "a `string`" (a leading vowel letter; `User` / `uint`-like names read
+    // "a", the safe default).
+    fn aCode(name: string) -> string {
+        const c: string = name.charAt(0)
+        if (c == "a" || c == "e" || c == "i" || c == "o" || c == "A" || c == "E" || c == "I" || c == "O") return "an `" + name + "`"
+        return "a `" + name + "`"
     }
 
     fn lifeEditFix(f: FieldInfo, post: string) -> string {
@@ -28833,13 +28847,16 @@ ${
     //      unresolvable call (`scan.unproven`), is not host-backed and has no
     //      `_{}` foreign block, and every `?{}` on the way is provably a SELECT
     //      (sql.scrml `sqlFacts`; a query the reader cannot prove read-only is
-    //      SqlWrite) — and there is at least ONE such query.
-    // The last two clauses are INTERIM, fail closed to WRITE (discard is never
-    // wrong): §6.7.7.1 O-059-3 does not rule a non-SQL side effect (a host
-    // call, an outbound request), so a call graph that reaches one — or that
-    // reaches no SQL at all, whose server work the compiler cannot vouch for —
-    // is WRITE. The capable form, once O-059-3 is ruled: a non-SQL
-    // effect-freedom proof over the server call graph (pure functions READ).
+    //      SqlWrite). A call graph that reaches NO `?{}` holds (a) vacuously
+    //      and is READ (ruling:user-voice-scrml.md S475 "PA self-correction
+    //      adopted: the #1787 '≥1 SELECT' clause (a no-SQL server call classed
+    //      WRITE) is dropped — SPEC §6.7.7.1 rule 1 makes it READ").
+    // The host-backed / `_{}` / unresolvable clauses are INTERIM, fail closed to
+    // WRITE (discard is never wrong): §6.7.7.1 O-059-3 does not rule a non-SQL
+    // side effect (a host call, a foreign block, an outbound request), so a
+    // call graph that reaches one — or a call the compiler cannot resolve — is
+    // WRITE. The capable form, once O-059-3 is ruled: a non-SQL effect-freedom
+    // proof over the host / foreign calls the server call graph reaches.
     // Body-own `?{}` sites are refused already (actionServerDiags, F1); one
     // makes the request WRITE here too. check.scrml C-R2 re-checks a READ
     // class against Core.
@@ -28911,11 +28928,10 @@ ${
 
     // rule 1(a) over the server call graph from `roots`: every callable reached is known, has no
     // unresolvable call, is not host-backed, has no `_{}` block, and every `?{}` is provably a
-    // SELECT — and there is at least one.
+    // SELECT. No `?{}` at all is READ (rule 1(a) holds vacuously; S475 ruling).
     fn serverReadOnly(t: Tables, sum: Summary, roots: int[]) -> boolean {
         let seen: int[] = []
         let todo: int[] = roots
-        let selects: int = 0
         let k: int = 0
         while (k < todo.length) {
             const sym: int = todo[k]
@@ -28930,12 +28946,11 @@ ${
                 if (f.scan.unproven.length > 0) return false
                 for (const q of f.sqls) {
                     if (sqlFacts(q.q.chunks).kind != SqlKind.SqlSelect) return false
-                    selects = selects + 1
                 }
                 for (const r of f.scan.refs) { todo = todo.concat([r.sym]) }
             }
         }
-        return selects > 0
+        return true
     }
 
     fn remoteCallee(k: SuspendK) -> int {
@@ -32250,10 +32265,18 @@ ${
     // the callee's `Transport` as its own (§19.5.2), so its callers receive it too (PA ruling S475:
     // "recursively for client callers"). Returned as AFn nids (the composed program keeps them; Sym ids
     // are minted again).
+    // s475-boot-transport-every-client-bang — and every client-placed `!` function that `?`-propagates a
+    // CLIENT CALL OF A SERVER FUNCTION, composed or not. Owner ruling S475 item 4: "§19.9.5 extends to every
+    // client `!` function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for
+    // client functions. Newly-accepting." Was: such a function's own enum had to declare `Transport`
+    // (E-ERROR-010, §19.5.3 bullet 3). A function that HANDLES each of its server calls (`!{}` / `match`)
+    // lets no wire failure out and is not a carrier unless it composes (reading: "making a server call" whose
+    // failure its callers can receive — making it a carrier would only add an arm its callers can never run,
+    // which is newly-rejecting, against the ruling's direction).
     fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> int[] {
         let syms: int[] = seeds
         const places: PlaceFact[] = t.server.places
-        let changed = syms.length > 0
+        let changed = true
         while (changed) {
             changed = false
             for (const fs of g.fns) {
@@ -32261,7 +32284,7 @@ ${
                 if (syms.indexOf(sid) < 0 && fs.f.failable && !isServerPlace(placeOf(places, sid)) && sum.inherited.indexOf(sid) < 0) {
                     for (const h of cfStmts(fs.f.body.stmts, cf0()).handled) {
                         const cs: Sym | not = fnSymAt(t, h.callee)
-                        if (!changed && h.how == 0 && cs is given && syms.indexOf(cs.id) >= 0) {
+                        if (!changed && h.how == 0 && cs is given && (syms.indexOf(cs.id) >= 0 || isServerPlaced(t, cs))) {
                             syms = syms.concat([sid])
                             changed = true
                         }

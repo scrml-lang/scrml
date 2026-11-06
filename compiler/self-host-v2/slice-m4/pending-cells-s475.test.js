@@ -660,3 +660,118 @@ describe("run time — the request machine, through the server artifact (slice-m
     expect(names()).toEqual(["a", "b", "c"]);
   });
 });
+
+// Merge of origin/main (#1794 s475-boot-request-followups, #1797 s475-boot-transport-every-client-bang)
+// into this lane. The pending cell's load IS a `<request>` (§13.9.2 "§6.7.7.1 READ / WRITE
+// classification and abort-reads / discard-writes … apply to a pending cell by construction"), so:
+//   #1794 — a server call that reaches NO SQL is READ (S475 ruling: "the #1787 '≥1 SELECT' clause …
+//     is dropped — SPEC §6.7.7.1 rule 1 makes it READ"), so a no-SQL pending load is now abortable —
+//     superseded by a dependency change or by an author write's claim (rt.suspendClaim), its transport
+//     is aborted (before the merge it was WRITE: run to completion, discarded). C-R2 re-checks it clean.
+//   #1797 — every client `!` function that `?`-propagates a server call is a transport carrier
+//     (ruling S475 item 4): an author's waiting write of one into a pending cell (§13.9.4 ¶2) must
+//     cover `E + Transport` (or `_`), and a wire failure reaches that arm.
+// C-R2's per-call counting (#1794) walks a client function's calls; a pending load is a direct server
+// call (a client call in the initializer is refused, g-boot-pending-cell-opaque-call-s475), so it is
+// checked by C-R2's direct branch (readServerWalk) — pinned by the forced-READ case below.
+const NOSQL = `    server function loadName(id: int) -> string {
+        if (id == 1) return "a";
+        if (id == 2) return "b";
+        return "c";
+    }
+`;
+const BANG = `    type E:enum = { Bad }
+    server function s(id: int)! E {
+        if (id < 0) fail E.Bad;
+        if (id == 1) return "a";
+        return "c";
+    }
+    function pick(id: int)! E {
+        const v: string = s(id)?;
+        return v;
+    }
+`;
+describe("merge with #1794 / #1797 — a pending cell's load under the new READ class and transport carriers", () => {
+  test("a no-SQL pending load is READ (#1794), prints `read: true`, and C-R2 re-checks it clean", () => {
+    const r = compile(APP(PEND).replace(LOAD, NOSQL));
+    const [rq] = requestsOf(r.core);
+    expect(rq.cls.variant ?? rq.cls).toBe("ReqRead");
+    expect(check(r.core)).toEqual([]);
+    const js = mods().print.printProgram(r.core, "app.client.js", "scrml-runtime.js").js;
+    expect(js).toContain("}, { mount: true, read: true });");
+  });
+
+  test("C-R2 still refuses a pending load forced READ when its server call writes (a locked, mount-once load)", () => {
+    const ins = `    function loadName(id: int) -> string {
+        ${SQ}\`INSERT INTO users (id, name) VALUES (\${id + 10}, 'x')\`}.run() !{ _ :> { return "?"; } };
+        return "w";
+    }
+`;
+    // a writing load with dependencies is refused by name (§6.7.7.3 write-request machine); one that
+    // reads no cell loads once on mount — WRITE, so never re-checked until forced READ
+    const r = compile(APP(`<who:(not to string)=(loadName(1) !{ _ :> not })/>`).replace(LOAD, ins));
+    const [rq] = requestsOf(r.core);
+    expect(rq.cls.variant ?? rq.cls).toBe("ReqWrite");
+    expect(check(r.core)).toEqual([]);
+    rq.cls = "ReqRead";
+    expect(check(r.core).join("\n")).toMatch(/C-R2: a READ Request's server call reaches a query that is not provably a SELECT, in `loadName`/);
+  });
+
+  test("a superseded no-SQL load's transport is aborted, by a dependency change and by an author write's claim", async () => {
+    const src = APP(PEND).replace(LOAD, NOSQL).replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
+      `<button id="w" onclick={ @who = loadName(3) !{ _ :> not }; }>w</button>`);
+    const r = compile(src);
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-nosql-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#u2"));            // reload 1
+    await settle(5);
+    click(document.querySelector("#u3"));            // reload 2 supersedes reload 1
+    await settle(5);
+    expect(held.length).toBe(3);
+    expect(held[1].aborted).toBe(true);              // RED before the merge: a no-SQL load was WRITE
+    click(document.querySelector("#w"));             // the author write claims the cell
+    await settle(5);
+    expect(held.length).toBe(4);
+    expect(held[2].aborted).toBe(true);
+    expect(cells(rt).who).toBe("a");                 // keeps its value meanwhile (§13.9.4)
+    await held[3].go();
+    await settle();
+    expect(cells(rt).who).toBe("c");
+  });
+
+  test("an author waiting write through a client `!` carrier (#1797) must cover `E + Transport`", () => {
+    const w = (h) => APP(`let <who:(not to string)=(s(@userId) !{ _ :> not })/>`).replace(LOAD, LOAD + BANG)
+      .replace(`onclick={ @userId = 2; }`, `onclick={ ${h} }`);
+    expect(codes(w(`@who = pick(3) !{ _ :> not };`))).toEqual([]);
+    expect(codes(w(`@who = pick(3) !{ .Bad :> not, .Transport(t) :> "offline" };`))).toEqual([]);
+    const e = errsOf(w(`@who = pick(3) !{ .Bad :> not };`));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-080"]);
+    expect(e[0].message).toContain("E + Transport");
+  });
+
+  test("a wire failure of that carrier write reaches its `.Transport` arm and lands in the pending cell", async () => {
+    const src = APP(`let <who:(not to string)=(s(@userId) !{ _ :> not })/>`).replace(LOAD, LOAD + BANG)
+      .replace(`onclick={ @userId = 2; }`, `onclick={ @who = pick(3) !{ .Bad :> not, .Transport(t) :> "offline" }; }`);
+    const r = compile(src);
+    expect(check(r.core)).toEqual([]);
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-carrier-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#u2"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    held[1].fail();
+    await settle();
+    expect(cells(rt).who).toBe("offline");
+    expect(shown()).toBe("offline");
+  });
+});
