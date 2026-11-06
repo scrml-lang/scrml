@@ -586,7 +586,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   gate:
     if: ${{ always() }}
-    needs: [checks, unit, integration, browser, slices, host-global, windows]
+    needs: [checks, unit, integration, browser, slices, host-global, windows, postgres-live]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -600,7 +600,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if echo "$NEEDS" | jq -e --arg ev "$EVENT" 'to_entries | all(.value.result == "success" or (.key == "windows" and .value.result == "skipped" and $ev == "merge_group"))' > /dev/null; then
+          if echo "$NEEDS" | jq -e --arg ev "$EVENT" 'to_entries | all(.value.result == "success" or ((.key == "windows" or .key == "postgres-live") and .value.result == "skipped" and $ev == "merge_group"))' > /dev/null; then
             echo "gate: every blocking job concluded success"
           else
             echo "::error::gate: a blocking job did not succeed (failure, cancellation and skip all count)"
@@ -672,7 +672,9 @@ jobs:
       # byte staleness warns; see "Bootstrap severity table" there.)
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
-  # postgres-live — NON-BLOCKING (not in gate.needs; listed in scripts/ci-shards.ts NON_BLOCKING), S475.
+  # postgres-live — BLOCKING since S475 (in gate.needs; promoted after 5 consecutive green main runs,
+  # bryan S475 "your recs on all of them", item 13). Like `windows`, it skips merge_group, where the gate
+  # accepts `skipped` for it. History: added S475 as non-blocking.
   # The bootstrap's live Postgres tests (compiler/self-host-v2/slice-m4/*-pg-s475.test.js) SKIP without
   # SCRML_TEST_PG_URL, so the `slices` job never runs them against a server. This job runs them against a
   # REAL PostgreSQL service container — the only place §19.10.6 "A statement from another request runs on
@@ -680,11 +682,8 @@ jobs:
   # backend session, so there the other request always waits (gap
   # g-boot-pg-envelope-nowait-unproven-on-real-pg-s475). SCRML_TEST_PG_REAL=1 turns on the no-wait /
   # no-dirty-read assertions in pg-envelope-s475.test.js.
-  # NOT REQUIRED on purpose: a new required check would block every PR on a service container's health
-  # (a Docker Hub pull) and on a suite that has never yet run green in CI. No job-level continue-on-error
-  # either, so a failure shows RED on the PR (visible, non-blocking) instead of passing silently. Promote it
-  # into gate.needs once it has run green — the PA's call. Skips merge_group (ran on the PR; runs again on
-  # the push to main).
+  # Cost of requiring it: a PR also waits on the service container's health (a Docker Hub pull); a pull
+  # failure is a re-run, not a code fault. Skips merge_group (ran on the PR; runs again on the push to main).
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   postgres-live:
     if: ${{ github.event_name != 'merge_group' }}
