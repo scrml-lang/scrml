@@ -1243,7 +1243,17 @@ ${
                 } else {
                     r = { s: rs.s, tp: termAfter(rs.tp, rs.s, b0) }
                 }
-                if (!armBlockLastAt(r.tp)) r = stmtChecks(r.tp, r.s, b0, h0)
+                if (!armBlockLastAt(r.tp)) {
+                    r = stmtChecks(r.tp, r.s, b0, h0)
+                } else if (stmts.length > 0) {
+                    // s475 r1 (#1767 review F3): the LAST of two or more statements is
+                    // never the arm's value (§18.5: a statement-holding block arm yields
+                    // only by `lift` — a bare tail is E-ARM-TAIL-VALUE), so a `match` /
+                    // `!{}` there is a statement in either position: its value-`if`
+                    // brace arms are statement lists (stmtArmReread), as armTails reads
+                    // them for a statement-position form
+                    r = valueIfArmsReread(r.tp, r.s)
+                }
                 stmts = stmts.concat([r.s])
                 t = r.tp
                 if (t.i == before) t = adv(t)
@@ -2481,6 +2491,30 @@ ${
 
     type RArmReread:struct = { a: AArm, tp: TP }
 
+    // s475 r1 (#1767 review F3) — the expression statement `s` (a `match` / `!{}`),
+    // its value-`if` brace arms re-read as statement lists; nothing else judged here.
+    fn valueIfArmsReread(tp: TP, s: AStmt) -> RStmt {
+        const x: AExpr | not = stmtExpr(s)
+        if (x is not) return { s: s, tp: tp }
+        const arms: AArm[] = handledArms(x)
+        if (arms.length == 0) return { s: s, tp: tp }
+        let t: TP = tp
+        let out: AArm[] = []
+        let changed = false
+        for (const a0 of arms) {
+            let a: AArm = a0
+            if (a.bare && valueIfArm(t, a)) {
+                const rr: RArmReread = stmtArmReread(t, a)
+                a = rr.a
+                t = rr.tp
+                changed = true
+            }
+            out = out.concat([a])
+        }
+        if (!changed) return { s: s, tp: tp }
+        return { s: withArmsStmt(s, x, out), tp: t }
+    }
+
     // Is this `bare` arm a value-`if` brace (valueIfBrace: the block `[Eval(if …)]`,
     // written `{ if … }`)? A `{ e }` brace never starts with `if` (parseStmt reads a
     // statement `if` there), so the brace's first token decides.
@@ -2495,12 +2529,19 @@ ${
 
     // The arm's brace read again as a statement-list block (parseArmBlock), from its
     // `{` — fresh node ids from `tp`, and that reading's own diagnostics.
+    // s475 r1 (#1767 review F2): the discarded value reading's diagnostics inside the
+    // brace (a soft one — a warning — survives valueIfBrace, which only refuses on a
+    // hard error) are dropped first, so the statement reading's own are not reported twice.
     fn stmtArmReread(tp: TP, a: AArm) -> RArmReread {
         const b: ABlock | not = armBlockOf(a)
         if (b is not) return { a: a, tp: tp }
         const i: int = tokIndexAt(tp, b.span.start)
         if (i < 0) return { a: a, tp: tp }
-        const rb: RArmBlock = parseArmBlock({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })
+        let kept: Diag[] = []
+        for (const d of tp.diags) {
+            if (d.span.start < b.span.start || d.span.end > b.span.end) kept = kept.concat([d])
+        }
+        const rb: RArmBlock = parseArmBlock({ toks: tp.toks, i: i, nid: tp.nid, diags: kept, file: tp.file, ns: tp.ns })
         return { a: withArmBlock(a, rb.b, rb.lifted, rb.bare), tp: { toks: tp.toks, i: tp.i, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: rb.tp.ns } }
     }
 

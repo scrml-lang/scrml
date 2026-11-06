@@ -12632,7 +12632,7 @@ ${
                 .Guard(arms: x) :> rs0.x.ty
                 .MatchOn(arms: x) :> not
             }
-            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(sc, expected), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, armWant(sc, expected, !isMatchHow(hm)), noSuccessUse(env, e, h, sc, stmt, rs0.st)))
         }
         // s469 — the §18 plain-value `match`: a subject that is not a failable result
         const pma: AArm[] | not = matchArmsOf(h.how)
@@ -12656,20 +12656,40 @@ ${
         const how: AHow = h.how
         return match how {
             .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
-            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(f, expected), st))
-            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(f, expected), st))
+            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(f, expected, true), st))
+            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, armWant(f, expected, false), st))
         }
     }
 
     // s475 (g-boot-object-literal-struct-context-positions-s475) — the type a value
-    // arm of a handler on a call yields: §19.4.3 "Yield a value of the call's success
-    // type"; for a callee with no declared success type (or a `?{}`), the position's.
-    fn armWant(f: FnInfo | not, expected: Type | not) -> Type | not {
-        if (f is given) {
-            const r: Type | not = f.ret
-            if (r is given) return r
-        }
+    // arm of a handler on a call is resolved against (an object literal arm takes its
+    // struct from it). s475 r1 (#1767 review F1): the POSITION's type wins — the arm's
+    // value is what lands there (§14.10: an object literal's struct is its position's);
+    // the callee's declared success type (§19.4.3 "a value of the call's success type")
+    // is the fallback only where the position has none. Preferring the callee's type
+    // built an arm as the callee's struct, and that value then landed in the position
+    // unchecked (g-boot-handled-call-result-landing-unchecked-s473) — `const r: int =
+    // match srv() { … :> { a: 1, b: 2 } … }` compiled.
+    // INTERIM (capable form: the landing check of g-boot-handled-call-result-landing-unchecked-s473,
+    // then a `!{}` arm takes the position's type here too): a `!{}` — whose value on success
+    // IS the call's success value — in a position of a DIFFERENT type gives its arms no
+    // struct context, so an object arm is refused (E-TYPE-STRUCT-CONTEXT) as before s475;
+    // taking the position's type would accept the arm and land the mismatched success
+    // value unchecked (`-> R` returning `srv() !{ .Transport(t) :> { a: 0, c: 0 } }`, srv -> S).
+    fn armWant(f: FnInfo | not, expected: Type | not, guard: boolean) -> Type | not {
+        let r: Type | not = not
+        if (f is given) r = f.ret
+        if (expected is not) return r
+        if (guard && r is given && !sameType(r, expected)) return not
         return expected
+    }
+
+    fn isMatchHow(h: AHow) -> boolean {
+        return match h {
+            .MatchOn(arms: x) :> true
+            .Guard(arms: x) :> false
+            .Propagate :> false
+        }
     }
 
     // §19.5.4: "`?` SHALL be valid only inside a `!` function body … E-ERROR-003";

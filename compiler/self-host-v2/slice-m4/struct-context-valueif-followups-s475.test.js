@@ -9,8 +9,9 @@
 //    type: "a function parameter type", "a function return type". §19.4.3: a value arm
 //    of a handler SHALL "Yield a value of the call's success type". So a `return`
 //    operand takes the function's declared return type, an argument its parameter's
-//    type, and a `!{}` / failable-`match` arm's value the callee's success type (or,
-//    for a callee that declares none, the position's).
+//    type, and a `!{}` / failable-`match` arm's value the POSITION's type (or, where
+//    the position has none, the callee's declared success type) — r1 (#1767 review F1),
+//    see struct-context-valueif-followups-r1-s475.test.js.
 //
 // 2. A markup value `if` whose bare condition starts with `(` — §17.6.10
 //    `value-form-if ::= 'if' condition '{' expression '}'`: `${ if (@ok) && @n > 0 { … } }`.
