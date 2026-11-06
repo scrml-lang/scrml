@@ -1160,6 +1160,29 @@ function hasTopLevelSpace(t) {
   return false;
 }
 
+/**
+ * A union type whose every top-level space sits beside a top-level `|` (`User | not`,
+ * `number(>0) | date`), re-spelled with one space each side of every `|`; else null.
+ * §66.2.4 (S451, made the only reading S469 — g-spec-66-union-type-in-opener-unruled): "A union type
+ * is legal in the opener's type position … written with `|`, bare". Any OTHER top-level space
+ * (`Role oneOf([.Admin])`, a predicate) stays unruled and is still reported.
+ */
+function bareUnionSpelling(t) {
+  const s = t.trim();
+  const parts = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "|" && depth === 0) { parts.push(s.slice(from, i).trim()); from = i + 1; }
+  }
+  parts.push(s.slice(from).trim());
+  if (parts.length < 2 || parts.some((p) => p === "" || hasTopLevelSpace(p))) return null;
+  return parts.join(" | ");
+}
+
 const isSequenceType = (t) => typeof t === "string" && /\]\s*$/.test(t.trim());
 
 // ---------------------------------------------------------------------------
@@ -1529,8 +1552,12 @@ export function fixS66(source, opts = {}) {
     if (badAttr) { block(rule, off, `opener attribute \`${badAttr}\` has no mechanical §66 spelling`); continue; }
     const writeAttr = attrToks.some((t) => WRITE_IMPLYING_ATTRS.has(attrName(t)));
     if (site.annotation && hasTopLevelSpace(site.annotation)) {
-      block(rule, off, `type \`${site.annotation}\` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)`);
-      continue;
+      const union = bareUnionSpelling(site.annotation);
+      if (!union) {
+        block(rule, off, `type \`${site.annotation}\` has a space at its top level that is not a union's \`|\` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only)`);
+        continue;
+      }
+      site.annotation = union; // §66.2.4 (S451): a union stands bare in the opener, written with `|`
     }
     if (site.annotation && /^\{/.test(site.annotation.trim())) {
       block(rule, off, "anonymous record type annotation (no §66 spelling — a named `:struct` is owed)");
