@@ -154,8 +154,28 @@ describe("§1 rhs-decl", () => {
     blocked(wrapP(`<xs> = [1]\nfunction f() { g(@xs) }\n<button onclick=f()>x</button>`), "written sequence");
   });
 
-  test("a type with a top-level space (a union) is reported — its opener spelling is not ruled", () => {
-    blocked(wrapP(`<u>: string | not = not\n<p>\${@u}</p>`), "has a space at its top level");
+  // §66.2.4 (S451; the contradicting S449 sentence removed S469, g-spec-66-union-type-in-opener-unruled):
+  // "A union type is legal in the opener's type position … written with `|`, bare".
+  test("a union type stands bare in the opener, written with `|` (§66.2.4, S451)", () => {
+    expect(clean(wrapP(`<u>: string | not = not\n<p>\${@u}</p>`))).toContain("<u:string | not=not/>");
+    expect(clean(wrapP(`type User:struct = { id: number }\n<u>: User | not = not\n<p>\${@u}</p>`))).toContain("<u:User | not=not/>");
+  });
+
+  test("a union's spacing is normalized to one space each side of every top-level `|`", () => {
+    expect(clean(wrapP(`<u>: string  |not = not\n<p>\${@u}</p>`))).toContain("<u:string | not=not/>");
+  });
+
+  test("a union of a refinement and a type with inner spaces keeps the inner text", () => {
+    expect(clean(wrapP(`<m>: number(>0) | string = 1\n<p>\${@m}</p>`))).toContain("<m:number(>0) | string=1/>");
+  });
+
+  test("a top-level space that is not a union's `|` (a predicate) is still reported", () => {
+    const r = blocked(wrapP(`type Role:enum = { Admin, Guest }\n<r>: Role oneOf([.Admin]) = .Admin\n<p>\${@r}</p>`), "not a union's `|`");
+    expect(r.output).toContain("<r>: Role oneOf([.Admin]) = .Admin");
+  });
+
+  test("a union with an anonymous record member is still reported (a named `:struct` is owed)", () => {
+    blocked(wrapP(`<u>: { name: string } | not = not\n<p>\${@u}</p>`), "anonymous record type annotation");
   });
 
   test("a refinement / lifecycle type stands bare in the opener (S449 ruling 4)", () => {
