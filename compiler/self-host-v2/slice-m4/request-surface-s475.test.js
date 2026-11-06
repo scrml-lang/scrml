@@ -371,3 +371,130 @@ describe("refusals — each by its code or by name (fail closed)", () => {
     expect(codes(src)).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// r1 (review of #1781). Each RED on b430e97a1.
+describe("r1 — review findings", () => {
+  const P = (decls, markup) => `<program db="./app.db">\n    let <a:int=1/>\n    let <x:int=0/>\n    let <y:int=0/>\n    let <z:int=0/>\n    fn f(n: int) -> int { return n + 1; }\n${decls}${markup}    <main><p>${D}@x}${D}@y}${D}@z}</p></main>\n</program>\n`;
+  const REQ = (attrs, body) => `    <request${attrs}>${D} ${body} }</request>\n`;
+  const errs = (src) => fe(src).diags.filter((x) => x.severity === "Error");
+  const SPLIT = "client code that does server work";
+
+  // F1 (HIGH) — a `?{}` directly in a request body compiled clean and the query was DROPPED
+  // (`on: null`, no route). Refused as a handler's is (INTERIM; gap g-boot-request-direct-sql-owed-s475).
+  test("F1: a `?{}` as the right-hand side is refused (and is not E-ERROR-002 — the request handles it)", () => {
+    const d = errs(P("", REQ(` id="r" deps=[]`, `@x = ${SQ}\`SELECT count(*) AS n FROM t\`}.get();`)));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain(SPLIT);
+    expect(d[0].message).toContain("`<request id=\"r\">` body");
+  });
+  test("F1: an INSERT as the right-hand side with deps — refused, and the §6.7.7.3 gate sees the direct write", () => {
+    const d = errs(P("", REQ(` id="r" deps=[@a]`, `@x = ${SQ}\`INSERT INTO t (a) VALUES (\${@a})\`}.run();`)));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d.some((x) => x.message.includes(SPLIT))).toBe(true);
+    expect(d.some((x) => x.message.includes("not provably a SELECT (a query in the `<request>` body)"))).toBe(true);
+  });
+  test("F1: a `?{}` in a `lin` initializer is refused (and, unhandled there, E-ERROR-002)", () => {
+    const d = errs(P("", REQ(` id="r"`, `lin n = ${SQ}\`SELECT a FROM t WHERE a = \${@a}\`}.get(); @x = f(n);`)));
+    expect(d.map((x) => x.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-002"]);
+    expect(d.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED").message).toContain(SPLIT);
+  });
+  test("F1: a `?{}` in an argument of the load is refused (and, not the load itself, E-ERROR-002)", () => {
+    const d = errs(P("    type T:struct = { a: int }\n", REQ(` id="r"`, `@x = f(${SQ}\`SELECT a FROM t WHERE a = \${@a}\`}.get().a);`)));
+    // (the query there is also a second wait — requestPlan's "an argument of a `<request>`'s load")
+    expect(d.map((x) => x.code).sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-002"]);
+    expect(d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes(SPLIT))).toBe(true);
+  });
+  test("F1: the reviewer's shapes — a direct SELECT with a tail, a DELETE in a `lin` — are refused", () => {
+    const sel = errs(P("    type T:struct = { a: int }\n", REQ(` id="r"`, `@x = ${SQ}\`SELECT a FROM t WHERE a = \${@a}\`}.get().a;`)));
+    expect(sel.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes(SPLIT))).toBe(true);
+    const del = errs(P("", REQ(` id="r"`, `lin q = ${SQ}\`DELETE FROM t WHERE a = \${@a}\`}.run(); @x = f(1);`)));
+    expect(del.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes(SPLIT))).toBe(true);
+  });
+  test("F1 control: a request whose load is a server function holding the query still compiles", () => {
+    expect(codes(APP())).toEqual([]);
+  });
+
+  // F2 (MED) — requests whose targets are each other's dependencies re-ran forever.
+  test("F2: a two-request ring is refused, naming the ring, on each request", () => {
+    const d = errs(P("", REQ(` id="r1"`, "@x = f(@y);") + REQ(` id="r2"`, "@y = f(@x);")));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("ring of requests that re-run each other");
+    expect(d[0].message).toContain("<request id=\"r1\"> writes @x → <request id=\"r2\"> writes @y → which re-runs <request id=\"r1\">");
+    expect(d[1].message).toContain("<request id=\"r2\"> writes @y → <request id=\"r1\"> writes @x → which re-runs <request id=\"r2\">");
+  });
+  test("F2: a three-request ring (explicit deps) is refused; a chain is not", () => {
+    const ring = P("", REQ(` id="r1" deps=[@z]`, "@x = f(@z);") + REQ(` id="r2" deps=[@x]`, "@y = f(@x);") + REQ(` id="r3" deps=[@y]`, "@z = f(@y);"));
+    const rd = errs(ring);
+    expect(rd.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(rd[0].message).toContain("<request id=\"r1\"> writes @x → <request id=\"r2\"> writes @y → <request id=\"r3\"> writes @z → which re-runs <request id=\"r1\">");
+    const chain = P("", REQ(` id="r1"`, "@x = f(@a);") + REQ(` id="r2"`, "@y = f(@x);") + REQ(` id="r3"`, "@z = f(@y);"));
+    expect(codes(chain)).toEqual([]);
+    // the ring broken by an explicit `deps=` that leaves the other's target out
+    expect(codes(P("", REQ(` id="r1" deps=[@a]`, "@x = f(@y);") + REQ(` id="r2"`, "@y = f(@x);")))).toEqual([]);
+  });
+
+  // F4 (LOW) — `id="a-b"` and `id="a_b"` both hinted `a_b`: duplicate signal-cell names.
+  test("F4: request hints are injective — `a-b` / `a_b`, and `a` / `a_loading`, get distinct cells", () => {
+    for (const [i1, i2] of [["a-b", "a_b"], ["a", "a_loading"]]) {
+      const src = P("", REQ(` id="${i1}"`, "@x = f(@a);") + REQ(` id="${i2}"`, "@y = f(@a);"));
+      expect(codes(src)).toEqual([]);
+      const r = compile(src);
+      expect(check(r.core)).toEqual([]);
+      const prog = r.core.decls.find((d) => d.sym.id === r.core.program.id);
+      const hints = prog.fields.map((f) => f.sym.hint);
+      expect(new Set(hints).size).toBe(hints.length);
+      const handles = prog.renders.filter((v) => v.variant === "Request").map((v) => v.data.handle.hint);
+      expect(new Set([...handles, ...hints]).size).toBe(handles.length + hints.length);
+    }
+    // the encoding: letters / digits themselves, `_` → `__`, anything else → `_` + four hex digits
+    const r2 = compile(P("", REQ(` id="a-b"`, "@x = f(@a);") + REQ(` id="a_b"`, "@y = f(@a);")));
+    const hs = r2.core.decls.find((d) => d.sym.id === r2.core.program.id).fields.map((f) => f.sym.hint);
+    expect(hs).toContain("#a_002db_loading");
+    expect(hs).toContain("#a__b_loading");
+  });
+
+  // F5 (LOW) — two requests assigning one cell: `data` and the target disagreed.
+  test("F5: a cell that two requests assign is refused, naming the first request", () => {
+    const d = errs(P("", REQ(` id="r1"`, "@x = f(@a);") + REQ(` id="r2"`, "@x = f(@a);")));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("`@x` is already the target of `<request id=\"r1\">`");
+  });
+
+  // found in r1: a `<#id>` written inside a message literal of analyze.scrml was compiled by impl#1
+  // as an input-state reference — the author read `_scrml_input_id_` in place of `<#id>`.
+  test("messages spell `<#id>`, not `_scrml_input_id_`", () => {
+    const ms = [
+      ...fe(P("", REQ("", "@x = f(@a);"))).diags,
+      ...fe(P("", REQ(` id="r1"`, "@x = f(@a);") + REQ(` id="r2"`, "@x = f(@a);"))).diags,
+    ].map((x) => x.message);
+    expect(ms.length).toBe(2);
+    for (const m of ms) {
+      expect(m).toContain("<#id>");
+      expect(m).not.toContain("_scrml_input");
+    }
+  });
+
+  // F3 (MED) — a request torn down mid-load left loading / stale true for good.
+  test("F3: teardown mid-load sets `loading` and `stale` false (§6.7.7 stale iff a fetch is in flight)", async () => {
+    const r = compile(APP({ inIf: true, init: "-" }));
+    const sql = await realDb(DDL, ROWS);
+    const { srv } = await serve(r.core, sql);
+    globalThis.fetch = bridge(srv);
+    const { rt } = await loadProgram(r.core, "req-r1-teardown-" + k++);
+    await settle();
+    expect(sig(cells(rt))).toEqual({ loading: false, data: "a", error: null, stale: false });
+    const held = heldTransport(srv);
+    click(document.querySelector("#u2"));            // a re-run: keep-stale, in flight
+    await settle(5);
+    expect(sig(cells(rt))).toEqual({ loading: true, data: "a", error: null, stale: true });
+    click(document.querySelector("#hide"));          // torn down while in flight
+    await settle(5);
+    expect(rt.stats.requests).toBe(0);
+    expect(sig(cells(rt))).toEqual({ loading: false, data: "a", error: null, stale: false });
+    for (const h of held) await h.go();              // its answer is discarded
+    await settle();
+    expect(sig(cells(rt))).toEqual({ loading: false, data: "a", error: null, stale: false });
+    expect(document.querySelector("#who").textContent).toBe("a");
+  });
+});

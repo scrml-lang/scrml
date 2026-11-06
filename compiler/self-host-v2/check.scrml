@@ -1697,7 +1697,7 @@ ${
                     .ROther :> not
                 }
                 if (t is not) {
-                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<#id>.data` is NOT cleared\")"])
+                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<" + "#id>.data` is NOT cleared\")"])
                 } else {
                     if (suspendCount(t) > 0) out = out.concat(["C-R1: a Request's continuation suspends again — a request has ONE suspension, its load (§6.7.7 \"single-shot\")"])
                 }
@@ -1741,7 +1741,7 @@ ${
             const k: string = depKey(sg)
             const nm: string = names[i]
             if (dk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal is one of its dependencies — every run writes it, so it would re-run forever"])
-            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<#id>` signal"])
+            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<" + "#id>` signal"])
             if (sk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal shares its cell with another signal"])
             sk = sk.concat([k])
             i = i + 1
