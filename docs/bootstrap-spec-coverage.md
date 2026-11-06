@@ -33,17 +33,17 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 <!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
 | status | rows |
 |---|---:|
-| BUILT | 308 |
-| PARTIAL | 149 |
-| REFUSED-LOUD | 312 |
+| BUILT | 307 |
+| PARTIAL | 154 |
+| REFUSED-LOUD | 311 |
 | DEFERRED-RULED | 64 |
 | N/A | 220 |
-| SILENT-ACCEPT | 20 |
+| SILENT-ACCEPT | 17 |
 | SILENT-ABSENT | 32 |
 | UNVERIFIED | 9 |
 | **total** | **1114** |
 
-SILENT rows carrying a gap id: 52 of 52.
+SILENT rows carrying a gap id: 49 of 49.
 <!-- @generated:coverage-totals END -->
 
 ## How the six parts were merged
@@ -579,7 +579,7 @@ SILENT rows carrying a gap id: 52 of 52.
 | §19.9.1 | Error serialization | PARTIAL | server-runtime.js encodeError (§57.8 envelope); server-artifact.test.js; S474 ruling 2 built by #1703 (`withholdDriverText`, `constraintField`; test slice-m4/wire-driver-text-s474.test.js) | g-boot-wire-driver-text-transformed-not-tracked-s474 | (P3) **S474 ruling 2 (as amended):** production withholds unchanged driver text from the delivered failure (dev = `scrml-boot dev`, delivers it); `ConstraintViolation`'s field is the column only, in both builds; the server logs the full text. Residue: driver text the author TRANSFORMS is not tracked (best effort). impl#1: in flight #1704. |
 | §19.9.2 | HTTP status mapping | PARTIAL | name heuristic BUILT (server-runtime.js:206 failStatus); `httpStatus(404)` on a variant → E-PARSE-TYPE (p19-http) | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) NO GAP. The runtime comment acknowledges it ("The bootstrap has no `httpStatus` attribute") · S473 D28: `httpStatus(…)` is a named refusal (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
 | §19.9.3 / 19.9.4 | CPS preservation | BUILT | server-call*.test.js | — | (P3) |
-| §19.9.5 | Auto-`!` wrap / body-split | PARTIAL | The body-split of an undeclared function: E-BOOTSTRAP-UNSUPPORTED naming U1d (analyze.scrml:25316); server.test.js:205. BUILT (s475-boot-caller-transport) for a client `!` function whose server calls compose into one request (§19.9.9 row): its callers' failure set is "the function's declared error variants … plus `Transport(t: ServerCallError)`" — analyze.scrml transport carriers (`FnInfo.derr`, `transportCarriers`, recursively through client `!` callers that `?`-propagate), its own enum needs no `Transport`; tests compiler/self-host-v2/slice-m4/caller-transport-s475.test.js | g-boot-client-bang-composition-residue-s474 | (P3) |
+| §19.9.5 | Auto-`!` wrap / body-split | PARTIAL | The body-split of an undeclared function: E-BOOTSTRAP-UNSUPPORTED naming U1d (analyze.scrml:25316); server.test.js:205. BUILT (s475-boot-caller-transport) for a client `!` function whose server calls compose into one request (§19.9.9 row): its callers' failure set is "the function's declared error variants … plus `Transport(t: ServerCallError)`" — analyze.scrml transport carriers (`FnInfo.derr`, `transportCarriers`, recursively through client `!` callers that `?`-propagate), its own enum needs no `Transport`; tests compiler/self-host-v2/slice-m4/caller-transport-s475.test.js. **S475 ruling (§19.9.5 "Extended (S475)", item 4):** the rule now covers EVERY client `!` function that makes a server call, not only a composed one, and §19.5.3 bullet 3 is retired for client functions — an UNcomposed client `!` function that `?`-propagates a plain client call still needs `Transport` in its enum on the bootstrap (E-ERROR-010, fails closed): an over-refusal owed the carrier rule. | g-boot-client-bang-composition-residue-s474 | (P3) |
 | §19.9.6 | Monotonicity classification, Idempotency-Key | REFUSED-LOUD | there is no split, so there are no CPS batches | — | (P3) see Q5: whether whole-function client→server calls fall under it is ambiguous; no Idempotency-Key is emitted anywhere **S473 D24: covers any compiler-emitted retry of a call whose body may have run (vacuous today)** (ruling:user-voice-scrml.md S473 "your recs on all"). |
 | §19.9.7 | `.idempotent()` | REFUSED-LOUD | probe p19-idem → E-PARSE-ITEM | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) · S473 D28: named refusal (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
 | §19.9.8 | No async/await | REFUSED-LOUD | probes p19-async (E-PARSE-ITEM), p19-await (E-SCOPE-001 `await`); no E-ASYNC-/E-AWAIT-/E-FOR-AWAIT-NOT-IN-SCRML | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P3) · S473 D28: E-ASYNC- / E-AWAIT- / E-FOR-AWAIT-NOT-IN-SCRML, E-FN-005 for `async fn` (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
