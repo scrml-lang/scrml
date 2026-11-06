@@ -14,8 +14,8 @@
 //      without `;`; a statement-position `match` / `!{}` (the value is not
 //      used, so §7.2.2 rule 1 applies); the lone shorthand name and the empty
 //      brace keep their own readings.
-//   C. value-form `if` (refused whole in the bootstrap, E-BOOTSTRAP-UNSUPPORTED):
-//      a `{ e }` branch draws no E-STMT-MISSING-SEMICOLON beside the refusal.
+//   C. value-form `if` (built s475; refused whole before, E-BOOTSTRAP-UNSUPPORTED):
+//      a `{ e }` branch draws no E-STMT-MISSING-SEMICOLON.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -128,9 +128,9 @@ describe("B — a brace that holds a statement (or a second item) is still a sta
 });
 
 // ---------------------------------------------------------------------------
-describe("C — a value-form `if` branch (the form itself is not in the bootstrap)", () => {
-  test("`{ e }` branches draw only the refusal, no E-STMT-MISSING-SEMICOLON — else-if chains included", () => {
-    expect(codes(P(`    function h(c: bool) -> int { const v = if (c) { 2 } else if (!c) { 3 } else { 4 }; return v; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+describe("C — a value-form `if` branch (built since s475-boot-value-if-object-arm)", () => {
+  test("`{ e }` branches owe no `;` — else-if chains included (the value `if` compiles clean)", () => {
+    expect(codes(P(`    function h(c: bool) -> int { const v = if (c) { 2 } else if (!c) { 3 } else { 4 }; return v; }`))).toEqual([]);
   });
   test("a branch holding a statement is a statement list; a statement `if` is unchanged", () => {
     expect(semis(P(`    function h(c: bool) -> int { const v = if (c) { one(); 2 } else { 3; }; return v; }`))).toEqual(["function h(c: bool) -> int { const v = if (c) { one(); 2"]);

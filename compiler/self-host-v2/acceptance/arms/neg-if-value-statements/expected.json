@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-neg-if-value-statements",
+  "description": "E-BOOTSTRAP-UNSUPPORTED (INTERIM): a value `if` branch with statements before its `lift`.",
+  "language-version": "1.0",
+  "spec": "§17.6.1, §17.6.8",
+  "rationale": "§17.6.1 admits `{ statement* lift-stmt statement* }`; the bootstrap builds a branch that is one value (§17.6.8's single-lift form) and refuses the rest by name. Capable form: an expression kind for the value `if`, lowered assign-in-branches (§17.6.8).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

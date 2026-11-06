@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-arms-object-arm",
+  "description": "An object-literal arm body is the object: `key: value`, string keys, shorthand entries.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: \"A brace body that reads as an object literal is the arm's value. An arm body `{ … }` whose content is an object literal SHALL be that object, in every position a `match` appears\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#big"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "1020 304"
+      }
+    ]
+  }
+}

@@ -56,7 +56,14 @@ ${
         Call(callee: AExpr, args: AExpr[]),
         Unary(op: UnOp, e: AExpr),
         Binary(op: BinOp, l: AExpr, r: AExpr),
-        Ternary(test: AExpr, yes: AExpr, no: AExpr),
+        // s475 — `viaIf`: the choice was WRITTEN as a value-form `if` (§17.6
+        // if-as-expression, §17.6.10 the value form): `if (c) { a } else { b }`,
+        // whose branches are each exactly one expression (the implied `lift`), is
+        // this choice — `else if` a nested one in `no`, a missing `else` the
+        // `not` of §17.6.4 (parse.scrml parseValueIfExpr). §17.6.8: "For simple
+        // single-lift arms, the compiler MAY optimize to a JavaScript ternary".
+        // The flag only names the form in diagnostics ("an `if` condition").
+        Ternary(test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean),
         // statement position only (analyze checks) — except the §50 kept form
         // (S473 D10). s474: `paren` — the assignment stood in its own parentheses
         // (`(x = e)`); `kept` — a parenthesized one at a kept place of a `for (…)` /

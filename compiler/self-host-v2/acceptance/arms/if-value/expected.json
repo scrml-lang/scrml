@@ -1,0 +1,32 @@
+{
+  "id": "acceptance-arms-if-value",
+  "description": "An `if` used as a value: each branch one value, `else if` chain, no `else` renders nothing; re-rendered when its cell changes.",
+  "language-version": "1.0",
+  "spec": "§17.6, §17.6.10",
+  "rationale": "§17.6.2: \"An if-as-expression arm body SHALL produce its result value via a `lift` statement, or by being exactly one expression\"; §17.6.10: \"When the `else` is absent, the false path SHALL contribute `not` per §17.6.4 and SHALL render as nothing\" and \"A value-form SHALL re-evaluate reactively on change of any reactive cell it reads.\" Ruled S469 \"three spec-follow-up opens\" (if-branch: \"Keep { e }, lift once a statement\").",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#flip"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "no"
+      },
+      {
+        "selector": "#b",
+        "text": ""
+      },
+      {
+        "selector": "#c",
+        "text": "many one none"
+      }
+    ]
+  }
+}

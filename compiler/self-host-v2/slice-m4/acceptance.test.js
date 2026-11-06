@@ -33,7 +33,9 @@ const STATUS = {
   "arms/lift-plain-multi-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "arms/neg-lift-statement-arm": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "arms/neg-lift-nested": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "arms/neg-if-value": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/if-value": ["PASS", []],                       // s475-boot-value-if-object-arm (was neg-if-value: refused)
+  "arms/neg-if-value-statements": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],   // s475: INTERIM
+  "arms/object-arm": ["PASS", []],                     // s475 (§18.5)
   "opener/union-maybe": ["PASS", []],
   // a general union needs a union type in the bootstrap's type system
   "opener/union-multi-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -420,7 +422,7 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   });
   test("s469-boot-ruled-backlog: every positive parse / string / position case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["parse/int-strict", "parse/number-finite", "parse/bool-exact", "parse/enum-parse", "parse/integer-type-name",
-                       "strings/admitted-methods", "strings/index-read", "arms/lift-guard-value", "arms/single-expr-block",
+                       "strings/admitted-methods", "strings/index-read", "arms/lift-guard-value", "arms/single-expr-block", "arms/if-value", "arms/object-arm",
                        "positions/from-end-explicit", "positions/at-negative-not", "positions/neg-slice-computed-traps"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }

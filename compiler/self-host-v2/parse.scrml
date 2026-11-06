@@ -563,7 +563,7 @@ ${
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
-        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e))
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false))
     }
 
     // s469 (§49.2.5): `a..b` / `a..=b` is legal ONLY as the whole iterable of a
@@ -1107,8 +1107,16 @@ ${
                 const sb: ABlock = { nid: close.nid, span: spanFrom(close, bstart), stmts: [rs.s] }
                 return { body: AArmBody.ArmBlock(sb), lifted: false, bare: false, tp: bumpId(close) }
             }
-            const rb: RArmBlock = parseArmBlock(tp)
-            return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, bare: rb.bare, tp: rb.tp }
+            // s475 — §18.5: "A brace body that reads as an object literal is the
+            // arm's value … in every position a `match` appears … exactly as
+            // `return { … }` and `f({ … })` read it." The object test
+            // (armObjectShape) comes before the one-expression brace and the
+            // block; the body is then read as the arm's ONE expression, by the
+            // expression path below (parsePrimary's object path), ended by armEnd.
+            if (!armObjectShape(tp)) {
+                const rb: RArmBlock = parseArmBlock(tp)
+                return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, bare: rb.bare, tp: rb.tp }
+            }
         }
         const end: int = armEnd(tp)
         const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
@@ -1240,6 +1248,142 @@ ${
         let t: TP = tp
         while (isP(t, ";")) { t = adv(t) }
         return atEnd(t) || isP(t, "}")
+    }
+
+    // s475 — §18.5's object-literal test on an arm's brace body (at its `{`):
+    // "The content is an object literal when it is a non-empty, comma-separated
+    // list in which every entry is `key: value` (the key an identifier, a
+    // keyword, a string or number literal, or a `[computed]` key), `...spread`,
+    // or a lone shorthand name — and it contains NO `;` at its own top level."
+    // Only the brace's own top-level tokens are read (a nested bracket is one
+    // step; its closer is kept, so `[k]:` reads `[`, `]`, `:`). A body that is
+    // exactly ONE lone shorthand name is not taken here: it is
+    // E-MATCH-ARM-SHORTHAND-AMBIGUOUS (§18.5), parseArmBody's own reading.
+    fn armObjectShape(tp: TP) -> boolean {
+        let i: int = tp.i + 1
+        let depth: int = 0
+        let entries: int = 0
+        let cnt: int = 0
+        let ai: int = i
+        let bi: int = i
+        let ci: int = i
+        while (i < tp.toks.length) {
+            const x: PTok = tp.toks[i]
+            if (x.cls == TC.End) return false
+            const opener: boolean = x.cls == TC.Punct && (tk(x, "{") || tk(x, "(") || tk(x, "["))
+            const closer: boolean = x.cls == TC.Punct && (tk(x, "}") || tk(x, ")") || tk(x, "]"))
+            if (closer && depth == 0) {
+                if (!tk(x, "}")) return false
+                if (cnt == 0) return false            // `{}`, or a `,` with no entry after it
+                if (!objEntryOk(tp, ai, bi, ci, cnt)) return false
+                if (entries == 0 && cnt == 1 && isShorthandName(tp.toks[ai])) return false
+                return true
+            }
+            let top: boolean = depth == 0
+            if (closer) {
+                depth = depth - 1
+                top = depth == 0
+            }
+            if (depth == 0 && !opener && !closer && x.cls == TC.Punct && tk(x, ";")) return false
+            if (depth == 0 && !closer && x.cls == TC.Punct && tk(x, ",")) {
+                if (cnt == 0 || !objEntryOk(tp, ai, bi, ci, cnt)) return false
+                entries = entries + 1
+                cnt = 0
+                // a trailing `,` before the `}` ends the list (JS reads `{ a: 1, }`)
+                const nx: PTok = tp.toks[i + 1]
+                if (nx.cls == TC.Punct && tk(nx, "}")) {
+                    return true
+                }
+            } else if (top) {
+                if (cnt == 0) ai = i
+                if (cnt == 1) bi = i
+                if (cnt == 2) ci = i
+                cnt = cnt + 1
+            }
+            if (opener) depth = depth + 1
+            i = i + 1
+        }
+        return false
+    }
+
+    // One entry of armObjectShape's list: its first three top-level tokens.
+    fn objEntryOk(tp: TP, ai: int, bi: int, ci: int, cnt: int) -> boolean {
+        const a: PTok = tp.toks[ai]
+        if (isSpread({ toks: tp.toks, i: ai, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })) return true
+        if (cnt == 1) return isShorthandName(a)
+        const b: PTok = tp.toks[bi]
+        const colon: boolean = b.cls == TC.Punct && tk(b, ":") && !tk(tp.toks[bi + 1], ">")
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword || a.cls == TC.Str || a.cls == TC.Num) && colon) return true
+        if (cnt < 3) return false
+        const c: PTok = tp.toks[ci]
+        return a.cls == TC.Punct && tk(a, "[") && b.cls == TC.Punct && tk(b, "]") && c.cls == TC.Punct && tk(c, ":") && !tk(tp.toks[ci + 1], ">")
+    }
+
+    // §18.5: "A *shorthand name* is a word JavaScript reads as a shorthand
+    // property: an identifier, or a scrml keyword that is not an ECMAScript
+    // strict-mode reserved word (`type`, `from`, `is`, `as`, `get`, `set`,
+    // `server`, `fn`, `async`, `undefined`, …); a reserved word (`return`,
+    // `break`, `null`, `this`, `true`, …) never is." `not` is scrml's absence
+    // literal (§42), never a name.
+    fn isShorthandName(x: PTok) -> boolean {
+        if (x.v == "not") return false
+        if (x.cls == TC.Ident) return !strictReserved(x.v)
+        if (x.cls == TC.Keyword) return !strictReserved(x.v)
+        return false
+    }
+
+    // The ECMAScript strict-mode reserved words (ES2015+ §12.6.2 ReservedWord, plus
+    // the strict-mode FutureReservedWords and `let` / `static` / `yield` / `await`).
+    fn strictReserved(w: string) -> boolean {
+        return match w {
+            "break" :> true
+            "case" :> true
+            "catch" :> true
+            "class" :> true
+            "const" :> true
+            "continue" :> true
+            "debugger" :> true
+            "default" :> true
+            "delete" :> true
+            "do" :> true
+            "else" :> true
+            "enum" :> true
+            "export" :> true
+            "extends" :> true
+            "false" :> true
+            "finally" :> true
+            "for" :> true
+            "function" :> true
+            "if" :> true
+            "import" :> true
+            "in" :> true
+            "instanceof" :> true
+            "new" :> true
+            "null" :> true
+            "return" :> true
+            "super" :> true
+            "switch" :> true
+            "this" :> true
+            "throw" :> true
+            "true" :> true
+            "try" :> true
+            "typeof" :> true
+            "var" :> true
+            "void" :> true
+            "while" :> true
+            "with" :> true
+            "yield" :> true
+            "let" :> true
+            "static" :> true
+            "implements" :> true
+            "interface" :> true
+            "package" :> true
+            "private" :> true
+            "protected" :> true
+            "public" :> true
+            "await" :> true
+            _ :> false
+        }
     }
 
     fn shorthandArmReason(n: string) -> string {
@@ -2026,17 +2170,11 @@ ${
             // (refused: its body is not judged as statements — s469 E-STMT-NO-EFFECT)
             return mkE(dropNoEffect(rf.tp, df.diags.length), start, AExprK.Recovered)
         }
-        // s469 — an `if` where a value stands (if-as-expression §17.6, the value form
-        // §17.6.10, whose branch rule S469 rules: `{ e }`, or `lift` once the branch
-        // holds a statement) is not in the bootstrap. Read past as an `if` statement
-        // (so its own errors report), refused by name — never read as a name `if`.
-        if (t.v == "if") {
-            const di: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function", t)
-            const ri: RStmt = parseValueIf(di)
-            // (refused: its branches are value positions, §17.6.10 — not judged as
-            // statements, s469 E-STMT-NO-EFFECT)
-            return mkE(dropNoEffect(ri.tp, di.diags.length), start, AExprK.Recovered)
-        }
+        // s475 — an `if` where a value stands (if-as-expression §17.6, the value
+        // form §17.6.10): parseValueIfExpr. Its head takes its parentheses here
+        // (§17.6.1 `'if' '(' condition ')'`); only the sole content of a markup
+        // `${ … }` may drop them (§17.6.10 `'if' condition`, parseInterp).
+        if (t.v == "if") return parseValueIfExpr(tp, false)
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
 
@@ -2090,6 +2228,13 @@ ${
                 const sv: RExpr = parseSpreadValue(t)
                 t = sv.tp
                 props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: true, name: "", value: sv.e }])
+            } else if (isShorthandName(nameTok) && (isP(adv(t), ",") || isP(adv(t), "}"))) {
+                // s475 — a shorthand property `{ u }` is the longhand `{ u: u }`
+                // (§18.5's "lone shorthand name"; §12.4: "a shorthand property `{ u }`
+                // is the longhand `{ u: u }`"): the value is the name, read as written
+                const sv: RExpr = mkE(adv(t), pstart, AExprK.Name(nameTok.v))
+                t = sv.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: false, name: nameTok.v, value: sv.e }])
             } else {
                 if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword && nameTok.cls != TC.Str) {
                     t = diagAt(t, "E-PARSE-OBJECT", "expected a field name, found `" + nameTok.text + "`", nameTok)
@@ -3704,61 +3849,189 @@ ${
     }
 
     fn parseIf(tp: TP) -> RStmt {
-        return parseIfAs(tp, false)
+        return parseIfAs(tp)
     }
 
-    // s474 #1512 — an `if` where a value stands, read past for its own errors
-    // (the form is refused by name, E-BOOTSTRAP-UNSUPPORTED, at parsePrimary).
-    // Its branches are value positions (§17.6.10, RULED S469 "Keep { e }, lift
-    // once a statement": "A braced value-form `if` branch holding ONE
-    // expression is that expression"), so a `{ e }` branch — one expression,
-    // no `;` — owes no `;` and is not reported for one: the refusal is the
-    // only report. A branch holding a statement is a statement list (rule 1).
-    fn parseValueIf(tp: TP) -> RStmt {
-        return parseIfAs(tp, true)
-    }
-
-    // `value`: the `if` stands where a value does (its branches: parseValueBranch).
-    fn parseIfAs(tp: TP, value: boolean) -> RStmt {
+    fn parseIfAs(tp: TP) -> RStmt {
         const start: int = cur(tp).start
         let t: TP = expectP(adv(tp), "(")
         const cond0: RExpr = parseAssign(t)
         const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }   // s474 (§50, D10)
         t = expectP(cond.tp, ")")
-        const thenB: RBlock = parseIfBranch(t, value)
+        const thenB: RBlock = parseBlockOrStmt(t)
         t = thenB.tp
         if (isWord(t, "else")) {
             t = adv(t)
             if (isWord(t, "if")) {
-                const inner: RStmt = parseIfAs(t, value)
+                const inner: RStmt = parseIfAs(t)
                 const eb: ABlock = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
                 return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb))
             }
-            const elseB: RBlock = parseIfBranch(t, value)
+            const elseB: RBlock = parseBlockOrStmt(t)
             return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b))
         }
         return mkS(t, start, AStmtK.If(cond.e, thenB.b, not))
     }
 
-    fn parseIfBranch(tp: TP, value: boolean) -> RBlock {
-        if (value) return parseValueBranch(tp)
-        return parseBlockOrStmt(tp)
-    }
-
-    // A value-form `if` branch: a `{ e }` brace is its one expression (above);
-    // anything else is read as a statement `if` reads it.
-    fn parseValueBranch(tp: TP) -> RBlock {
-        if (isP(tp, "{") && !tk(peekAt(tp, 1), ";") && !tk(peekAt(tp, 1), "}")) {
-            const h0: int = hardErrors(tp.diags)
-            const start: int = cur(tp).start
-            const rs: RStmt = parseStmt(adv(tp))
-            if (isP(rs.tp, "}") && stmtExpr(rs.s) is given && hardErrors(rs.tp.diags) == h0) {
-                const close: TP = adv(rs.tp)
-                const b: ABlock = { nid: close.nid, span: spanFrom(close, start), stmts: [rs.s] }
-                return { b: b, tp: bumpId(close) }
+    // =========================================================================
+    // s475 — THE VALUE `if` (§17.6 if-as-expression; §17.6.10 the value form).
+    //
+    //   if-as-expr ::= 'if' '(' condition ')' arm-body
+    //                  ('else' 'if' '(' condition ')' arm-body)* ('else' arm-body)?
+    //   arm-body   ::= '{' statement* lift-stmt statement* '}'
+    //               |  '{' expression '}'   -- "value-form sugar for `{ lift expression }`"
+    //
+    // §17.6.2: "An if-as-expression arm body SHALL produce its result value via a
+    // `lift` statement, or by being exactly one expression, which is sugar for
+    // `lift` of that expression (§17.6.10)"; "The result of an if-as-expression
+    // when no arm body executes SHALL be `not`"; its type is the union of the
+    // lifted types (`T | not` without an `else`). RULED S469 (§17.6.10, "Keep
+    // { e }, lift once a statement"): "A braced value-form `if` branch holding
+    // ONE expression is that expression. Once the branch holds a statement, it
+    // must `lift` … a bare tail is E-ARM-TAIL-VALUE."
+    //
+    // BUILT: every branch that is ONE value — `{ e }`, `{ e; }` or `{ lift e; }`
+    // (a nested value `if` included) — as the choice AExprK.Ternary(…, viaIf =
+    // true): §17.6.8 "For simple single-lift arms, the compiler MAY optimize to a
+    // JavaScript ternary … (valid when arms contain only lift)". `else if` is a
+    // nested choice in `no`; a missing `else` is `not` (§17.6.4). The choice's
+    // union typing, the narrowing of each branch by the condition, the condition
+    // rule (E-COND-NOT-BOOLEAN), reactivity in markup and the lowering are the
+    // ternary's (resolveTernary / typeTernary / lower boolMatch).
+    //
+    // NOT BUILT (INTERIM, refused by name, E-BOOTSTRAP-UNSUPPORTED): a branch
+    // that holds statements before its `lift` (or yields on only some paths, or
+    // is empty) — Core's choice holds one expression per branch, as Core's
+    // `match` arm does (analyze plainValueBlock refuses the same shape for a
+    // `match`). The capable form: an expression kind for the value `if` lowered
+    // assign-in-branches (§17.6.8's preferred form), with W-LIFT-001 for a
+    // lift-less branch. Two shapes of such a branch are errors whatever is
+    // built, and are reported by their own codes: a bare tail after a statement
+    // (E-ARM-TAIL-VALUE) and a second `lift` on the branch's path (E-LIFT-002).
+    // =========================================================================
+    // `bareOk`: the head may be written without its parentheses — only for the
+    // sole content of a markup `${ … }` (§17.6.10 `value-form-if ::= 'if'
+    // condition '{' expression '}'`), and the `else if`s and nested value `if`s
+    // of that one.
+    fn parseValueIfExpr(tp: TP, bareOk: boolean) -> RExpr {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let cond: AExpr = mkE(t, start, AExprK.Recovered).e
+        if (bareOk && !isP(t, "(")) {
+            const cb: RExpr = parseTernary(t)
+            cond = cb.e
+            t = cb.tp
+        } else {
+            t = bumpId(expectP(t, "("))
+            const c0: RExpr = parseAssign(t)
+            cond = keptHead(c0.e)                                       // s474 (§50, D10): `if (…)` is a condition head
+            t = expectP(c0.tp, ")")
+        }
+        const yes: RExpr = parseValueBranchExpr(t, bareOk)
+        t = yes.tp
+        const nl: RExpr = mkE(t, start, AExprK.NotLit)                  // §17.6.4: no `else` — the false path is `not`
+        let no: AExpr = nl.e
+        t = nl.tp
+        if (isWord(t, "else")) {
+            t = adv(t)
+            if (isWord(t, "if")) {
+                const inner: RExpr = parseValueIfExpr(t, bareOk)
+                no = inner.e
+                t = inner.tp
+            } else {
+                const eb: RExpr = parseValueBranchExpr(t, bareOk)
+                no = eb.e
+                t = eb.tp
             }
         }
-        return parseBlockOrStmt(tp)
+        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true))
+    }
+
+    // One branch of a value `if`: its value, or a Recovered placeholder for a
+    // refused / erroneous branch (the report made here).
+    fn parseValueBranchExpr(tp: TP, bareOk: boolean) -> RExpr {
+        const start: int = cur(tp).start
+        if (!isP(tp, "{")) {
+            // §17.6.1: every branch of an if-as-expression is braced (`arm-body ::=
+            // '{' … '}'`). Read past as one expression (so the `else` that may
+            // follow is still the value `if`'s).
+            const d: TP = diagAt(tp, "E-PARSE-EXPECTED", "expected `{` to open a branch of an `if` used as a value, found `" + cur(tp).text + "` — every branch of a value `if` is braced (§17.6.1 `arm-body ::= '{' … '}'`): `if (c) { a } else { b }`", cur(tp))
+            const rx: RExpr = parseAssign(d)
+            return mkE(rx.tp, start, AExprK.Recovered)
+        }
+        // A branch whose content is itself a value `if` (`{ if (d) { a } else { b } }`):
+        // that `if` is the branch's ONE expression (§17.6.2: an arm body "that is
+        // exactly one expression"). Taken only when the whole brace is that `if`
+        // (an optional `;`, then `}`) and it read without an error; otherwise the
+        // brace is read as statements below (a statement `if` among others).
+        if (isWord(adv(tp), "if")) {
+            const h0: int = hardErrors(tp.diags)
+            const inner: RExpr = parseValueIfExpr(adv(tp), bareOk)
+            let ti: TP = inner.tp
+            if (isP(ti, ";")) ti = adv(ti)
+            if (isP(ti, "}") && hardErrors(ti.diags) == h0) return { e: inner.e, tp: adv(ti) }
+        }
+        const hb: int = hardErrors(tp.diags)
+        const rb: RArmBlock = parseArmBlock(tp)
+        const ss: AStmt[] = rb.b.stmts
+        if (ss.length == 1) {
+            // `{ e }`, `{ e; }`, `{ lift e; }` — the branch's one value
+            const x: AExpr | not = stmtExpr(ss[0])
+            if (x is given) return { e: x, tp: rb.tp }
+        }
+        let t: TP = rb.tp
+        // a branch that did not parse (markup as a value — not in the bootstrap,
+        // g-boot-markup-as-value-unbuilt-s473 — or any other parse error) is judged
+        // by nothing more: its shape is the parse error's artefact
+        if (hardErrors(t.diags) > hb) return mkE(t, start, AExprK.Recovered)
+        const line: int = cur(tp).line
+        const dl: AStmt | not = directLiftBefore(ss)
+        const vt: AExpr | not = valueTail(ss)
+        if (rb.lifted && dl is given) {
+            t = diagAt(t, "E-LIFT-002", "a second `lift` on the same path of one branch of an `if` used as a value — a branch yields exactly one value (§17.6.9 Example 6); keep the one `lift` that designates the branch's value", spanTok(dl.span, line))
+        } else if (!rb.lifted && vt is given) {
+            t = diagAt(t, "E-ARM-TAIL-VALUE", "a branch of an `if` used as a value holds a statement and ends in a bare expression — once a branch holds a statement it yields its value with `lift` (§17.6.10, ruled S469: \"Keep { e }, lift once a statement\"; §18.5); write `lift <expr>;` as its last statement", spanTok(vt.span, line))
+        } else {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", valueBranchReason(ss.length, rb.lifted), spanTok(rb.b.span, line))
+        }
+        return mkE(t, start, AExprK.Recovered)
+    }
+
+    // A stand-in token at `sp` — where a report made after the fact lands.
+    fn spanTok(sp: ASpan, line: int) -> PTok {
+        return { cls: TC.Other, v: "", text: "", start: sp.start, end: sp.end, line: line, bad: "" }
+    }
+
+    // INTERIM (capable form: an expression kind for the value `if`, lowered
+    // assign-in-branches, §17.6.8; W-LIFT-001 for a lift-less branch).
+    fn valueBranchReason(n: int, lifted: boolean) -> string {
+        if (n == 0) return "an empty branch of an `if` used as a value (it yields `not` and owes W-LIFT-001, §17.6.2) is not in the bootstrap yet — write the value: `{ not }`"
+        if (lifted) return "a branch of an `if` used as a value that holds statements before its `lift` is not in the bootstrap yet — the bootstrap builds a branch that is ONE value, `{ e }` or `{ lift e; }` (§17.6.8's single-lift form); compute the value before the `if` (or in a function) and make the branch `{ value }`, or use a statement `if` and write the result in each branch"
+        return "a branch of an `if` used as a value that does not end in its `lift` (a `lift` on only some paths, or none — §17.6.2, W-LIFT-001) is not in the bootstrap yet — the bootstrap builds a branch that is ONE value, `{ e }` or `{ lift e; }`; compute the value before the `if` (or in a function), or use a statement `if`"
+    }
+
+    // A `lift` written directly in a branch before its last statement (the last
+    // is the designating one): E-LIFT-002's second `lift` on one path.
+    fn directLiftBefore(ss: AStmt[]) -> AStmt | not {
+        let i: int = 0
+        while (i < ss.length - 1) {
+            const k: AStmtK = ss[i].k
+            if (k is .Lift) return ss[i]
+            i = i + 1
+        }
+        return not
+    }
+
+    // The bare tail of a branch that holds a statement: its last statement as a
+    // value expression, else not — a write (an assignment) is a statement, never
+    // the branch's value (analyze bareTail's rule).
+    fn valueTail(ss: AStmt[]) -> AExpr | not {
+        if (ss.length < 2) return not
+        const x: AExpr | not = stmtExpr(ss[ss.length - 1])
+        if (x is not) return not
+        const k: AExprK = x.k
+        if (k is .Assign) return not
+        return x
     }
 
     // `if (c) stmt` without braces is one statement in a block of its own.
@@ -7639,7 +7912,16 @@ ${
             const nw: ANode = { nid: mw.nid, span: mkSpan(start, mw.pos), k: ANodeK.Effect(rw.w) }
             return { n: nw, mp: mBump(mw) }
         }
-        const r: RExpr = parseAssign(t)
+        // s475 — §17.6.10: a value `if` that is the sole content of the
+        // interpolation may drop its head's parentheses (`value-form-if ::= 'if'
+        // condition '{' expression '}'`): `${ if @isAdmin { "Admin" } else { "User" } }`.
+        // With the parentheses it is an ordinary expression (an operand too, §17.6.1).
+        let r: RExpr = { e: { nid: t.nid, span: mkSpan(start, start), k: AExprK.Recovered }, tp: t }
+        if (isWord(t, "if") && !tk(peekAt(t, 1), "(")) {
+            r = parseValueIfExpr(t, true)
+        } else {
+            r = parseAssign(t)
+        }
         t = expectP(r.tp, "}")
         t = expectRegionEnd(t)
         const m: MP = backToMarkup(mp, t)

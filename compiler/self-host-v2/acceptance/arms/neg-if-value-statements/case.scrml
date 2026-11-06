@@ -1,0 +1,8 @@
+// §17.6.1: a value `if` branch that holds statements before its `lift` is not in the bootstrap
+// yet (INTERIM — Core's choice holds one expression per branch); it is refused by name.
+<program>
+    let <b:bool=true/>
+    function note() -> int { return 1; }
+    function pick(c: bool) -> int { const v = if (c) { note(); lift 2; } else { 3 }; return v; }
+    <main><p>${pick(@b)}</p></main>
+</program>

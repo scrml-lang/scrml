@@ -1,0 +1,12 @@
+// §17.6 / §17.6.10: an `if` used as a value is the chosen branch's value; a branch that is
+// one expression (`{ e }`, `{ e; }`) or one `lift` is that value; no `else` renders nothing.
+<program>
+    let <b:bool=true/>
+    function pick(n: int) -> string { const v = if (n > 1) { "many" } else if (n > 0) { lift "one"; } else { "none"; }; return v; }
+    <main>
+        <button id="flip" onclick={ @b = !@b; }>flip</button>
+        <p id="a">${if (@b) { "yes"; } else { "no"; }}</p>
+        <p id="b">${ if @b { "shown" } }</p>
+        <p id="c">${pick(2)} ${pick(1)} ${pick(0)}</p>
+    </main>
+</program>
