@@ -44,3 +44,8 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
   `checks` commands all exit 0 (root conformance 2239, snippet/claim/compile-floor/facts/md/conflict/SPEC-INDEX/coverage
   (totals STALE = bot-owned)/state/delta/needs/windows/bot-owned/bootstrap-conformance current). Hook: SCRML_HOOK_SHARDS=12
   SCRML_HOOK_SHARD_MEM_MB=4096 SCRML_HOOK_SHARD_TIMEOUT_S=2400 (16/48/64 shards hit the memory ceiling / load timeouts).
+
+## 2026-11-06T20:24:42Z — merge-main round (#1794, #1797)
+- Merged origin/main 9bc6426e3; conflicts: analyze.scrml lifeMaybeMsg (aCode + pending carve-out), known-gaps g-boot-lifecycle-types (both hunks). No gap id lost.
+- Interactions pinned in pending-cells-s475.test.js (5 new tests): no-SQL pending load READ + C-R2 clean + aborted on supersede/claim; forced-READ writing load refused by C-R2; author write through a client `!` carrier covers E + Transport.
+- Verified: hook 54058/0; slice-m1 160, lowered 160, m2 619, m3 60, codec 166, m4 5482 pass 0 fail; e2e-render-map 259; checks job commands all exit 0.
