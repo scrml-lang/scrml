@@ -98,11 +98,11 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
-             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, EffectDep, RequestState, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
-    import { Node, allNodes } from "./walk.scrml"
+    import { Node, allNodes, requestStateDeps } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
@@ -1394,6 +1394,7 @@ ${
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
+            .Request(target: t, deps: ds, body: b, state: st) :> checkRequest(p, encl, t, ds, b, st)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
             .Reach(fields: fs) :> checkGateFields(p, encl, fs)
@@ -1576,6 +1577,170 @@ ${
         const w: string = blockWriteWitness(p, body, [])
         if (w != "") out = out.concat(["C11: an Effect body writes reactive state — " + w + " (§6.7.4: an effect may not write any reactive cell, directly or through a called function)"])
         return out
+    }
+
+    // -------------------------------------------------------------------------
+    // C-R1 (s475) — a Request (§6.7.7; §13.9.2): the target, every dependency
+    // and every signal resolves (C11's rule) to a mutable cell; the body is
+    // `Let`s (§6.7.7 S469: `lin` declarations "MAY be preceded by" — and
+    // nothing else) and then ONE Suspend, last — the load, the request's one
+    // suspension ("single-shot"): its `then` holds no Suspend at any depth.
+    // The whole body holds exactly ONE Write, of the target (§6.7.7: "exactly
+    // one assignment expression of the form `@variable = expr`"; E-LIFECYCLE-020
+    // / E-LIFECYCLE-021 at the source) and no Commit; that the Write sits in
+    // the continuation is what makes keep-stale hold (§6.7.7 "`<#id>.data` is
+    // NOT cleared", §13.9.4): the target changes only when a load settles.
+    // An empty dependency list is legal (`deps=[]`: load once, on mount).
+    // -------------------------------------------------------------------------
+    type ReqStmt:enum = {
+        RLet,
+        RSuspend(then: Block),
+        RWrite(cap: Sym, inst: InstRef),
+        RCommit,
+        ROther,
+    }
+
+    fn reqStmt(s: Stmt) -> ReqStmt {
+        return match s {
+            .Let(sym: x) :> ReqStmt.RLet
+            .Suspend(bind: x, then: t) :> ReqStmt.RSuspend(t)
+            .Write(cap: c, inst: i) :> ReqStmt.RWrite(c, i)
+            .Commit(writes: x) :> ReqStmt.RCommit
+            .Assign(local: x) :> ReqStmt.ROther
+            .If(cond: x) :> ReqStmt.ROther
+            .Return(e: x) :> ReqStmt.ROther
+            .Eval(e: x) :> ReqStmt.ROther
+            .ResetSurface(of: x) :> ReqStmt.ROther
+            .Defer(body: x) :> ReqStmt.ROther
+            .Unpersist(decl: x) :> ReqStmt.ROther
+            .Attempt(result: x) :> ReqStmt.ROther
+            .Fail(err: x) :> ReqStmt.ROther
+            .Join(k: x) :> ReqStmt.ROther
+            .Jump(k: x) :> ReqStmt.ROther
+            .Loop(label: x) :> ReqStmt.ROther
+            .Break(target: x) :> ReqStmt.ROther
+            .Continue(target: x) :> ReqStmt.ROther
+            .Gather(g: x) :> ReqStmt.ROther
+            .Lift(into: x) :> ReqStmt.ROther
+        }
+    }
+
+    fn nodeReqStmt(n: Node) -> ReqStmt {
+        return match n {
+            .NStmt(s: s) :> reqStmt(s)
+            .NView(v: x) :> ReqStmt.ROther
+            .NAttr(a: x) :> ReqStmt.ROther
+            .NProgram(p: x) :> ReqStmt.ROther
+            .NDecl(d: x) :> ReqStmt.ROther
+            .NField(f: x) :> ReqStmt.ROther
+            .NFn(f: x) :> ReqStmt.ROther
+            .NServerFn(f: x) :> ReqStmt.ROther
+            .NBlock(b: x) :> ReqStmt.ROther
+            .NExpr(e: x) :> ReqStmt.ROther
+            .NPlace(pl: x) :> ReqStmt.ROther
+            .NInst(i: x) :> ReqStmt.ROther
+            .NPattern(pat: x) :> ReqStmt.ROther
+            .NEdit(k: x) :> ReqStmt.ROther
+        }
+    }
+
+    fn checkRequest(p: CoreProgram, encl: Decl[], target: EffectDep, deps: EffectDep[], body: Block, st: RequestState | not) -> string[] {
+        let out: string[] = []
+        for (const m of checkEffectDep(p, encl, target)) { out = out.concat([m.replace("C11: an Effect dependency", "C-R1: a Request target")]) }
+        for (const dep of deps) {
+            for (const m of checkEffectDep(p, encl, dep)) { out = out.concat([m.replace("C11: an Effect dependency", "C-R1: a Request dependency")]) }
+        }
+        for (const sg of requestStateDeps(st)) {
+            for (const m of checkEffectDep(p, encl, sg)) { out = out.concat([m.replace("C11: an Effect dependency", "C-R1: a Request signal")]) }
+        }
+        // the shape: Let* then ONE Suspend, last
+        const n: int = body.stmts.length
+        if (n == 0) return out.concat(["C-R1: a Request body is empty — it is its load, one Suspend (§6.7.7: the body holds the one `@var = expr`)"])
+        let k = 0
+        for (const s of body.stmts) {
+            const r: ReqStmt = reqStmt(s)
+            if (k < n - 1) {
+                const isLet: boolean = match r {
+                    .RLet :> true
+                    .RSuspend(then: x) :> false
+                    .RWrite(cap: x) :> false
+                    .RCommit :> false
+                    .ROther :> false
+                }
+                if (!isLet) out = out.concat(["C-R1: a Request body's statement " + k + " is not a Let — only declarations precede the load (§6.7.7 S469: \"MAY be preceded by `lin` declarations and by nothing else\")"])
+            } else {
+                const t: Block | not = match r {
+                    .RSuspend(then: tb) :> tb
+                    .RLet :> not
+                    .RWrite(cap: x) :> not
+                    .RCommit :> not
+                    .ROther :> not
+                }
+                if (t is not) {
+                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<#id>.data` is NOT cleared\")"])
+                } else {
+                    if (suspendCount(t) > 0) out = out.concat(["C-R1: a Request's continuation suspends again — a request has ONE suspension, its load (§6.7.7 \"single-shot\")"])
+                }
+            }
+            k = k + 1
+        }
+        // exactly one Write in the whole body, of the target; no Commit
+        let writes = 0
+        for (const nd of allNodes(Node.NBlock(body))) {
+            const r: ReqStmt = nodeReqStmt(nd)
+            const w: ReqWrite | not = reqWriteOf(r)
+            if (w is given) {
+                writes = writes + 1
+                if (!writesTarget(p, w.cap, w.inst, target)) out = out.concat(["C-R1: a Request body writes " + capText(p, w.cap) + ", not its target (§6.7.7: the one assignment is the request's write point; E-RI-002 / E-LIFECYCLE-020 otherwise)"])
+            }
+            if (reqIsCommit(r)) out = out.concat(["C-R1: a Request body holds a Commit — its one write is a single Write of the target"])
+        }
+        if (writes != 1) out = out.concat(["C-R1: a Request body holds " + writes + " Writes — it holds exactly one, of its target (§6.7.7: \"exactly one assignment expression of the form `@variable = expr`\")"])
+        return out
+    }
+
+    type ReqWrite:struct = { cap: Sym, inst: InstRef }
+
+    fn reqWriteOf(r: ReqStmt) -> ReqWrite | not {
+        return match r {
+            .RWrite(cap: c, inst: i) :> { cap: c, inst: i }
+            .RLet :> not
+            .RSuspend(then: x) :> not
+            .RCommit :> not
+            .ROther :> not
+        }
+    }
+
+    fn reqIsCommit(r: ReqStmt) -> boolean {
+        return match r {
+            .RCommit :> true
+            .RWrite(cap: c) :> false
+            .RLet :> false
+            .RSuspend(then: x) :> false
+            .ROther :> false
+        }
+    }
+
+    fn suspendCount(b: Block) -> int {
+        let n = 0
+        for (const nd of allNodes(Node.NBlock(b))) {
+            const r: ReqStmt = nodeReqStmt(nd)
+            const sus: boolean = match r {
+                .RSuspend(then: x) :> true
+                .RLet :> false
+                .RWrite(cap: x) :> false
+                .RCommit :> false
+                .ROther :> false
+            }
+            if (sus) n = n + 1
+        }
+        return n
+    }
+
+    fn writesTarget(p: CoreProgram, cap: Sym, i: InstRef, target: EffectDep) -> boolean {
+        const o: CapOwner | not = capOwner(p, cap)
+        if (o is not) return false
+        return o.decl.sym.id == target.decl.id && o.idx == target.idx && instIdKey(i) == instIdKey(target.inst)
     }
 
     // -------------------------------------------------------------------------
@@ -1936,6 +2101,7 @@ ${
             .Slot :> not
             .Star(decl: x) :> not
             .Effect(deps: x) :> not
+            .Request(deps: x) :> not
             .ResetOn(triggers: x) :> not
             .Errors(of: x) :> not
             .Reach(fields: fs) :> not
@@ -2068,6 +2234,7 @@ ${
     fn viewOwnerTails(v: View) -> string[] {
         return match v {
             .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
+            .Request(body: b) :> tailBlock(b, true, [], "a request body")
             .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
@@ -3102,6 +3269,7 @@ ${
     fn jumpView(v: View) -> string[] {
         return match v {
             .Effect(body: b) :> jumpBlock(b, [])
+            .Request(body: b) :> jumpBlock(b, [])
             .ResetOn(reset: b) :> jumpBlock(b, [])
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
@@ -3293,6 +3461,7 @@ ${
         return match v {
             .Gather(g: g, rows: rows) :> gatherProblems(g, rows.length)
             .Effect(body: b) :> liftBlock(b, -1, -1)
+            .Request(body: b) :> liftBlock(b, -1, -1)
             .ResetOn(reset: b) :> liftBlock(b, -1, -1)
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
@@ -4424,6 +4593,7 @@ ${
             .Slot :> not
             .Star(decl: d) :> not
             .Effect(deps: ds) :> not
+            .Request(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
             .Errors(of: ds) :> not
             .Reach(fields: fs) :> not

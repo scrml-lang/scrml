@@ -155,6 +155,7 @@ ${
             .Slot :> "Slot"
             .Star(decl: x) :> "Star"
             .Effect(deps: x) :> "Effect"
+            .Request(deps: x) :> "Request"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"
             .Reach(fields: fs) :> "Reach"

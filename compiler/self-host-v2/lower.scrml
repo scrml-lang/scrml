@@ -2222,6 +2222,7 @@ ${
             .Slot :> v
             .Star(decl: dd) :> v
             .Effect(deps: ds) :> v
+            .Request(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
             .Reach(fields: fs) :> v
@@ -3755,6 +3756,7 @@ ${
             .Slot :> v
             .Star(decl: x) :> v
             .Effect(deps: x) :> v
+            .Request(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
             .Reach(fields: fs) :> v
@@ -3846,6 +3848,7 @@ ${
             .Dyn(e: x) :> []
             .Slot :> []
             .Effect(deps: x) :> []
+            .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
@@ -3908,6 +3911,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .Request :> []
             .ResetOn :> []
             .Errors :> []
             .Reach :> []
@@ -3981,6 +3985,7 @@ ${
             .Slot :> []
             .Star(decl: x) :> []
             .Effect(deps: x) :> []
+            .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
             .Reach(fields: x) :> []
@@ -4030,6 +4035,7 @@ ${
             .Slot :> 0
             .Star(decl: x) :> 0
             .Effect(deps: x) :> 0
+            .Request(deps: x) :> 0
             .ResetOn(triggers: x) :> 0
             .Errors(of: x) :> 0
             .Reach(fields: x) :> 0

@@ -381,6 +381,117 @@ export function effectOn(scope, deps, body) {
   new DepEffect(scope, deps, body);
 }
 
+// ---------------------------------------------------------------------------
+// s475 — THE REQUEST MACHINE: `<request>` (SPEC §6.7.7) and a pending cell
+// (§13.9.2: "a plain cell initialized to `not`, plus a `<request>`" — "No new
+// runtime representation"). Core View.Request; print.scrml requestJs.
+//
+// A run (mount, a dependency change, `refetch()`):
+//   1. starts a new TASK and cancels every earlier one — the newest run wins
+//      (EC-2 / EC-4: "only the most recently initiated fetch's result is
+//      applied"; the task IS the per-instance sequence number);
+//   2. sets the signals (§6.7.7 "Mount behavior"): loading true, error `not`,
+//      stale = (data is not `not`); `data` and the TARGET keep their values
+//      ("On re-execution, `<#id>.data` is NOT cleared"; §13.9.4 keep-stale);
+//   3. evaluates the load: `body(task)` returns `{ on, then }` — `on` the
+//      waiting value, `then(v)` the continuation that writes the target.
+// When the load settles on a LIVE task (not superseded, not torn down —
+// EC-3's mounted guard): with an `error` signal and a Failure, the error is
+// set and the target is untouched (§6.7.7 "Settled state (failure)": "data
+// retains previous value"); otherwise `then(v)` runs (for a pending cell its
+// own Attempt handles a failure, §13.9.5) and `data` takes the target's new
+// value. loading / stale go false in the same batch.
+//
+// Discard-only (INTERIM): a superseded or torn-down run's transport is NOT
+// aborted — its result is dropped. §6.7.7.1 rules 2/3 owe an abort for a
+// READ request; that needs `call(route, args, task)`'s AbortController wired
+// to Task.cancel for a READ-classified request only (gap
+// g-boot-request-read-abort-owed-s475). Discarding is never wrong for a WRITE.
+// ---------------------------------------------------------------------------
+class Request {
+  constructor(scope, target, deps, body, opts) {
+    this.target = target;
+    this.deps = deps;
+    this.body = body;
+    this.loading = opts.loading ?? null;
+    this.data = opts.data ?? null;
+    this.error = opts.error ?? null;
+    this.stale = opts.stale ?? null;
+    this.disposed = false;
+    this.tasks = new Set();
+    for (const d of deps) d.observers.add(this);
+    stats.depEffects++;
+    scope.ownEffect(() => this.unregister());
+  }
+  markStale() {
+    if (this.disposed) return;
+    effectQueue.add(this);
+    if (batchDepth === 0) flush();
+  }
+  run() {
+    if (this.disposed) return;
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    const task = new Task(this);
+    this.tasks.add(task);
+    try {
+      batch(() => {
+        if (this.loading) this.loading.set(true);
+        if (this.error) this.error.set(null);
+        if (this.stale) this.stale.set(this.data ? this.data.peek() != null : this.target.peek() != null);
+      });
+      const load = untrack(() => this.body(task));
+      suspend(task, load.on, (v) => this.settle(v, load.then));
+    } finally {
+      this.settled(task);
+    }
+  }
+  settle(v, then) {
+    if (this.error && failed(v)) {
+      this.error.set(v.error);
+    } else {
+      then(v);
+      if (this.data) this.data.set(this.target.peek());
+    }
+    if (this.loading) this.loading.set(false);
+    if (this.stale) this.stale.set(false);
+  }
+  settled(task) {
+    if (task.pending === 0) this.tasks.delete(task);
+  }
+  unregister() {
+    if (this.disposed) return;
+    this.disposed = true;
+    effectQueue.delete(this);
+    for (const d of this.deps) d.observers.delete(this);
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    stats.depEffects--;
+  }
+}
+
+/**
+ * Register a request in `scope` (§6.7.7 / §13.9.2). `target` is the cell the
+ * load writes; `deps` the cells whose change re-runs it (may be empty: load
+ * once); `body(task)` returns `{ on, then }`. `opts.mount` (default true) runs
+ * it on mount — false for a provably-writing request (§6.7.7.3); `opts.loading
+ * / data / error / stale` are the optional signal cells. Returns `{ refetch }`
+ * (§6.7.7 `<#id>.refetch()`: a new run, superseding an in-flight one — EC-4).
+ */
+export function requestOn(scope, target, deps, body, opts = {}) {
+  requireScope(scope, "a <request>");
+  if (!(target instanceof Cell)) throw new Error("a <request> target must be a mutable cell (§6.7.7: the body's one `@var = expr`)");
+  for (const d of deps) {
+    if (!(d instanceof Cell)) throw new Error("a <request> dependency must be a mutable cell (§6.7.7, E-LIFECYCLE-022)");
+  }
+  for (const k of ["loading", "data", "error", "stale"]) {
+    if (opts[k] != null && !(opts[k] instanceof Cell)) throw new Error(`a <request>'s \`${k}\` signal must be a mutable cell`);
+  }
+  const r = new Request(scope, target, deps, body, opts);
+  if (opts.mount !== false) r.markStale();
+  return { refetch: () => r.markStale() };
+}
+
 /**
  * Suspend `task` on `value` (Core Stmt.Suspend — the CPS split, §19.9.8):
  * when it settles, run the continuation `k(v)` — unless the task was cancelled
