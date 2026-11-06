@@ -30984,13 +30984,24 @@ ${
             }
             runs = runs.concat([n])
         }
+        // r1 of #1760: a member of a cycle that runs a query at all runs it any number of times — the cycle's
+        // members get 2 (was: the first member read its partner's runs before they were computed). No reader
+        // today; kept correct so one cannot inherit the undercount.
         let own2: int[] = runs
         for (const scc of sccOrder(edges)) {
+            const loop: boolean = scc.length > 1 || edges[scc[0]].indexOf(scc[0]) >= 0
+            let any = false
             for (const m of scc) {
                 let n: int = own2[m]
-                for (const j of edges[m]) { n = n + runs[j] }
+                for (const j of edges[m]) {
+                    if (scc.indexOf(j) < 0) n = n + runs[j]
+                }
                 if (n > 2) n = 2
+                if (n > 0) any = true
                 runs = runs.slice(0, m).concat([n]).concat(runs.slice(m + 1))
+            }
+            if (loop && any) {
+                for (const m of scc) { runs = runs.slice(0, m).concat([2]).concat(runs.slice(m + 1)) }
             }
         }
         // the remote calls of client-placed callables, callees first.
