@@ -3971,6 +3971,7 @@ ${
             if (isP(ti, ";")) ti = adv(ti)
             if (isP(ti, "}") && hardErrors(ti.diags) == h0) return { e: inner.e, tp: adv(ti) }
         }
+        const hb: int = hardErrors(tp.diags)
         const rb: RArmBlock = parseArmBlock(tp)
         const ss: AStmt[] = rb.b.stmts
         if (ss.length == 1) {
@@ -3979,6 +3980,10 @@ ${
             if (x is given) return { e: x, tp: rb.tp }
         }
         let t: TP = rb.tp
+        // a branch that did not parse (markup as a value — not in the bootstrap,
+        // g-boot-markup-as-value-unbuilt-s473 — or any other parse error) is judged
+        // by nothing more: its shape is the parse error's artefact
+        if (hardErrors(t.diags) > hb) return mkE(t, start, AExprK.Recovered)
         const line: int = cur(tp).line
         const dl: AStmt | not = directLiftBefore(ss)
         const vt: AExpr | not = valueTail(ss)
