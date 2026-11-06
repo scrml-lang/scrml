@@ -109,15 +109,12 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
     clean(P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{ _ err :> { @status = "failed"; } };\n    }`));
   });
 
-  test("`?` needs `Transport(t: ServerCallError)` in the enclosing enum — else E-ERROR-010 naming the line to add (SPEC wording)", () => {
+  // s475-boot-transport-every-client-bang: owner ruling S475 item 4 — "§19.9.5 extends to every client `!`
+  // function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for client
+  // functions. Newly-accepting." Was: E-ERROR-010 "Add `Transport(t: ServerCallError)` to `SyncError`".
+  test("`?` on a client server call in a client `!` function whose enum lacks `Transport`: the function is a transport carrier — no E-ERROR-010 (ruling S475 item 4 retires §19.5.3 bullet 3 for client functions)", () => {
     const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n    }`;
-    const src = P(NOTES + E);
-    expect(errCodes(src)).toEqual(["E-ERROR-010"]);
-    const m = run(src).diags.find((d) => d.code === "E-ERROR-010").message;
-    // §19.5.3: "the E-ERROR-010 message then names that line" (s475-boot-caller-transport reworded the
-    // message around it — and, for a built-in enum, names the forms that can work instead)
-    expect(m).toContain("`saveNote` is a server function: a call to it from the client can also fail on the wire");
-    expect(m).toContain("Add `Transport(t: ServerCallError)` to `SyncError`");
+    expect(errCodes(P(NOTES + E))).toEqual([]);
   });
 
   test("with the wrapper declared, `?` re-fails every variant of the client set — the four retags", () => {

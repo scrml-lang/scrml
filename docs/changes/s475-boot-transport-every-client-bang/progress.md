@@ -1,0 +1,7 @@
+# s475-boot-transport-every-client-bang — progress (append-only)
+
+- 2026-11-06 start: worktree at origin/main 19fc95a24. Ruling: user-voice-scrml.md "⭐ RULED — S475 owner questions, PA recs adopted wholesale (S475, 2026-11-06)" item 4.
+- 2026-11-06 probe (base): an uncomposed client `! E` fn with `s(x)?` (s a `! E` server fn, nothing after it that can fail) → E-ERROR-010 at the `?` (+ E-TYPE-VARIANT at a caller's `.Transport` arm); same via a client `?`-propagating caller; built-in `! SqlError` likewise. Composed fns were already carriers (#1760).
+- 2026-11-06 change: analyze.scrml `transportCarriers` seeds every client-placed `!` fn that `?`-propagates a call of a server-placed fn (`isServerPlaced`), plus the existing fixpoint. Functions that HANDLE their server calls stay non-carriers (reading; see report).
+- 2026-11-06 tests: slice-m4/transport-every-client-bang-s475.test.js — 12 pass head, 9 fail / 3 pass base (the 3 base-passing are stays-refused / unchanged pins). Two pins rewritten (caller-transport-s475, server-call-core S2): the retired §19.5.3 bullet 3 E-ERROR-010.
+- 2026-11-06 commit 1 hook: shard 1 killed at the memory ceiling (3351 MB > 3072) and a spawn in shard 0 returned exit null (killed) — infra, not a test failure; retried with SCRML_HOOK_SHARDS=1. failT test moved its `fail` before the call (a later one composes, so it did not exercise the uncomposed path). Gap + coverage rows updated. Base corpus sweep: 2,252 files.

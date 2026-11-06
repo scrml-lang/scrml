@@ -31379,10 +31379,18 @@ ${
     // the callee's `Transport` as its own (§19.5.2), so its callers receive it too (PA ruling S475:
     // "recursively for client callers"). Returned as AFn nids (the composed program keeps them; Sym ids
     // are minted again).
+    // s475-boot-transport-every-client-bang — and every client-placed `!` function that `?`-propagates a
+    // CLIENT CALL OF A SERVER FUNCTION, composed or not. Owner ruling S475 item 4: "§19.9.5 extends to every
+    // client `!` function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for
+    // client functions. Newly-accepting." Was: such a function's own enum had to declare `Transport`
+    // (E-ERROR-010, §19.5.3 bullet 3). A function that HANDLES each of its server calls (`!{}` / `match`)
+    // lets no wire failure out and is not a carrier unless it composes (reading: "making a server call" whose
+    // failure its callers can receive — making it a carrier would only add an arm its callers can never run,
+    // which is newly-rejecting, against the ruling's direction).
     fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> int[] {
         let syms: int[] = seeds
         const places: PlaceFact[] = t.server.places
-        let changed = syms.length > 0
+        let changed = true
         while (changed) {
             changed = false
             for (const fs of g.fns) {
@@ -31390,7 +31398,7 @@ ${
                 if (syms.indexOf(sid) < 0 && fs.f.failable && !isServerPlace(placeOf(places, sid)) && sum.inherited.indexOf(sid) < 0) {
                     for (const h of cfStmts(fs.f.body.stmts, cf0()).handled) {
                         const cs: Sym | not = fnSymAt(t, h.callee)
-                        if (!changed && h.how == 0 && cs is given && syms.indexOf(cs.id) >= 0) {
+                        if (!changed && h.how == 0 && cs is given && (syms.indexOf(cs.id) >= 0 || isServerPlaced(t, cs))) {
                             syms = syms.concat([sid])
                             changed = true
                         }
