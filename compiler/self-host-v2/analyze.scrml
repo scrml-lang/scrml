@@ -29197,7 +29197,7 @@ ${
                 // client `!` function it calls (and which makes no server call of its own) needs no batch of its own
                 // — that request runs inside the callee's envelope, and its wire failure reaches this function as the
                 // callee's `Transport` (§19.9.5). The composed program judges it again (one call of `#H`).
-                if (why != "" && viaOneComposed(sum, tq, places, sum.nodes[i].f, composing)) why = ""
+                if (why != "" && viaOneComposed(sum, tq, places, i, composing)) why = ""
                 if (why != "") {
                     const r: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, why, allow, st)
                     st = r.st
@@ -29226,7 +29226,12 @@ ${
     // client function that makes server calls, outside any loop: a function in `composing` (its calls compose
     // into one batch, one request). Fails closed: any other reference to a function that reaches the server
     // (a second call, a call in a loop, a function passed as a value) is not this shape.
-    fn viaOneComposed(sum: Summary, tq: TxQ, places: PlaceFact[], f: FnFacts, composing: int[]) -> boolean {
+    // r1 (review of #1760, F1): nor is a function in a call cycle, or one calling a function in a cycle — the
+    // recursion makes a request per turn (on 15393ed9e g → h → g ran two requests, the first committed). A
+    // reference counts by what the callee REACHES (`tq.srv`, the closure over every call), not by `tq.remote`.
+    fn viaOneComposed(sum: Summary, tq: TxQ, places: PlaceFact[], i: int, composing: int[]) -> boolean {
+        if (tq.cyc[i]) return false
+        const f: FnFacts = sum.nodes[i].f
         let n: int = 0
         let ok = true
         for (const r of f.scan.refs) {
@@ -29234,9 +29239,9 @@ ${
             if (isFnNode(sum.nodes, j)) {
                 if (isServerPlace(placeOf(places, sum.nodes[j].f.sym))) {
                     ok = false
-                } else if (tq.remote[j] > 0) {
+                } else if (tq.srv[j] || tq.remote[j] > 0) {
                     n = n + 1
-                    if (composing.indexOf(sum.nodes[j].f.sym) < 0 || inRepeat(f.repeats, r.span)) ok = false
+                    if (tq.cyc[j] || composing.indexOf(sum.nodes[j].f.sym) < 0 || inRepeat(f.repeats, r.span)) ok = false
                 }
             }
         }
@@ -30906,7 +30911,9 @@ ${
     // `all[i]` (s474 r1, review F1/F2) — EVERY `?{}` callable i reaches, `.nobatch()` ones included:
     // §8.9.5 makes `.nobatch()` opt a query out of the COUNT (the trigger), not out of what an open
     // envelope reaches — so the one-database checks (E-SQL-011, the cross-database read) read `all`.
-    type TxQ:struct = { qs: FxAtom[][], all: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[] }
+    // `srv[i]` (r1 of #1760) — callable i reaches a server-placed or server-only function along its calls
+    // (itself included); `cyc[i]` — callable i is in a cycle of calls.
+    type TxQ:struct = { qs: FxAtom[][], all: FxAtom[][], loops: FxAtom[][], loopWhy: string[], runs: int[], edges: int[][], remote: int[], remoteWhy: string[], srv: boolean[], cyc: boolean[] }
 
     fn txQuerySets(nodes: Callable[], places: PlaceFact[], inherited: int[]) -> TxQ {
         let own: FxAtom[][] = []
@@ -30986,22 +30993,42 @@ ${
                 runs = runs.slice(0, m).concat([n]).concat(runs.slice(m + 1))
             }
         }
-        // the remote calls of client-placed callables, callees first
+        // the remote calls of client-placed callables, callees first.
+        // r1 (review of #1760, F1): the order is the components of the CLIENT call graph (client-placed,
+        // not inherited, callers and callees — a call that reaches the server runs everything below it in
+        // place there, so only client-side cycles repeat requests), and a member of a cycle gets the cycle's
+        // count, not its own: a cycle that reaches the server at all makes a request per turn of the
+        // recursion — any number (2, the cap). Was: one pass over the members in SCC order, so the first
+        // member of a cycle read its partner's count before it was computed (0) and undercounted.
         let remote: int[] = []
         let rwhy: string[] = []
+        let cedges: int[][] = []
         for (const c of nodes) {
             remote = remote.concat([0])
             rwhy = rwhy.concat([""])
         }
-        for (const scc of sccOrder(edges)) {
+        i = 0
+        for (const c of nodes) {
+            let ce: int[] = []
+            if (clientCaller(nodes, places, inherited, i)) {
+                for (const j of edges[i]) {
+                    if (clientCaller(nodes, places, inherited, j)) ce = ce.concat([j])
+                }
+            }
+            cedges = cedges.concat([ce])
+            i = i + 1
+        }
+        for (const scc of sccOrder(cedges)) {
+            const loop: boolean = scc.length > 1 || cedges[scc[0]].indexOf(scc[0]) >= 0
+            let any = false
             for (const m of scc) {
                 const c: Callable = nodes[m]
-                if (c.kind == CallableK.KFn && !isServerPlace(placeOf(places, c.f.sym)) && inherited.indexOf(c.f.sym) < 0) {   // s474: a server-only (inherited, §12.2 T5) function calls in place
+                if (clientCaller(nodes, places, inherited, m)) {   // s474: a server-only (inherited, §12.2 T5) function calls in place
                     let n: int = 0
                     let names: string[] = []
                     for (const r of c.f.scan.refs) {
                         const j: int = nodeIdx(nodes, r.sym)
-                        if (isFnNode(nodes, j)) {
+                        if (isFnNode(nodes, j) && scc.indexOf(j) < 0) {   // a partner in the cycle: the cycle's count, below
                             let k: int = 0
                             if (isServerPlace(placeOf(places, nodes[j].f.sym))) {
                                 k = 1
@@ -31014,12 +31041,44 @@ ${
                         }
                     }
                     if (n > 2) n = 2
+                    if (n > 0) any = true
                     remote = remote.slice(0, m).concat([n]).concat(remote.slice(m + 1))
                     rwhy = rwhy.slice(0, m).concat([names.join(", ")]).concat(rwhy.slice(m + 1))
                 }
             }
+            if (loop && any) {
+                for (const m of scc) {
+                    remote = remote.slice(0, m).concat([2]).concat(remote.slice(m + 1))
+                    rwhy = rwhy.slice(0, m).concat(["`" + nodes[m].label + "` is recursive (it calls itself, directly or through other functions) and reaches the server — a request per call"]).concat(rwhy.slice(m + 1))
+                }
+            }
         }
-        return { qs: qs, all: closeDim(ownAll, edges), loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy }
+        // `srv[i]`: callable i reaches a server-placed or server-only (inherited) function along its calls;
+        // `cyc[i]`: callable i is in a cycle of calls (any placement).
+        let srv: boolean[] = []
+        for (const c of nodes) {
+            srv = srv.concat([c.kind == CallableK.KFn && (isServerPlace(placeOf(places, c.f.sym)) || inherited.indexOf(c.f.sym) >= 0)])
+        }
+        for (const scc of sccOrder(edges)) {
+            let hit = false
+            for (const m of scc) {
+                if (srv[m]) hit = true
+                for (const j of edges[m]) {
+                    if (srv[j]) hit = true
+                }
+            }
+            if (hit) {
+                for (const m of scc) { srv = setBoolAt(srv, m, true) }
+            }
+        }
+        return { qs: qs, all: closeDim(ownAll, edges), loops: closeDim(ownL, edges), loopWhy: why, runs: runs, edges: edges, remote: remote, remoteWhy: rwhy, srv: srv, cyc: cyc }
+    }
+
+    // A client-placed function that is not server-only (inherited): its calls of the server are requests.
+    fn clientCaller(nodes: Callable[], places: PlaceFact[], inherited: int[], i: int) -> boolean {
+        if (!isFnNode(nodes, i)) return false
+        const c: Callable = nodes[i]
+        return !isServerPlace(placeOf(places, c.f.sym)) && inherited.indexOf(c.f.sym) < 0
     }
 
     fn isServerPlace(pk: PlaceK) -> boolean {
