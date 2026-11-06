@@ -186,9 +186,16 @@ ${
     // `hostWrapperOf`, the §21.3.1 wrapper rule): its body is the one host call
     // it wraps, and Core keeps its signature and the host reference (core.scrml
     // HostFn) instead of a body. `not`: an ordinary function.
+    // s475-boot-caller-transport — `derr`: the DECLARED error enum (`! E`). `err` equals it except for a
+    // TRANSPORT CARRIER: a client `!` function whose server calls compose into one request (composePass),
+    // or one that `?`-propagates a carrier's failure. §19.9.5: "Its client call fails with the §19.9.10
+    // failure set: the function's declared error variants, if it is declared `!`, plus `Transport(t:
+    // ServerCallError)`". A carrier's `err` is that set (`E + Transport`, minted as for a server function's
+    // client call — E itself when E declares the wrapper), so its callers' handlers and `?` are judged
+    // against it, and Core gives the function that enum; its own `fail` still names E (FailCtx.derr).
     export type FnInfo:struct = { nid: int, span: ASpan, sym: Sym, name: string, file: string, exported: boolean,
                                   pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not,
-                                  serverOwn: boolean, rerr: Sym | not, host: HostFn | not }
+                                  serverOwn: boolean, rerr: Sym | not, host: HostFn | not, derr: Sym | not }
 
     // A classified write (§6.2): the capability, the instance, the edit, the check.
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
@@ -633,7 +640,13 @@ ${
     // s475 r1 — `nsAt`: the value names `m` resolved to a namespace import (resolveNameOf), by file and
     // source offset; analyzeSources re-reads those files with `m.x` there one name (parse.scrml PNs).
     type NsAt:struct = { file: string, at: int }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[] }
+    // s475-boot-caller-transport — `tport`: each E-ERROR-010 a `?` on a client server call reported because
+    // the enclosing function's enum has no `Transport` (remotePropagate), with that function's Sym id. A
+    // client `!` function whose server calls compose (composePass) hands the request's wire failure to ITS
+    // callers instead (§19.9.5: "Its client call fails with … the function's declared error variants … plus
+    // `Transport(t: ServerCallError)`"), so analyzeRun drops these reports for it (dropTransportDiags).
+    type TportAt:struct = { fnSym: int, d: Diag }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[] }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -675,11 +688,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -730,38 +743,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     // =========================================================================
@@ -4328,7 +4341,7 @@ ${
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret,
                                        failable: af.failable, err: re.err,
-                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not, host: not }
+                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not, host: not, derr: re.err }
                 st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
@@ -5122,7 +5135,7 @@ ${
     fn fnWithHost(i: FnInfo, h: HostFn) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
-                 serverOwn: i.serverOwn, rerr: i.rerr, host: h }
+                 serverOwn: i.serverOwn, rerr: i.rerr, host: h, derr: i.derr }
     }
 
     // Why the function `fs` (whose whole body is `return h(…)`) is not the
@@ -5329,12 +5342,32 @@ ${
     type RemoteMemo:struct = { enumId: int, remote: Sym }
     type RMintedEnum:struct = { ti: TypeInfo, st: AS }
 
-    fn remoteEnums(fs: FnSrc[], ts: TypeInfo[], sce: Sym, st0: AS) -> RRemoteEnums {
+    // s475-boot-caller-transport — `carriers`: the AFn nids of the TRANSPORT CARRIERS (FnInfo.derr; the
+    // composed program's analysis is given them, analyzeSources). A carrier's `err` becomes its declared
+    // enum's `E + Transport` — the same minted enum (memo) a client call of a server function declared
+    // `! E` fails with, so the composed `#F(…)?` re-fails as itself. E already holding `Transport(t:
+    // ServerCallError)` IS that set; E with another `Transport` (E-ERROR-016) or not an enum (E-ERROR-011)
+    // is left as declared.
+    fn remoteEnums(fs: FnSrc[], ts: TypeInfo[], sce: Sym, carriers: int[], st0: AS) -> RRemoteEnums {
         let st: AS = st0
         let minted: TypeInfo[] = []
         let memo: RemoteMemo[] = []
         let out: FnSrc[] = []
-        for (const f of fs) {
+        for (const f0 of fs) {
+            let f: FnSrc = f0
+            const ce: Sym | not = f0.info.err
+            if (carriers.indexOf(f0.info.nid) >= 0 && f0.info.failable && ce is given && transportShape(ts, ce, sce) < 0) {
+                let cs: Sym | not = remoteMemoOf(memo, ce.id)
+                if (cs is not) {
+                    const cm: RMintedEnum = mintRemoteEnum(ts, ce, ce.id, sce, st)
+                    st = cm.st
+                    minted = minted.concat([cm.ti])
+                    const ms0: Sym = typeDefSym(cm.ti.def)
+                    memo = memo.concat([{ enumId: ce.id, remote: ms0 }])
+                    cs = ms0
+                }
+                f = { info: withCarrierErr(f0.info, cs), f: f0.f }
+            }
             let rerr: Sym | not = not
             if (f.info.serverOwn) {
                 const e: Sym | not = f.info.err
@@ -5382,10 +5415,17 @@ ${
         return not
     }
 
+    // A transport carrier's FnInfo: `err` the failure set its callers see (`derr` keeps the declared enum).
+    fn withCarrierErr(i: FnInfo, err: Sym | not) -> FnInfo {
+        return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
+                 pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: err,
+                 serverOwn: i.serverOwn, rerr: i.rerr, host: i.host, derr: i.derr }
+    }
+
     fn withRemoteErr(i: FnInfo, rerr: Sym | not) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
-                 serverOwn: i.serverOwn, rerr: rerr, host: i.host }
+                 serverOwn: i.serverOwn, rerr: rerr, host: i.host, derr: i.derr }
     }
 
     // Does enum `e` declare a variant named `Transport`: -1 none; 0 exactly
@@ -5829,7 +5869,7 @@ ${
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
-    fn phaseA(files: FileAst[], entry: string, st0: AS) -> RGlobals {
+    fn phaseA(files: FileAst[], entry: string, carriers: int[], st0: AS) -> RGlobals {
         let st: AS = st0
         const rs: RStubs = typeStubs(files, st)
         st = rs.st
@@ -5869,7 +5909,7 @@ ${
         st = rhb.st
         const rf0: RFns = { fs: rhb.fs, st: st }
         // s454 (U1b): the failure enum of a client call of each server-triggered function
-        const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), st)
+        const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), carriers, st)
         st = rr.st
         const rf: RFns = { fs: rr.fs, st: st }
         const allTypes: TypeInfo[] = rt.ts.concat(rr.minted)
@@ -6208,9 +6248,12 @@ ${
     // function); `serverOwn` — its own body places it on the server (§12.2
     // T1/T4), so a call made in it is server→server whatever the rest of the
     // program does (§19.9.10 "Not affected: A server→server call").
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int }
+    // s475-boot-caller-transport: `derr` — the function's DECLARED error enum, which a `fail` names
+    // (§19.3.3); `err` differs from it only for a transport carrier (FnInfo.derr), whose `err` is the
+    // failure set its callers see (`E + Transport`).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1 } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -6219,7 +6262,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -6230,12 +6273,12 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
     }
 
     // s469 (#1471 round-2 MED-2): `nid` is a call evaluated as a STATEMENT (its result is
@@ -6243,12 +6286,12 @@ ${
     // E-ERROR-012) — resolveCall does not report it as a value use.
     fn withStmtCall(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -6608,7 +6651,7 @@ ${
         // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
         // stands only for `m` used as a value.
         if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]) }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]), tport: st.tport }
             return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
@@ -12611,8 +12654,13 @@ ${
         return handledFact(env, e, err, stmt, into, rt.retag, not, rt.st)
     }
 
-    fn e010Msg(env: Env, err: Sym, into: Sym, bad: string[]) -> string {
-        return "propagating `" + err.hint + "` into `" + env.fx.fnName + "(…)! " + into.hint + "` would drop the variant(s) " + bad.join(", ") + " — every variant the callee can fail with must exist in the enclosing function's error type with the same payload (§19.5.3). Add them to `" + into.hint + "`, or handle the call with `!{ … }` / `match`"
+    fn e010Msg(env: Env, err: Sym, into0: Sym, bad: string[]) -> string {
+        // s475-boot-caller-transport: name the enclosing function's DECLARED enum (a carrier's `err` is E + Transport)
+        const dd: Sym | not = env.fx.derr
+        const into: Sym = dd is given ? dd : into0
+        let more: string = ""
+        if (bad.indexOf("Transport") >= 0) more = " `Transport(t: ServerCallError)` is the wire failure of a composed client `!` function's one request, which its callers receive (§19.9.5); '" + env.fx.fnName + "' can hand it on only when its own callers can receive it — when '" + env.fx.fnName + "' runs on the client, is declared `!`, and its error type declares no other `Transport` (§19.9.10, E-ERROR-016)."
+        return "propagating `" + err.hint + "` into `" + env.fx.fnName + "(…)! " + into.hint + "` would drop the variant(s) " + bad.join(", ") + " — every variant the callee can fail with must exist in the enclosing function's error type with the same payload (§19.5.3)." + more + " Add them to `" + into.hint + "`, or handle the call with `!{ … }` / `match`"
     }
 
     // The retag of variants [from, upto) of `err` into `into` (upto -1: all),
@@ -13415,7 +13463,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -13483,11 +13531,33 @@ ${
         const tr: RRetag = retagInto(env, rset, into, nE, -1, st)
         st = tr.st
         let remote: Diag[] = []
-        if (tr.bad.length > 0) remote = [newDiag("E-ERROR-010", "`" + f.name + "` is a server function: a call to it from the client can also fail on the wire. Add `Transport(t: ServerCallError)` to `" + into.hint + "`, or handle the call with `!{ … .Transport(t) :> … }` (§19.9.10, §19.5.3)", env.file, e.span)]
+        if (tr.bad.length > 0) {
+            // s475-boot-caller-transport (review of #1756, F3): a built-in enum takes no variant — name the forms
+            // that can work; and record the report (AS.tport): when the enclosing function's calls compose,
+            // the wire failure is its callers' (§19.9.5) and analyzeRun drops this report
+            const td: Diag = newDiag("E-ERROR-010", "`" + f.name + "` is a server function: a call to it from the client can also fail on the wire (§19.9.10), and `?` would re-fail that as `Transport(t: ServerCallError)`, which `" + into.hint + "` does not declare (§19.5.3). " + transportFix(env.g, into), env.file, e.span)
+            remote = [td]
+            st = withTport(st, env.fx.fnSym, td)
+        }
         let local: Diag[] = []
         if (!f.failable) local = [newDiag("E-ERROR-004", e004Msg(subj) + " — `" + f.name + "` is a server function called server→server here, so the call cannot fail on the wire (§19.9.10)", env.file, e.span)]
         st = bySite(env, site, remote.concat(conflictDiags(env, f, e)), local, st)
         return handledFact(env, e, rset, stmt, into, own.retag, remoteFact(env, f, tr.retag), st)
+    }
+
+    // s475-boot-caller-transport — what an author can do when an enclosing enum lacks `Transport`. A built-in
+    // enum (`SqlError`, `Error`) takes no variant (review of #1756, F3: "add `Transport` to `SqlError`" was
+    // impossible advice).
+    fn transportFix(g: Globals, into: Sym) -> string {
+        const ti: TypeInfo | not = typeInfoOf(g.types, into)
+        let builtin = false
+        if (ti is given) builtin = ti.file == builtinFile()
+        if (builtin) return "`" + into.hint + "` is built in and takes no variant: handle the call here with `!{ … .Transport(t) :> … }`, or declare an error enum holding `" + into.hint + "`'s variants and `Transport(t: ServerCallError)` and use it"
+        return "Add `Transport(t: ServerCallError)` to `" + into.hint + "`, or handle the call here with `!{ … .Transport(t) :> … }`"
+    }
+
+    fn withTport(st: AS, fnSym: int, d: Diag) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]) }
     }
 
     // `!{}` / `match` on the call: the arms resolve against the CLIENT set (the
@@ -14197,8 +14267,11 @@ ${
             if (env.fx.inFn) where = "in function '" + env.fx.fnName + "', which is not declared as failable"
             return addDiag(st, env.file, s.span, "E-ERROR-001", "'fail' used " + where + ". Add '!' to the function signature: 'function " + env.fx.fnName + "(...)! ErrorType' (§19.3.3)" + failSplitNote(f))
         }
-        const err: Sym | not = env.fx.err
-        if (err is not) return st                          // E-ERROR-011 reported
+        const into: Sym | not = env.fx.err
+        // s475-boot-caller-transport: a `fail` names the DECLARED enum (§19.3.3); a transport carrier's
+        // `err` (its callers' set, E + Transport) holds E's variants first, at the same indexes
+        const err: Sym | not = env.fx.derr is given ? env.fx.derr : into
+        if (err is not || into is not) return st           // E-ERROR-011 reported
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         const valid: string = variantNamesOf(vs).join(", ")
         if (t is given) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)" + failSplitNote(f))
@@ -14212,7 +14285,7 @@ ${
         if (idx < 0) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.variant + "' which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)" + failSplitNote(f))
         const n: int = vs[idx].fields.length
         if (n != f.args.length) return addDiag(st, env.file, s.span, "E-TYPE-082", "`" + err.hint + "." + f.variant + "` carries " + n + " payload value(s) but this `fail` supplies " + f.args.length + " — one argument per declared field, in order (§19.3.3, §14.4)")
-        return addFail(st, s.nid, FailFact.FFail(err, idx))
+        return addFail(st, s.nid, FailFact.FFail(into, idx))
     }
 
     // The type a name denotes where `env` stands (user types first, so a user
@@ -19719,7 +19792,7 @@ ${
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1 }
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
             const fte: TypeEnv = teAt(g.te, fs.info.file)
             for (const p of fs.f.params) {
@@ -28635,7 +28708,8 @@ ${
     // transitive query set needs one — BEGIN IMMEDIATE when a query it reaches
     // writes, S474 ruling 5), its callees run in place (an inner `!` as a savepoint,
     // F10), its failure is the routed `fail` wire shape (with #1703's production
-    // blanking of driver text), and F's `?` re-fails it as F's own variant.
+    // blanking of driver text), and F's `?` re-fails it as F's own variant — a wire
+    // failure as F's `Transport`, which F's callers receive (s475-boot-caller-transport).
     //
     // What stays refused:
     //  - the residue of F11 — INTERIM, design owed, not planned (§19.10.5: a
@@ -28655,9 +28729,10 @@ ${
     //    a server call, a top-level `defer` or an effect in the batch, a `lin`
     //    parameter, a parameter or a client local with no nameable type, a `match`
     //    on a non-`!` server call.
-    //  - F's error type must hold `Transport(t: ServerCallError)`: the composed
-    //    request can fail on the wire (§19.9.10), and F re-fails that failure as its
-    //    own (E-ERROR-010 otherwise).
+    // F's error type need not hold `Transport` (s475-boot-caller-transport): the composed request
+    // can fail on the wire (§19.9.10), and that failure goes to F's callers — F is a transport
+    // carrier (FnInfo.derr, §19.9.5), so its callers' handlers and `?` are judged against
+    // `E + Transport`, and `#F(…)?` re-fails the wire failure as F's `Transport`.
     // =========================================================================
     export type ComposeExtra:struct = { name: string, span: ASpan, ty: AType | not, vt: Type | not }
     // `name`: F's name (analyzeLinked maps the batch's names back to it, review L2); `notes`: the
@@ -28676,7 +28751,9 @@ ${
     // the batch as the parameter `#m_<cell>` of type `ty`, its argument the client's value at the call.
     export type ComposeMarsh:struct = { cell: string, ty: Type }
     export type ComposePlan:struct = { fnNid: int, name: string, lo: int, hi: int, deferred: int[], extra: ComposeExtra[], strip: int[], drop: int[], returns: boolean, notes: Diag[], late: int, cells: ComposeCell[], rty: Type | not, marsh: ComposeMarsh[] }
-    type RCompose:struct = { plans: ComposePlan[], st: AS }
+    // `tried` (s475-boot-caller-transport): the Sym ids of the functions whose calls compose — a plan was made,
+    // or composeOne refused the shape by name (the refusal is then the one report).
+    type RCompose:struct = { plans: ComposePlan[], st: AS, tried: int[] }
     type RPlan:struct = { plan: ComposePlan | not, st: AS }
 
     // A synthesized batch function's name: `#` + the client function's (no identifier spells it).
@@ -29102,27 +29179,121 @@ ${
     fn composePass(g: Globals, t: Tables, sum: Summary, allow: boolean, st0: AS) -> RCompose {
         let st: AS = st0
         let plans: ComposePlan[] = []
+        let tried: int[] = []
         const places: PlaceFact[] = t.server.places
         const tq: TxQ = txQuerySets(sum.nodes, places, sum.inherited)
         const dr: boolean[] = domReach(sum.nodes, tq, places)
+        // s475-boot-caller-transport: the functions whose own calls compose (the trigger), first
+        let composing: int[] = []
+        for (const fs0 of g.fns) {
+            const i0: int = nodeIdx(sum.nodes, fs0.info.sym.id)
+            if (i0 >= 0 && composeEligible(sum, places, fs0, i0) && composeTrigger(sum, tq, places, i0) != "") composing = composing.concat([fs0.info.sym.id])
+        }
         for (const fs of g.fns) {
             const i: int = nodeIdx(sum.nodes, fs.info.sym.id)
-            if (i >= 0 && fs.f.failable && !isServerPlace(placeOf(places, fs.info.sym.id)) && sum.inherited.indexOf(fs.info.sym.id) < 0 && !holdsTxControl(sum.nodes[i].f)) {
-                const why: string = composeTrigger(sum, tq, places, i)
+            if (i >= 0 && composeEligible(sum, places, fs, i)) {
+                let why: string = composeTrigger(sum, tq, places, i)
+                // s475-boot-caller-transport: a client `!` function whose ONE request is the composed batch of the
+                // client `!` function it calls (and which makes no server call of its own) needs no batch of its own
+                // — that request runs inside the callee's envelope, and its wire failure reaches this function as the
+                // callee's `Transport` (§19.9.5). The composed program judges it again (one call of `#H`).
+                if (why != "" && viaOneComposed(sum, tq, places, sum.nodes[i].f, composing)) why = ""
                 if (why != "") {
                     const r: RPlan = composeOne(g, t, sum, tq, places, dr, fs, i, why, allow, st)
                     st = r.st
+                    tried = tried.concat([fs.info.sym.id])
                     const p: ComposePlan | not = r.plan
                     if (p is given) plans = plans.concat([p])
                 } else if (tq.remote[i] == 1) {
                     const r1: RPlan = composeSingle(g, t, sum, tq, places, dr, fs, i, allow, st)
                     st = r1.st
                     const p1: ComposePlan | not = r1.plan
-                    if (p1 is given) plans = plans.concat([p1])
+                    if (p1 is given) {
+                        plans = plans.concat([p1])
+                        tried = tried.concat([fs.info.sym.id])
+                    }
                 }
             }
         }
-        return { plans: plans, st: st }
+        return { plans: plans, st: st, tried: tried }
+    }
+
+    fn composeEligible(sum: Summary, places: PlaceFact[], fs: FnSrc, i: int) -> boolean {
+        return fs.f.failable && !isServerPlace(placeOf(places, fs.info.sym.id)) && sum.inherited.indexOf(fs.info.sym.id) < 0 && !holdsTxControl(sum.nodes[i].f)
+    }
+
+    // s475-boot-caller-transport — callable `f` makes no server call of its own, and exactly one reference to a
+    // client function that makes server calls, outside any loop: a function in `composing` (its calls compose
+    // into one batch, one request). Fails closed: any other reference to a function that reaches the server
+    // (a second call, a call in a loop, a function passed as a value) is not this shape.
+    fn viaOneComposed(sum: Summary, tq: TxQ, places: PlaceFact[], f: FnFacts, composing: int[]) -> boolean {
+        let n: int = 0
+        let ok = true
+        for (const r of f.scan.refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym)
+            if (isFnNode(sum.nodes, j)) {
+                if (isServerPlace(placeOf(places, sum.nodes[j].f.sym))) {
+                    ok = false
+                } else if (tq.remote[j] > 0) {
+                    n = n + 1
+                    if (composing.indexOf(sum.nodes[j].f.sym) < 0 || inRepeat(f.repeats, r.span)) ok = false
+                }
+            }
+        }
+        return ok && n == 1
+    }
+
+    // ---- transport carriers (s475-boot-caller-transport) ------------------------------
+    // The functions whose callers receive `Transport(t: ServerCallError)` besides their declared variants:
+    // §19.9.5 "Its client call fails with the §19.9.10 failure set: the function's declared error variants,
+    // if it is declared `!`, plus `Transport(t: ServerCallError)`". Seeded by the composed functions; then,
+    // to a fixpoint, every client-placed `!` function that `?`-propagates a call of a carrier — `?` re-fails
+    // the callee's `Transport` as its own (§19.5.2), so its callers receive it too (PA ruling S475:
+    // "recursively for client callers"). Returned as AFn nids (the composed program keeps them; Sym ids
+    // are minted again).
+    fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> int[] {
+        let syms: int[] = seeds
+        const places: PlaceFact[] = t.server.places
+        let changed = syms.length > 0
+        while (changed) {
+            changed = false
+            for (const fs of g.fns) {
+                const sid: int = fs.info.sym.id
+                if (syms.indexOf(sid) < 0 && fs.f.failable && !isServerPlace(placeOf(places, sid)) && sum.inherited.indexOf(sid) < 0) {
+                    for (const h of cfStmts(fs.f.body.stmts, cf0()).handled) {
+                        const cs: Sym | not = fnSymAt(t, h.callee)
+                        if (!changed && h.how == 0 && cs is given && syms.indexOf(cs.id) >= 0) {
+                            syms = syms.concat([sid])
+                            changed = true
+                        }
+                    }
+                }
+            }
+        }
+        let nids: int[] = []
+        for (const fs2 of g.fns) {
+            if (syms.indexOf(fs2.info.sym.id) >= 0) nids = nids.concat([fs2.info.nid])
+        }
+        return nids
+    }
+
+    // The E-ERROR-010 reports a `?` on a client server call made for a missing `Transport` (AS.tport) in a
+    // function whose calls compose or that is a carrier: its wire failure goes to its callers instead.
+    fn dropTransportDiags(st: AS, fnSyms: int[]) -> AS {
+        let gone: Diag[] = []
+        for (const x of st.tport) {
+            if (fnSyms.indexOf(x.fnSym) >= 0) gone = gone.concat([x.d])
+        }
+        if (gone.length == 0) return st
+        let out: Diag[] = []
+        for (const d of st.diags) {
+            let drop = false
+            for (const x of gone) {
+                if (!drop && d.code == x.code && d.message == x.message && d.file == x.file && d.span.start == x.span.start && d.span.end == x.span.end) drop = true
+            }
+            if (!drop) out = out.concat([d])
+        }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     // Why callable i's server calls need composing ("" — they do not): two or more
@@ -29225,14 +29396,11 @@ ${
             }
             k = k + 1
         }
-        if (!enumHasVariant(t, fs.info.err, "Transport")) {
-            const en: string = fs.info.err is given ? "`" + errName(fs.info.err) + "`" : "its error type"
-            // s475-boot-nonbang-callee-envelope: the built-in `SqlError` takes no variant — say what to declare;
-            // and name the capable form (INTERIM, g-boot-client-bang-composition-residue-s474)
-            let fix: string = "add `Transport(t: ServerCallError)` to " + en
-            if (en == "`SqlError`") fix = "add `Transport(t: ServerCallError)` to `SqlError`'s variants — `SqlError` is built in, so declare an error enum holding its variants and `Transport(t: ServerCallError)`, and use it"
-            return { plan: not, st: addDiag(st, file, fs.info.span, "E-ERROR-010", "'" + name + "' is declared '!' and runs on the client, and " + why + ": the bootstrap composes those calls into ONE request inside ONE transaction (§19.9.9.8 rule 1, S474), and that request can also fail on the wire (§19.9.10). '" + name + "' re-fails that failure as its own, so " + fix + ". (INTERIM: the capable form gives the composed request's wire failure to '" + name + "''s callers as `Transport` in their failure set, §19.9.5, without a variant in '" + name + "''s error type)") }
-        }
+        // s475-boot-caller-transport: F's error type need not hold `Transport` (was E-ERROR-010 here, INTERIM).
+        // The composed request's wire failure goes to F's CALLERS: §19.9.5 "Its client call fails with the
+        // §19.9.10 failure set: the function's declared error variants, if it is declared `!`, plus
+        // `Transport(t: ServerCallError)`" — F is a transport carrier (FnInfo.derr), analyzed as such in the
+        // composed program.
         // the batch's statements: deferred cell writes apart
         let deferred: int[] = []
         let cells: ComposeCell[] = []
@@ -29953,15 +30121,9 @@ ${
     }
 
     fn refusalReason(d: Diag) -> string {
-        if (d.code == "E-ERROR-010") return "composing the call needs `Transport(t: ServerCallError)` in the function's error type (E-ERROR-010: the composed request can fail on the wire) — add it, and this check joins the batch"
         const at: int = d.message.indexOf("not this shape yet: ")
         if (at >= 0) return "composing the call is not built for this function yet: " + d.message.substring(at + 20)
         return "composing the call is refused (" + d.code + ")"
-    }
-
-    fn errName(e: Sym | not) -> string {
-        if (e is not) return ""
-        return e.hint
     }
 
     // ---- the composed program (s474, client-bang composition) ------------------------
@@ -31606,7 +31768,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -33606,7 +33768,9 @@ ${
     // and such a function is refused. A program with an error is not composed (its
     // report stands; the compile fails either way). Both passes get `keyBase`.
     // s475 r1: `nsAt` — the namespace member reads the run found (AS.nsAt).
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[] }
+    // s475-boot-caller-transport: `carriers` — the transport carriers' AFn nids (transportCarriers), which the
+    // composed program's analysis is given (FnInfo.derr).
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[] }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
@@ -33625,18 +33789,23 @@ ${
     // access on it, as it is without the import. Without a file's source nothing is re-read: its
     // `m.x` stays a member access on the namespace, refused (E-SCOPE-001 — fails closed).
     export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
-        const r0: ARun = analyzeRun(files0, entry, keyBase, nextId >= 0)
+        const r0: ARun = analyzeRun(files0, entry, keyBase, nextId >= 0, [])
         let files: FileAst[] = files0
         let r1: ARun = r0
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt)
             if (rr.changed) {
                 files = rr.files
-                r1 = analyzeRun(files, entry, keyBase, nextId >= 0)
+                r1 = analyzeRun(files, entry, keyBase, nextId >= 0, [])
             }
         }
+        // s475-boot-caller-transport: a transport carrier's callers are judged against `E + Transport`
+        // (FnInfo.derr) — known only once this run composed; the program is analyzed again with them,
+        // so a caller's `.Transport` arm, a handler that omits it, and a `?` carrying it up are judged as
+        // the composed program will run
+        if (r1.carriers.length > 0) r1 = analyzeRun(files, entry, keyBase, nextId >= 0, r1.carriers)
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
-        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false)
+        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, nextId), entry, keyBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
         let notes: Diag[] = []
@@ -33724,9 +33893,9 @@ ${
         return m
     }
 
-    fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [] }
-        const ra0: RGlobals = phaseA(files, entry, st0)
+    fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean, carriers: int[]) -> ARun {
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [] }
+        const ra0: RGlobals = phaseA(files, entry, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
@@ -33776,7 +33945,19 @@ ${
                                  novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts, taliases: bound.taliases }
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
-        const pl: PS = planPass(ra.g, typedT, sum, cp.st)
+        // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
+        // functions that `?`-propagate them); a missing `Transport` in a carrier's or a composing function's
+        // own enum is not reported — its callers receive the wire failure (§19.9.5)
+        let seeds: int[] = []
+        for (const cf of ra.g.fns) {
+            if (planFor(cp.plans, cf.f.nid) is given) seeds = seeds.concat([cf.info.sym.id])
+        }
+        const carrierNids: int[] = transportCarriers(ra.g, typedT, sum, seeds)
+        let quiet: int[] = cp.tried
+        for (const cf2 of ra.g.fns) {
+            if (carrierNids.indexOf(cf2.info.nid) >= 0) quiet = quiet.concat([cf2.info.sym.id])
+        }
+        const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
@@ -33792,7 +33973,7 @@ ${
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
         return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
