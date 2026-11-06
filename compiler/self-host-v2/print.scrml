@@ -28,7 +28,7 @@
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
@@ -1430,6 +1430,7 @@ ${
             .RawText :> []
             .Dyn :> []
             .Effect :> []
+            .Request :> []
             .ResetOn :> []
             .Errors :> []
             .Reach :> []
@@ -1991,6 +1992,8 @@ ${
             .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v, ns)
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v, ns)
+            // s475: a request renders no DOM either (its signals are read where the author reads them)
+            .Request :> hole(HNode.HComment("request"), path, v, ns)
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v, ns)
             .Errors :> hole(HNode.HComment("errors"), path, v, ns)
             .Reach :> hole(HNode.HComment("reach"), path, v, ns)
@@ -2030,6 +2033,7 @@ ${
             .Slot :> ks
             .Star :> ks
             .Effect :> ks
+            .Request :> ks
             .ResetOn :> ks
             .Errors :> ks
             .Reach :> ks
@@ -2139,6 +2143,7 @@ ${
             .Slot :> false
             .Star :> false
             .Effect :> false
+            .Request :> false
             .ResetOn :> false
             .Errors :> false
             .Reach :> false
@@ -2150,6 +2155,7 @@ ${
     fn holeNeedsNode(v: View) -> boolean {
         return match v {
             .Effect(deps: ds) :> false
+            .Request(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
             .El(tag: t) :> true
             .Text(text: t) :> true
@@ -2183,6 +2189,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h) :> requestJs(ctx, t, ds, b, m, st, h)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
             .Reach(fields: fs) :> reachJs(ctx, fs, node)
@@ -2360,6 +2367,39 @@ ${
         let params: string[] = []
         if (suspends(body)) params = ["task$"]
         return only([sexpr(rtCall(ctx, "effectOn", [scopeVar(), JsExpr.JArray(depCells(ctx, deps)), JsExpr.JArrow(params, blockJs(ctx, body))]))])
+    }
+
+    // s475 — the request machine (§6.7.7 / §13.9.2), modelled on effectJs:
+    //   [const <handle> =] rt.requestOn(scope$, <target cell>, [<dependency cells>],
+    //     (task$) => { <Lets>; return { on: <the load>, then: (x) => { <then> } }; },
+    //     { mount[, state: { loading, data, error, stale }] })
+    // The body's ONE Suspend (C-R1) is not printed as `rt.suspend`: the
+    // runtime owns the load's suspension, so it knows the run (newest wins —
+    // EC-2), drops a late settle after teardown (EC-3), sets the signals, and,
+    // for a request WITH its state (r1: all four signals or none), takes a
+    // failure itself (target unchanged, §6.7.7 "Settled state (failure)")
+    // instead of running `then`. `then` closes over the Lets. Registered into
+    // the scope this view list renders into (C12's owner rule, as an Effect).
+    // r1 (F3): a `handle` binds the `{ refetch }` object requestOn returns, so
+    // `<#id>.refetch()` (EC-4) has a route; with none the call is a statement.
+    fn requestJs(ctx: Ctx, target: EffectDep, deps: EffectDep[], body: Block, mount: boolean, st: RequestState | not, handle: Sym | not) -> Rendered {
+        const n: int = body.stmts.length
+        if (n == 0) return only([sexpr(jid("malformedRequest$"))])          // C-R1 refuses it first
+        const sp: SuspendParts | not = suspendPartsOf(body.stmts[n - 1])
+        if (sp is not) return only([sexpr(jid("malformedRequest$"))])       // C-R1 refuses it first
+        const pre: Block = { stmts: body.stmts.slice(0, n - 1) }
+        const cont: JsExpr = JsExpr.JArrow([symName(ctx, sp.bind)], blockJs(ctx, sp.then))
+        const load: JsStmt[] = blockJs(ctx, pre).concat([JsStmt.SReturn(JsExpr.JObject([{ key: "on", value: exprJs(ctx, sp.on) }, { key: "then", value: cont }]))])
+        let opts: JsProp[] = [{ key: "mount", value: JsExpr.JBool(mount) }]
+        if (st is given) {
+            const sigs: JsExpr[] = depCells(ctx, [st.loading, st.data, st.error, st.stale])
+            const so: JsExpr = JsExpr.JObject([{ key: "loading", value: sigs[0] }, { key: "data", value: sigs[1] }, { key: "error", value: sigs[2] }, { key: "stale", value: sigs[3] }])
+            opts = opts.concat([{ key: "state", value: so }])
+        }
+        const args: JsExpr[] = [scopeVar(), depCells(ctx, [target])[0], JsExpr.JArray(depCells(ctx, deps)), JsExpr.JArrow(["task$"], load), JsExpr.JObject(opts)]
+        const call: JsExpr = rtCall(ctx, "requestOn", args)
+        if (handle is given) return only([JsStmt.SConst(symName(ctx, handle), call)])
+        return only([sexpr(call)])
     }
 
     // s454 (U1b): a Suspend at ANY depth (a Join body, an If branch after a
@@ -2692,6 +2732,7 @@ ${
             .Slot :> false
             .Star(decl: d) :> false
             .Effect(deps: ds) :> false
+            .Request(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
             .Errors(of: x) :> false
             .Reach(fields: fs) :> false
@@ -3036,6 +3077,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .Request :> []
             .ResetOn :> []
             .Errors :> []
             .Reach :> []

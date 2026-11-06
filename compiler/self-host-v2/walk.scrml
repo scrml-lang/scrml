@@ -10,7 +10,7 @@
 // =============================================================================
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, PathStep, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
-             Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
+             Attr, View, CondArm, ConstructAttr, EffectDep, RequestState, Field, Decl, Fn, ServerFn, CoreProgram,
              ValidityOf, validityInst } from "./core.scrml"
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
@@ -292,6 +292,9 @@ ${
             .Slot :> []
             .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            // s475 — the target, the deps and the signals are cells (their instances are children)
+            .Request(target: t, deps: ds, body: b, state: st) :>
+                effectDepNodes([t].concat(ds).concat(requestStateDeps(st))).concat([Node.NBlock(b)])
             .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
             .Reach(fields: fs) :> validityNodes(fs)
@@ -305,6 +308,13 @@ ${
         let out: Node[] = []
         for (const d of ds) { out = out.concat([Node.NInst(d.inst)]) }
         return out
+    }
+
+    // s475 — a request's signal cells, in the fixed order loading, data, error, stale
+    // (r1: all four or none — RequestState's fields are mandatory).
+    export fn requestStateDeps(st: RequestState | not) -> EffectDep[] {
+        if (st is not) return []
+        return [st.loading, st.data, st.error, st.stale]
     }
 
     fn attrKids(a: Attr) -> Node[] {
@@ -513,11 +523,17 @@ ${
             .Slot :> []
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
+            .Request(handle: h) :> optSym(h)                // s475 r1: the request's handle (bound by requestJs)
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
             .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§17.4)
         }
+    }
+
+    fn optSym(s: Sym | not) -> Sym[] {
+        if (s is not) return []
+        return [s]
     }
 
     fn patternBinds(pat: Pattern) -> Sym[] {
