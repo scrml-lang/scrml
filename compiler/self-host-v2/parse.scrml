@@ -4358,6 +4358,7 @@ ${
     fn parseType(tp: TP) -> RType {
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
+        if (lifeAhead(tp)) return parseLifeType(tp)
         let t: TP = tp
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
@@ -4385,6 +4386,134 @@ ${
             r = maybeType(rest.tp, start, tp.i, rest.t)
         }
         return r
+    }
+
+    // s475 (s475-boot-lifecycle-type) — a lifecycle type `(A to B)` (§14.12) in a
+    // CODE position (a parameter, a return type, a struct / variant field, a
+    // local's annotation), at its `(`. It is READ whole — A (`not`, a name or a
+    // bare variant `.V`), the glyph `to` (or the legacy `->`), B (any type), `)` —
+    // so nothing cascades, and then REFUSED by name: the bootstrap builds the
+    // lifecycle only as a program cell's declared type (an opener, openerLife),
+    // INTERIM until field / parameter / return tracking (§14.12.3, §14.12.6).
+    // A malformed inside is E-PARSE-TYPE; the reader resumes after the `)`.
+    // At `(`, A, then the glyph `to` or `->`: the head of a lifecycle type. Any
+    // other `(` (a function type `(T, U) -> R`, …) keeps its old reading.
+    fn lifeAhead(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return false
+        const a: PTok = peekAt(tp, 1)
+        if (a.cls != TC.Variant && a.cls != TC.Ident && a.cls != TC.Keyword) return false
+        const g: PTok = peekAt(tp, 2)
+        if ((g.cls == TC.Ident || g.cls == TC.Keyword) && g.v == "to") return true
+        return tk(g, "-") && tk(peekAt(tp, 3), ">") && touching(g, peekAt(tp, 3))
+    }
+
+    fn parseLifeType(tp: TP) -> RType {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let bad = false
+        let arrow = false
+        const ft: PTok = cur(t)
+        let fromT: AType = { nid: t.nid, span: mkSpan(ft.start, ft.end), k: ATypeK.TName("") }
+        if (ft.cls == TC.Variant) {
+            fromT = { nid: t.nid, span: mkSpan(ft.start, ft.end), k: ATypeK.TName("." + ft.v) }
+            t = bumpId(adv(t))
+        } else if (ft.cls == TC.Ident || ft.cls == TC.Keyword) {
+            fromT = { nid: t.nid, span: mkSpan(ft.start, ft.end), k: ATypeK.TName(ft.v) }
+            t = bumpId(adv(t))
+        } else {
+            t = diagAt(t, "E-PARSE-TYPE", "expected a lifecycle's first state after `(` — `(not to T)` (§14.12), found `" + ft.text + "`", ft)
+            bad = true
+        }
+        let toT: AType = { nid: t.nid, span: mkSpan(ft.start, ft.end), k: ATypeK.TName("") }
+        if (!bad) {
+            const a: PTok = cur(t)
+            const b: PTok = peekAt(t, 1)
+            if (isWord(t, "to")) {
+                t = adv(t)
+            } else if (tk(a, "-") && tk(b, ">") && touching(a, b)) {
+                arrow = true
+                t = adv(adv(t))
+            } else {
+                t = diagAt(t, "E-PARSE-TYPE", "expected `to` in the lifecycle type — `(not to T)` (§14.12.2), found `" + a.text + "`", a)
+                bad = true
+            }
+        }
+        // B a bare variant: one `.V` token, or — after the word `to`, which the lexer
+        // reads as a member access — `.` then a name touching it
+        const dt: PTok = cur(t)
+        const dn: PTok = peekAt(t, 1)
+        if (!bad && dt.cls == TC.Variant) {
+            toT = { nid: t.nid, span: mkSpan(dt.start, dt.end), k: ATypeK.TName("." + dt.v) }
+            t = bumpId(adv(t))
+        } else if (!bad && tk(dt, ".") && (dn.cls == TC.Ident || dn.cls == TC.Keyword) && touching(dt, dn)) {
+            toT = { nid: t.nid, span: mkSpan(dt.start, dn.end), k: ATypeK.TName("." + dn.v) }
+            t = bumpId(adv(adv(t)))
+        } else if (!bad) {
+            const n0: int = t.diags.length
+            const rb: RType = parseType(t)
+            toT = rb.t
+            t = rb.tp
+            if (t.diags.length > n0) bad = true
+        }
+        if (!bad && !isP(t, ")")) {
+            const c: PTok = cur(t)
+            if (isWord(t, "to")) {
+                t = diagAt(t, "E-PARSE-TYPE", "a lifecycle chain `(A to B to C)` is not v1 scrml — a lifecycle has two states (§14.12.6.4)", c)
+            } else {
+                t = diagAt(t, "E-PARSE-TYPE", "expected `)` to close the lifecycle type, found `" + c.text + "`", c)
+            }
+            bad = true
+        }
+        t = lifeCloseTok(t)
+        // a malformed lifecycle (reported above) keeps a blank first state: it
+        // resolves to no type, quietly (analyze presenceLife), never a second report
+        if (bad) return mkT(t, start, ATypeK.TLife(blankAType(fromT), toT))
+        const r: RType = mkT(t, start, ATypeK.TLife(fromT, toT))
+        let why: string = lifeRefusal(fromT, toT, arrow, tokText(r.tp, tp.i, r.tp.i))
+        if (why == "") why = "a lifecycle type `" + tokText(r.tp, tp.i, r.tp.i) + "` in a code position (a parameter, a return type, a struct or variant field, a local's annotation) is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3); write `T | not` here"
+        const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", why, r.tp.file, spanFrom(r.tp, start))
+        return { t: r.t, tp: { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: r.tp.diags.concat([d]), file: r.tp.file, ns: r.tp.ns } }
+    }
+
+    // Past the `)` that closes the lifecycle type the reader is inside (depth 1
+    // at `tp`); at the end of input when it never closes.
+    fn lifeCloseTok(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 1
+        while (!atEnd(t)) {
+            if (isP(t, "(")) depth = depth + 1
+            if (isP(t, ")")) {
+                depth = depth - 1
+                if (depth == 0) return adv(t)
+            }
+            t = adv(t)
+        }
+        return t
+    }
+
+    // THE one judge of a READ lifecycle type, both readers (the opener's
+    // openerLife and the code position's parseLifeType): why the bootstrap does
+    // not build `(from to to)` in ANY position, "" when it is the presence
+    // lifecycle `(not to T)` written with `to`. `text` = the type as written.
+    fn lifeRefusal(fromT: AType, toT: AType, arrow: boolean, text: string) -> string {
+        if (arrow) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`)"
+        if (!isNotType(fromT) || variantAType(toT)) return "the lifecycle `" + text + "` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not built — for a variant graph, declare an engine (`<x:T=.A single>` with state-children, §66.13)"
+        if (grantedSeq(toT)) return "a granted sequence in a lifecycle type (`" + text + "`) is not in the bootstrap — its grants are not checked through the lifecycle (§14.12); declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)"
+        return ""
+    }
+
+    fn blankAType(t: AType) -> AType {
+        return { nid: t.nid, span: t.span, k: ATypeK.TName("") }
+    }
+
+    // A lifecycle state written as a bare variant `.V` (held as TName(".V")).
+    fn variantAType(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> n.substring(0, 1) == "."
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
+        }
     }
 
     // `T | not` in a CODE position (a return type, a parameter, a local's
@@ -4416,6 +4545,7 @@ ${
             .TName(name: n) :> false
             .TSeq(elem: e, grants: gs) :> gs.length > 0 || grantedSeq(e)
             .TMaybe(inner: i) :> grantedSeq(i)
+            .TLife(pre: f, post: x) :> grantedSeq(x)
         }
     }
 
@@ -5179,6 +5309,7 @@ ${
             .TName(name: n) :> n == "void"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -5240,6 +5371,7 @@ ${
     // the bootstrap type system has no general union.
     fn parseOpenerType(mp: MP) -> RMType {
         const start: int = mp.pos
+        if (chAt(mp, 0) == "(") return openerLife(mp)
         const first: RMType = openerTypeMember(mp, "`:`")
         let m: MP = first.mp
         let ty: AType = first.t
@@ -5291,11 +5423,126 @@ ${
         return { t: ty, mp: m }
     }
 
+    // s475 (s475-boot-lifecycle-type) — a lifecycle type `(A to B)` in an opener,
+    // at its `(`. §66.2.4 (amended S449, dialect ruling 4): "a refinement type
+    // (§53) or a lifecycle type (§14.12) MAY stand bare … A `>` or `/` inside the
+    // type's OWN parentheses … does not end the opener". So the reader runs to the
+    // MATCHING `)` whatever is inside: spaces, `->`, a `/`. Inside: A (`not`, a
+    // name, or a bare variant `.V`), the glyph `to` (or the legacy `->`), B (a
+    // member: Name, Name[…]), `)`. A malformed inside is E-PARSE-TYPE and the
+    // opener resumes after the `)` (no tag cascade). Whether the bootstrap
+    // builds the lifecycle READ here is lifeRefusal (every position) and, for a
+    // declaration's own type, analyze's lifeCellWhy (which cell).
+    fn openerLife(mp: MP) -> RMType {
+        const start: int = mp.pos
+        const close: int = lifeCloseCh(mp.src, start)
+        let m: MP = skipSpace(mAdv(mp, 1))
+        let bad = false
+        let arrow = false
+        // A: up to a space, `)`, or the `->` glyph (a name may hold `-`: readName would eat it)
+        const a0: int = m.pos
+        let a1: int = a0
+        if (chAt(m, 0) == ".") a1 = a1 + 1
+        while (a1 < mp.src.length && isNameCh(mp.src.substring(a1, a1 + 1)) && mp.src.substring(a1, a1 + 2) != "->") a1 = a1 + 1
+        const aText: string = mp.src.substring(a0, a1)
+        let fromT: AType = { nid: m.nid, span: mkSpan(a0, a1), k: ATypeK.TName(aText) }
+        m = mBump(mAt(m, a1))
+        if (aText == "" || aText == ".") {
+            m = mDiag(m, "E-PARSE-TYPE", "expected a lifecycle's first state after `(` — `(not to T)` (§14.12)", a0, a0 + 1)
+            bad = true
+        }
+        if (!bad) {
+            m = skipSpace(m)
+            if (chAt(m, 0) == "-" && chAt(m, 1) == ">") {
+                arrow = true
+                m = skipSpace(mAdv(m, 2))
+            } else {
+                const g: RWord = readName(m)
+                if (g.w == "to" && (isSpaceCh(chAt(g.mp, 0)) || chAt(g.mp, 0) == "")) {
+                    m = skipSpace(g.mp)
+                } else {
+                    m = mDiag(m, "E-PARSE-TYPE", "expected `to` in the lifecycle type — `(not to T)` (§14.12.2)", m.pos, m.pos + 1)
+                    bad = true
+                }
+            }
+        }
+        let toT: AType = { nid: m.nid, span: mkSpan(m.pos, m.pos), k: ATypeK.TName("") }
+        if (!bad && chAt(m, 0) == ".") {
+            // B a bare variant `.V` (a variant progression: read, then refused by lifeRefusal)
+            const vb: RWord = readName(mAdv(m, 1))
+            toT = { nid: m.nid, span: mkSpan(m.pos, vb.mp.pos), k: ATypeK.TName("." + vb.w) }
+            m = skipSpace(mBump(vb.mp))
+        } else if (!bad) {
+            const rb: RMType = openerTypeMember(m, "`to`")
+            toT = rb.t
+            m = skipSpace(rb.mp)
+            if (isBlankAType(toT)) bad = true     // openerTypeMember reported it: E-PARSE-TYPE
+        }
+        if (!bad && chAt(m, 0) != ")") {
+            const w: RWord = readName(m)
+            if (w.w == "to") {
+                m = mDiag(m, "E-PARSE-TYPE", "a lifecycle chain `(A to B to C)` is not v1 scrml — a lifecycle has two states (§14.12.6.4)", m.pos, w.mp.pos)
+            } else {
+                m = mDiag(m, "E-PARSE-TYPE", "expected `)` to close the lifecycle type, found `" + chAt(m, 0) + "`", m.pos, m.pos + 1)
+            }
+            bad = true
+        }
+        if (close < 0) {
+            if (!bad) m = mDiag(m, "E-PARSE-TYPE", "unterminated `(` in a lifecycle type", start, start + 1)
+            bad = true
+        } else {
+            m = mAt(m, close + 1)
+        }
+        let pre: AType = fromT
+        if (bad) pre = blankAType(fromT)     // as parseLifeType: no second report downstream
+        const ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TLife(pre, toT) }
+        m = mBump(m)
+        if (!bad) {
+            const why: string = lifeRefusal(fromT, toT, arrow, mp.src.substring(start, m.pos))
+            if (why != "") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", why, start, m.pos)
+        }
+        return { t: ty, mp: m }
+    }
+
+    fn isLifeAType(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> false
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> true
+        }
+    }
+
+    // Does `ds` hold a diagnostic inside `sp` (one report per construct)?
+    fn hasDiagIn(ds: Diag[], sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
+    }
+
+    // The index of the `)` matching the `(` at `open`, or -1.
+    fn lifeCloseCh(src: string, open: int) -> int {
+        let depth: int = 0
+        let i: int = open
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (c == "(") depth = depth + 1
+            if (c == ")") {
+                depth = depth - 1
+                if (depth == 0) return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
     fn isSeqAType(t: AType) -> boolean {
         return match t.k {
             .TName(name: n) :> false
             .TSeq(elem: e) :> true
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -5304,6 +5551,7 @@ ${
             .TName(name: n) :> n == ""
             .TSeq(elem: e) :> isBlankAType(e)
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -5312,6 +5560,7 @@ ${
             .TName(name: n) :> n == "not"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -6237,6 +6486,11 @@ ${
         if (chAt(m, 0) == ":" && !isNamespace(nm.w)) {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
             m = rt.mp
+            // s475 — a lifecycle type on a typed ATTRIBUTE: refused by name (INTERIM — the
+            // bootstrap builds `(not to T)` only as a program cell's own type, §14.12.3)
+            if (isLifeAType(rt.t) && !hasDiagIn(m.diags, rt.t.span)) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a lifecycle type on the attribute `" + nm.w + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3); write `T | not` here", rt.t.span.start, rt.t.span.end)
+            }
             let dflt: AAttrValue = AAttrValue.NoValue
             m = checkSpacedEq(m)
             if (chAt(m, 0) == "=") {
@@ -7584,6 +7838,7 @@ ${
             .TName(name: n) :> n
             .TSeq(elem: e) :> typeNameText(e) + "[]"
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
+            .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
         }
     }
 

@@ -151,6 +151,7 @@ ${
             rowOn("anonymous " + FN + " expression", "§48.2.1", U, [FN, "("], [], false, "declare a named `" + FN + "` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
             rowG("audit @log", "§51.11", U, ["audit", "@"], "lead", ""),
             rowOn("replay()", "§51.14", U, ["replay", "("], ["E-SCOPE-001"], true, ""),
+            rowOn("transition()", "§14.12.6.3", U, ["transition", "("], ["E-SCOPE-001"], true, "the bootstrap builds only the presence lifecycle `(not to T)` on a program cell (§14.12.3), which a discrimination transitions — there is no variant lifecycle for `transition()` to advance yet"),
             rowOn("@currentUser", "§52.15.1", U, ["@", "currentUser"], ["E-STATE-UNDECLARED", "E-SCOPE-001"], true, "read the session in a server function and pass the value in"),
             rowG("on mount { }", "§6.7.1a", U, ["on", "mount", "{"], "", "write `<onMount>${ … }</>` (§6.7.1a, S449)"),
             rowG("const @x = … derived", "§6.6.1", U, ["const", "@"], "", "declare a derived cell `<x=(expr)/>` (§66.9)"),

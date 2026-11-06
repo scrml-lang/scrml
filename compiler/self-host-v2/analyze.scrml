@@ -1374,12 +1374,71 @@ ${
             .TName(name: n) :> resolveTypeName(te, at, n, st)
             .TSeq(elem: e, grants: gs) :> resolveSeqType(te, at, e, gs, st)
             .TMaybe(inner: i) :> resolveMaybe(te, i, st)
+            .TLife(pre: f, post: x) :> resolveLife(te, f, x, st)
         }
     }
 
     fn resolveMaybe(te: TypeEnv, inner: AType, st: AS) -> RType {
         const r: RType = resolveType(te, inner, st)
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
+    }
+
+    // s475 (s475-boot-lifecycle-type) — the presence lifecycle `(not to T)` is
+    // Core `Type.Maybe(T)`: "No new runtime representation. At run time the cell
+    // holds `not` until the load settles, which is the existing representation of
+    // `(not to T)`. The difference between pending and `T` is static only"
+    // (§13.9.2). INTERIM until the S1 slice: a `(not to T)` cell is typed and
+    // checked exactly as a `T | not` cell (no E-TYPE-001 pre-transition read
+    // rule yet, §13.9.3 / §14.12.3). Any other lifecycle (`(.A to .B)`) was
+    // refused where it was read (parse.scrml lifeRefusal); it resolves to no type
+    // here (untrusted, no second report).
+    fn resolveLife(te: TypeEnv, pre: AType, post: AType, st: AS) -> RType {
+        if (presenceLife(pre, post)) return resolveMaybe(te, post, st)
+        return { t: Type.Str, st: st, unresolved: true }
+    }
+
+    // `(pre to post)` is the presence lifecycle `(not to T)`: `pre` is `not`, `post` is no bare variant.
+    fn presenceLife(pre: AType, post: AType) -> boolean {
+        return lifeStateName(pre) == "not" && lifeStateName(post).substring(0, 1) != "."
+    }
+
+    fn lifeStateName(t: AType) -> string {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
+        }
+    }
+
+    // Is `at` the presence lifecycle `(not to T)` (at its top)?
+    fn isPresenceLife(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> false
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> presenceLife(f, x)
+        }
+    }
+
+    // s475 — why the declaration `name` cannot carry the lifecycle type `(not to T)`
+    // in the bootstrap, "" when it can. §14.12.3: a "Shape 1 plain reactive cell"
+    // carries it; §13.9.1 names "A Shape-1 cell declaration (§6.2)". The bootstrap
+    // builds that one place: a PROGRAM cell (`where` 2), `let` or locked, not
+    // derived, with no declaration body. Every refusal here is INTERIM (the
+    // capable form: §14.12.3's every-typed-location rule), except the derived one,
+    // which waits on a ruling (a lifecycle is a write contract, §66.11.6, and a
+    // derived value is never written — §13.9.1 refuses only its PENDING form).
+    fn lifeCellWhy(name: string, where: int, mode: FieldMode, bodyLen: int) -> string {
+        const fix: string = "; write `T | not` here"
+        // (`where` 0, a typed attribute: refused where it is read, parse.scrml scanAttr — every attribute, fieldOf'd or not)
+        if (where == 0) return ""
+        if (where == 1) return "a lifecycle type on the child field `" + name + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3)" + fix
+        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer reads cells, §66.9 rule 3), and a lifecycle type on a derived value is not in the bootstrap — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written; write `let` before the `<` for a writable cell, or `T | not` for the derived value"
+        if (bodyLen > 0) return "a lifecycle type on the declaration `" + name + "`, which has a body (child fields or state-children), is not in the bootstrap — it builds `(not to T)` only on a plain program cell (§14.12.3; an engine cell never carries one, §14.12.4)" + fix
+        return ""
     }
 
     // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
@@ -3615,6 +3674,15 @@ ${
             mode = FieldMode.Derived
             if (rg.graph is given) st = derivedRules(te.file, body, st)
         }
+        // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
+        // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
+        if (aty is given && isPresenceLife(aty)) {
+            const why: string = lifeCellWhy(name, where, mode, body.length)
+            if (why != "") {
+                st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", why)
+                resolved = false
+            }
+        }
 
         let wcap: Sym | not = not
         if (grantsAny(fieldGrantSet(grantRep, grantEdits))) {
@@ -5543,6 +5611,7 @@ ${
             .TName(name: n) :> n == "void"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -5706,6 +5775,7 @@ ${
             .TName(name: n) :> n == "timestamp" && isBuiltinTypeName(te, n)
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
         if (!isStamp) return st
         const own: AAttrValue = d.own
@@ -5863,6 +5933,7 @@ ${
             .TName(name: n) :> n
             .TSeq(elem: e) :> ""
             .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
         }
     }
 
@@ -7517,6 +7588,7 @@ ${
         const k: ATypeK = r.k
         return match k {
             .TMaybe(inner: i) :> " — for the absent case, `return not;`"
+            .TLife(pre: f, post: x) :> ""
             .TName(name: x) :> ""
             .TSeq(elem: e) :> ""
         }
@@ -7528,6 +7600,7 @@ ${
             .TName(name: x) :> x
             .TSeq(elem: e) :> typeText(e) + "[…]"
             .TMaybe(inner: i) :> typeText(i) + " | not"
+            .TLife(pre: f, post: x) :> "(" + typeText(f) + " to " + typeText(x) + ")"
         }
     }
 
@@ -11137,6 +11210,7 @@ ${
             .TSeq(elem: e, grants: gs) :> shrinkList(gs)
             .TName(name: n) :> []
             .TMaybe(inner: i) :> []
+            .TLife(pre: f, post: x) :> []
         }
     }
 
@@ -11156,6 +11230,7 @@ ${
             .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
             .TName(name: n) :> false
             .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
+            .TLife(pre: f, post: x) :> seqReplace(x)
         }
     }
 
@@ -14085,6 +14160,7 @@ ${
             .TName(name: n) :> n == "void"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -30482,11 +30558,18 @@ ${
             .TName(name: n) :> { ty: { nid: next, span: t.span, k: ATypeK.TName(n) }, next: next + 1 }
             .TSeq(elem: e, grants: gs) :> seqAType(copyAType(e, next), t.span, gs)
             .TMaybe(inner: i) :> maybeAType(copyAType(i, next), t.span)
+            .TLife(pre: f, post: x) :> lifeAType(copyAType(f, next), x, t.span)
         }
     }
 
     fn maybeAType(r: RTy, sp: ASpan) -> RTy {
         return { ty: { nid: r.next, span: sp, k: ATypeK.TMaybe(r.ty) }, next: r.next + 1 }
+    }
+
+    // s475: `(A to B)` copied — A (already copied, `rf`), then B, then the node.
+    fn lifeAType(rf: RTy, post: AType, sp: ASpan) -> RTy {
+        const rp: RTy = copyAType(post, rf.next)
+        return { ty: { nid: rp.next, span: sp, k: ATypeK.TLife(rf.ty, rp.ty) }, next: rp.next + 1 }
     }
 
     // A resolved type spelled back as syntax (composeOne admits only `spellable` ones).

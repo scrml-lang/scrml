@@ -266,6 +266,12 @@ ${
         TName(name: string),                   // int · string · bool · number · struct · Line · Openness …
         TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (O10 spelling, ruled S469)
         TMaybe(inner: AType),                  // T | not
+        // s475 — a lifecycle type `(A to B)` (§14.12). `pre` = A (`not`, or a
+        // bare variant `.V` held as TName(".V")); `post` = B. The bootstrap reads
+        // every spelling but builds only `(not to T)` on a program cell
+        // (parse.scrml lifeRefusal, analyze.scrml lifeCellWhy); it resolves to
+        // Core `Type.Maybe(T)` — "no new runtime representation" (§13.9.2).
+        TLife(pre: AType, post: AType),
     }
 
     export type ATypeField:struct = { nid: int, span: ASpan, isLet: boolean, name: string, ty: AType }
