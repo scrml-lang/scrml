@@ -103,6 +103,22 @@ export const URI_CODE = "scrml-boot-uri";
  * `file://remotehost/x.scrml`, or an encoded `/` as in `file:///tmp/a%2Fb.scrml`). Such a document is
  * not compiled, and is not part of any other document's overlay. The server stays up.
  */
+/**
+ * The single diagnostic a document gets when another open document is the SAME file under another
+ * spelling of its URI (`file:///x` and `file://localhost/x`, or `%61` for `a`) and was opened first
+ * (g-lsp-boot-uri-alias-overlay-s474). One file has one overlay slot: the first-opened document owns
+ * it, and this one is compiled once the owner closes.
+ */
+export function aliasDiagnostic(docText: string, uri: string, owner: string): LspDiagnostic {
+  return {
+    range: firstLineRange(docText),
+    severity: 1,
+    code: URI_CODE,
+    source: SOURCE,
+    message: `scrml-boot does not compile this document: its URI ${uri} names the same file as the document already open as ${owner}. Edit that one; this one compiles once it closes.`,
+  };
+}
+
 export function uriDiagnostic(docText: string, uri: string, why: string): LspDiagnostic {
   return {
     range: firstLineRange(docText),

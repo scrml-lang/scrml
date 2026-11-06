@@ -114,7 +114,10 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
     const src = P(NOTES + E);
     expect(errCodes(src)).toEqual(["E-ERROR-010"]);
     const m = run(src).diags.find((d) => d.code === "E-ERROR-010").message;
-    expect(m).toContain("`saveNote` is a server function: a call to it from the client can also fail on the wire. Add `Transport(t: ServerCallError)` to `SyncError`");
+    // §19.5.3: "the E-ERROR-010 message then names that line" (s475-boot-caller-transport reworded the
+    // message around it — and, for a built-in enum, names the forms that can work instead)
+    expect(m).toContain("`saveNote` is a server function: a call to it from the client can also fail on the wire");
+    expect(m).toContain("Add `Transport(t: ServerCallError)` to `SyncError`");
   });
 
   test("with the wrapper declared, `?` re-fails every variant of the client set — the four retags", () => {

@@ -76,8 +76,10 @@ describe("1 — §8.9.2 amendment: the envelope trigger reads the TRANSITIVE que
     expect(envOf(DBP(bang(own("UPDATE acct SET n = 1")))).standalone).toBe(true);
     // s475-boot-nonbang-callee-envelope: the client `!` whose ONE call reaches the helper's one query is
     // composed (its query in the batch's envelope — "one is enough"); the composed request can fail on the
-    // wire, and the built-in `SqlError` has no `Transport`: E-ERROR-010 (was: compiled, the query unenveloped)
-    expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual(["E-ERROR-010"]);
+    // wire, and that failure is its CALLERS' (s475-boot-caller-transport; §19.9.5: "Its client call fails with
+    // the §19.9.10 failure set: the function's declared error variants, if it is declared `!`, plus
+    // `Transport(t: ServerCallError)`") — so `! SqlError` compiles (was E-ERROR-010: the built-in has no `Transport`)
+    expect(codes(DBP(helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
     const T1 = "    type TE:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }\n";
     const one = DBP(T1 + helper("bump", "UPDATE acct SET n = n - ${a}") + bang(`        ${hcall("y", "bump", "a")}\n`).replace("! SqlError", "! TE"));
     expect(codes(one)).toEqual([]);
@@ -370,8 +372,9 @@ describe("F10 — a `!` callee's queries count toward the outer `!` function's s
 // s474-boot-client-bang-composition (S474 ruling, the four one-way doors, door 2): "F11 becomes INTERIM: a
 // client `!`'s server calls compose into one request with one envelope". These two shapes were the permanent
 // E-TX-CLIENT-MULTI-CALL; they now compose (a server `!` batch `move#batch`, one standalone envelope). The
-// composed request can fail on the wire, so `move`'s error type needs `Transport` — the built-in `SqlError`
-// has none: E-ERROR-010 naming the line to add. (What stays E-TX-CLIENT-MULTI-CALL — a browser statement
+// composed request can fail on the wire; that failure is `move`'s CALLERS' (s475-boot-caller-transport, §19.9.5),
+// so `move`'s error type needs no `Transport` (was E-ERROR-010 for the built-in `SqlError`, which has none).
+// (What stays E-TX-CLIENT-MULTI-CALL — a browser statement
 // splitting the calls — is pinned in client-bang-compose-s474.test.js and acceptance/envelope/neg-client-multi-call.)
 describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two or more server calls composes into one request", () => {
   const L = helper("logIt", "INSERT INTO log (a) VALUES (${a})") + helper("bump", "UPDATE acct SET n = n - ${a}");
@@ -381,10 +384,11 @@ describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two
       ["two calls", `        ${hcall("x", "logIt", "a")}\n        ${hcall("y", "bump", "a")}\n`],
       ["one call in a loop", `        for (let i = 0; i < 3; i = i + 1) {\n            ${hcall("y", "bump", "i")}\n        }\n`],
     ]) {
-      const e = errs(DBP(L + bang(body)));
-      expect([name, e.map((d) => d.code)]).toEqual([name, ["E-ERROR-010"]]);
-      expect(e[0].message).toContain("add `Transport(t: ServerCallError)` to `SqlError`");
-      expect(e[0].message).toContain("`SqlError` is built in, so declare an error enum holding its variants");
+      // s475-boot-caller-transport: `! SqlError` composes too — the wire failure is the callers' (§19.9.5);
+      // was E-ERROR-010 ("add `Transport(t: ServerCallError)` to `SqlError`")
+      const sq = DBP(L + bang(body));
+      expect([name, codes(sq)]).toEqual([name, []]);
+      expect([name, !!run(sq).core.server.find((x) => x.sym.hint === "move#batch")]).toEqual([name, true]);
       const ok = DBP(T + L + bang(body).replace("! SqlError", "! TE"));
       expect([name, codes(ok)]).toEqual([name, []]);
       const core = run(ok).core;
@@ -393,10 +397,10 @@ describe("F11 (s474: INTERIM, built) — a client-placed `!` function making two
     }
   });
   // s475-boot-nonbang-callee-envelope: one call of a non-`!` helper that reaches a query composes too (§8.9.2
-  // "Amendment S474" item 1: "one is enough") — so it needs `Transport` like two calls (was: compiled clean, the
-  // helper's query unenveloped)
-  test("one server call reaching a query composes like two (E-ERROR-010 with the built-in `SqlError`)", () => {
-    expect(codes(DBP(L + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual(["E-ERROR-010"]);
+  // "Amendment S474" item 1: "one is enough"). s475-boot-caller-transport: with the built-in `SqlError` it
+  // compiles — the composed request's wire failure is the callers' (§19.9.5); was E-ERROR-010
+  test("one server call reaching a query composes like two (`! SqlError` included)", () => {
+    expect(codes(DBP(L + bang(`        ${hcall("y", "bump", "a")}\n`)))).toEqual([]);
     expect(codes(DBP(T + L + bang(`        ${hcall("y", "bump", "a")}\n`).replace("! SqlError", "! TE")))).toEqual([]);
   });
 });

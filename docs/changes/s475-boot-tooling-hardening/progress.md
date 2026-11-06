@@ -1,0 +1,10 @@
+# s475-boot-tooling-hardening progress
+
+- 2026-11-05T19:29:19-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-ac9e430a4551cb0e1; pretest exit 0; base 9eeb6604e
+- 2026-11-05T20:05 items 1,2,3,5 implemented: scrml-boot writeOutputs through held dirs (/proc/self/fd) + temp+rename + `wx` writeNewFile; lsp-boot per-URI path cache + first-opened owner for URI aliases. Race, 2000 writeOutputs calls: base writes-escaped 502-676, deletes-escaped 2-6 (3 runs); head 0/0 (3 runs); fallback path forced: 0-1 writes.
+- 2026-11-05T20:50 item 4: NAMED_CODES += E-PARSE-ATTR, E-PARAM-TYPE-REQUIRED, E-SCOPE-010 (3 pins re-pinned with names); unnamed E-PARSE-* counts are a ceiling (1..N). sweep3: base hid 186/544 (1 pin-blind), head 185 (0 pin-blind). claim-gate + snippet-gate pass. Gap entries marked resolved; new INTERIM gap g-boot-output-race-non-linux-fallback-s475.
+
+## r1 (review of #1764)
+- 2026-11-05T20:00 r1 start on s475-1764-r1 at origin/s475-boot-tooling-hardening 9ce78919f; pretest exit 0. Reproduced F1: moveout.js /proc mode err:null, 4000 files outside, 0 in -o.
+- 2026-11-05T20:30 F1: OutTree.check() (dev/ino of each held dir vs the entry it was opened from, up to the pinned -o) on open, around every write/delete, before+after the final manifest. moveout.js /proc: OutDirError, 52-53 in the moved dir (written before the move). F5: race ENOENT/realpath refusals -> OutDirError; ENAMETOOLONG fixed (short temp name > 200 bytes). F4: renameOver (win32 retry, then OutDirError); paths mode compares dev/ino + case-folded realpath; compiler/tests/unit/scrml-boot-write-outputs-s475.test.js (both modes). Commit cb2fcf27f (hook: SCRML_HOOK_SHARDS=1 SCRML_HOOK_SHARD_TIMEOUT_S=2400 after sharded runs died of memory/timeouts on the loaded box).
+- 2026-11-05T21:10 paths mode: temp file location verified before any data is written (escaped temps are empty). Fallback leak (harness, 3000 builds, forced paths mode): swap 1, deep 8/8 (pre-r1 same box 2-4 / 1-4; review 10 / 16; base 667 / 182). Gap docs: F2 claim made precise, F3 rates recorded, F4/F5 notes.
