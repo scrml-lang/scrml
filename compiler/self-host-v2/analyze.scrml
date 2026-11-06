@@ -1374,12 +1374,87 @@ ${
             .TName(name: n) :> resolveTypeName(te, at, n, st)
             .TSeq(elem: e, grants: gs) :> resolveSeqType(te, at, e, gs, st)
             .TMaybe(inner: i) :> resolveMaybe(te, i, st)
+            .TLife(pre: f, post: x) :> resolveLife(te, f, x, st)
         }
     }
 
     fn resolveMaybe(te: TypeEnv, inner: AType, st: AS) -> RType {
         const r: RType = resolveType(te, inner, st)
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
+    }
+
+    // s475 (s475-boot-lifecycle-type) — the presence lifecycle `(not to T)` is
+    // Core `Type.Maybe(T)`: "No new runtime representation. At run time the cell
+    // holds `not` until the load settles, which is the existing representation of
+    // `(not to T)`. The difference between pending and `T` is static only"
+    // (§13.9.2). INTERIM until the S1 slice: a `(not to T)` cell is typed and
+    // checked exactly as a `T | not` cell (no E-TYPE-001 pre-transition read
+    // rule yet, §13.9.3 / §14.12.3). Any other lifecycle (`(.A to .B)`) was
+    // refused where it was read (parse.scrml lifeRefusal); it resolves to no type
+    // here (untrusted, no second report).
+    fn resolveLife(te: TypeEnv, pre: AType, post: AType, st: AS) -> RType {
+        if (presenceLife(pre, post)) return resolveMaybe(te, post, st)
+        return { t: Type.Str, st: st, unresolved: true }
+    }
+
+    // `(pre to post)` is the presence lifecycle `(not to T)`: `pre` is `not`, `post` is no bare variant.
+    fn presenceLife(pre: AType, post: AType) -> boolean {
+        return lifeStateName(pre) == "not" && lifeStateName(post).substring(0, 1) != "."
+    }
+
+    fn lifeStateName(t: AType) -> string {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
+        }
+    }
+
+    // Is `at` the presence lifecycle `(not to T)` (at its top)?
+    fn isPresenceLife(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> false
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> presenceLife(f, x)
+        }
+    }
+
+    // s475 — why the declaration `name` cannot carry the lifecycle type `(not to T)`
+    // in the bootstrap, "" when it can. §14.12.3: a "Shape 1 plain reactive cell"
+    // carries it; §13.9.1 names "A Shape-1 cell declaration (§6.2)". The bootstrap
+    // builds that one place: a PROGRAM cell (`where` 2), `let` or locked, not
+    // derived, with no declaration body. Every refusal here is INTERIM (the
+    // capable form: §14.12.3's every-typed-location rule). The derived one is
+    // INTERIM too until the owner rules: §13.9.1 rules out only a derived PENDING
+    // cell; whether a derived value may carry a lifecycle (a write contract,
+    // §66.11.6, on a value that is never written) awaits an owner ruling — the
+    // PA's recommendation to the owner is PERMANENT, and when ruled so this
+    // refusal becomes PERMANENT; ruled the other way, its capable form is the
+    // lifecycle read rule (§13.9.3) applied to a derived cell's reads.
+    // `reads`: the initializer's valueReads (an `@name`, or "()" for a call).
+    fn lifeCellWhy(name: string, where: int, mode: FieldMode, bodyLen: int, reads: string[]) -> string {
+        const fix: string = "; write `T | not` here"
+        // (`where` 0, a typed attribute: refused where it is read, parse.scrml scanAttr — every attribute, fieldOf'd or not)
+        if (where == 0) return ""
+        if (where == 1) return "a lifecycle type on the child field `" + name + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3)" + fix
+        if (mode == FieldMode.Derived) return "`" + name + "` is derived (a locked declaration whose initializer " + derivedHow(reads) + ", §66.9 rule 3), and a lifecycle type on a derived value is not in the bootstrap yet — a lifecycle constrains WRITES (§66.11.6) and a derived value is never written; write `let` before the `<` for a writable cell, or `T | not` for the derived value"
+        if (bodyLen > 0) return "a lifecycle type on the declaration `" + name + "`, which has a body (child fields or state-children), is not in the bootstrap — it builds `(not to T)` only on a plain program cell (§14.12.3; an engine cell never carries one, §14.12.4)" + fix
+        return ""
+    }
+
+    // s475 r1 (F5) — why a locked initializer made its declaration derived: it reads
+    // a cell, or it calls a function (a call may read cells, so the bootstrap counts
+    // it as a read — valueReads gives "()").
+    fn derivedHow(reads: string[]) -> string {
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@") return "reads the cell `" + r + "`"
+        }
+        if (reads.indexOf("()") >= 0) return "calls a function, which the bootstrap counts as reading cells"
+        return "runs a query, which the bootstrap counts as reading cells"
     }
 
     // s473 fix round 2 — `n` names no user type in `te.file`'s scope (declared
@@ -3615,6 +3690,15 @@ ${
             mode = FieldMode.Derived
             if (rg.graph is given) st = derivedRules(te.file, body, st)
         }
+        // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
+        // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
+        if (aty is given && isPresenceLife(aty)) {
+            const why: string = lifeCellWhy(name, where, mode, body.length, reads)
+            if (why != "") {
+                st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", why)
+                resolved = false
+            }
+        }
 
         let wcap: Sym | not = not
         if (grantsAny(fieldGrantSet(grantRep, grantEdits))) {
@@ -5543,6 +5627,7 @@ ${
             .TName(name: n) :> n == "void"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -5706,6 +5791,7 @@ ${
             .TName(name: n) :> n == "timestamp" && isBuiltinTypeName(te, n)
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
         if (!isStamp) return st
         const own: AAttrValue = d.own
@@ -5863,6 +5949,7 @@ ${
             .TName(name: n) :> n
             .TSeq(elem: e) :> ""
             .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
         }
     }
 
@@ -7584,6 +7671,7 @@ ${
         const k: ATypeK = r.k
         return match k {
             .TMaybe(inner: i) :> " — for the absent case, `return not;`"
+            .TLife(pre: f, post: x) :> ""
             .TName(name: x) :> ""
             .TSeq(elem: e) :> ""
         }
@@ -7595,6 +7683,7 @@ ${
             .TName(name: x) :> x
             .TSeq(elem: e) :> typeText(e) + "[…]"
             .TMaybe(inner: i) :> typeText(i) + " | not"
+            .TLife(pre: f, post: x) :> "(" + typeText(f) + " to " + typeText(x) + ")"
         }
     }
 
@@ -11219,6 +11308,7 @@ ${
             .TSeq(elem: e, grants: gs) :> shrinkList(gs)
             .TName(name: n) :> []
             .TMaybe(inner: i) :> []
+            .TLife(pre: f, post: x) :> []
         }
     }
 
@@ -11238,6 +11328,7 @@ ${
             .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
             .TName(name: n) :> false
             .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
+            .TLife(pre: f, post: x) :> seqReplace(x)
         }
     }
 
@@ -14201,6 +14292,7 @@ ${
             .TName(name: n) :> n == "void"
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
         }
     }
 
@@ -26517,7 +26609,10 @@ ${
     // Which of §6.15's three kinds a position is — it picks the fix text.
     type ValueKind:enum = { InitKind, FormulaKind, RenderKind }
     // A value position: what it is (for the message), its kind, its value, where.
-    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string }
+    // `pending`: the own initializer of a program cell declared with the presence
+    // lifecycle `(not to T)` — §13.9.1's one position that MAY wait (a pending
+    // cell), which the bootstrap does not build yet (valueServerDiags).
+    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean }
 
     fn valuePositions(g: Globals, t: Tables) -> ValuePos[] {
         let out: ValuePos[] = []
@@ -26525,9 +26620,9 @@ ${
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file)) }
+                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file, true)) }
             } else if (d is given) {
-                out = out.concat(declInits(d, "@" + d.name, ds.file))
+                out = out.concat(declInits(d, "@" + d.name, ds.file, false))
             }
             for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
         }
@@ -26537,14 +26632,23 @@ ${
     // A declaration's own value, its attribute fields' defaults and its child
     // fields' initializers (at any depth); `path` is the cell as the author
     // spells it (`@x`, `@box.k`).
-    fn declInits(d: ADecl, path: string, file: string) -> ValuePos[] {
+    // `cell`: `d` is a program cell (s475 — its own initializer may be a pending
+    // cell's, §13.9.1; a child field, an attribute default and a declaration
+    // with a body are refused the lifecycle by analyze's lifeCellWhy).
+    fn declInits(d: ADecl, path: string, file: string, cell: boolean) -> ValuePos[] {
         let out: ValuePos[] = []
-        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file)])
+        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file, cell && d.body.length == 0 && presenceDecl(d))])
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file)])
+            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file, false)])
         }
-        for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file)) }
+        for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file, false)) }
         return out
+    }
+
+    fn presenceDecl(d: ADecl) -> boolean {
+        const at: AType | not = d.ty
+        if (at is given) return isPresenceLife(at)
+        return false
     }
 
     // A value with something to evaluate (a quoted string is a literal).
@@ -26560,9 +26664,11 @@ ${
 
     // A locked initializer that reads cells is a derived FORMULA (§66.9 rule 3);
     // anything else is an initializer (a `let` seed, a locked constant).
-    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string) -> ValuePos {
-        if (!isLet && valueReads(v).length > 0) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file }
-        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file }
+    // `life`: the declaration is a `(not to T)` program cell — its INITIALIZER (never
+    // a derived formula: §13.9.1 "A derived cell cannot be a pending cell") is pending.
+    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean) -> ValuePos {
+        if (!isLet && valueReads(v).length > 0) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false }
+        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life }
     }
 
     fn nodePositions(t: Tables, n: ANode, file: string) -> ValuePos[] {
@@ -26583,13 +26689,13 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file }]
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
-        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file }
+        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false }
     }
 
     fn elemPositions(t: Tables, e: AElem, file: string) -> ValuePos[] {
@@ -26631,7 +26737,7 @@ ${
         // field (§6.15 list item 1, §66.9 rule 8)
         let vk: ValueKind = ValueKind.RenderKind
         if (isConstructAttr(k)) vk = ValueKind.InitKind
-        return { what: what, vk: vk, v: a.value, span: a.span, file: file }
+        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false }
     }
 
     fn isConstructAttr(k: AttrKind | not) -> boolean {
@@ -30718,11 +30824,18 @@ ${
             .TName(name: n) :> { ty: { nid: next, span: t.span, k: ATypeK.TName(n) }, next: next + 1 }
             .TSeq(elem: e, grants: gs) :> seqAType(copyAType(e, next), t.span, gs)
             .TMaybe(inner: i) :> maybeAType(copyAType(i, next), t.span)
+            .TLife(pre: f, post: x) :> lifeAType(copyAType(f, next), x, t.span)
         }
     }
 
     fn maybeAType(r: RTy, sp: ASpan) -> RTy {
         return { ty: { nid: r.next, span: sp, k: ATypeK.TMaybe(r.ty) }, next: r.next + 1 }
+    }
+
+    // s475: `(A to B)` copied — A (already copied, `rf`), then B, then the node.
+    fn lifeAType(rf: RTy, post: AType, sp: ASpan) -> RTy {
+        const rp: RTy = copyAType(post, rf.next)
+        return { ty: { nid: rp.next, span: sp, k: ATypeK.TLife(rf.ty, rp.ty) }, next: rp.next + 1 }
     }
 
     // A resolved type spelled back as syntax (composeOne admits only `spellable` ones).
@@ -31411,20 +31524,31 @@ ${
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, s, st)
-                st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
+                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix())
             }
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
             for (const r of scan.refs) {
                 const pk: PlaceK = placeOf(ps, r.sym)
                 const c: Reach | not = waitsOf(sum, r.sym)
                 if (pk == PlaceK.Server) {
-                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
+                    st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix())
                 } else if (c is given) {
-                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`) — " + waitFix())
+                    st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix())
                 }
             }
         }
         return st
+    }
+
+    // s475 r1 (s475-boot-lifecycle-type F1) — a waiting value at `p`: §13.7's
+    // E-VALUE-SERVER-CALL, except the own initializer of a `(not to T)` program
+    // cell. §13.9.1: "A `(not to T)`-declared cell initializer is no longer
+    // E-VALUE-SERVER-CALL" — it is a PENDING cell, which the bootstrap does not
+    // build yet: E-BOOTSTRAP-UNSUPPORTED naming §13.9. INTERIM; the capable form
+    // is slice S4's pending-cell desugar (§13.9.2: a plain cell plus a `<request>`).
+    fn waitDiag(st: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string) -> AS {
+        if (!p.pending) return addDiag(st, file, span, "E-VALUE-SERVER-CALL", head + " " + fix)
+        return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — pending cells are not in the bootstrap yet. Declare the cell `=not` and load the value into it with a `<request>` (§6.7.7)")
     }
 
     fn waitFix() -> string {

@@ -430,10 +430,15 @@ describe("S475 — pins catch a typo'd name; a parse cascade count is a ceiling"
     expect(pinMismatch(["E-PARSE-ATTR(loadCount)"], ["E-PARSE-ATTR(loadCunt)"])).toContain("reported [E-PARSE-ATTR(loadCunt)]");
   });
 
+  // s475-boot-lifecycle-type: the bootstrap now READS the block's `(not to int)` opener, so the
+  // `loadCount()` call is no longer an E-PARSE-ATTR (the parse cascade is gone). r1 (F1): the
+  // waiting initializer of the `(not to int)` cell is a pending cell (§13.9.1: "no longer
+  // E-VALUE-SERVER-CALL"), not built yet — one more E-BOOTSTRAP-UNSUPPORTED (×3). The typo is
+  // still caught: `loadCunt` is a new E-SCOPE-001 name, so the pin no longer matches.
   test("tutorial :160 — the block passes its pin; `loadCount` → `loadCunt` (pin-blind in the #1723 r1 sweep) now fails it", async () => {
     await loadBoot();
     const doc = parseDocMarkers(readFileSync(join(ROOT, "docs", "tutorial.md"), "utf8"));
-    const b = doc.blocks.find((x) => x.gate?.kind === "spec-ahead" && (x.gate.codes ?? []).includes("E-PARSE-ATTR(loadCount)"));
+    const b = doc.blocks.find((x) => x.gate?.kind === "spec-ahead" && x.body.includes("=(loadCount()"));
     expect(b).toBeDefined();
     const path = join(ROOT, "docs", "tutorial-block.scrml");
     expect(classifySpecAhead(await bootCheck(path, b.body), b.gate.codes).verdict).toBe("expected");
@@ -442,6 +447,6 @@ describe("S475 — pins catch a typo'd name; a parse cascade count is a ceiling"
     const typo = b.body.replace("=(loadCount()", "=(loadCunt()");
     const c = classifySpecAhead(await bootCheck(path, typo), b.gate.codes);
     expect(c.verdict).toBe("pin-mismatch");
-    expect(c.message).toContain("E-PARSE-ATTR(loadCunt)");
+    expect(c.message).toContain("E-SCOPE-001(loadCunt)");
   }, 120_000);
 });

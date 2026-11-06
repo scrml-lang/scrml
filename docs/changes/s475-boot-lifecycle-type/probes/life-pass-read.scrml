@@ -1,0 +1,6 @@
+<program>
+let <m:(not to int)=not/>
+function g(x: int | not) -> int { return 1; }
+function f() -> int { return g(@m); }
+<main><p>${f()}</p></main>
+</program>
