@@ -73,7 +73,43 @@ describe("C-R1 — a Request's body is its load (check.scrml)", () => {
 
   test("a body that writes the target twice is refused (§6.7.7 exactly one assignment)", () => {
     const core = requestCore((p) => { p.then = [...p.then, ...p.then]; });
-    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: a Request body holds 2 Writes/);
+    // s475-boot-pending-cells: C-R1 counts the Writes of ONE control path (two in sequence: 2)
+    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: one control path through a Request body performs 2 Writes — a path performs at most one/);
+  });
+
+  // s475-boot-pending-cells (slice S4; the #1771 r1 trap): a handled load's success and failure arms
+  // are alternatives — ONE Write of the target per control path (§13.9.5 `@x = f() !{ _ :> not }`)
+  test("a Write of the target in each branch of an If is one Write per path — accepted", () => {
+    const core = requestCore((p, { here }) => {
+      const w = (n) => C.Stmt.Write(p.wcaps.res, here, C.EditKind.Replace, C.litInt(n), C.Check.Static);
+      p.then = [C.Stmt.If(C.Expr.Lit(C.Literal.Bool(true)), C.block([w(1)]), C.block([w(2)]))];
+    });
+    expect(mods.check.checkCore(core)).toEqual([]);
+  });
+
+  test("a Write of the target inside a Loop may run twice — refused", () => {
+    const core = requestCore((p, { here }) => {
+      const w = C.Stmt.Write(p.wcaps.res, here, C.EditKind.Replace, C.litInt(1), C.Check.Static);
+      const lbl = C.mkSym(910030, "l");
+      p.then = [C.Stmt.Loop(lbl, C.LoopHead.Forever, C.block([w, C.Stmt.Break(lbl)]))];
+    });
+    expect(mods.check.checkCore(core).join("\n")).toMatch(/C-R1: one control path through a Request body performs 2 Writes — a path performs at most one/);
+  });
+
+  // r1 F3 (red on ac5fe6d1b: C-R1 silent — pathWrites skipped the head while the `writes` total
+  // counted it): a Counted head's init / step is walked; a step Write runs after every iteration.
+  test("a Write in a Counted loop head counts on its path (init once, step as a body) — refused", () => {
+    const lbl = C.mkSym(910031, "l");
+    const once = requestCore((p, { here }) => {
+      const w = C.Stmt.Write(p.wcaps.res, here, C.EditKind.Replace, C.litInt(1), C.Check.Static);
+      p.then = [C.Stmt.Loop(lbl, C.LoopHead.Counted([w], null, []), C.block([C.Stmt.Break(lbl)])), ...p.then];
+    });
+    expect(mods.check.checkCore(once).join("\n")).toMatch(/C-R1: one control path through a Request body performs 2 Writes/);
+    const step = requestCore((p, { here }) => {
+      const w = C.Stmt.Write(p.wcaps.res, here, C.EditKind.Replace, C.litInt(1), C.Check.Static);
+      p.then = [C.Stmt.Loop(lbl, C.LoopHead.Counted([], null, [w]), C.block([C.Stmt.Break(lbl)]))];
+    });
+    expect(mods.check.checkCore(step).join("\n")).toMatch(/C-R1: one control path through a Request body performs 2 Writes/);
   });
 
   test("a body that writes another cell is refused", () => {

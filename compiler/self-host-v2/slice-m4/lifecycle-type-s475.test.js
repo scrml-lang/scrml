@@ -17,6 +17,7 @@
 // s475-boot-lifecycle-reads: lifecycle-reads-s475.test.js), a waiting initializer
 // (a pending cell, §13.9.1) is slice S4 and gives a named E-BOOTSTRAP-UNSUPPORTED here (pinned
 // below — r1 F1: §13.9.1 "A `(not to T)`-declared cell initializer is no longer E-VALUE-SERVER-CALL").
+// s475-boot-pending-cells: slice S4 is BUILT — the pin is flipped (pending-cells-s475.test.js).
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -143,7 +144,7 @@ describe("other lifecycles and other declarations are refused by name", () => {
   test("a derived cell whose initializer only calls: the message says it calls, not that it reads cells", () => {
     const e = errs(P(`function g() -> int { return 1; }\n<m:(not to int)=(g())/>`));
     expect(e.map((d) => d.code)).toEqual([U]);
-    expect(e[0].message).toContain("calls a function, which the bootstrap counts as reading cells");
+    expect(e[0].message).toContain("calls `g()`, which the bootstrap counts as reading cells");   // r2: names the call
     expect(e[0].message).not.toContain("initializer reads cells");
   });
   // r1 F5 (red on 91e235c2c: E-PARSE-TYPE "expected `)` … found `(`")
@@ -166,7 +167,9 @@ describe("other lifecycles and other declarations are refused by name", () => {
   });
 });
 
-describe("S4 pin: a waiting initializer is a pending cell, not built yet (§13.9.1, slice S4 flips this)", () => {
+// s475-boot-pending-cells (slice S4) flipped the pin: a waiting initializer on a `(not to T)` cell is a
+// pending cell, BUILT (§13.9.2 — pending-cells-s475.test.js grades it end to end).
+describe("S4: a waiting initializer is a pending cell (§13.9.1; was the S4 pin — E-BOOTSTRAP-UNSUPPORTED)", () => {
   const SRC = `<program db="./app.db">
 let <u:int=1/>
 function cnt(id: int) -> int {
@@ -179,16 +182,13 @@ let <m:(not to int)=(cnt(@u) !{ _ :> not })/>
 `;
   // r1 F1 (red on 91e235c2c: E-VALUE-SERVER-CALL with §13.7's fix — §13.9.1: "A `(not to T)`-declared
   // cell initializer is no longer E-VALUE-SERVER-CALL")
-  test("E-BOOTSTRAP-UNSUPPORTED naming §13.9 — not §13.7's E-VALUE-SERVER-CALL", () => {
-    const e = errs(SRC);
-    expect(e.map((d) => d.code)).toEqual([U]);
-    expect(e[0].message).toContain("pending cell (§13.9");
-    expect(e[0].message).not.toContain("§13.7");
+  test("it compiles — no E-VALUE-SERVER-CALL (§13.9.1), no refusal (S4 built)", () => {
+    expect(codes(SRC)).toEqual([]);
   });
   test("the same initializer on a `T | not` cell keeps E-VALUE-SERVER-CALL (§13.9.1: no marker, no pending)", () => {
     expect(codes(SRC.replace("(not to int)", "int | not"))).toEqual(["E-VALUE-SERVER-CALL"]);
   });
-  test("a DERIVED `(not to T)` cell that waits keeps E-VALUE-SERVER-CALL (§13.9.1: a derived cell cannot be a pending cell)", () => {
+  test("a DERIVED `(not to T)` cell that waits keeps E-VALUE-SERVER-CALL (§13.9.1: a derived cell cannot be a pending cell; ruling S475 item 7)", () => {
     expect(codes(SRC.replace("let <m:", "<m:"))).toEqual([U, "E-VALUE-SERVER-CALL"]);
   });
 });

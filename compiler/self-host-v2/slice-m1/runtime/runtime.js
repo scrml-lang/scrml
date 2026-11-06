@@ -195,11 +195,22 @@ export class Cell {
     // A seed still owed (an initializer queued during construction, see
     // `construct`), SEEDING while it runs, or null once the value is settled.
     this.pending = null;
+    // s475 r3 (N2): a PENDING cell's supersede record (§13.9.2; set by its Request) — null otherwise
+    this.pend = null;
   }
   get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    if (this.pend !== null) {                       // s475 r3/r4: a pending cell's write (pendWrite)
+      const w = pendWrite(this, v);
+      if (w === PEND_STALE) return;
+      if (w === PEND_RELOAD) { const req = this.pend.req; batch(() => { req.markStale(); this.land(v); }); return; }
+    }
+    this.land(v);
+  }
+  /** The write itself, once it is let through. */
+  land(v) {
     this.pending = null;
     if (Object.is(v, this.value)) return;
     this.value = v;
@@ -451,6 +462,59 @@ export function effectOn(scope, deps, body) {
 // ---------------------------------------------------------------------------
 const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 
+// s475 r3 (N2) — SUPERSEDE ACROSS A PENDING CELL'S WRITES AND LOADS (PA reading, recorded in the
+// coverage row / gap text: "the MOST RECENTLY STARTED write or load of a pending cell wins. Starting
+// a new one supersedes any older one in flight: the older one's result is discarded, and for
+// READ-class loads it is aborted, the same way a request's own reload already supersedes").
+// START STAMPS, compared when a write LANDS (r3 — r2's claim-at-call-start aborted a load even
+// when no write followed, and missed writes it could not see statically):
+//  - one global monotonic counter (`pendSeq`). A run of a pending cell's own load takes a fresh
+//    stamp (Request.run → `p.load`). Every `suspend` takes a fresh stamp when it is CALLED (the
+//    wait's start) and its continuation runs with that stamp AMBIENT (`curStamp`, restored on
+//    exit and on throw) — so a write from any code the continuation runs synchronously (a Join
+//    body, a helper function, a loop, a nested arm) carries it. A write outside any continuation
+//    (a handler's synchronous part — no wait) takes a fresh stamp: it starts as it lands ("now").
+//  - a write of value `v` with stamp `s` landing on a pending cell:
+//      · a load started after it (`p.load > s`) or a newer write already landed (`p.wrote > s`):
+//        DISCARDED — this write only; the rest of its continuation runs;
+//      · otherwise it WINS (`p.wrote = s`: an older write still in flight is discarded when it
+//        lands) and supersedes an in-flight load started before `s`: its task is cancelled — its
+//        result discarded, a READ's transport aborted (Task.onAbort). This holds for EVERY winning
+//        write, a no-op (`Object.is(v, current)`) included (r4 F-A): the no-op only skips the
+//        notify, as for every cell — it is still the newest start, so an older load must not land
+//        over it (red r3: the reload's "b" overwrote a newer `@who = "a"`).
+//      · a winning write of `not` RE-RUNS the load (r4 D, PA reading ⚑): §13.9.2 "A reset of a
+//        pending cell … is the request's re-run — never … back to `not`", and §13.9.5 "`not` …
+//        returns the cell to its pre-state" — a pending cell's pre-state is `not` WITH its load
+//        running. The older load is superseded, then `markStale` queues a fresh run, which the
+//        write's batch flushes once the write has landed: its own newer stamp (`p.load > s`).
+//        No loop: the load's own settle takes the `settling` bypass below, so a load that fails to
+//        `not` lands `not` and never re-triggers itself (red r3: `not` with nothing in flight —
+//        loading forever).
+//  - nothing is superseded before a write actually lands (a wait whose continuation then writes
+//    nothing — an untaken `if`, a failure arm that skips the write, an early exit — leaves the
+//    load alone).
+//  - the load's own settle is never re-checked: a write that would beat it cancelled its task, so
+//    a load whose continuation runs is the newest start (`settling` lets its write through).
+// Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
+// author write does not supersede its fetch).
+let pendSeq = 0;
+let curStamp = 0;                 // the running continuation's start stamp; 0 = none (a synchronous write)
+
+const PEND_STALE = 0;              // discarded: a newer load started, or a newer write landed
+const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
+const PEND_RELOAD = 2;             // lands `not`, then the cell's load re-runs (r4 D)
+
+function pendWrite(cell, v) {
+  const p = cell.pend;
+  if (p.settling) return PEND_LAND;                   // the load's own settle (never re-checked, never reloads)
+  const s = curStamp !== 0 ? curStamp : ++pendSeq;
+  if (p.load > s || p.wrote > s) return PEND_STALE;   // a newer load started, or a newer write landed
+  p.wrote = s;                                        // older writes still in flight now lose
+  if (p.load < s) p.req.supersede();                  // r4 F-A: every winning write, a no-op included
+  return v === null || v === undefined ? PEND_RELOAD : PEND_LAND;
+}
+
 class Request {
   constructor(scope, target, deps, body, state, read) {
     this.target = target;
@@ -461,6 +525,8 @@ class Request {
     this.disposed = false;
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
+    // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
+    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -469,12 +535,19 @@ class Request {
     effectQueue.add(this);
     if (batchDepth === 0) flush();
   }
+  /** s475 r3 (N2): a write of the pending cell that started after this run landed — the run is superseded. */
+  supersede() {
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+  }
   run() {
     if (this.disposed) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
+    const p = this.target.pend;
+    if (p !== null && p.req === this) p.load = ++pendSeq;     // N2: this load's start stamp
     const st = this.state;
     try {
       if (st) {
@@ -505,7 +578,13 @@ class Request {
       if (st && failed(v)) {
         st.error.set(v.error);
       } else {
-        then(v);
+        const p = this.target.pend;
+        if (p !== null && p.req === this) {
+          p.settling = true;
+          try { then(v); } finally { p.settling = false; }
+        } else {
+          then(v);
+        }
         if (st) st.data.set(this.target.peek());
       }
     } finally {
@@ -533,6 +612,7 @@ class Request {
     this.disposed = true;
     effectQueue.delete(this);
     for (const d of this.deps) d.observers.delete(this);
+    if (this.target.pend !== null && this.target.pend.req === this) this.target.pend = null;
     const inFlight = this.tasks.size > 0;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
@@ -642,12 +722,14 @@ export function refetch(slot) {
  */
 export function suspend(task, value, k, onLiveReject) {
   task.pending++;
+  // s475 r3 (N2): this wait's start stamp — ambient while its continuation runs (pendWrite)
+  const stamp = ++pendSeq;
   Promise.resolve(value).then(
     (v) => {
       task.pending--;
       if (task.cancelled) return;
       try {
-        batch(() => untrack(() => k(v)));
+        batch(() => untrack(() => withStamp(stamp, k, v)));
       } catch (e) {
         reportHostError(e);
         abandonWaiting(task);
@@ -694,6 +776,13 @@ export function waiting(task, executor) {
       reject(e);
     }
   });
+}
+
+// s475 r3 (N2): run a continuation with its wait's start stamp ambient (restored on exit and on throw).
+function withStamp(stamp, k, v) {
+  const prev = curStamp;
+  curStamp = stamp;
+  try { return k(v); } finally { curStamp = prev; }
 }
 
 // The rejection a waiting function's Promise is abandoned with after its host error was REPORTED
