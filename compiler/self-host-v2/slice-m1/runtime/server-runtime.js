@@ -205,6 +205,9 @@ export function connection(host, desc) {
     log(line) { logLine(host, line); },
     // s474 (U1e): the §19.10.6 gate — one owner on the connection at a time
     gate: fifoGate(host, desc),
+    // s475 r1: how long an envelope waits for a reserved connection's close() (`closeReserved`);
+    // a host may shorten it (`reservedCloseWaitMs`, used by the tests)
+    closeWaitMs: host !== null && typeof host === "object" && Number.isFinite(host.reservedCloseWaitMs) && host.reservedCloseWaitMs >= 0 ? host.reservedCloseWaitMs : RESERVED_CLOSE_WAIT_MS,
   };
   if (key !== null) reg.set(key, conn);
   return conn;
@@ -345,23 +348,82 @@ function control(tx, text) {
 //    transaction on a shared connection.
 // MySQL envelopes are refused at compile time (analyze.scrml envelopeOf): this path is not proven
 // against a MySQL server.
+// s475 (g-boot-runtime-envelope-mysql-unguarded-s475) — and refused HERE too, before the driver is
+// opened or a connection reserved: a transaction runs only on a driver whose path is proven
+// (`TX_DRIVERS`), so a compiler hole, a hand-written server, or a new driver never reaches
+// `reserve()` + `BEGIN` on an unproven one. INTERIM: the capable form is a MySQL
+// reserved-connection path proven against a live MySQL server (then "mysql" joins TX_DRIVERS, with
+// the compile-time refusal lifted in the same change).
+const TX_DRIVERS = new Set(["sqlite", "postgres"]);
 async function txConnection(conn) {
+  if (!TX_DRIVERS.has(conn.desc.driver)) {
+    throw new Error(`scrml server: a transaction on ${conn.desc.driver}:${conn.desc.file} is refused — the bootstrap runs a \`!\` envelope only on SQLite or Postgres (§19.10.6: a pooled driver's transaction needs a connection of its own, and the ${conn.desc.driver} path is not proven); nothing was run`);
+  }
   const pool = conn.open();
-  if (gated(conn)) return { sql: pool, done: () => {} };
+  if (gated(conn)) return { sql: pool, done: async () => {} };
   if (typeof pool.reserve !== "function") {
     throw new Error(`scrml server: ${conn.desc.driver}:${conn.desc.file} is a pooled database and its driver handle has no reserve() — a transaction needs a connection of its own (§19.10.6), so it is refused, never run on a shared connection`);
   }
   const reserved = await pool.reserve();
   return {
     sql: reserved,
-    done: (ended) => {
+    // s475 (g-boot-reserved-close-unawaited-s475): awaited, and its failure caught — a rejected
+    // `close()` (or `release()`) is logged, never an unhandled rejection; and the envelope releases
+    // its gate only after the connection is given back or closed (or the close wait ran out —
+    // `closeReserved`), so the next transaction does not start beside a connection still closing.
+    done: async (ended) => {
       try {
-        if (ended) reserved.release(); else reserved.close();
+        if (ended) await reserved.release(); else await closeReserved(conn, reserved);
       } catch (e) {
         conn.log(`scrml server: giving back the reserved connection to ${conn.desc.driver}:${conn.desc.file} failed — ${messageOf(e)}`);
       }
     },
   };
+}
+
+// s475 r1 (review F1): the wait for a reserved connection's close() is BOUNDED. A close() that never
+// settles (a dead socket after a failed ROLLBACK) would otherwise hang the failing request — it never
+// gets its 500 — and, since the envelope releases the gate after `done`, every later transaction on
+// the database. After RESERVED_CLOSE_WAIT_MS the wait is abandoned with one log line, the gate is
+// released and the envelope's own error propagates.
+// Why releasing the gate then is safe: this path is Postgres only (SQLite is gated and never
+// reserves). The next transaction runs on its own reserved connection; whatever locks the stuck
+// connection still holds make that transaction WAIT inside Postgres (or fail on a lock timeout), they
+// cannot corrupt it — the server rolls back what was open on the stuck connection when it finally
+// drops. On a pooled driver correctness does not depend on the gate; the gate there only serializes.
+// Bun's ReservedSQL `close({ timeout })` (seconds; measured on Bun 1.4.3) also bounds the close
+// itself — passed too, but the race below is the guarantee (a host's driver may ignore it).
+// The timer is cleared as soon as close() settles and unref'd, so it never keeps the process alive
+// and never fires after a normal close.
+const RESERVED_CLOSE_WAIT_MS = 5000;
+async function closeReserved(conn, reserved) {
+  const ms = conn.closeWaitMs;
+  let timer = null;
+  const ranOut = new Promise((res) => {
+    timer = setTimeout(() => res(true), ms);
+    if (timer && typeof timer.unref === "function") timer.unref();
+  });
+  let abandoned = false;
+  try {
+    // never rejects: a failure settles as { error } — rethrown below for `done` to log while the
+    // wait is live; after the wait ran out it is logged here (never an unhandled rejection)
+    const closing = Promise.resolve(reserved.close({ timeout: Math.max(1, Math.ceil(ms / 1000)) })).then(
+      () => ({ error: null }),
+      (error) => {
+        if (abandoned) conn.log(`scrml server: closing the reserved connection to ${conn.desc.driver}:${conn.desc.file} failed after the wait ran out — ${messageOf(error)}`);
+        return { error };
+      },
+    );
+    const settled = await Promise.race([closing, ranOut]);
+    if (settled === true) {
+      abandoned = true;
+      conn.log(`scrml server: closing the reserved connection to ${conn.desc.driver}:${conn.desc.file} did not finish in ${ms} ms; gate released (the database rolls back what was open on it when the connection drops)`);
+      return;
+    }
+    if (settled.error !== null) throw settled.error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // After a statement failed INSIDE a transaction: is the transaction still open?
@@ -522,8 +584,11 @@ export async function envelope(conn, run, standalone, begin) {
     return result;
   } finally {
     tx.open = false;
-    if (handle !== null) handle.done(tx.ended);
-    conn.gate.release();
+    try {
+      if (handle !== null) await handle.done(tx.ended);
+    } finally {
+      conn.gate.release();
+    }
   }
 }
 
@@ -808,15 +873,45 @@ export function sqlErrorOf(e) {
 // both fall back to the constraint name, `column: false`). A NOT NULL violation carries
 // the column in the driver's `column` (a string). MySQL: its `column` when it gives
 // one, else the `constraint` name (not a column).
-const PG_IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")$/;
+// s475 (g-boot-pg-constraint-field-fallbacks-s475 part a): the key list is READ, not split on
+// ", " — a double-quoted column may itself hold `, ` or `)=(` (`Key ("Weird, col")=(x)`), which a
+// split read as two parts and fell back to the constraint name. Postgres prints each column with
+// quote_identifier: a plain lower-case identifier, or `"…"` with `"` doubled. Anything else in the
+// list (an expression index's `lower(email)`) is not a column: null, the constraint-name fallback.
+const PG_PLAIN_IDENT = /^[A-Za-z_][A-Za-z0-9_$]*/;
 function pgKeyColumns(e) {
   if (e === null || typeof e !== "object" || typeof e.detail !== "string") return null;
   if (!codesOf(e).some((c) => /^23[0-9A-Z]{3}$/.test(c))) return null;
-  const m = /^Key \((.+?)\)=\(/.exec(e.detail);
-  if (m === null) return null;
-  const parts = m[1].split(", ");
-  if (!parts.every((p) => PG_IDENT.test(p))) return null;
-  return parts.map((p) => (p.startsWith('"') ? p.slice(1, -1).replace(/""/g, '"') : p)).join(", ");
+  const d = e.detail;
+  if (!d.startsWith("Key (")) return null;
+  let i = 5;
+  const cols = [];
+  for (;;) {
+    if (d[i] === '"') {
+      let name = "";
+      let j = i + 1;
+      for (;;) {
+        if (j >= d.length) return null;              // an unterminated quoted name
+        if (d[j] === '"') {
+          if (d[j + 1] === '"') { name += '"'; j += 2; continue; }
+          break;
+        }
+        name += d[j];
+        j += 1;
+      }
+      if (name === "") return null;
+      cols.push(name);
+      i = j + 1;
+    } else {
+      const m = PG_PLAIN_IDENT.exec(d.slice(i));
+      if (m === null) return null;
+      cols.push(m[0]);
+      i += m[0].length;
+    }
+    if (d.startsWith(", ", i)) { i += 2; continue; }
+    if (d.startsWith(")=(", i)) return cols.join(", ");
+    return null;                                     // anything else after a name: not a plain column list
+  }
 }
 function constraintField(e, msg) {
   const m = /constraint failed: (.*)$/.exec(msg);
