@@ -710,9 +710,11 @@ function writeOutputManifest(root: OutDirHandle, files: string[]) {
  * it refuses a name that already exists, so a planted symbolic link or hard link at a temp-file name is
  * never written through (#1723 review C1-c; pinned by g-boot-tooling-manifest-wx-unpinned-and-lsp-statsync-s474).
  */
-export function writeNewFile(path: string, data: string | Uint8Array, mode = 0o666) {
+export function writeNewFile(path: string, data: string | Uint8Array, mode = 0o666, verify?: (fd: number) => void) {
   const fd = openSync(path, "wx", mode);
   try {
+    // `verify` runs on the new, still EMPTY file: a refusal there writes none of `data` anywhere
+    verify?.(fd);
     writeSync(fd, typeof data === "string" ? Buffer.from(data) : data);
   } finally {
     closeSync(fd);
@@ -932,7 +934,12 @@ function replaceFile(d: OutDirHandle, name: string, data: string | Uint8Array, m
   const rel = d.rel ? `${d.rel}/${name}` : name;
   d.check();
   try {
-    writeNewFile(d.at(tmp), data, mode);
+    writeNewFile(d.at(tmp), data, mode, (fd) => {
+      // the temp file was created where it was meant to be (paths mode: not through a link swapped in)
+      d.check();
+      const there = lstatOrNull(d.at(tmp));
+      if (there === null || !sameId(fstatSync(fd), there)) throw changedUnder(outDir, d.rel || ".");
+    });
   } catch (e: any) {
     if (e?.code === "EEXIST")
       throw new OutDirError(`refusing to write into ${shown(outDir)}: ${d.rel ? d.rel + "/" : ""}${tmp} already exists (a temp file scrml-boot did not create now). Remove it and build again.`);
