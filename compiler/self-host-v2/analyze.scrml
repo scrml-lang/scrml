@@ -15726,12 +15726,15 @@ ${
         return out
     }
 
+    // s475 r3 (F3): a counted `for`'s `init` statements are its own block (stmtExprs gives only
+    // the head's condition / steps, forHeadExprs) — every walker over these (atNodesInBlock,
+    // blocksReads, calledSymsBlock) reads `for (let i = @cnt; …)` too.
     fn stmtKidBlocks(s: AStmt) -> ABlock[] {
         const k: AStmtK = s.k
         return match k {
             .If(cond: c, thenB: t, elseB: e) :> [t].concat(maybeBlockList(e))
             .Given(name: n, body: b) :> [b]
-            .For(f: lf) :> [lf.body]
+            .For(f: lf) :> [forInitBlock(lf), lf.body]
             .Defer(body: b) :> [b]
             .EffectStmt(w: w) :> [w.body]
             .Eval(e: x) :> []
@@ -29071,7 +29074,7 @@ ${
     // (§13.7 "It is offered only for a cell initializer, the one value position §13.9 opens").
     // `pendWhy` (s475 S4 r1): "" — or, for a pending initializer the bootstrap does not desugar,
     // why (each INTERIM, waitDiag reports it by name with E-BOOTSTRAP-UNSUPPORTED).
-    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean, cellInit: boolean, pendWhy: string }
+    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean, cellInit: boolean, pendWhy: string, pendCall: string, pendSelf: string }
 
     // `ps`: the placement, when known (valueServerDiags) — it tells a server call from any
     // other call in a `(not to T)` cell's initializer (initPos); [] where it is not known
@@ -29139,15 +29142,19 @@ ${
     // refused (E-VALUE-SERVER-CALL)" (ruling S475 item 1) holds through it (lifeDerived).
     fn initPos(t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
         const derived: boolean = life ? lifeDerived(t, file, v, ps) : valueReads(v).length > 0
-        if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "" }
+        if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }
         let why: string = ""
+        let oc: string = ""
         if (life && outside) {
             why = pendOutsideWhy()
         } else if (life && isLet) {
-            const oc: string = opaqueCall(t, file, v, ps)
-            if (oc != "") why = pendOpaqueWhy(path, oc)
+            oc = opaqueCall(t, file, v, ps)
+            if (oc != "") why = pendOpaqueWhy(path, "but its initializer also calls `" + oc + "`, which", oc)
         }
-        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why }
+        // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
+        let self: string = ""
+        if (oc != "") self = pendOpaqueWhy(path, "but `" + oc + "`", oc)
+        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why, pendCall: oc, pendSelf: self }
     }
 
     // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked: it reads a
@@ -29174,8 +29181,8 @@ ${
         return ""
     }
 
-    fn pendOpaqueWhy(path: string, call: string) -> string {
-        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — but its initializer also calls `" + call + "`, which is not a server function, and the bootstrap cannot see which cells a called function reads, so it cannot infer the load's dependencies (§13.9.2 \"deps are inferred from the initializer's `@` reads\"); the load would never re-run. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
+    fn pendOpaqueWhy(path: string, but: string, call: string) -> string {
+        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — " + but + " is not a server function, and the bootstrap cannot see which cells a called function reads, so it cannot infer the load's dependencies (§13.9.2 \"deps are inferred from the initializer's `@` reads\"); the load would never re-run. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
     }
 
     fn pendOutsideWhy() -> string {
@@ -29274,13 +29281,13 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false, cellInit: false, pendWhy: "" }]
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
-        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false, cellInit: false, pendWhy: "" }
+        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }
     }
 
     fn elemPositions(t: Tables, e: AElem, file: string) -> ValuePos[] {
@@ -29322,7 +29329,7 @@ ${
         // field (§6.15 list item 1, §66.9 rule 8)
         let vk: ValueKind = ValueKind.RenderKind
         if (isConstructAttr(k)) vk = ValueKind.InitKind
-        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false, cellInit: false, pendWhy: "" }
+        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }
     }
 
     fn isConstructAttr(k: AttrKind | not) -> boolean {
@@ -34222,7 +34229,7 @@ ${
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, s, st)
-                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix(p), true)
+                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix(p), true, "")
             }
             // s475 (S4): a pending initializer's query is its one refusal (waitDiag)
             if (!p.pending || sqls.length == 0) {
@@ -34231,9 +34238,9 @@ ${
                     const pk: PlaceK = placeOf(ps, r.sym)
                     const c: Reach | not = waitsOf(sum, r.sym)
                     if (pk == PlaceK.Server) {
-                        st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix(p), false)
+                        st = waitDiag(st, p, r.file, r.span, p.what + " calls the server function `" + r.name + "`", "— " + waitFix(p), false, r.name)
                     } else if (c is given) {
-                        st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix(p), false)
+                        st = waitDiag(st, p, r.file, r.span, p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`)", "— " + waitFix(p), false, r.name)
                     }
                 }
             }
@@ -34256,11 +34263,33 @@ ${
     //  - otherwise: a front end run without the linker's node ids (analyze(); the
     //    desugar mints nodes). (A `{ … }` block initializer never reaches here: the
     //    parser refuses it, E-DECL-OPENER-EXPR-UNPARENTHESIZED, §66.2.4.)
-    fn waitDiag(st: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string, sql: boolean) -> AS {
-        if (!p.pending) return addDiag(st, file, span, "E-VALUE-SERVER-CALL", head + " " + fix)
+    //  r3 (cosmetic): `callee` — the waiting call named in `head`; when it is the opaque call itself
+    //  the refusal says so (never "calls `pick()` … also calls `pick()`"). A pending refusal is the
+    //  initializer's ONE diagnostic: the Ue2 "handled failable … only as a statement's whole value"
+    //  on the same initializer (a client carrier's handled form, §13.9.5's own shape) is dropped.
+    fn waitDiag(st0: AS, p: ValuePos, file: string, span: ASpan, head: string, fix: string, sql: boolean, callee: string) -> AS {
+        if (!p.pending) return addDiag(st0, file, span, "E-VALUE-SERVER-CALL", head + " " + fix)
+        const st: AS = dropUe2At(st0, p)
+        if (p.pendWhy != "" && callee != "" && callee == p.pendCall) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + p.pendSelf)
         if (p.pendWhy != "") return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + p.pendWhy)
         if (sql) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) whose load is a `" + sqlSigil() + "}` written in its declaration — not in the bootstrap. Put the query in a function and initialize the cell with a handled call of it, `=(load() !{ _ :> not })` (§13.9.5)")
         return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — the bootstrap builds one from an expression initializer, `=(load() !{ _ :> not })` (§13.9.5), in a linked build; write the initializer that way")
+    }
+
+    fn dropUe2At(st: AS, p: ValuePos) -> AS {
+        const e: AExpr | not = valueExpr(p.v)
+        if (e is not) return st
+        let keep: Diag[] = []
+        let dropped = false
+        for (const d of st.diags) {
+            if (d.code == "E-BOOTSTRAP-UNSUPPORTED" && d.file == p.file && d.span.start == e.span.start && d.span.end == e.span.end && d.message.indexOf("a handled failable") == 0) {
+                dropped = true
+            } else {
+                keep = keep.concat([d])
+            }
+        }
+        if (!dropped) return st
+        return { facts: st.facts, diags: keep, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
     }
 
     // §13.7 "the fix: a value position cannot wait for the server; load the value with a

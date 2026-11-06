@@ -49,3 +49,12 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
 - Merged origin/main 9bc6426e3; conflicts: analyze.scrml lifeMaybeMsg (aCode + pending carve-out), known-gaps g-boot-lifecycle-types (both hunks). No gap id lost.
 - Interactions pinned in pending-cells-s475.test.js (5 new tests): no-SQL pending load READ + C-R2 clean + aborted on supersede/claim; forced-READ writing load refused by C-R2; author write through a client `!` carrier covers E + Transport.
 - Verified: hook 54058/0; slice-m1 160, lowered 160, m2 619, m3 60, codec 166, m4 5482 pass 0 fail; e2e-render-map 259; checks job commands all exit 0.
+
+## 2026-11-06T21:15Z — fix round r3 (re-review of ec2850635, probes ~/.cache/scrml/review/s475-1796r2/probe p11/p12/p13)
+- N2 REDESIGNED (F1 HIGH, F2 MED): no claim at call start. Start stamps compared when a write LANDS — runtime.js
+  pendSeq / curStamp (ambient during a continuation, restored on throw) / pendWrite(cell, v); Request.run stamps
+  pend.load; every suspend stamps its wait's start. print.scrml reverted to main (suspendClaim + Ctx.pend gone).
+  9508f5ba7. p11 A/A'/B/F/C correct; D pinned (newer `not` write wins, nothing in flight).
+- F3: stmtKidBlocks walks a counted for's init block (blocksReads / calledSymsBlock / atNodesInBlock).
+- Cosmetic: a pending init through a client ! carrier is one refusal ("but `pick()` is not a server function"); the
+  Ue2 diag on the same initializer is dropped (waitDiag → dropUe2At).

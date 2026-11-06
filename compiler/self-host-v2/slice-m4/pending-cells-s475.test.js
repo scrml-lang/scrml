@@ -348,6 +348,24 @@ ${LOAD}export let <who:(not to string)=(loadName(1) !{ _ :> not })/>
     expect(rq.deps.map((d) => d.hint ?? d.sym?.hint ?? JSON.stringify(d)).length).toBe(2);
   });
 
+  // r3 F3 (red on ec2850635, probe p12 for_counted_init: locked compiled mount-once, `let` had deps 1 —
+  // stmtKidBlocks gave a `for` its body only, so blocksReads / calledSymsBlock never saw a counted
+  // head's `init`): `for (let i = @cnt; …)` in a block arm reads `@cnt`.
+  const FORINIT = `{ let t: int = 0; for (let i = @cnt; i < 3; i = i + 1) { t = t + i; } lift "x"; }`;
+  const withCnt = (decl) => APP(decl).replace("    let <show", "    let <cnt:int=0/>\n    let <show");
+  test("locked + a cell read in a counted `for`'s init (in a block arm) is DERIVED (r3 F3)", () => {
+    const e = errsOf(withCnt(`<who:(not to string)=(loadName(1) !{ _ :> ${FORINIT} })/>`));
+    expect(e.map((d) => d.code)).toContain("E-VALUE-SERVER-CALL");
+    expect(e.find((d) => d.code === U).message).toContain("reads the cell `@cnt`");
+  });
+
+  test("`let` + a cell read in a counted `for`'s init: the read is a dependency (r3 F3)", () => {
+    const r = fe(withCnt(`let <who:(not to string)=(loadName(@userId) !{ _ :> ${FORINIT} })/>`));
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.deps.length).toBe(2);
+  });
+
   test("E-DERIVED-WRITE names the reads and the calls — never \"reads (), ()\" (r2 cosmetic)", () => {
     // the reviewer's case: a `(not to T)` cell made derived by its call, then written
     const src = APP(`<who:(not to string)=(loadName(one()) !{ _ :> not })/>`).replace(LOAD, LOAD + CUR)
@@ -899,6 +917,16 @@ describe("merge with #1794 / #1797 — a pending cell's load under the new READ 
     await settle();
     expect(held[2].aborted).toBe(true);
     expect(cells(rt).who).toBe("c");
+  });
+
+  // r3 cosmetic (red on ec2850635: two diagnostics — the Ue2 "handled failable … only as a statement's
+  // whole value" plus "calls `pick()` … but its initializer also calls `pick()`"): ONE clear refusal.
+  test("a pending initializer through a client `!` carrier is ONE refusal, naming the carrier once", () => {
+    const e = errsOf(APP(`let <who:(not to string)=(pick(@userId) !{ _ :> not })/>`).replace(LOAD, LOAD + BANG));
+    expect(e.map((d) => d.code)).toEqual([U]);
+    expect(e[0].message).toContain("but `pick()` is not a server function");
+    expect(e[0].message).not.toContain("also calls");
+    expect(e[0].message).toContain("g-boot-pending-cell-opaque-call-s475");
   });
 
   test("an author waiting write through a client `!` carrier (#1797) must cover `E + Transport`", () => {
