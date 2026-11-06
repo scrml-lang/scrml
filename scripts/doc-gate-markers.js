@@ -50,14 +50,16 @@
  *   pins the bootstrap's expected Error diagnostics as a MULTISET: `E-CODE×N` is N of that
  *   code, a bare `E-CODE` is one, and a code listed twice counts twice. A NAME-RESOLUTION code
  *   (doc-boot-check.js NAMED_CODES: E-SCOPE-001, E-STATE-UNDECLARED, E-TYPE-UNKNOWN,
- *   E-VALUE-WRITES-STATE) is pinned with the names
+ *   E-VALUE-WRITES-STATE, E-PARSE-ATTR, E-PARAM-TYPE-REQUIRED, E-SCOPE-010) is pinned with the names
  *   it is reported for, `E-SCOPE-001(addRow, replaceRow)`, one per diagnostic. A pinned
  *   spec-ahead block whose Error diagnostics are not exactly the pin FAILS, so a typo or a new
  *   kind of error is not hidden behind "expected to fail". Pins are only allowed on spec-ahead.
  *   S474 backfill (#1489-1): pins were compared as SETS of distinct codes, so `postMesage` for
  *   `postMessage` in a block that already pinned E-SCOPE-001 passed both gates. Counts alone
  *   would not catch that one either (the misspelled name REPLACES an undeclared one), so a
- *   name-resolution code carries its names.
+ *   name-resolution code carries its names. S475 (g-doc-pin-counts-encode-cascades-s474): an
+ *   unnamed `E-PARSE-*` count is a CEILING (1..N), so better parser recovery does not fail the
+ *   gates; one more still does (doc-boot-check.js pinMismatch).
  *
  * ── FENCES ─────────────────────────────────────────────────────────────────────
  *   A fence opens with a run of 3+ backticks or 3+ tildes and closes only on a run of the

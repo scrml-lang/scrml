@@ -56,7 +56,24 @@ export function codeSummary(codes, max = 4) {
  */
 // #1723 review 1489-A: E-TYPE-UNKNOWN (`Request` → `Requst`) and E-VALUE-WRITES-STATE (`@contacts` →
 // `@contcts`) name what they are about too, and a swapped name kept their count.
-export const NAMED_CODES = new Set(["E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-UNKNOWN", "E-VALUE-WRITES-STATE"]);
+// S475 (g-doc-pin-counts-encode-cascades-s474): E-PARSE-ATTR (`` `loadCount(…)` in a tag ``),
+// E-PARAM-TYPE-REQUIRED (`` the parameter `liveCount` ``) and E-SCOPE-010 (`` `Features` is already
+// bound ``) open with the user's name too. The #1723 r1 sweep found `loadCount`→`loadCunt` pin-blind
+// because E-PARSE-ATTR was keyed by its code alone.
+export const NAMED_CODES = new Set([
+  "E-SCOPE-001", "E-STATE-UNDECLARED", "E-TYPE-UNKNOWN", "E-VALUE-WRITES-STATE",
+  "E-PARSE-ATTR", "E-PARAM-TYPE-REQUIRED", "E-SCOPE-010",
+]);
+
+/**
+ * A CASCADE key: an unnamed parse-error code (`E-PARSE-*`). One parse error is often followed by
+ * several more of the same code while the parser recovers, so its COUNT records the parser's recovery
+ * rather than the block: a bootstrap change that only recovers better (`E-PARSE-ITEM×11` → ×3) would
+ * otherwise fail the docs gates in an unrelated PR (g-doc-pin-counts-encode-cascades-s474).
+ */
+export function isCascadeKey(k) {
+  return k.startsWith("E-PARSE-") && !k.includes("(");
+}
 
 /**
  * A diagnostic's pin key: its code, with the name it is about for a NAMED_CODES code
@@ -105,13 +122,28 @@ export function pinText(keys) {
  * message naming both, the reported one in pin syntax, ready to paste. S474 backfill (#1489-1):
  * this compared SETS of distinct codes, so a typo in a block that already pinned E-SCOPE-001
  * passed both gates.
+ *
+ * S475 (g-doc-pin-counts-encode-cascades-s474): every key must match its pinned count EXACTLY, except
+ * a CASCADE key (isCascadeKey: an unnamed `E-PARSE-*`), whose pinned count is a CEILING — the block
+ * must report that code at least once and at most the pinned number of times. Better recovery (fewer)
+ * passes; one MORE of a pinned cascade code (a typo that adds a parse error, #1489-1) still fails, as
+ * does a code the pin does not list or a pinned code that is gone.
  */
 export function pinMismatch(pins, codes) {
   if (!pins) return null;
-  const want = pinText(pins);
-  const got = pinText(codes);
-  if (want === got) return null;
-  return `pinned codes [${want}] but the bootstrap reported [${got}] — fix the block, or update the pin if the bootstrap's refusal legitimately changed`;
+  const count = (keys) => {
+    const n = new Map();
+    for (const k of keys) n.set(k, (n.get(k) ?? 0) + 1);
+    return n;
+  };
+  const w = count(pins), g = count(codes);
+  let ok = true;
+  for (const k of new Set([...w.keys(), ...g.keys()])) {
+    const want = w.get(k) ?? 0, got = g.get(k) ?? 0;
+    if (isCascadeKey(k) ? !(want >= 1 && got >= 1 && got <= want) : want !== got) ok = false;
+  }
+  if (ok) return null;
+  return `pinned codes [${pinText(pins)}] but the bootstrap reported [${pinText(codes)}] — fix the block, or update the pin if the bootstrap's refusal legitimately changed (an unnamed E-PARSE-* count is a ceiling: fewer is fine, more is not)`;
 }
 
 /**

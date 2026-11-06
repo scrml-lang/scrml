@@ -403,3 +403,45 @@ describe("snippet-gate end to end", () => {
     expect(r.status).toBe(0);
   }, 120_000);
 });
+
+// S475 (s475-boot-tooling-hardening, g-doc-pin-counts-encode-cascades-s474): a code that opens with
+// the user's name (E-PARSE-ATTR, E-PARAM-TYPE-REQUIRED, E-SCOPE-010) is pinned by name, so a typo of
+// that name is caught; an unnamed E-PARSE-* count is a ceiling, so better recovery does not fail.
+describe("S475 — pins catch a typo'd name; a parse cascade count is a ceiling", () => {
+  test("E-PARSE-ATTR / E-PARAM-TYPE-REQUIRED / E-SCOPE-010 key by the name they open with", () => {
+    expect(pinKey({ code: "E-PARSE-ATTR", message: "`loadCount(…)` in a tag — only a validator …" })).toBe("E-PARSE-ATTR(loadCount)");
+    expect(pinKey({ code: "E-PARAM-TYPE-REQUIRED", message: "the parameter `liveCount` has no type" })).toBe("E-PARAM-TYPE-REQUIRED(liveCount)");
+    expect(pinKey({ code: "E-SCOPE-010", message: "`Features` is already bound in this file" })).toBe("E-SCOPE-010(Features)");
+  });
+
+  test("an unnamed E-PARSE-* count is 1..N: fewer passes, more fails, none fails; other codes stay exact", () => {
+    const pin = ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", ...Array(11).fill("E-PARSE-ITEM"), "E-SCOPE-001(stats)"];
+    const got = (n, extra = []) => ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", ...Array(n).fill("E-PARSE-ITEM"), "E-SCOPE-001(stats)", ...extra];
+    expect(pinMismatch(pin, got(11))).toBeNull();
+    expect(pinMismatch(pin, got(3))).toBeNull(); // the bootstrap recovers better: no re-pin
+    expect(pinMismatch(pin, got(1))).toBeNull();
+    expect(pinMismatch(pin, got(12))).toContain("reported [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-ITEM×12, E-SCOPE-001(stats)]"); // one more: a typo
+    expect(pinMismatch(pin, got(0))).toContain("pinned codes"); // the cascade is gone: the pin is stale
+    expect(pinMismatch(pin, got(11, ["E-PARSE-TAG"]))).toContain("pinned codes"); // an unpinned parse code
+    expect(pinMismatch(pin, got(11, ["E-SCOPE-001(stat)"]))).toContain("pinned codes"); // a new name
+    // a non-cascade code stays an exact count, fewer included
+    expect(pinMismatch(pin, got(11).slice(1))).toContain("pinned codes");
+    // a NAMED parse code is exact too (its name is what catches the typo)
+    expect(pinMismatch(["E-PARSE-ATTR(loadCount)"], ["E-PARSE-ATTR(loadCunt)"])).toContain("reported [E-PARSE-ATTR(loadCunt)]");
+  });
+
+  test("tutorial :160 — the block passes its pin; `loadCount` → `loadCunt` (pin-blind in the #1723 r1 sweep) now fails it", async () => {
+    await loadBoot();
+    const doc = parseDocMarkers(readFileSync(join(ROOT, "docs", "tutorial.md"), "utf8"));
+    const b = doc.blocks.find((x) => x.gate?.kind === "spec-ahead" && (x.gate.codes ?? []).includes("E-PARSE-ATTR(loadCount)"));
+    expect(b).toBeDefined();
+    const path = join(ROOT, "docs", "tutorial-block.scrml");
+    expect(classifySpecAhead(await bootCheck(path, b.body), b.gate.codes).verdict).toBe("expected");
+    // the CALL in the opener (`=(loadCount() !{ … })`), not the comment or the declaration
+    expect(b.body.includes("=(loadCount()")).toBe(true);
+    const typo = b.body.replace("=(loadCount()", "=(loadCunt()");
+    const c = classifySpecAhead(await bootCheck(path, typo), b.gate.codes);
+    expect(c.verdict).toBe("pin-mismatch");
+    expect(c.message).toContain("E-PARSE-ATTR(loadCunt)");
+  }, 120_000);
+});
