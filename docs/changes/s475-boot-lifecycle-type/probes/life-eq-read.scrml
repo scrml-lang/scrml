@@ -1,0 +1,5 @@
+<program>
+let <m:(not to int)=not/>
+function f() -> bool { return @m == 5; }
+<main><p>${f()}</p></main>
+</program>

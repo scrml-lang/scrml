@@ -1,0 +1,6 @@
+<program>
+let <m:(not to int)=not/>
+function f() { @m = 5; }
+function h() { @m = not; }
+<main><button onclick=f()>a</button><button onclick=h()>b</button></main>
+</program>
