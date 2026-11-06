@@ -39,3 +39,8 @@ initializer is a pending cell (§13.9.2: a plain cell initialized to `not` plus 
   a pending cell wins (PA reading ⚑) — runtime `Cell.pend` record set by a stateless Request, `rt.suspendClaim`
   (print suspendJs claims the pending cells a continuation writes), `pendWrite` in Cell.set; READ loads aborted
   through Task.onAbort. Cosmetic: E-DERIVED-WRITE names reads + calls (readsPhrase / followsPhrase).
+- 2026-11-06T21:50Z — r2 verification (sequential, foreground): pending-cells 40 pass; m1 160, m1-lowered 160, m2 619, m3 60,
+  codec 166, m4 5451 — 0 fail; e2e-render-map 259; lints 0; severity current; types-gate unchanged; s34-census PASS; CI
+  `checks` commands all exit 0 (root conformance 2239, snippet/claim/compile-floor/facts/md/conflict/SPEC-INDEX/coverage
+  (totals STALE = bot-owned)/state/delta/needs/windows/bot-owned/bootstrap-conformance current). Hook: SCRML_HOOK_SHARDS=12
+  SCRML_HOOK_SHARD_MEM_MB=4096 SCRML_HOOK_SHARD_TIMEOUT_S=2400 (16/48/64 shards hit the memory ceiling / load timeouts).
