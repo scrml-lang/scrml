@@ -13,7 +13,8 @@
 // cascade, and `transition(…)` E-SCOPE-001.
 //
 // INTERIM (this slice): a `(not to T)` cell is typed exactly as a `T | not` cell — the
-// pre-transition read rule (E-TYPE-001, §13.9.3 / §14.12.3) is slice S1, a waiting initializer
+// pre-transition read rule (E-TYPE-001, §13.9.3 / §14.12.3) is slice S1 (BUILT by
+// s475-boot-lifecycle-reads: lifecycle-reads-s475.test.js), a waiting initializer
 // (a pending cell, §13.9.1) is slice S4 and gives a named E-BOOTSTRAP-UNSUPPORTED here (pinned
 // below — r1 F1: §13.9.1 "A `(not to T)`-declared cell initializer is no longer E-VALUE-SERVER-CALL").
 
@@ -48,11 +49,14 @@ describe("`(not to T)` on a program cell compiles (red on base: E-PARSE-TYPE + E
   for (const [name, decl] of Object.entries(OK)) test(name, () => expect(codes(P(decl))).toEqual([]));
 });
 
-describe("a `(not to T)` cell behaves exactly as a `T | not` cell (INTERIM until S1)", () => {
+// s475-boot-lifecycle-reads (slice S1) built the read rule and the write contract: an undiscriminated
+// read, `@m = not` and `reset` of a locked cell now differ from `T | not` (lifecycle-reads-s475.test.js).
+// What stays the same: a `T`-shaped write's type check, and the runtime representation.
+describe("a `(not to T)` cell shares the `T | not` type check and representation", () => {
   // same length spellings, so every span — and so the Core — lines up
   const pair = (body) => [body.replaceAll("(not to int)", "int  |   not"), body];
   const BODIES = {
-    writes: `let <m:(not to int)=not/>\nfunction f() { @m = 5; }\nfunction g() { @m = "x"; }\nfunction h() { @m = not; }\nfunction k() -> int { return @m + 1; }`,
+    writes: `let <m:(not to int)=not/>\nfunction f() { @m = 5; }\nfunction g() { @m = "x"; }\nfunction k() -> int { if (@m is not) return 0; return @m + 1; }`,
     lockedWrongValue: `<m:(not to int)="x"/>`,
     render: `let <m:(not to int)=not/>\nfunction f() { @m = 5; }\n<p>\${@m is not ? "none" : "some"}</p>`,
   };

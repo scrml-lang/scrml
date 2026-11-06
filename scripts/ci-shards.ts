@@ -139,9 +139,8 @@ function mergeTimings(out: string, inputs: string[]): number {
 }
 
 /** NON-blocking by design (ci.yml header; `windows` left this set at S473 — the ratchet); every other job must be one the `gate` aggregator needs. */
-// S475: `postgres-live` (real-PostgreSQL service container for the bootstrap's live PG tests) is
-// non-blocking until it has run green in CI — see its header in ci.yml.
-const NON_BLOCKING = new Set(["gate", "tracking", "postgres-live"]);
+// S475: `postgres-live` left this set after 5 consecutive green main runs (bryan S475 item 13) — the ratchet.
+const NON_BLOCKING = new Set(["gate", "tracking"]);
 
 function needsLint(workflow: string): number {
   let y: any;
