@@ -2,3 +2,5 @@
 
 - 2026-11-07T09:41:42-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/s475-boot-literal-carriers (base 95c63e4d7)
 - 2026-11-07T09:56:54-07:00 transportCarriers widened to the literal reading (any handled server call seeds), CFold.dead withholds unreachable calls (⚑), quiet dead-only E-ERROR-010, rerun only on retype (ARun.retype). New slice-m4/literal-carriers-s475.test.js: 16 pass head, 12 fail base.
+- 2026-11-07T10:16:20-07:00 corpus sweep head vs base over 228 .scrml files with a `!` fn: 0 newly-refused, 0 newly-accepted, 0 changed (21 clean both sides). Task B: W-REQUEST-ID-UNREFERENCEABLE emitted at the id attribute via lex.scrml isIdentifierText; id="" now warns and compiles (was E-LIFECYCLE-018). Test file waits on #1807's §34 row (severity).
+- 2026-11-07T10:34:43-07:00 merged origin/s475-spec-rulings2 (#1807, open, CLEAN) so the §34 row exists; severity.scrml regenerated (W-REQUEST-ID-UNREFERENCEABLE Warning); #1807 gaps g-boot-transport-carrier-literal-reading-s475 + g-request-id-unreferenceable-not-emitted-s475 resolved; §34/§6.7.7/§19.9.5 SPEC notes + coverage rows -> emitted/BUILT. request-surface F4 updated (a-b now warns).

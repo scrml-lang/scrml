@@ -56,6 +56,7 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
+    import { isIdentifierText } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
@@ -15579,9 +15580,14 @@ ${
         for (const a of r.attrs) {
             if (a.name == "id") {
                 const t: string | not = quotedAttrText(a.value)
-                if (t is given && t != "") {
+                if (t is given) {
                     id = t
                     hasId = true
+                    // s475-boot-literal-carriers — §6.7.7 (RULED S475 second batch item 4): an `id` that is not an
+                    // identifier can never be named by `<#id>` (`state-ref ::= '<#' identifier '>'`, §15.11.2).
+                    // "The compiler SHALL report W-REQUEST-ID-UNREFERENCEABLE at the `id` attribute and SHALL still
+                    // compile the request" — `id=""` included (was E-LIFECYCLE-018 for an empty id).
+                    if (!isIdentifierText(t)) st = addDiag(st, env.file, a.span, "W-REQUEST-ID-UNREFERENCEABLE", "this `<request>`'s `id=\"" + t + "\"` is not an identifier, so no `" + hashId() + "` can name it: `" + hashId() + "` takes an identifier (§6.7.7, §15.11.2 `state-ref ::= '<#' identifier '>'`), and the request's `.loading`, `.data`, `.error`, `.stale` and `.refetch()` cannot be used. It still runs and assigns its `@variable`. Use an identifier for the `id` (`id=\"userList\"`)")
                 } else {
                     st = addDiag(st, env.file, a.span, "E-LIFECYCLE-018", "a `<request>`'s `id=` is a string literal naming it, `id=\"profile\"` (§6.7.7 grammar `id-attr ::= 'id=' string-literal`) — its `" + hashId() + "` state is reached by that name")
                     hasId = true
@@ -15599,10 +15605,10 @@ ${
             }
         }
         if (!hasId) st = addDiag(st, env.file, r.opener, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state (`.loading`, `.data`, `.error`, `.stale`, `.refetch()`); add `id=\"…\"`")
-        if (id != "") {
+        if (hasId) {
             for (const q of st.reqs) {
                 // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
-                if (q.id == id) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                if (q.id == id && q.pend < 0) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
             }
         }
         // ---- the body's shape ----
@@ -15701,7 +15707,7 @@ ${
         // The fact is recorded whatever the body's own diagnostics: an Error there stops lowering
         // (the diagnostics gate), and a Warning must not drop the request from the Core (fail closed —
         // lower.scrml requestView finds every request it lowers here). No `id`: E-LIFECYCLE-018 above.
-        if (!hasId || id == "") return st
+        if (!hasId) return st
         // ---- the request's facts: its four signal cells, its handle, its load bind ----
         const hb: string = "#" + reqHint(id)
         let sigs: Sym[] = []

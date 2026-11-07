@@ -442,7 +442,9 @@ describe("r1 — review findings", () => {
   test("F4: request hints are injective — `a-b` / `a_b`, and `a` / `a_loading`, get distinct cells", () => {
     for (const [i1, i2] of [["a-b", "a_b"], ["a", "a_loading"]]) {
       const src = P("", REQ(` id="${i1}"`, "@x = f(@a);") + REQ(` id="${i2}"`, "@y = f(@a);"));
-      expect(codes(src)).toEqual([]);
+      // s475-boot-literal-carriers: `a-b` is not an identifier, so no `<#…>` names it — W-REQUEST-ID-UNREFERENCEABLE
+      // (SPEC §6.7.7, RULED S475 second batch item 4); the request still compiles
+      expect(codes(src)).toEqual(i1 === "a-b" ? ["W-REQUEST-ID-UNREFERENCEABLE"] : []);
       const r = compile(src);
       expect(check(r.core)).toEqual([]);
       const prog = r.core.decls.find((d) => d.sym.id === r.core.program.id);
