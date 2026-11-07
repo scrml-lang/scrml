@@ -25,10 +25,12 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { compile, realDb, serve, bridge } from "./server-artifact-harness.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
-afterEach(() => expectNoPageErrors());
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; expectNoPageErrors(); });
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code).sort();
@@ -248,5 +250,83 @@ describe("G — `some` / `every` / `includes` on a tape (§66.12.1)", () => {
     for (const m of ["find(x => x > 0)", "findIndex(x => x > 0)", "indexOf(1)", "reduce((a, b) => a + b, 0)"]) {
       expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: int = @xs.${m};`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s475 r1 (#1812 review F1) — §19.9.9.8 rule 1: a client `!` function's server calls compose into ONE
+// batch, and "the batch may not assign what the client holds". A local edit `xs.append(v)` rebinds `xs`
+// exactly as `xs = [...xs, v]` does, so an edit between two waits of a local the client declared is
+// refused the same way `n = n + 1` is — never run on the server against a copy the client keeps.
+const SQ = "?" + "{";
+const CPS = (body) => `<program db="./app.db">
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Transport(t: ServerCallError) }
+    let <r:int=0/>
+    let <shown:string=""/>
+    function hold(a: int)! E {
+        ${SQ}\`INSERT INTO log (a) VALUES (\${a})\`}.run();
+        return 1;
+    }
+    function book(a: int)! E {
+${body}
+    }
+    <main>
+        <button id="ok" onclick={ @r = book(7) !{ _ :> 9, }; }>ok</button>
+        <p id="o">\${@shown}</p>
+    </main>
+</program>
+`;
+const cpsErrs = (body) => run(CPS(body)).diags.filter((d) => d.severity === "Error");
+const BATCH_ASSIGNS = /the batch assigns a parameter or a local declared before it/;
+let kc = 0;
+async function cpsRun(body) {
+  const r = compile(CPS(body));
+  const sql = await realDb(["CREATE TABLE log (a INTEGER)"]);
+  const { srv } = await serve(r.core, sql);
+  const loaded = await loadProgram(r.core, "s475lte-cps-" + kc++);
+  const b = bridge(srv);
+  globalThis.fetch = async (p, init) => b(p, init);
+  const inst = () => [...loaded.rt.devtools.instances.values()].find((i) => i.id === 0 && i.decl.name === "program");
+  click(document.querySelector("#ok"));
+  for (let i = 0; i < 400 && loaded.rt.snapshot(inst()).r === 0; i++) await new Promise((res) => setTimeout(res, 0));
+  return loaded.rt.snapshot(inst());
+}
+
+describe("H — a local edit in a composed server batch (§19.9.9.8 rule 1; review F1)", () => {
+  test("an edit between two waits of a local declared before the batch: refused like `n = n + 1`", () => {
+    for (const edit of ["xs.append(2);", "xs.prepend(2);", "xs.pop();", "xs.shift();", "xs.remove(0);", "xs = [...xs, 2];"]) {
+      const es = cpsErrs(`        let xs: ${ALL} = [a];\n        xs.append(1);\n        hold(a)?;\n        ${edit}\n        hold(a)?;\n        return xs.length;`);
+      expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(es[0].message).toMatch(BATCH_ASSIGNS);
+    }
+    // the control the review named — a counter step between waits
+    expect(cpsErrs(`        let n: int = 0;\n        hold(a)?;\n        n = n + 1;\n        hold(a)?;\n        return n;`)[0].message).toMatch(BATCH_ASSIGNS);
+    // an edit of a PARAMETER in the batch is refused the same way
+    const pe = run(CPS(`        return 0;`).replace("    function book(a: int)! E {", `    function bump(p: ${ALL})! E {\n        hold(1)?;\n        p.append(2);\n        hold(1)?;\n        return p.length;\n    }\n    function book(a: int)! E {`)).diags.filter((d) => d.severity === "Error");
+    expect(pe.map((d) => d.message).join("\n")).toMatch(BATCH_ASSIGNS);
+  });
+
+  test("an edit of a local declared INSIDE the batch composes; edits outside the batch run on the client (real SQLite)", async () => {
+    expect(cpsErrs(`        hold(a)?;\n        let ys: ${ALL} = [a];\n        ys.append(2);\n        hold(a)?;\n        return ys.length;`)).toEqual([]);
+    expect((await cpsRun(`        hold(a)?;\n        let ys: ${ALL} = [a];\n        ys.append(2);\n        hold(a)?;\n        return ys.length;`)).r).toBe(2);
+    const st = await cpsRun(`        let xs: ${ALL} = [a];\n        xs.append(1);\n        hold(a)?;\n        hold(a)?;\n        xs.append(3);\n        @shown = ${txt("xs")};\n        return xs.length;`);
+    expect(st).toMatchObject({ r: 3, shown: "7,1,3" });
+    const one = await cpsRun(`        let xs: ${ALL} = [a];\n        hold(a)?;\n        xs.append(2);\n        @shown = ${txt("xs")};\n        return xs.length;`);
+    expect(one).toMatchObject({ r: 2, shown: "7,2" });
+  }, 60000);
+});
+
+// s475 r1 (#1812 review F2) — the grow shape's added elements are values of the local's element type
+// (§66.1 rule 5), checked exactly as `xs.append(e)` checks its value.
+describe("I — the elements a local grow shape adds are checked (review F2)", () => {
+  test("a wrong element: E-TYPE-031 / E-TYPE-041, as `.append` reports; a struct of another type is refused", () => {
+    expect(codes(prog("", `        let xs: int[free, append] = [1];\n        xs = [...xs, "a"];`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("", `        let xs: int[free, prepend] = [1];\n        xs = [true, ...xs];`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("", `        let xs: int[free, append] = [1];\n        xs = [...xs, 1.5];`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("", `        let xs: int[free, append] = [1];\n        xs = [...xs, not];`))).toEqual(["E-TYPE-041"]);
+    expect(codes(prog("    type P:struct = { n: int }\n    type Q:struct = { m: string }", `        let xs: P[free, append] = [];\n        const q: Q = { m: "z" };\n        xs = [...xs, q];`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    type P:struct = { n: int }", `        let xs: P[free, append] = [];\n        xs = [...xs, { n: "z" }];`))).toEqual(["E-TYPE-031"]);
+    // a local copied from a parameter: its own annotation's element type is the one checked
+    expect(codes(prog("    fn f(xs: int[free, append]) -> int {\n        let ys: int[free, append] = xs;\n        ys = [...ys, \"a\"];\n        return ys.length;\n    }", ""))).toEqual(["E-TYPE-031"]);
   });
 });

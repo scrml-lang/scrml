@@ -27088,7 +27088,12 @@ ${
             if (ls is given) {
                 if (bareLocal) placeType = tLocal(env, ls)
                 const la: Type | not = annotOf(env.t, ls)
-                if (la is given && bareLocal) {
+                // s475 r1 (#1812 review F2): a grow shape `xs = [...xs, e]` / `[e, ...xs]` is checked
+                // element by element (growShapeElems) — its joined type is unknown whenever an element
+                // does not fit, so the whole-value check below would pass it silently
+                const grow: int = seqEditShapeKey(exprName(target), value)
+                const growShape: boolean = bareLocal && (grow == 1 || grow == 2)
+                if (la is given && bareLocal && !growShape) {
                     // a write to an annotated local: checked like a cell write
                     ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
                 } else if (la is not && bareLocal) {
@@ -27109,12 +27114,30 @@ ${
                     let tds: TapeDiag[] = inferredTapeProblems(exprName(target), value, knownOf(r.vt))
                     if (lt is given) tds = localTapeProblems(env.t.types, exprName(target), lt, value)
                     for (const d of tds) { ts1 = report(ts1, env, target.span, d.code, d.msg) }
+                    if (growShape && tds.length == 0 && lt is given) ts1 = growShapeElems(env, exprName(target), lt, value, ts1)
                 }
             }
         }
         let ts2: TypeState = typePlace(env, target, placeType, ts1)
         for (const sw of ws) { ts2 = checkWrite(env, sw.w, r.vt, value, placeLabel(target), ts2) }
         return record(ts2, e.nid, VType.Unknown)
+    }
+
+    // s475 r1 (#1812 review F2) — the elements a grow shape `xs = [...xs, e…]` / `[e…, ...xs]` adds,
+    // each checked against the local's element type exactly as `xs.append(e)` checks its value
+    // (typeLocalEdit: checkValue, then the struct-literal fields, then no `not` into a non-optional
+    // element; §66.1 rule 5, §66.12.6 rule 3). The local's type is its annotation or a parameter's
+    // written type (`lt`); a tape whose element type the typer cannot name fails closed.
+    fn growShapeElems(env: TEnv, name: string, lt: Type, value: AExpr, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        const el: Type | not = seqElem(unMaybe(lt))
+        if (el is not) return report(ts, env, value.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + " = [...]` grows the local `" + name + "`, whose element type the compiler cannot name here, so the elements it adds cannot be checked — annotate the local (`let " + name + ": T[free, append] = …`)")
+        for (const x of arrayElems(value)) {
+            if (spreadInner(x) is not) {
+                ts = checkNotElems(env, x, el, checkLitFields(env, x, checkValue(env, exprType0(ts, x.nid), el, x.span, "an element of `" + name + "`", ts)))
+            }
+        }
+        return ts
     }
 
     // s472 — what the typer checks of a part write / a position write: its index
@@ -32722,7 +32745,7 @@ ${
             .Recovered :> a
             .Variant(name: n) :> a
             .Member(obj: o) :> a
-            .Call(callee: c) :> a
+            .Call(callee: c) :> cfWith(a, a.names, a.assigns.concat(cfEditNid(e.nid, c)), a.rets, a.exits, a.effects, a.handled)   // s475 r1 F1
             .Unary(op: o) :> a
             .Binary(op: o) :> a
             .Ternary(test: x) :> a
@@ -32736,6 +32759,16 @@ ${
             .HashRef(id: hr0) :> a
             .Foreign(f: fb0) :> a
         }
+    }
+
+    // s475 r1 (#1812 review F1): a local tape edit `xs.append(v)` (§66.12.6 rule 3) rebinds `xs` exactly
+    // as `xs = [...xs, v]` does, so its call is one of the run's `assigns` — assignedSymsOf reads the
+    // resolver's ELocalEdit fact at the call's nid (a host value's own `remove()` has none: no Sym).
+    // §19.9.9.8 rule 1 then refuses a composed batch that edits a local the client holds.
+    fn cfEditNid(nid: int, c: AExpr) -> int[] {
+        const n: string = memberName(c.k)
+        if (n == "append" || n == "prepend" || n == "pop" || n == "shift" || n == "remove" || n == "insert") return [nid]
+        return []
     }
 
     fn cfHandled(a0: CFold, nid: int, sp: ASpan, h: AHandled) -> CFold {
