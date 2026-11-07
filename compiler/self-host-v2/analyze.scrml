@@ -11899,12 +11899,29 @@ ${
                     where = where.concat([gp])
                 } else if (sp is given) {
                     shrinks = shrinks.concat([sp])
+                } else if (isBoundWord(g)) {
+                    st = addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", boundRefusal(g))
                 } else {
                     st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
                 }
             }
         }
         return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
+    }
+
+    // s475 r1 (#1812 review F3) — a bounded length `a..=b` / `a..b` (§66.12.2, the length axis) on any
+    // tape type — a cell, a field, a local, a parameter. INTERIM (gap g-boot-bounded-length-unenforced-s475):
+    // the bound is checked on every write (§66.11.2: "a length bound … checked on every write"), and how a
+    // write whose length the compiler cannot prove is enforced is ⚑ O36 — so the bootstrap refuses the
+    // bound rather than accept a length it never enforces. The capable form is bound enforcement: a provable
+    // violation E-WRITE-INVARIANT, the unprovable case per O36's ruling.
+    fn isBoundWord(g: string) -> boolean {
+        if (g.length == 0) return false
+        return "0123456789".indexOf(g.slice(0, 1)) >= 0 && g.indexOf("..") > 0
+    }
+
+    fn boundRefusal(g: string) -> string {
+        return "a bounded length `" + g + "` is not in the bootstrap yet — the bound is checked on every write (§66.11.2), and how a write whose length cannot be proven is enforced is not ruled (⚑ O36); the bootstrap enforces no bound, so it refuses one rather than accept a length it never checks. Write `free` (any length) or no length grant (a fixed length)"
     }
 
     // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
@@ -24740,11 +24757,11 @@ ${
 
     // s444 — the type of a call that names no function: a host call's, or a
     // filter's (the sequence it filters — the same type).
-    fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, ts: TypeState) -> VType {
+    fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts: TypeState) -> VType {
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         return match f {
             .VHost(call: c) :> known(Type.Num)
-            .VSeqCall(op: o) :> seqCallType(ts, o, callee)
+            .VSeqCall(op: o) :> seqCallType(ts, o, callee, args)
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
             .VStructOf(ty: s) :> VType.Unknown
@@ -24782,6 +24799,8 @@ ${
         if (op is not) return comparatorCheck(env, f, args, ts0)
         let sig: Type[] = methodSig(op)
         // s475: a tape's `includes(x)` — the argument against the receiver's element type
+        // s475 r1 (#1812 review F4): a receiver whose type the typer cannot name fails closed — the
+        // argument is never compared unchecked
         if (op == PrimOp.TapeIncludes) {
             sig = []
             const cl: AExpr | not = calleeOf(e.k)
@@ -24790,6 +24809,7 @@ ${
                 if (ob is given) {
                     const rt: Type | not = knownOf(exprType0(ts0, ob.nid))
                     if (rt is given) sig = methodSigFor(op, rt)
+                    if (rt is not && !hasErrIn(env.errs, ob.span)) return report(ts0, env, ob.span, "E-BOOTSTRAP-UNSUPPORTED", "`.includes(…)` on a tape whose type the compiler cannot resolve here — its argument cannot be checked against the element type (§66.12.1); bind the tape to an annotated `const` first")
                 }
             }
         }
@@ -24825,19 +24845,56 @@ ${
     // s475 — the predicate of `xs.some(x => b)` / `xs.every(x => b)` is a `bool`
     // (a condition: no truthiness, §66.12.1's predicate methods return a `bool`).
     // A predicate whose type is not known is refused (fail closed).
+    // s475 r1 (#1812 review F8, gap g-boot-filter-predicate-not-bool-checked-s475): `xs.filter(x => b)`'s
+    // too — scrml has no truthiness (§42.4), so a non-`bool` predicate is no condition.
     fn predicateCheck(env: TEnv, f: ValueFact | not, lam: AExpr, ts: TypeState) -> TypeState {
         const body: AExpr | not = lambdaBody(lam)
         if (body is not) return ts
         const bt: Type | not = knownOf(exprType0(ts, body.nid))
         if (bt == Type.Bool) return ts
         if (hasErrIn(env.errs, body.span)) return ts
-        if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the predicate of `.some(…)` / `.every(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`")
-        return report(ts, env, body.span, "E-TYPE-031", "the predicate of `.some(…)` / `.every(…)` must return a `bool`, and this one returns `" + typeName(bt) + "` — say what you test (`x == 0`, `x is given`)")
+        if (typedErrIn(ts, body.span)) return ts     // the body's own error (the typer's) is the one report
+        const m: string = predMethod(f)
+        if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the predicate of `." + m + "(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`")
+        return report(ts, env, body.span, "E-TYPE-031", "the predicate of `." + m + "(…)` must return a `bool`, and this one returns `" + typeName(bt) + "` — scrml has no truthiness (§42.4): say what you test (`x == 0`, `x is given`)")
+    }
+
+    // s475 r1: did the typer already report inside `span` (one report per fault, §42.4 statement 6)?
+    fn typedErrIn(ts: TypeState, span: ASpan) -> boolean {
+        for (const d of ts.diags) {
+            if (d.span.start >= span.start && d.span.end <= span.end) return true
+        }
+        return false
+    }
+
+    fn predMethod(f: ValueFact | not) -> string {
+        if (isSeqFact(f, SeqFn.Filter)) return "filter"
+        if (isSeqFact(f, SeqFn.Some)) return "some"
+        return "every"
+    }
+
+    fn isSeqFact(f: ValueFact | not, want: SeqFn) -> boolean {
+        return match f {
+            .VSeqCall(op: o) :> o == want
+            .VMethod(op: o) :> false
+            .VToEnum(enumSym: s) :> false
+            .VIndex(loc: zl) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
     }
 
     fn isPredFact(f: ValueFact | not) -> boolean {
         return match f {
-            .VSeqCall(op: o) :> o == SeqFn.Some || o == SeqFn.Every
+            .VSeqCall(op: o) :> o == SeqFn.Some || o == SeqFn.Every || o == SeqFn.Filter    // s475 r1 F8: `filter`'s predicate too
             .VMethod(op: o) :> false
             .VToEnum(enumSym: s) :> false
             .VIndex(loc: zl) :> false
@@ -24937,14 +24994,24 @@ ${
         }
     }
 
-    fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr) -> VType {
+    fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr, args: AExpr[]) -> VType {
         if (o == SeqFn.Some || o == SeqFn.Every) return known(Type.Bool)
         const isFilter: boolean = o == SeqFn.Filter || o == SeqFn.SortBy
-        if (!isFilter) return VType.Unknown
         const obj: AExpr | not = memberObj(callee)
         if (obj is not) return VType.Unknown
         const rt: Type | not = knownOf(exprType0(ts, obj.nid))
         if (rt is not) return VType.Unknown
+        // s475 r1 (#1812 review F4): a map is a NEW tape of its body's type, the receiver's length
+        // (mappedType, as the resolver reads it) — so a method on it (`.includes`) has a typed receiver
+        if (o == SeqFn.Map) {
+            if (args.length != 1) return VType.Unknown
+            const body: AExpr | not = lambdaBody(args[0])
+            if (body is not) return VType.Unknown
+            const mt: Type | not = mappedType(rt, knownOf(exprType0(ts, body.nid)))
+            if (mt is not) return VType.Unknown
+            return known(mt)
+        }
+        if (!isFilter) return VType.Unknown
         return known(ungranted(rt))      // s469 F/U-5: a new tape carries its own type's grants — none
     }
 
@@ -26011,7 +26078,7 @@ ${
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
         // value fact (VToEnum / VAt / VMethod or a SortBy comparator) and the identity otherwise
-        if (s is not) return rvt(builtinCallType(env, e, callee, ts), methodArgCheck(env, e, args, atArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts))))
+        if (s is not) return rvt(builtinCallType(env, e, callee, args, ts), methodArgCheck(env, e, args, atArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts))))
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity

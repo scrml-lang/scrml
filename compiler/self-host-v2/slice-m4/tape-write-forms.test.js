@@ -84,7 +84,14 @@ const FORMS = [
   ["local: an in-place edit (`.append`)", ["", "let out: int[free, pop] = [];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], ["", "let out: int[free, append] = [];\n        out.append(1);", []]],
   ["local: an in-place edit of an inferred tape (rule 1)", ["", "let out = [1];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], null],
   ["local: an in-place shrink (`.pop` / `.shift` / `.remove(i)`)", ["", "let out: int[free, append] = [1];\n        out.pop();", ["E-WRITE-NOT-GRANTED"]], ["", "let out: int[free, remove] = [1];\n        out.pop();\n        out.shift();\n        out.remove(0);", []]],
-  ["parameter: an in-place edit (§66.12.3)", ["    fn f(p: int[]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", ["E-WRITE-NOT-GRANTED"]], ["    fn f(p: int[free, append]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", []]],
+  // ⚑ PA reading (s475 r1, #1812 review F6): an edit METHOD is legal on a `const` and a parameter
+  // (`xs.append(e)`), while the SAME edit spelled as a rebinding (`xs = [...xs, e]`) is E-ASSIGN-CONST.
+  // Grants live on the TYPE (§66.12.6 rule 1: "On a local, `let` makes only the NAME rebindable; it
+  // grants the tape nothing"), and §50 governs whether the NAME may be rebound — the method rebinds no
+  // name. §66.11.2's "judged by the transition, never the spelling" against §66.12.6 rules 1 and 4 owes
+  // one SPEC line (gap g-spec-local-edit-method-vs-rebinding-s475).
+  ["const / parameter: an edit method is granted by the type; the rebinding spelling is E-ASSIGN-CONST (§50)", ["", "const out: int[free, append] = [];\n        out = [...out, 1];", ["E-ASSIGN-CONST"]], ["", "const out: int[free, append] = [];\n        out.append(1);", []]],
+  ["parameter: an in-place edit (§66.12.3)",["    fn f(p: int[]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", ["E-WRITE-NOT-GRANTED"]], ["    fn f(p: int[free, append]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", []]],
   // s472: a part write of a local — the tape field's OWN grants (rules 1 and 4)
   ["local: a part write (`q.xs = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs = [];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "let q: Box = @b;\n        q.xs = [];", []]],
   ["local: a position write of a struct local's tape field (`q.xs[i] = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [box("int[write]"), "let q: Box = @b;\n        q.xs[0] = 1;", []]],

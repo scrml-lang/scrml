@@ -330,3 +330,48 @@ describe("I — the elements a local grow shape adds are checked (review F2)", (
     expect(codes(prog("    fn f(xs: int[free, append]) -> int {\n        let ys: int[free, append] = xs;\n        ys = [...ys, \"a\"];\n        return ys.length;\n    }", ""))).toEqual(["E-TYPE-031"]);
   });
 });
+
+// s475 r1 (#1812 review F3) — a bounded length (`int[1..=3, …]`, §66.12.2) is enforced on every write
+// (§66.11.2), and the unprovable case is ⚑ O36: the bootstrap enforces no bound, so it refuses one on
+// EVERY tape type — a cell, a local, a `const`, a parameter — by name. INTERIM (gap
+// g-boot-bounded-length-unenforced-s475; capable form: bound enforcement).
+describe("J — a bounded length is refused by name, on every tape type (INTERIM, ⚑ O36; review F3)", () => {
+  test("a local, a `const`, a parameter and a cell: E-BOOTSTRAP-UNSUPPORTED naming the bound, §66.11.2 and O36", () => {
+    for (const src of [
+      prog("", `        let xs: int[1..=3, free, append] = [1];\n        xs.append(2);`),
+      prog("", `        let xs: int[1..=3, append] = [1];`),
+      prog("", `        const xs: int[1..=3] = [1, 2, 3, 4, 5];`),
+      prog("", `        let xs: int[0..3] = [1];`),
+      prog("    fn f(xs: int[1..=3, free, append]) -> int { return 0; }", ""),
+      prog("    <c:int[1..=3, free, append]=([1])/>", ""),
+    ]) {
+      const ds = run(src).diags.filter((d) => d.severity === "Error");
+      expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(ds[0].message).toMatch(/a bounded length `\d\.\.=?\d` .*§66\.11\.2.*O36/);
+    }
+  });
+
+  test("a number-led token run in a local's grant list is one grant word, never dropped (`3` is no axis value)", () => {
+    expect(codes(prog("", `        let xs: int[3] = [1, 2, 3];`))).toEqual(["E-GRANT-UNKNOWN"]);
+  });
+});
+
+// s475 r1 (#1812 review F4, F8) — a map's result is a tape of its body's type, so `.includes` on it is
+// checked; `.includes` on a receiver of unknown type fails closed; and `filter`'s predicate is a `bool`
+// (no truthiness, §42.4 — gap g-boot-filter-predicate-not-bool-checked-s475).
+describe("K — `.map(…)` is typed for `.includes`; `filter`'s predicate is a `bool` (review F4, F8)", () => {
+  test("`@xs.map(x => x + 1).includes(\"x\")` is E-TYPE-031; the right type compiles and runs", async () => {
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.map(x => x + 1).includes("x");`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.map(x => \`\${x}\`).includes(1);`))).toEqual(["E-TYPE-031"]);
+    await load(prog("    <xs:int[replace]=([1])/>", `        @shown = \`\${@xs.map(x => x + 1).includes(2)},\${@xs.map(x => x + 1).includes(1)}\`;`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("true,false");
+  });
+
+  test("a non-`bool` `filter` predicate: E-TYPE-031 (as `some` / `every`); a `bool` one compiles", () => {
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const n: int = @xs.filter(x => x + 1).length;`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const n: int = @xs.filter(x => x).length;`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const n: int = @xs.filter(x => x > 0).length;`))).toEqual([]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.map(x => x).some(x => x);`))).toEqual(["E-TYPE-031"]);
+  });
+});
