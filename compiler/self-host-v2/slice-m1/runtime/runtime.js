@@ -2417,6 +2417,51 @@ export function reversed(xs) {
   return out;
 }
 
+// s475 (s475-boot-local-tape-edits) — the tape edits as VALUES (Core PrimOp TapeAppend … TapeConcat):
+// a granted edit of a LOCAL rebinds the local to one of these (print.scrml), so each returns a NEW tape
+// and never writes its operand — value semantics (§66.10): no alias of the old value sees the edit.
+
+/** `xs.append(v)` on a local: a new tape, `v` at the end. */
+export function tapeAppend(xs, v) {
+  const out = copyOf(xs);
+  out.push(v);
+  return out;
+}
+
+/** `xs.prepend(v)` on a local: a new tape, `v` at the front. */
+export function tapePrepend(xs, v) {
+  const out = new Array(xs.length + 1);
+  out[0] = v;
+  for (let i = 0; i < xs.length; i++) out[i + 1] = xs[i];
+  return out;
+}
+
+/** `xs.pop()` on a local: a new tape without the last position (an empty tape stays empty). */
+export function tapeDropEnd(xs) {
+  return xs.length === 0 ? copyOf(xs) : xs.slice(0, xs.length - 1);
+}
+
+/** `xs.shift()` on a local: a new tape without the first position (an empty tape stays empty). */
+export function tapeDropFront(xs) {
+  return xs.slice(1);
+}
+
+/** `xs.remove(i)` on a local: a new tape without position `i`; no position `i`, nothing is removed (§66.12.6 rule 3). */
+export function tapeRemoveAt(xs, i) {
+  if (!Number.isInteger(i) || i < 0 || i >= xs.length) return copyOf(xs);
+  const out = [];
+  for (let k = 0; k < xs.length; k++) if (k !== i) out.push(xs[k]);
+  return out;
+}
+
+/** `[...a, ...b]`: a new tape holding `a`'s values, then `b`'s (an array value with a spread). */
+export function tapeConcat(a, b) {
+  const out = new Array(a.length + b.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i];
+  for (let i = 0; i < b.length; i++) out[a.length + i] = b[i];
+  return out;
+}
+
 /** `xs.join(sep)` on a tape of strings. */
 export function joinStr(xs, sep) {
   let out = "";

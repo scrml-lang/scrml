@@ -190,6 +190,18 @@ ${
         // are) and never anything but a primitive (the typer refuses the rest,
         // E-TEXT-NON-PRIMITIVE / E-OPERAND-NOT-NARROWED).
         Text,
+        // s475 (s475-boot-local-tape-edits) — the tape edits as VALUES, each a
+        // NEW tape (R3; §66.10 value semantics: no alias of the operand sees it).
+        // What a granted in-place edit of a LOCAL lowers to — the local is
+        // rebound to the result (Stmt.Assign), as a local part write is
+        // (§66.12.6 rules 1 and 3; analyze judged the grant on the local's
+        // TYPE): TapeAppend(xs, v) `xs.append(v)`, TapePrepend(xs, v)
+        // `xs.prepend(v)`, TapeDropEnd(xs) `xs.pop()`, TapeDropFront(xs)
+        // `xs.shift()` (an empty tape stays empty), TapeRemoveAt(xs, i)
+        // `xs.remove(i)` (no position `i`: nothing removed — §66.12.6 rule 3).
+        // TapeConcat(a, b): the tape `[...a, ...b]` — what an array value with a
+        // spread lowers to (each run of plain elements an ArrayOf).
+        TapeAppend, TapePrepend, TapeDropEnd, TapeDropFront, TapeRemoveAt, TapeConcat,
     }
 
     export type Pattern:enum = {

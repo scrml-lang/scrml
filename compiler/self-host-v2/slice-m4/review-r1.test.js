@@ -25,12 +25,19 @@ const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Do
 
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {
-  test("`s = [...s, e]` on a `let` local: refused (Core has no spread value), never compiled to nothing", () => {
-    // s469-boot-tape-grants: and the rebinding is an end-append of an INFERRED tape, which carries no
-    // grant (§66.12.6 rules 1 and 4) — E-WRITE-NOT-GRANTED as well
-    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-WRITE-NOT-GRANTED"]);
-    // with the grant written in the local's type, only the Core limit remains
-    expect(codes(withFn(`function lp() -> int {\n let s: Entry[free, append] = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("`s = [...s, e]` on a `let` local: judged by its type's grants, and never compiled to nothing", async () => {
+    // s469-boot-tape-grants: the rebinding is an end-append of an INFERRED tape, which carries no
+    // grant (§66.12.6 rules 1 and 4) — E-WRITE-NOT-GRANTED. s475 (s475-boot-local-tape-edits): the
+    // local grow shape is in the bootstrap (a TapeConcat), so that is the only report
+    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    // with the grant written in the local's type it compiles — and the statement runs (the local grows; the cell does not)
+    const r = run(withFn(`function lp() -> int {\n let s: Entry[free, append] = @audit;\n s = [...s, ${E}];\n return s.length;\n }`));
+    expect(r.diags).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const { program } = await loadProgram(r.core, "r1-f1-local-spread", ["lp", "record"]);
+    program.record("a");
+    expect(program.lp()).toBe(2);
+    expect(rows().length).toBe(1);
   });
   test("the same on a `const` local keeps E-ASSIGN-CONST", () => {
     expect(codes(withFn(`function lp() -> int {\n const s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-ASSIGN-CONST");
@@ -49,13 +56,15 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
     expect(rows().length).toBe(2);                              // the cell is untouched: the local holds the new value
   });
   test("a spread on a parameter: refused", () => {
-    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    // s475: a parameter cannot be REBOUND (§50) — the grow shape is a rebinding; `s.append(e)` is the edit it grants
+    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-ASSIGN-CONST"]);
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
     // s469-boot-strings-1: JavaScript's `push` is refused by NAME before anything else (§66.12.6 rule 3)
     expect(codes(withFn(`function lp() {\n let s = @audit;\n s.push(${E});\n }`))).toEqual(["E-TAPE-JS-METHOD"]);
-    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.append(${E});\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.shift();\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s475 (s475-boot-local-tape-edits): an edit of an INFERRED local tape — no grant (§66.12.6 rule 1)
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.append(${E});\n }`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.shift();\n }`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(withFn(`function lp() {\n let s = @audit;\n s[0].action = "x";\n }`)).length).toBeGreaterThan(0);
   });
 });

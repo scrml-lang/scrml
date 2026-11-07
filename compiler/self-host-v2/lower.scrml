@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -370,6 +370,69 @@ ${
         return out
     }
 
+    // An array value. With no spread, the ArrayOf of its elements — the one spelling
+    // every array literal had before s475. s475 (s475-boot-local-tape-edits): a value
+    // with a spread `...xs` (admitted by analyze only in a local's recognized edit
+    // shape, `xs = [...xs, e]` / `xs = [e, ...xs]` — §66.11.2, §66.12.6 rule 4) is the
+    // TapeConcat of its runs in order: each spread operand, and each run of plain
+    // elements as one ArrayOf — a NEW tape (R3), evaluated left to right.
+    fn arrayValue(c: LC, es: AExpr[]) -> Expr {
+        let parts: Expr[] = []
+        let run: Expr[] = []
+        let spread = false
+        for (const x of es) {
+            const inner: AExpr | not = spreadOperand(x)
+            if (inner is given) {
+                spread = true
+                if (run.length > 0) parts = parts.concat([Expr.ArrayOf(run)])
+                run = []
+                parts = parts.concat([lowerExpr(c, inner)])
+            } else {
+                run = run.concat([lowerExpr(c, x)])
+            }
+        }
+        if (!spread) return Expr.ArrayOf(run)
+        if (run.length > 0) parts = parts.concat([Expr.ArrayOf(run)])
+        let out: Expr = parts[0]
+        let i = 1
+        while (i < parts.length) {
+            out = Expr.Prim(PrimOp.TapeConcat, [out, parts[i]])
+            i = i + 1
+        }
+        return out
+    }
+
+    fn spreadOperand(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Spread(e: x) :> x
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+        }
+    }
+
     fn lowerExprs(c: LC, es: AExpr[]) -> Expr[] {
         let out: Expr[] = []
         for (const e of es) { out = out.concat([lowerExpr(c, e)]) }
@@ -457,7 +520,7 @@ ${
             .Binary(op: o, l: l, r: r) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, l), lowerExpr(c, r)])
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n))
             .Assign(target: t, value: v, kept: kp) :> keptAssignExpr(c, e, v, kp)   // s474 (§50, D10)
-            .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
+            .ArrayLit(elems: es) :> arrayValue(c, es)
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
             .Spread(e: sx) :> missing()
             .Index(obj: o, idx: ix) :> indexExpr(c, e, o, ix)    // s469 (§49.13)
@@ -951,6 +1014,7 @@ ${
             .ERemove(w: w) :> not
             .EElemAt(cap: x) :> not
             .EPosition(cap: x) :> not
+            .ELocalEdit(sym: x) :> not
             not :> not
         }
     }
@@ -1095,8 +1159,28 @@ ${
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
             .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value)
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
+            .ELocalEdit(sym: s, op: op, arg: a) :> localEditStmt(c, s, op, a)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
+    }
+
+    // s475 (s475-boot-local-tape-edits) — a granted in-place edit of a LOCAL tape
+    // (`xs.append(v)` … `xs.remove(i)`; analyze judged it against the local's TYPE
+    // grants, §66.12.6 rules 1 and 3) → Assign(xs, Prim(TapeAppend …, [xs, …]), []):
+    // the local is rebound to the edited value, a NEW tape (§66.10 — no alias of the
+    // old value sees the edit), as a local part write is (assignLocal).
+    fn localEditStmt(c: LC, s: Sym, op: LocalEdit, arg: AExpr | not) -> Stmt[] {
+        const xs: Expr = Expr.Local(s)
+        let args: Expr[] = [xs]
+        if (arg is given) args = [xs, lowerExpr(c, arg)]
+        const prim: PrimOp = match op {
+            .LAppend :> PrimOp.TapeAppend
+            .LPrepend :> PrimOp.TapePrepend
+            .LPop :> PrimOp.TapeDropEnd
+            .LShift :> PrimOp.TapeDropFront
+            .LRemoveAt :> PrimOp.TapeRemoveAt
+        }
+        return [Stmt.Assign(s, Expr.Prim(prim, args), [])]
     }
 
     // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index

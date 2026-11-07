@@ -614,6 +614,13 @@ ${
             // s469: a primitive's text (§20.7.2) — JavaScript's String() of an
             // int / number (Number::toString), a bool, a unit variant's tag
             .Text :> rtCall(ctx, "textOf", a)
+            // s475 — the tape edits as values (a granted edit of a local rebinds it to one), each a NEW tape
+            .TapeAppend :> rtCall(ctx, "tapeAppend", a)
+            .TapePrepend :> rtCall(ctx, "tapePrepend", a)
+            .TapeDropEnd :> rtCall(ctx, "tapeDropEnd", a)
+            .TapeDropFront :> rtCall(ctx, "tapeDropFront", a)
+            .TapeRemoveAt :> rtCall(ctx, "tapeRemoveAt", a)
+            .TapeConcat :> rtCall(ctx, "tapeConcat", a)
         }
     }
 

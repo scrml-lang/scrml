@@ -1407,6 +1407,12 @@ ${
             .ParseNum :> "ParseNum"
             .ParseBool :> "ParseBool"
             .Text :> "Text"
+            .TapeAppend :> "TapeAppend"
+            .TapePrepend :> "TapePrepend"
+            .TapeDropEnd :> "TapeDropEnd"
+            .TapeDropFront :> "TapeDropFront"
+            .TapeRemoveAt :> "TapeRemoveAt"
+            .TapeConcat :> "TapeConcat"
         }
     }
 }
