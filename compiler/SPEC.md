@@ -12222,7 +12222,8 @@ body is the declared initializer assigned to the cell:
 - **Everything else is the `<request>`'s.** Mount, supersede (EC-2: the newest load wins), teardown (EC-3), §6.7.7.1
   READ / WRITE classification and abort-reads / discard-writes, and §6.7.7.3's rule that a provably-writing request
   does not run on mount all apply to a pending cell by construction, because the desugar is literal. (DD Open
-  Question 3 asks for this confirmation; this sentence gives it.)
+  Question 3 asks for this confirmation; this sentence gives it.) Author writes also take part in the supersede
+  order, which the literal desugar does not give: §13.9.4 "Which write or load wins" (S475, ⚑ PA reading).
 - **No new runtime representation.** At run time the cell holds `not` until the load settles, which is the existing
   representation of `(not to T)`. The difference between pending and `T` is **static only**.
 - **The compiler SHALL NOT reset the cell by re-running the initializer outside the request.** A reset of a pending
@@ -12294,7 +12295,8 @@ behaviour only. Statically, §13.9.3 already requires every read to discriminate
 
 **A waiting write from an action position.** An action-position write of a waiting value into a pending cell
 (`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its suspension point
-(§13.8 (i)) and lands when the value arrives. Until then the cell SHALL keep its current value. It SHALL NOT revert
+(§13.8 (i)) and lands when the value arrives, unless a newer write or load has started by then (§13.9.4 "Which
+write or load wins", S475, ⚑ PA reading). Until then the cell SHALL keep its current value. It SHALL NOT revert
 to `not` when the write starts, as a reload keeps its last value above. The write does not transition the cell by
 itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point ends narrowing (§42.3.5).
 
@@ -12311,6 +12313,61 @@ itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point 
 <select bind:value=@team><option>core</option><option>infra</option></select>
 <p if=@members>Members: ${@members}</p>   // switching team keeps the old count until the new one arrives
 <p else>Loading…</p>
+```
+
+**Which write or load wins (S475, ⚑ PA reading, for bryan's veto).** A pending cell is written by its own loads
+(§13.9.2) and by the author's writes, both plain writes and the awaited action-position writes above. When more
+than one of them is in flight, they are ordered as follows.
+
+1. **The one that started most recently wins.** Among a pending cell's loads and writes, the one with the latest
+   start (rules 2 and 3) SHALL win. When a winning write lands, a load still in flight is superseded: its result
+   SHALL be discarded, and a load classified READ (§6.7.7.1) SHALL also have its transport aborted (a WRITE load's
+   transport runs to completion, §6.7.7.1 rule 2). A write that lands after a newer write or load has started SHALL
+   be discarded. Only that write is dropped, and the rest of the continuation it is in still runs. Plain
+   synchronous author writes are included: `@members = 0` starts and lands at once, so it supersedes any load in
+   flight. Nothing is superseded before a write lands. A write whose wait is still pending aborts nothing, and if
+   that write is later discarded, the load it would have superseded stands.
+2. **A write starts at its last wait.** A write's start is the start of the last wait that comes before it in its
+   continuation (the handler or function body it runs in, §13.8 (i)). A write with no wait before it starts when it
+   lands. A load starts when its run starts.
+3. **A load triggered by a write starts when that write's batch ends.** A dependency change re-runs the load
+   (§13.9.2). That run starts when the batch that made the change ends: the handler, or the continuation after a
+   wait, that wrote the dependency. So when one batch writes both a dependency and the cell, in either order, the
+   load wins. It starts after both writes, which makes it the newest, and its result replaces the cell write.
+4. **A winning write of `not` re-runs the load.** When a winning write's value is `not`, the write SHALL supersede
+   the load in flight and then start the cell's load again. This includes a host `null` or `undefined`, which is
+   `not` at the interop boundary (§42.9). This is the reset rule of §13.9.2 ("A reset of a pending cell (§6.8) is the
+   request's re-run"), read with §13.9.5 (`not` "returns the cell to its pre-state"): a pending cell's pre-state is
+   `not` with its load running. When the load itself settles to `not` (a handled failure arm, §13.9.5), it SHALL NOT
+   re-run. §66.11.6 decides which author writes may carry `not` at all.
+5. **A same-value write is still a winning write.** A write of the value the cell already holds counts as a write
+   under rules 1–4: it starts, lands and supersedes like any other. The only difference is that it sends no change
+   notification to the cell's readers.
+
+**Not the rule of a stateful `<request>`.** These rules differ from an author-written `<request>` (§6.7.7). There,
+supersede happens only between the request's own fetches (EC-2, EC-4). An author write to its `@variable` does not
+supersede the fetch in flight, and that fetch's result lands over the write when it settles. A pending cell's
+request is compiler-written and has no `refetch()` (§13.9.2), so an author write is the only way to override a load.
+Under the `<request>` rule, an older load would overwrite the author's newer value.
+
+> **Provenance:** ⚑ **PA reading, for bryan's veto — not ruled.** §13.9 did not say how a pending cell's author
+> writes and its own loads are ordered. The bootstrap lane s475-boot-pending-cells needed an answer, and the PA gave
+> these readings (PR #1796, S4 rounds r2–r4; recorded in `docs/bootstrap-spec-coverage.md` §13.9.4, "S4 r4 — PA
+> READINGS ⚑"). Rule 4 reads §13.9.2's reset sentence together with §13.9.5's pre-state sentence. · **supersedes:**
+> nothing is struck. The rules extend §13.9.2's supersede bullet (*"supersede (EC-2: the newest load wins) … apply
+> to a pending cell by construction, because the desugar is literal"*). That bullet still holds for loads among
+> themselves. Author writes joining the supersede order are not in the literal desugar, so this paragraph adds them.
+> **Direction of change:** **semantics-defined**, since the SPEC was silent. Nominal on impl#1, which does not
+> implement §13.9. The bootstrap builds it in #1796.
+
+```scrml
+<team> = "core";
+<members>: (not to int) = teamCount(@team) !{ _ :> not };
+<button onclick={ @members = 0; }>Clear</button>                  // rule 1: lands at once; a load in flight is discarded (a READ load is aborted)
+<button onclick={ @team = "infra"; @members = 0; }>Infra</button> // rule 3: the reload starts at the batch end, so it wins over the 0
+<button onclick={ @members = teamCount("ops") !{ _ :> not }; }>Ops</button>
+// rule 2: the write starts at its wait. If @team changes before it lands, the newer reload wins and this write
+// is discarded. If it wins and its arm yields `not`, the load re-runs (rule 4).
 ```
 
 #### 13.9.5 Failure is handled at the declaration
@@ -12435,6 +12492,15 @@ ${
 - On a dependency change after the first settle, a pending cell SHALL keep its last value until the new load
   settles. An action-position write of a waiting value into a pending cell SHALL be awaited, and the cell SHALL keep
   its current value until the write lands.
+- *(S475, ⚑ PA reading, for bryan's veto; §13.9.4 "Which write or load wins".)* Among a pending cell's loads and
+  author writes, the one that started most recently SHALL win. A write starts at the last wait before it in its
+  continuation, or when it lands if no wait comes before it. A load that a write triggers starts when that write's
+  batch ends. A winning write SHALL supersede, when it lands, a load in flight as §6.7.7.1 supersedes (the result is
+  discarded, and a READ load's transport is aborted). A write that lands after a newer write or load has started
+  SHALL be discarded, and the rest of its continuation SHALL still run. A winning write of `not` (including a host
+  `undefined`, §42.9) SHALL re-run the load. The load's own settle to `not` SHALL NOT. A same-value write SHALL count
+  as a winning write and SHALL skip only the change notification. A stateful `<request>` keeps §6.7.7's rule, under
+  which an author write supersedes no fetch.
 - A derived cell SHALL NOT be a pending cell (E-VALUE-SERVER-CALL). A pending cell's desugared request SHALL expose no
   `.refetch()`, `.loading`, `.stale` or `.error`.
 - *(S475, PERMANENT.)* In the §66 spelling, a `let` pending cell whose initializer reads cells SHALL re-run its load
