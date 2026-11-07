@@ -161,13 +161,14 @@ describe("through a client callee: `?` on a carrier's call makes the caller a ca
     expect((await clickRun(compile(SRC(-1)).core, sql3, "#go")).state.r).toBe(8);
   });
 
-  test("a client caller that HANDLES the carrier's call is not a carrier: its callers owe no `Transport`", () => {
+  test("a client caller that HANDLES the carrier's call is a carrier too: its callers cover `Transport` (s475-boot-literal-carriers r1: SPEC §19.9.5 Extended)", () => {
     const H = `    function g(x: int)! E {
         const v: int = f(x) !{ _ :> 0 };
         return v + 10;
     }
 `;
-    expect(errs(P(S + F + H, `@r = g(5) !{ .Bad :> 8 };`))).toEqual([]);
+    expect(errs(P(S + F + H, `@r = g(5) !{ .Bad :> 8 };`)).map((x) => x.split(":")[0])).toEqual(["E-TYPE-080"]);
+    expect(errs(P(S + F + H, `@r = g(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).toEqual([]);
   });
 });
 

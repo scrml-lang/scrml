@@ -222,19 +222,20 @@ describe("nested client callers: `?` carries `Transport` up (recursively for cli
     expect(e[0].message).toContain("Transport");
   });
 
-  test("a client caller handling the call itself must cover `Transport`; covering it, its own callers do not see `Transport`", () => {
+  test("a client caller handling the call itself must cover `Transport`; it is still a carrier, so its own callers see `Transport` (s475-boot-literal-carriers r1: SPEC §19.9.5 Extended, \"how the body handles the call does not matter\")", () => {
     const arms = ".QueryFailed(m) :> 0, .ConstraintViolation(c) :> 0, .ConnectionLost :> 0,";
+    // `mid`'s handler omits `Transport` (one report there), and `top`'s caller omits it too (one report there)
     const e = errs(NEST(`        const v: int = save(x) !{ ${arms} };\n        return v + 1;`, `@r = top(5) !{ ${SQLARMS} };`));
-    expect(e.length).toBe(1);
-    expect(e[0].message).toContain("Transport");
-    // and since `mid` hands nothing on, a `.Transport` arm on `top` names no variant of its set
+    expect(e.length).toBe(2);
+    expect(e.every((d) => d.message.includes("Transport"))).toBe(true);
+    // `mid` handles every failure, yet makes a server call: a carrier (stable failure set), and `top`'s `?`
+    // on it hands `Transport` on, so a `.Transport` arm on `top` is valid
     const e2 = errs(NEST(`        const v: int = save(x) !{ .Transport(t) :> 0, ${arms} };\n        return v + 1;`, `@r = top(5) !{ .Transport(t) :> 7, ${SQLARMS} };`));
-    expect(e2.length).toBe(1);
-    expect(e2[0].message).toContain("Transport");
-    // `mid` handles every failure and propagates none: `top`'s `?` on it carries SqlError only, so a
-    // handler on `top` with no `.Transport` arm is total
-    const ok = NEST(`        const v: int = save(x) !{ .Transport(t) :> 0, ${arms} };\n        return v + 1;`, `@r = top(5) !{ ${SQLARMS} };`);
-    expect(errs(ok)).toEqual([]);
+    expect(e2).toEqual([]);
+    // and a handler on `top` with no `.Transport` arm is not total
+    const bad = errs(NEST(`        const v: int = save(x) !{ .Transport(t) :> 0, ${arms} };\n        return v + 1;`, `@r = top(5) !{ ${SQLARMS} };`));
+    expect(bad.length).toBe(1);
+    expect(bad[0].message).toContain("Transport");
   });
 });
 

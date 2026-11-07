@@ -56,6 +56,7 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
+    import { isIdentifierText } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
@@ -15579,9 +15580,14 @@ ${
         for (const a of r.attrs) {
             if (a.name == "id") {
                 const t: string | not = quotedAttrText(a.value)
-                if (t is given && t != "") {
+                if (t is given) {
                     id = t
                     hasId = true
+                    // s475-boot-literal-carriers — §6.7.7 (RULED S475 second batch item 4): an `id` that is not an
+                    // identifier can never be named by `<#id>` (`state-ref ::= '<#' identifier '>'`, §15.11.2).
+                    // "The compiler SHALL report W-REQUEST-ID-UNREFERENCEABLE at the `id` attribute and SHALL still
+                    // compile the request" — `id=""` included (was E-LIFECYCLE-018 for an empty id).
+                    if (!isIdentifierText(t)) st = addDiag(st, env.file, a.span, "W-REQUEST-ID-UNREFERENCEABLE", "this `<request>`'s `id=\"" + t + "\"` is not an identifier, so no `" + hashId() + "` can name it: `" + hashId() + "` takes an identifier (§6.7.7, §15.11.2 `state-ref ::= '<#' identifier '>'`), and the request's `.loading`, `.data`, `.error`, `.stale` and `.refetch()` cannot be used. It still runs and assigns its `@variable`. Use an identifier for the `id` (`id=\"userList\"`)")
                 } else {
                     st = addDiag(st, env.file, a.span, "E-LIFECYCLE-018", "a `<request>`'s `id=` is a string literal naming it, `id=\"profile\"` (§6.7.7 grammar `id-attr ::= 'id=' string-literal`) — its `" + hashId() + "` state is reached by that name")
                     hasId = true
@@ -15599,10 +15605,14 @@ ${
             }
         }
         if (!hasId) st = addDiag(st, env.file, r.opener, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state (`.loading`, `.data`, `.error`, `.stale`, `.refetch()`); add `id=\"…\"`")
-        if (id != "") {
+        if (hasId) {
             for (const q of st.reqs) {
                 // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
-                if (q.id == id) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                // r1 (review F4): an id no `<#…>` can name has no `<#id>` ambiguity to report
+                if (q.id == id && q.pend < 0) {
+                    if (isIdentifierText(id)) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                    else st = reqUnsupported(env, r.opener, "two `<request>`s share the id `\"" + id + "\"`; give each request its own `id`", st)
+                }
             }
         }
         // ---- the body's shape ----
@@ -15701,7 +15711,7 @@ ${
         // The fact is recorded whatever the body's own diagnostics: an Error there stops lowering
         // (the diagnostics gate), and a Warning must not drop the request from the Core (fail closed —
         // lower.scrml requestView finds every request it lowers here). No `id`: E-LIFECYCLE-018 above.
-        if (!hasId || id == "") return st
+        if (!hasId) return st
         // ---- the request's facts: its four signal cells, its handle, its load bind ----
         const hb: string = "#" + reqHint(id)
         let sigs: Sym[] = []
@@ -32690,35 +32700,60 @@ ${
     // The functions whose callers receive `Transport(t: ServerCallError)` besides their declared variants:
     // §19.9.5 "Its client call fails with the §19.9.10 failure set: the function's declared error variants,
     // if it is declared `!`, plus `Transport(t: ServerCallError)`". Seeded by the composed functions; then,
-    // to a fixpoint, every client-placed `!` function that `?`-propagates a call of a carrier — `?` re-fails
-    // the callee's `Transport` as its own (§19.5.2), so its callers receive it too (PA ruling S475:
+    // to a fixpoint, every client-placed `!` function that calls a carrier (handled or `?`-propagated; see
+    // s475-boot-literal-carriers below), so its callers receive `Transport` too (PA ruling S475:
     // "recursively for client callers"). Returned as AFn nids (the composed program keeps them; Sym ids
     // are minted again).
-    // s475-boot-transport-every-client-bang — and every client-placed `!` function that `?`-propagates a
-    // CLIENT CALL OF A SERVER FUNCTION, composed or not. Owner ruling S475 item 4: "§19.9.5 extends to every
-    // client `!` function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for
-    // client functions. Newly-accepting." Was: such a function's own enum had to declare `Transport`
-    // (E-ERROR-010, §19.5.3 bullet 3). A function that HANDLES each of its server calls (`!{}` / `match`)
-    // lets no wire failure out and is not a carrier unless it composes (reading: "making a server call" whose
-    // failure its callers can receive — making it a carrier would only add an arm its callers can never run,
-    // which is newly-rejecting, against the ruling's direction).
+    // s475-boot-transport-every-client-bang — and every client-placed `!` function that makes a CLIENT CALL
+    // OF A SERVER FUNCTION, composed or not. Owner ruling S475 item 4: "§19.9.5 extends to every client `!`
+    // function making a server call (callers see `E + Transport`); retires §19.5.3 bullet 3 for client
+    // functions." Was: such a function's own enum had to declare `Transport` (E-ERROR-010, §19.5.3 bullet 3).
+    // s475-boot-literal-carriers — THE LITERAL READING (owner ruling S475 second batch, item 2: "Every client
+    // `!` function that makes a server call is a transport carrier (stable failure set, even when the call is
+    // fully handled), not only those that `?`-propagate one"). A server call handled by `!{}` or `match`
+    // seeds the function as a `?` on one does (was #1797's narrow reading: `?` only). The calls are the
+    // composition fold's handling forms (cfStmts — every statement, for-init, lift, `fail` payload,
+    // expression arm and BLOCK arm, at any depth); a client server call is always one of them (unhandled it
+    // is E-ERROR-002). A call of a CARRIER is a server call too (SPEC §19.9.5 Extended: "a client call of a
+    // server function (§19.9.10), or a call of another transport carrier"; "how the body handles the call does
+    // not matter"): handled or `?`-propagated, it makes the caller a carrier.
+    // s475-boot-literal-carriers r1 (review F2, the PA's ⚑ dead-code reading WITHDRAWN): TEXTUAL CONTAINMENT.
+    // A server call anywhere in the body — after a `return` / `fail` / `break` / `continue` included — makes
+    // the function a carrier (stable failure set: an early `return` above a function's only server call must
+    // not flip a caller's `.Transport` arm to E-TYPE-VARIANT). cfStmts already folds unreachable statements'
+    // handling forms. The fixpoint only adds functions, so it ends (recursion and mutual recursion included).
     fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> int[] {
         let syms: int[] = seeds
         const places: PlaceFact[] = t.server.places
+        // the client `!` functions that can be carriers, and their folds (one fold each)
+        let cand: FnSrc[] = []
+        let folds: CFold[] = []
+        for (const fs0 of g.fns) {
+            const sid0: int = fs0.info.sym.id
+            if (fs0.f.failable && !isServerPlace(placeOf(places, sid0)) && sum.inherited.indexOf(sid0) < 0) {
+                cand = cand.concat([fs0])
+                folds = folds.concat([cfStmts(fs0.f.body.stmts, cf0())])
+            }
+        }
         let changed = true
         while (changed) {
             changed = false
-            for (const fs of g.fns) {
-                const sid: int = fs.info.sym.id
-                if (syms.indexOf(sid) < 0 && fs.f.failable && !isServerPlace(placeOf(places, sid)) && sum.inherited.indexOf(sid) < 0) {
-                    for (const h of cfStmts(fs.f.body.stmts, cf0()).handled) {
+            let i: int = 0
+            while (i < cand.length) {
+                const sid: int = cand[i].info.sym.id
+                const fold: CFold = folds[i]
+                if (syms.indexOf(sid) < 0) {
+                    let seeded = false
+                    for (const h of fold.handled) {
                         const cs: Sym | not = fnSymAt(t, h.callee)
-                        if (!changed && h.how == 0 && cs is given && (syms.indexOf(cs.id) >= 0 || isServerPlaced(t, cs))) {
-                            syms = syms.concat([sid])
-                            changed = true
-                        }
+                        if (!seeded && cs is given && (isServerPlaced(t, cs) || syms.indexOf(cs.id) >= 0)) seeded = true
+                    }
+                    if (seeded) {
+                        syms = syms.concat([sid])
+                        changed = true
                     }
                 }
+                i = i + 1
             }
         }
         let nids: int[] = []
@@ -37504,7 +37539,10 @@ ${
     // s475-boot-caller-transport: `carriers` — the transport carriers' AFn nids (transportCarriers), which the
     // composed program's analysis is given (FnInfo.derr).
     // s475 (slice S4): `pend` — the pending cells the run found (pendingCells): their declarations' nids.
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[] }
+    // s475-boot-literal-carriers (g-boot-transport-carriers-rerun-every-carrier-s475): `retype` — some carrier's
+    // `err` would differ from its declared enum (remoteEnums: failable, an enum, no `Transport` variant), so its
+    // callers must be judged again; a carrier whose enum already declares `Transport` changes nothing.
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[], retype: boolean }
 
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
@@ -37551,7 +37589,8 @@ ${
         // (FnInfo.derr) — known only once this run composed; the program is analyzed again with them,
         // so a caller's `.Transport` arm, a handler that omits it, and a `?` carrying it up are judged as
         // the composed program will run
-        if (r1.carriers.length > 0) r1 = analyzeRun(files, entry, keyBase, nextId >= 0, r1.carriers)
+        // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
+        if (r1.retype) r1 = analyzeRun(files, entry, keyBase, nextId >= 0, r1.carriers)
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
@@ -37702,8 +37741,14 @@ ${
         }
         const carrierNids: int[] = transportCarriers(ra.g, typedT, sum, seeds)
         let quiet: int[] = cp.tried
+        let retype = false
         for (const cf2 of ra.g.fns) {
-            if (carrierNids.indexOf(cf2.info.nid) >= 0) quiet = quiet.concat([cf2.info.sym.id])
+            if (carrierNids.indexOf(cf2.info.nid) >= 0) {
+                quiet = quiet.concat([cf2.info.sym.id])
+                // remoteEnums' own condition for giving a carrier `E + Transport`
+                const ce2: Sym | not = cf2.info.err
+                if (cf2.info.failable && ce2 is given && transportShape(ra.g.types, ce2, ra.g.sceSym) < 0) retype = true
+            }
         }
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
@@ -37722,7 +37767,7 @@ ${
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
         return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum) }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype }
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {

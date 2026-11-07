@@ -1,0 +1,10 @@
+# s475-boot-literal-carriers — progress
+
+- 2026-11-07T09:41:42-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/s475-boot-literal-carriers (base 95c63e4d7)
+- 2026-11-07T09:56:54-07:00 transportCarriers widened to the literal reading (any handled server call seeds), CFold.dead withholds unreachable calls (⚑), quiet dead-only E-ERROR-010, rerun only on retype (ARun.retype). New slice-m4/literal-carriers-s475.test.js: 16 pass head, 12 fail base.
+- 2026-11-07T10:16:20-07:00 corpus sweep head vs base over 228 .scrml files with a `!` fn: 0 newly-refused, 0 newly-accepted, 0 changed (21 clean both sides). Task B: W-REQUEST-ID-UNREFERENCEABLE emitted at the id attribute via lex.scrml isIdentifierText; id="" now warns and compiles (was E-LIFECYCLE-018). Test file waits on #1807's §34 row (severity).
+- 2026-11-07T10:34:43-07:00 merged origin/s475-spec-rulings2 (#1807, open, CLEAN) so the §34 row exists; severity.scrml regenerated (W-REQUEST-ID-UNREFERENCEABLE Warning); #1807 gaps g-boot-transport-carrier-literal-reading-s475 + g-request-id-unreferenceable-not-emitted-s475 resolved; §34/§6.7.7/§19.9.5 SPEC notes + coverage rows -> emitted/BUILT. request-surface F4 updated (a-b now warns).
+- 2026-11-07T10:52:35-07:00 verification: all named suites + CI checks-job commands green (facts/SPEC-INDEX/state exit 4 = stale-warn, bot-owned). s34-census needed 'emitted at' provenance on the W row: fixed.
+- 2026-11-07T11:45:40-07:00 r1: merged origin/main (79c09f081). F1 handled carrier calls seed; F2 textual containment (CFold.dead + RCarriers.quiet removed); F4 duplicate-id message for non-identifier ids. Tests: 7 red on b55d7d100, green on head.
+- 2026-11-07T12:40:38-07:00 r1 sweep head vs origin/main 5da9ad57a: 581 files, 0 newly refused/accepted/changed (67 clean both). Doc fixes: dead-question gap reopened-resolved opposite (dead calls count), literal-reading gap text, §19.9.5 note, coverage row.
+- 2026-11-07T12:53:09-07:00 r1: flipped caller-transport + transport-every-client-bang tests that asserted handled-carrier-call = not a carrier. Verification all green (see report).
