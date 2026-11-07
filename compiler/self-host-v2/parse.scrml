@@ -4634,11 +4634,27 @@ ${
         while (isP(r.tp, "[")) {
             let g: TP = adv(r.tp)
             let grants: string[] = []
+            // s475 r1 (#1812 review F3): a bounded length (`1..=3`, §66.12.2) — a run of tokens that
+            // starts with a number, up to the next comma — is ONE grant word, as the attribute form
+            // reads it (grantWords): never dropped, so `int[1..=3, append]` is judged by its bound,
+            // not read as fixed. Other tokens are skipped as before (a refinement's `[.A, .B]` list
+            // is read by its own form).
+            let odd: string = ""
             while (!isP(g, "]") && !atEnd(g)) {
                 const w: PTok = cur(g)
-                if (w.cls == TC.Ident || w.cls == TC.Keyword) grants = grants.concat([w.v])
+                if (w.cls == TC.Ident || w.cls == TC.Keyword) {
+                    if (odd != "") grants = grants.concat([odd])
+                    odd = ""
+                    grants = grants.concat([w.v])
+                } else if (isP(g, ",")) {
+                    if (odd != "") grants = grants.concat([odd])
+                    odd = ""
+                } else if (odd != "" || w.cls == TC.Num) {
+                    odd = odd + w.text
+                }
                 g = adv(g)
             }
+            if (odd != "") grants = grants.concat([odd])
             g = expectP(g, "]")
             r = mkT(g, start, ATypeK.TSeq(r.t, grants))
         }

@@ -238,8 +238,10 @@ describe("the grant lens — a loop never gets a write past §66.12.6", () => {
     click(btn("b"));
     expect($("#n").textContent).toBe("3");
   });
-  test("a local tape is edited by no loop (the existing local-edit refusal holds in a body)", () => {
-    expect(fnCodes(`        let ys: int[free, append] = [];\n        for (i of 0..3) { ys.append(i); }\n        return ys.length;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a local tape edited in a loop body is judged by its type's grants, as outside one (s475)", () => {
+    // s475 (s475-boot-local-tape-edits): local tape edits are in the bootstrap (§66.12.6 rules 1 and 3)
+    expect(fnCodes(`        let ys: int[free, append] = [];\n        for (i of 0..3) { ys.append(i); }\n        return ys.length;`)).toEqual([]);
+    expect(fnCodes(`        let ys: int[free, pop] = [];\n        for (i of 0..3) { ys.append(i); }\n        return ys.length;`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
   test("a server wait in a loop is refused — the loop cannot wait yet (C19)", () => {
     const S = `    function g(id: string) -> string {\n        const r: string = ?{\`SELECT name FROM t WHERE id = \${id}\`}.get() !{ _ :> { return ""; } };\n        return r;\n    }`;

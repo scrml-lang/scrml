@@ -292,7 +292,16 @@ ${
         ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
         EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
+        // s475 (s475-boot-local-tape-edits) — a GRANTED in-place edit of a LOCAL tape
+        // (a `let` / `const` / parameter; §66.12.6 rules 1 and 3): `xs.append(v)` …
+        // `xs.remove(i)`, judged by the local's TYPE grants (§66.12.3). Core: the
+        // local rebound to the edited value (Stmt.Assign of a Prim TapeAppend …),
+        // so no alias of the old value sees it (§66.10). `arg`: the element
+        // (append / prepend) or the index (remove); `elem`: the element type the
+        // typer checks an element against (`not`: unchecked).
+        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not),
     }
+    export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt }
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
     // (`name` as written, for the narrowing key), or a tape position.
     export type LStep:enum = {
@@ -7412,13 +7421,15 @@ ${
         // lowered to a placeholder.
         if (isIndexExpr(obj) && name != "length") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a field of an index read (`xs[i]." + name + "`) is not in the bootstrap yet — bind the element first: `const x = xs[i]`, then `x." + name + "`", st)
         // `.length` of a sequence or a string is a primitive (a read, never a place).
-        if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
+        // s475: of a call result too — the called function's declared return type (recvType)
+        const lty: Type | not = recvType(env, obj, ro)
+        if (name == "length" && ro.x.inst is not && isLengthOf(lty)) {
             // s469 (bryan: "code points everywhere, `.length` included"): a
             // STRING's length counts code points — Core StrLength, recorded as
             // the member node's value fact (lower reads it first); a tape's
             // stays Length (its element count)
             const lst: AS = addName(st, e.nid, NameFact.NLength)
-            if (ro.x.ty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
+            if (lty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
             return plain(Type.Int, lst)
         }
         const inst: InstRef | not = ro.x.inst
@@ -7798,6 +7809,8 @@ ${
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
+                // s475: `xs.some(x => b)` / `xs.every(x => b)` — a `bool` (§66.12.1)
+                if (m.method == "some" || m.method == "every") return resolveSeqCall(env, e, m, args, st0)
                 // s469 — `xs.sort((a, b) => …)`: a comparator (a SeqCall, like filter / map)
                 if (m.method == "sort" && args.length == 1) return resolveSortBy(env, e, m, args, st0)
                 // s469 — `xs.at(i)` (§49.13): `T | not`, never a trap
@@ -7822,7 +7835,7 @@ ${
                 const su: RX | not = unknownStrMethod(env, e, m, args, st0)
                 if (su is given) return su
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
@@ -8305,12 +8318,14 @@ ${
         const ro: RX = resolveExpr(env, m.obj, not, st0)
         let st: AS = ro.st
         let elem: Type | not = not
-        const ot: Type | not = ro.x.ty
+        const ot: Type | not = recvType(env, m.obj, ro)
         const isFilter: boolean = m.method == "filter"
         // what a refusal still answers (a filter keeps the receiver's type), so
         // a `.length` after a refused call is not a second report
         let guess: Type | not = not
         if (isFilter && ot is given) guess = ungranted(ot)
+        const isPred: boolean = m.method == "some" || m.method == "every"
+        if (isPred) guess = Type.Bool
         if (ot is given) {
             elem = seqElem(ot)
             if (elem is not) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)"))
@@ -8327,12 +8342,17 @@ ${
             want = Type.Bool
             op = SeqFn.Filter
         }
+        if (isPred) {
+            want = Type.Bool
+            op = SeqFn.Every
+            if (m.method == "some") op = SeqFn.Some
+        }
         const rl: RX = resolveLambda(env, lam, ps, elem, want, st)
         st = rl.st
         // a filter keeps the receiver's type; a map is a sequence of the body's
         // type with the receiver's length (s469 F/U-5: a NEW tape — no grants, §66.12.6 rule 3)
         let result: Type | not = guess
-        if (!isFilter) result = mappedType(ot, rl.x.ty)
+        if (!isFilter && !isPred) result = mappedType(ot, rl.x.ty)
         return plain(result, addValue(st, e.nid, ValueFact.VSeqCall(op)))
     }
 
@@ -8535,6 +8555,7 @@ ${
         if (el is not) return not
         if (n == "reverse") return PrimOp.Reverse
         if (n == "join" && el == Type.Str) return PrimOp.Join
+        if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
         if (n == "sort") {
             if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
             if (el == Type.Str) return PrimOp.SortStr
@@ -8585,14 +8606,25 @@ ${
         return []
     }
 
+    // s475 — a built-in's signature on a receiver of type `recv`: methodSig, except
+    // a tape's `includes(x)`, whose argument is a value of the receiver's ELEMENT type.
+    fn methodSigFor(op: PrimOp, recv: Type) -> Type[] {
+        if (op == PrimOp.TapeIncludes) {
+            const el: Type | not = seqElem(recv)
+            if (el is given) return [el]
+        }
+        return methodSig(op)
+    }
+
     fn methodMinArity(op: PrimOp) -> int {
-        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) return 1
+        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes) return 1
         return methodSig(op).length
     }
 
     // The result type of a built-in on a receiver of type `recv`.
     fn methodResult(op: PrimOp, recv: Type) -> Type {
         if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return Type.Bool
+        if (op == PrimOp.TapeIncludes) return Type.Bool
         if (op == PrimOp.StrIndexOf || op == PrimOp.StrLastIndexOf) return Type.Maybe(Type.Int)
         if (op == PrimOp.ParseInt) return Type.Maybe(Type.Int)
         if (op == PrimOp.ParseNum) return Type.Maybe(Type.Num)
@@ -8619,7 +8651,7 @@ ${
         if (op == PrimOp.StrTrim) return "trim"
         if (op == PrimOp.StrSlice) return "slice"
         if (op == PrimOp.StrCharAt) return "charAt"
-        if (op == PrimOp.StrIncludes) return "includes"
+        if (op == PrimOp.StrIncludes || op == PrimOp.TapeIncludes) return "includes"
         if (op == PrimOp.StrStartsWith) return "startsWith"
         if (op == PrimOp.StrEndsWith) return "endsWith"
         if (op == PrimOp.StrSplit) return "split"
@@ -8657,7 +8689,7 @@ ${
     fn resolveMethod(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX {
         const ro: RX = resolveExpr(env, m.obj, not, st0)
         const st: AS = ro.st
-        const ot: Type | not = ro.x.ty
+        const ot: Type | not = recvType(env, m.obj, ro)
         const call: string = "`." + m.method + "(…)`"
         if (ot is not) {
             if (strMethodOp(m.method) is not && strReceiver(env, m.obj, ro)) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
@@ -8684,17 +8716,17 @@ ${
                 return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
             }
             if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
-            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.filter(x => …)`, `.map(x => …)`", args, st)
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.includes(x)`, `.filter(x => …)`, `.map(x => …)`, `.some(x => …)`, `.every(x => …)`", args, st)
         }
         const lo: int = methodMinArity(op)
-        const hi: int = methodSig(op).length
+        const hi: int = methodSigFor(op, ot).length
         if (args.length < lo || args.length > hi) {
             let want: string = hi + " argument(s)"
             if (lo != hi) want = lo + " or " + hi + " arguments"
             if (m.method == "sort") want = "no argument (the natural order) or one comparator `(a, b) => …`"
             return refuseMethod(env, e, "E-CALL-ARITY", "`." + m.method + "(…)` takes " + want + "; " + args.length + " given", args, st)
         }
-        const sig: Type[] = methodSig(op)
+        const sig: Type[] = methodSigFor(op, ot)
         let st2: AS = st
         let i = 0
         for (const a of args) {
@@ -8823,6 +8855,24 @@ ${
         return isStrOrMaybeStr(r)
     }
 
+    // s475 (s475-boot-local-tape-edits; gap g-bootstrap-method-on-call-result-refused-s469) — the
+    // type of a built-in method's RECEIVER: the binder's type for it, or — the binder
+    // types no call result — the declared return type of the scrml function it calls
+    // (the function's own `ret`, as strReceiver reads it), so `three().sort()` with
+    // `fn three() -> int[]` has its receiver's type. Only a plain function's result: a
+    // failable (`!`) or a server function's call is a value only once handled /
+    // awaited, and keeps the refusal its own path gives it.
+    fn recvType(env: Env, obj: AExpr, ro: RX) -> Type | not {
+        const rt: Type | not = ro.x.ty
+        if (rt is given) return rt
+        const c: AExpr | not = calleeOf(obj.k)
+        if (c is not) return not
+        const f: FnInfo | not = calledFn(env, nameFactIn(ro.st, c.nid))
+        if (f is not) return not
+        if (f.failable || f.serverOwn || f.host is given) return not
+        return f.ret
+    }
+
     fn isStrOrMaybeStr(t: Type) -> boolean {
         if (t == Type.Str) return true
         const i: Type | not = maybeInner(t)
@@ -8843,7 +8893,7 @@ ${
     fn resolveSortBy(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX {
         const ro: RX = resolveExpr(env, m.obj, not, st0)
         let st: AS = ro.st
-        const ot: Type | not = ro.x.ty
+        const ot: Type | not = recvType(env, m.obj, ro)
         if (ot is not) return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type", args, st)
         const elem: Type | not = seqElem(ot)
         if (elem is not) return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`.sort(…)` on a value that is not a tape (it is `" + typeName(ot) + "`)", args, st)
@@ -10593,6 +10643,14 @@ ${
             // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
             // the typer's (typeAssign → localTapeProblems), where an inferred type is known
             st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, [], not))
+            // s475 (s475-boot-local-tape-edits): the recognized grow shapes of the local
+            // itself, `xs = [...xs, e]` / `xs = [e, ...xs]` (§66.11.2; §66.12.6 rule 4 —
+            // the typer classifies the edit and judges it by the local's TYPE grants):
+            // the one place a spread value stands in the bootstrap outside a cell's edit
+            // shape (lowered to a TapeConcat, lower.scrml arrayValue). INTERIM (gap
+            // g-boot-spread-value-s475): the capable form is a spread in every tape value.
+            const lshape: int = seqEditShapeKey(l.name, value)
+            if (lshape == 1 || lshape == 2) return resolveLocalGrowShape(env, value, l, st)
             return resolveExpr(env, value, l.ty, st).st
         }
         const p: WPlace | not = rp.place
@@ -10609,6 +10667,25 @@ ${
         const w: WriteFact | not = rw.w
         if (w is given) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
+    }
+
+    // s475 — the elements of `xs = [...xs, e…]` / `xs = [e…, ...xs]` on a local `xs`:
+    // the spread operand is a read of the local itself, every other element a value
+    // of the local's element type (an object literal has its struct from it).
+    fn resolveLocalGrowShape(env: Env, value: AExpr, l: LocalB, st0: AS) -> AS {
+        let st: AS = st0
+        const lt: Type | not = l.ty
+        let el: Type | not = not
+        if (lt is given) el = seqElem(lt)
+        for (const x of arrayElems(value)) {
+            const inner: AExpr | not = spreadInner(x)
+            if (inner is given) {
+                st = resolveExpr(env, inner, lt, st).st
+            } else {
+                st = resolveExpr(env, x, el, st).st
+            }
+        }
+        return st
     }
 
     // s469 review r2: the advice depends on whether the local can be rebound —
@@ -11087,6 +11164,16 @@ ${
         if (jm is given) {
             const tj: AS | not = tapeMethodStmt(env, e, jm, args, st)
             if (tj is given) return tj
+        }
+        // s475 (s475-boot-local-tape-edits): an edit method on a LOCAL tape — a `let`,
+        // a `const`, a parameter (§66.12.6 rules 1 and 3) — judged by the local's TYPE
+        // grants (the typer, localEditProblems) and lowered to a rebinding of the local
+        const lm: MethodCall | not = memberCall(callee)
+        if (lm is given) {
+            if (rootIsLocal(env, lm.obj)) {
+                const le: AS | not = resolveLocalEdit(env, e, lm, args, st)
+                if (le is given) return le
+            }
         }
         const rmv: MethodCall | not = removeCall(callee)
         if (rmv is given) {
@@ -11595,6 +11682,67 @@ ${
         }
     }
 
+    // s475 (s475-boot-local-tape-edits) — an edit METHOD on the local tape `name` of
+    // type `lt` (§66.12.6 rule 3's table): granted by the type's grants through the
+    // one predicate (grantsAdmit; `insert` / `remove` cover the end and the front,
+    // S442), and the length invariant checked on every write (§66.11.2): a type with
+    // no `free` grant fixes the length, so a grow or a shrink provably breaks it.
+    // `lt` not a tape (a struct, a string, a host value): there is no such tape method.
+    fn localEditProblems(name: string, lt: Type, tyText: string, op: LocalEdit) -> TapeDiag[] {
+        const meth: string = localEditMethodName(op)
+        const call: string = localEditCall(op)
+        if (maybeInner(lt) is given) return [{ code: "E-BOOTSTRAP-UNSUPPORTED", msg: "`" + name + "." + call + "` edits `" + name + "`, which is `" + typeName(lt) + "` — it may be `not`, and an edit through a `T | not` value is not in the bootstrap yet; bind the present value first" }]
+        const tg: GrantSet | not = tapeGrants(lt)
+        if (tg is not) return [{ code: "E-BOOTSTRAP-UNSUPPORTED", msg: "`" + name + "." + call + "`: `" + name + "` is `" + typeName(lt) + "`, not a tape — `." + meth + "` is a tape edit (§66.12.6 rule 3)" }]
+        let edit: EditKind = EditKind.Append
+        let what: string = "an end-append (granted by `append`, or `insert`)"
+        let grows: boolean = true
+        if (op == LocalEdit.LPrepend) {
+            edit = EditKind.Prepend
+            what = "a front-prepend (granted by `prepend`, or `insert`)"
+        }
+        if (op == LocalEdit.LPop) {
+            edit = EditKind.RemoveEnd
+            what = "a removal at the end (granted by `pop`, or `remove`)"
+            grows = false
+        }
+        if (op == LocalEdit.LShift) {
+            edit = EditKind.RemoveFront
+            what = "a removal at the front (granted by `shift`, or `remove`)"
+            grows = false
+        }
+        if (op == LocalEdit.LRemoveAt) {
+            edit = EditKind.RemoveAnywhere
+            what = "a removal anywhere (granted by `remove`)"
+            grows = false
+        }
+        if (!grantsAdmit(tg, edit)) {
+            return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + name + "." + call + "` is " + what + ", which the local tape `" + name + "`'s type (`" + tyText + "`) does not grant — a tape's grants govern it in every position, a local and a parameter included, and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469); write the grant in the type (`" + name + ": T[free, " + meth + "]`)" }]
+        }
+        if (growsFixed(lt)) {
+            let verb: string = "shrinks"
+            if (grows) verb = "grows"
+            return [{ code: "E-WRITE-INVARIANT", msg: "`" + name + "." + call + "` " + verb + " the local tape `" + name + "`, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)" }]
+        }
+        return []
+    }
+
+    fn localEditCall(op: LocalEdit) -> string {
+        const m: string = localEditMethodName(op)
+        if (op == LocalEdit.LPop || op == LocalEdit.LShift) return m + "()"
+        return m + "(…)"
+    }
+
+    fn localEditMethodName(op: LocalEdit) -> string {
+        return match op {
+            .LAppend :> "append"
+            .LPrepend :> "prepend"
+            .LPop :> "pop"
+            .LShift :> "shift"
+            .LRemoveAt :> "remove"
+        }
+    }
+
     fn localTapeEdit(name: string, tyText: string, tg: GrantSet, fixed: boolean, value: AExpr) -> TapeDiag[] {
         const shape: int = seqEditShapeKey(name, value)
         let edit: EditKind = EditKind.Replace
@@ -11752,12 +11900,29 @@ ${
                     where = where.concat([gp])
                 } else if (sp is given) {
                     shrinks = shrinks.concat([sp])
+                } else if (isBoundWord(g)) {
+                    st = addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", boundRefusal(g))
                 } else {
                     st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
                 }
             }
         }
         return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
+    }
+
+    // s475 r1 (#1812 review F3) — a bounded length `a..=b` / `a..b` (§66.12.2, the length axis) on any
+    // tape type — a cell, a field, a local, a parameter. INTERIM (gap g-boot-bounded-length-unenforced-s475):
+    // the bound is checked on every write (§66.11.2: "a length bound … checked on every write"), and how a
+    // write whose length the compiler cannot prove is enforced is ⚑ O36 — so the bootstrap refuses the
+    // bound rather than accept a length it never enforces. The capable form is bound enforcement: a provable
+    // violation E-WRITE-INVARIANT, the unprovable case per O36's ruling.
+    fn isBoundWord(g: string) -> boolean {
+        if (g.length == 0) return false
+        return "0123456789".indexOf(g.slice(0, 1)) >= 0 && g.indexOf("..") > 0
+    }
+
+    fn boundRefusal(g: string) -> string {
+        return "a bounded length `" + g + "` is not in the bootstrap yet — the bound is checked on every write (§66.11.2), and how a write whose length cannot be proven is enforced is not ruled (⚑ O36); the bootstrap enforces no bound, so it refuses one rather than accept a length it never checks. Write `free` (any length) or no length grant (a fixed length)"
     }
 
     // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
@@ -12209,12 +12374,73 @@ ${
         }
     }
 
-    // An edit method on a local sequence: its values are resolved, and it is
-    // refused — Core has no in-place edit of a local (dpa-052 Q2 puts locals
-    // under their type's grants; the bootstrap cannot lower one either way).
+    // An edit method on a part of a local (`p.xs.append(v)`, `xs[i].append(v)`), or
+    // on a local whose type the compiler cannot resolve: its values are resolved, and
+    // it is refused. INTERIM (gap g-boot-local-tape-part-edit-s475): the capable form
+    // is the edit of the part, judged by the part's own tape grants (§66.12.6 rule 1)
+    // and lowered as a local part write (Stmt.Assign with a path) of the edited part.
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)")
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a part of a local (a field or a position of it), or on a local whose type the compiler cannot resolve, is not in the bootstrap yet — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
+    }
+
+    // s475 (s475-boot-local-tape-edits) — `xs.append(v)` / `xs.prepend(v)` /
+    // `xs.pop()` / `xs.shift()` / `xs.remove(i)` on a LOCAL tape `xs` (a `let`, a
+    // `const`, a parameter). §66.12.6 rule 1: "A tape's grants govern every write to
+    // it, in each position that can hold one: … a local binding … a function
+    // parameter: the callee can do only what its parameter type grants"; rule 3: each
+    // method "is checked against the target's grants exactly as a whole-value write
+    // is". Recorded here (ELocalEdit) and JUDGED by the typer (localEditProblems),
+    // where an un-annotated local's inferred type is known (rule 1: it carries no
+    // grant). The element is resolved against the local's WRITTEN element type, so
+    // an object literal has its struct. `not`: not a local tape edit — the caller's
+    // paths take it (a host value's own `remove()`, a non-tape local).
+    // `insert(i, x)` is refused, INTERIM (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469): its
+    // index past the end breaks the per-position type (E-WRITE-INVARIANT), and how
+    // that is enforced where the index is not provable is ⚑ O36 (§66.12.6 rule 3).
+    fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
+        const meth: string = m.method
+        const editName: boolean = meth == "append" || meth == "prepend" || meth == "pop" || meth == "shift"
+        if (!editName && meth != "remove" && meth != "insert") return not
+        const n: string = exprName(m.obj)
+        const l: LocalB | not = lookupLocal(env, n)
+        if (n == "" || l is not) {
+            if (editName) return localEditRefused(env, e, meth, args, st0)
+            return not
+        }
+        let wt: Type | not = writtenLocalType(st0, l.s)
+        if (wt is not) wt = l.ty
+        // `remove` / `insert` are tape methods only on a tape (a host value has its own)
+        if (!editName) {
+            if (wt is not) return not
+            if (seqElem(unMaybe(wt)) is not) return not
+        }
+        if (isRowLocal(env, l)) return localEditRefused(env, e, meth, args, st0)
+        let st: AS = resolveExpr(env, m.obj, not, st0).st       // the receiver: an appearance of the local
+        if (meth == "insert") return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".insert(i, x)` is not in the bootstrap yet — an index past the end would break the tape's per-position type (E-WRITE-INVARIANT, §66.12.6 rule 3), and how that is enforced where the index is not provable is not ruled (⚑ O36). Rebuild the tape (`" + n + " = …`, granted by the shape it is) or use `append` / `prepend`")
+        let op: LocalEdit = LocalEdit.LAppend
+        if (meth == "prepend") op = LocalEdit.LPrepend
+        if (meth == "pop") op = LocalEdit.LPop
+        if (meth == "shift") op = LocalEdit.LShift
+        if (meth == "remove") op = LocalEdit.LRemoveAt
+        let el: Type | not = not
+        if (wt is given) el = seqElem(wt)
+        const takesArg: boolean = meth == "append" || meth == "prepend" || meth == "remove"
+        if (takesArg && args.length != 1) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "(…)` takes exactly one " + localEditArgWhat(meth) + " (§66.12.6 rule 3: each grow method adds ONE value — call it once per value)")
+        if (!takesArg && args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "()` takes no argument")
+        let arg: AExpr | not = not
+        if (takesArg) {
+            arg = args[0]
+            let want: Type | not = el
+            if (meth == "remove") want = Type.Int
+            st = resolveExpr(env, args[0], want, st).st
+        }
+        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el))
+    }
+
+    fn localEditArgWhat(meth: string) -> string {
+        if (meth == "remove") return "position (an `int`)"
+        return "value"
     }
 
     fn fixedShrinkMessage(name: string, what: string) -> string {
@@ -16750,6 +16976,7 @@ ${
     fn isLocalRebind(f: EffectFact | not) -> boolean {
         return match f {
             .EAssignLocal(sym: s, path: pa) :> pa.length == 0      // s472: a part write rebinds no counter
+            .ELocalEdit(sym: s) :> false                             // s475: an edit is not a counter step
             .EWrite(w: w) :> false
             .ESpread(ws: ws) :> false
             .EReset(w: w) :> false
@@ -17506,6 +17733,7 @@ ${
         const ef: EffectFact | not = effectFactIn(st, e.nid)
         const ok: boolean = match ef {
             .EAssignLocal(sym: s, path: pa) :> s.id == sym.id && pa.length > 0
+            .ELocalEdit(sym: s) :> s.id == sym.id                    // s475: an edit writes the binder
             .EWrite(w: x) :> false
             .ESpread(ws: x) :> false
             .EReset(w: x) :> false
@@ -22491,6 +22719,7 @@ ${
     fn reboundId(f: EffectFact) -> string {
         return match f {
             .EAssignLocal(sym: s) :> "" + s.id
+            .ELocalEdit(sym: s) :> "" + s.id                         // s475: an edit rebinds the local
             .EWrite(w: w) :> ""
             .ESpread(ws: ws) :> ""
             .EReset(w: w) :> ""
@@ -24091,6 +24320,7 @@ ${
             .ERemove(w: w) :> [oneWrite(w)]
             .EElemAt(cap: c) :> []
             .EPosition(cap: c) :> []
+            .ELocalEdit(sym: s) :> []
             not :> []
         }
     }
@@ -24107,6 +24337,7 @@ ${
             .ERemove(w: w) :> false
             .EElemAt(cap: c) :> false
             .EPosition(cap: c) :> false
+            .ELocalEdit(sym: s) :> false
             not :> false
         }
     }
@@ -24122,6 +24353,7 @@ ${
             .ERemove(w: w) :> not
             .EElemAt(cap: c) :> not
             .EPosition(cap: c) :> not
+            .ELocalEdit(sym: s) :> not
             not :> not
         }
     }
@@ -24535,11 +24767,11 @@ ${
 
     // s444 — the type of a call that names no function: a host call's, or a
     // filter's (the sequence it filters — the same type).
-    fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, ts: TypeState) -> VType {
+    fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts: TypeState) -> VType {
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         return match f {
             .VHost(call: c) :> known(Type.Num)
-            .VSeqCall(op: o) :> seqCallType(ts, o, callee)
+            .VSeqCall(op: o) :> seqCallType(ts, o, callee, args)
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
             .VStructOf(ty: s) :> VType.Unknown
@@ -24575,7 +24807,22 @@ ${
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         const op: PrimOp | not = methodOfFact(f)
         if (op is not) return comparatorCheck(env, f, args, ts0)
-        const sig: Type[] = methodSig(op)
+        let sig: Type[] = methodSig(op)
+        // s475: a tape's `includes(x)` — the argument against the receiver's element type
+        // s475 r1 (#1812 review F4): a receiver whose type the typer cannot name fails closed — the
+        // argument is never compared unchecked
+        if (op == PrimOp.TapeIncludes) {
+            sig = []
+            const cl: AExpr | not = calleeOf(e.k)
+            if (cl is given) {
+                const ob: AExpr | not = memberObj(cl)
+                if (ob is given) {
+                    const rt: Type | not = knownOf(exprType0(ts0, ob.nid))
+                    if (rt is given) sig = methodSigFor(op, rt)
+                    if (rt is not && !hasErrIn(env.errs, ob.span)) return report(ts0, env, ob.span, "E-BOOTSTRAP-UNSUPPORTED", "`.includes(…)` on a tape whose type the compiler cannot resolve here — its argument cannot be checked against the element type (§66.12.1); bind the tape to an annotated `const` first")
+                }
+            }
+        }
         let ts: TypeState = ts0
         let i = 0
         for (const a of args) {
@@ -24594,6 +24841,7 @@ ${
     }
 
     fn comparatorCheck(env: TEnv, f: ValueFact | not, args: AExpr[], ts: TypeState) -> TypeState {
+        if (isPredFact(f) && args.length == 1) return predicateCheck(env, f, args[0], ts)
         if (!isSortByFact(f) || args.length != 1) return ts
         const body: AExpr | not = lambdaBody(args[0])
         if (body is not) return ts
@@ -24602,6 +24850,75 @@ ${
         if (hasErrIn(env.errs, body.span)) return ts
         if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the comparator of `.sort(…)` returns a value whose type the compiler cannot resolve — it must return a number (negative: `a` first; positive: `b` first; zero: keep their order)")
         return report(ts, env, body.span, "E-TYPE-031", "the comparator of `.sort(…)` must return a number (negative: `a` first; positive: `b` first; zero: keep their order), and this one returns `" + typeName(bt) + "` (S440 #10)")
+    }
+
+    // s475 — the predicate of `xs.some(x => b)` / `xs.every(x => b)` is a `bool`
+    // (a condition: no truthiness, §66.12.1's predicate methods return a `bool`).
+    // A predicate whose type is not known is refused (fail closed).
+    // s475 r1 (#1812 review F8, gap g-boot-filter-predicate-not-bool-checked-s475): `xs.filter(x => b)`'s
+    // too — scrml has no truthiness (§42.4), so a non-`bool` predicate is no condition.
+    fn predicateCheck(env: TEnv, f: ValueFact | not, lam: AExpr, ts: TypeState) -> TypeState {
+        const body: AExpr | not = lambdaBody(lam)
+        if (body is not) return ts
+        const bt: Type | not = knownOf(exprType0(ts, body.nid))
+        if (bt == Type.Bool) return ts
+        if (hasErrIn(env.errs, body.span)) return ts
+        if (typedErrIn(ts, body.span)) return ts     // the body's own error (the typer's) is the one report
+        const m: string = predMethod(f)
+        if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the predicate of `." + m + "(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`")
+        return report(ts, env, body.span, "E-TYPE-031", "the predicate of `." + m + "(…)` must return a `bool`, and this one returns `" + typeName(bt) + "` — scrml has no truthiness (§42.4): say what you test (`x == 0`, `x is given`)")
+    }
+
+    // s475 r1: did the typer already report inside `span` (one report per fault, §42.4 statement 6)?
+    fn typedErrIn(ts: TypeState, span: ASpan) -> boolean {
+        for (const d of ts.diags) {
+            if (d.span.start >= span.start && d.span.end <= span.end) return true
+        }
+        return false
+    }
+
+    fn predMethod(f: ValueFact | not) -> string {
+        if (isSeqFact(f, SeqFn.Filter)) return "filter"
+        if (isSeqFact(f, SeqFn.Some)) return "some"
+        return "every"
+    }
+
+    fn isSeqFact(f: ValueFact | not, want: SeqFn) -> boolean {
+        return match f {
+            .VSeqCall(op: o) :> o == want
+            .VMethod(op: o) :> false
+            .VToEnum(enumSym: s) :> false
+            .VIndex(loc: zl) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
+    }
+
+    fn isPredFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VSeqCall(op: o) :> o == SeqFn.Some || o == SeqFn.Every || o == SeqFn.Filter    // s475 r1 F8: `filter`'s predicate too
+            .VMethod(op: o) :> false
+            .VToEnum(enumSym: s) :> false
+            .VIndex(loc: zl) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
     }
 
     fn isSortByFact(f: ValueFact | not) -> boolean {
@@ -24687,13 +25004,24 @@ ${
         }
     }
 
-    fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr) -> VType {
+    fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr, args: AExpr[]) -> VType {
+        if (o == SeqFn.Some || o == SeqFn.Every) return known(Type.Bool)
         const isFilter: boolean = o == SeqFn.Filter || o == SeqFn.SortBy
-        if (!isFilter) return VType.Unknown
         const obj: AExpr | not = memberObj(callee)
         if (obj is not) return VType.Unknown
         const rt: Type | not = knownOf(exprType0(ts, obj.nid))
         if (rt is not) return VType.Unknown
+        // s475 r1 (#1812 review F4): a map is a NEW tape of its body's type, the receiver's length
+        // (mappedType, as the resolver reads it) — so a method on it (`.includes`) has a typed receiver
+        if (o == SeqFn.Map) {
+            if (args.length != 1) return VType.Unknown
+            const body: AExpr | not = lambdaBody(args[0])
+            if (body is not) return VType.Unknown
+            const mt: Type | not = mappedType(rt, knownOf(exprType0(ts, body.nid)))
+            if (mt is not) return VType.Unknown
+            return known(mt)
+        }
+        if (!isFilter) return VType.Unknown
         return known(ungranted(rt))      // s469 F/U-5: a new tape carries its own type's grants — none
     }
 
@@ -24836,6 +25164,13 @@ ${
             .ParseNum :> ts
             .ParseBool :> ts
             .Text :> ts
+            .TapeAppend :> ts
+            .TapePrepend :> ts
+            .TapeDropEnd :> ts
+            .TapeDropFront :> ts
+            .TapeRemoveAt :> ts
+            .TapeConcat :> ts
+            .TapeIncludes :> ts
         }
     }
 
@@ -25572,6 +25907,13 @@ ${
             .ParseNum :> VType.Unknown
             .ParseBool :> VType.Unknown
             .Text :> known(Type.Str)
+            .TapeAppend :> VType.Unknown
+            .TapePrepend :> VType.Unknown
+            .TapeDropEnd :> VType.Unknown
+            .TapeDropFront :> VType.Unknown
+            .TapeRemoveAt :> VType.Unknown
+            .TapeConcat :> VType.Unknown
+            .TapeIncludes :> VType.Unknown
         }
     }
 
@@ -25696,10 +26038,22 @@ ${
         for (const e of es) {
             const r: RVT = typeExpr(env, e, ts)
             ts = r.ts
+            // s475: a spread `...xs` (a local's grow shape) contributes its tape's
+            // ELEMENT type; a spread whose type is not a known tape leaves it unknown
+            let ev: VType = r.vt
+            const inner: AExpr | not = spreadInner(e)
+            if (inner is given) {
+                ev = VType.Unknown
+                const it: Type | not = knownOf(exprType0(ts, inner.nid))
+                if (it is given) {
+                    const iel: Type | not = seqElem(it)
+                    if (iel is given) ev = known(iel)
+                }
+            }
             if (first) {
-                elem = r.vt
+                elem = ev
             } else {
-                elem = joinVT(elem, r.vt)
+                elem = joinVT(elem, ev)
             }
             first = false
         }
@@ -25734,7 +26088,7 @@ ${
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
         // value fact (VToEnum / VAt / VMethod or a SortBy comparator) and the identity otherwise
-        if (s is not) return rvt(builtinCallType(env, e, callee, ts), methodArgCheck(env, e, args, atArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts))))
+        if (s is not) return rvt(builtinCallType(env, e, callee, args, ts), methodArgCheck(env, e, args, atArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts))))
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity
@@ -26518,6 +26872,7 @@ ${
             .ERemove(w: w) :> ""
             .EElemAt(cap: c) :> ""
             .EPosition(cap: c) :> ""
+            .ELocalEdit(sym: s) :> ""
             not :> ""
         }
     }
@@ -26810,7 +27165,12 @@ ${
             if (ls is given) {
                 if (bareLocal) placeType = tLocal(env, ls)
                 const la: Type | not = annotOf(env.t, ls)
-                if (la is given && bareLocal) {
+                // s475 r1 (#1812 review F2): a grow shape `xs = [...xs, e]` / `[e, ...xs]` is checked
+                // element by element (growShapeElems) — its joined type is unknown whenever an element
+                // does not fit, so the whole-value check below would pass it silently
+                const grow: int = seqEditShapeKey(exprName(target), value)
+                const growShape: boolean = bareLocal && (grow == 1 || grow == 2)
+                if (la is given && bareLocal && !growShape) {
                     // a write to an annotated local: checked like a cell write
                     ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
                 } else if (la is not && bareLocal) {
@@ -26831,12 +27191,30 @@ ${
                     let tds: TapeDiag[] = inferredTapeProblems(exprName(target), value, knownOf(r.vt))
                     if (lt is given) tds = localTapeProblems(env.t.types, exprName(target), lt, value)
                     for (const d of tds) { ts1 = report(ts1, env, target.span, d.code, d.msg) }
+                    if (growShape && tds.length == 0 && lt is given) ts1 = growShapeElems(env, exprName(target), lt, value, ts1)
                 }
             }
         }
         let ts2: TypeState = typePlace(env, target, placeType, ts1)
         for (const sw of ws) { ts2 = checkWrite(env, sw.w, r.vt, value, placeLabel(target), ts2) }
         return record(ts2, e.nid, VType.Unknown)
+    }
+
+    // s475 r1 (#1812 review F2) — the elements a grow shape `xs = [...xs, e…]` / `[e…, ...xs]` adds,
+    // each checked against the local's element type exactly as `xs.append(e)` checks its value
+    // (typeLocalEdit: checkValue, then the struct-literal fields, then no `not` into a non-optional
+    // element; §66.1 rule 5, §66.12.6 rule 3). The local's type is its annotation or a parameter's
+    // written type (`lt`); a tape whose element type the typer cannot name fails closed.
+    fn growShapeElems(env: TEnv, name: string, lt: Type, value: AExpr, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        const el: Type | not = seqElem(unMaybe(lt))
+        if (el is not) return report(ts, env, value.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + " = [...]` grows the local `" + name + "`, whose element type the compiler cannot name here, so the elements it adds cannot be checked — annotate the local (`let " + name + ": T[free, append] = …`)")
+        for (const x of arrayElems(value)) {
+            if (spreadInner(x) is not) {
+                ts = checkNotElems(env, x, el, checkLitFields(env, x, checkValue(env, exprType0(ts, x.nid), el, x.span, "an element of `" + name + "`", ts)))
+            }
+        }
+        return ts
     }
 
     // s472 — what the typer checks of a part write / a position write: its index
@@ -26847,6 +27225,7 @@ ${
         return match f {
             .EAssignLocal(sym: s, path: pa, ty: ty) :> localPartTyping(pa, ty)
             .EPosition(cap: c, index: ix) :> positionTyping(env, c, ix)
+            .ELocalEdit(sym: s) :> not
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
@@ -26894,6 +27273,7 @@ ${
             .ERemove(w: w) :> not
             .EElemAt(cap: c) :> not
             .EPosition(cap: c) :> not
+            .ELocalEdit(sym: s) :> not
             not :> not
         }
     }
@@ -26904,6 +27284,7 @@ ${
         return match f {
             .EElemAt(cap: c, index: x) :> x
             .EPosition(cap: c) :> not
+            .ELocalEdit(sym: s) :> not
             .EEdits(w: w) :> not
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
@@ -26939,6 +27320,7 @@ ${
         return match f {
             .EElemAt(cap: c, path: p) :> p
             .EPosition(cap: c) :> not
+            .ELocalEdit(sym: s) :> not
             .EEdits(w: w) :> not
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
@@ -27000,6 +27382,9 @@ ${
     // A write whose value is the call's single argument: `@xs.push(v)`.
     fn typeCallStmt(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s475 (s475-boot-local-tape-edits): an edit method on a local tape
+        const le: LocalEditFact | not = localEditOf(f)
+        if (le is given) return typeLocalEdit(env, e, callee, le, ts0)
         const ws: SpreadWrite[] = effectWrites(f)
         if (ws.length == 0) {
             if (isReset(f)) {
@@ -27014,6 +27399,74 @@ ${
         }
         return record(ts, e.nid, VType.Unknown)
     }
+    // s475 (s475-boot-local-tape-edits) — `xs.append(v)` … `xs.remove(i)` on a local
+    // tape (the resolver's ELocalEdit): the receiver and the argument typed, the
+    // edit JUDGED against the local's TYPE grants — its annotation, a parameter's
+    // written type, else its inferred type, which carries NO grant (§66.12.6 rule 1:
+    // "Inference never invents a grant"; O63: a local `let` gives the tape nothing).
+    // The element is checked against the element type; `remove`'s position is an `int`.
+    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not }
+
+    fn localEditOf(f: EffectFact | not) -> LocalEditFact | not {
+        return match f {
+            .ELocalEdit(sym: s, op: op, arg: a, elem: el) :> localEditFact(s, op, a, el)
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            .EEdits(w: w) :> not
+            .ERemove(w: w) :> not
+            .EElemAt(cap: c) :> not
+            .EPosition(cap: c) :> not
+            not :> not
+        }
+    }
+
+    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not) -> LocalEditFact {
+        return { sym: s, op: op, arg: a, elem: el }
+    }
+
+    fn typeLocalEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        const obj: AExpr | not = memberObj(callee)
+        if (obj is given) ts = typeExpr(env, obj, ts).ts
+        const a: AExpr | not = le.arg
+        let av: VType = VType.Unknown
+        if (a is given) {
+            const ra: RVT = typeExpr(env, a, ts)
+            ts = ra.ts
+            av = ra.vt
+        }
+        const name: string = le.sym.hint
+        let lt: Type | not = annotOf(env.t, le.sym)
+        if (lt is not) lt = paramTypeOfSym(env.t, le.sym)
+        let tyText: string = ""
+        if (lt is given) {
+            tyText = tapeTypeName(lt)
+        } else {
+            const inf: Type | not = knownOf(tLocal(env, le.sym))
+            if (inf is given) {
+                lt = inferredTape(inf)
+                tyText = "inferred: no grants"
+            }
+        }
+        // an un-annotated local whose inferred type is not settled (`let bare = [];`):
+        // whatever it holds, its type is inferred, and inference never invents a grant
+        // (§66.12.6 rule 1 — the SPEC's own example: `let bare = []; bare.append(n);`)
+        if (lt is not) return record(report(ts, env, e.span, "E-WRITE-NOT-GRANTED", "`" + name + "." + localEditCall(le.op) + "` edits the local `" + name + "`, whose type is inferred (no annotation), and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469) — write the grants in its type (`let " + name + ": T[free, " + localEditMethodName(le.op) + "] = …`)"), e.nid, VType.Unknown)
+        const pr: TapeDiag[] = localEditProblems(name, lt, tyText, le.op)
+        if (pr.length > 0) return record(report(ts, env, e.span, pr[0].code, pr[0].msg), e.nid, VType.Unknown)
+        if (a is given) {
+            if (le.op == LocalEdit.LRemoveAt) {
+                ts = checkIndex(env, av, a.span, ts)
+            } else {
+                const el: Type | not = seqElem(lt)
+                if (el is given) ts = checkNotElems(env, a, el, checkLitFields(env, a, checkValue(env, av, el, a.span, "an element of `" + name + "`", ts)))
+            }
+        }
+        return record(ts, e.nid, VType.Unknown)
+    }
+
     // The type recorded for a node this pass already typed.
     fn exprType0(ts: TypeState, nid: int) -> VType {
         let i: int = ts.exprs.length - 1
@@ -28601,6 +29054,7 @@ ${
             .ERemove(w: w) :> w.cap
             .EElemAt(cap: c) :> c
             .EPosition(cap: c) :> c
+            .ELocalEdit(sym: s) :> not
             .EAssignLocal(sym: s) :> not
             not :> not
         }
@@ -28620,6 +29074,7 @@ ${
             .ERemove(w: w) :> false
             .EElemAt(cap: c) :> false
             .EPosition(cap: c) :> false
+            .ELocalEdit(sym: s) :> false
             .EAssignLocal(sym: s) :> false
             not :> false
         }
@@ -32367,7 +32822,7 @@ ${
             .Recovered :> a
             .Variant(name: n) :> a
             .Member(obj: o) :> a
-            .Call(callee: c) :> a
+            .Call(callee: c) :> cfWith(a, a.names, a.assigns.concat(cfEditNid(e.nid, c)), a.rets, a.exits, a.effects, a.handled)   // s475 r1 F1
             .Unary(op: o) :> a
             .Binary(op: o) :> a
             .Ternary(test: x) :> a
@@ -32381,6 +32836,16 @@ ${
             .HashRef(id: hr0) :> a
             .Foreign(f: fb0) :> a
         }
+    }
+
+    // s475 r1 (#1812 review F1): a local tape edit `xs.append(v)` (§66.12.6 rule 3) rebinds `xs` exactly
+    // as `xs = [...xs, v]` does, so its call is one of the run's `assigns` — assignedSymsOf reads the
+    // resolver's ELocalEdit fact at the call's nid (a host value's own `remove()` has none: no Sym).
+    // §19.9.9.8 rule 1 then refuses a composed batch that edits a local the client holds.
+    fn cfEditNid(nid: int, c: AExpr) -> int[] {
+        const n: string = memberName(c.k)
+        if (n == "append" || n == "prepend" || n == "pop" || n == "shift" || n == "remove" || n == "insert") return [nid]
+        return []
     }
 
     fn cfHandled(a0: CFold, nid: int, sp: ASpan, h: AHandled) -> CFold {
@@ -32465,6 +32930,7 @@ ${
                 .ERemove(w: w) :> -1
                 .EElemAt(cap: c) :> -1
                 .EPosition(cap: c) :> -1
+                .ELocalEdit(sym: x) :> x.id
                 not :> localSymAt(t, n)
             }
             if (s >= 0) out = out.concat([s])

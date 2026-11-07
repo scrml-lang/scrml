@@ -517,7 +517,7 @@ ${
         }
     }
 
-    // `filter` / `map` are the host's (they never mutate); `sortBy` is the
+    // `filter` / `map` / `some` / `every` are the host's (they never mutate); `sortBy` is the
     // runtime's (the host `sort` sorts in place — a scrml sort returns a new tape).
     fn seqCallJs(ctx: Ctx, o: SeqFn, sq: JsExpr, f: JsExpr) -> JsExpr {
         if (o == SeqFn.SortBy) return rtCall(ctx, "sortBy", [sq, f])
@@ -529,6 +529,8 @@ ${
             .Filter :> "filter"
             .Map :> "map"
             .SortBy :> "sortBy"
+            .Some :> "some"
+            .Every :> "every"
         }
     }
 
@@ -614,6 +616,14 @@ ${
             // s469: a primitive's text (§20.7.2) — JavaScript's String() of an
             // int / number (Number::toString), a bool, a unit variant's tag
             .Text :> rtCall(ctx, "textOf", a)
+            // s475 — the tape edits as values (a granted edit of a local rebinds it to one), each a NEW tape
+            .TapeAppend :> rtCall(ctx, "tapeAppend", a)
+            .TapePrepend :> rtCall(ctx, "tapePrepend", a)
+            .TapeDropEnd :> rtCall(ctx, "tapeDropEnd", a)
+            .TapeDropFront :> rtCall(ctx, "tapeDropFront", a)
+            .TapeRemoveAt :> rtCall(ctx, "tapeRemoveAt", a)
+            .TapeConcat :> rtCall(ctx, "tapeConcat", a)
+            .TapeIncludes :> rtCall(ctx, "tapeIncludes", a)
         }
     }
 
