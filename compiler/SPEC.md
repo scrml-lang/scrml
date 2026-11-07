@@ -6076,6 +6076,17 @@ On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch 
 **Reaching a request by `<#id>` (S475).** `<#id>` names the `<request>` whose `id` is `id`. An `<#id>` that names no element of the program SHALL be **E-SCOPE-001** (an unknown name; §6.7.7 names no code of its own). `<#id>.refetch()` on a request that is not mounted — its scope not yet mounted, or torn down (EC-3) — SHALL do nothing: no fetch starts, and none of the four properties changes. (Under EC-3 a torn-down request's result is discarded anyway, so a fetch it started could not be observed.)
 > **Provenance:** RULED S475, bryan: *"your recs on all of them"* — ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale", "Veto-window PA readings confirmed" — *"`refetch()` on an unmounted request is a no-op"* · *"unknown `<#id>` is E-SCOPE-001"* — both PA readings in their veto window from lane s475-boot-request-refs (PR #1788: *"A refetch while the request is unmounted does nothing. §6.7.7 is silent here."* · *"An unknown `<#id>` is E-SCOPE-001, since §6.7.7 names no code."*) · **supersedes:** nothing written — the table above was silent on both. **Direction of change:** **semantics-defined** (refetch of an unmounted request); **newly-rejecting on paper** for an unknown `<#id>` (it was already refused on the bootstrap, and impl#1 is frozen, S471/S475). The bootstrap builds both in #1788.
 
+**An `id` that `<#id>` cannot name (S475).** `<#id>` takes an identifier (`state-ref ::= '<#' identifier '>'`,
+§15.11.2), but `id=` takes any string literal. A `<request>` whose `id` value is not an identifier, such as
+`id="user-list"`, `id="2fa"` or `id=""`, can never be reached by `<#id>`: no `<#…>` names it, so its `.loading`,
+`.data`, `.error`, `.stale` and `.refetch()` cannot be used. The compiler SHALL report **W-REQUEST-ID-UNREFERENCEABLE**
+at the `id` attribute and SHALL still compile the request. It runs, and its `@variable` is assigned, as for any
+other id. The warning's message names the id and says that `<#id>` takes an identifier.
+> **Provenance:** RULED S475, bryan: *"your recs on all"* — ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 4 — *"**Unreferenceable request id: yes, a W- code.** A `<request id=…>` whose id is not an identifier (so `<#id>` can never name it) gets a warning."* · **supersedes:** nothing written. §6.7.7
+> was silent on an `id` that is not an identifier. · **Direction of change:** **newly-warning**. No program is
+> rejected, and no program changes meaning. **Not yet emitted** by either compiler (impl#1 frozen, S471/S475;
+> `g-request-id-unreferenceable-not-emitted-s475`).
+
 **`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age~~, no background revalidation. Cache semantics are a stdlib concern~~.
 
 > **Amendment S444 (dpa-060) — the stdlib deferral is struck.** A `<request>` MAY opt into result caching with the bare `cache` attribute (§6.7.7.2). A cache hit revalidates in the background, and during that fetch `stale` is `true` — which is exactly this paragraph's point-in-time definition (data exists and a fetch is in flight). There is still no cache expiration and no max-age: no author TTL exists anywhere on `<request>`. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (the entry: *"Supersedes §6.7.7's unprovenanced "Cache semantics are a stdlib concern" (scrml8 `1ce4ff6`, agent-authored one-shot patch — rationale-grade, per the dd)."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` C1 (the sentence arrived verbatim in scrml8 `1ce4ff6`'s one-shot `apply_patch.py` L118; no deliberation found — `rationale:`-grade under Rule 4b) · **supersedes:** *"no background revalidation. Cache semantics are a stdlib concern."* (struck above).
@@ -6116,6 +6127,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - The compiler SHALL NOT emit E-RI-002 for the single declared assignment in a `<request>` body.
 - The call that is the right-hand side of the body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002: its failure — the callee's declared error, or the transport failure of a call to a server function (§19.9.10) — SHALL set `<#id>.error` and leave `@var` and `<#id>.data` at their previous values (§19.4.3 item 5). *(S451 "your recs on all of them" — item 1 makes every client call of a server function failable; item 3 confirms the #1259 reading that the request handles its body's call.)*
 - The compiler SHALL emit E-LIFECYCLE-018 if `<request>` has no `id` attribute.
+- *(S475.)* The compiler SHALL report W-REQUEST-ID-UNREFERENCEABLE, a warning, if a `<request>`'s `id` value is not an identifier, so that no `<#id>` can name it. The request SHALL still compile and run. *(RULED S475, bryan: "your recs on all", second batch item 4; see "An `id` that `<#id>` cannot name".)*
 - The compiler SHALL emit E-LIFECYCLE-019 if `<request>` is self-closing (no body).
 - The compiler SHALL emit E-LIFECYCLE-020 if the body contains ~~more than one assignment~~ anything besides `lin` declarations and one assignment. *(S469 PA reading: a `lin` declaration is not an assignment for this count.)* *(S475 PA reading, confirmed S475 (**Provenance:** RULED S475, bryan: "your recs on all of them" — ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale", "Veto-window PA readings confirmed" — *"E-LIFECYCLE-020 = anything in a `<request>` body besides `lin` declarations and one assignment"*): the body's grammar `lin-declaration* assignment-expression` and the S469 "MAY be preceded by `lin` declarations and by nothing else" leave no other statement in the body, and §6.7.7 named no code for one; E-LIFECYCLE-020 is read as covering it — a call statement, a `let` / `const`, a second assignment, or a statement after the assignment. Markup after the `${}` block stays E-PARSE-ITEM. **Provenance:** dispatch:s475-request-r1 (PA reading on the #1781 developer's open call) · supersedes: the trigger text "if the body contains more than one assignment" — widened, not struck · **Direction of change:** inert on impl#1 (it emits no E-LIFECYCLE-020); on the bootstrap, which already refused these statements under E-LIFECYCLE-020 (S475), inert.)*
 - The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`. *(S469 PA reading: this includes a body that holds only `lin` declarations.)*
@@ -6194,6 +6206,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
 | W-LIFECYCLE-014 | `<request>` inside `for/lift` loop | Warning |
 | E-REQUEST-CACHE-NO-READSET | `cache` on a `<request>` with no compiler-derivable read-set (`url=` / `api=`) — §6.7.7.2. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| W-REQUEST-ID-UNREFERENCEABLE | `<request>` `id` is not an identifier, so no `<#id>` can name it (S475; **not yet emitted**) | Warning |
 
 #### 6.7.7.1 Supersede and teardown — abort READS, discard WRITES (S444, dpa-059)
 
@@ -12223,7 +12236,7 @@ body is the declared initializer assigned to the cell:
   READ / WRITE classification and abort-reads / discard-writes, and §6.7.7.3's rule that a provably-writing request
   does not run on mount all apply to a pending cell by construction, because the desugar is literal. (DD Open
   Question 3 asks for this confirmation; this sentence gives it.) Author writes also take part in the supersede
-  order, which the literal desugar does not give: §13.9.4 "Which write or load wins" (S475, ⚑ PA reading).
+  order, which the literal desugar does not give: §13.9.4 "Which write or load wins" (S475; RULED S475, second batch item 1).
 - **No new runtime representation.** At run time the cell holds `not` until the load settles, which is the existing
   representation of `(not to T)`. The difference between pending and `T` is **static only**.
 - **The compiler SHALL NOT reset the cell by re-running the initializer outside the request.** A reset of a pending
@@ -12315,7 +12328,7 @@ itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point 
 <p else>Loading…</p>
 ```
 
-**Which write or load wins (S475, ⚑ PA reading, for bryan's veto).** A pending cell is written by its own loads
+**Which write or load wins (S475, RULED S475).** A pending cell is written by its own loads
 (§13.9.2) and by the author's writes, both plain writes and the awaited action-position writes above. When more
 than one of them is in flight, they are ordered as follows.
 
@@ -12350,7 +12363,10 @@ supersede the fetch in flight, and that fetch's result lands over the write when
 request is compiler-written and has no `refetch()` (§13.9.2), so an author write is the only way to override a load.
 Under the `<request>` rule, an older load would overwrite the author's newer value.
 
-> **Provenance:** ⚑ **PA reading, for bryan's veto — not ruled.** §13.9 did not say how a pending cell's author
+> **Provenance:** RULED S475, bryan: *"your recs on all"* — ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second
+> batch of owner questions, PA recs adopted wholesale" item 1 — *"**§13.9.4 "Which write or load wins" (SPEC #1804),
+> rules 1–5 → RULED.**"* Rules 1–5 were a PA reading in their veto window until then (the ⚑ marker is removed; the
+> text is unchanged). §13.9 did not say how a pending cell's author
 > writes and its own loads are ordered. The bootstrap lane s475-boot-pending-cells needed an answer, and the PA gave
 > these readings (PR #1796, S4 rounds r2–r4; recorded in `docs/bootstrap-spec-coverage.md` §13.9.4, "S4 r4 — PA
 > READINGS ⚑"). Rule 4 reads §13.9.2's reset sentence together with §13.9.5's pre-state sentence. · **supersedes:**
@@ -12492,7 +12508,7 @@ ${
 - On a dependency change after the first settle, a pending cell SHALL keep its last value until the new load
   settles. An action-position write of a waiting value into a pending cell SHALL be awaited, and the cell SHALL keep
   its current value until the write lands.
-- *(S475, ⚑ PA reading, for bryan's veto; §13.9.4 "Which write or load wins".)* Among a pending cell's loads and
+- *(S475; §13.9.4 "Which write or load wins"; RULED S475, bryan: "your recs on all", second batch item 1.)* Among a pending cell's loads and
   author writes, the one that started most recently SHALL win. A write starts at the last wait before it in its
   continuation, or when it lands if no wait comes before it. A load that a write triggers starts when that write's
   batch ends. A winning write SHALL supersede, when it lands, a load in flight as §6.7.7.1 supersedes (the result is
@@ -22553,31 +22569,47 @@ A function whose body mixes a server-trigger statement with a reactive-assignmen
 > **Provenance:** ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" — *"**F1 (B):** … Body-split's implicit `!` uses the same set."* · *"**F2:** the built-in is named `ServerCallError`; it replaces `CpsError`."* · **supersedes:** *"The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants)."* — **the name `CpsError` is RETIRED** from the language; and this section's conceptual wrapper building a `type: "CpsError"` envelope. · **Direction of change (pa-base §8): semantics-changed + newly-rejecting (narrow)** — a handler that named `CpsError`'s variants (`.NetworkError` / `.ServerError`) no longer names a variant of the call's failure set (E-TYPE-020 non-exhaustive, or an unknown variant); a `_ :>` handler is unaffected. **Carried divergence:** impl#1 still synthesizes `CpsError` (its body-split wrapper returns a `type: "CpsError"` envelope, and its server sends `ServerError` with the exception's text) — impl#1 is frozen for language semantics (S447) and is not changed for this; the bootstrap builds `ServerCallError` (U1b, with U1d for the split itself).
 
 **Extended (S475) — every client `!` function that makes a server call.** The rule above is not limited to a
-body-split function. A **client-placed function declared `! E` whose body makes a server call** — a client call to a
-server function (§19.9.10), directly or by `?`-propagating such a call, including a call of another function this
-rule covers — fails, at its callers, with **`E + Transport(t: ServerCallError)`**: its declared variants plus
-`Transport`, the same set a client call of a `! E` server function fails with (§19.9.10; `E` itself when `E`
-already declares `Transport(t: ServerCallError)`). So:
+body-split function. A **client-placed function declared `! E` whose body makes a server call** is a **transport
+carrier**. A server call here is a client call of a server function (§19.9.10), or a call of another transport
+carrier. A transport carrier fails, at its callers, with **`E + Transport(t: ServerCallError)`**: its declared
+variants plus `Transport`, the same set a client call of a `! E` server function fails with (§19.9.10). When `E`
+already declares `Transport(t: ServerCallError)`, the set is `E` itself.
 
-1. **Its callers see `E + Transport`.** A caller's `!{}` / `match` on its call covers `.Transport` (or `_` /
-   `_ err`), a `.Transport` arm on its call is valid, and a caller that propagates it with `?` is itself a client
-   `!` function this rule covers (its own callers see its `E′ + Transport`).
-2. **Its own enum need not declare `Transport`.** `E` may omit `Transport(t: ServerCallError)`; a `?` on a server
+**How the body handles the call does not matter.** A server call makes its function a carrier whether the body
+handles it with `!{}` or `match`, propagates it with `?`, or does both. A function whose every server call is handled
+in its body is still a carrier, so its failure set does not change when its body's handling changes. So:
+
+1. **Its callers see `E + Transport`.** A caller's `!{}` / `match` on its call SHALL cover `.Transport` (or `_` /
+   `_ err`). A `.Transport` arm on its call is valid. A client `!` caller is itself a carrier (rule above, a call
+   of a carrier), so its own callers see its `E′ + Transport`. This holds for a carrier whose body handles every
+   server call: its callers still cover `.Transport`, even though no wire failure from those calls reaches them.
+2. **Its own enum need not declare `Transport`.** `E` may omit `Transport(t: ServerCallError)`. A `?` on a server
    call inside its body is not E-ERROR-010 for the missing line (§19.5.3, bullet 3 retired for client functions).
-   Its own `fail` still names a variant of `E` — `fail .Transport(…)` is not one unless `E` declares it.
+   Its own `fail` still names a variant of `E`; `fail .Transport(…)` is not one unless `E` declares it.
 3. A server-placed `!` function is not affected: a server→server call has no `Transport` (§19.9.10).
+4. A client function NOT declared `!` is not a carrier. It has no failure set, and each server call in its body is
+   handled there (E-ERROR-002 otherwise, §19.9.10).
 
 > **Provenance:** RULED S475, bryan: *"your recs on all of them"* — ruling:user-voice-scrml.md S475 "⭐ RULED — S475
 > owner questions, PA recs adopted wholesale" item 4 — *"**§19.9.5 extends to every client `!` function making a
 > server call** (callers see `E + Transport`); retires §19.5.3 bullet 3 for client functions. Newly-accepting."* ·
-> **supersedes:** §19.5.3 bullet 3 for an enclosing client function (quoted and struck there) · **Direction of
-> change: newly-accepting** — a client `! E` function whose `E` lacks `Transport` and that `?`-propagates a server
-> call (was E-ERROR-010); its callers' handling is judged against `E + Transport`. No compiling program changes
-> meaning: before, such a function compiled only when `E` declared `Transport(t: ServerCallError)`, and then
-> `E + Transport` is `E`. The bootstrap built the
-> composed / `?`-propagating half ahead of this text (s475-boot-caller-transport, "transport carriers",
-> `compiler/self-host-v2/analyze.scrml` `transportCarriers`); an uncomposed client `!` function that `?`-propagates
-> a plain client call is now governed by this rule too. Nominal on impl#1 (frozen, S471/S475).
+> **Widened to the literal reading:** RULED S475, bryan: *"your recs on all"* — ruling:user-voice-scrml.md S475
+> "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 2 — *"**§19.9.5 transport
+> carriers: the LITERAL reading.** Every client `!` function that makes a server call is a transport carrier (stable
+> failure set, even when the call is fully handled), not only those that `?`-propagate one."* ·
+> **supersedes:** §19.5.3 bullet 3 for an enclosing client function (quoted and struck there); and this paragraph's
+> S475 first-batch wording, *"a client call to a server function (§19.9.10), directly or by `?`-propagating such a
+> call, including a call of another function this rule covers"*, which read both ways — every call, or only a
+> `?`-propagated one (the reading #1797 built). · **Direction of change:** **newly-accepting** for a client `! E`
+> function whose `E` lacks `Transport` and that `?`-propagates a server call (was E-ERROR-010). **Newly-rejecting
+> (narrow)** for a caller of a client `! E` function that handles all of its server calls in its body: if that
+> caller's `!{}` / `match` lists `E`'s variants with no `.Transport` arm and no `_`, it is now non-exhaustive
+> (E-TYPE-020). Before, the callee's failure set there was `E`. The fix is one arm, and that arm never runs for such
+> a callee. That cost is the price of the stable failure set the ruling chose. · **Carried divergence:** the
+> bootstrap built the `?`-propagating reading (s475-boot-caller-transport and s475-boot-transport-every-client-bang,
+> #1797: `compiler/self-host-v2/analyze.scrml` `transportCarriers` seeds a client `!` function only when it has a
+> `?` on a server call). A carrier whose server calls are all handled in its body is not yet a carrier there. The
+> widening is owed (`g-boot-transport-carrier-literal-reading-s475`). Nominal on impl#1 (frozen, S471/S475).
 
 ```scrml
 // Developer writes:
@@ -30954,6 +30986,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LIFECYCLE-021 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3882~~ §6.7.7 "Normative Statements" — §28 is Compiler Settings and has no §28.4; S469 reference fix, no change of meaning.) ~~**Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469).~~ **Emitted by the bootstrap** (S475, `compiler/self-host-v2/analyze.scrml` — the `<request>` body-shape check; record-lag corrected S475); **not yet emitted** by impl#1. | Error |
 | E-LIFECYCLE-022 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3883~~ §6.7.7 "Normative Statements"; S469 reference fix — §28 is Compiler Settings.) (Emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
+| W-REQUEST-ID-UNREFERENCEABLE | §6.7.7, §15.11.2 | A `<request>` whose `id` value is not an identifier (`id="user-list"`, `id="2fa"`, `id=""`): `<#id>` takes an identifier (`state-ref ::= '<#' identifier '>'`), so no `<#…>` can name the request, and its `.loading` / `.data` / `.error` / `.stale` / `.refetch()` cannot be used. Reported at the `id` attribute. The request still compiles and runs. Resolution: use an identifier for the `id` (`id="userList"`). **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 4 — *"**Unreferenceable request id: yes, a W- code.** A `<request id=…>` whose id is not an identifier (so `<#id>` can never name it) gets a warning."* **Not yet emitted** by either compiler (impl#1 frozen, S471/S475; the bootstrap lands it with the impl). | Warning |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |
