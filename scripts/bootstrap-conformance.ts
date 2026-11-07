@@ -360,12 +360,14 @@ export interface Twin {
  * `allowNonCompiling`: a conformance error case fails to compile BY DESIGN, so the S464 refusal
  * (`scrml fix` does not rewrite a file that does not compile — a CLI contract) is off here; the
  * twin of an error case is checked against the bootstrap's expected codes, not verified by impl#1.
+ * `wrapPageRoot`: a case whose root is `<page>` is program-wrapped (S475 ruling) — a case is a
+ * whole program, not a route file of some shell. The CLI keeps a `<page>` root unwrapped.
  */
 export function twinOf(c: { source: string; auxFiles: Record<string, string> }): Twin {
   const rules = new Set<string>();
   const blockers: string[] = [];
   let changed = false;
-  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES, allowNonCompiling: true });
+  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES, allowNonCompiling: true, wrapPageRoot: true });
   for (const a of entry.applied) rules.add(a.rule);
   for (const b of entry.blockers) blockers.push(`case.scrml:${b.line} ${b.rule}: ${b.reason}`);
   changed ||= entry.changed;
