@@ -295,6 +295,38 @@ describe("§4 program-wrap / program-move / unwrap-logic", () => {
     expect(r.output).toContain("<count> = 0");
   });
 
+  // S475 ruling: "A twin case whose root is `<page>` is program-wrapped". The twin generator passes
+  // `wrapPageRoot`; the CLI does not, and a `<page>` root (a route file's shape) stays reported.
+  test("a <page> root is not wrapped by default (route-file shape) — reported", () => {
+    const src = "${\n    <n> = 0\n}\n<page>\n    <p>${@n}</p>\n</page>\n";
+    const r = blocked(src, "`<page>` root with no `<program>` (route-file shape — not wrapped)");
+    expect(r.output.startsWith("<program")).toBe(false);
+  });
+
+  test("wrapPageRoot: a <page> root is program-wrapped and the depth-0 ${} unwraps (S475)", () => {
+    const src = "${\n    <n> = 0\n}\n<page>\n    <p>${@n}</p>\n</page>\n";
+    const out = clean(src, { wrapPageRoot: true });
+    expect(out).toBe("<program reset=\"none\">\n    <n:number=0/>\n<page>\n    <p>${@n}</p>\n</page>\n</program>\n");
+  });
+
+  test("wrapPageRoot: a <page> root with items before it (no ${}) is wrapped whole", () => {
+    const src = "type E:enum = { A, B }\n\n<page>\n    <h1>x</h1>\n</page>\n";
+    const out = clean(src, { wrapPageRoot: true });
+    expect(out).toBe("<program reset=\"none\">\ntype E:enum = { A, B }\n\n<page>\n    <h1>x</h1>\n</page>\n</program>\n");
+  });
+
+  test("wrapPageRoot: the impl#1 verify still guards a <page>-root wrap (withdrawn when the codes change)", () => {
+    // impl#1 reads a top-level `fn … = match` differently inside <program> (+E-UNQUOTED-DISPLAY-TEXT).
+    const src = "fn pick(k: int) -> bool = match k {\n  1 :> true,\n  _ :> false\n}\n<page><main><p>${ pick(1) }</p></main></page>\n";
+    const r = fix(src, { wrapPageRoot: true, allowNonCompiling: true });
+    expect(r.output).toBe(src);
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (+E-UNQUOTED-DISPLAY-TEXT) — not restructured");
+  });
+
+  test("wrapPageRoot leaves the other program-wrap refusals in place (top-level prose)", () => {
+    blocked("${ <n> = 1 }\nHello there\n<page><p>\${@n}</p></page>\n", "top-level prose", { wrapPageRoot: true });
+  });
+
   test("two top-level <program>s (a live E-PROGRAM-002 case) is not restructured and not reported", () => {
     const r = fix("<program>\n<p>a</p>\n</program>\n<program>\n<p>b</p>\n</program>\n");
     expect(r.changed).toBe(false);
