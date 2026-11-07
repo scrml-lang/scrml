@@ -6084,8 +6084,9 @@ at the `id` attribute and SHALL still compile the request. It runs, and its `@va
 other id. The warning's message names the id and says that `<#id>` takes an identifier.
 > **Provenance:** RULED S475, bryan: *"your recs on all"* — ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 4 — *"**Unreferenceable request id: yes, a W- code.** A `<request id=…>` whose id is not an identifier (so `<#id>` can never name it) gets a warning."* · **supersedes:** nothing written. §6.7.7
 > was silent on an `id` that is not an identifier. · **Direction of change:** **newly-warning**. No program is
-> rejected, and no program changes meaning. **Not yet emitted** by either compiler (impl#1 frozen, S471/S475;
-> `g-request-id-unreferenceable-not-emitted-s475`).
+> rejected, and no program changes meaning. **Emitted by the bootstrap** (S475, `compiler/self-host-v2/analyze.scrml`, the
+> `<request>` `id` attribute; `g-request-id-unreferenceable-not-emitted-s475` resolved by s475-boot-literal-carriers); **not yet
+> emitted** by impl#1 (frozen, S471/S475).
 
 **`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age~~, no background revalidation. Cache semantics are a stdlib concern~~.
 
@@ -6206,7 +6207,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
 | W-LIFECYCLE-014 | `<request>` inside `for/lift` loop | Warning |
 | E-REQUEST-CACHE-NO-READSET | `cache` on a `<request>` with no compiler-derivable read-set (`url=` / `api=`) — §6.7.7.2. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
-| W-REQUEST-ID-UNREFERENCEABLE | `<request>` `id` is not an identifier, so no `<#id>` can name it (S475; **not yet emitted**) | Warning |
+| W-REQUEST-ID-UNREFERENCEABLE | `<request>` `id` is not an identifier, so no `<#id>` can name it (S475; emitted at `compiler/self-host-v2/analyze.scrml` `resolveRequest`, the `id` attribute; not yet emitted by impl#1) | Warning |
 
 #### 6.7.7.1 Supersede and teardown — abort READS, discard WRITES (S444, dpa-059)
 
@@ -22605,11 +22606,11 @@ in its body is still a carrier, so its failure set does not change when its body
 > (narrow)** for a caller of a client `! E` function that handles all of its server calls in its body: if that
 > caller's `!{}` / `match` lists `E`'s variants with no `.Transport` arm and no `_`, it is now non-exhaustive
 > (E-TYPE-020). Before, the callee's failure set there was `E`. The fix is one arm, and that arm never runs for such
-> a callee. That cost is the price of the stable failure set the ruling chose. · **Carried divergence:** the
-> bootstrap built the `?`-propagating reading (s475-boot-caller-transport and s475-boot-transport-every-client-bang,
-> #1797: `compiler/self-host-v2/analyze.scrml` `transportCarriers` seeds a client `!` function only when it has a
-> `?` on a server call). A carrier whose server calls are all handled in its body is not yet a carrier there. The
-> widening is owed (`g-boot-transport-carrier-literal-reading-s475`). Nominal on impl#1 (frozen, S471/S475).
+> a callee. That cost is the price of the stable failure set the ruling chose. · **Built by the bootstrap**
+> (s475-boot-literal-carriers: `compiler/self-host-v2/analyze.scrml` `transportCarriers` seeds a client `!` function
+> from every server call it makes, and every call of a carrier, handled or `?`-propagated, by textual containment:
+> a call in unreachable code counts; `g-boot-transport-carrier-literal-reading-s475` resolved). Nominal on impl#1
+> (frozen, S471/S475).
 
 ```scrml
 // Developer writes:
@@ -30986,7 +30987,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LIFECYCLE-021 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3882~~ §6.7.7 "Normative Statements" — §28 is Compiler Settings and has no §28.4; S469 reference fix, no change of meaning.) ~~**Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469).~~ **Emitted by the bootstrap** (S475, `compiler/self-host-v2/analyze.scrml` — the `<request>` body-shape check; record-lag corrected S475); **not yet emitted** by impl#1. | Error |
 | E-LIFECYCLE-022 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3883~~ §6.7.7 "Normative Statements"; S469 reference fix — §28 is Compiler Settings.) (Emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
-| W-REQUEST-ID-UNREFERENCEABLE | §6.7.7, §15.11.2 | A `<request>` whose `id` value is not an identifier (`id="user-list"`, `id="2fa"`, `id=""`): `<#id>` takes an identifier (`state-ref ::= '<#' identifier '>'`), so no `<#…>` can name the request, and its `.loading` / `.data` / `.error` / `.stale` / `.refetch()` cannot be used. Reported at the `id` attribute. The request still compiles and runs. Resolution: use an identifier for the `id` (`id="userList"`). **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 4 — *"**Unreferenceable request id: yes, a W- code.** A `<request id=…>` whose id is not an identifier (so `<#id>` can never name it) gets a warning."* **Not yet emitted** by either compiler (impl#1 frozen, S471/S475; the bootstrap lands it with the impl). | Warning |
+| W-REQUEST-ID-UNREFERENCEABLE | §6.7.7, §15.11.2 | A `<request>` whose `id` value is not an identifier (`id="user-list"`, `id="2fa"`, `id=""`): `<#id>` takes an identifier (`state-ref ::= '<#' identifier '>'`), so no `<#…>` can name the request, and its `.loading` / `.data` / `.error` / `.stale` / `.refetch()` cannot be used. Reported at the `id` attribute. The request still compiles and runs. Resolution: use an identifier for the `id` (`id="userList"`). **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — S475 second batch of owner questions, PA recs adopted wholesale" item 4 — *"**Unreferenceable request id: yes, a W- code.** A `<request id=…>` whose id is not an identifier (so `<#id>` can never name it) gets a warning."* **Emitted by the bootstrap** (S475, emitted at `compiler/self-host-v2/analyze.scrml` `resolveRequest` — the `<request>` `id` attribute, via `lex.scrml` `isIdentifierText`); **not yet emitted** by impl#1 (frozen, S471/S475). | Warning |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |

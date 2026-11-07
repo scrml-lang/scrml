@@ -1491,6 +1491,19 @@ ${
         return st.tokens.concat([makeEof(st.cur)])
     }
 
+    // s475-boot-literal-carriers (W-REQUEST-ID-UNREFERENCEABLE, §6.7.7 / §15.11.2): is `s` an identifier
+    // — does THIS lexer read it as one `Ident` token spanning all of it (`state-ref ::= '<#' identifier '>'`;
+    // parse.scrml hashRefAhead reads `<#id>` from these tokens). A reserved word, a `-`, a leading digit,
+    // whitespace or the empty string is not.
+    export fn isIdentifierText(s: string) -> boolean {
+        if (s.length == 0) return false
+        const ts: Token[] = lex(s)
+        if (ts.length != 2) return false
+        const k: TokenKind = ts[0].kind
+        if (k is .Ident) return ts[0].text == s && ts[0].span.start == 0 && ts[0].span.end == s.length
+        return false
+    }
+
     // -------------------------------------------------------------------------
     // REGION lexing for the bootstrap parser (slice M2, s437). A scrml file is
     // markup with logic REGIONS in it: a `${…}` block, a parenthesized or braced
