@@ -517,7 +517,7 @@ ${
         }
     }
 
-    // `filter` / `map` are the host's (they never mutate); `sortBy` is the
+    // `filter` / `map` / `some` / `every` are the host's (they never mutate); `sortBy` is the
     // runtime's (the host `sort` sorts in place — a scrml sort returns a new tape).
     fn seqCallJs(ctx: Ctx, o: SeqFn, sq: JsExpr, f: JsExpr) -> JsExpr {
         if (o == SeqFn.SortBy) return rtCall(ctx, "sortBy", [sq, f])
@@ -529,6 +529,8 @@ ${
             .Filter :> "filter"
             .Map :> "map"
             .SortBy :> "sortBy"
+            .Some :> "some"
+            .Every :> "every"
         }
     }
 
@@ -621,6 +623,7 @@ ${
             .TapeDropFront :> rtCall(ctx, "tapeDropFront", a)
             .TapeRemoveAt :> rtCall(ctx, "tapeRemoveAt", a)
             .TapeConcat :> rtCall(ctx, "tapeConcat", a)
+            .TapeIncludes :> rtCall(ctx, "tapeIncludes", a)
         }
     }
 

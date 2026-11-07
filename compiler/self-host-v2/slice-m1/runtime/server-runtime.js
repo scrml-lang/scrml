@@ -38,7 +38,7 @@ import { encode, decode, failure, failed, unmatchedFailure, runDefers, eq, index
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
   parseIntText, parseNumText, parseBoolText, textOf,
   sortNum, sortStr, sortBy, reversed, joinStr, hostResult,
-  tapeAppend, tapePrepend, tapeDropEnd, tapeDropFront, tapeRemoveAt, tapeConcat } from "./runtime.js";
+  tapeAppend, tapePrepend, tapeDropEnd, tapeDropFront, tapeRemoveAt, tapeConcat, tapeIncludes } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
 // both artifacts): a failure value, the test for one, the `defer` stack,
@@ -47,7 +47,7 @@ import { encode, decode, failure, failed, unmatchedFailure, runDefers, eq, index
 export { failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath };   // s472: writePath — a local part write (print.scrml assignedJs)
 export { strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith, sortNum, sortStr, sortBy, reversed, joinStr };
 // s475 — the tape edits as values (a granted edit of a local, an array value with a spread): the SAME functions
-export { tapeAppend, tapePrepend, tapeDropEnd, tapeDropFront, tapeRemoveAt, tapeConcat };
+export { tapeAppend, tapePrepend, tapeDropEnd, tapeDropFront, tapeRemoveAt, tapeConcat, tapeIncludes };
 // s469 — the admitted string additions (Appendix D.1) and the strict parses (§14.13.4): the SAME
 // function objects the client runtime exports (one definition, never a server copy)
 export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat };

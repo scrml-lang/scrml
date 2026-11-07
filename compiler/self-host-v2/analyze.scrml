@@ -7420,13 +7420,15 @@ ${
         // lowered to a placeholder.
         if (isIndexExpr(obj) && name != "length") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a field of an index read (`xs[i]." + name + "`) is not in the bootstrap yet — bind the element first: `const x = xs[i]`, then `x." + name + "`", st)
         // `.length` of a sequence or a string is a primitive (a read, never a place).
-        if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
+        // s475: of a call result too — the called function's declared return type (recvType)
+        const lty: Type | not = recvType(env, obj, ro)
+        if (name == "length" && ro.x.inst is not && isLengthOf(lty)) {
             // s469 (bryan: "code points everywhere, `.length` included"): a
             // STRING's length counts code points — Core StrLength, recorded as
             // the member node's value fact (lower reads it first); a tape's
             // stays Length (its element count)
             const lst: AS = addName(st, e.nid, NameFact.NLength)
-            if (ro.x.ty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
+            if (lty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
             return plain(Type.Int, lst)
         }
         const inst: InstRef | not = ro.x.inst
@@ -7806,6 +7808,8 @@ ${
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
+                // s475: `xs.some(x => b)` / `xs.every(x => b)` — a `bool` (§66.12.1)
+                if (m.method == "some" || m.method == "every") return resolveSeqCall(env, e, m, args, st0)
                 // s469 — `xs.sort((a, b) => …)`: a comparator (a SeqCall, like filter / map)
                 if (m.method == "sort" && args.length == 1) return resolveSortBy(env, e, m, args, st0)
                 // s469 — `xs.at(i)` (§49.13): `T | not`, never a trap
@@ -7830,7 +7834,7 @@ ${
                 const su: RX | not = unknownStrMethod(env, e, m, args, st0)
                 if (su is given) return su
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
@@ -8319,6 +8323,8 @@ ${
         // a `.length` after a refused call is not a second report
         let guess: Type | not = not
         if (isFilter && ot is given) guess = ungranted(ot)
+        const isPred: boolean = m.method == "some" || m.method == "every"
+        if (isPred) guess = Type.Bool
         if (ot is given) {
             elem = seqElem(ot)
             if (elem is not) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)"))
@@ -8335,12 +8341,17 @@ ${
             want = Type.Bool
             op = SeqFn.Filter
         }
+        if (isPred) {
+            want = Type.Bool
+            op = SeqFn.Every
+            if (m.method == "some") op = SeqFn.Some
+        }
         const rl: RX = resolveLambda(env, lam, ps, elem, want, st)
         st = rl.st
         // a filter keeps the receiver's type; a map is a sequence of the body's
         // type with the receiver's length (s469 F/U-5: a NEW tape — no grants, §66.12.6 rule 3)
         let result: Type | not = guess
-        if (!isFilter) result = mappedType(ot, rl.x.ty)
+        if (!isFilter && !isPred) result = mappedType(ot, rl.x.ty)
         return plain(result, addValue(st, e.nid, ValueFact.VSeqCall(op)))
     }
 
@@ -8543,6 +8554,7 @@ ${
         if (el is not) return not
         if (n == "reverse") return PrimOp.Reverse
         if (n == "join" && el == Type.Str) return PrimOp.Join
+        if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
         if (n == "sort") {
             if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
             if (el == Type.Str) return PrimOp.SortStr
@@ -8593,14 +8605,25 @@ ${
         return []
     }
 
+    // s475 — a built-in's signature on a receiver of type `recv`: methodSig, except
+    // a tape's `includes(x)`, whose argument is a value of the receiver's ELEMENT type.
+    fn methodSigFor(op: PrimOp, recv: Type) -> Type[] {
+        if (op == PrimOp.TapeIncludes) {
+            const el: Type | not = seqElem(recv)
+            if (el is given) return [el]
+        }
+        return methodSig(op)
+    }
+
     fn methodMinArity(op: PrimOp) -> int {
-        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) return 1
+        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes) return 1
         return methodSig(op).length
     }
 
     // The result type of a built-in on a receiver of type `recv`.
     fn methodResult(op: PrimOp, recv: Type) -> Type {
         if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return Type.Bool
+        if (op == PrimOp.TapeIncludes) return Type.Bool
         if (op == PrimOp.StrIndexOf || op == PrimOp.StrLastIndexOf) return Type.Maybe(Type.Int)
         if (op == PrimOp.ParseInt) return Type.Maybe(Type.Int)
         if (op == PrimOp.ParseNum) return Type.Maybe(Type.Num)
@@ -8627,7 +8650,7 @@ ${
         if (op == PrimOp.StrTrim) return "trim"
         if (op == PrimOp.StrSlice) return "slice"
         if (op == PrimOp.StrCharAt) return "charAt"
-        if (op == PrimOp.StrIncludes) return "includes"
+        if (op == PrimOp.StrIncludes || op == PrimOp.TapeIncludes) return "includes"
         if (op == PrimOp.StrStartsWith) return "startsWith"
         if (op == PrimOp.StrEndsWith) return "endsWith"
         if (op == PrimOp.StrSplit) return "split"
@@ -8692,17 +8715,17 @@ ${
                 return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
             }
             if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
-            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.filter(x => …)`, `.map(x => …)`", args, st)
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.includes(x)`, `.filter(x => …)`, `.map(x => …)`, `.some(x => …)`, `.every(x => …)`", args, st)
         }
         const lo: int = methodMinArity(op)
-        const hi: int = methodSig(op).length
+        const hi: int = methodSigFor(op, ot).length
         if (args.length < lo || args.length > hi) {
             let want: string = hi + " argument(s)"
             if (lo != hi) want = lo + " or " + hi + " arguments"
             if (m.method == "sort") want = "no argument (the natural order) or one comparator `(a, b) => …`"
             return refuseMethod(env, e, "E-CALL-ARITY", "`." + m.method + "(…)` takes " + want + "; " + args.length + " given", args, st)
         }
-        const sig: Type[] = methodSig(op)
+        const sig: Type[] = methodSigFor(op, ot)
         let st2: AS = st
         let i = 0
         for (const a of args) {
@@ -8831,7 +8854,7 @@ ${
         return isStrOrMaybeStr(r)
     }
 
-    // s475 (s475-boot-local-tape-edits; gap g-boot-method-on-call-result-s475) — the
+    // s475 (s475-boot-local-tape-edits; gap g-bootstrap-method-on-call-result-refused-s469) — the
     // type of a built-in method's RECEIVER: the binder's type for it, or — the binder
     // types no call result — the declared return type of the scrml function it calls
     // (the function's own `ret`, as strReceiver reads it), so `three().sort()` with
@@ -12354,7 +12377,7 @@ ${
     // grant). The element is resolved against the local's WRITTEN element type, so
     // an object literal has its struct. `not`: not a local tape edit — the caller's
     // paths take it (a host value's own `remove()`, a non-tape local).
-    // `insert(i, x)` is refused, INTERIM (gap g-boot-tape-insert-remove-s475): its
+    // `insert(i, x)` is refused, INTERIM (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469): its
     // index past the end breaks the per-position type (E-WRITE-INVARIANT), and how
     // that is enforced where the index is not provable is ⚑ O36 (§66.12.6 rule 3).
     fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
@@ -24757,7 +24780,19 @@ ${
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         const op: PrimOp | not = methodOfFact(f)
         if (op is not) return comparatorCheck(env, f, args, ts0)
-        const sig: Type[] = methodSig(op)
+        let sig: Type[] = methodSig(op)
+        // s475: a tape's `includes(x)` — the argument against the receiver's element type
+        if (op == PrimOp.TapeIncludes) {
+            sig = []
+            const cl: AExpr | not = calleeOf(e.k)
+            if (cl is given) {
+                const ob: AExpr | not = memberObj(cl)
+                if (ob is given) {
+                    const rt: Type | not = knownOf(exprType0(ts0, ob.nid))
+                    if (rt is given) sig = methodSigFor(op, rt)
+                }
+            }
+        }
         let ts: TypeState = ts0
         let i = 0
         for (const a of args) {
@@ -24776,6 +24811,7 @@ ${
     }
 
     fn comparatorCheck(env: TEnv, f: ValueFact | not, args: AExpr[], ts: TypeState) -> TypeState {
+        if (isPredFact(f) && args.length == 1) return predicateCheck(env, f, args[0], ts)
         if (!isSortByFact(f) || args.length != 1) return ts
         const body: AExpr | not = lambdaBody(args[0])
         if (body is not) return ts
@@ -24784,6 +24820,38 @@ ${
         if (hasErrIn(env.errs, body.span)) return ts
         if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the comparator of `.sort(…)` returns a value whose type the compiler cannot resolve — it must return a number (negative: `a` first; positive: `b` first; zero: keep their order)")
         return report(ts, env, body.span, "E-TYPE-031", "the comparator of `.sort(…)` must return a number (negative: `a` first; positive: `b` first; zero: keep their order), and this one returns `" + typeName(bt) + "` (S440 #10)")
+    }
+
+    // s475 — the predicate of `xs.some(x => b)` / `xs.every(x => b)` is a `bool`
+    // (a condition: no truthiness, §66.12.1's predicate methods return a `bool`).
+    // A predicate whose type is not known is refused (fail closed).
+    fn predicateCheck(env: TEnv, f: ValueFact | not, lam: AExpr, ts: TypeState) -> TypeState {
+        const body: AExpr | not = lambdaBody(lam)
+        if (body is not) return ts
+        const bt: Type | not = knownOf(exprType0(ts, body.nid))
+        if (bt == Type.Bool) return ts
+        if (hasErrIn(env.errs, body.span)) return ts
+        if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the predicate of `.some(…)` / `.every(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`")
+        return report(ts, env, body.span, "E-TYPE-031", "the predicate of `.some(…)` / `.every(…)` must return a `bool`, and this one returns `" + typeName(bt) + "` — say what you test (`x == 0`, `x is given`)")
+    }
+
+    fn isPredFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VSeqCall(op: o) :> o == SeqFn.Some || o == SeqFn.Every
+            .VMethod(op: o) :> false
+            .VToEnum(enumSym: s) :> false
+            .VIndex(loc: zl) :> false
+            .VAt :> false
+            .VTemplate(text: tx) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VConstruct(enumSym: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
     }
 
     fn isSortByFact(f: ValueFact | not) -> boolean {
@@ -24870,6 +24938,7 @@ ${
     }
 
     fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr) -> VType {
+        if (o == SeqFn.Some || o == SeqFn.Every) return known(Type.Bool)
         const isFilter: boolean = o == SeqFn.Filter || o == SeqFn.SortBy
         if (!isFilter) return VType.Unknown
         const obj: AExpr | not = memberObj(callee)
@@ -25024,6 +25093,7 @@ ${
             .TapeDropFront :> ts
             .TapeRemoveAt :> ts
             .TapeConcat :> ts
+            .TapeIncludes :> ts
         }
     }
 
@@ -25766,6 +25836,7 @@ ${
             .TapeDropFront :> VType.Unknown
             .TapeRemoveAt :> VType.Unknown
             .TapeConcat :> VType.Unknown
+            .TapeIncludes :> VType.Unknown
         }
     }
 

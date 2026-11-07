@@ -1413,6 +1413,7 @@ ${
             .TapeDropFront :> "TapeDropFront"
             .TapeRemoveAt :> "TapeRemoveAt"
             .TapeConcat :> "TapeConcat"
+            .TapeIncludes :> "TapeIncludes"
         }
     }
 }

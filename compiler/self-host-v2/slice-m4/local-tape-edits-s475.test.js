@@ -1,7 +1,7 @@
 // local-tape-edits-s475.test.js — s475-boot-local-tape-edits: grant-checked
 // in-place edits of a LOCAL tape (a `let`, a `const`, a parameter) — gap
 // g-boot-local-tape-edit-s475; and a built-in method on a call result
-// (gap g-boot-method-on-call-result-s475).
+// (gap g-bootstrap-method-on-call-result-refused-s469).
 //
 // SPEC §66.12.6 rule 1: "A tape's grants govern every write to it, in each
 // position that can hold one: … a local binding: `let`, `const`, or the
@@ -182,7 +182,7 @@ describe("D — judged by the local's TYPE grants, with the codes a cell gets", 
 
 // ---------------------------------------------------------------------------
 describe("E — what stays refused (INTERIM, named)", () => {
-  test("`insert(i, x)` — its out-of-range enforcement is ⚑ O36 (gap g-boot-tape-insert-remove-s475)", () => {
+  test("`insert(i, x)` — its out-of-range enforcement is ⚑ O36 (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469)", () => {
     const r = run(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(0, 2);`));
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("O36");
@@ -209,7 +209,44 @@ describe("F — a built-in method on a call result takes the declared return typ
     expect($("#o").textContent).toBe("1,2,30|2,1,30|30,2");
   });
 
+  test("`.length` of a call result, a tape's and a string's (code points)", async () => {
+    const decls = "    fn three() -> int[] { return [30, 1, 2]; }\n    fn word() -> string { return \"a😀\"; }";
+    await load(prog(decls, `        @shown = \`\${three().length},\${word().length}\`;`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("3,2");
+  });
+
   test("a call result whose function declares no tape is still refused", () => {
     expect(codes(prog("    fn n() -> int { return 1; }", `        const s: int = n().sort();`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469 (part): §66.12.1 "Non-mutating operations (`map`, `filter`,
+// `slice`, `concat`, `find`, `some`, `every`, `reduce`, …) are always allowed; they return new values."
+describe("G — `some` / `every` / `includes` on a tape (§66.12.1)", () => {
+  test("they run, on a cell and on a local; `includes` compares structurally (§45)", async () => {
+    const decls = "    type P:struct = { n: int }\n    <xs:int[replace]=([1, 2, 3])/>";
+    await load(prog(decls, `        const ps: P[] = [{ n: 1 }, { n: 2 }];\n        @shown = \`\${@xs.some(x => x > 2)},\${@xs.every(x => x > 2)},\${@xs.includes(2)},\${@xs.includes(9)},\${ps.includes({ n: 2 })},\${ps.some(p => p.n == 5)}\`;`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("true,false,true,false,true,false");
+  });
+
+  test("an empty tape: `some` is false, `every` is true", async () => {
+    await load(prog("", `        const e: int[] = [];\n        @shown = \`\${e.some(x => x > 0)},\${e.every(x => x > 0)}\`;`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("false,true");
+  });
+
+  test("the predicate is a `bool` (no truthiness), `includes`' argument the element type — E-TYPE-031", () => {
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.some(x => x + 1);`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.every(x => x);`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: bool = @xs.includes("1");`))).toEqual(["E-TYPE-031"]);
+  });
+
+  test("`find` / `findIndex` / `indexOf` / `reduce` stay refused (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469)", () => {
+    for (const m of ["find(x => x > 0)", "findIndex(x => x > 0)", "indexOf(1)", "reduce((a, b) => a + b, 0)"]) {
+      expect(codes(prog("    <xs:int[replace]=([1])/>", `        const b: int = @xs.${m};`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    }
   });
 });

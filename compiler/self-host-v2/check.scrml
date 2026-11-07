@@ -4473,6 +4473,8 @@ ${
         return match op {
             .Map :> fieldItself(d, idx, inst, sq, "a position write")
             .SortBy :> fieldItself(d, idx, inst, sq, "a position write")
+            .Some :> "a position write's value is a `some` (a bool), not a map / sort of the field"
+            .Every :> "a position write's value is an `every` (a bool), not a map / sort of the field"
             .Filter :> "a position write's value is a filter (a shrink), not a map / sort of the field"
         }
     }

@@ -202,6 +202,9 @@ ${
         // TapeConcat(a, b): the tape `[...a, ...b]` — what an array value with a
         // spread lowers to (each run of plain elements an ArrayOf).
         TapeAppend, TapePrepend, TapeDropEnd, TapeDropFront, TapeRemoveAt, TapeConcat,
+        // s475 — `xs.includes(x)` on a tape (§66.12.1): `true` when some element is
+        // structurally equal to `x` (§45, the one equality — EqStruct's), a `bool`.
+        TapeIncludes,
     }
 
     export type Pattern:enum = {
@@ -220,7 +223,10 @@ ${
     // Each makes a NEW sequence value (R3: values are immutable).
     // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the
     // comparator (its two parameters are the element type; it returns a number).
-    export type SeqFn:enum = { Filter, Map, SortBy }
+    // s475 (s475-boot-local-tape-edits): Some / Every — `xs.some(x => b)` /
+    // `xs.every(x => b)`, a `bool` (§66.12.1: non-mutating, always allowed); the
+    // predicate is a `bool` (analyze checks it).
+    export type SeqFn:enum = { Filter, Map, SortBy, Some, Every }
 
     // s449 — the §55 validity surface. A surface is the reactive validity
     // state the compiler synthesizes for a value that carries validators

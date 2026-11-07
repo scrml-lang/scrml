@@ -2454,6 +2454,12 @@ export function tapeRemoveAt(xs, i) {
   return out;
 }
 
+/** `xs.includes(x)` on a tape: some element is structurally equal to `x` (§45 — the same `eq` as `==`). */
+export function tapeIncludes(xs, x) {
+  for (let i = 0; i < xs.length; i++) if (eq(xs[i], x)) return true;
+  return false;
+}
+
 /** `[...a, ...b]`: a new tape holding `a`'s values, then `b`'s (an array value with a spread). */
 export function tapeConcat(a, b) {
   const out = new Array(a.length + b.length);
