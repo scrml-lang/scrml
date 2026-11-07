@@ -59,6 +59,8 @@
  *                   only for a declared `<program>`, so a plain wrap would change the page's styling;
  *                   the attribute keeps the rendering identical (a codemod changes spelling, never
  *                   rendering). Deleting it opts the program into the reset.
+ *                   A `<page>` root (route-file shape) is not wrapped, except with `wrapPageRoot`
+ *                   (the twin generator — S475 ruling).
  *   program-move    items above (or below) the entry's `<program>` → moved inside it.
  *   unwrap-logic    a `${ … }` block at markup depth 0 whose statements are all items → unwrapped
  *                   (§40.8 / S441: a bare run at a program body top means the same as inside `${}`).
@@ -1302,7 +1304,10 @@ function parseDeclSite(src, node, filePath) {
  *               compile (S464 ruling) — for a caller that twins files which fail to compile BY
  *               DESIGN (scripts/bootstrap-conformance.ts: the conformance error cases). The CLI
  *               never sets it.
- *   verify      compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
+ *   wrapPageRoot  program-wrap an entry whose root is `<page>` (S475 ruling) — for the twin
+ *               generator, where each case is a whole program. The CLI never sets it: in a
+ *               project a `<page>` root is a route file, and stays unwrapped (reported).
+ *   verify     compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
  *               codes are unchanged (default true).
  * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
  *             blockers: Array<{rule:string,line:number,reason:string,snippet:string}> }}
@@ -1649,7 +1654,11 @@ export function fixS66(source, opts = {}) {
       if (enabled.has("program-wrap")) {
         const prose = topNodes.find((n) => n.kind === "text" && /\S/.test(n.value ?? ""));
         const page = topNodes.find((n) => n.kind === "markup" && n.tag === "page");
-        if (page) block("program-wrap", page.span?.start ?? 0, "`<page>` root with no `<program>` (route-file shape — not wrapped)");
+        // A `<page>` root is a route file's shape: in a project it belongs to its shell, so the CLI
+        // does not wrap it. A conformance twin is a whole program on its own, so the twin
+        // generator passes `wrapPageRoot` and the file is wrapped like any other entry (S475
+        // ruling: "A twin case whose root is `<page>` is program-wrapped").
+        if (page && !opts.wrapPageRoot) block("program-wrap", page.span?.start ?? 0, "`<page>` root with no `<program>` (route-file shape — not wrapped)");
         else if (prose) block("program-wrap", prose.span?.start ?? 0, "top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)");
         else if (/<program\b/.test(src)) block("program-wrap", 0, "a `<program>` the front end does not recognize as the root (malformed source)");
         else if (!topNodes.some((n) => n.kind === "markup")) {
