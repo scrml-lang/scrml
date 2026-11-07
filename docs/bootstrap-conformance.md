@@ -15,8 +15,8 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 243 | 13.3% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 649 | 35.5% |
-| UNSUPPORTED | 633 | 34.6% |
+| NOT-TWINNED | 624 | 34.2% |
+| UNSUPPORTED | 658 | 36.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,15 +26,15 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 243; the other 168 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 633.
+UNSUPPORTED by reason: bootstrap-unsupported 658.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **834** — PASS 185 · FAIL 207 · UNSUPPORTED 442. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **859** — PASS 185 · FAIL 207 · UNSUPPORTED 467. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -47,7 +47,6 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 - 39 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
-- 32 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — const-cell: initializer extent could not be verified against impl#1's AST
 - 13 — rhs-decl: declaration text not found at the AST site
@@ -65,9 +64,9 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
 - 5 — engine-simple: engine without a bare-variant `…`
+- 5 — program-wrap: a `…` the front end does not recognize as the root (malformed source)
 - 5 — rhs-decl: bare variant .X declared by N enums (needs a type)
 - 5 — rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
-- 4 — program-wrap: a `…` the front end does not recognize as the root (malformed source)
 - 3 — engine-simple: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
 - 3 — program-move: `…` outside `…` (where it renders is not mechanical)
 - 3 — rhs-decl: Shape 2 `…` (→ `…`, CTX — ⚑ O25)
@@ -84,6 +83,7 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 - 1 — program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-LIFECYCLE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `…` unwrapped
+- 1 — program-wrap: impl#1 reads the restructured file differently (+E-UNQUOTED-DISPLAY-TEXT) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-INTERP-WRAPPED, +E-CODEGEN-INVALID-LOGIC, +W-DERIVED-001) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-FOREIGN-LANG-DUPLICATE, +E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-LOOP-006) — not restructured, no `…` unwrapped
@@ -101,9 +101,9 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
 | attr-executable-sink | 23 | 5 | · | 1 | · | 11 | 6 | · | · |
-| auth | 65 | 7 | · | 3 | · | 12 | 43 | · | · |
+| auth | 65 | 7 | · | 3 | · | 11 | 44 | · | · |
 | block-grammar | 14 | 10 | · | 1 | · | 1 | 2 | · | · |
-| body-top | 27 | 5 | · | 19 | · | 2 | 1 | · | · |
+| body-top | 27 | 5 | · | 19 | · | 1 | 2 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
@@ -119,7 +119,7 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
 | error | 78 | 37 | · | 12 | · | 5 | 24 | · | · |
-| error-boundary | 11 | · | · | · | · | 11 | · | · | · |
+| error-boundary | 11 | · | · | · | · | · | 11 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | 6 | · | 5 | · | 1 | 7 | · | · |
 | foreign | 16 | 1 | · | 1 | · | 7 | 7 | · | · |
@@ -127,12 +127,12 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 | forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
 | hostmethod | 1 | · | · | 1 | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 56 | 15 | · | 4 | · | 26 | 11 | · | · |
+| lifecycle | 56 | 15 | · | 4 | · | 22 | 15 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 16 | · | 19 | · | 40 | 14 | · | · |
-| match-block | 22 | 4 | · | 3 | · | 9 | 6 | · | · |
+| match-block | 22 | 4 | · | 3 | · | 6 | 9 | · | · |
 | match-codes | 25 | 4 | · | 10 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 16 | · | 5 | · | 12 | 13 | · | · |
@@ -155,8 +155,8 @@ NOT-TWINNED by reason (649 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 91 | 10 | · | 22 | · | 19 | 40 | · | · |
-| server-fn | 27 | · | · | 13 | · | 10 | 4 | · | · |
+| server-db | 91 | 10 | · | 22 | · | 17 | 42 | · | · |
+| server-fn | 27 | · | · | 13 | · | 7 | 7 | · | · |
 | sql | 20 | 2 | · | 3 | · | 9 | 6 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 1 | · | 1 | · | 24 | 1 | · | · |
@@ -1413,7 +1413,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (633)
+### UNSUPPORTED (658)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1453,6 +1453,7 @@ none
 - `auth/auth-004-pos` — bootstrap-unsupported: `<>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `auth/auth-005-neg` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `auth/auth-005-pos` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `auth/auth-async-stdlib-sync-callback-neg` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-attr-legal-values-neg` — bootstrap-unsupported: `<program auth="optional">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/auth-attr-nested-program-one-code-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/auth-attr-nonliteral-page-pos` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1484,6 +1485,7 @@ none
 - `block-grammar/block-015-bare-slash-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `block-grammar/block-047-unclosed-brace-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `body-top/page-prose-rejected` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `capability/inheritance-closest-wins-no-union` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
 - `capability/inheritance-inherit-covers` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
 - `capability/inline-block-covered` — bootstrap-unsupported: a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet
@@ -1596,6 +1598,17 @@ none
 - `equality/is-not-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `equality/same-type-primitive-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `equality/strict-operator-reject` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `error-boundary/bare-call-no-boundary-e002` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error-boundary/e005-nested-inner-no-fallback` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error-boundary/e005-no-fallback-no-renders` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error-boundary/e005-partial-coverage` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/fallback` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/nested-inner-catches` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error-boundary/no-renders-falls-to-fallback` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/renders-multifield-payload` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/success-transparent` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/terse-fallback-closer` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/variant-renders` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error/construct-variant-payload-arity-let-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/construct-variant-payload-arity-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
@@ -1659,11 +1672,15 @@ none
 - `lifecycle/effect-writes-state-function-value-pos` — twin · bootstrap-unsupported: `bump` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `bump(…)`
 - `lifecycle/on-transition-from` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `lifecycle/request-body-client-wrapper-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-data-is-some-if-attr-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-data-is-some-value-bool-class-attr-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-deps-empty-mount-only-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-deps-explicit-listed-refire-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-refetch-fn-body-stmt-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-refetch-inline-multi-stmt-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-settle-error-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
+- `lifecycle/request-settle-success-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `linear/lin-001-never-consumed-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-002-consumed-in-loop-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-002-consumed-in-loop-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
@@ -1698,6 +1715,9 @@ none
 - `match-block/payload-bind` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/phase-arm-swap` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/round-trip` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/value-decl-block-arm-keyword-prefixed-tail` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/value-decl-block-arm-raw` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/value-decl-block-arm-variant` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/wildcard` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1965,6 +1985,8 @@ none
 - `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: `on mount { }` (§6.7.1a) is not in the bootstrap yet; it is refused here by name rather than misread — write `<onMount>${ … }</>` (§6.7.1a, S449)
 - `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
+- `server-db/server-fn-in-sync-callback-neg` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/server-fn-in-sync-callback-pos` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-configured-db-no-e-sql-004` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
@@ -1990,8 +2012,11 @@ none
 - `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
 - `server-fn/e-route-003-pos` — twin · bootstrap-unsupported: `snippet type` (§14.9) is not in the bootstrap yet; it is refused here by name rather than misread
 - `server-fn/e-route-004-pos` — twin · bootstrap-unsupported: `anonymous fn expression` (§48.2.1) is not in the bootstrap yet; it is refused here by name rather than misread — declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callba
+- `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
+- `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/session-value-in-tool-neg` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-fn/value-server-call-interp-neg` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: a client call of `loadRows`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `loadRows` declares none and its returns do not prove one (the t
 - `sql/one-statement-trailing-semicolon-pos` — twin · bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
@@ -2049,7 +2074,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: `map literal [k: v]` (§59) is not in the bootstrap yet; it is refused here by name rather than misread — maps (§59, O44) are not in the bootstrap
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `ops` holds a struct literal (a file-scope struct constant is not in the bootstrap yet) — the bootstrap builds a file-scope `const` whose value is fixed at c
 
-### NOT-TWINNED (649)
+### NOT-TWINNED (624)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -2065,10 +2090,9 @@ none
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-002-pos` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
-- `auth/auth-005-db-context-neg` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38) · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `auth/auth-async-stdlib-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `auth/auth-005-db-context-neg` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `auth/program-from-component-config-unread-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
-- `auth/program-nested-auth-in-page-pos` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `auth/program-nested-auth-in-page-pos` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
 - `auth/program-top-level-session-attr-neg` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
 - `auth/program-worker-under-div-in-wrapped-app-not-e-program-002-neg` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
 - `auth/program-wrapped-in-markup-is-application-gated` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
@@ -2076,7 +2100,6 @@ none
 - `auth/w-serverload-ungated-pos` — not mechanical: rhs-decl: initializer not parsed by impl#1
 - `block-grammar/block-ctx-001-unterminated-raw-content-pos` — not mechanical: program-wrap: the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured, no `${}` unwrapped
 - `body-top/channel-prose-rejected` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
-- `body-top/page-prose-rejected` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `channel/dup-name-cross-file` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/export-reactive-ref-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/export-string-literal-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
@@ -2304,23 +2327,12 @@ none
 - `equality/map-key-function-field-reject` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `equality/payload-variant-compare-warn` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
 - `equality/unit-variant-compare-clean` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
-- `error-boundary/bare-call-no-boundary-e002` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/e005-nested-inner-no-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/e005-no-fallback-no-renders` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/e005-partial-coverage` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/nested-inner-catches` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/no-renders-falls-to-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/renders-multifield-payload` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/success-transparent` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/terse-fallback-closer` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `error-boundary/variant-renders` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `error/handler-failable-reference-component-prop-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-failable-reference-via-component-prop-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-guard-arm-uses-prop-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-guard-in-component-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-pipeless-arms-rt-newline-list` — excluded (dialect.s66): impl#1-only guard (s469-impl1-arm-commas): the arm list is written NEWLINE-separated on purpose, to keep impl#1's carried newline-list reading covered after the conformance comma migration; the bootstrap enforces the
-- `fn/equals-body-reject` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `fn/equals-body-reject` — not mechanical: program-wrap: impl#1 reads the restructured file differently (+E-UNQUOTED-DISPLAY-TEXT) — not restructured, no `${}` unwrapped
 - `foreign/foreign-bare-block-neg` — not mechanical: program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `${}` unwrapped
 - `foreign/foreign-crossing-clean-pos` — not mechanical: program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `${}` unwrapped
 - `foreign/foreign-crossing-shadow-neg` — not mechanical: program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `${}` unwrapped
@@ -2387,12 +2399,8 @@ none
 - `lifecycle/effect-on-derived-engine` — not mechanical: engine-simple: engine surface beyond the simple rule: effect, derived (⚑ O5 surface)
 - `lifecycle/on-transition-to` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `lifecycle/ontransition-once-if-attrs` — not mechanical: engine-simple: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
-- `lifecycle/request-data-is-some-if-attr-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `lifecycle/request-data-is-some-value-bool-class-attr-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-neg` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-pos` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
-- `lifecycle/request-settle-error-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `lifecycle/request-settle-success-rt` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `lifecycle/reset-on-cycle-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - `lifecycle/reset-on-cycle-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - `lifecycle/reset-on-cycle-self-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
@@ -2459,13 +2467,10 @@ none
 - `markup-handler/s462-handler-if-else-template-cell-true` — excluded (dialect.s66): impl#1-only newline-shape guard (S469 PA call, dpa-073 F5): this case pins how impl#1 splits a braceless if / else written on one line with NO `;` — a newline-terminated shape the bootstrap refuses by construction (E
 - `markup-handler/s462-handler-nested-if-else` — excluded (dialect.s66): impl#1-only newline-shape guard (S469 PA call, dpa-073 F5): this case pins how impl#1 splits a braceless if / else written on one line with NO `;` — a newline-terminated shape the bootstrap refuses by construction (E
 - `markup-handler/s462-handler-while-body-if-else` — excluded (dialect.s66): impl#1-only newline-shape guard (S469 PA call, dpa-073 F5): this case pins how impl#1 splits a braceless if / else written on one line with NO `;` — a newline-terminated shape the bootstrap refuses by construction (E
-- `match-block/block-arm-nested-assignment-fidelity` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/block-arm-tail-after-block-statement` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/member-assign-tail-voids-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/value-decl-block-arm-keyword-prefixed-tail` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/value-decl-block-arm-raw` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/value-decl-block-arm-variant` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `match-block/value-form-block-arm-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/block-arm-nested-assignment-fidelity` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-block/block-arm-tail-after-block-statement` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-block/member-assign-tail-voids-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-block/value-form-block-arm-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
@@ -2612,8 +2617,6 @@ none
 - `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `route-region/cn10-keepalive-reentry` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `server-db/cps-batch-field-write-refused` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
-- `server-db/server-fn-in-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `server-db/server-fn-in-sync-callback-pos` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `server-db/sql-aggregate-group-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `server-db/sql-all-array-shape-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-db/sql-delete-reflects-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -2632,14 +2635,11 @@ none
 - `server-db/sql-where-filter-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `server-fn/basic-load-hydrate` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-fn/cps-call-in-if-arm` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `server-fn/error-boundary-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
-- `server-fn/error-boundary-value-server-call-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `server-fn/optional-absent` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `server-fn/optional-present` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `server-fn/sequence-two-fns` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `server-fn/sse-generator-binding-seed-survives` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `server-fn/value-server-call-init-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
-- `server-fn/value-server-call-interp-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `sql/bad-conn-prefix-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `sql/batch-warn-info` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `sql/clean-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
