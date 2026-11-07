@@ -22608,9 +22608,9 @@ in its body is still a carrier, so its failure set does not change when its body
 > (E-TYPE-020). Before, the callee's failure set there was `E`. The fix is one arm, and that arm never runs for such
 > a callee. That cost is the price of the stable failure set the ruling chose. · **Built by the bootstrap**
 > (s475-boot-literal-carriers: `compiler/self-host-v2/analyze.scrml` `transportCarriers` seeds a client `!` function
-> from every server call it makes, handled or `?`-propagated; `g-boot-transport-carrier-literal-reading-s475`
-> resolved). ⚑ PA reading there (S475, veto window): a server call in unreachable code (after a `return` / `fail` /
-> `break` / `continue` of its block) is not "made", so it makes no carrier. Nominal on impl#1 (frozen, S471/S475).
+> from every server call it makes, and every call of a carrier, handled or `?`-propagated, by textual containment:
+> a call in unreachable code counts; `g-boot-transport-carrier-literal-reading-s475` resolved). Nominal on impl#1
+> (frozen, S471/S475).
 
 ```scrml
 // Developer writes:

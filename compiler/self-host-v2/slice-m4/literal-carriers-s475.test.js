@@ -13,8 +13,13 @@
 //   SPEC §19.9.5: "Its client call fails with the §19.9.10 failure set: the function's declared error
 //   variants, if it is declared `!`, plus `Transport(t: ServerCallError)`".
 //
-// ⚑ PA reading (g-boot-transport-carrier-dead-question-seeds-s475): a server call in unreachable code (after a
-// `return` / `fail` / `break` / `continue` of its block) is never MADE, so it seeds nothing.
+//   SPEC §19.9.5 "Extended (S475)": a server call is "a client call of a server function (§19.9.10), or a call
+//   of another transport carrier", and "how the body handles the call does not matter".
+//
+// r1 (review F2): TEXTUAL CONTAINMENT. A server call anywhere in the body, unreachable or not, makes the
+// function a carrier (g-boot-transport-carrier-dead-question-seeds-s475; the PA's ⚑ dead-code reading was
+// withdrawn — it let an early `return` flip a caller's `.Transport` arm to E-TYPE-VARIANT).
+// r1 (review F1): a HANDLED call of a carrier makes the caller a carrier too.
 //
 // RED on base (origin/main 95c63e4d7): the fully-handled shapes below compiled with a caller handler that
 // omits `Transport`, and a `.Transport` arm at such a caller was E-TYPE-VARIANT.
@@ -134,7 +139,7 @@ describe("the seeding reaches a `for` init and a handler's block arm", () => {
   });
 });
 
-describe("transitively: a client caller `?`-propagating a carrier is one; one HANDLING it is not", () => {
+describe("transitively: a client caller of a carrier is one, `?`-propagating or HANDLING the call", () => {
   const F = SHAPES["guard with `_`"];
   test("`?` on the carrier's call: the outer caller covers `Transport`", () => {
     const G = `    function g(x: int)! E {
@@ -145,28 +150,63 @@ describe("transitively: a client caller `?`-propagating a carrier is one; one HA
     expect(codes(P(S + F + G, `@r = g(5) !{ .Bad :> 8 };`))).toEqual(["E-TYPE-080"]);
     expect(errs(P(S + F + G, `@r = g(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).toEqual([]);
   });
-  test("handling the carrier's call is not a server call: its callers owe no `Transport`", () => {
+  test("handling the carrier's call is a server call (§19.9.5 Extended): its callers cover `Transport` (r1 F1; RED on b55d7d100: compiled)", () => {
     const H = `    function g(x: int)! E {
         if (x == 0) fail E.Bad;
         const v: int = f(x) !{ _ :> 0 };
         return v + 10;
     }
 `;
-    expect(errs(P(S + F + H, `@r = g(5) !{ .Bad :> 8 };`))).toEqual([]);
+    expect(codes(P(S + F + H, `@r = g(5) !{ .Bad :> 8 };`))).toEqual(["E-TYPE-080"]);
+    expect(errs(P(S + F + H, `@r = g(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).toEqual([]);
+    expect(errs(P(S + F + H, `@r = g(5) !{ _ :> 8 };`))).toEqual([]);
+  });
+  test("mutual recursion through a handled carrier call ends and makes both carriers", () => {
+    const H = `    function g(x: int)! E {
+        if (x == 0) fail E.Bad;
+        const v: int = h(x - 1) !{ _ :> 0 };
+        const w: int = f(x) !{ _ :> 0 };
+        return v + w;
+    }
+    function h(x: int)! E {
+        if (x == 0) fail E.Bad;
+        const v: int = g(x - 1) !{ _ :> 0 };
+        const u: int = h(x - 1) !{ _ :> 0 };
+        return v + u;
+    }
+`;
+    // a recursive waiting client function is refused on its own (E-BOOTSTRAP-UNSUPPORTED); the analysis still
+    // ends, and the carrier's `E + Transport` is judged at the caller
+    const bad = errs(P(S + F + H, `@r = h(5) !{ .Bad :> 8 };`));
+    expect(bad.filter((x) => x.startsWith("E-TYPE-080")).length).toBe(1);
+    expect(bad.find((x) => x.startsWith("E-TYPE-080"))).toContain("E + Transport");
+    expect(codes(P(S + F + H, `@r = h(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).not.toContain("E-TYPE-080");
+    expect(codes(P(S + F + H, `@r = h(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).not.toContain("E-TYPE-VARIANT");
   });
 });
 
-describe("⚑ a server call in unreachable code is never made: no carrier (g-boot-transport-carrier-dead-question-seeds-s475)", () => {
-  test("a `?` after `return`: no E-ERROR-010 at the dead `?`, and the caller owes no `Transport` (RED on base: E-TYPE-080)", () => {
+describe("textual containment: a server call in unreachable code still makes a carrier (r1 F2; g-boot-transport-carrier-dead-question-seeds-s475)", () => {
+  test("an early `return` above the only server call keeps the caller's `.Transport` arm valid (RED on b55d7d100: E-TYPE-VARIANT)", () => {
+    const F = `    function f(x: int)! E {
+        if (x == 0) fail E.Bad;
+        return 1;
+        const v: int = s(x) !{ _ :> 0 };
+    }
+`;
+    expect(errs(P(S + F, `@r = f(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).toEqual([]);
+    expect(codes(P(S + F, `@r = f(5) !{ .Bad :> 8 };`))).toEqual(["E-TYPE-080"]);
+  });
+  test("a `?` after `return`: a carrier (no E-ERROR-010 — §19.5.3 bullet 3 is retired for client functions)", () => {
     const F = `    function f(x: int)! E {
         if (x == 0) fail E.Bad;
         return 1;
         const v: int = s(x)?;
     }
 `;
-    expect(errs(P(S + F, `@r = f(5) !{ .Bad :> 8 };`))).toEqual([]);
+    expect(codes(P(S + F, `@r = f(5) !{ .Bad :> 8 };`))).toEqual(["E-TYPE-080"]);
+    expect(errs(P(S + F, `@r = f(5) !{ .Transport(t) :> 7, .Bad :> 8 };`))).toEqual([]);
   });
-  test("a handled call after `fail` inside a block: no carrier", () => {
+  test("a handled call after `fail` inside a block: a carrier", () => {
     const F = `    function f(x: int)! E {
         if (x == 0) {
             fail E.Bad;
@@ -175,9 +215,9 @@ describe("⚑ a server call in unreachable code is never made: no carrier (g-boo
         return 1;
     }
 `;
-    expect(errs(P(S + F, `@r = f(5) !{ .Bad :> 8 };`))).toEqual([]);
+    expect(codes(P(S + F, `@r = f(5) !{ .Bad :> 8 };`))).toEqual(["E-TYPE-080"]);
   });
-  test("the same call where it can run IS a carrier", () => {
+  test("the same call where it can run is a carrier: the failure set does not depend on reachability", () => {
     const F = `    function f(x: int)! E {
         if (x == 0) fail E.Bad;
         const v: int = s(x) !{ _ :> 0 };

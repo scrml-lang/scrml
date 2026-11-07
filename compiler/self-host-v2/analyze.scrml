@@ -15608,7 +15608,11 @@ ${
         if (hasId) {
             for (const q of st.reqs) {
                 // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
-                if (q.id == id && q.pend < 0) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                // r1 (review F4): an id no `<#…>` can name has no `<#id>` ambiguity to report
+                if (q.id == id && q.pend < 0) {
+                    if (isIdentifierText(id)) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                    else st = reqUnsupported(env, r.opener, "two `<request>`s share the id `\"" + id + "\"`; give each request its own `id`", st)
+                }
             }
         }
         // ---- the body's shape ----
@@ -32249,21 +32253,18 @@ ${
     // `clocks` (review L4): every bare `Date` / `performance` name — the browser's clock is not the server's.
     // s475 r1 (review item 4): `exitAt` — where each `fail` / `?` of the run stands (a `fail` statement's span,
     // a `?`'s expression span), for the path walk after a server call (pwStmts).
-    // s475-boot-literal-carriers: `dead` — the nids of the `handled` forms that stand in unreachable code (after a
-    // `return` / `fail` / `break` / `continue` of the same block, as `exitAt` withholds them): a call there is never
-    // MADE (transportCarriers).
-    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[], exitAt: ASpan[], dead: int[] }
+    type CFold:struct = { names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[], clocks: int[], exitAt: ASpan[] }
 
-    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [], exitAt: [], dead: [] } }
+    fn cf0() -> CFold { return { names: [], assigns: [], rets: false, exits: false, effects: false, handled: [], clocks: [], exitAt: [] } }
 
     fn cfWith(a: CFold, names: int[], assigns: int[], rets: boolean, exits: boolean, effects: boolean, handled: CHand[]) -> CFold {
-        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks, exitAt: a.exitAt, dead: a.dead }
+        return { names: names, assigns: assigns, rets: rets, exits: exits, effects: effects, handled: handled, clocks: a.clocks, exitAt: a.exitAt }
     }
 
     fn cfName(a: CFold, nid: int, n: string) -> CFold {
         let c: int[] = a.clocks
         if (n == "Date" || n == "performance") c = c.concat([nid])
-        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt, dead: a.dead }
+        return { names: a.names.concat([nid]), assigns: a.assigns, rets: a.rets, exits: a.exits, effects: a.effects, handled: a.handled, clocks: c, exitAt: a.exitAt }
     }
 
     // s475-boot-file-scope-own-value (#1772 review N4): an exit AFTER a `return` / `fail` / `break` /
@@ -32276,14 +32277,7 @@ ${
         for (const s of ss) {
             const b: CFold = cfStmt(s, a)
             if (dead) {
-                // the handling forms this unreachable statement added (the fold only appends)
-                let dn: int[] = b.dead
-                let i: int = a.handled.length
-                while (i < b.handled.length) {
-                    dn = dn.concat([b.handled[i].nid])
-                    i = i + 1
-                }
-                a = { names: b.names, assigns: b.assigns, rets: b.rets, exits: b.exits, effects: b.effects, handled: b.handled, clocks: b.clocks, exitAt: a.exitAt, dead: dn }
+                a = { names: b.names, assigns: b.assigns, rets: b.rets, exits: b.exits, effects: b.effects, handled: b.handled, clocks: b.clocks, exitAt: a.exitAt }
             } else {
                 a = b
             }
@@ -32329,7 +32323,7 @@ ${
 
     fn cfRet(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, true, a.exits, a.effects, a.handled) }
     fn cfExit(a: CFold, at: ASpan) -> CFold {
-        return { names: a.names, assigns: a.assigns, rets: a.rets, exits: true, effects: a.effects, handled: a.handled, clocks: a.clocks, exitAt: a.exitAt.concat([at]), dead: a.dead }
+        return { names: a.names, assigns: a.assigns, rets: a.rets, exits: true, effects: a.effects, handled: a.handled, clocks: a.clocks, exitAt: a.exitAt.concat([at]) }
     }
     fn cfEffect(a: CFold) -> CFold { return cfWith(a, a.names, a.assigns, a.rets, a.exits, true, a.handled) }
 
@@ -32706,8 +32700,8 @@ ${
     // The functions whose callers receive `Transport(t: ServerCallError)` besides their declared variants:
     // §19.9.5 "Its client call fails with the §19.9.10 failure set: the function's declared error variants,
     // if it is declared `!`, plus `Transport(t: ServerCallError)`". Seeded by the composed functions; then,
-    // to a fixpoint, every client-placed `!` function that `?`-propagates a call of a carrier — `?` re-fails
-    // the callee's `Transport` as its own (§19.5.2), so its callers receive it too (PA ruling S475:
+    // to a fixpoint, every client-placed `!` function that calls a carrier (handled or `?`-propagated; see
+    // s475-boot-literal-carriers below), so its callers receive `Transport` too (PA ruling S475:
     // "recursively for client callers"). Returned as AFn nids (the composed program keeps them; Sym ids
     // are minted again).
     // s475-boot-transport-every-client-bang — and every client-placed `!` function that makes a CLIENT CALL
@@ -32720,19 +32714,15 @@ ${
     // seeds the function as a `?` on one does (was #1797's narrow reading: `?` only). The calls are the
     // composition fold's handling forms (cfStmts — every statement, for-init, lift, `fail` payload,
     // expression arm and BLOCK arm, at any depth); a client server call is always one of them (unhandled it
-    // is E-ERROR-002). A call of a CLIENT carrier still seeds only through `?`: handling it is not a server
-    // call, and only `?` re-fails its `Transport` (§19.5.2).
-    // ⚑ PA reading (S475, g-boot-transport-carrier-dead-question-seeds-s475): a call in unreachable code —
-    // after a `return` / `fail` / `break` / `continue` of its block (CFold.dead) — is never MADE, so it seeds
-    // nothing. INTERIM: unreachability is that one block-local rule (as `exitAt`'s); a call after an `if`
-    // whose every branch leaves still seeds (fails toward more required handling, never a wrong run). The
-    // capable form is the path walk's reachability (pwStmts) over every branch.
-    // `quiet`: the client `!` functions that are NOT carriers but hold a server call in unreachable code — the
-    // E-ERROR-010 a dead `?` there would get is dropped as a carrier's is (§19.5.3 bullet 3 is retired for
-    // client functions, ruling S475 item 4; a call never made owes nothing).
-    type RCarriers:struct = { nids: int[], quiet: int[] }
-
-    fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> RCarriers {
+    // is E-ERROR-002). A call of a CARRIER is a server call too (SPEC §19.9.5 Extended: "a client call of a
+    // server function (§19.9.10), or a call of another transport carrier"; "how the body handles the call does
+    // not matter"): handled or `?`-propagated, it makes the caller a carrier.
+    // s475-boot-literal-carriers r1 (review F2, the PA's ⚑ dead-code reading WITHDRAWN): TEXTUAL CONTAINMENT.
+    // A server call anywhere in the body — after a `return` / `fail` / `break` / `continue` included — makes
+    // the function a carrier (stable failure set: an early `return` above a function's only server call must
+    // not flip a caller's `.Transport` arm to E-TYPE-VARIANT). cfStmts already folds unreachable statements'
+    // handling forms. The fixpoint only adds functions, so it ends (recursion and mutual recursion included).
+    fn transportCarriers(g: Globals, t: Tables, sum: Summary, seeds: int[]) -> int[] {
         let syms: int[] = seeds
         const places: PlaceFact[] = t.server.places
         // the client `!` functions that can be carriers, and their folds (one fold each)
@@ -32756,7 +32746,7 @@ ${
                     let seeded = false
                     for (const h of fold.handled) {
                         const cs: Sym | not = fnSymAt(t, h.callee)
-                        if (!seeded && fold.dead.indexOf(h.nid) < 0 && cs is given && (isServerPlaced(t, cs) || (h.how == 0 && syms.indexOf(cs.id) >= 0))) seeded = true
+                        if (!seeded && cs is given && (isServerPlaced(t, cs) || syms.indexOf(cs.id) >= 0)) seeded = true
                     }
                     if (seeded) {
                         syms = syms.concat([sid])
@@ -32766,25 +32756,11 @@ ${
                 i = i + 1
             }
         }
-        let quiet: int[] = []
-        let j: int = 0
-        while (j < cand.length) {
-            const sj: int = cand[j].info.sym.id
-            if (syms.indexOf(sj) < 0) {
-                let deadCall = false
-                for (const h2 of folds[j].handled) {
-                    const cs2: Sym | not = fnSymAt(t, h2.callee)
-                    if (folds[j].dead.indexOf(h2.nid) >= 0 && cs2 is given && isServerPlaced(t, cs2)) deadCall = true
-                }
-                if (deadCall) quiet = quiet.concat([sj])
-            }
-            j = j + 1
-        }
         let nids: int[] = []
         for (const fs2 of g.fns) {
             if (syms.indexOf(fs2.info.sym.id) >= 0) nids = nids.concat([fs2.info.nid])
         }
-        return { nids: nids, quiet: quiet }
+        return nids
     }
 
     // The E-ERROR-010 reports a `?` on a client server call made for a missing `Transport` (AS.tport) in a
@@ -37763,9 +37739,8 @@ ${
         for (const cf of ra.g.fns) {
             if (planFor(cp.plans, cf.f.nid) is given) seeds = seeds.concat([cf.info.sym.id])
         }
-        const rc: RCarriers = transportCarriers(ra.g, typedT, sum, seeds)
-        const carrierNids: int[] = rc.nids
-        let quiet: int[] = cp.tried.concat(rc.quiet)
+        const carrierNids: int[] = transportCarriers(ra.g, typedT, sum, seeds)
+        let quiet: int[] = cp.tried
         let retype = false
         for (const cf2 of ra.g.fns) {
             if (carrierNids.indexOf(cf2.info.nid) >= 0) {

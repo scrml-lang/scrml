@@ -90,6 +90,25 @@ describe("the unreferenceable request runs and assigns its `@variable` (SPEC: \"
 
   test("two requests with the same non-identifier id stay refused as a duplicate", () => {
     const two = SRC("x-y").replace("</request>", `</request>\n    <request id="x-y">${D} @userName = loadName(@userId); }</request>`);
-    expect(fe(two).diags.filter((d) => d.severity === "Error").map((d) => d.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    const dup = fe(two).diags.filter((d) => d.severity === "Error" && d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.startsWith("two `<request>`s"));
+    expect(dup.length).toBe(1);
+    // r1 (review F4): no `<#…>` can name such an id, so the message gives no `<#id>` ambiguity reason
+    expect(dup[0].message).toContain("share the id `\"x-y\"`");
+    expect(dup[0].message).not.toContain("would name either");
+  });
+
+  test("two requests with `id=\"\"`: the duplicate message names the empty id without `<#>` (r1 F4)", () => {
+    const two = SRC("").replace("</request>", `</request>\n    <request id="">${D} @userName = loadName(@userId); }</request>`);
+    const dup = fe(two).diags.filter((d) => d.severity === "Error" && d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.startsWith("two `<request>`s"));
+    expect(dup.length).toBe(1);
+    expect(dup[0].message).toContain("share the id `\"\"`");
+    expect(dup[0].message).not.toContain("<#>");
+  });
+
+  test("two requests with the same identifier id keep the `<#id>` ambiguity message", () => {
+    const two = SRC("abc").replace("</request>", `</request>\n    <request id="abc">${D} @userName = loadName(@userId); }</request>`);
+    const dup = fe(two).diags.filter((d) => d.severity === "Error" && d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.startsWith("two `<request>`s"));
+    expect(dup.length).toBe(1);
+    expect(dup[0].message).toContain("would name either");
   });
 });
