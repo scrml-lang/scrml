@@ -37,3 +37,24 @@
 - Extension after reading the R26 app: `return { a: x, b: [y] }` — a local held by a struct / tape literal the `return` builds is safe exactly as `return x` is (the frame ends; defers are already excluded). The lotto app's `learn()` returns its eight tables that way.
 - New test file first run after: 29/29 green. 100,000 appends: 4941 ms -> 1.2 ms; 2 x 100,000 slot writes on 10,000 slots + 20,000 appends: 1433 ms -> 3.6 ms.
 - R26 first pass (before the return-literal extension): base and after both `ALL CHECKS PASSED` on the app's own tests/verify.mjs; `node --check` ok on all 8 emitted .js. after-build: 41 owned edits, 16 copies left (out_11 passed to `freshLine` — a real escape; `next`/`ways` in patternChance — `ways = next` aliases; the rest returned in struct literals -> fixed by the extension).
+
+## 2026-11-08 — verified, committed a4edc94bb
+- Hook on a4edc94bb: 47411 pass / 0 fail (unit+integration+conformance), slices 6663 pass / 0 fail, slice-m1 lowered 167 pass / 0 fail.
+- Bootstrap conformance after (`--json ~/.cache/scrml/s476-boot-tape-inplace/conf-after.json`): identical to base — PASS 302 / FAIL 243 / NOT-TWINNED 624 / UNSUPPORTED 658 / CRASH 0, runtime-executed 109; 0 per-case verdict changes.
+- position-write-s472.test.js D: its printed-shape assertion `writePath(` became `writePathOwned(true` (a fresh server local; the run half — 200 / 14, and the out-of-range fixed 500 — passes unchanged through the owned writer).
+- R26 (~/projects/lotto-analyzer/analyzer.scrml, read-only; copies in ~/.cache/scrml/s476-boot-tape-inplace/r26/, a second copy with the input cap raised 20000 -> 100000): compiled with `bun scripts/scrml-boot.ts compile` on base (a `git archive` of c6afb2cae) and after. `node --check` ok on all 12 emitted .js. The app's own tests/verify.mjs: ALL CHECKS PASSED on both. Same seed (2026-11-08 / 2000-01-01), sha256 of the page text after Run identical base vs after at every count. Run-handler time in headless Chromium:
+  | drawings | base ms | after ms |
+  |---:|---:|---:|
+  | 1,000 | 205 | 171 |
+  | 5,000 | 921 | 791 |
+  | 20,000 | 3,877 | 2,981 |
+  | 50,000 | 12,059 | 7,177 |
+  | 100,000 | 36,053 | 14,293 |
+  After is linear in the input; base was superlinear. The remaining per-drawing cost is not tape copying (5 copying edits left, all real escapes: a local passed as a call argument — `freshLine(…, out, …)`, `ageAt(lastSeen, …)`, `median(banks)` — and `ways = next` aliasing in patternChance).
+- after-build edit census: 52 owned edits, 5 copies (base: 0 owned, 57 copies).
+
+## open / deferred
+- A local passed to a function keeps copying (the callee may return its parameter). Capable form: an interprocedural "does not keep its parameter" fact per function. Not built here.
+- A local read whole into another binding on its last use (`ways = next`) keeps copying (the proof is flow-insensitive by design — a move/last-use analysis is the capable form).
+- Client functions that WAIT are not optimized (continuation printing). Same rule would apply; not built.
+- `sortBy` / `tapeConcat` / `sort` / `reverse` as VALUE ops still build a new tape each call — that is their meaning (a new value), not a local edit.
