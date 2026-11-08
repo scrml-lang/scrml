@@ -8,6 +8,8 @@
 // there is no capability Sym for it to name (see core.scrml, THE BINDER'S
 // OBLIGATION). What this module checks:
 //   C1  wcap is some  ⟺  the field grants a write (replace, an edit, a graph)
+//   C1b (s476) a Derived declaration field whose own type grants nothing carries no inner
+//       (FieldAt) grant — so, by C1, no write capability (§66.9 rule 3)
 //   C2  every Write's `cap` is some field's wcap (else: a dangling capability)
 //   C3  the Write's edit is granted by that field's contract (§66.11, §66.12):
 //       `replace` subsumes the sequence edits (§66.11.3); a Transition needs a
@@ -99,7 +101,7 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, RequestState, ReqClass, SqlKind, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
+             DeclKind, FieldMode, FieldRole, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes, requestStateDeps, requestHandles } from "./walk.scrml"
@@ -1205,7 +1207,42 @@ ${
         const grants: boolean = grantsAnyWrite(f) || (f.graph is given && f.mode != FieldMode.Derived)
         if (has && !grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " has a write capability but grants no write"]
         if (!has && grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " grants a write but has no write capability"]
+        // C1b (s476-boot-derived-no-inner-wcap): a DERIVED declaration field (§66.9 rule 3, "cannot
+        // be written") whose own type grants nothing carries no inner grant either — the
+        // FieldAt grants of its struct / element struct fields are inert for it, so it has no
+        // write capability (C1) and is printed as a Derived that recomputes, never seeded. A
+        // derived field WITH an own grant (its outermost tape's) is owner questions Q1/Q2 of the
+        // S476 design pass and is not judged here; an attribute is the use-site case (O60).
+        if (f.mode == FieldMode.Derived && f.role == FieldRole.Child && !f.grants.replace && f.grants.edits.length > 0 && onlyInnerEdits(f.grants.edits)) {
+            return ["C1b: <" + d.sym.hint + ">." + f.sym.hint + " is derived, but carries the inner grants of its type (a struct field's) — a derived field is never written (§66.9 rule 3)"]
+        }
         return []
+    }
+
+    fn onlyInnerEdits(es: EditKind[]) -> boolean {
+        for (const e of es) {
+            if (!isInnerEdit(e)) return false
+        }
+        return true
+    }
+
+    // A grant of a struct sub-field write (subFieldEdits: the field's own struct, or its element
+    // struct) — not a grant on the field's own value.
+    fn isInnerEdit(e: EditKind) -> boolean {
+        return match e {
+            .FieldAt(path: x) :> true
+            .Replace :> false
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .PositionWrite :> false
+            .Transition :> false
+            .ElemAt(index: x) :> false
+            .PositionAt(index: x) :> false
+        }
     }
 
     fn checkNode(p: CoreProgram, encl: Decl[], n: Node) -> string[] {

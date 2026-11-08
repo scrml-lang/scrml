@@ -3835,7 +3835,7 @@ ${
         const et: Type | not = seqElem(ty)
         if (et is given) elemEdits = subFieldEdits(g, et)
         let grantRep: boolean = isLet || seqRep
-        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
+        let grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
             if (reads.length > 0) {
@@ -3855,6 +3855,20 @@ ${
             // source, not authored"); `let` is the seeded, writable form.
             mode = FieldMode.Derived
             if (rg.graph is given) st = derivedRules(te.file, body, st)
+            // s476 (s476-boot-derived-no-inner-wcap, g-boot-derived-cell-inner-grant-seeded-s476):
+            // §66.9 rule 3 "A locked declaration whose initializer reads cells is DERIVED: it
+            // recomputes when a dependency changes … and cannot be written". The grants INSIDE its
+            // type — a `let` / `T[replace]` field of its struct type or of its element struct
+            // (subFieldEdits) — are INNER: they say what the value's parts admit in a holder that
+            // can write them, and a derived cell is never written (an `@d.f = v` stays §6.6.18's
+            // E-DERIVED-VALUE-MUTATE). They are inert here, so they mint no write capability —
+            // before this, one made the cell `rt.seeded` (read once, stale after; the adopter's
+            // `3 1` for `3 3`). This applies where the cell's OWN type grants nothing (no grant on
+            // its outermost tape: `edits` / `seqRep`): a derived cell WITH an own grant is owner
+            // questions Q1/Q2 of the S476 design pass, left exactly as it was (inner grants
+            // included). An ATTRIBUTE is the use-site case (O60, rule 8; Q3) — not touched.
+            // Core invariant: check.scrml C1b.
+            if (role != FieldRole.Attribute && !grantsAny(fieldGrantSet(seqRep, edits))) grantEdits = edits
         }
         // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
         // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
@@ -9800,6 +9814,20 @@ ${
         return target
     }
 
+    // s476 (s476-boot-derived-no-inner-wcap): a write INTO a derived value through a grant its
+    // TYPE carries on a part (a struct field's `let` / `T[replace]`, its element struct's) —
+    // §6.6.18 item 2: "Object property writes — `@derivedObj.foo = x` … on a derived object cell
+    // SHALL be `E-DERIVED-VALUE-MUTATE`"; the message names the cell, what it reads, and the two
+    // ways out (§6.6.18 "recommend either (a) … the upstream cell … or (b) … a separate mutable
+    // cell"). `what` is the written place's spelling, `part` names the granting field.
+    fn derivedPartMessage(f: FieldInfo, what: string, part: string) -> string {
+        const how: string = readsPhrase(f.reads)
+        const deps: string = followsPhrase(f.reads)
+        const out: string = "In-place mutation of derived value `@" + f.sym.hint + "`: `" + what + " = …`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer " + how + ") — it recomputes and cannot be written, so the write grant on " + part + " does not apply to it (a part's grant is for a holder that can write it, §66.9 rule 3). To change it, write one of its dependencies"
+        if (seqElem(unMaybe(f.ty)) is given) return out + "; or keep a separate tape whose type grants the edit (§66.12.2), filled from it."
+        return out + "; or declare it `let` — it becomes SEEDED: computed once, then written independently, and it no longer follows " + deps + " (§66.9, §6.6.18)."
+    }
+
     fn derivedMessage(p: WPlace, f: FieldInfo) -> string {
         const how: string = readsPhrase(f.reads)
         const deps: string = followsPhrase(f.reads)
@@ -10851,6 +10879,10 @@ ${
     fn fieldAtWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, key: string, st: AS, span: ASpan) -> RWriteFact {
         const cap: Sym | not = f.wcap
         const target: FieldDef | not = pathTarget(env, p)
+        // s476: a DERIVED cell's part grant is inert (fieldOf) — the write is §6.6.18's
+        if (target is given && cap is not && f.mode == FieldMode.Derived && grantsAny(target.grants)) {
+            return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-VALUE-MUTATE", derivedPartMessage(f, writtenLabel(key, f.sym.hint + "." + target.sym.hint), "the `" + target.sym.hint + "` field")) }
+        }
         if (target is not || cap is not) {
             return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` grants no write") }
         }
@@ -12634,6 +12666,8 @@ ${
         const stt: AS = checkStructTapes(env, target.ty, value, "", "@" + f.sym.hint + "[…]." + ef.field, e.span, st)
         if (stt.diags.length > st.diags.length) return stt
         const cap: Sym | not = f.wcap
+        // s476: a DERIVED tape's element-field grant is inert (fieldOf) — the write is §6.6.18's
+        if (cap is not && f.mode == FieldMode.Derived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", derivedPartMessage(f, "@" + f.sym.hint + "[…]." + ef.field, "`" + owner + "." + ef.field + "`"))
         if (cap is not || elemSym is not) return noCapability(env, e, st)
         return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }], env.file + ":" + lineOf(env.g, env.file, e.span.start)))
     }
