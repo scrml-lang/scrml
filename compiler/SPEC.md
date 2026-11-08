@@ -39954,6 +39954,8 @@ This error applies equally to statement-form (`x = newValue` where `x` is `const
 
 A `const` freezes the BINDING, not the value it holds. Mutating a property reached through a `const` binding — `obj.field = 2` where `obj` is `const` — is NOT E-ASSIGN-004. Only a bare-identifier left-hand side names the binding itself.
 
+**RULED S475 — a tape edit method is not a rebinding.** A tape edit method (`append` / `prepend` / `pop` / `shift` / `insert` / `remove`) called on a `const` local or a parameter is an edit of the tape, judged by the tape type's grants (§66.12.6 rule 3), not a rebinding of the name, so it is not E-ASSIGN-004. The rebinding spelling of the same change (`xs = [...xs, e]`) has a bare-identifier left-hand side and is still E-ASSIGN-004 on a `const`. *(Provenance: ruling:user-voice-scrml.md S475 "⭐ RULED — local tape edit on a `const` local or parameter is an EDIT" — *"read as edit"*.)*
+
 Worked examples — all six of these are E-ASSIGN-004:
 
 ```scrml
@@ -40033,6 +40035,7 @@ ${
 - A binding created without `let` SHALL be a `const` binding. The keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does; `let` is the only declaration form that produces a mutable binding. (§50.8.5)
 - A compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) whose target is a `const` binding SHALL be E-ASSIGN-004. Compound assignment is statement-only in scrml (§50.12), so this follows from the statement-form rule above. (§50.8.5)
 - Mutating a property reached through a `const` binding SHALL NOT be E-ASSIGN-004. `const` freezes the binding, not the value. (§50.8.5) ⚑ For a tape this sentence is superseded: the tape's grants govern the write, in a `const` or any other binding (§66.12.6, S469; ruled for locals S440, O14).
+- A tape edit method (`append`, `prepend`, `pop`, `shift`, `insert`, `remove`) on a `const` local or a parameter SHALL NOT be E-ASSIGN-004: it is an edit of the tape, judged by the grants of its type (§66.12.6 rule 3), not a rebinding of the name. (§50.8.5; RULED S475)
 - An assignment expression to an undeclared identifier SHALL be a compile error (E-ASSIGN-003). (§50.8.4)
 - Assignment-as-expression to an outer-scope variable from inside a `fn` body SHALL be E-FN-003, identical to statement-form assignment. The expression form does not affect the outer-scope mutation prohibition. (§50.5.2)
 - Assignment to a `lin` variable using the expression form is not a valid consumption. It is a re-assignment and SHALL be E-LIN-004. (§50.6)
@@ -53115,6 +53118,22 @@ write, wherever the tape is held, wherever it came from, and however the write i
    (`xs = [...xs, a, b];`). `pop`, `shift` and `remove` return the removed value, typed `T | not`: on an empty
    tape, or a `remove(i)` with no position `i`, nothing is removed and the result is `not` *(derived from §42:
    scrml has no `undefined`; not separately ruled)*. The grow methods return no value.
+
+   **An edit method on a `const` local or a parameter is an edit, not a rebinding (RULED S475).** A call of
+   `append`, `prepend`, `pop`, `shift`, `insert` or `remove` on a `const` local, a keywordless local (§50.8.5) or
+   a function parameter SHALL be judged as an edit of the tape, against the grants of the tape's type, exactly
+   as the same call on a `let` local is; it does not rebind the name, so §50's rebinding rules (E-ASSIGN-004,
+   §50.8.5) SHALL NOT refuse it. §66.11.2's "not by how it is spelled" is about the grant judgement only. Whether
+   a NAME may be rebound is §50's question, and a method call does not ask it. So on a `const`, `xs.append(e)` is
+   checked against `xs`'s grants, while `xs = [...xs, e]` rebinds `xs` and is refused by §50.8.5 whatever the
+   grants say.
+   > **Provenance:** ruling:user-voice-scrml.md S475 "⭐ RULED — local tape edit on a `const` local or parameter
+   > is an EDIT" — *"read as edit"* (bryan's answer to the PA's #1812 F6 question: *"`xs.append(e)` / `prepend` /
+   > `pop` / `shift` / `insert` / `remove` on a `const` local or a parameter is an edit of the tape, permitted by
+   > the grants on the tape's type; it is not a rebinding of the name, so §50's rebinding rules do not refuse
+   > it."*). **supersedes:** nothing written here; it settles the ⚑ PA reading #1812 recorded
+   > (`g-spec-local-edit-method-vs-rebinding-s475`). **Direction of change:** semantics-defined; the bootstrap
+   > already builds it (#1812, `compiler/self-host-v2/analyze.scrml` `typeLocalEdit` / `localEditProblems`).
 
    An index write at or past the end, an `insert(i, x)` with `i` greater than the length, and a `length =` write
    that lengthens would each create a position that holds no value. scrml has no `undefined` (§42.1), so such a

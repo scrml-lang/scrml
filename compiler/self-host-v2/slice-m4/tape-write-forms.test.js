@@ -84,12 +84,13 @@ const FORMS = [
   ["local: an in-place edit (`.append`)", ["", "let out: int[free, pop] = [];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], ["", "let out: int[free, append] = [];\n        out.append(1);", []]],
   ["local: an in-place edit of an inferred tape (rule 1)", ["", "let out = [1];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], null],
   ["local: an in-place shrink (`.pop` / `.shift` / `.remove(i)`)", ["", "let out: int[free, append] = [1];\n        out.pop();", ["E-WRITE-NOT-GRANTED"]], ["", "let out: int[free, remove] = [1];\n        out.pop();\n        out.shift();\n        out.remove(0);", []]],
-  // ⚑ PA reading (s475 r1, #1812 review F6): an edit METHOD is legal on a `const` and a parameter
-  // (`xs.append(e)`), while the SAME edit spelled as a rebinding (`xs = [...xs, e]`) is E-ASSIGN-CONST.
-  // Grants live on the TYPE (§66.12.6 rule 1: "On a local, `let` makes only the NAME rebindable; it
-  // grants the tape nothing"), and §50 governs whether the NAME may be rebound — the method rebinds no
-  // name. §66.11.2's "judged by the transition, never the spelling" against §66.12.6 rules 1 and 4 owes
-  // one SPEC line (gap g-spec-local-edit-method-vs-rebinding-s475).
+  // RULED S475 (bryan): an edit ("read as edit"; #1812 review F6). An edit METHOD on a `const` and a
+  // parameter (`xs.append(e)`) is an edit of the tape, judged by its type's grants, while the SAME edit
+  // spelled as a rebinding (`xs = [...xs, e]`) is E-ASSIGN-CONST. Grants live on the TYPE (§66.12.6
+  // rule 1: "On a local, `let` makes only the NAME rebindable; it grants the tape nothing"), and §50
+  // governs whether the NAME may be rebound — the method rebinds no name. SPEC §66.12.6 rule 3 "An edit
+  // method on a `const` local or a parameter is an edit, not a rebinding" and §50.8.5 (gap
+  // g-spec-local-edit-method-vs-rebinding-s475, resolved).
   ["const / parameter: an edit method is granted by the type; the rebinding spelling is E-ASSIGN-CONST (§50)", ["", "const out: int[free, append] = [];\n        out = [...out, 1];", ["E-ASSIGN-CONST"]], ["", "const out: int[free, append] = [];\n        out.append(1);", []]],
   ["parameter: an in-place edit (§66.12.3)",["    fn f(p: int[]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", ["E-WRITE-NOT-GRANTED"]], ["    fn f(p: int[free, append]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", []]],
   // s472: a part write of a local — the tape field's OWN grants (rules 1 and 4)
