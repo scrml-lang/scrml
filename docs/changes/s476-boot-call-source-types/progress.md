@@ -27,3 +27,5 @@
 ## Deferred
 - §48.8 inference of an UNTYPED callee's return for a loop source (and receivers). Path: `failableSuccs` already proves `!` fns' returns via `ownProvenReturn` (§66.3 rule 5 (g) "INFERRED-AND-PROVEN"); widening it to non-failable, non-server fns would type these. Refused INTERIM meanwhile.
 - `const xs = mk()` (no annotation) leaves `xs` untyped in the resolver (resolveCall returns no type) — the same root; not in this brief.
+
+- 2026-11-08T10:48:14-07:00 done — commit 840d9f8eb (hook passed: 6761 tests 0 fail). CI-only slices job run locally: lint-no-default-arm 0, lint-duplicate-fn 0, slice-m1 167/0, m2 619/0, m1 lowered 167/0, m3 60/0, m4 5635/0, codec 166/0, e2e-render-map 259/0; types-gate OK unchanged. Next: push + draft PR. Blockers: none.
