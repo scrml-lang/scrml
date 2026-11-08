@@ -1,1466 +1,75 @@
 # build.map.md
 # project: scrml
-# updated: 2026-11-03T00:00:00Z  commit: fa0e875b4
-# S474 (d139f747c -> fa0e875b4): `.github/workflows/facts-regen.yml` DELETED; replaced by `.github/workflows/generated-regen.yml` (post-merge bot: severity.scrml, SPEC-INDEX.md, bootstrap-spec-coverage.md, docs/generated/{gap-counts,recent-sessions}.md, bootstrap-conformance.md, FACTS.md). ci.yml gained a bot-owned-untouched guard (scripts/bot-owned-untouched.sh) and stale warnings (scripts/ci-stale-warn.sh); `.github/workflows/cloud-maps.yml` edited; .github/CI.md updated. Mentions of facts-regen below are historical.
-# ⛑ **S471 STAMP — `3d17013f8` -> `546e2f4aa` (origin/main). 68 COMMITS, 18 first-parent (s471 PRs #1581 … #1599 + bot/facts-regen merges). Branch `s471-maps`.
-# FIGURES (ls-tree at 546e2f4aa): `compiler/src` 325 files (+1: `guard-arm-bodies.ts`, the ONE reader of text-held `!{ }` arm bodies, moved out of codegen/emit-library-shared.ts for the
-# E-SYNTAX-042 null/undefined-in-arm refusal #1587), 1,845 test files (`compiler/tests`), `compiler/SPEC.md` 52,075 lines, 2,091 `case.scrml` (conformance + acceptance), 65 conformance category dirs.
-# THEMES: bootstrap (impl#2) — control-flow batch #1593 (defer/loop/if-chain acceptance), parse batch #1594, stdlib import #1588, lin + loop #1597; SPEC dpa-075 floor #1596 / owner rulings #1585;
-# impl#1 — nested-handler await (#1581), null-in-arm refusal (#1587), Windows imported-alias refusal (#1590); 228 `self-host-v2/acceptance/**/case.scrml`. Gap sweep: docs/changes/s471-bootstrap-gap-sweep/SWEEP.md.
-# Test suites NOT re-run, EXCEPT `bun scripts/bootstrap-conformance.ts --check` = current (docs/bootstrap-conformance.md: 1813 cases attempted, PASS 254, FAIL 51 as written).
-# MAP-STAMP RULE: watermark advanced to `546e2f4aa` (was 3d17013f8; 68 commits). Older detail below is CARRIED and may omit S471 specifics: grep source.
-# BOOTSTRAP ROUTING (S471, new): see bootstrap.map.md (NEW) — per-module roles, analyze.scrml anchors, build/test chain, task routes.
-# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `3d17013f8`), CARRIED. ━━━━━━━
-# ⛑ **S470 STAMP — `e0c4ad6cc` -> `3d17013f8` (origin/main). 343 COMMITS, 43 first-parent (s470 PRs #1538 … #1580 + bot/facts-regen merges).
-# Incremental refresh on branch `s470-maps`; source tree = `3d17013f8`. FIGURES (ls-tree at 3d17013f8): `compiler/src` 324 files (+5 added, none deleted),
-# 1,842 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,750 lines, 2,068 `case.scrml`. Test suites NOT re-run; diagnostic code census NOT re-audited
-# (S468 error.map figures stand; consult FACTS.md for current counts).
-# THEMES (verified in the first-parent log e0c4ad6cc..3d17013f8): security limb (impl#1) — E-VALUE-SERVER-CALL render-position refusal (#1547), E-IMPL1-ACTION-NOT-AWAITED
-# action-body await (#1554), async colouring scope (#1558), `when…changes` latest-wins (#1560), typed payload binders (#1563), host `fetch` as a waiting value (#1566, #1572),
-# bang-catch refusal E-TRY-NOT-IN-SCRML (#1568), unit-variant `.variant` tag read (#1571), nested handler-arm await (#1576), impl#1 emits E-ERROR-012 / await residue (#1577);
-# also #1551 whole-error-binder escapes, #1538 structural-else guard, #1539 server-return match await, #1557 inbox addressees, #1544 inbox-debt probe, gaps batches (#1546/1549/1550/1553/1556/1561/1564/1569/1575/1580).
-# NEW compiler/src modules: codegen/`render-waiting-calls.ts` (render-position / sync-action check for waiting-value calls, E-VALUE-SERVER-CALL), codegen/`host-promise-globals.ts` +
-# codegen/`host-promise-names.ts` (host Promise global `fetch` and its globalThis/window/self spellings as one pseudo name, SPEC §13.7/§13.8), `gate-attr-refusal.ts` (E-GATE-UNSUPPORTED-HOST:
-# `if=`/`show=` on a host that ignores it; was in-flight at S469, now on main), `stdlib-failable-errors.ts` (declared error enum per failable `scrml:` export, for `!{}` payload binders).
-# Heaviest edits (added+deleted lines): type-system.ts (~2,990), codegen/render-waiting-calls.ts (~1,750, new), ast-builder.js (~1,090), codegen/{rewrite.ts, emit-logic.ts, emit-control-flow.ts,
-# emit-library-shared.ts, arm-structure.ts, index.ts, js-async-analysis.ts, emit-expr.ts}.
-# TESTS: `compiler/tests/integration/security-failable-pack/` +101 files (77 in `shapes/`: families f1-f26, l1-l18, n27, n29, s4-s23, t1-t18; 24 top-level: pinned-class.js, r3…r20 `rN-shapes.js` / `rN-pinned.js`
-# round files); +20 `compiler/tests/unit/*` files, +1 integration, +1 browser test. `scripts/` new: inbox-debt.ts (every message on the `inbox` branch is HANDLED or OWED).
-# MAP-STAMP RULE: watermark advanced to `3d17013f8` (was e0c4ad6cc; 343 commits). Detail sections below are the S468 text + S469 stamp, CARRIED, and may omit S469/S470 specifics: grep source.
-# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `e0c4ad6cc`), CARRIED. ━━━━━━━
-# ⛑ **S469 STAMP — `5c43c3b8e` -> `e0c4ad6cc` (origin/main). 704 COMMITS, 85 first-parent (~44 s469 PRs #1444 … #1537 + bot/facts-regen merges).
-# Incremental refresh on branch `wrap/s469`; source tree = `e0c4ad6cc`. FIGURES (git ls-tree at e0c4ad6cc): `compiler/src` 319 files (+15 added,
-# none deleted/renamed), 1,820 test files (`compiler/tests`, grep '.test.'), `compiler/SPEC.md` 51,635 lines, 2,067 `case.scrml`. Test suites NOT re-run; diagnostic
-# code census NOT re-audited this pass (S468 error.map figures stand; consult FACTS.md for current counts).
-# NEW compiler/src modules: `arm-body-reader.ts` + `engine-body-reader.ts` (the ONE parse of match-arm / engine state-child raw-text bodies), `arm-list-split.ts` (lexer-based
-# split of raw arm lists), `engine-in-each-row.ts` (one diagnostic text for `<engine>` in an `<each>` row, §51.0.K), `identity-flow.ts` (location-aware binding resolver
-# for the identity follower), `impl1-ruled-form-refusal.ts` (E-IMPL1-RULED-FORM-UNSUPPORTED), `interpolation-extent.ts` (the one reader of where `${ }` ends),
-# `object-shorthand-cell.ts` (E-OBJECT-SHORTHAND-CELL); codegen/: `lift-gate-scope.js`+`.d.ts` (which bindings a lifted if=/show= reads), `if-gate-condition.ts` (the ONE if= predicate
-# lowering; callers emit-event-wiring), `emit-boundary-logic.ts` (§19.6.6 render-time `<errorBoundary>` logic), `string-equality-lowering.ts` (§45 `==` in string pipeline),
-# `build-identity.ts` (§20.8.2 step 0 build id vs soft-nav), `comment-text.ts` (sanitize text into generated JS comments). `gate-attr-refusal.ts` is NOT on origin/main (in-flight branch).
-# Heaviest edits: type-system.ts, failable-value-calls.ts, ast-builder.js, codegen/{fn-valued-bindings,emit-lift.js,emit-each,rewrite,emit-engine,emit-control-flow,emit-reactive-wiring,emit-html,emit-match}, route-inference.ts, runtime-template.js.
-# Bootstrap `compiler/self-host-v2/`: new `css-syntax.scrml`, `print-server.scrml`, `url.scrml`, `slice-m1/runtime/server-runtime.js`, `slice-m4/grant-scan.js` (tape-grant reader), many `slice-m4/*-s469.test.js`;
-# acceptance dirs added under `acceptance/`: arms css grants guess interp loop loop-value match opener parse positions security strings tapes templates termination toenum.
-# `compiler/tests/integration/security-failable-pack/`: +35 files (30 in `shapes/`: n1-n28, s1-s3 shape families; plus pack.js, classify.js, known-fail.js, README.md, failable-probe-pack.test.js).
-# `scripts/` new: ci-shards.ts, ci-test-timings.json, test-sharded.ts (hook/CI sharding), git-merge-generated.{sh,ts} + install-merge-driver.sh (generated-doc merge driver),
-# claim-gate-surface.js, doc-boot-check.js, doc-gate-markers.js, scrml-boot.ts, git-hooks/{post-merge,post-rewrite}.
-# MAP-STAMP RULE: watermark advanced to `e0c4ad6cc` (was 5c43c3b8e; 704 commits). Detail sections below are the S468 text, CARRIED, and may omit S469 specifics: grep source.
-# ━━━━━━━ BELOW IS THE PRIOR HEADER (stamp `5c43c3b8e`), CARRIED. ━━━━━━━
-# ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
-# commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
-# E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the
-# emitted client names is shipped (93b60f7af), §67 `<md>` phase 2 — a static `<md>` is lowered at build time by the ONE
-# `scrml:md` reader (`md-lower.ts` + `md-reader.js`, 739b602a5 …), `?{}` result tails apply to the value — `.get().name` no
-# longer serves the whole row (#1407, P0 hash leak); S465 — lift `<pre>`/`<code>` bodies are raw text (#1409); S464 — quoted
-# handlers + static executable URLs/srcdoc refused, E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE (#1416), statement-position
-# markup refused E-MARKUP-STATEMENT-NOT-RENDERED + emitted-JS parse floor on EVERY compile + safe `promote --match` (#1417), a
-# plain `fn` is never a route or async (#1419), no value holds a function E-VALUE-FUNCTION-STORED + `scrml:time`
-# `Debouncer`/`Throttler` struct API (#1418, #1422), imported/async server helpers awaited — ONE per-file async set
-# (`codegen/file-async-fns.ts`) + server text guard (#1424, P0), enum-cell type from a qualified initializer + `ParseError`
-# import-only (#1423), `scrml fix` refuses a file that does not compile (#1425), server-placed functions keep their parameter
-# defaults + E-PARAM-DEFAULT-* (#1427, #1433), the 424-shape security await probe pack (#1428); S467 — SPEC §13.8 one rule
-# for waiting values + §13.9 pending cells (Nominal on impl#1; #1430, #1432), an unhandled failable call used as a value is
-# E-ERROR-002 (#1431), CPS-split functions keep server logic and server values on the server (#1435, P0). Incremental
-# refresh in the main checkout on branch `wrap/s468` = `origin/main` `5c43c3b8e` + an uncommitted docs-only hand-off rotation
-# (source tree = `5c43c3b8e`; no file deleted or renamed under `compiler/src` — incremental is sound for every map).**
-# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 94 commits behind HEAD (watermark 41af4153a, HEAD
-# 5c43c3b8e)` = `git log --oneline 41af4153a..5c43c3b8e` (94).
-# ⛑ FIGURES AT `5c43c3b8e` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **340,511 lines / 303 files**
-# (+16,281 lines; +17 files: 16 `.ts`/`.js` modules + `md-reader.d.ts` — see structure.map.md S468; `git ls-tree` = 304) ·
-# test files **1,765** by `git ls-tree -r --name-only 5c43c3b8e compiler/tests | grep -c '\.test\.'` (+47; FACTS rule 1,750) ·
-# `compiler/SPEC.md` **49,366** lines (+662; NEW §13.8, §13.9, §17.6.10.1, §19.9.9.8, §41.21) · conformance **1795**
-# `case.scrml` (+37) · `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (unchanged) · **16 new
-# diagnostic code literals** in `compiler/src`, every one with a §34 row (see error.map.md S468) · known-gaps heading/marker
-# drift **73** (was 72) · `state.ts --check` @generated sections PASS. Conformance suite / full test suite NOT re-run this pass.
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `41af4153a`), CARRIED. ━━━━━━━
-# ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
-# S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
-# whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
-# `meta.emit` gate (#1367), one presence reader / declared props off the root (#1369), channel handler bindings (#1370),
-# ONE presence test §42.4 (#1372), refinement copy-in (#1376); S461 — `given @cell` reads the cell (#1380), runtime
-# tree-shake (#1382), E-CHANNEL-006 (#1379/#1384); S462 — `is some` -> `is given` through §63 (#1385), message templates not
-# functions (#1387), Rule enum (#1389), in-place `given` guard deprecated (#1392), stdlib closure factories -> structs
-# (#1393), E-IMPORT-004 on `scrml:` imports (#1394), statement-match inline + E-STMT-RETURN-OUTSIDE-FUNCTION (#1395),
-# presence narrowing ends on write (#1396), `<script>`/`<style>` refused + `<pre>`/`<code>` raw text (#1398/#1400/#1402),
-# async stdlib awaited (#1399/#1401), §67 `<md>` + `scrml:md` (#1403), `scrml fix` markup given guards (#1404).
-# Incremental refresh in an isolated worktree on branch `s465-docs-currency` = `origin/main` `41af4153a` + 3 docs-only
-# commits (docs/PA-SCRML-PRIMER.md, docs/articles/llm-kickstarter-v2-2026-05-04.md, docs/changes/s465-docs-currency/).**
-# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 54 commits behind HEAD (watermark 8ce6d61b5, HEAD
-# fe859fd07)` = `git log --oneline 8ce6d61b5..origin/main` (51) + the 3 docs-only branch commits.
-# ⛑ FIGURES AT `41af4153a` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **324,230 lines / 286 files**
-# (+29 files: 25 `.ts`/`.js` modules + 4 `.d.ts` — see structure.map.md S465; `git ls-tree` incl. `.d.ts` = 287) ·
-# test files **1,718** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+63; FACTS says 1,703 by
-# its own rule) · `compiler/SPEC.md` **48,704** lines (+1,642; NEW §67 `<md>`) · conformance **1758** `case.scrml` (+335) ·
-# `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (+2: `fix-given-presence`, `fix-verify-shared` —
-# FACTS counts files in `commands/`; `fix-is-some` also new) · **14 new diagnostic code literals** in `compiler/src` (see
-# error.map.md S465) · known-gaps heading/marker drift **72** (was 68) · `state.ts --check` @generated sections PASS.
-# Conformance suite NOT re-run this pass. `../giti` / `../flogence` NOT cloned in this container — not consulted.
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `8ce6d61b5`), CARRIED. ━━━━━━━
-# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
-# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
-# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
-# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
-# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
-# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
-# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
-# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
-# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
-# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
-# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
-# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
-# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
-# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
-# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
-# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
-# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
-# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
-# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
-# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
-# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
-# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
-# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
-# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
-# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
-# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
-# Conformance suite NOT re-run this pass.
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
-# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
-# client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
-# sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
-# tenant `<schema>` statement-kind allow-list, #1319 tenant `<schema>` bodies in the SQL subset, #1321 build-report PG
-# REVOKE, #1322 handled-`?{}` guard consumers, #1324 test timeout, #1325 §8.10 hoist), incremental refresh in an isolated
-# worktree @ `9c556dc74` = `origin/main`.** MAP-STAMP RULE: `git log --oneline f38697900..HEAD` -> 20; `bun scripts/state.ts
-# --check` at pass start: `maps: 20 commits behind HEAD (watermark f38697900, HEAD 9c556dc74)` — matches exactly.
-# ⛑ FIGURES RE-EXECUTED AT `9c556dc74`: `facts.ts --check` PASS · FACTS `compiler/src` **298,756 lines / 241 files** (+5 new
-# modules this window) · test files **1,609** (+12) · `compiler/SPEC.md` **46,681** lines (+546; `regen-spec-index.ts
-# --check` OK 72/72) · conformance **1346** (+28); `bun conformance/run.ts` -> **1296 pass + 50 xfail** · known-gaps open
-# **HIGH 241 · MED 513 · LOW 277** · Nominal 8; heading/marker drift 61 · bootstrap counter (live) 1346 attempted: PASS
-# **121** · FAIL **56** · NOT-TWINNED **515** · UNSUPPORTED **654** · CRASH 0; graded 177, 121 hold (68.4%) — ⚠ committed
-# `docs/bootstrap-conformance.md` STALE a 6th window (1315 cases; `--check` STALE). slice-m4 and `types-gate.ts` NOT
-# re-executed this pass. ⚠ FACTS "CLI verbs 14" is WRONG (12 dispatched) — non-compliance N-S455-1.
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S454 HEADER (stamp `f38697900`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
-# bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
-# U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
-# #1302 Types gate BLOCKING, #1303 bootstrap U1b, #1304 scheduled @generated regen, #1305 handled `?{}` in
-# expressions), incremental refresh in an isolated worktree @ `f38697900` = `origin/main`.** MAP-STAMP RULE:
-# `git log --oneline 7ce905ac2..HEAD` -> 12; `bun scripts/state.ts --check` at pass start: `maps: 12 commits behind
-# HEAD (watermark 7ce905ac2, HEAD f38697900)` — matches exactly.
-# Source-relevant in THIS window, grep-verified at `f38697900`:
-#   impl#1 (`compiler/src`, **236 files** = +2 `.ts` + 8 `.d.ts`):
-#   #1296 — §5.2.2 / §19.6.8 B7: the call-ref `onclick=fn()` listener is built with the AUTHOR name (not
-#     `fnNameMap.get`) so `colorHandlerAsync` sees an async callee; the formFor submit wrapper and the bare-ref
-#     `onclick=handler` (when async) now go through colouring too. `colorHandlerAsync` (`emit-event-wiring.ts:484`,
-#     module-local) is now called TWICE (:1229 bare-ref, :1386 main). `emit-variant-guard.ts` `emitArmWireFunction`
-#     :436 — the in-arm non-delegable registration — is the **16th listener-registration site**, now coloured via
-#     `colorActiveHandler` at :1299. Async `<errorBoundary>` render: re-throw -> `return`, both render calls gain
-#     `.catch(-> _scrml_error_boundary_log)` (:2492-:2497).
-#   #1299 — §14.8.9 (SECURITY): `codegen/protect-egress.ts` (1224 -> **1597** lines) fails CLOSED:
-#     `resolveProtectedOutputColumns` :641 returns `null` only on a POSITIVE proof; NEW `lexProtectSql` :287,
-#     `classifyProtectStatement` :417 (exported), `analyzeProtectStatement` :428, `writeTargetFromOriginal` :619,
-#     `nestedSelectReadsUnknownSource` :844, `holePayloadMayDisagree` :255, `ProtectStatementKind` :220. RETIRED:
-#     `isRowProducingQuery` (grep 0).
-#   #1301 — §47.1.1 (SECURITY): NEW `validators/reserved-prefix.ts` (545 lines) — `E-NAME-COLLIDES-RESERVED-PREFIX`,
-#     `runReservedPrefixCheck` :532, stage `RESERVED-PREFIX` at `api.js:1968` (post-TAB, after `SCOPE-REDECLARE`);
-#     stdlib exempt by REAL path via NEW `module-resolver.js` `isStdlibSourceFile`. Added to `pipeline-seam.ts`'s
-#     buildAST re-entry list (now TEN files). `expression-parser.ts` now exports `tokenizeTemplateInterpolations`.
-#   #1302 — `scripts/types-gate.ts --check` is a BLOCKING step in CI `gate` (placed right after Install deps).
-#     8 NEW `.d.ts`: `ast-builder`, `ast-if-chain`, `attribute-registry`, `codegen/emit-lift`, `host-import`,
-#     `markup-return-scan`, `runtime-template`, `schema-differ`.
-#   #1305 — §19.8.3 / §19.8.4: a handled `?{}` lowers in every expression position. `expression-parser.ts`
-#     `extractHandledOperands` :464 / `restoreHandledOperands` :534 (`SQL_REF_MARKER = "__scrml_sql_ref__"` :367,
-#     `GUARD_MARKER = "__scrml_guard__"` :369); `SqlRefExpr.raw` (types/ast.ts:2049); NEW `codegen/sql-attempt.ts` (141
-#     lines; `_scrml_sql_attempt`); `emit-logic.ts` `emitSqlQueryShape` :1183 / `emitNestedGuardExpr` :1230;
-#     `ast-builder.js` `parseGuardArmsFromRaw` :18325; `type-system.ts` E-TYPE-080 on every handler (:12676, :15181);
-#     `route-inference.ts:1797` walks a decl's `matchExpr` / `ifExpr` / `forExpr`.
-#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1295 codec payload enums (`codec.scrml`, runtime
-#     `encEnum` / `decEnum` / `decodeError`); #1303 U1b — `ServerCallError`, `Expr.ServerCall` / `Failable.FSettled`
-#     / `Stmt.Join` / `Stmt.Jump` (core.scrml), `check.scrml` C-S1..C-S4 + C-S7 + C-S8, runtime `call(route, args, task)` :2000
-#     (never rejects), `SERVER_CALL_DEADLINE_MS = 30000` :1988, `E-ERROR-016` (bootstrap-only, no §34 row).
-#   tooling: #1297 NEW `scripts/merge-on-green.sh` (257 lines) + `.gitattributes` LF pin for `scripts/*.sh` + hooks.
-#   SPEC-only: #1298 (§19.9.10 U1b closed; §14.8.10 subset text + `E-TENANT-SQL-SUBSET` §34 row; arm-pipe currency).
-# ⛑ FIGURES RE-EXECUTED AT `f38697900`: `facts.ts --check` PASS · `compiler/src` **292,596 lines / 236 files** ·
-# test files **1,597** (+6) · `compiler/SPEC.md` **46,135** lines (+352; `regen-spec-index.ts --check` OK 72/72) ·
-# conformance **1318** (+6); `bun conformance/run.ts` -> **1268 pass + 50 xfail** · known-gaps open **HIGH 242** ·
-# **MED 506** · **LOW 268** · Nominal 8; drift 61 · slice-m4 **1229 pass / 1 todo / 0 fail** across 38 files ·
-# `self-host-v2` 21 `.scrml` modules, **36,127** lines · bootstrap counter (live) 1318 attempted: PASS **121** ·
-# FAIL **58** · NOT-TWINNED **514** · UNSUPPORTED **625** · CRASH 0; graded 179, 121 hold (67.6%) — ⚠ committed
-# `docs/bootstrap-conformance.md` STALE a 5th window (1315 cases; `--check` STALE). `types-gate.ts --check` NOT
-# executed this pass (no `tsc` in the available node_modules).
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S452-WRAP HEADER (stamp `7ce905ac2`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S452-WRAP STAMP — `fd2f757d0` -> `7ce905ac2`. 5 COMMITS (#1281 SPEC security forks, #1290 bootstrap effect
-# summary, #1292 the S453 maps refresh itself, #1285 W-ARM-PIPE-LEGACY + `scrml fix arm-pipe`, #1293 tenant SQL
-# subset), incremental refresh. Checkout `wrap/s452` @ `7ce905ac2`; untracked `spotLightReply.txt` NOT mapped.**
-# MAP-STAMP RULE: `git log --oneline fd2f757d0..HEAD` -> 5; `bun scripts/state.ts --check`: `maps: 5 commits behind
-# HEAD (watermark fd2f757d0, HEAD 7ce905ac2)` — matches exactly.
-# Source-relevant in THIS window, grep-verified at `7ce905ac2`:
-#   impl#1 (`compiler/src`, 226 files):
-#   #1293 — §14.8.10 (SECURITY) r3+r4: a tenant query is legal (without `.acrossTenants()`) only inside an
-#     ALLOW-LISTED SQL SUBSET. NEW `codegen/tenant-sql-subset.ts` (751 lines): `lexTenantSubset(raw)` :117 (CLOSED
-#     token set — unquoted idents, numbers, plain `''` literals, provable `${}` params, a fixed punct set; `"`, `` ` ``,
-#     `[`, `$`, `\`, `;`, `:`, `?`, `@`, `#`, `--`, `/*`, `E''`, `X''` are OUTSIDE), `analyzeTenantSql` :353
-#     (one SELECT / INSERT / UPDATE / DELETE; no WITH / subquery / set ops / OVER / REPLACE / ON CONFLICT /
-#     RETURNING / SELECT INTO), `TENANT_ROW_FUNCTIONS` :229, `TENANT_GROUP_AGGREGATES` :242, `tenantTableMentioned`
-#     :312, `injectInsertTenant` :725, `injectWriteTenantFilter` :743 (UPDATE/DELETE: WHERE parenthesized whole and
-#     ANDed with `tenant_id = _scrml_tenant_write_key()`; module-local `withOrAbort` :716 adds statement-level
-#     `OR ABORT` on SQLite), `TenantCode` :260 = `E-TENANT-AGG` | `E-TENANT-WRITE` | **`E-TENANT-SQL-SUBSET`** (NEW
-#     code). `codegen/tenant-egress.ts` rewritten (920 -> **896** lines): delegates to the subset
-#     (`analyzeTenantQuery` :296, `resolveTenantScoping` :345, `tenantFloorViolation` :590 -> `TenantViolationCode`
-#     :579), NEW `schemaWriteHazards(schemaText, tenantTables)` :105 (a `<schema>` trigger / rule / CASCADE-SET NULL-
-#     SET DEFAULT FK referencing a tenant table -> `E-TENANT-WRITE`), `TenantContext.driverFor` :90, runtime
-#     `_scrml_tenant_write_key` (in `SERVER_TENANT_HELPER` :657). Callers `emit-server.ts:1957` / `emit-tool.ts:346`
-#     (`buildTenantContext`); `rewrite.ts:274/:291` carry the 3-code union. **PARTIAL — r4 residuals filed OPEN**
-#     (views over tenant tables, raw driver handle, predicate oracles, schema write hazards beyond the ON table).
-#   #1285 — §19.4.5 / §51.0.S.2.3 / §63: impl#1 now EMITS `W-ARM-PIPE-LEGACY` (Info, one per `|`-led arm):
-#     `!{}` arms — `ast-builder.js` `parseErrorTokens` records `arm.legacyPipe` (:17502; offsets RELATIVE to the
-#     arm's `span.start`), fired by `type-system.ts` `checkArmPipeLegacy` :18639 with `armPipeLegacyMessage` :18695
-#     (exported); message arms — `engine-statechild-parser.ts` `legacyPipe {pattern, patternStart}` :2411 +
-#     `bodyRawOffset`, fired in `symbol-table.ts` :7654 (`MessageArmEntry.legacyPipe` :576). `E-ARM-PIPE-LEGACY` stays
-#     reserved. NEW `commands/fix-arm-pipe.js` (564 lines): `fixArmPipe(source, opts)` :466, `ARM_PIPE_RULE =
-#     "arm-pipe"` :58; verify-by-compile per file (`verifyByCompile` :402, all-or-nothing, idempotent). Chained in
-#     `fix-s66.js` (now 1700 lines) `fixS66` :1276 right after pre-migrate; `IMPL1_SAFE_RULES` :96 = pre-migrate /
-#     **arm-pipe** / program-wrap / program-move / unwrap-logic; `S66_RULES` :100 includes `arm-pipe`. `fix.js` (255
-#     lines) help updated. `scripts/bootstrap-conformance.ts` `TWIN_RULES` :110 = `S66_RULES` minus `arm-pipe`.
-#     Corpus migrated: 72 files / 170 arms (16 message arms) across examples/ samples/ conformance/ stdlib/
-#     docs/readme-snippets/ docs/tutorial-snippets/ benchmarks/, + README / NERDME / tutorial mirrors.
-#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1290 dpa-066 M0–M3 — NEW `effects.scrml` (241
-#     lines; `FxAtom:struct` :46, `ownAtom` :49, `atomBefore` :54, `closeDim(own, edges)` :115 (SCC order from its own
-#     edges), `witnessOf` :148, `atomChain` :163, `sccOrder` :180 (Tarjan, callees-first)). `analyze.scrml` (15,088
-#     lines) imports it (:57); `Summary:struct` :14109 (dims `writes` / `writesOpen` / `client` / `routeOpen` / `waits`
-#     / `clock` / `noValue` + `places`), `Callable` :14108, `summarize` :14121, `rulesPass` :14483; rules read it via
-#     `writeWitness` :12037 / `openWitness` :12043 / `clientReachOf` :13365 / `routeOpenOf` :13373 / `waitsOf` :13381.
-#     RETIRED (grep finds none): `fnSummaries`, `clientReach`, `asyncReach`, `mayRunOnServer`, `fnYieldsValue`,
-#     `clockFns`. G7 closed (a `return <no-value call>` wrapper is E-ERROR-012). NEW `slice-m4/effects-summary.test.js`
-#     (196) + `slice-m4/diag-diff.js` (98; reads `SCRML_BOOT_DIAG_LOG`, hook at `slice-m1/harness.js:125`).
-#     `link.scrml` (#1280) unchanged this window — mapped in the S453 block below.
-#   SPEC-only: #1281 — E-TENANT-RAW-EGRESS narrowed to `.acrossTenants()` rows; §14.8.9 binding rule keyed on ORIGIN;
-#     NEW E-PROTECT-UNRESOLVED-COLUMNS (MAY), I-PROTECT-REVEAL. #1285 also edits §19.13 / §34 / §19.4.5 status lines.
-# ⛑ FIGURES RE-EXECUTED AT `7ce905ac2`: `facts.ts --check` PASS · `compiler/src` **290,007 lines / 226 files** (+2 =
-# `tenant-sql-subset.ts`, `commands/fix-arm-pipe.js`) · test files **1,591** (+3) · `compiler/SPEC.md` **45,783** lines
-# (+110; `regen-spec-index.ts --check` OK 72/72) · conformance **1312** (+2: `error/arm-pipe-legacy-handler`,
-# `engine/arm-pipe-legacy-message`); `bun conformance/run.ts` -> **1262 pass + 50 xfail** · known-gaps open **HIGH
-# 242** · **MED 505** · **LOW 266** · Nominal 8; drift 61 · slice-m4 **1129 pass / 1 todo / 0 fail** across 34 files ·
-# `self-host-v2` 21 `.scrml` modules, **33,342** lines · bootstrap counter (live) 1312 attempted: PASS **121** · FAIL
-# **48** · NOT-TWINNED **514** · UNSUPPORTED **629** · CRASH 0; graded 169, 121 hold (71.6%) — ⚠ committed
-# `docs/bootstrap-conformance.md` STALE a 4th window (1310 cases; `--check` STALE).
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S453 HEADER (stamp `fd2f757d0`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
-# bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
-# + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
-# refresh. Checkout `docs/s453-wrap-bookkeeping` @ `fd2f757d0` = `origin/main` (`38ec5fcab`, #1287) merged into the
-# S453 bookkeeping branch.** MAP-STAMP RULE: `git log --oneline d3e660a08..HEAD` -> 17; `bun scripts/state.ts
-# --check` at pass start: `maps: 17 commits behind HEAD (watermark d3e660a08, HEAD fd2f757d0)` — matches exactly.
-# ⚠ **HEAD MOVED TWICE MID-PASS; THE STAMP IS THE FINAL HEAD AND THE FIGURES ARE STILL EXACT.** The pass opened at
-# `b6a43445e` (15 commits, clean tree). (1) The PA merged `origin/main` #1287 in at `1d45ef281` while the pass ran —
-# every figure in this stamp was re-executed there, so #1287 IS mapped. (2) The branch was then RE-LINEARISED: the
-# merge went away, `b6a43445e` became `d33842588` (#1289) and the S453 wrap commit `fd2f757d0` (#1291) was added, so
-# `1d45ef281` is no longer an ancestor of HEAD (`state.ts --check` will say so about any stamp older than this one).
-# ⛑ **THE FIGURES WERE NOT RE-RUN A THIRD TIME, AND DO NOT NEED TO BE:** `git diff 1d45ef281 fd2f757d0 -- compiler
-# scripts conformance stdlib docs/FACTS.md docs/known-gaps.md compiler/SPEC.md` is **EMPTY** — the two commits have a
-# byte-identical source, figure and gap-ledger tree. The only differences are `docs/changelog.md`, `hand-off.md` and
-# `handOffs/**` (out of scope). `git log --oneline d3e660a08..fd2f757d0` is **17**, the same window.
-# Source-relevant in THIS window, grep-verified at `fd2f757d0`:
-#   impl#1 (`compiler/src`, 224 files):
-#   #1283 — §13.2 / S449 ruling A3: an async event listener's rejection reaches scrml's logging surface.
-#     `codegen/js-async-analysis.ts` NEW `wrapHandlerRejectionLog` :1539 (module-LOCAL, not exported) +
-#     `DEFAULT_HANDLER_BOUNDARY_ID` :1505 (`"event handler"`) + `ColorOpts.boundaryId` :1472; the wrap is applied
-#     INSIDE `colorAsyncFunctionExpr`'s `if (r.rootAsync)` branch (:1666-1667) — ONE seam, so every listener
-#     emitter inherits it. A DIRECTIVE PROLOGUE stays OUTSIDE the `try` (the first cut returned `null` there and
-#     left the listener `async` with no arm — worse than the bug). Catch var `_scrml_async_err`; sink
-#     `_scrml_error_boundary_log(boundaryId, err)`, called UNGUARDED from the always-included `errors` runtime
-#     chunk, matching its sibling sites (`emit-engine` `effect=`, `emit-reactive-wiring` `on mount`, `emit-client`
-#     `session.destroy`). Boundary ids threaded at the call sites: `emit-event-wiring.ts:1345` (the ONE
-#     `colorHandlerAsync` call — covers all THREE registrations there), `emit-each.ts:2536`, and the **13**
-#     `colorActiveHandler` sites in `emit-lift.js`. See structure.map.md's S453 inventory for the full surface.
-#   #1286 — §19.10 transaction exits + the top-level refusal. NEW `validators/lint-transaction.ts` (404 lines):
-#     `runTransactionChecks(ast)` :143, `TransactionCode` = `E-ERROR-001` | `E-ERROR-007` |
-#     `E-TRANSACTION-CONTROL-FLOW` :58, `TransactionDiagnostic` :60, internal `TxnCtx` :70 (`loopDepth`,
-#     `switchDepth`, `labels`, `inFunction`, `inStmtMatchArm`, `inMatchArm` :115 — a FAIL-CLOSED union over
-#     statement- and value-position `match` arms) / `WalkState` :118. Wired in `api.js:1946` as the
-#     `TRANSACTION-CHECKS` stage (after TAB, before `SCOPE-REDECLARE`). `ast-builder.js` NEW shared
-#     `parseTransactionBlock()` :7803, reached from BOTH the top-level loop (:15697) and `parseOneStatement`
-#     (:9689, gated on a following `{`) — before this a `transaction {}` in a function body degraded to an
-#     undeclared identifier (E-SCOPE-001). `emit-logic.ts` `case "transaction-block"` :4377 owns the emission
-#     (BEGIN / COMMIT / `_markTransactionExits` :700 marking every `fail` / `?` exit with the rollback closure /
-#     a `finally` backstop so no transaction is ever left open); the `fail` limb is `emit-logic.ts:685-687`.
-#   #1287 — §14.8.10 (SECURITY): the tenant floor now filters at the SOURCE. `codegen/tenant-egress.ts` (920 lines,
-#     +819 changed) `_scrml_tenant_scope(rows, keyCols, addedCols)` :792 / `_scrml_tenant_scope_none` :814 REPLACE
-#     the retired `_scrml_tenant_tag`; `resolveTenantScoping` :321 emits one key column per tenant-scoped JOIN
-#     source (`TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_"` :253), a subquery / CTE / derived-table read of a
-#     tenant table -> `E-TENANT-AGG` (reason `"subquery"`), anything else unresolvable -> ZERO rows;
-#     `wrapWithTenantScope` :911 wraps EVERY terminator (`.all`, `.get`, `.run`, bare `?{}` — the last two were
-#     never tagged before) via `rewrite.ts` + `emit-logic.ts`, and `.get()` takes `[0]` AFTER the filter;
-#     `emit-server.ts` wraps route handlers in `_scrml_tenant_request_scope` :705 (AsyncLocalStorage) so PEER
-#     server functions are scoped too, and outside any request the filter yields zero rows;
-#     `_scrml_tenant_redact` :851 stays as defense in depth. Closes the C4 extraction leak (`rows.map(r =>
-#     r.name)`, `rows.length`, a sum, a join, a hand-built `Response`). **PARTIAL — lexical bypasses are open,
-#     r3 next.** Also `sql-projection.ts`, `emit-tool.ts`, `emit-control-flow.ts`, `protect-flow.ts` (one name).
-#   #1275 / #1276 — §51.0.S.2.3 / §19.4.5 impl#1 EXCEPTIONS to the S452 freeze: engine message arms and `!{}`
-#     handler arms parse with NO leading `|`. `engine-statechild-parser.ts` NEW `pipelessHeadAt` (+ `readIdent`):
-#     a head is EXACTLY `.V` / `::V` / `T.V` / `T::V` (optionally `( … )`) or `_` / `else`, with the arm arrow on
-#     the SAME line — no paren-free binder, no alternation, a bare name is not a pattern; anything else ends the
-#     arm run and the line is render content (FAILS CLOSED, byte-identical to before). `ast-builder.js` carries
-#     the `!{}` twin. `type-system.ts` NEW `E-TYPE-ARM-QUALIFIER-MISMATCH` — a type-qualified arm (`T.V :>`) must
-#     name the handled error type; compares the ENUMS both names resolve to (alias-following `enumNameOf`), and
-#     SKIPS when either side is unresolvable. The unqualified foreign variant (`.Zap :>`) is still accepted
-#     (`g-impl1-handler-arm-foreign-variant-accepted`).
-#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1270 NEW GENERATED `severity.scrml` (208 lines;
-#     `Severity:enum = { Error, Warning, Info }` :86, `severityOf(code)` :90) written by NEW
-#     `scripts/gen-bootstrap-severity.ts` from NEW `scripts/s34-catalog.ts` (the ONE §34 catalog-row parser, also
-#     used by `scripts/s34-census.ts`); `ast.scrml` `newDiag` :309 reads `severityOf` so no call site can state a
-#     severity. #1274 the S451 error-model rulings (E-ERROR-012..015, E-MATCH-BARE-BINDER, `| _ err :>`, value-arm
-#     `defer`, `<db src>` per §8.1.1, one arm parser). #1279 `W-ARM-PIPE-LEGACY` (`parse.scrml:524`, Info per
-#     `severity.scrml:101`) + the conformance counter grades ONLY Error-severity parse diagnostics as rejections.
-#     #1280 §58 determinism: NEW `link.scrml` (246 lines; `Source` / `Linked` types, `codeUnitCompare`,
-#     `canonicalSources`, `resolveFrom`, `linkOrder`, `programPaths`, `parseProgram`) — the compile is a function
-#     of the SOURCE SET: path-sorted (UTF-16 code units, no locale), canonical link order, no host paths in any
-#     artifact or diagnostic; NEW `slice-m4/determinism.test.js` is its gate.
-#   SPEC-only: #1269 (`| _ err :>` whole-error binder), #1272 (currency fixes — the §8.1.1 impl#1 divergence
-#     marked RESOLVED by #1264, E-SQL-004 loci cited by function, a §34 row for
-#     E-INTERNAL-DB-HANDLE-UNRESOLVED), #1273 (ONE pattern-arm grammar: `!{}` and engine message arms take
-#     §18.2's `match-arm`; the `|` lead soft-deprecates under `W-ARM-PIPE-LEGACY`, `E-ARM-PIPE-LEGACY` reserved),
-#     #1278 (§14.8.10 filters at the SOURCE — the NORMATIVE mechanism changed; WHERE-injection is demoted to a
-#     v1.next optimization and the egress strip is explicitly no longer the guarantee). #1277 = dpa-queue only.
-# ⛑ FIGURES RE-EXECUTED AT `fd2f757d0`: `facts.ts --check` PASS · `compiler/src` **288,402 lines / 224 files**
-# (+1,506, +1 file = `validators/lint-transaction.ts`) · test files **1,588** (+10 by the FACTS definition; 13 new
-# files, 3 of them under `self-host-v2/`, which FACTS excludes) · `compiler/SPEC.md` **45,673** lines (+444;
-# `regen-spec-index.ts --check` OK 72/72) · conformance **1310** cases (+10); `bun conformance/run.ts` -> **1260
-# pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed; `state.ts --check` gap-counts PASS at this HEAD)
-# open **HIGH 241** (carried 6) · **MED 500** (4) · **LOW 264** · Nominal 8; heading/marker drift **61**
-# (unchanged) · slice-m4 **1115 pass / 1 todo / 0 fail** across 33 files (was 1002/0) · bootstrap counter (live)
-# 1310 of 1310 attempted: PASS **120** · CODES-ONLY 0 · FAIL **48** · LEGACY 0 · NOT-TWINNED **513** ·
-# UNSUPPORTED **629** · CRASH 0; graded 168, of which 120 hold (71.4%), 11 of those vacuous — ⚠ committed
-# `docs/bootstrap-conformance.md` is STALE AGAIN (1301 cases / 511 / 622; `--check` says STALE) · `state.ts
-# --check` `@generated:recent-sessions` (master-list.md) STALE.
-# ⚠ **HOST ARTIFACT, NOT A REGRESSION — do not open a bug on it.** `bun test ./compiler/self-host-v2/slice-m2/` is
-# **420 pass / 6 fail** on this Windows clone. All six are `compareCore` text-node diffs of the shape
-# a=`"\r\n    "` b=`"\n    "` at `decls[0].renders[0].data.kids[0].data.text` — `core.autocrlf=true` CRLF in the
-# fixture sources, not a lowering defect. The S451 stamp's 462/0 was measured on a different host.
-# ⛔ **CORRECTED THIS PASS: the `gate` CI job is 17 TOTAL STEPS (15 `- name:` + 2 `- uses:`)**, re-parsed at BOTH
-# `d3e660a08` and `fd2f757d0` (identical at both ends). `primary.map.md`'s Task-Shape Routing row published
-# `14 TOTAL STEPS — 12 + 2` with a "RE-PARSED, NOT CARRIED" assurance attached; see build.map.md's S453 section
-# and non-compliance.report.md `C-S453-A`.
-# NOT MAPPED: the PA's in-flight S453 wrap edits, and the untracked `compiler/tests/unit/gauntlet-s20/__fixtures__/`
-# that appeared mid-pass. `file:line` cites in S453 sections are grep-derived at `fd2f757d0` — locate by SYMBOL
-# after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S451 HEADER (stamp `d3e660a08`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
-# Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
-# NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
-# stamp. #1270 (`scripts/s34-catalog.ts`) and the bootstrap severity branch are UNLANDED — NOT mapped.** MAP-STAMP RULE:
-# `git log --oneline 47c863556..HEAD` -> 17; `bun scripts/state.ts --check` at pass start: `maps: 17 commits behind HEAD
-# (watermark 47c863556, HEAD d3e660a08)` — matches exactly.
-# Source-relevant in THIS window, grep-verified at `d3e660a08`:
-#   impl#1 (`compiler/src`, 223 files):
-#   #1264 — §8.1.1 nearest database scope (security): `db-ownership.ts` NEW `resolveDbScopes` :215 / `dbHandlesWithin`
-#     :274 / `dbScopeValueOf` :162 + `DbHandle`/`DbSite`/`DbScopeResolution` :126-155; NEW `codegen/sql-handle-name.ts`
-#     (85 lines: `DEFAULT_SQL_HANDLE`, `UNRESOLVED_SQL_HANDLE`, `SQL_HANDLE_PATTERN`, `sqlHandleRegExp`, `sqlHandleAt`,
-#     `compareSqlHandles`, `setFileSqlFallback`, `fallbackSqlHandle`); `emit-server.ts` `dbScopeResolutionFor` :834, one
-#     handle per database (`_scrml_sql`, `_scrml_sql_<n>`), E-SQL-011 :1828 (one fn, two databases) + :6652 (`watches=`
-#     channels in two scopes), E-INTERNAL-DB-HANDLE-UNRESOLVED :7059 / `emit-tool.ts:222`; `db-authoritative.ts`
-#     `wrapPrincipalTxn(src, handles?)` — tenant floor on EVERY handle (was `_scrml_sql` only).
-#   #1258 — §12.4 route inference ignores string-literal / template-text / comment contents: `expression-parser.ts`
-#     `blankLiteralTextInSource` :3689, `emitCodeOnlyStringFromTree` :3763; `route-inference.ts` `codeOnlyTextForTrigger` :926.
-#   #1256 — NEW `scrml fix` verb: `commands/fix.js` (253 lines; `runFix`, `runFixCommand`, `parseFixArgs`, `classifyEntry`,
-#     `resolveProject`, `lineDiff`) + `commands/fix-s66.js` (1684 lines; `fixS66`, `IMPL1_SAFE_RULES` = pre-migrate /
-#     program-wrap / program-move / unwrap-logic, `S66_DECL_RULES` = rhs-decl / const-cell / engine-simple); `cli.js`
-#     dispatch. CLI verbs now **12**. Bootstrap counter grades legacy cases on generated §66 twins (`--no-twins` = old).
-#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1254 if/else-if/else chains (E-CTRL-001..005), #1255 defer
-#     + no artifact on error, #1257 `<program>` attrs checked/refused, #1260 `persist=` (E-PERSIST-*, E-HOLD-/E-PREPAINT-
-#     WITHOUT-PERSIST; runtime `persisted` `slice-m1/runtime/runtime.js:1665`), #1261 `show=` + repeated/case-variant
-#     attrs refused, #1263 U1a NEW `sql.scrml` (577 lines; `sqlFacts(chunks) -> SqlFacts`, fail-closed SELECT-vs-write
-#     scan), #1265 error model — ONE `Stmt.Attempt` (core.scrml:369) for `!{}` / `match` / `?` / `?{}`.
-#   SPEC-only: #1253 (U1 R1-R11), #1259 (OPEN items), #1262 (`show=` no-narrow; nearest db scope), #1266 (E-ERROR-012/013,
-#     E-SQL-011), #1267 (lone direct-child `<db src>` supplies the program db), #1268 (§19.9.10 client server-calls
-#     failable; E-ERROR-014/015, E-MATCH-BARE-BINDER). New SPEC headings: §13.7, §19.8.3, §19.9.9.7, §19.9.10, §52.6.8,
-#     §57.5, §57.8. All new language codes are **Nominal on impl#1**; bootstrap emits none of E-ERROR-012..015 /
-#     E-MATCH-BARE-BINDER / E-SERVER-CELL-RESERVED-NAME yet.
-# ⛑ FIGURES RE-EXECUTED AT `d3e660a08`: `facts.ts --check` PASS · `compiler/src` **286,896 lines / 223 files** (+2,579,
-# +3 = `sql-handle-name.ts`, `commands/fix.js`, `commands/fix-s66.js`) · test files **1,578** (+4, FACTS def.) ·
-# `compiler/SPEC.md` **45,229** lines (+1,062; `regen-spec-index.ts --check` OK 72/72) · conformance **1300** cases (+12);
-# `bun conformance/run.ts` -> **1250 pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed) open **HIGH 240** ·
-# **MED 496** · **LOW 251** · Nominal 8; heading/marker drift 61 (unchanged) · slice-m2 **462/0**, slice-m4 **1002/0**
-# (+451; 10 new test files) · bootstrap counter (live, with twins) PASS **95** · FAIL **65** · LEGACY 0 · UNSUPPORTED
-# **629** of 1300 — ⚠ committed `docs/bootstrap-conformance.md` STALE again (89/52/648; `--check` says STALE).
-# NOT MAPPED: in-flight / unlanded work. `file:line` cites in S451 sections are grep-derived at `d3e660a08`.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S449-WRAP HEADER (stamp `47c863556`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
-# #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
-# validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
-# `47c863556`.** MAP-STAMP RULE at write time: `git log --oneline 9bafb927..origin/main` -> 7; `bun scripts/state.ts
-# --check` at pass start: `maps: 7 commits behind HEAD (watermark 9bafb927, HEAD 47c863556)` — matches exactly.
-# ALREADY COVERED by the `9bafb927` refresh (grep-verified in these maps, NOT re-mapped): #1235 bootstrap `<effect>`, #1236
-# protect r9 (`codegen/session-store-emit.ts`), #1238 §6.15 value-writes, #1239 auth (`codegen/server-session-guard.ts`,
-# `route-inference.ts`), #1240 native-parser freeze. S449-wrap only ADDS Task-Shape Routing rows for #1239 (none existed).
-# Source-relevant in THIS window, grep-verified at `47c863556`:
-#   #1251 — §19.10.6 / §8.9.2 transaction guard (impl#1): NEW `compiler/src/codegen/sql-tx-guard.ts` (360 lines; the
-#     emitted per-handle FIFO mutex + AsyncLocalStorage request scope); `emit-server.ts` (guarded handle decls, request-
-#     scope loop, body read before BEGIN, `BEGIN` vs `BEGIN DEFERRED` by driver, `fail` -> ROLLBACK, SSE stream-end
-#     backstop, `E-SQL-010`); `emit-channel.ts` (WS callbacks `async` + await their onserver handler); `protect-flow.ts`
-#     (`TX_GUARD_RUNTIME_NAMES` modelled, never walked); `attribute-registry.js` (`<program transactions=>`);
-#     `db-ownership.ts` (NEW export `fileDefaultDbDecl`).
-#   #1250 — bootstrap §55 validity surface + compiler submit gate (`compiler/self-host-v2/` ONLY; impl#1 xfail).
-#   #1249 — §66.2.5 keywords OUTSIDE the declaration opener (`let <x/>`, `export let <x/>`): SPEC + bootstrap parser
-#     (`self-host-v2/parse.scrml`) + 43 test/fixture files migrated. impl#1 has NO emitter (Nominal).
-#   #1247 — NEW `scripts/bootstrap-conformance.ts` (tracking counter), generated `docs/bootstrap-conformance.md`, a
-#     `continue-on-error` ci.yml step.
-# ⛑ FIGURES RE-EXECUTED AT `47c863556`: `facts.ts --check` PASS · `compiler/src` **284,317 lines / 220 files** (+530, +1 =
-# `sql-tx-guard.ts`) · test files **1,574** (+5) · `compiler/SPEC.md` **44,167** lines (+252; `regen-spec-index.ts --check`
-# OK 72/72) · conformance **1288** cases (+10); `bun conformance/run.ts` -> **1246 pass + 42 xfail, 0 fail** (+2 pass =
-# the 2 `sql/transactions-*` cases; +8 xfail = the 8 `forms/` bootstrap-executed cases) · `docs/known-gaps.md`
-# gap-counts open **HIGH 237** · **MED 484** · **LOW 234** · Nominal 7; heading/marker drift 61 (unchanged) ·
-# bootstrap slices: slice-m2 **462/0**, slice-m4 **551/0** · bootstrap counter (live run) PASS 42 · FAIL 18 · LEGACY 951 ·
-# UNSUPPORTED 277 of 1288 — ⚠ the committed `docs/bootstrap-conformance.md` is STALE (1286 cases; `--check` says STALE).
-# NOT MAPPED: any in-flight / unlanded fix. `file:line` cites in S449-wrap sections are grep-derived at `47c863556`.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S450 HEADER (stamp `9bafb927`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
-# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
-# FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
-# `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
-# EMPTY).** MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check`
-# at pass start: `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` = 17 landings + wrap `65d64e9f` +
-# merge `da493e06`. After this restamp it reads 2 behind `da493e06` — both docs-only wrap commits, not source drift.
-# Source-relevant, grep-verified at `9bafb927`: #1240 (native-parser FREEZE — see HEADLINE), #1239 (E-SESSION-AMBIENT-SERVER
-# + E-AUTH-ATTR-INVALID, both build-refusing), #1234 (session store WAL+busy_timeout; CSRF-gated session destroy; auth=
-# lints), #1233 (§47.14 data-root containment refuses unresolvable symlinks; W-DEPLOY rows), #1236 (§14.8.9 protect
-# egress round 9), #1235/#1238 (bootstrap `<effect deps=>` / `reset-on=` / §6.15 value-position no-write — self-host-v2
-# ONLY), #1237 (SPEC-only S449 lifecycle rulings), #1208 (defer: E-DEFER-OUTSIDE-FUNCTION reaches text-lowered bodies),
-# #1210 (imported-enum match binding), #1211 (client helper `.js` copied into `dist/_scrml_local/`; E-IMPORT-011), #1241
-# (headless serve-target binds loopback; `SCRML_HOST`), #1242 (nested server-call cell write awaited in place), #1243
-# (E-SCHEMA-014 / E-SCHEMA-015), #1244 (E-ATTR-MULTI-STATEMENT). #1231/#1232 = wrap / gaps / reviews only.
-# ⛑ **FIGURES RE-EXECUTED AT `9bafb927`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
-# **283,787 lines / 219 files** (+2,864 lines, -1 file) · test files **1,569** (+11) · `compiler/SPEC.md` **43,915** lines
-# (+877; `regen-spec-index.ts --check` OK, 72/72) · conformance **1278** cases (+69); `bun conformance/run.ts` ->
-# **1244/1278 pass + 34 xfail, 0 fail** (was 1201 + 8 xfail; the new xfails are bootstrap-only `lifecycle/` +
-# `reactive/no-write-*` cases) · `docs/known-gaps.md` `@generated:gap-counts` at `9bafb927`: open **HIGH 230** (+5
-# carried) · **MED 473** (+1 carried) · **LOW 224** · Nominal 7. §34 census NOT re-run this pass (Windows host; see N-S446-1).
-# ⛑ **HEADLINE — #1240 NATIVE-PARSER FREEZE (S449 ruling 6).** `compiler/native-parser/` 81 -> **44** tracked files: all
-# 37 `.scrml` mirrors DELETED; the `.js` files STAY as a FROZEN component of impl#1, called at fixed sites only:
-# `component-expander.ts` + `meta-eval.ts` (`nativeParseFile`), `codegen/emit-match.ts` + `codegen/emit-engine.ts`
-# (re-parse via `require`), `validators/defer-structure.ts` (`lex` + `parseProgram` probe), `native-walker/
-# forbidden-js-native.ts` (E-CLASS / E-DYNAMIC-IMPORT), `ast-builder.js` + `block-splitter.js` (`body-top-prose.js`,
-# `body-top-coverage.js`), `api.js` (`translate-expr.js` `resetMarkupValueExprIdCounter`), `native-walker/
-# engine-statechild-walker.ts` (`collect-hoisted.js`). **`--parser=scrml-native` RETIRED** — `scrml compile` exits 1 with
-# "is retired (S449)" (`commands/compile.js`; help line removed from `cli.js`; test `unit/parser-flag-retired.test.js`).
-# DELETED: `src/native-parser-canary/within-node-classifier.ts` (dir gone), `src/native-walker/attrvalue-exprnode-walker.ts`,
-# `src/native-walker/exprtext-backfill-walker.ts`, `scripts/native-parser-flip-harness.ts`, the parity suite
-# (`tests/parser-conformance.test.js`, `-canary.test.js`, `-within-node.test.js`, the 6,736-line
-# `parser-conformance-within-node-allowlist.json`, `parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`,
-# `parser-conformance/live-phantom-fixture.scrml`) and ci.yml's tracking "Within-node parser-parity" step. KEPT:
-# `tests/parser-conformance/{corpus-enumerator.js,bench/,markup-bench/}`, `tests/parser-conformance-corpus.test.js`,
-# `-expr.test.js`, `-each-contextual-sigil.test.js`; NEW `tests/helpers/native-ast.js` (direct `nativeParseFile` tree +
-# `liveAst` oracle for tests that used to compile under the flag).
-# ⚠ Every OLDER stamp block / section below that describes the within-node parity gate, the canary, the allowlist,
-# `STRIP_KEYS` registration, the flip harness, or `--parser=scrml-native` as LIVE is SUPERSEDED by this block.
-# ⚑ `file:line` citations in S450 sections are grep-derived at `9bafb927`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
-# #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
-# `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
-# `bun scripts/state.ts --check` reported `maps: 12 commits behind HEAD (watermark 78e4ddad, HEAD 6a592ed5c)` at pass
-# start — confirms the window exactly. Source-relevant, grep-verified at `6a592ed5c`:
-# #1230 (**`compiler/self-host/` — the frozen v1 tree — is REMOVED.** 18 tracked files / 22,433 lines deleted;
-# `git ls-files compiler/self-host` is EMPTY; a gitignored untracked `compiler/self-host/dist/` can linger on an old
-# checkout and is NOT source. Deleted with it: `scripts/rebuild-self-host-dist.ts`, `scripts/rebuild-bs-dist.ts`,
-# `scripts/rebuild-tab-dist.ts`; the v1 sections of `integration/self-host-smoke.test.js` (§B bs.js, §C tab.js) and of
-# `integration/self-compilation.test.js` ("compiler compiles compiler" + the skipped L3); the 11 v1 keys of
-# `parser-conformance-within-node-allowlist.json`. Trimmed: `compiler/scripts/build-self-host.js` builds ONLY the
-# `stdlib/compiler/{module-resolver,meta-checker}` pair; `commands/compile.js` `--self-host` loads ONLY that pair (the
-# optional bs/ast/bpp/pa/ri/ts/dg/cg/tokenizer swap-ins are gone). Re-pointed: `parser-conformance/corpus-enumerator.js`
-# corpus root "self-host" -> `compiler/self-host-v2` (`driftGated: false`; 11 v2 files `[gap]`-skipped — gap
-# `G-SELF-HOST-V2-CORPUS-PARSER-DIVERGENCE-SKIPS`); `parser-conformance-canary.test.js` inlines the cg/bs fixture shapes
-# it used to read from the tree. KEPT (not v1): the `selfHostModules` API option (`api.js` / `pipeline-seam.ts`) and
-# `codegen/compat/parser-workarounds.js` `setBPPOverrides`), #1226 (S448 test infra: NEW
-# `compiler/tests/helpers/tmp-root-preload.js`, registered via NEW `bunfig.toml` `[test] preload` — every `bun test`
-# process from the repo root gets a per-process temp root `<base>/<pid>-<rand>` with TMPDIR/TEMP/TMP pointed at it;
-# `<base>` = `SCRML_TEST_TMP_BASE` else `${XDG_CACHE_HOME:-~/.cache}/scrml-test-tmp`; MUST NOT sit in a git repo or
-# under a `scrml.toml` (falls back to `<os.tmpdir()>/scrml-test-tmp`, else leaves TMPDIR alone); wraps
-# `Bun.spawn`/`Bun.spawnSync` calls that pass no `env`; layered removal (global `afterAll`, `exit`, SIGINT/SIGTERM/SIGHUP,
-# a detached POSIX `sh` watchdog, stale-root prune >24h of dead pids) — PLUS `commands/dev.js` child lifecycle:
-# `spawnedAppChildren` Set + `killAllAppChildren()` reap every starting/live/in-grace app child on `exit`/SIGINT/SIGTERM
-# (SIGHUP deliberately unhandled, preserves `nohup`); `runDevChildServer(serveDir, opts, serverModules, parentPid)`
-# arms its 2 s orphan guard on the parent pid written into the child config (`parentPid: process.pid`), BEFORE route
-# loading; the parent's own launcher guard uses the ppid captured at entry (`launchPpidAtEntry`); NEW test
-# `compiler/tests/commands/dev-child-dies-with-parent.test.js`), #1228 (§14.8.9 protect egress round 8,
-# `codegen/protect-flow.ts` +685: `RowPart.paths` — where a row sits inside a value (`ROW_SELF`, `PATH_SEP`, `ANY_KEY`,
-# `ROW_ANYWHERE`, `MAX_ROW_PATH = 4`; `normPaths`/`prefixPaths`/`readPaths`/`rowAnywhere`/`anyDepth`) so `{ h: u }.h`
-# is the row, not column `h`; `Taint.gn`/`gnAny` — global names a value was read through (`carryGlobalNames`,
-# `containerOf`, `subsumes`) so an aliased global (`const { C } = globalThis`, `const P = process`) reaches functions
-# stored under that name, fail-closed when unnamed; one descriptor path (`get`/`set`/`value` and a getter's returned
-# function are stored under the key); `LANGUAGE_COERCIONS` (String/Number/Boolean/BigInt/Symbol) no longer apply every
-# reachable function — removes the round-7 perf cliff; new gap `g-protect-egress-round-9-residuals`), #1213/#1221
-# (bootstrap arc unit Uc — the §57 wire codec: NEW `compiler/self-host-v2/codec.scrml` (compile-time, type-directed
-# `WireTable` descriptor; refuses payload enums, a `__scrml_absent` field, unnamed `Named`) + NEW
-# `compiler/self-host-v2/slice-codec/` (`runtime/codec.js`: `ABSENT_KEY`, `CodecDefect`, `isAbsenceEnvelope`,
-# `encode`/`encodeText`/`decode`/`decodeText`; `codec.test.js`, `cross-impl.test.js`, `harness.js`, `bundle.scrml`,
-# `src/types.scrml`); CI `gate` runs `bun test ./compiler/self-host-v2/slice-codec/` — 92 pass / 0 fail re-executed this
-# pass), SPEC-only landings (#1216 §55 validity surface for validated top-level values + §55.17 compiler submit gate;
-# #1222 §7.3.4 call arity + argument-type checking, UFCS parked; #1227 dpa-063 §7.2.2 newline ends a statement,
-# `E-STMT-NO-EFFECT` language-wide; #1229 §6.7.4 `<effect deps=[…]>` outside-world only + §6.8.4 `reset-on=` + §6.7.7.3
-# write requests skip mount). ALL NEW SPEC CODES ARE NOMINAL — grep of `compiler/src` finds ZERO emitters for:
-# `E-EFFECT-NO-DEPS`, `E-EFFECT-WRITES-STATE`, `E-EFFECT-WRITE-UNPROVEN`, `E-RESET-ON-CYCLE`, `E-RESET-ON-ENGINE-REFUSED`,
-# `E-RESET-ON-INVALID-ENTRY`, `E-RESET-ON-NOT-WRITABLE`, `E-STMT-LEADING-OPERATOR`, `E-VALIDITY-RESERVED-NAME`,
-# `E-WHEN-EFFECT-DEPRECATED`, `W-WHEN-EFFECT-DEPRECATED`, `I-FORM-SUBMIT-GATED` (also emitter-less: `E-CALL-ARITY`,
-# `E-VALIDITY-NO-SURFACE`, `E-VALIDATOR-DEAD`). impl#1 still compiles `when … changes { }` with writes allowed
-# (gap `g-impl1-when-effect-divergence-s447`). `db-ownership.ts` / `db-target.ts` / `codegen/sqlite-file-target.ts` are
-# ZERO-DIFF this window (#1215 data root mapped at the S446 stamp stands); #1225 is inbox-only.
-# ⛑ **FIGURES RE-EXECUTED AT `6a592ed5c`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
-# **280,923 lines / 220 files** (+495 lines, +0 files) · test files **1,558** (+1) · `compiler/SPEC.md` **43,038 lines**
-# (+1,052; `regen-spec-index.ts --check` OK, 72/72) · conformance **1209** cases (+0); `bun conformance/run.ts` ->
-# **1201/1209 pass + 8 xfail** · `docs/known-gaps.md` open **HIGH 235** (+10; 4 carried) · **MED 462** (+20) · **LOW 215**
-# (+1) · Nominal 7. §34 census (Linux run, path-separator bug does not apply): **881 rows** (+12 — the 12 Nominal codes
-# above) · STRUCK **35** · PINNED **377** · IMPL-SITES **317**.
-# ⚑ `file:line` citations in S447 sections are grep-derived at `6a592ed5c`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S446 HEADER (stamp `78e4ddad`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S446 STAMP — `464c9ab4d` -> `78e4ddad`. 13 COMMITS (S444/S445 wrap tail #1201/#1203-#1206, S446-peter
-# #1207/#1209/#1212/#1217, test fixes #1219/#1220, S447-bryan #1215/#1218), incremental refresh, branch `wrap/s446-peter`.**
-# MAP-STAMP RULE at write time: `git log --oneline 464c9ab4d..78e4ddad` -> 13; `bun scripts/state.ts --check` reports
-# `maps: 13 commits behind HEAD (watermark 464c9ab4d, HEAD 78e4ddad)` at the moment this pass started — confirms the
-# window exactly. Source-relevant, grep-verified at `78e4ddad`:
-# #1201 (§4.12/§40 program role by ancestor — NEW `compiler/src/program-role.ts`: `ProgramRole`, `forEachProgramWithRole`,
-# `findTopLevelProgram(s)`, `stampImpliedProgramAncestors`, `nestedProgramAttrVerdict`; NEW codes `E-PROGRAM-NESTED-SESSION`,
-# `E-PROGRAM-NESTED-ATTR`, `E-PROGRAM-CONFIG-UNREAD`, `W-PROGRAM-TITLE-NESTED` beside the S443 `E-PROGRAM-002` /
-# `E-PROGRAM-NESTED-AUTH`; a `<program>` is top-level iff it has no `<program>`/`<page>` ancestor, whatever markup wraps
-# it, and every `<program>` in a route file of a build with an app program is nested (implied ancestor); consumed by
-# `compute-program-config.ts`, `tool-program.ts`, `auth-graph.ts`, `reachability/entry-points.ts`, `route-inference.ts`,
-# `refusal-gate.js` (fail-closed: no `server.js` written on `E-PROGRAM-002`/`E-PROGRAM-NESTED-AUTH`); +9 conformance
-# cases under `conformance/cases/auth/program-*`), #1209 (schema: `E-SCHEMA-014` NEW — a readable, unqualified
-# `CREATE TABLE` head that is not a plain declaration (a kind modifier / no column list / unclosed list / trailing
-# `INHERITS`); extends `E-SCHEMA-012`/`013` to a declarative `name {` DSL head glued to a longer token; emitted at
-# `gauntlet-phase1-checks.js` from `schema-differ.js` `findRejectedCreateTableHeads` / `findGluedDslTableHeads`; a
-# same-PR tenant-declaration UNION attempt was REVERTED for a worse silent over-scope — base shadow (first-wins)
-# stands, gap reopened routed to bryan), #1207 (CLI: NEW `compiler/src/commands/listen.js` — the ONE CLI `Bun.serve`
-# call site (`listen`, `listenOrExit`, `parseHostFlag`, `isLoopbackHost`, `bindPlan`, `displayUrl`, `networkNotice`);
-# `scrml dev`/`scrml serve` now bind `127.0.0.1` (+ a best-effort `::1` twin) by default instead of every interface;
-# `--host`/`--host=` opts in, bare `--host` = `0.0.0.0`; new non-catalog CLI error codes `E_SCRML_HOST_SHORTHAND`
-# (inet_aton numeric shorthand refused on every OS), `E_SCRML_HOST_WHITESPACE`, `E_SCRML_LISTEN`), #1212 + #1217
-# (§5.2.3/§13.2 handler statement lists, three residual silent drops + one regression of the fix itself, all
-# execute-verified in happy-dom: `for…lift` rows now attach `handlerBlock` via the same `attachHandlerStatementList`
-# function bodies use, lowered by `emit-lift.js` `emitHandlerStatementList`; a match-arm handler's LATER statements are
-# now scanned for the arm-name read by `emit-variant-guard.ts` `exprReadsArmName` (the old `handlerReadsArmName` was
-# first-statement-only); `collectExpr`'s ASI boundary now treats a postfix `++`/`--` as value-ending so the next line
-# is not swallowed into one bare-expr statement; #1217 then makes a ≥2-statement handler's OWN server-call cell write
-# await in place before the next statement reads the cell (`js-async-analysis.ts` `handlerStatementListColor` /
-# `activeHandlerStatementListColor`, `ColorOpts.reactiveArg1SkipKeep`), with a same-PR fix-round narrowing it to KEEP
-# the §36 SSE-generator arg1 skip (`scheduling.ts` `_clientSseFnNames`) so GITI-026's subscription rewrite still
-# matches — `emit-event-wiring.ts`/`emit-each.ts` call sites pass the new skip-set through; 7 out-of-scope gaps filed
-# (4 HIGH) for shapes still dropped: an imported server fn call, an SSE call nested in an expression), #1215 (db: NEW
-# `compiler/src/db-ownership.ts` (`decideOwnedDbFiles`, `sqlDeclaresTable`, `fileDefaultDbValue`, `collectOwnedDbFiles`)
-# + NEW `compiler/src/codegen/sqlite-file-target.ts` (`projectRootFor`, `runtimeDbPath`, `sqliteFileHandle` —
-# `_scrml_sqlite_owned` / `_scrml_sqlite_referenced`); a `db=` path now resolves against ITS DECLARING FILE and
-# OWNERSHIP is per declaring file (only the file whose body declares the schema may create the database; a
-# referencing file opens lazily, never creates, loud error if absent); ONE runtime data root, `SCRML_DATA_DIR` env var
-# if set else the recorded project root (NEW SPEC §47.14); `db-target.ts` `resolveDbFilePath` is the one compile-time
-# resolver, used by `protect-analyzer.ts`; NEW catalog row `W-DB-PATH-RESOLVES-ELSEWHERE`; NEW non-catalog build
-# warnings `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` / `W-DEPLOY-DB-SHARED-PATH`
-# (`commands/build.js`); docker/fly/render/railway adapters now set `SCRML_DATA_DIR=/data` on a mounted volume; `scrml
-# dev` ignores `SCRML_DATA_DIR` by design (opens beside the declaring `.scrml`)), #1218 (§14.8.9 protect egress round
-# 7, `protect-flow.ts`: `this` is tracked as the receiver so `this.p = v` writes the class exactly as `o.p = v`; a
-# function stored under a key the LANGUAGE may call — protocol string keys, accessors, any key the compiler cannot
-# read, a thenable `.then`, a tagged-template call, an `instanceof` hasInstance hook, a built-in-shadowing method name
-# — is analysed as invoked with that `this`; stdlib-identity now keys on the pre-write `scrml:NAME` specifier, not any
-# `_scrml/NAME.js`-shaped path (closes a same-named author file spoofing the allowlist); `scrml dev`'s route catch and
-# its `error:` handler now answer a FIXED 500 body, never `err.message`, matching the production entry), #1219/#1220
-# (test-only: 58 files restore happy-dom globals at a root `afterAll` — a prior file's leaked `Response`/`fetch`/
-# `window`/`document` no longer bleeds into a later file in the same `bun test` process; one §K assertion now expects
-# the platform-resolved project root, forward-slashed, instead of a hard-coded POSIX `/test` — Windows-red since
-# `c12b52c2`, root-caused to this very session).
-# ⛑ **FIGURES RE-EXECUTED AT `78e4ddad`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
-# **280,428 lines / 220 files** (+2,891 lines, +4 files — the four NEW modules above) · test files **1,557** (+11,
-# exactly the 11 new test files below) · `compiler/SPEC.md` **41,986 lines** (+226; `bun scripts/regen-spec-index.ts
-# --check` PASS, 72/72 sections current) · conformance **1209** cases (+9); `bun conformance/run.ts` ->
-# **1201/1209 pass + 8 xfail** · `docs/known-gaps.md` `@generated:gap-counts` open **HIGH 225** (+3; 4 carried) ·
-# **MED 442** (+9) · **LOW 214** (+5) · Nominal 7 (+0) — vs the S445-stamp figures 222/433/209/7.
-# ⚑ **§34 census (`bun scripts/s34-census.ts`) NOT FULLY TRUSTED THIS PASS, ON THIS OS — ROOT-CAUSED, NOT
-# HAND-WAVED.** Row total **869** (+6 vs the S445 stamp's 863 — reconciles: +1 `E-SCHEMA-014`, +4 program-role codes,
-# +1 `W-DB-PATH-RESOLVES-ELSEWHERE`) and STRUCK **34** / PINNED **377** are reliable (string/JSON-derived, no path
-# logic). The IMPL-SITES/FALSE-CLAIM split this run read **IMPL-SITES 0 · FALSE-CLAIM 395**, which is WRONG: the
-# script's emitter scan guards `isImpl` with `rel.startsWith("compiler/src/")` against a path from Node's `relative()`,
-# which on **win32** returns `\`-separated segments (`compiler\src\...`) and so NEVER matches — `implHits` stays
-# empty for every run on this Windows checkout, and every code that should land in IMPL-SITES falls through to
-# FALSE-CLAIM/DECLARED-AHEAD instead. Confirmed directly: `E-STMT-NO-EFFECT` is a live string literal at
-# `ast-builder.js:1708` (grep-verified), yet the census still scored 0 IMPL-SITES. This is a PRE-EXISTING cross-platform
-# bug in `scripts/s34-census.ts` (zero-diff this window — not caused by any commit above) — filed as a tooling
-# finding in `non-compliance.report.md`, not fixed (a mapper does not edit source). Do not cite this pass's
-# IMPL-SITES/FALSE-CLAIM/DECLARED-AHEAD split as ground truth; re-run on Linux/macOS or after a `path.sep`-safe fix.
-# ⛑ **BOOTSTRAP RE-RUN: NOT RE-EXECUTED THIS PASS** (time budget). `compiler/self-host-v2` has exactly ONE line-level
-# touch this window (`ingest.scrml`, registering `precgTopLevelProgramSpan` as an identity field for the within-node
-# classifier, part of #1201's `E-PROGRAM-CONFIG-UNREAD` support — no logic change); `compiler/native-parser` is
-# zero-diff. lint-no-default-arm / slice-m1..m4 / CG+CSS footprint figures from the S445 stamp stand, carried forward
-# unchanged.
-# ⚑ `file:line` citations in S446 sections are grep-derived at `78e4ddad`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S445 HEADER (stamp `464c9ab4d`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
-# incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
-# `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
-# line 3 actually read `5b1d0dab0` — the S444b refresh rode in #1187 — so the window starts there.) Source-relevant:
-# #1196 (§40.8 S441: `<program>`/`<page>`/`<channel>` bodies are CODE — catch-all body-top lift, `"…"` declared display text,
-# `E-STMT-NO-EFFECT`, `E-INTERNAL-BODY-TOP-DROPPED`; `E-WRITE-NOT-IN-LOGIC-CONTEXT` RETIRED; `default-logic-exemption.ts` +
-# `unit-cc-exemption-list.json` DELETED; NEW `native-parser/body-top-prose.js` + `body-top-coverage.js`), #1194 (route
-# inference: app root relative to the BUILD ROOT — `resolveBuildRoot` / `makeRouteClassifier`; `W-AUTH-REQUIRED-NOT-INHERITED`),
-# #1198 (§14.8.9 protect egress round 6 — RETURNING / every `?{}` terminator / spaced star / undeclared tables /
-# opaque callbacks / `arguments` / global stores / descriptor Symbol keys / bare digests; CPS `ServerError` message fixed
-# under `protect=`; prod `Bun.serve` `error:` handler), #1200 (`--emit-per-route`: chunk manifest + role bootstrap moved
-# from inline `<script>` to ONE same-origin `scrml-chunks.<hash>.js`), #1191 (`<request>` `deps=`, `refetch()` statements,
-# client-async bodies, re-fire loop; `E-LIFECYCLE-022` now FIRES), #1184 (`E-ASYNC-FN-ESCAPES-AS-VALUE` wording), #1182
-# (CI runs `slice-m4/`; live-PG hook timeouts 120 s). BOOTSTRAP: #1189 (typer r8), #1190 + #1195 (dpa-045 plain-markup
-# text grammar, `//` comment only after whitespace, display-text escapes), #1202 (Core additions: `Attr.Bind`, `Expr.Host`
-# (`Date.now`), `Expr.Lambda`, `Expr.SeqCall`, `View.Star`, removals, `ElemAt`; dpa-058 validators; fail-closed refusal of
-# unimplemented elements). SPEC-only: #1186/#1193 (§6.7.7.1 abort reads, §6.7.7.2 `<request cache>`, §6.14 `persist=`),
-# #1199 (§6.14.4 prepaint / `hold=@cell`). #1183 = example 23 helper routes removed. Rest: gaps / dpa-queue / wrap.
-# ⛑ **FIGURES RE-EXECUTED AT `464c9ab4d`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
-# **277,537 lines / 216 files** (+2,521 lines, -1 file) · test files **1,546** (+11) · `compiler/SPEC.md` **41,760** lines
-# (+546) · conformance **1200** cases (+49); `bun conformance/run.ts` -> **1192/1200 pass + 8 xfail** · §34 census
-# (`bun scripts/s34-census.ts`) **863 rows** (`SPEC.md:21341..22288`): PINNED 374 · IMPL-SITES 314 · DECLARED-AHEAD 32 ·
-# RUNTIME-SURFACED 3 · FALSE-CLAIM 106 · STRUCK 34 · unique `^| [EWIH]-` codes **817 -> 831** (+14, removed none) · known-gaps
-# open HIGH 215 -> **222**, MED 420 -> 433, LOW 190 -> 209, Nominal 7.
-# ⛑ **BOOTSTRAP RE-RUN AT `464c9ab4d`:** lint-no-default-arm 58 files / 0 violations · `slice-m1/` 73/73 · lowered `slice-m1/`
-# 73/73 · `slice-m2/` **448/448** (7 files) · `slice-m3/` 60/60 (5 files) · `slice-m4/` **403 pass + 1 todo / 404** (16 files;
-# NOW IN CI, `ci.yml:157`) · CG footprint runtime 18/0, codes-only 10/0, crashed 0, not-yet 697, front-end 475 · CSS
-# footprint runtime 335/0, codes-only 280/0, CSS half 38/38.
-# ⚑ `file:line` citations in S445 sections are grep-derived at `464c9ab4d`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444b HEADER (stamp `5b1d0dab0`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
-# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
-# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
-# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
-# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
-# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
-# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
-# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
-# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
-# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
-# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
-# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
-# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
-# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
-# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
-# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
-# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
-# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
-# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
-# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
-# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
-# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
-# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
-# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
-# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
-# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
-# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
-# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
-# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
-# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
-# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
-# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
-# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
-# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
-# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
-# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
-# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
-# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
-# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
-# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
-# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
-# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
-# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
-# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
-# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
-# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
-# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
-# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
-# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
-# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
-# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
-# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
-# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
-# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
-# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
-# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
-# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
-# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
-# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
-# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
-# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
-# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
-# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
-# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
-# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
-# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
-# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
-# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
-# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
-# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
-# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
-# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
-# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
-# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
-# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
-# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
-# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
-# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
-# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
-# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
-# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
-# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
-# = EMPTY.**
-# ⛑ **WINDOW HEADLINES (verify in source, not here):**
-#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
-#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
-#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
-#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
-#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
-#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
-#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
-#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
-#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
-#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
-#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
-#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
-#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
-#     `gauntlet-phase1-checks.js` `<schema>` body checks).
-#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
-#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
-#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
-#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
-#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
-#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
-#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
-#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
-#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
-#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
-#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
-#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
-#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
-#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
-#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
-#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
-#     suite over LOWERED programs (`SLICE_CORE=lowered`).
-# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
-# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
-# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
-# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
-# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
-# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
-# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
-# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
-# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
-# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
-# ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
-# MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
-# `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
-# inbound: `d02738767` is an ancestor of `9941a504c`. Pass ran in worktree `agent-a311ef56e25c9326a`; HEAD advances past
-# the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
-# ⛑ **FIGURES RE-EXECUTED AT `9941a504c`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
-# version **0.8.0** (flat) · `compiler/src` **266,005 lines / 211 files** per FACTS (+790 lines, files FLAT;
-# `git ls-files compiler/src | wc -l` = 213, flat) · test files **1,506** (+1) · `compiler/SPEC.md` **40,348** lines (+216) ·
-# conformance **1,047** cases (+74) in **55** dirs (flat) · §34 catalog **832** rows FLAT, range `20294..21197` ·
-# `docs/changes/` 777. PREFIX SERIES set-diffed at both ends: E 943 · W 183 · I 10 · H 2 · unique 800 — ADDED = REMOVED = EMPTY.
-# impl#1 conformance: `bun conformance/run.ts` -> **1040/1047 pass + 7 xfail** (was 967/973 + 6 at `d02738767`).
-# ⛑ **WINDOW HEADLINES (verify in source, not here):** #1106 §5.2.3 handler fix — a multi-statement handler value is PARSED
-# with the function-body statement parser into `value.handlerBlock.stmts` and lowered from those nodes by every emitter;
-# a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
-# braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
-# `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
-# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN [REMOVED S447 #1230] (reference
-# only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
-# `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
-# ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
-# this stamp.** It adds `compiler/self-host-v2/{parse,lower}.scrml` + `slice-m2/`, MODIFIES `core/check/print/lex/walk/measure.scrml`,
-# `slice-m1/runtime/runtime.js` + its tests, and `ci.yml` (+7/-). This map is deliberately stamped `9941a504c` (the brief's
-# target); `state.ts` will read it 1 commit behind until the next refresh maps M2.
-# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
-# ⚑ `file:line` citations in this S437b block were grep-derived at `9941a504c`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437 HEADER (stamp `d02738767`, 2026-09-27 AM), CARRIED FOR PROVENANCE. ITS FIGURES ARE `d02738767`-ERA. ━━━━━━━
-# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
-# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
-# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
-# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
-# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
-# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
-# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
-# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
-# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
-# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
-# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
-# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
-# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
-# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
-# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
-# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
-# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
-# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
-# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
-# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
-# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
-# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
-# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
-# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
-# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
-# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
-#
-# ━━━━━━━ S437 BUILD DELTA ━━━━━━━
-# NOT a zero-diff row. `.github/workflows/ci.yml` +16 lines: **`gate` 15 -> 16 steps** (14 `- name:` + 2 `- uses:`),
-# **`windows` 4 -> 5**, `tracking` FLAT at 8 (counted by awk over `- name:|- uses:` per job at `d02738767`).
-# `cloud-maps.yml` relabelled only (S436): the PR/commit now say `chore(state): scheduled @generated regen (nav-maps NOT
-# refreshed — Stage 2 removed S310)`. `package.json` version 0.8.0; scripts block unchanged. NEW script:
-# `scripts/hybrid.ts`. See `## S437 — CI + SCRIPTS` below.
-#
-# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
-# ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
-# 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
-# executed at write time, not carried:
-# `BASE=$(git merge-base HEAD origin/main)` -> **`787d4cb4`** (== `origin/main` exactly);
-# `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
-# package.json` -> **EMPTY**; `git merge-base --is-ancestor 787d4cb4 origin/main` -> **exit 0**.
-# Inbound (invariant 48): `git merge-base --is-ancestor e74f5423 787d4cb4` -> **exit 0**.
-# ⚠ **`HEAD` IS NOT THE STAMP.** This pass ran in worktree `agent-a83548a63b17c0d54` on branch
-# `worktree-agent-a83548a63b17c0d54` and COMMITS ITSELF, so `HEAD` advances past the stamp by this
-# pass's own maps-and-progress commits. The stamp tracks the MERGE-BASE deliberately: stamping a
-# branch tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto `main` under
-# a DIFFERENT SHA and the stamp is then orphaned.
-#
-# ⛑ **THIS WINDOW IS NOT A ZERO-DIFF WINDOW, AND THAT IS THE HEADLINE.** Four of the last five
-# stamps were advanced on a VERIFIED-EMPTY source diff. This one is not: `e74f5423..787d4cb4` is
-# **112 commits / 53 source-relevant files / +7,543 / -428**, with **`compiler/src` itself at 12
-# files, +1,195 / -79**. Every figure in this file was re-derived; nothing was carried on the
-# assumption that a flat count stays flat.
-#
-# ⛑ **RE-EXECUTED AT `787d4cb4` — FACTS, the raw walks and the census agree on every figure:**
-# `compiler/src` **253,519 lines / 195 files** (**+1,116 lines; files FLAT for the 4th consecutive
-# window**) · `test files` **1,459** (**+19**) · `specification lines` **37,993** (**+46**) ·
-# `conformance cases` **905** (**FLAT**, still **54** category dirs) · `docs/changes/` **745** (+11).
-# §34 catalog **819** rows (`19750..20640`) by `bun scripts/s34-census.ts`, **+1**.
-# ⛑ **PREFIX SERIES MEASURED AT BOTH ENDS AND SET-DIFFED:** `^| E-` **921 -> 922**, `^| W-` **182
-# FLAT**, `^| I-` **10 FLAT**, `^| H-` **2 FLAT**; UNIQUE codes **786 -> 787**;
-# **ADDED = {`E-CONDITION-HEAD-UNPARENTHESIZED`}, REMOVED = EMPTY.**
-#
-# ⛔ **N-S405-1 IS STILL LIVE, UNREMEDIATED, FOUR SESSIONS ON — AND IT SURVIVED A WINDOW THAT
-# REWROTE ITS OWN FILE.** `E-CG-ENUM-BINDING-COLLISION` (emitter `compiler/src/codegen/emit-library.ts:1517`)
-# and `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (emitter `:713`, referenced `:1255`) still have **ZERO mentions
-# in `compiler/SPEC.md`** — no catalog row, no index row, nothing. `emit-library.ts` took **+400
-# lines this window** and neither code was documented on the way past. They are invisible to every
-# count above, because every count above derives from SPEC.
-#
-# ⚑ **RE-DERIVE, DO NOT CARRY, ANY `file:line` IN THIS FILE.** This pass re-derived the prior
-# report's own `postRe` CORRECTION and found it had itself gone stale: the correction published
-# `:27224 / :28162 / :28287`; at this HEAD `grep -n 'const postRe' compiler/src/type-system.ts`
-# returns **`:27384`, `:28322`, `:28447`**. A citation that was right when written, and a
-# correction to it that was right when written, are both wrong now. Locate by SYMBOL.
-#
-# ━━━━━━━ S422 BUILD DELTA — **`.github/` IS *NOT* EMPTY THIS WINDOW. `gate` GREW A STEP.** ━━━━━━━
-#
-# ⛑ **`gate` IS NOW 15 STEPS (13 `- name:` + 2 `- uses:`), UP FROM 14 (12 + 2).** RE-COUNTED BY
-# PARSE over `ci.yml:103-192` at this SHA, stated both ways because a bare total has invited an
-# ambiguity before. The added step is **`Conflict-marker gate (no unresolved merge markers on the
-# trunk)` -> `bun scripts/conflict-marker-gate.ts`** (NEW FILE, S409). One step was also RENAMED and
-# WIDENED: `SPEC-INDEX totals gate` -> **`SPEC-INDEX currency gate (totals + every row's range +
-# full-scan coverage)`**, running the SAME command (`bun run scripts/regen-spec-index.ts --check`).
-# ⚠ **A RENAMED STEP RUNNING THE SAME COMMAND IS INVISIBLE TO A COMMAND-LEVEL DIFF** — the behaviour
-# change lives inside `regen-spec-index.ts` (+71 this window), not in the workflow.
-# `tracking` (**8** steps) and `windows` (**4**) are BOTH still `continue-on-error: true` — re-counted
-# by parse, not carried. `gate` remains the ONLY blocking job. Three workflows on `main`, unchanged
-# in number: `ci.yml`, `advisory-review.yml`, `cloud-maps.yml`.
-#
-# ⛔ **WHY THE NEW GATE EXISTS, AND IT INDICTS THIS DIRECTORY'S OWN PRIOR STAMP.** Per its own
-# header, `conflict-marker-gate.ts` was added because **an unresolved merge conflict reached `main`
-# at `e74f5423` (#900) and `gate` was GREEN.** ⚑ **`e74f5423` IS THE SHA EVERY MAP IN THIS DIRECTORY
-# WAS STAMPED AT.** Verified here by execution, not taken from the script's word:
-# `git show e74f5423:compiler/SPEC-INDEX.md` carries raw markers at **`:33`, `:91`, `:149`**,
-# enclosing **57 Sections rows on each side — 114 rows over a 117-line hunk**.
-# ⚠ **THE TWO SIDES ARE NOT IDENTICAL — THIS WAS COMPETING DATA, NOT MERE DUPLICATION.** §14 Type
-# System appears as `8050-9941 | 1892` on one side and `8050-9856 | 1807` on the other. A Profile-A
-# PA boot full-reads this file, so for that whole window the navigation table offered two different
-# answers per section with nothing to choose between them. (Current `SPEC-INDEX.md` agrees with the
-# FORMER: `| 14 | Type System | 8050-9941 | 1892 |`.)
-# ⛔ **NO MAP NOTICED, INCLUDING THIS ONE.** The S405 pass stamped itself at that commit and
-# published a clean bill. That is the durable lesson: **a map pass that never checks file
-# WELL-FORMEDNESS can stamp a broken trunk and call it current.**
-#
-# ⚑ **SCRIPT SURFACE: `scripts/` now holds 37 `.ts`/`.js` files.** NEW this window:
-# `scripts/conflict-marker-gate.ts`. MODIFIED: `browser-baseline.ts`, `corpus-emit-differential.ts`,
-# `dpa-debt.ts`, `flograph.ts`, `generate-api-reference.js`, `regen-spec-index.ts`, `state.ts`.
-# ⚠ `conflict-marker-gate.ts` matches ONLY the two DISTINCTIVE 7-char markers anchored at column 0;
-# the bare `=======` middle marker is deliberately NOT matched (it collides with setext Markdown
-# headings). Backlog at introduction was ZERO, the pa-base §8 precondition for adding a gate.
-#
-# ⚠ **`cloud-maps.yml` STILL HAS NO NAV-MAP STAGE, AND THAT IS BY RULING, NOT BY BREAKAGE.** Stage 2
-# (project-mapper regeneration) was REMOVED 2026-08-01 (S310) as a COST decision — bryan ruled the
-# cloud AI spend off, so the leg was deleted rather than left erroring red. What remains is Stage 1
-# (`bun scripts/state.ts --write`) and Stage 1b (`threads.ts`, `continue-on-error`). **The 112-commit
-# staleness this stamp just closed is the direct, predicted consequence of that ruling** — the gap
-# `g-nav-maps-have-no-scheduled-refresh` is accurate and open. Nothing will move a map stamp but a
-# wrap-6c run by hand.
-#
-# ━━━━━━━ EVERYTHING BELOW THIS LINE IS THE SUPERSEDED S405 HEADER, CARRIED FOR PROVENANCE. ━━━━━━━
-# ⚠ Its stamp line read: `updated: 2026-09-08T05:00:00Z  commit: e74f5423`. Figures in it are S405-era.
-# ⛑ **S405 STAMP — `68cfac6d` -> `e74f5423`.** `merge-base HEAD origin/main` == `origin/main` ==
-# **`e74f5423`**. ⚠ **`HEAD` IS *NOT* THE STAMP THIS PASS.** It advanced to `e6b8fc77` mid-pass — a
-# LOCAL, UNPUSHED, docs-only wrap commit on branch `wrap/s405`
-# (`git diff --name-only e74f5423..e6b8fc77 -- compiler/ scripts/ conformance/ stdlib/ lsp/ .github/
-# package.json` -> **EMPTY**). The stamp deliberately tracks the MERGE-BASE, not a branch tip:
-# stamping an unpushed tip is the S326/S328/S331 orphaning hazard, because the tip squash-merges onto
-# `main` under a DIFFERENT SHA. MAP-STAMP RULE, all three commands:
-# `BASE=$(git merge-base HEAD origin/main)` -> `e74f5423`; `git diff --name-only BASE..HEAD --
-# compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json` -> **EMPTY**;
-# `git merge-base --is-ancestor e74f5423 origin/main` -> **exit 0**. Inbound (invariant 48):
-# `git merge-base --is-ancestor 68cfac6d e74f5423` -> **exit 0**.
-#
-# ━━━━━━━ S405 wrap-6c — **STAMP-ADVANCED ON RE-MEASURED ZERO-DIFF. CURRENCY-VERIFIED, NOT RE-WALKED.** ━━━━━━━
-#
-# ⛑ **THE ZERO IS A COMMAND, RE-RUN AT WRITE TIME, NOT A MEMORY:**
-# `git diff --name-only 68cfac6d..e74f5423 -- .github/ Dockerfile docker-compose.yml '*.tf' fly.toml
-# render.yaml` -> **EMPTY**, and `git diff --name-only 68cfac6d..e74f5423 -- package.json bun.lock`
-# -> **EMPTY**. So all three workflows are BYTE-IDENTICAL, every `scripts` entry in `package.json` is
-# unchanged, and the blocking `gate` job is still **14 total steps (12 `- name:` + 2 `- uses:`)** —
-# carried on a verified-empty diff rather than on recall.
-# ⚠ **A ZERO-DIFF SURFACE IS AN UNCHANGED MAP, NOT A CORRECT ONE.** This pass did not re-walk the
-# CI half; it re-measured the surface and found it empty.
-#
-# ⚑ **ONE THING THE `gate` COVERAGE STATEMENT SHOULD BE READ AGAINST THIS WINDOW.** `gate` runs
-# `unit` + `conformance` + root-level `*.test.js`, NOT `integration`, NOT `lsp`, NOT `commands`
-# (invariant 87). ⛑ **MEASURED FOR THIS WINDOW BY `git diff --name-status`, not estimated: 14 paths
-# under `compiler/tests` moved — 4 ADDED, 10 MODIFIED, and one of the 10 is a `.scrml` FIXTURE, so 13
-# `.test.js` files. Of those 13, SEVEN are `integration/`, five `unit/`, one `conformance/`. All seven
-# `integration/` files are OUTSIDE the blocking gate.** The 4 ADDED reconcile exactly with FACTS'
-# `test files` +4 (1,436 -> 1,440):
-# `integration/engine-statechild-prose-punctuation.test.js` ·
-# `integration/library-mode-structural-routing.test.js` · `unit/protect-response-scan.test.js` ·
-# `unit/tenant-floor-raw-ddl-schema.test.js`. ⚠ **The library-mode structural-routing arc — including
-# both new `E-CG-*` codes — is covered ONLY by `integration/` tests, so nothing in `gate` bites if it
-# regresses.** **That is not a new defect; it is the standing tier split, and this window is a clean
-# illustration of what it means in practice.** The top-level `conformance/` corpus IS gated even though no workflow names it, via
-# `compiler/tests/conformance/corpus-bridge.test.js` (invariant 88), and conformance grew 897 -> 905.
-#
-# ⚑ **`bun scripts/state.ts --check` WAS RUN THIS PASS AND ITS OUTPUT IS RECORDED RATHER THAN
-# SUMMARIZED.** BEFORE the write it printed `maps: 20 commits behind HEAD (watermark 68cfac6d, HEAD
-# e6b8fc77)  [WARN-only — not gated; project-mapper seam]`, plus
-# `digest: STALE — sources changed since stamp 9713d703 (primary.map.md, known-gaps.md, delta-log.md,
-# package.json) → PA distrusts + falls back  [WARN-only]`, and
-# `FAIL — stale/missing @generated section(s): @generated:recent-sessions (master-list.md)`.
-# ⚠ **AND IT STILL EXITED 0** — verified by reading the exit status, not assumed. **Nothing in the
-# toolchain fails on stale maps, and the one thing it DOES report as FAIL is non-gating.**
-# ⚠ **`mapsStaleness()` compares the watermark to LOCAL `HEAD`, so `maps: current` is NOT achievable
-# here without violating the MAP-STAMP RULE** — `HEAD` is the local unpushed `e6b8fc77` and stamping
-# a branch tip is the S326/S328/S331 orphaning hazard. The residual "1 commit behind" after this pass
-# is the correct terminal state, not a failed advance.
-#
-# ⛑ **RE-RUN *AFTER* THIS PASS'S WRITE — and that re-run, not the file content, is the check that
-# matters, because this step has crashed post-write before and left a stamp stale. It now prints
-# `maps: 1 commits behind HEAD (watermark e74f5423, HEAD e6b8fc77)`. **`watermark e74f5423` confirms
-# the new stamps were read back by an INDEPENDENT instrument.** Exit status re-read: **0**.**
-#
-# generated-at: 68cfac6d — **THE SAME SHA AS LINE 3, BY CONSTRUCTION.** At this watermark
-# `merge-base HEAD origin/main` == `origin/main` == `HEAD` == **`68cfac6d`**. This pass ran in the
-# MAIN checkout on branch `wrap/s404` and does NOT commit itself, so no self-commit advances `HEAD`
-# past the stamp. MAP-STAMP RULE, all three commands: `BASE=$(git merge-base HEAD origin/main)` ->
-# `68cfac6d`; `git diff --name-only BASE..HEAD -- compiler/ scripts/ conformance/ stdlib/ lsp/
-# .github/ package.json` -> **EMPTY**; `git merge-base --is-ancestor 68cfac6d origin/main` -> exit 0.
-# Inbound (invariant 48): `git merge-base --is-ancestor 499eecce 68cfac6d` -> exit 0.
-#
-# ━━━━━━━ S404 wrap-6c — **STAMP ADVANCED. `499eecce` -> `68cfac6d`.** ━━━━━━━
-#
-# ⛑ **THE CI HALF IS RE-MEASURED ZERO-DIFF: `git diff --name-only 499eecce..68cfac6d -- .github/`
-# -> **EMPTY**.** So `ci.yml`, `advisory-review.yml` and `cloud-maps.yml` are byte-identical and the
-# blocking `gate` job is FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — carried on a
-# verified-empty diff rather than re-parsed, and stated both ways because "14" and "12" are each
-# correct under a different counting base. `package.json` is `--name-only` EMPTY too, so no `scripts`
-# entry moved.
-#
-# **ONE NEW HAND-RUN INSTRUMENT, NOT WIRED TO ANY GATE: `bun scripts/int-number-census.ts` (#875).**
-# Flags: `--summary` (totals only, the DONE-PROBE shape) · `--json` (machine-readable, every site) ·
-# `--roots=a,b,c` (restrict to top-level roots; §7.5.1's own population is
-# `--roots=examples,samples,conformance,stdlib,benchmarks`) · `--selftest` (fixture-driven classifier
-# check). Non-zero exit on a collapsed population or a failed selftest. ⚠ **It is NOT in `ci.yml`, NOT
-# in `bun test`, NOT in a hook** — same class as `scripts/corpus-emit-differential.ts` and
-# `scripts/s34-census.ts`: run it BY HAND, and re-run it rather than quoting a number out of SPEC.
-#
-# ━━━━━━━ S402 wrap-6c — **STAMP ADVANCED. `10a4b045` -> `499eecce`.** ━━━━━━━
-#
-# ⚠ **THE WINDOW IS FOUR SESSIONS WIDE, NOT ONE** — `10a4b045..499eecce` is **36 commits, PRs
-# #835-#872** (S399 · S400 · S400-peter · S401 · S402). The prior stamp is 4 sessions behind because
-# S398-S401 did not fire a wrap-6c. Per-file attribution is in `primary.map.md`'s header.
-#
-# **THIS MAP:** **NOT a zero-diff row: `scripts/` changed in FIVE files, one of them NEW** — `scripts/native-parser-flip-harness.ts` (+617), an instrument that PATCHES AND RESTORES `compiler/src/api.js`. `.github/` is `--name-only` EMPTY, so `ci.yml` is byte-identical and `gate` is FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — RE-PARSED at this watermark. Re-walked.
-#
-# ━━━━━━━ S397 wrap-6c — **STAMP ADVANCED. `8e278c73` -> `10a4b045`.** ━━━━━━━
-#
-# **THE WATERMARK AND THE WALKED WINDOW END AT THE SAME COMMIT.** The source delta walked is
-# `8e278c73..10a4b045` (10 commits, PRs #825-#834, ONE operator), and `10a4b045` is the merge-base
-# AND `origin/main` — unlike S395 (stamp vs unpushed branch tip) and S396 (watermark ahead of the
-# last source-bearing commit). ⚠ **This pass's OWN commit then advances `HEAD` past the watermark,
-# exactly as every pass's does; see the note above line 14. That is the rule working, not a gap.**
-#
-# **THE COMPLETE SOURCE DELTA WAS WALKED — the partial-pass rule is SATISFIED, not waived.**
-# `git diff --name-only 8e278c73..10a4b045` over `compiler/src` · `compiler/native-parser` ·
-# `stdlib` · `scripts` · `lsp` · `conformance` is **FOUR `compiler/src` files and they are all in
-# `codegen/`**, every one read in full, plus 8 conformance files (4 NEW cases):
-#   · `compiler/src/codegen/emit-logic.ts`  (+371/-63) — **#830** (`8d3c7936`) the §32.2.1 WRITE half
-#   · `compiler/src/codegen/emit-expr.ts`   (+166/-16) — **#832** (`c11db440`) the fail-closed `~` floor
-#   · `compiler/src/codegen/index.ts`       (+38)      — **#832** the sink's reset + TWO drains
-#   · `compiler/src/codegen/log-loc.ts`     (+32)      — **#832** `resolveSpanLineCol` (NEW export)
-# `.github/` · `scripts/` · `stdlib/` · `lsp/` · `package.json` · `bun.lock` · `compiler/native-parser/`
-# are all `--name-only` **EMPTY**. `compiler/src/types/` EMPTY for the FIFTEENTH window.
-# `compiler/SPEC.md` **37,647 -> 37,798 (+151)**; `SPEC-INDEX.md` re-generated.
-#
-# ⛑ **THE HEADLINE FINDING IS A ROUTER HOLE, AND IT WAS MEASURED BY THREE DISPATCHES FAILING THE SAME
-# WAY.** Three separate S397 dispatches working the `~` / §32 surface reported that
-# `primary.map.md` gave them **no routing**. A fourth falsified the STRONGER version of that claim:
-# `domain.map.md` carries **17** `~`/§32 hits and always did. So the real defect was narrower and
-# worse — **the material existed and the ROUTER could not reach it.** `primary.map.md` now carries a
-# `~`/§32 Task-Shape Routing row, and it splits the surface into **THREE AXES** because conflating
-# two of them cost this session a wrong-locus round. See that row before touching anything `~`.
-#
-# ⚑ **TWO STANDING TRAPS ON THIS SURFACE, BOTH RE-VERIFIED BY EXECUTION AT THIS WATERMARK:**
-#   (1) **`E-TILDE-001` / `E-TILDE-002` CANNOT FIRE.** The `tilde-init` / `tilde-ref` node kinds have
-#       **FOUR consumers** in `type-system.ts` (`:18426` comment · `:18435` · `:18744` · `:18750`) and
-#       **ZERO producers** anywhere in `compiler/src/` or `compiler/native-parser/` — measured, the
-#       grep returns exactly those four lines and nothing else. The apparent producers are hand-built
-#       object literals in `compiler/tests/unit/type-system.test.js:1751+`. Any §32 reasoning that
-#       assumes enforcement is reasoning about a checker that does not run.
-#   (2) **scrml's AST has NO UNIFORM BINDER REPRESENTATION**, and `ast-builder.js` builds most of it
-#       with ES6 SHORTHAND so a regex keyed on `field:` cannot see it. Details in schema.map.md.
-#
-# ⚑ **S397 — A BRIEFED PREMISE WAS FALSIFIED *BY THE WINDOW IT DESCRIBED*, WHICH IS A DIFFERENT
-# FAILURE FROM THE S396 ONE TWO BANNERS DOWN (that one was wrong when written; this one WENT wrong).**
-# The dispatching brief said SPEC's verbatim INVALID §32 examples "all compile at exit 0". **FALSIFIED BY EXECUTION
-# at this watermark:** §32.5's own `${ process(~) }` now compiles to **exit 1** with
-# `E-CG-TILDE-UNRESOLVED` at a CORRECT `1:11`. The premise was true at `8e278c73` and #832 changed it.
-# What survives is the sharper statement: the code that fires is the CODEGEN floor, not the §32.5
-# TYPE-SYSTEM code the SPEC names — so `g-tilde-lin-enforcement-does-not-fire-on-spec-own-examples`
-# is now PARTIALLY overtaken and its "ZERO diagnostics" headline is stale for at least that probe.
-#
-#
-# ━━━━━━━ S396 wrap-6c — **STAMP ADVANCED. `ad7b65dc` -> `8e278c73`.** ━━━━━━━
-#
-# ⚠ **TWO SHAs, AND THE DISTINCTION IS LOAD-BEARING — DO NOT COLLAPSE THEM.** The **SOURCE DELTA**
-# this pass walked is `ad7b65dc..2d8dd8cb` (7 commits, 4 changed source files). The **WATERMARK** is
-# `8e278c73`, which is further along: `2d8dd8cb..8e278c73` is the wrap commit (#824) and is
-# `--name-only` **EMPTY** over `compiler/ scripts/ conformance/ stdlib/ lsp/ .github/ package.json`.
-# Every measurement below therefore holds at the watermark unchanged — the stamp is advanced to the
-# CURRENT `origin/main` rather than left on the last source-bearing commit, because the MAP-STAMP
-# RULE takes the merge-base, not the last interesting commit.
-#
-# **THE COMPLETE SOURCE DELTA WAS WALKED, SO THE PARTIAL-PASS RULE IS SATISFIED RATHER THAN WAIVED.**
-# `git diff --name-only ad7b65dc..2d8dd8cb` over `compiler/src` · `compiler/native-parser` · `stdlib` ·
-# `scripts` · `lsp` · `conformance` is **FOUR source files**, and every one was read in full:
-#   · `compiler/src/route-inference.ts` + `compiler/src/codegen/collect.ts` — **#818** (`c4c55c50`)
-#   · `conformance/normalize.ts` — **#822** (`ae2741e7`)
-#   · `compiler/src/commands/dev.js` — **#823** (`2d8dd8cb`)
-# Also in the window: 3 test files changed, **2 NEW conformance cases**, and `docs/FACTS.md`.
-# `.github/` is `--name-only` **EMPTY**, so `ci.yml` is byte-identical and the blocking `gate` job is
-# FLAT at **14 total steps (12 `- name:` + 2 `- uses:`)** — stated both ways deliberately, because
-# "14" and "12" are each correct under a different counting base and a bare number invites the
-# ambiguity. Re-counted at this SHA by parse, not carried.
-#
-# **NO BUILD-SURFACE CHANGE THIS WINDOW** — `.github/` is `--name-only` EMPTY and `package.json` is
-# untouched, so every command, job and stage below is carried forward VERIFIED-UNCHANGED rather than
-# re-asserted. What IS new is a gating fact the map had never stated explicitly: the top-level
-# `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
-# See the CI section and invariant 87 in primary.map.md.
-#
-
-## S468 — BUILD / CI DELTA (`41af4153a..5c43c3b8e`)
-
-- No change to `.github/workflows/`, `scripts/git-hooks/`, `package.json` scripts. Only `scripts/bootstrap-conformance.ts`
-  changed (`twinOf` passes `allowNonCompiling: true`).
-- Compile output: the emitted-JS parse floor now holds for EVERY compile, incl. `write: false` (LSP / in-process API)
-  (`api.js` ~:4071); a client stdlib chunk may be PARTIAL — only browser-safe members ship (`runtime-template.js`
-  `STDLIB_CLIENT_CHUNK_MEMBERS` :176); every runtime helper the emitted client names is shipped (93b60f7af); plain pure `fn`s
-  reached from the server are emitted as sync functions in `.server.js` (`RouteMap.pureFnServerHelperIds`); static `<md>` is
-  lowered at build time (`md-lower.ts`).
-- `scrml fix` exit 3 on a refused (non-compiling) file — see config.map.md S468.
-
-## S465 — BUILD / CI DELTA (`8ce6d61b5..41af4153a`)
-
-- CI (`.github/workflows/ci.yml`) +2 steps: **Host-global alias gate** `bun scripts/host-global-scan.ts --check`;
-  **scrml:md shim gate** `bun scripts/gen-md-shim.ts --check`.
-- `scripts/git-hooks/pre-commit` +1 guard: `bun scripts/gen-md-shim.ts --check` (runtime `md.js` is generated).
-- `scrml build` ships stripped browser JS (`codegen/ship-strip.ts`; fallback warns W-CG-SHIP-STRIP-FALLBACK) (#1365);
-  shared runtime tree-shaken (#1382).
-
-## S458 — CI + BUILD DELTA (`125486345..8ce6d61b5`)
-
-No `package.json` script, workflow or Dockerfile change. `scrml build`'s `_server.js` tenant gate is now emitted from ONE shared text (`codegen/tenant-startup-check.ts` `tenantGateEntryLines` :236, called `commands/build.js:578`); output byte-identical to before. `scrml dev` runs the same gate in-process.
-
-## S457 — CI + BUILD DELTA (`ba2712973..125486345`)
-
-- **CI `gate` (blocking, PR-only):** NEW step "Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)" — runs `bun scripts/bootstrap-conformance.ts --check` only when `git diff <base>...HEAD -- conformance/cases compiler/self-host-v2` is non-empty (a diff error counts as touched). Staleness blocks; FAIL count does not. Remedy `bun scripts/bootstrap-conformance.ts --write` (~60 s). `tracking` still reports it on every run. [`.github/workflows/ci.yml`]
-- **`scrml compile` / `build` / `dev` / `serve`:** a compile with any Error leaves the output dir untouched; `compile`/`build` print `noFilesWrittenLine` (`commands/refusal-gate.js:38`) when `!result.artifactsWritten`; `dev` keeps serving the last good build and answers every request with the error; `serve` returns `outputs: {}` + `artifactsWritten: false`. `build`'s E-MW-007 check over the post-write unit set still goes through `beforeWrite`.
-- **`scrml fix --help`:** sql-failable text now says reads rewritten, writes listed (#1340).
-- `docs/bootstrap-conformance.md` is **current** at `125486345` (`--check` executed).
-
-## S456 — CI + BUILD DELTA (`9c556dc74..ba2712973`)
-- No `package.json` / `.github/` / `scripts/` change.
-- `scrml build` server entry (`commands/build.js` `generateServerEntry`): imports every server module's `_scrml_tenant_startup_check` (alias `_scrml_tc_N`, :463) into `_SCRML_TENANT_CHECKS` (:582); while any check reports an undeclared `tenant_id` relation or errors, every request answers 503 (`E-DEPLOY-DB-TENANT-UNDECLARED`); 10 s per-check timeout; re-check 1 s backing off to 30 s, `/_scrml/health` re-checks immediately.
-- `conformance/run.ts`: `<name>.db.sql` fixtures built into SQLite `<name>.db` before compile (`dbFixtures`).
-
-## S455 — CI + BUILD DELTA (`f38697900..9c556dc74`)
-
-- No `.github/` or `package.json` change.
-- `scrml fix` gains two DEFAULT rules: `client-server-call` (#1308, §19.9.10) and `sql-failable` (#1315, §19.8.3 R11) — `commands/fix-s66.js` `IMPL1_SAFE_RULES` :110; listed in `scrml fix --help`. ⚠ the help text still describes a `.run() !{ _ :> {} }` rewrite the rule no longer performs (non-compliance N-S455-2).
-- `scrml build`: `pgSchemaCreateRequirementLines` (`commands/build.js:1055`, used :1304) adds a "Postgres deploy requirement (SPEC §14.8.11)" block to the database report when the program has db-authoritative tables. Never connects, never fails the build.
-- `scripts/state.ts`: recent-sessions SHAs pinned to `git log --abbrev=9` (#1311).
-- `scripts/bootstrap-conformance.ts`: `TWIN_RULES` excludes `client-server-call` + `sql-failable`.
-- `docs/FACTS.md` (`facts.ts --write`) now lists `fix-client-server-call` and `fix-sql-failable` as CLI verbs (14) — they are not dispatched by `cli.js` (N-S455-1).
-
-## S454 — CI + BUILD DELTA (`7ce905ac2..f38697900`)
-
-- ⛑ **The Types gate is BLOCKING (#1302).** `.github/workflows/ci.yml` `gate` job step **"Types gate (diagnostic
-  NAME-SET vs compiler/tests/TYPES-BASELINE.json)"** -> `bun scripts/types-gate.ts --check`, no
-  `continue-on-error`, placed right after "Install deps". Removed from `tracking`. **`gate` is now 18 steps (16
-  `- name:` + 2 `- uses:`)**, `tracking` 8, `windows` 5. `--check` is BIDIRECTIONAL: a fixed diagnostic without
-  `bun scripts/types-gate.ts --write` turns `gate` red exactly like a new one. A new `.ts` -> `.js` import with no
-  sibling `.d.ts` is a new TS7016 — add the `.d.ts` (8 added this window). No local hook runs it: `bun run
-  types:check` before pushing `compiler/src` changes. Exits 2 if `node_modules/.bin/tsc` is missing (no PATH fallback).
-- `scripts/merge-on-green.sh <pr> [--dry-run] [--squash|--merge|--rebase] [--base <branch>]` (#1297, NEW, bash + `gh`
-  only, no `jq`) — merges only when `gate` + `windows` pass on the PR's current head AND `tracking`'s failure-name
-  set equals the base branch's newest run; never uses `--auto`.
-- `.gitattributes`: `scripts/*.sh` and `scripts/git-hooks/*` pinned `text eol=lf` (#1297).
-- `.pa-base/profile` GATE line updated to name the blocking Types step (#1302).
-- No `package.json` script change. No new CLI verb (12).
-
-## S452-WRAP — CI + BUILD DELTA (`fd2f757d0..7ce905ac2`)
-
-No `.github/`, `package.json` or script-entry change in this window.
-
-| command | change |
-|---|---|
-| `scrml fix <root>` | DEFAULT rule set (`IMPL1_SAFE_RULES`, `fix-s66.js:96`) now = pre-migrate, **arm-pipe**, program-wrap, program-move, unwrap-logic |
-| `scrml fix <root> --rules=arm-pipe` | NEW rule: `\|`-led `!{}` / engine message arms -> §18.2 match arms; verify-by-compile per file, all-or-nothing, idempotent (`commands/fix-arm-pipe.js`) |
-| `bun scripts/bootstrap-conformance.ts` | twins generated with `TWIN_RULES` (= `S66_RULES` − `arm-pipe`); live 1312 / PASS 121; ⚠ `--write` not run — committed doc STALE (1310) |
-| `SCRML_BOOT_DIAG_LOG=<file> bun test ./compiler/self-host-v2/...` | logs every bootstrap `analyze` call's diagnostics; compare two runs with `slice-m4/diag-diff.js` |
-
-## S453 — CI + BUILD DELTA (`d3e660a08..fd2f757d0`)
-
-### ⛔ CORRECTION FIRST — THE `gate` JOB'S STEP COUNT WAS WRONG IN THESE MAPS
-
-**Re-parsed at `fd2f757d0`: the `gate` job is 15 `- name:` + 2 `- uses:` = 17 TOTAL STEPS.** Re-parsed at
-`d3e660a08` as well: **identical (15 + 2)**. So the figure `primary.map.md`'s Task-Shape Routing row published —
-`14 TOTAL STEPS — 12 `- name:` + 2 `- uses:``, with a `RE-PARSED AT 499eecce, NOT CARRIED` assurance attached, and
-with an explicit lecture about a figure contradicting its sibling — **has itself been stale for more than one
-window**. The routing row is corrected in place this pass. Method, so the next pass can repeat it exactly:
-
-```
-awk '/^  gate:/{f=1;next} /^  [a-z_-]+:$/{if(f)exit} f && /^      - name:/{n++} f && /^      - uses:/{u++} END{print n, u}' .github/workflows/ci.yml
-```
-
-The 15 named `gate` steps at this watermark, in order (line numbers at `fd2f757d0`): Install deps :117 · Populate
-browser-test fixtures :119 · Gate suite (unit + conformance) :121 · Root-level parser/native conformance :134 ·
-e2e-render-map tier assertions :145 · Bootstrap slice (self-host-v2) :156 · Gauntlet quick check :166 · Browser tier
-failure NAME-SET gate :183 · Snippet gate :185 · Compile-floor gate :194 · Facts gate :196 · Conflict-marker gate
-:203 · SPEC-INDEX currency gate :212 · delta-log sequence gate :223 · §34.0 row-provenance gate :225. Plus
-`actions/checkout@v4` :113 and `oven-sh/setup-bun@v2` :116.
-
-### The ONE ci.yml change in this window
-
-| job | step | gating |
-|---|---|---|
-| `tracking` (line 228; the job is `continue-on-error: true`) | **NEW** `Bootstrap severity table (tracking; report staleness)` :266 — `bun scripts/gen-bootstrap-severity.ts --check` | NON-blocking by TWO mechanisms (job-level AND step-level `continue-on-error`), deliberately. A docs-only §34 edit can make the generated file stale without changing an answer, so staleness is reported, not gated. `tracking` now has 7 named steps |
-
-`gate` gained nothing and lost nothing. No new workflow file. No Dockerfile / docker-compose change. No
-`package.json` script change (0 npm diff).
-
-### Build-shape facts that changed
-
-- **The bootstrap compile is now a pure function of its input SET (#1280, §58.1).** `link.scrml` sorts the sources
-  by path (UTF-16 code units, no locale; text as a total tie-break), derives the canonical LINK ORDER from that
-  sorted list, and parses in link order, so node ids, symbol numbering, declaration order and diagnostic order no
-  longer depend on the order a driver listed files in or a filesystem enumerated them. The gate is
-  `slice-m4/determinism.test.js` (266 lines, four limbs): compiled twice -> byte-identical client JS + HTML + Core
-  + ASTs + diagnostics; every permutation of the file list -> identical; the same project under two different
-  ABSOLUTE roots, each compiled from its own cwd -> identical, **and no absolute path in any artifact or
-  diagnostic**; a program with diagnostics in every file -> one diagnostic order. Its fixture program has four
-  files whose path order is deliberately NOT their link order.
-- **`severity.scrml` is a GENERATED build input** (`scripts/gen-bootstrap-severity.ts` <- `scripts/s34-catalog.ts`
-  <- `compiler/SPEC.md` §34). Treat it like `docs/FACTS.md`: never hand-edit; regenerate in the same push as a §34
-  change that touches a code the bootstrap names.
-- **`scrml fix` has NO arm-pipe rule yet.** SPEC §51.0.S.2.3 says "`scrml fix` deletes the `|`"; the rule sets in
-  `commands/fix-s66.js` are `IMPL1_SAFE_RULES` = pre-migrate / program-wrap / program-move / unwrap-logic and
-  `S66_DECL_RULES` = rhs-decl / const-cell / engine-simple — **zero** pipe/arm hits. §63.7 is consistent with the
-  code (the code is "gate-blocked until its `scrml fix` rule is verified-landed"); §51.0.S.2.3's present tense is
-  not. Filed as `N-S453-3`.
-
-### Measurement caveats for anyone re-running the suites on a Windows clone
-
-- `bun test ./compiler/self-host-v2/slice-m2/` is **420 pass / 6 fail** here, and all six are CRLF: `compareCore`
-  reports `a="\r\n    "` vs `b="\n    "` at `decls[0].renders[0].data.kids[0].data.text`. `core.autocrlf=true`
-  rewrites the fixture sources; the lowering is innocent. Do NOT read this tier's exit code as a regression signal
-  on this host — diff the failure NAME SET against a base run instead.
-- `bun test ./compiler/self-host-v2/slice-m4/` is green here: **1115 pass / 1 todo / 0 fail** across 33 files.
-- `bun conformance/run.ts` -> **1260 pass + 50 xfail, 0 fail** of 1310 (~4 min on this host).
-- `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK 72/72 ·
-  `bun scripts/bootstrap-conformance.ts --check` **STALE** · `bun scripts/state.ts --check` gap-counts PASS,
-  `@generated:recent-sessions` STALE.
-
-## S451 — CI + BUILD DELTA (`47c863556..d3e660a08`)
-
-CI workflows: **0 changes** (`.github/` untouched). `package.json` scripts: **0 changes**.
-New dev command: `scrml fix <file|dir> [--dry-run|--check|--s66 [--write]|--json]` (`compiler/src/commands/fix.js`).
-Bootstrap counter: `bun scripts/bootstrap-conformance.ts [--write|--check|--no-twins]` now grades legacy cases on their
-generated §66 twin by default. Committed `docs/bootstrap-conformance.md` last regenerated at #1257 — STALE at `d3e660a08`.
-Emitted server shape: one guarded handle PER DATABASE the file's scopes name (`_scrml_sql`, `_scrml_sql_<n>`); a lowering
-with no resolvable handle in a multi-database file emits `E-INTERNAL-DB-HANDLE-UNRESOLVED` instead of a declaration.
-
-## S449-WRAP — CI + BUILD DELTA (`9bafb927..47c863556`)
-
-- **ci.yml NEW step** (after "Types gate", before "Populate browser-test fixtures"): `Bootstrap conformance count
-  (tracking; report staleness)` → `bun scripts/bootstrap-conformance.ts --check`, `continue-on-error: true`, never in
-  `gate`. `--check` exits 1 only when `docs/bootstrap-conformance.md` is stale; the FAIL count never sets exit status.
-  ⚠ The doc IS stale at `47c863556` (#1251 added 2 cases without `--write`) — the step is red-but-continuing.
-- `bun scripts/bootstrap-conformance.ts` — print report; `--write` regenerate the doc; `--fail-on-fail` exit 1 on
-  FAIL/CRASH > 0 (local use). ~5 s bundle build + <1 s cases.
-- Emitted server output changed shape (#1251): every `?{}` handle is `const _scrml_sql = _scrml_db_guard(<expr>,
-  "<driver>", <bool>);` (ONE line), preceded by the guard runtime block and followed at module end by the request-scope
-  loop. Any regex over emitted server JS that matches `const _scrml_sql = …` must allow the `_scrml_db_guard(` wrapper
-  (see `compiler/tests/helpers/self-host-server-import.js`).
-- Build-refusing: `E-SQL-010` is an `error`-severity CGError (no dist on fire).
-
-
-## S450 — CI + BUILD DELTA (`6a592ed5c..9bafb927`)
-
-- `.github/workflows/ci.yml`: the `tracking` job's **"Within-node parser-parity" step is RETIRED** (#1240); tracking now
-  covers the remaining non-blocking items + the types gate. Native functions impl#1 still calls keep their own tests,
-  run by the blocking `gate` job's root glob and the unit suite.
-- `scripts/native-parser-flip-harness.ts` DELETED. `scripts/facts.ts`: comment-only — `compiler/native-parser` (~30k lines
-  JS, frozen) still excluded from the `compiler/src` LOC figure.
-- `scrml compile --parser…` now exits 1 ("is retired (S449)").
-- Build output: `compile`/`build` copy client-reachable plain-JS helpers (+ transitive relative `.js`/`.mjs` imports) to
-  `<dist>/_scrml_local/…` (#1211); `scrml dev` now watches the copied helpers' sources (`commands/dev.js`). A classic-format
-  page whose client bundle has a top-level ES import loads its client-bundle tags as `type="module"`.
-- Refusal gate (`commands/refusal-gate.js`): `E-AUTH-ATTR-INVALID`, `E-SESSION-AMBIENT-SERVER`,
-  `E-INTERNAL-SESSION-AMBIENT-SERVER` added — the build writes NO dist when any fires (#1239).
-- `commands/build.js` console warnings `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` now have §34 rows (#1233).
-
-
-## S447 — CI + BUILD DELTA (`78e4ddad..6a592ed5c`)
-- **`bunfig.toml`** — NEW `[test] preload = ["./compiler/tests/helpers/tmp-root-preload.js"]` (per-process temp root;
-  test.map.md). Applies to every `bun test` launched from the repo root, incl. the pre-commit hook.
-- **`.github/workflows/ci.yml`** — `gate` bootstrap step adds `bun test ./compiler/self-host-v2/slice-codec/` (§57
-  codec); step renamed "… + §57 codec + v2 lexer oracle". The tracking step is renamed "integration + lsp + commands
-  (promotion candidates)" (the self-host-smoke dist caveat is gone). Header comment records the S447 v1 removal.
-- **Deleted scripts:** `scripts/rebuild-self-host-dist.ts`, `scripts/rebuild-bs-dist.ts`, `scripts/rebuild-tab-dist.ts`.
-- **`compiler/scripts/build-self-host.js`** — builds only `stdlib/compiler/{module-resolver,meta-checker}.scrml` into
-  `compiler/dist/self-host/`. `scrml compile --self-host` loads only that pair (help text updated).
-- `scripts/migrate-closers.js` / `scripts/s34-census.ts` drop the removed dir from their default lists;
-  `scripts/hybrid.ts` comments updated (harness drives `compiler/self-host-v2`).
-- **`scrml dev` child lifecycle (`compiler/src/commands/dev.js`)** — every spawned app child is tracked in
-  `spawnedAppChildren` and reaped by `killAllAppChildren()` on `exit` / SIGINT / SIGTERM (SIGHUP not handled, so `nohup`
-  keeps working); the child's orphan guard follows the parent pid passed in its config. Dev commands/flags unchanged.
-
-## S446 — CI + BUILD OUTPUT DELTA (`464c9ab4d..78e4ddad`)
-- **Dev/serve bind default changed** (#1207): `scrml dev` / `scrml serve` now bind `127.0.0.1` (+ a best-effort `::1`
-  twin) instead of every interface; `--host <addr>` / `--host=<addr>` opts in, bare `--host` = `0.0.0.0`.
-  `compiler/src/commands/listen.js` is the ONE CLI `Bun.serve` call site, structurally pinned by
-  `compiler/tests/unit/cli-listen-host.test.js` (no other `Bun.serve`/`Bun.listen`/`createServer`/host/net/tls import
-  anywhere else in `compiler/src`).
-- **Deploy adapters now wire a persistent data root** (#1215, `commands/build.js` adapters for `docker`/`fly`/
-  `render`/`railway`): Dockerfile gets `ENV SCRML_DATA_DIR=/data` + `VOLUME ["/data"]`; `fly.toml` gets `[env]` +
-  `[mounts] data → /data`; `render.yaml` gets an env var + a persistent disk at `/data`; railway prints the
-  instruction (dashboard-attached volumes). `scrml build` now also prints a **"Databases expected under
-  $SCRML_DATA_DIR"** report naming each database as owning (created on first run) or referencing (seed it), and warns
-  `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` / `W-DEPLOY-DB-SHARED-PATH` (build-time only, not
-  §34-catalogued diagnostics).
-- **NEW test files, `compiler/tests/commands/`** (the ADVISORY-ONLY tier — see invariant 87 below; NOT in the
-  blocking `gate` job or the installed pre-commit/pre-push hooks): `build-sqlite-data-root.test.js`,
-  `dev-serve-bind-host.test.js`. The UNIT-tier counterpart `unit/cli-listen-host.test.js` IS in the gated tiers.
-- **No `.github/` change this window** (`git diff --name-only -- .github/` empty) — the `gate` job's step list,
-  the Windows job, and every CI stage are unchanged; only which test files those existing stages execute changed.
-
-## S445 — CI + BUILD OUTPUT DELTA (`5b1d0dab0..464c9ab4d`)
-- **CI:** `.github/workflows/ci.yml:157` — the bootstrap step now runs `bun test ./compiler/self-host-v2/slice-m4/` (#1182).
-  ⛑ The S444 statement below that `slice-m4/` is NOT run by CI is SUPERSEDED.
-- **Build artifact (#1200):** with `--emit-per-route`, `codegen/index.ts` builds ONE content-addressed chunk-activation script
-  (`buildChunksBootJs`, `emit-html.ts:4493`; basename `CHUNKS_BOOT_BASENAME = "scrml-chunks"`, `index.ts:350`) and returns it as
-  `CgOutput.chunksBootJs` / `chunksBootFilename`; `api.js` writes it to the dist root and adds it to the hashed-asset and
-  client-seed sets. Pages reference it as `<script src="/scrml-chunks.<hash>.js" data-scrml-route="…">` — no inline script
-  (strict CSP `default-src 'self'`). PIPELINE.md A-4.7 updated to match.
-- **Server entry (#1198):** `generateServerEntry` (`commands/build.js:361`) emits a `Bun.serve` `error(err)` handler (`:696`)
-  answering every uncaught error with a fixed 500 and logging server-side, regardless of `NODE_ENV`.
-- **Live-PG tests (#1182):** hook timeouts 120 s in `db-migrate-pg`, `db-authoritative-pg`, `db-authoritative-p2-pg`.
-- **Script (#1196):** `bun scripts/measure-loose-body-prose.ts` — loose body-prose census across both front ends.
-
-## S444b — BUILT-SERVER STATIC SERVING + WORKER OUTPUT (grep at `5b1d0dab0`)
-
-### §47.13 static-serve allowlist in `compiler/src/commands/build.js` `generateServerEntry` (`:361`)
-- Called at `:1072` with `result.clientAssets` (from `compileScrml`; `api.js:3935` `collectClientAssets(outputDir,
-  clientSeeds)` also writes `.scrml-client-assets.json`).
-- `:576` bakes `const _SCRML_CLIENT_ASSETS = new Set([...sorted])` into `_server.js` (not read from disk at startup);
-  `:578` inlines `STATIC_POLICY_EMIT_SOURCE` (text of `static-serve-policy-emitted.js`: `_scrml_static_request_path`,
-  `_scrml_static_denied`, `_scrml_static_servable`).
-- Dispatch `:604-620`: `_scrml_static_request_path(url.pathname)` (false -> 404); `/` -> `/index.html`; candidates are
-  `join(SERVE_DIR, pathname)` and `` `${pathname}.html` `` ONLY — no `x/index.html` for `/x` (gap
-  `g-prod-static-no-directory-index`, open); each candidate passes `_scrml_static_servable(rel, _SCRML_CLIENT_ASSETS)`
-  BEFORE `statSync`; auth-required documents then go through `_SCRML_PROTECTED_DOCS`.
-- Client-asset seeds (`api.js:3523-3526`): `.html`, `*.css`, `.client[.<hash>].js`, `*.worker.js`; plus runtime `:3440`
-  and chunks `:3849`. `scrml dev` uses the same policy: `commands/dev.js:1082` `readClientAssetManifest`, `:1174`.
-
-### Worker bundle output
-`api.js:3746` writes each nested `<program name=…>` worker as `<page>-<name>.worker.js` beside the page
-(`workerBundleSuffix`, `codegen/emit-worker.ts:47`); never content-hashed (URL baked into the client bundle).
-
-## S444 — CI + SCRIPTS DELTA (`cf62b415..108ca89be`)
-
-### CI `gate` bootstrap step (`.github/workflows/ci.yml`) — UNCHANGED
-Still runs lint + `slice-m1/` + `slice-m2/` + lowered `slice-m1/` + `slice-m3/` + the v2 lexer oracle. ⚑
-⛑ **S445: SUPERSEDED — CI runs `slice-m4/` since #1182 (`ci.yml:157`).** ~~**`compiler/self-host-v2/slice-m4/` (NEW, 11 test files, 131 tests) is NOT run by CI**~~ (grep of `.github/workflows/`
-for `slice-m4` -> no match). Run by hand: `bun test ./compiler/self-host-v2/slice-m4/`. `.github/` untouched this window.
-
-### `scripts/hybrid.ts` — CSS sub-seam (#1149)
-`bun scripts/hybrid.ts --swap CSS=compiler/self-host-v2/slice-m3/css-substitute.js --footprint [--report …] [--json …]`
-— same footprint grade for the bootstrap stylesheet pass (impl#1 keeps html / clientJs / serverJs). A substitute that
-exports `gradeCss` adds the **CSS half**: computed style in Chromium against SPEC-derived oracles under
-`slice-m3/css-oracle/`. Re-run at `108ca89be`: CSS half 38/38.
-
-### `scripts/snippet-drift.js` (NEW, #1145) + `scripts/snippet-gate.js`
-`snippet-gate.js` now also runs the DRIFT half: a ```` ```scrml ```` fence preceded by `<!-- snippet: <path>[#Lx-Ly] -->`
-must equal that file (or line range); the target must be inside the compile-gated corpus; in a doc that uses a marker,
-an unmarked block containing `<program` fails. Exports `checkDrift`, `parseDoc`, `normalize`. Re-run at `108ca89be`:
-`bun scripts/snippet-gate.js` -> 122/122.
-
-### `scripts/corpus-compile-floor.baseline.json`
-Baseline updated (#1147 — examples/09 compiles after bare `fail .Variant`).
-
-### `scrml dev` / `scrml build` — static serving (#1162)
-Both serve ONLY the build's client-asset manifest + passive media (§47.13); databases, server modules and the session
-store are no longer downloadable. The dev server and emitted servers share `static-serve-policy-emitted.js`.
-
-
-## S440 — CI + SCRIPTS DELTA (`fb21983a..cf62b415`)
-
-### CI `gate` bootstrap step (`.github/workflows/ci.yml`, step "Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + v2 lexer oracle")
-Runs, in order: `bun scripts/lint-no-default-arm.js` · `bun test ./compiler/self-host-v2/slice-m1/` ·
-`bun test ./compiler/self-host-v2/slice-m2/` · `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` ·
-**`bun test ./compiler/self-host-v2/slice-m3/` (NEW, #1118)** · `bun test compiler/tests/integration/self-host-v2-lexer`.
-NOT in CI (cost decision open per hand-off): `slice-m1/bench/mutations.js`, `slice-m3/bench/bite-matrix.js`
-(~118 s), and the full footprint grade.
-
-### `scripts/hybrid.ts` — footprint mode (NEW, #1118)
-`bun scripts/hybrid.ts --swap CG=<module> --footprint [--filter <substr>] [--only a,b] [--report <path.md>] [--json <path>]`.
-The substitute exports `footprint(cgArgs) -> { constructs, notYet }`; each case is classified `graded` / `not-yet` /
-`front-end` / `crashed`; graded cases go through the unchanged conformance runner. Exported for tests:
-`classifyFootprint`, `runFootprintGrade`, `footprintTable`, `footprintCounts`. Other modes unchanged
-(`--conformance`, `--differential`, `--swap all=ts` calibration).
-
-### `scripts/lint-no-default-arm.js`
-The non-first-alternation-arm rule is RETIRED (#1129; impl#1 fixed F12 in #1119). Still flags a default arm and a
-wildcard inside an alternation over an enum. Opt-out comment: `// no-default-arm: <reason>`.
-
-### `scrml build` / `scrml compile --output-dir` — refused build writes nothing (#1125)
-`commands/build.js` and `commands/compile.js` pass `compileScrml` a `beforeWrite({ errors, outputDir,
-plannedServerUnits })` callback (`api.js`); returning `false` skips every write. Only `E-MW-007` / `E-MW-008`
-(`commands/refusal-gate.js` `APPLICATION_SCOPE_REFUSALS`) refuse the write; every other hard error keeps the old
-posture (artifacts land, exit 1). `scrml dev` unchanged.
-
-
-## S438 — CI + SCRIPTS DELTA (`9941a504c..fb21983a`)
-
-`package.json` scripts — NOT changed.
-
-### `.github/workflows/ci.yml` — job `gate`: the bootstrap step RENAMED + EXTENDED (#1109), same position
-`Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + v2 lexer oracle` now runs:
-- `bun scripts/lint-no-default-arm.js` — unchanged (26 files, 0 violations at `fb21983a`, was 15)
-- `bun test ./compiler/self-host-v2/slice-m1/` — M1 slice (73/73 pass at `fb21983a`, was 68/68)
-- `bun test ./compiler/self-host-v2/slice-m2/` — **NEW**, M2's own suite (72/74 — 2 fail on this Windows clone,
-  a CRLF-checkout artifact of a SPEC-verbatim drift guard, not reproduced as a source defect; see test.map.md)
-- `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` — **NEW**, the M1 suite re-run over programs
-  M2's `parse → lower` produced, the Fork-A proof's operational form (73/73 pass)
-- `bun test compiler/tests/integration/self-host-v2-lexer` — unchanged (v2 lexer oracle)
-Triggers unchanged. Net: `ci.yml` +7/-2 (one step edited in place, no step added/removed at the job-count level).
-
-### Scripts
-No script file added or removed this window (`lint-no-default-arm.js` and `hybrid.ts` both pre-existing,
-untouched).
-
-### Dev commands (bootstrap)
-`bun test ./compiler/self-host-v2/slice-m1/` — 73 tests (was 68)
-`bun test ./compiler/self-host-v2/slice-m2/` — **NEW**, 74 tests (M2 front end)
-`SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` — **NEW** invocation form (M1 oracle over lowered programs)
-
-Resolves the prior ⏳ NOT-MAPPED note.
-
-
-## S437b — CI + SCRIPTS DELTA (`d02738767..9941a504c`)
-
-`package.json` scripts — NOT changed.
-
-### `.github/workflows/ci.yml` — job `gate`: ONE step added (#1105), after `e2e-render-map tier assertions`
-`Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + v2 lexer oracle` runs:
-- `bun scripts/lint-no-default-arm.js` — exit 1 on a default arm in an enum `match` under `compiler/self-host-v2/`
-- `bun test ./compiler/self-host-v2/slice-m1/` — the M1 slice (outside the bunfig test root, so the plain `bun test` steps never reach it)
-- `bun test compiler/tests/integration/self-host-v2-lexer` — the v2 lexer oracle (7 `self-host-v2-lexer-slice*.test.js` files, already under the test root)
-Triggers unchanged.
-
-### Scripts
-`scripts/lint-no-default-arm.js` — NEW. Usage: `bun scripts/lint-no-default-arm.js [--root <dir>] [--json]` (default root
-`compiler/self-host-v2`).
-`scripts/hybrid.ts` — header NARROWED S437 (dpa-051 R1): per-stage swap exists only at the LEX seam and for the whole
-compiler; the v1 `compiler/self-host/` tree is REMOVED (S447 #1230) — the harness drives `compiler/self-host-v2/`. Flags/usage unchanged.
-
-### Dev commands (bootstrap)
-`bun test ./compiler/self-host-v2/slice-m1/` — run the M1 slice (68 tests)
-`bun compiler/self-host-v2/slice-m1/print-demo.js counter|dropdown|valuesem [js|html]` — print a slice program's emitted JS or HTML (dev aid)
-
-
-⏳ NOT MAPPED: bootstrap M2 (#1109, `072741ca9`) landed on main mid-pass, after this stamp; it edits files named here (self-host-v2 modules, `slice-m1/`, `ci.yml`). Next refresh maps it.
-
-## S437 — CI + SCRIPTS (`787d4cb4..d02738767`)
-
-### CI/CD Pipeline  [.github/workflows/ci.yml] — two NEW blocking steps
-- `gate` — **e2e-render-map tier assertions (S427 — previously ran in no job)**: `bun test compiler/tests/e2e-render-map/`. Before this, `compiler/tests/*.test.js` (root glob) and the pre-commit globs never descended into that dir, so its detector pins pinned nothing. The fast-slice green→red delta inside `e2e-render-map.test.js` stays WARN-only; `generate-baseline.js --check` is NOT run.
-- `windows` — **e2e-render-map tier on Windows (S427 — the S417 separator class)**: same command; the tier was a silent whole-tier no-op on Windows at S417.
-- `gate` now 16 steps: install · browser fixtures · gate suite (unit + conformance) · root-level parser/native conformance · **e2e-render-map** · gauntlet quick check · browser failure name-set · snippet gate · compile-floor · facts · conflict-marker · SPEC-INDEX currency · delta-log sequence · §34.0 row-provenance (+ checkout, setup-bun).
-
-### CI/CD Pipeline  [.github/workflows/cloud-maps.yml]
-Trigger: schedule `17 9 * * *` + manual. Still Stage-1-only (`bun scripts/state.ts --write` → auto-merge PR). **It does NOT refresh `.claude/maps/`** — the label now says so (S436). Nav-map refresh remains a PA wrap-step-6c job.
-
-### `scripts/hybrid.ts` — the HYBRID-COMPILER harness (NEW, #1044, S430 P5) — NOT a CI gate
-- `bun scripts/hybrid.ts --list` — every substitutable stage (36, from `compiler/src/pipeline-seam.ts` `STAGE_SEAMS`).
-- `bun scripts/hybrid.ts --swap <STAGE>=<module> [--swap …] --conformance [--filter <substr>]` — **THE bootstrap module-done gate** (P5): the full conformance suite through `conformance/adapters/hybrid.ts`.
-- `bun scripts/hybrid.ts --swap <STAGE>=<module> --differential [--roots …] [--files …] [--limit N] [--json <path>]` — artifact differential vs pure TS; TRIAGE, not a gate.
-- `<module>` may be `.js`/`.ts`/`.mjs`, a `.scrml` (compiled first in library mode in a child process), or the literal `ts` (calibration: `--swap all=ts`).
-- Exit: 0 green · 1 red · 2 not a valid run.
-
-### `conformance/run.ts` — per-implementation `xfail` (NEW, #1050, S430 P7)
-A case may carry a top-level `"xfail": { "impl1-ts": { "gap": "<status=carried gap id>", "fails": { … } } }` pinning impl#1's FAILURE SIGNATURE. `bun conformance/run.ts --xfail-signature <case>` prints a paste-ready block. At `d02738767`: `bun conformance/run.ts` → **967/973 pass, 6 XFAIL** (see test.map.md).
-
-### `scripts/state.ts` — `status=carried` is its own column (S430 P7)
-`GAP_STATUS_CARRIED = new Set(["carried"])` (`:109`) — "owed by the bootstrap, xfail on impl#1", never folded into open. `scripts/flograph.ts` now parses `@gap` markers through `state.ts` (`parseGapMarkers`, `classifyGapStatus`) instead of its own fixed-order regex. `bun scripts/state.ts --check` at this SHA: **FAIL** on `@generated:recent-sessions` (master-list.md) — recorded in non-compliance.report.md.
-
-## Development Commands (root package.json scripts)
-compile — `bun run compiler/src/cli.js compile`
-pretest — `bash scripts/compile-test-samples.sh` (populates samples/compilation-tests/*/dist gitignored fixtures; runs before `test`)
-test — `bun test compiler/tests/`
-test:coverage — `bun test compiler/tests/ --coverage`
-watch — `bun --watch compiler/src/cli.js compile`
-bench — ⛑ **CHANGED S402 (#853, `1e69d3b2`): `compile examples/ --verbose`** — was `compile samples/compilation-tests/ --timing`. ⚠ **BOTH THE CORPUS AND THE OUTPUT MODE MOVED, so a `bun run bench` result is NOT comparable across `1e69d3b2`.** Context: #853 filed `g-runtime-benchmarks-stale-and-no-perf-gate` (MED) — `benchmarks/RESULTS.md` and `runtime-results.json` were both last touched **2026-05-19**, so ~4 months of codegen landed with no partial-update measurement, **and there is no perf job in any workflow.** ⛔ **A `bench` run is NOT a regression gate and never has been** — the same session shipped a 17x compile-time regression (590ms -> 10,039ms at 88KB) that was invisible at 8.4KB and was caught only by an adversarial review.
-security — compiles samples then `node --check`s every emitted .client.js
-types — `bun scripts/types-gate.ts` (**NEW #665**) — PRINT the current TypeScript diagnostic set over `compiler/src`.
-types:check — `bun scripts/types-gate.ts --check` (**NEW #665**) — diff the diagnostic NAME->COUNT map against `compiler/tests/TYPES-BASELINE.json`; **exit 1 on ANY difference, in EITHER direction**. This is the CI-wired mode (`tracking` job, `continue-on-error` at both job and step level). Record a new baseline with `bun scripts/types-gate.ts --write`.
-lsp — `bun run lsp/server.js --stdio`
-docs:build — `bun run docs/build.ts`
-e2e / e2e:ui / e2e:docs — Playwright suites (playwright.config.ts / playwright.docs.config.ts)
-e2e:install — `playwright install chromium firefox webkit`
-
-## Packaging — scrml is PUBLISHABLE as of this window (`171f5f23`)
+# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# `facts-regen.yml` no longer exists. It was deleted in S474 and replaced by `generated-regen.yml` (below).
+
+## Development Commands (package.json scripts)
+bun run compile <file|dir> — impl#1 compile (`bun run compiler/src/cli.js compile`)
+bun run watch — impl#1 compile under `bun --watch`
+bun run boot:compile <file.scrml> — compile with the BOOTSTRAP (scripts/scrml-boot.ts compile; see bootstrap.map.md)
+bun run boot:dev <file.scrml> — bootstrap dev server (scrml-boot dev)
+bun run lsp / bun run lsp:boot — impl#1 LSP / bootstrap diagnostics LSP (stdio)
+bun test — the impl#1 suite under compiler/tests/ (bunfig root). `pretest` installs the merge driver and runs scripts/compile-test-samples.sh (it populates samples/compilation-tests/*/dist)
+bun run test:coverage — the same with --coverage
+bun run types / types:check — scripts/types-gate.ts (tsc diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
+bun run e2e / e2e:ui / e2e:docs / e2e:install — Playwright (e2e/playwright*.config.ts)
+bun run docs:build — docs/build.ts
+bun run bench — compile examples/ --verbose
+bun run security — compile samples/compilation-tests and `node --check` the client JS
+impl#1 CLI verbs (compiler/src/cli.js): init, compile, dev, build, serve, migrate, fix, db-migrate, promote, generate, introspect, semdiff
+
+## Bootstrap / generated-file tools (scripts/)
+bun scripts/bootstrap-conformance.ts [--filter s] [--cases dir] [--json p] [--check] [--write [--ratchet]] — bootstrap conformance run (report docs/bootstrap-conformance.md)
+bun scripts/gen-bootstrap-severity.ts [--check] — compiler/self-host-v2/severity.scrml from SPEC §34
+bun scripts/lint-no-default-arm.js / lint-duplicate-fn.js — bootstrap lints
+bun scripts/facts.ts [--check|--write] — docs/FACTS.md
+bun scripts/state.ts [--check|--write] — docs/generated/{gap-counts,recent-sessions}.md + the known-gaps heading/marker drift report (WARN-only)
+bun scripts/regen-spec-index.ts — compiler/SPEC-INDEX.md totals + rows
+bun scripts/spec-coverage-check.ts [--write] — docs/bootstrap-spec-coverage.md gate + totals
+bun scripts/windows-ratchet.ts validate|judge|retry-list|report — Windows baseline ratchet
+bun scripts/sync-bootstrap-url-guard.ts — copies compiler/src/runtime-url-guard.js into the bootstrap runtime
+bun scripts/gen-md-shim.ts [--check] — compiler/runtime/stdlib/md.js from stdlib/md/index.scrml (blocking, in-PR)
+Others: claim-gate.js + claim-gate-c2.js, snippet-gate.js, corpus-compile-floor.ts, host-global-scan.ts, s34-census.ts, conflict-marker-gate.ts, delta-lint.ts, ci-shards.ts, ci-pr-base.sh, ci-stale-warn.sh, bot-owned-untouched.sh, test-sharded.ts, inbox-debt.ts, review-debt.ts, worktree-sweep.ts
+
+## Build & Release
+Not published from CI. package.json `files` is an allowlist: compiler/{bin,src,native-parser,runtime}/, stdlib/, README.md, LICENSE (self-host*, tests, SPEC, examples excluded). Version 0.8.0.
+
+## Git hooks (scripts/git-hooks/, install: ./scripts/git-hooks/install.sh)
+pre-commit — warns on a commit to main; runs `bun test compiler/tests/{unit,integration,conformance} --bail` sharded by scripts/test-sharded.ts; also runs the bootstrap slices + lints when the staged diff touches a slice input (compiler/self-host-v2, compiler/src, compiler/runtime, compiler/native-parser, conformance, stdlib, SPEC.md, known-gaps.md, …); SPEC-coverage step (warns on stale)
+pre-push — full suite on update pushes (new refs defer to CI); SPEC-INDEX and FACTS steps warn on stale; no slices
+post-merge / post-rewrite — phase 2 of the `scrml-generated` merge driver (scripts/git-merge-generated.ts --regen)
+core.hooksPath is absolute: hooks run from the main checkout's scripts/git-hooks.
+
+## CI/CD Pipeline  [.github/workflows/ci.yml, 867 lines]
+Triggers: push to main (paths-ignore **.md, handOffs/**, docs/**), pull_request, merge_group, schedule 06:41 UTC, workflow_dispatch. Bun pinned 1.4.3.
+checks — fast gates: types gate, parser/native conformance, snippet gate, claim gates (C1 + C2), compile-floor, FACTS currency (warn), md shim (blocking), bootstrap conformance report (PRs touching conformance/cases or self-host-v2; stale warns), conflict markers, SPEC-INDEX, SPEC-coverage, state.ts, bot-owned docs/generated untouched, severity table, delta-log sequence, every blocking job in gate.needs, Windows baseline validate, §34.0 row provenance
+unit (3 shards) — bun test compiler/tests/unit compiler/tests/conformance
+integration (3 shards) — pretest, then bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
+browser — pretest, gauntlet quick check (TodoMVC), scripts/browser-baseline.ts --check (failure NAME-SET gate)
+slices — bootstrap lints + slice-m1/m2/(m1 lowered)/m3/m4/codec, then compiler/tests/e2e-render-map/
+host-global (sharded by emission mode) — scripts/host-global-scan.ts: no user binding can capture a host global
+postgres-live — postgres:18 service; slice-m4 pg-envelope / sql-error-pg / statement-savepoint-pg s475 tests; fails on any skip. Skipped on merge_group. Required since S475 (#1791)
+windows — windows-latest unit + conformance + e2e-render-map with junit, one retry, judged by windows-ratchet.ts against .github/windows-baseline.json; path-filtered on PRs (step `env.WIN_TRIGGER`), skipped on merge_group
+tracking — non-blocking: bootstrap-conformance --check (staleness report)
+gate — the ONE required check. needs: checks, unit, integration, browser, slices, host-global, windows, postgres-live. Every need must be success, except windows / postgres-live may be `skipped` on merge_group. It also reconciles the shard partition (ci-shards.ts reconcile)
+
+## Other workflows
+generated-regen.yml — on push to main, a daily 08:23 UTC backstop and workflow_dispatch: runs severity -> SPEC-INDEX -> coverage -> state -> bootstrap-conformance (--write --ratchet) -> FACTS on main's tip; on drift, force-pushes branch `bot/generated-regen` and auto-merges its PR through gate. Token: MAPS_PAT. Closes any leftover `bot/facts-regen` PR
+windows-main-report.yml — daily 07:47 UTC + dispatch: reports main's latest windows result and its first red SHA
+cloud-maps.yml — daily 09:17 UTC + dispatch: thread-board probe only (writes nothing since S474)
+advisory-review.yml — workflow_dispatch only (disabled since S310, cost decision): advisory AI review comment
+Branch protection: ruleset 25356240 on main (PR + gate + merge queue, no bypass). Details: .github/CI.md
+
+## Docker
+No Dockerfile or docker-compose. The only CI service container is postgres:18 (postgres-live job).
+
+---
+
+# Carried detail (pre-f92d1a8fb body sections)
+The sections below are the previous map generation's body (mostly impl#1, `compiler/src`), carried rather than lost. They were NOT re-read line by line. Each carries a verification line from f92d1a8fb: code identifiers checked to exist, `symbol` :line anchors re-derived by grep, cited paths checked, cited gaps whose marker is no longer `open`, and STALE-RISK flags for the CI/bot facts that changed in S468–S475. Where a carried section disagrees with a refreshed section above, the refreshed section wins.
+
+## (carried) Packaging — scrml is PUBLISHABLE as of this window (`171f5f23`)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 2/2 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. Paths cited that do NOT exist at f92d1a8fb: `compiler/package.json`._
 
 `"private": true` removed · `"workspaces": ["compiler"]` removed · **`compiler/package.json`
 DELETED** (acorn + astring hoisted into the root `dependencies`) · a `files` ALLOWLIST added. There
@@ -1473,7 +82,8 @@ excluded: `compiler/tests` (20M), `self-host*`, `samples/`, `examples/` (12M),
 it is not. `bin: { scrml: "compiler/bin/scrml.js" }` is unchanged. Any doc or brief describing a
 `compiler/` workspace at v0.2.0 is stale.
 
-## scrml CLI subcommands (compiler/src/cli.js -> commands/*.js)
+## (carried) scrml CLI subcommands (compiler/src/cli.js -> commands/*.js)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 13/13 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 compile, dev, build, serve, migrate, **db-migrate (NEW S287)**, promote, generate, init, introspect, semdiff — **11 verbs** (was 10; `db-migrate` is the only addition this window). `migrate` and `db-migrate` are DELIBERATELY DISTINCT commands, not a rename: `migrate` is the pre-existing scrml-SOURCE syntax codemod tool; `db-migrate` (below) applies a project's `<schema>` to a REAL database. `compile`, `dev` and `build` carry `--module-format=<classic|esm>` (prior window, unchanged).
 
 ### `scrml compile` flags
@@ -1534,7 +144,8 @@ Classify a change between two .scrml versions by AXIS + soundness TIER — never
 --help, -h.
 Both versions are compiled in-process (full pipeline, write:false); the synthesized top-level `verdict` field is the single value a consumer keys on. Exit codes: **0** = cosmetic (no-op on every modeled axis) · **1** = behavioral (a change on some axis; gate/review stays consumer-side) · **2** = a version failed to compile (fail-closed — the compiler is the first reviewer). Consumers: giti MERGE, flogence REVIEW. Classifier math lives in `compiler/src/semdiff.ts` (pure, unit-tested); the command is the I/O shell.
 
-## `--module-format=classic|esm` (ESM-chunks arc U1-U3)
+## (carried) `--module-format=classic|esm` (ESM-chunks arc U1-U3)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 1/1 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 Selects the CLIENT module format. Accepted on `compile`, `dev` and `build`, in both the
 `--module-format=esm` and `--module-format esm` shapes; any other value is a hard exit with
@@ -1555,44 +166,8 @@ loop (compile.js, dev.js, build.js) and threaded to `compileScrml({ moduleFormat
   (`compiler/src/commands/module-format-notice.js`). Deliberately NOT a §34 catalog code and never
   enters the diagnostic stream or the compile result; classic prints nothing.
 
-## WHICH GATE RUNS WHICH TEST TIER — and the two greps that give the wrong answer (NEW section, S396)
-
-**RE-READ FROM THE RUNNERS AT `2d8dd8cb`, not carried.** A mention of a path is not evidence it is
-gated, and the absence of a mention is not evidence it is not.
-
-| runner | blocking? | tiers |
-|---|---|---|
-| `.git/hooks/pre-commit` (installed) **and** `scripts/git-hooks/pre-commit:17` | yes, at COMMIT | `unit` · `integration` · `conformance` · root `compiler/tests/*.test.js` (`--bail`) |
-| `ci.yml` `gate` | **yes** — the only branch-protection required check | `unit` · `conformance` · root `compiler/tests/*.test.js` |
-| `ci.yml` `tracking` | no (`continue-on-error: true`) | `integration` · `lsp` · **`commands`** · `parser-conformance-within-node` |
-| `ci.yml` `windows` | no (`continue-on-error: true`) | `unit` · `conformance` |
-| `scripts/git-hooks/pre-push:87` (source-controlled) | on RELEASE-TAG / forced push only | `unit` · `integration` · `conformance` |
-| `.git/hooks/pre-push:96` (installed, machine-local) | on RELEASE-TAG / forced push only | `unit` · `integration` · `conformance` · `lsp` · `self-host` · **`commands`** |
-
-⚠ **THE PRE-COMMIT AND CLOUD-GATE SETS ARE DIFFERENT, AND `integration` IS THE ONE THAT STRADDLES
-THEM.** `integration` blocks a COMMIT but not a MERGE; `commands` blocks neither in practice.
-
-⚑ **GREP TRAP 1 — `commands/` looks gated and is not.** Grepping for `compiler/tests/commands` hits
-`.git/hooks/pre-push:96`, inside a suite whose own comment calls it blocking. It nevertheless never
-runs on a normal push: `RUN_SUITE` is set to `1` **only** when `PUSHING_RELEASE_TAG=1` or
-`FORCE_RUN=1` (a ref-diff failure), and the S253 cloud-gating arc made a normal CODE push skip the
-whole block. The source-controlled hook does not name `commands` at all. **Net: advisory-only** — and
-a real §52.13 assertion sat RED there for an extended period. Invariant 87.
-
-⚑ **GREP TRAP 2 — the top-level `conformance/` corpus looks ungated and is not.** No workflow names
-it, because `bunfig.toml` pins `[test] root = "compiler/tests/"` and the corpus lives at the repo
-root, outside auto-discovery. It is gated by a BRIDGE:
-`compiler/tests/conformance/corpus-bridge.test.js` sits under the gated root and imports `loadCases`
-/ `runCase` / `runCaseRuntime` / `hasRuntimeHalf` from `../../../conformance/run.ts`, emitting one
-`test()` per case. Because `compiler/tests/conformance` is in **both** pre-commit and `gate`, all
-**893** cases ride both. **Practical consequence:** editing `conformance/run.ts`,
-`conformance/normalize.ts` or any `expected.json` **is** gated, and a red case blocks a commit —
-which is why #822 had to preserve the `count: 0` short-circuit rather than delete the `continue`.
-Invariant 88. ⚠ `conformance/driver.ts` also runs the corpus for cross-impl use; that path is NOT a
-gate.
-
-
-## Public-claim gates (S280)
+## (carried) Public-claim gates (S280)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 2/2 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. STALE-RISK: describes CI `gate`: since S468–S475 `gate` is an aggregator over checks/unit/integration/browser/slices/host-global/windows/postgres-live (build.map.md "CI/CD Pipeline")._
 
 Three scripts, two of them CI-required. They exist because a public claim that was true when
 written rots silently.
@@ -1667,7 +242,8 @@ written rots silently.
   stale SPEC-INDEX and the ~9x-wrong LOC figure are the two precedents, and are why `docs/FACTS.md`
   exists). See error.map.md for the buckets and the traps it defeats.
 
-## `scripts/boot.ts` — the executable boot read-set gate (NEW #492/#493/#498) — NOT a CI gate
+## (carried) `scripts/boot.ts` — the executable boot read-set gate (NEW #492/#493/#498) — NOT a CI gate
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 3/3 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **Why it exists, in one sentence: a memory NAVIGATES and does not GATE, so it "leaves room for
 misdirection."** S335 short-booted — skipped BOTH user-voice ledgers and the per-user profile — and
@@ -1711,7 +287,8 @@ Sub-processes via `spawnSync` with explicit arg arrays, no shell.
 **SCOPE — additive.** It does NOT touch bryan's boot contract (`.pa-base/profile` · `/boot` ·
 `pa-base.md`); it is wired into peter's `/boot` only, and the shared-contract amendment was ROUTED.
 
-## `scripts/issue-debt.ts` — the adopter-issues obligation probe (NEW #536, S346) — NEVER a gate, never in CI
+## (carried) `scripts/issue-debt.ts` — the adopter-issues obligation probe (NEW #536, S346) — NEVER a gate, never in CI
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 3/3 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **The same `pa-base` §10 hole as dpa-debt, in the ISSUES channel: the boot probe READ `gh issue list
 --state open` and the PA STATED the open issues — which discharges nothing.** At S346 three open
@@ -1738,7 +315,8 @@ DETERMINISTIC AGE (`--now=<ISO>`); WINDOWS-FIRST (`fileURLToPath`, `spawnSync` a
 **Modes.** bare = boot-probe report (exit 0) · `--check` = exit 1 iff any OWED · `--json` ·
 `--now=<ISO>` · `--repo=owner/name` · `--gaps=<path> --queue=<path>` · `--limit=N`.
 
-## `scripts/dpa-debt.ts` — the deliberation-queue probe (NEW #507) — NEVER a gate, never in CI
+## (carried) `scripts/dpa-debt.ts` — the deliberation-queue probe (NEW #507) — NEVER a gate, never in CI
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 1/1 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **The rule it discharges is `pa-base` §10's most-repeated failure: an obligation recorded in one
 artifact while every probe reads another.** `handOffs/dpa-queue.md` is the ONE file the dPA drains,
@@ -1763,7 +341,8 @@ boot gate's PICKUP `indexOf` bug (#492) and the S337 ledger-section regex. It al
 from **column 3, not column 2**, because the dPA never flips a row to `ratified` (RUN-not-RATIFY) —
 reading col 2 alone reports dpa-019/020/021 as owed when they were ratified at S319.
 
-## `scripts/source-text-regex-census.ts` — the post-AST source-text rule's probe (NEW #513) — deliberately NOT a CI gate
+## (carried) `scripts/source-text-regex-census.ts` — the post-AST source-text rule's probe (NEW #513) — deliberately NOT a CI gate
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 4/4 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **THE RULE (bryan, S338):** *a regex applied to SOURCE TEXT in a POST-AST stage requires a one-line
 justification, or the structural route.* **Binds NEW-OR-TOUCHED code only.** Detection is a RATIO,
@@ -1797,7 +376,8 @@ practice of pattern-matching instead of resolving structure, and it inherited th
 **The honest upgrade path is named too** — a structural successor would walk the TypeScript AST and
 resolve each regex argument to its declared type and origin rather than guessing from its name.
 
-## PR review-floor tracker — `scripts/review-debt.ts` (NEW, S316) — NOT a CI gate
+## (carried) PR review-floor tracker — `scripts/review-debt.ts` (NEW, S316) — NOT a CI gate
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 1/1 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 Built after the review floor (pa.md's mandatory-review contract) was measured at a **0% execution
 rate** the day after ratification: boot reads `gh pr list` (**open** PRs only), while the review floor
@@ -1852,8 +432,8 @@ happens BEFORE anything is counted: computing `bound` first and widening after w
 figure derived from the pre-widen list while the widen message claimed otherwise — *the exact defect
 this guard exists to prevent, one level up*.
 
-
-## Wide-corpus emit-differential + dual-goggle syntax gate — `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (NEW #428) — **NOT a CI gate; the STANDING PRE-LAND GATE for codegen**
+## (carried) Wide-corpus emit-differential + dual-goggle syntax gate — `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (NEW #428) — **NOT a CI gate; the STANDING PRE-LAND GATE for codegen**
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 1/1 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. Paths cited that do NOT exist at f92d1a8fb: `scripts/u1-corpus-emit.sh`._
 
 **Task-shape routing: any change under `compiler/src/codegen/` runs this, base-vs-head, before it
 lands.** It is not in `ci.yml`, not in `bun test`, not in a git hook. It is run by hand. (There was no
@@ -1936,96 +516,8 @@ the same two revisions got base 44 / head 46. **`pa-base v2.13 §8` names this T
 truncated enumeration reads exactly like a complete one.** `scripts/u1-corpus-emit.sh` was deliberately
 EXCLUDED from the #429 landing — it is the gate this tool retired.
 
-## `scripts/native-parser-flip-harness.ts` — THE NATIVE-PARSER DEFAULT-FLIP METER (NEW #870, `94572819`, S402) — **NOT a CI gate, and it MUTATES YOUR WORKING TREE**
-
-    bun scripts/native-parser-flip-harness.ts
-
-⛔ **READ THIS BEFORE RUNNING IT: THIS SCRIPT PATCHES `compiler/src/api.js` IN PLACE AND RESTORES IT.**
-That is not a bug and it is not a shortcut — the design note in the file rejects the two obvious
-alternatives explicitly:
-- **an env var** (`SCRML_PARSER_DEFAULT`) would plant a permanent behavioural backdoor in the compile
-  entry point, and `compiler/src/` is in the published `files` allowlist in `package.json` — **a
-  test-only knob would ship to adopters**;
-- **a `Bun.plugin` `onLoad` transform via `--preload`** never mutates the tree, which is attractive,
-  but it only applies to the test runner's own module graph. **A meaningful slice of the suite SPAWNS
-  the CLI as a subprocess** (dev-server tests, command tests) and `scripts/compile-test-samples.sh` is
-  a separate `bun` invocation entirely — all of those would silently run UNFLIPPED and the meter would
-  **under-report**.
-
-⚑ **THE RESTORE DISCIPLINE, because "it patches your tree" is only safe if this list is true:** it
-**refuses to run if `compiler/src/api.js` is already dirty**; keeps the original bytes **in memory AND
-on disk** under the output dir (`api.js.orig`, for manual rescue); restores in a `finally` **and** on
-`SIGINT`/`SIGTERM`/uncaught; and **verifies the restore is BYTE-IDENTICAL by SHA-256** and shouts if
-it is not.
-
-⛑ **ANCHOR DISCIPLINE — IT HARD-FAILS RATHER THAN MEASURING NOTHING.** Every anchor is a SYMBOL match
-asserted **UNIQUE**; if `api.js` is refactored so an anchor is missing or ambiguous, the script fails
-loudly with the anchor text. **The previous instruments failed by not existing; the next failure mode
-would be an instrument that runs green while measuring the unflipped compiler.**
-
-### Why it exists at all
-The native-parser transition is FROZEN (self-host oracle, off the V1 path), and the operator attached
-an explicit re-trigger to that freeze: *"if verify-harden stops showing a declining divergence count,
-the tail isn't finite -> M5 earns its cost."* **That is a meter, and a meter needs an instrument.**
-Twice the instrument was built as a throwaway and discarded — **the original 429 figure is
-NON-REPRODUCIBLE and retired** because no harness was ever committed; S161 rebuilt one in a throwaway
-worktree and discarded it again; S170's ~508 was the last reading, ~230 sessions stale with no way to
-re-read it except a third reconstruction. **This script IS the instrument.**
-
-### THE TWO FLIPS ARE NOT THE SAME FLIP
-`compileScrml` takes a `parser` option defaulting to `null`, with exactly TWO live consumers (the
-script locates both **by SYMBOL**, not by remembered line numbers):
-
-| mode | what it rewrites | measures |
-|---|---|---|
-| `--mode=routing` **(DEFAULT)** | `const useNativeParser = parser === "scrml-native"` -> `true` | the parser, and only the parser |
-| `--mode=option-default` | the `parser = null` default -> `"scrml-native"` | also fires the `I-PARSER-NATIVE-SHADOW` info diagnostic, so **every test asserting on `result.warnings` shape/length can fail for a reason that has nothing to do with parsing** |
-
-### ⛔ THE CONTROL IS NOT OPTIONAL — THE SUITE IS NOT GREEN AT HEAD
-The script always runs and reports the CONTROL; **there is no way to get a flip number out of it
-without one.** As of 2026-09-06 the CONTROL over `compiler/tests/` is **54 failures — 48 of them the
-documented browser-tier set in `compiler/tests/browser/FAILURE-BASELINE.json`.** ⚠ **It reads 56 on a
-machine where `benchmarks/todomvc/dist/` has never been built**, because the 2 `envExcluded` TodoMVC
-names in that same file gate on a **GITIGNORED artifact**; those two are dropped from both sides.
-**If your CONTROL is not in that neighbourhood the harness is measuring something other than the flip
-and the delta is void.**
-
-### LAST READING — 2026-09-06, `--tier compiler/tests/`
-```
-CONTROL 54 · FLIPPED 1907 · NEW 1860 · GONE 7   (--mode=routing)
-CONTROL 54 · FLIPPED 1901 · NEW 1854 · GONE 7   (--mode=option-default)
-```
-The two modes agree to within 8 names, all run-to-run flake — **so the `I-PARSER-NATIVE-SHADOW`
-diagnostic costs ~0 test failures and the mode choice does not move the meter.**
-
-⛔ **DO NOT COMPARE 1860 TO THE S161..S170 TRAJECTORY (1,150 -> 790 -> 605 -> 525 -> ~508) AS IF IT
-WERE THE SAME MEASUREMENT.** The suite roughly doubled and the language kept growing while the parser
-stayed frozen, so most of the rise is **surface growth, not decay.** Partitioned against the test
-surface as it stood at the S170 reading (`9e306082`, 2026-06-07): **1,382 are in test FILES that did
-not exist then · 62 are in files that existed but tests that did not · 416 are LIKE-FOR-LIKE.**
-⚑ **416 vs ~508 is the honest meter: down ~18% in ~230 sessions — declining but nearly flat.** ⚠ It is
-a **DERIVED** figure, not a directly measured one; reproduce the partition with `git show <sha>:<file>`
-and a verbatim test-title check.
-
-⛑ **AND REPORT THE SETS, NEVER JUST THE COUNT — THE FLIP IS NOT MONOTONE.** All **7 GONE** are
-documented `FAILURE-BASELINE.json` failures in two files
-(`g-emit-lift-markup-text-interp.browser.test.js`, `g-each-peritem-markup-value-ternary.browser.test.js`),
-**both markup-nested-in-body cases the flat legacy body-scanner cannot represent and the native
-parser's body-mode machine gets right.** ⚑ **That is the same architectural class the S402 apostrophe
-arc was stopped on** (structure.map.md, `engine-statechild-parser.ts`) — a count alone hides it.
-
-### Flags and artifacts
-`--tier <paths>` (SPACE-separated, default `compiler/tests/`) · `--out <dir>` (default
-`.native-flip-harness/`, gitignored) · `--control-only` · `--flip-only` · `--report` (re-analyse
-existing artifacts, runs nothing) · `--no-pretest` (skips `scripts/compile-test-samples.sh` on both
-sides — **faster, but the browser tier then reads UNFLIPPED sample artifacts and the number
-under-reports**).
-Artifacts under `--out`: `control.raw.txt` / `flipped.raw.txt` · `control.fails.txt` /
-`flipped.fails.txt` · `control.errors.tsv` / `flipped.errors.tsv` · `delta.md` (NEW/GONE sets +
-family histogram) · `api.js.orig`.
-⚠ **Runtime is ~7 minutes PER SIDE, i.e. ~15 minutes for a full reading.**
-
-## ⛔ SPLIT ON `/\r?\n/`, NEVER ON A BARE `"\n"` — four boot/gate probes were BLIND on every Windows clone (NEW section, S402, #848 `c516aadc`)
+## (carried) ⛔ SPLIT ON `/\r?\n/`, NEVER ON A BARE `"\n"` — four boot/gate probes were BLIND on every Windows clone (NEW section, S402, #848 `c516aadc`)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 0/0 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **On a CRLF checkout (`core.autocrlf=true` — i.e. every Windows clone) a bare `"\n"` split leaves a
 trailing `\r` on every line.** That silently defeats any END-SENSITIVE construct: a `$`-anchored
@@ -2051,7 +543,8 @@ named constant per file** so the next reader cannot reintroduce a bare `"\n"` lo
 ⚠ **A `wc -l` or a `grep -c` will NOT reproduce this** — both are `\n`-based and agree across
 encodings. **Reproduce by parsing the file under both encodings, which is how #848 was verified.**
 
-## Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
+## (carried) Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 4/4 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep._
 
 **Naming (build path only).** `scrml build` → `compileScrml({ contentHashAssets: true })`. The
 FNV-1a 32-bit hash (8-char base36) of each artifact's FINAL on-disk bytes is spliced in before the
@@ -2067,64 +560,8 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml] — ⛑ S391: ONE NEW **BLOCKING** STEP (the compile-floor gate, in `gate`). The prior-window note below (#665, a `tracking` step) is retained as history.
-
-⛑ **S391 — `gate` MOVED `13 -> 14` STEPS. The addition is `bun scripts/corpus-compile-floor.ts --check` at `ci.yml:159`, "Compile-floor gate (every showcase program still builds on HEAD)".** Counted by
-`grep -c '^      - name:\|^      - uses:'` over the `gate` job at both ends: **13 at `0dd659a1`, 14 at `2ec2ce3a`.** It is an ABSOLUTE floor (every shipped showcase program in `examples/` + `benchmarks/` must build on HEAD), deliberately NOT a differential — `corpus-emit-differential` is base-vs-head and treats compile failure as DATA, so standing breakage is invisible to it. Known-broken programs are baselined in `scripts/corpus-compile-floor.baseline.json`; **a stale baseline entry is itself a gate failure**, and enumeration below `MIN_PROGRAMS = 25` exits **2** rather than reporting a green floor over a truncated population. Full behaviour + the executed result live in test.map.md.
-
-⚠ **AND THE WINDOW HANDED THIS MAP ITS SHARPEST EVIDENCE YET FOR THE `gate`-vs-`tracking` ASYMMETRY BELOW — a MEASURED, main-blocking instance, not a hypothetical.** #788 (`a5b361a2`): `emit-channel.ts:756` emitted a bare `undefined` KEYWORD into client output, which the repo-wide `W-CG-UNDEFINED-INTERPOLATION` regression guard forbids. **The required `gate` check runs unit + conformance only; `integration` rides in `tracking`, which is `continue-on-error: true` (`ci.yml:181`). The LOCAL pre-commit hook runs unit + integration + conformance.** So the change passed the gate that guards `main` and simultaneously **broke the gate that guards every contributor's commit — while it sat on `main`, NO local code commit could land in this repo, for anyone.** The one-token fix was `undefined` -> `void 0`, the idiom the same file already documents at `:892-895` and uses at `:687`. **The asymmetry is not resolved; it is now demonstrated.**
-Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
-Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment). ⚑ **The `types` layer in that model DID NOT EXIST until #665** — the header advertised it and nothing invoked it; corrected in the same landing, and the types step is `tracking`/non-blocking, NOT `gate`.
-**gate** — BLOCKING (the merge-gate), **14 steps** (⛑ **S391 +1: the compile-floor gate**; the prior window's +1 was the delta-log sequence gate). checkout (`fetch-depth: 0`) → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step — **this is where the parser-conformance CANARY is actually gated**) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → `bun scripts/browser-baseline.ts --check` → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/delta-lint.ts` (NEW #652 — the delta-log sequence gate)** → `bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (the SPEC §34.0 row-provenance gate).
-Triggers: push `branches: [main]` (#532, S345 — an unscoped `push` ran the gate TWICE per PR under the one required check name, doubling intermittent exposure; paths-ignore: `**.md`, `handOffs/**`, `docs/**` unchanged), pull_request, and `workflow_dispatch: {}` (#454). **A branch with no open PR gets NO CI until a PR exists — the standard trade; `workflow_dispatch` re-fires any post-#454 ref on demand.** `concurrency: group ci-${{ref}}, cancel-in-progress: true`. ⚠ **Both diff-scoped/baselined gates are that way DELIBERATELY** — `s34-census --check-new` is silent on the legacy corpus by construction, and `delta-lint` carries nine pre-existing duplicates in `handOffs/delta-log-dupes.baseline.json`. The repo states the reason in its own CI comments (pa-base §8): **a gate that is instantly red for reasons no change caused gets bypassed, and then deleted.**
-
-### `workflow_dispatch` — the manual re-fire lever (NEW #454). Read the two constraints BEFORE you need it.
-
-**Why it exists.** GitHub does not re-deliver a webhook it dropped. During the 2026-08-06 Actions
-outage ("webhook triggers remain throttled; many push/pull request events aren't triggering runs")
-**FIVE PRs sat with ZERO checks and therefore could not merge**, `gate` being the sole required check.
-S325 burned a whole session on it and tried force-push, close/reopen, a new commit, and a brand-new PR
-— **all four produced nothing, because every one of them is just another webhook into the same
-throttled pipe.** This was the SECOND outage with no lever; the first cost a session's landings.
-
-```
-gh workflow run CI --ref <branch>
-```
-
-**⚑ CONSTRAINT 1, MEASURED not assumed — the lever is PROSPECTIVE, not retroactive.** The dispatch
-reads the workflow definition **FROM THE TARGET REF**, so `--ref <branch>` fails
-`HTTP 422: Workflow does not have 'workflow_dispatch' trigger` on any branch cut BEFORE #454 landed.
-**Rebase the branch onto main first, or dispatch `--ref main`.** Stated plainly because it is exactly
-the wrong thing to learn during an outage: *this will not rescue a branch that predates it.* Proven
-both ways — `--ref docs/s326-continuity` (a pre-merge cut) → 422; `--ref main` → run 31140159467,
-**all three jobs green including `gate`**.
-
-**⚑ CONSTRAINT 2 — a dispatched run's §34.0 row-provenance check is WEAKER, and this is the honest
-caveat, not a footnote.** The step `s34-census --check-new --base` reads
-`github.event.pull_request.base.sha`, which does not exist on a manual run, so it falls back to
-`HEAD~1` — **a fallback that already existed; this is not new behaviour.** On a multi-commit branch
-that compares against the previous commit rather than the merge base, so **rows added in EARLIER
-commits of the same branch are not seen as NEW.** Every other step is event-independent and identical.
-**Prefer a real push/PR event when one is available; reach for this when the platform has eaten the
-event.**
-
-**⚑ IT WEAKENS NO GATE.** It adds a way to START a run; it does not add a way to skip one. `gate` must
-still go green on the head SHA before a merge is allowed, and `enforce_admins=true` is untouched. The
-fork-rule row that matters is root-vs-position: **nudging a PR treats the symptom; a manual trigger
-removes the class.**
-
-Two placement facts that are deliberate, not incidental:
-- **`fetch-depth: 0` exists FOR the §34.0 gate** — it diffs against the PR base SHA, and a shallow clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
-- **The browser gate sits AFTER the gauntlet step**, which compiles the TodoMVC benchmark and therefore materialises `benchmarks/todomvc/dist`. That makes `browser-baseline.ts`'s two env-exclusions moot IN THIS JOB (the pair passes here) — they still matter in `tracking`, which never builds it. Both sides of the comparison are filtered, so the check is correct either way.
-
-**tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (incl. `commands/db-migrate.test.js`) → **`bun scripts/browser-baseline.ts --check` (REPLACES the raw `bun test compiler/tests/browser`)** → the parser-conformance-within-node M6.x backlog. **The replacement fixed a second-order bug worth knowing: a FAILED step HALTS the job, and the browser step was permanently red, so `Within-node parser-parity + canary` — the step after it — reports `skipped` on run 30742472551 and had therefore NEVER RUN.** That is the S302 class (13 of 14 root-level files run by no workflow) recurring one job over: the tier was useless in both directions at once *and* it was silently eating the steps behind it.
-  ⚑ **NEW FIRST STEP (#665): `Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)` → `bun scripts/types-gate.ts --check`.** `continue-on-error: true` at the STEP level as well as the job level — **not redundant: a failed step HALTS the job even in a `continue-on-error` job** (verified on run 30742472551, where the within-node parity step reported `skipped` and had never run). Without it a types regression would silently suppress every tracking signal below it. **Placed FIRST** because it needs neither `pretest` nor a populated dist, so it cannot be skipped by an earlier step's failure. **Promotion into the BLOCKING `gate` job is an explicit operator call and was NOT taken** — it wants a decision on the nine live exhaustive-switch `never` failures first.
-
-**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only. **Carried from the prior window (unchanged this pass):** the `Install deps` step now sets `PUPPETEER_SKIP_DOWNLOAD: "true"` before `bun install --frozen-lockfile` — this job never touches the browser tier, so the puppeteer postinstall download was pure cost AND a flake source (PR #382 witnessed an `ECONNRESET` failing `Install deps` before a single test ran, on IDENTICAL content that passed on a sibling run). **`gate` still downloads it — the browser NAME-SET assertion needs a real browser.**
-
-Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful.
-
-## Gate topology — the two failure modes, and why they pull in opposite directions
+## (carried) Gate topology — the two failure modes, and why they pull in opposite directions
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 0/0 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. Cited gaps whose marker is no longer open: g-parity-canary-outside-every-blocking-gate=resolved. STALE-RISK: describes CI `gate`: since S468–S475 `gate` is an aggregator over checks/unit/integration/browser/slices/host-global/windows/postgres-live (build.map.md "CI/CD Pipeline"); cites `continue-on-error`: `windows` is now a required ratchet job and `tracking` is the only non-blocking job._
 
 **Read this before adding a test tier to a gate, or removing one.** Both rules below were violated in
 this repo, one of them for the whole life of the root-level test files.
@@ -2163,64 +600,8 @@ The two original rules remain in tension and both are load-bearing: **widen a bl
 a subset that is reproducibly green from source OR name-set-assertable; never leave a tier whose only
 runner is non-blocking.**
 
-## CI/CD Pipeline  [.github/workflows/advisory-review.yml] — **DISABLED THIS WINDOW (#351)**
-**`workflow_dispatch` ONLY**, with a required `pr` input. The `pull_request:` trigger and its paths
-filter are GONE; the workflow name now reads `AI Code Review (advisory — DISABLED, manual fire only)`.
-**Read the reason correctly: the missing `ANTHROPIC_API_KEY` is a COST decision by bryan, not a broken
-secret.** A check that is always red is the `pa-base` §8 cry-wolf shape — it gets ignored, and then a
-real failure gets ignored with it; this one had already been logged as a known non-regression in three
-consecutive session hand-offs, and that tax is what was removed.
-**What is NOT lost:** the MANDATORY adversarial pass (S239) is PA-side and local, and always was — the
-contract requires it precisely because a dev-agent cannot invoke the review in-agent. THIS job was
-explicitly advisory (S255), a SECOND opinion stacked on the PA's. Removing it deletes duplication, not
-coverage; the gap it originally closed (human-authored PRs the PA never dispatched) is now covered by
-the PA reviewing those PRs directly.
-**To reinstate:** set the `ANTHROPIC_API_KEY` repo secret and restore the `pull_request:` trigger.
-**Any map or doc line saying "that secret IS set — the daily cloud-maps run passes it" is RETIRED**;
-`cloud-maps` no longer passes it at all.
-
-## CI/CD Pipeline  [.github/workflows/cloud-maps.yml] — **STAGE 2 DELETED; NO SCHEDULED MAP REFRESH**
-
-**The single most consequential build-side fact this window, and it is a silent one.**
-
-**name:** `cloud-maps` · **job:** `regen` · **triggers:** `workflow_dispatch` + `schedule` cron
-`17 9 * * *` (daily ~09:17 UTC) · **concurrency:** group `cloud-maps`, `cancel-in-progress: false` ·
-**permissions:** `contents: write`, `pull-requests: write` (**`id-token: write` was DROPPED — it
-existed solely for the removed claude-code-action OIDC**).
-
-**Steps NOW.** checkout (token `secrets.MAPS_PAT`, `fetch-depth: 0`) → setup-bun → `bun install
---frozen-lockfile` → **Stage 1** `bun scripts/state.ts --write` (deterministic `@generated` rollup,
-zero AI cost, and a HARD-FAIL surface — see "Gap-status vocabulary" below) → **Stage 1b**
-`bun scripts/threads.ts --check && bun scripts/threads.ts` (`continue-on-error: true`) →
-~~Stage 2 (project-mapper agent)~~ **REMOVED 2026-08-01 (#351)** → **Stage 3** if
-`git status --porcelain -- .claude/maps master-list.md` is non-empty: branch `maps/regen-<run_id>`,
-`git add -f .claude/maps master-list.md` (the `-f` is load-bearing — `.claude/` is gitignored and the
-maps are force-tracked), commit, push, `gh pr create --base main`, `gh pr merge --squash --auto
---delete-branch`.
-
-**CONSEQUENCE, STATED PLAINLY: nav-maps are NO LONGER refreshed on a schedule.** That reverts to the
-PA at wrap (the contract's wrap step 6c), which is where it lived before this workflow existed.
-**A reader who assumes a nightly refresh will trust a stale stamp.** Stages 1/1b remain deterministic
-and free, so the `@generated` state rollup keeps drifting-checked — the map set does not.
-
-**Why it was deleted rather than left red.** Stage 2 was the only Anthropic-billed step here, and
-bryan ruled the cloud AI spend off. Leaving it erroring would have been the cry-wolf shape again; it
-was already costing real time (an S310 boot spent part of itself root-causing this workflow's red
-run). **The prior generation of this map spent ~35 lines diagnosing that red as a probable
-credential/entitlement condition on `ANTHROPIC_API_KEY` — that analysis is now MOOT and has been
-deleted, not carried.** The 17/17-failure history and its `1 turn / ~0.6s / $0 / is_error:true`
-signature are in `docs/changelog.md` if anyone needs them.
-
-**To reinstate:** restore an `anthropics/claude-code-action@v1` step with the project-mapper
-FULL_COLD_START prompt and set the `ANTHROPIC_API_KEY` repo secret.
-
-**Design constraints still worth not re-litigating:** it NEVER pushes to protected `main` — it opens
-a PR and enables auto-merge, so `ci.yml`'s `gate` runs on it and auto-merge stamps it on green. The
-PAT (not `GITHUB_TOKEN`) is required because a PR opened by `GITHUB_TOKEN` does not cascade events, so
-`gate` would never fire and auto-merge would wait forever. Fine-grained PATs expire (≤1 yr) —
-`MAPS_PAT` must be renewed or the bot goes dark.
-
-## Gap-status vocabulary + LEDGER INTEGRITY — `scripts/state.ts` (CHANGED S299; THREE more integrity fixes #485, S334)
+## (carried) Gap-status vocabulary + LEDGER INTEGRITY — `scripts/state.ts` (CHANGED S299; THREE more integrity fixes #485, S334)
+> _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 6/6 code identifiers found in source; symbol line anchors: 0 confirmed, 0 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. STALE-RISK: mentions cloud-maps.yml: since S474 it writes nothing (thread-board probe only)._
 
 `scripts/state.ts` parses `<!-- @gap id=… sev=… status=… -->` markers out of `docs/known-gaps.md`
 to generate the §0 counts rollup. It runs in `cloud-maps` **Stage 1** and via `bun scripts/state.ts
@@ -2305,34 +686,42 @@ does `git rev-list --count <watermark>..HEAD` with NO ancestry check** (invarian
 off-main stamp it prints a number that means nothing and prints it as a staleness figure. Nothing
 fails either way. At the start of this pass it read **19 commits behind**.
 
-## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
-pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance **compiler/tests/*.test.js** --bail` (~2min; the last path is NEW this window — see "Gate topology" above; still excludes browser/e2e/self-host/lsp/commands); warns (non-blocking) on direct commits to `main`.
-pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
-  - **Scope:** `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` — **NOT** the whole of `compiler/tests/`. See "Gate topology" FAILURE MODE 2.
-  - **Trigger:** the suite is **SKIPPED on a NEW-REF push** (`remote_sha` all-zero = the ref does not exist upstream yet); the cloud `gate` on the PR is the authority for a feature branch (implements the S254 relaxation this hook had DOCUMENTED at step 2.5 but never applied at step 1). It DOES run on an update to an existing remote ref (including a force-push) and on any `refs/tags/v*`.
-  - **STALE COMMENT, added this window and superseded within it:** the hook's step-2 banner now says
-    the browser NAME-SET check "runs in CI `tracking` today" and that requiring it in the blocking
-    `gate` "is bryan's to make — NOT taken unilaterally". **Bryan ruled promote in the same window and
-    `ci.yml`'s `gate` runs it.** The hook's own SCOPE is unchanged and still correct; only that
-    narration is stale. `browser-baseline.ts` is deliberately NOT run by this hook.
-  - **`set -e` trap, worth knowing before editing this hook:** a bare `VAR=$(failing-cmd)` aborts the script THERE, before any reporting runs — an S301 blocked push printed only the banner and exited 1 with the diagnostic below it as dead code. `TEST_OUTPUT=$(…) || EXIT_CODE=$?` is load-bearing, not style. The failure summary greps `"^(fail)"`, not `-A2 "fail"`.
-  - Also: gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
-
-## Docker
-None. No Dockerfile / docker-compose in this repo — see infra.map.md.
+## Section audit (build.map.md, pre-f92d1a8fb → this file)
+| old section | disposition |
+|---|---|
+| dated `S4xx — … DELTA` / `ZERO DIFF FOR THIS MAP` blocks and the stacked header stamps | dropped: dated stamp blocks |
+| Development Commands (root package.json scripts) | now lives in build.map.md "Development Commands (package.json scripts)" — re-read from package.json at f92d1a8fb |
+| Packaging — scrml is PUBLISHABLE as of this window (`171f5f23`) | carried above as "(carried) …" (2/2 ids; anchors 0 ok/0 re-derived; flags 0) |
+| scrml CLI subcommands (compiler/src/cli.js -> commands/*.js) | carried above as "(carried) …" (13/13 ids; anchors 0 ok/0 re-derived; flags 0) |
+| `--module-format=classic\|esm` (ESM-chunks arc U1-U3) | carried above as "(carried) …" (1/1 ids; anchors 0 ok/0 re-derived; flags 0) |
+| WHICH GATE RUNS WHICH TEST TIER — and the two greps that give the wrong answer (NEW section, S396) | no longer true — S396 runner table (gate ran unit+conformance; integration/commands only in non-blocking tracking; windows continue-on-error). At f92d1a8fb unit/integration(+lsp+commands)/browser/slices/windows/postgres-live are separate blocking jobs; now lives in build.map.md "CI/CD Pipeline" |
+| Public-claim gates (S280) | carried above as "(carried) …" (2/2 ids; anchors 0 ok/0 re-derived; flags 1) |
+| `scripts/boot.ts` — the executable boot read-set gate (NEW #492/#493/#498) — NOT a CI gate | carried above as "(carried) …" (3/3 ids; anchors 0 ok/0 re-derived; flags 0) |
+| `scripts/issue-debt.ts` — the adopter-issues obligation probe (NEW #536, S346) — NEVER a gate, never in CI | carried above as "(carried) …" (3/3 ids; anchors 0 ok/0 re-derived; flags 0) |
+| `scripts/dpa-debt.ts` — the deliberation-queue probe (NEW #507) — NEVER a gate, never in CI | carried above as "(carried) …" (1/1 ids; anchors 0 ok/0 re-derived; flags 0) |
+| `scripts/source-text-regex-census.ts` — the post-AST source-text rule's probe (NEW #513) — deliberately NOT a CI gate | carried above as "(carried) …" (4/4 ids; anchors 0 ok/0 re-derived; flags 0) |
+| PR review-floor tracker — `scripts/review-debt.ts` (NEW, S316) — NOT a CI gate | carried above as "(carried) …" (1/1 ids; anchors 0 ok/0 re-derived; flags 0) |
+| Wide-corpus emit-differential + dual-goggle syntax gate — `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (NEW #42 | carried above as "(carried) …" (1/1 ids; anchors 0 ok/0 re-derived; flags 0) |
+| `scripts/native-parser-flip-harness.ts` — THE NATIVE-PARSER DEFAULT-FLIP METER (NEW #870, `94572819`, S402) — **NOT a CI gate, and it MUTATE | no longer true — scripts/native-parser-flip-harness.ts does not exist at f92d1a8fb (and `--parser=scrml-native` is retired, compile.js) |
+| ⛔ SPLIT ON `/\r?\n/`, NEVER ON A BARE `"\n"` — four boot/gate probes were BLIND on every Windows clone (NEW section, S402, #848 `c516aadc`) | carried above as "(carried) …" (0/0 ids; anchors 0 ok/0 re-derived; flags 0) |
+| Content-addressed build assets + cache headers (S265, adopter #82, PR #96) | carried above as "(carried) …" (4/4 ids; anchors 0 ok/0 re-derived; flags 0) |
+| CI/CD Pipeline  [.github/workflows/ci.yml] — ⛑ S391: ONE NEW **BLOCKING** STEP (the compile-floor gate, in `gate`). The prior-window note be | no longer true — S391 job/step topology (14-step `gate`, non-blocking windows/tracking); now lives in build.map.md "CI/CD Pipeline" (re-read from ci.yml at f92d1a8fb) |
+| Gate topology — the two failure modes, and why they pull in opposite directions | carried above as "(carried) …" (0/0 ids; anchors 0 ok/0 re-derived; flags 2) |
+| CI/CD Pipeline  [.github/workflows/advisory-review.yml] — **DISABLED THIS WINDOW (#351)** | now lives in build.map.md "Other workflows" (still workflow_dispatch-only) |
+| CI/CD Pipeline  [.github/workflows/cloud-maps.yml] — **STAGE 2 DELETED; NO SCHEDULED MAP REFRESH** | no longer true in part — cloud-maps no longer has a Stage 1 writer either (S474); now lives in build.map.md "Other workflows" |
+| Gap-status vocabulary + LEDGER INTEGRITY — `scripts/state.ts` (CHANGED S299; THREE more integrity fixes #485, S334) | carried above as "(carried) …" (6/6 ids; anchors 0 ok/0 re-derived; flags 1) |
+| Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`) | now lives in build.map.md "Git hooks" (re-read from scripts/git-hooks/README.md at f92d1a8fb) |
+| Docker | now lives in build.map.md "Docker" |
+| Tags | replaced by the new footer |
+| Links | replaced by the new footer |
 
 ## Tags
-#scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps #s437b #9941a504c #ci-bootstrap-step #lint-no-default-arm #s440 #cf62b415 #slice-m3-ci #hybrid-footprint #before-write #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066 #s456 #ba2712973 #tenant-startup-check
-#int-number-census #hand-run-instrument #not-gated #gate-flat-14-steps #ci-zero-diff
-#s405 #ci-zero-diff #gate-14-steps #verified-empty-diff #gate-excludes-integration #seven-of-fourteen-outside-the-gate #corpus-bridge-invariant-88 #905-conformance #state-ts-check-exits-0 #maps-staleness-vs-local-head #stamp-tracks-merge-base
-#s437 #d02738767 #gate-16-steps #windows-5-steps #e2e-render-map-gated #hybrid-harness #p5-module-done-gate #xfail #status-carried #cloud-maps-relabel #v0-8-0
+#scrml #map #build #ci #github-actions #hooks #generated-regen
 
 ## Links
 - [primary.map.md](./primary.map.md)
+- [test.map.md](./test.map.md)
+- [infra.map.md](./infra.map.md)
+- [bootstrap.map.md](./bootstrap.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)
-- [test.map.md](./test.map.md)
-- [config.map.md](./config.map.md)
-- [infra.map.md](./infra.map.md)
-- [migrations.map.md](./migrations.map.md)
-- [domain.map.md](./domain.map.md)
