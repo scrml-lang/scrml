@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
@@ -2079,9 +2079,18 @@ ${
     // Every file: a second+ top-level `<program>` (E-PROGRAM-002), file-top
     // markup outside any `<program>`, and — for the entry file's program —
     // its attributes and the `<program>`s nested in its body.
-    fn programShapeDiags(files: FileAst[], entry: string, st0: AS) -> AS {
+    fn programShapeDiags(files: FileAst[], entry: string, keyBase: string, st0: AS) -> AS {
         let st: AS = st0
+        // s476 — whether the build has a `<program>` (§40.8: the build root, and
+        // so which files are route files, is read off the entry file's program)
+        let buildHasProgram = false
         for (const f of files) {
+            for (const it of f.items) {
+                if (programOfItem(it) is given) buildHasProgram = true
+            }
+        }
+        for (const f of files) {
+            st = pageDiags(f, st)
             let programs = 0
             for (const it of f.items) {
                 if (programOfItem(it) is given) programs = programs + 1
@@ -2099,21 +2108,134 @@ ${
                     }
                 }
                 const n: ANode | not = markupOfItem(it)
-                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, st)
+                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, routeFile(f.path, entry, keyBase, buildHasProgram), st)
             }
         }
         return st
+    }
+
+    // s476 — §40.8 "The build root, and which files are route files": "A route
+    // file … is a file whose path RELATIVE TO THE BUILD ROOT has a `pages/` or
+    // `routes/` directory component". With an application `<program>` the build
+    // root is the entry file's directory; with none, "route files are then the
+    // files with a `pages/` or `routes/` component anywhere in their path".
+    // A file's path here is relative to the build's source root; `keyBase` is
+    // that root's path under the PROJECT root (scrml-boot keyBaseOf), so with no
+    // `<program>` the whole project-relative path is read (a `pages/about.scrml`
+    // compiled alone arrives as `about.scrml` with keyBase `pages`).
+    fn routeFile(path: string, entry: string, keyBase: string, buildHasProgram: boolean) -> boolean {
+        let rel: string = path
+        if (buildHasProgram) {
+            const slash: int = entry.lastIndexOf("/")
+            const root: string = slash < 0 ? "" : entry.substring(0, slash + 1)
+            if (root != "" && path.startsWith(root)) rel = path.substring(root.length, path.length)
+        } else if (keyBase != "") {
+            rel = keyBase + "/" + path
+        }
+        const parts: string[] = rel.split("/")
+        let i = 0
+        while (i < parts.length - 1) {
+            if (parts[i] == "pages" || parts[i] == "routes") return true
+            i = i + 1
+        }
+        return false
+    }
+
+    // s476 — the file's `<page>`s (parse.scrml pageItem: a `<page>` written
+    // directly in a top-level `<program>`; its body already stands in the
+    // program's items). Two checks:
+    //   - its attributes, against §40.8's closed per-route set (pageAttrDiags);
+    //   - a SECOND `<page>` in the file. ⚑ §40.8: "A `<program>` MAY contain
+    //     zero or more `<page>` declarations … its URL is inferred from
+    //     filesystem location" — every `<page>` of one file has that file's one
+    //     URL, and no SPEC sentence says how two pages of the same route combine
+    //     (both bodies on one document? whose `auth=`?). Searched §4.15, §20.8,
+    //     §40.8, §40.8.2, §47.9.2 — no governing sentence. Refused by name
+    //     (INTERIM — the capable form is one `<page>` per file).
+    fn pageDiags(f: FileAst, st0: AS) -> AS {
+        let st: AS = st0
+        let seen = 0
+        for (const pg of f.pages) {
+            seen = seen + 1
+            st = pageAttrDiags(f.path, pg, st)
+            if (seen > 1) {
+                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file is not in the bootstrap — a page's URL is its file's location (§40.8), so both pages would be the same route, and the SPEC does not say how two pages of one route combine; merge them into one `<page>` (one route file per page is the multi-page form, §40.8 — not in the bootstrap yet)")
+            }
+        }
+        return st
+    }
+
+    // §40.8: "The five per-route attributes are `db=`, `auth=`, `csrf=`,
+    // `ratelimit=`, `keep-alive` (§20.8.4); any other attribute on `<page>`
+    // fires `E-PAGE-INVALID-ATTR`" (§34; §4.15's general W-ATTR-001 sentence is
+    // overridden by this `<page>`-specific one, as §34's row states). A `route=`
+    // is `E-PAGE-ROUTE-ATTR-FORBIDDEN` (§4.15). Of the five, the bootstrap
+    // builds none: it emits one document with no request pipeline, no per-route
+    // database scope, no login gate and no route cache. Each is checked to its
+    // static SPEC rule where there is one (`auth=` §52.13.2, `ratelimit=`
+    // §39.2.4) and otherwise — and for a legal value — refused by name (INTERIM:
+    // refused until built, never compiled as if absent).
+    fn pageAttrDiags(file: string, pg: APage, st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of pg.attrs) {
+            if (a.name == "route") {
+                st = addDiag(st, file, a.span, "E-PAGE-ROUTE-ATTR-FORBIDDEN", "`route=` on `<page>` — a page's URL is inferred from its file's location (§40.8, §47.9.2), never written; remove `route=` (a route file under `pages/` names its route)")
+            } else if (a.name == "auth") {
+                st = pageAuthDiag(file, a, st)
+            } else if (a.name == "ratelimit") {
+                const v: string | not = quotedAttrText(a.value)
+                let legal = false
+                if (v is given) legal = isRatelimitForm(v)
+                if (legal) {
+                    st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<page ratelimit=…>` is not in the bootstrap — it emits no request pipeline (§40.2, §40.8), so the limit would be dropped")
+                } else {
+                    st = addDiag(st, file, a.span, "E-MW-002", "`ratelimit=` is " + attrValueText(a.value) + " — it must be `N/unit` with unit one of sec, min, hour (e.g. ratelimit=\"100/min\", §39.2.4)")
+                }
+            } else if (a.name == "db") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<page db=…>` is not in the bootstrap — it builds no per-route database scope (§40.8, §8.1.1); declare the database on the `<program>` (`<program db=…>`)")
+            } else if (a.name == "csrf") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<page csrf=…>` is not in the bootstrap — it emits no request pipeline and no CSRF check (§40.2, §52.13), so the setting would be dropped")
+            } else if (a.name == "keep-alive") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<page keep-alive>` is not in the bootstrap — it emits no `<outlet>` region and no route cache (§20.8.4), so the setting would be dropped")
+            } else {
+                st = addDiag(st, file, a.span, "E-PAGE-INVALID-ATTR", "`" + a.name + "=` on `<page>` — a `<page>` takes only the per-route attributes `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` (§40.8); an application-wide attribute (`title=`, `cors=`, …) belongs on `<program>`, and markup belongs in an element inside the page body")
+            }
+        }
+        return st
+    }
+
+    // §52.13.2: "An `auth=` attribute on a `<program>` or a `<page>` whose value
+    // is not exactly one of the three literals … SHALL be a compile error,
+    // `E-AUTH-ATTR-INVALID`". A legal value is refused: the bootstrap builds no
+    // login gate, so the page would be served ungated.
+    fn pageAuthDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is given) {
+            if (v == "required" || v == "optional" || v == "none") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<page auth=\"" + v + "\">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.8), so the page is refused rather than compiled ungated")
+        }
+        return addDiag(st, file, a.span, "E-AUTH-ATTR-INVALID", "`auth=` on `<page>` is " + attrValueText(a.value) + " — it must be exactly one of the literals \"required\", \"optional\", \"none\" (§52.13.2)")
     }
 
     // Markup at a file's top level, outside any `<program>`. §38.1, §20.8.1
     // and §23.6 name three shapes; for the rest the SPEC names no rule (§40.8:
     // "The file top level outside any `<program>` / `<page>` / `<channel>` is
     // NOT this locus"), so it is refused — never dropped.
-    fn outsideProgramDiag(file: string, n: ANode, fileHasProgram: boolean, st: AS) -> AS {
+    fn outsideProgramDiag(file: string, n: ANode, fileHasProgram: boolean, isRouteFile: boolean, st: AS) -> AS {
         const e: AElem | not = topElemOf(n)
         // a file-top `<effect>` is already refused by `strayEffects` (s449)
         if (e is not) return st
         const t: string = e.tag.toLowerCase()
+        // s476 — a file-top `<page>`. In a route file it is that route's page
+        // (§40.8: "A `<page>` body in a route file (a `<page>` with no enclosing
+        // `<program>`)"), which the bootstrap does not build: it emits one
+        // document, with no per-route documents and no shell composition
+        // (§40.8.2) — refused by name (INTERIM). Anywhere else, §4.15: "`<page>`
+        // is grammatical only as a child of `<program>` … Use outside the owning
+        // locus is `E-STRUCTURAL-ELEMENT-MISPLACED`".
+        if (!e.star && e.tag == "page") {
+            if (isRouteFile && !fileHasProgram) return addDiag(st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a route file's `<page>` (§40.8) is not in the bootstrap — it builds one document from the entry `<program>`, with no per-route documents and no shell composition (§40.8.2, §47.9.2); write the page inside the entry file's `<program>`")
+            return addDiag(st, file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` outside `<program>` — a `<page>` is grammatical only as a direct child of `<program>` (§4.15, §40.8), or as the root of a route file under `pages/` or `routes/`; move it inside the `<program>`")
+        }
         if (t == "channel" && fileHasProgram) return addDiag(st, file, e.span, "E-CHANNEL-OUTSIDE-PROGRAM", "`<channel>` outside `<program>` in a file that has a `<program>` (§38.1) — move it inside the `<program>`")
         if (t == "outlet") return addDiag(st, file, e.span, "E-OUTLET-OUTSIDE-SHELL", "`<outlet>` outside a `<program>` shell (§20.8.1) — an outlet is the shell's route-content region; move it inside the `<program>`")
         if (t == "foreign" && fileHasProgram && attrNamed(e.attrs, "lang") is given) return addDiag(st, file, e.span, "E-FOREIGN-LANG-IN-PROGRAM", "`<foreign lang>` in a file that also declares a top-level `<program>` (§23.6) — `<foreign lang>` is the library-file surface; remove it and set `lang=` on the `<program>`")
@@ -6216,12 +6338,12 @@ ${
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
-    fn phaseA(files: FileAst[], entry: string, carriers: int[], st0: AS) -> RGlobals {
+    fn phaseA(files: FileAst[], entry: string, keyBase: string, carriers: int[], st0: AS) -> RGlobals {
         let st: AS = st0
         const rs: RStubs = typeStubs(files, st)
         st = rs.st
         const rd: RDeclStubs = declStubs(files, entry, st)
-        st = programShapeDiags(files, entry, rd.st)
+        st = programShapeDiags(files, entry, keyBase, rd.st)
         let declNames: string[] = []
         let declSyms: Sym[] = []
         let declFiles: string[] = []
@@ -18864,6 +18986,14 @@ ${
         // when no declaration of that name is in scope (above).
         // s475 (S3a): a `<request>` the parser left an element — not the `${ … }` body form
         if (e.tag == "request") return requestElemShape(env, e, st)
+        // s476 — a `<page>` here is inside markup (or a markup value): parse.scrml
+        // pageItem reads every `<page>` that stands directly in a `<program>`
+        // body, and outsideProgramDiag a file-top one. §4.15: "`<page>` is
+        // grammatical only as a child of `<program>` … Use outside the owning
+        // locus is `E-STRUCTURAL-ELEMENT-MISPLACED`" (its §34 row also names a
+        // `<page>` inside a `${...}` logic body). Its contents are not judged
+        // again (one report).
+        if (e.tag == "page") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` inside markup — a `<page>` is grammatical only as a direct child of `<program>` (§4.15, §40.8); move it out of the enclosing element")
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -20195,7 +20325,6 @@ ${
             "channel"       :> "§38"
             "onchange"      :> "§38.13"
             "auth"          :> "§40.9.5"
-            "page"          :> "§40"
             "engine"        :> "§51.0 (retired into `single` declarations, §66.13.3)"
             "ontransition"  :> "§51.0.H"
             "ontimeout"     :> "§51.0.M"
@@ -34110,7 +34239,7 @@ ${
         for (const f of files) {
             const r: RItems = pendItems(f.items, pend, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
         }
         return { files: out, next: next }
     }
@@ -34155,7 +34284,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
         }
         return out
     }
@@ -38148,7 +38277,7 @@ ${
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean, carriers: int[]) -> ARun {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
-        const ra0: RGlobals = phaseA(files, entry, carriers, st0)
+        const ra0: RGlobals = phaseA(files, entry, keyBase, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
