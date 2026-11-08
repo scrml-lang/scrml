@@ -1,0 +1,4 @@
+# s475-records6 — progress
+
+- 2026-11-08T07:29-07:00 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a9ee5c06c116e4996 (base a9057254c, = origin/main); bun install + pretest green. Records/SPEC lane: review markers #1802–#1814, F6 RULED local edit (SPEC §66.12.6 + §50.8.5 / §50.9), refetch-coalescing gap. No compiler code.
+- 2026-11-08T07:50:18-07:00 markers #1802–#1814 appended to docs/pr-reviews.md (13: 7 regens, #1803 records, #1804/#1807 SPEC carve-outs, #1808 clean PA-VERIFIED, #1810/#1812 finding). F6 RULED: SPEC §66.12.6 rule 3 sentence + provenance, §50.8.5 cross-ref paragraph, §50.9 bullet; gap g-spec-local-edit-method-vs-rebinding-s475 resolved; tape-write-forms comment → RULED S475 (123/0). New LOW gap g-spec-refetch-coalescing-reading-s475 (#1788 F4). Gates: snippet 113/0, claim 22/0, spec-coverage 0 violations, s34-census PASS, severity current, state PASS, delta-lint PASS, conflict-marker PASS, SPEC-INDEX stale-warn (bot-owned).
