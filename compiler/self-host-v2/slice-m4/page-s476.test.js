@@ -25,6 +25,9 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { join, sep } from "node:path";
+import { tmpdir } from "node:os";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -295,3 +298,30 @@ describe("`<host>` in a `<page>` is no direct child of `<program>` (§21.3.3 rul
   });
 });
 
+describe("F3 — with no `<program>`, a route file is read off its whole path (§40.8)", () => {
+  const ABOUT = `<page>\n<p>about</p>\n</page>\n`;
+  test("`routeBase` (the driver's absolute source root) names `pages/`: a route file, keyBase \"\"", () => {
+    const d = frontEnd(mods, [{ path: "about.scrml", src: ABOUT }], "about.scrml", { keyBase: "", routeBase: "/home/u/site/pages" }).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING"]);
+    expect(d[0].message).toContain("route file");
+    const n = frontEnd(mods, [{ path: "about.scrml", src: ABOUT }], "about.scrml", { keyBase: "", routeBase: "/home/u/site/lib" }).diags;
+    expect(n.map((x) => x.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED", "E-PROGRAM-MISSING"]);
+  });
+  test("scrml-boot: a lone `pages/about.scrml` in a tree with no scrml.toml / .git is a route file", async () => {
+    const boot = await import("../../../scripts/scrml-boot.ts");
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "s477-route-")));
+    try {
+      mkdirSync(join(tmp, "pages"));
+      writeFileSync(join(tmp, "pages", "about.scrml"), ABOUT);
+      // no marker above it — unless the temp dir itself sits in a marked tree
+      if (boot.projectRootOf(join(tmp, "pages")) === join(tmp, "pages")) expect(boot.keyBaseOf(join(tmp, "pages"))).toBe("");
+      expect(boot.routeBaseOf(join(tmp, "pages"))).toBe(join(tmp, "pages").split(sep).join("/"));
+      const r = await boot.compileSource(join(tmp, "pages", "about.scrml"));
+      const codesOf = r.diagnostics.map((x) => x.code);
+      expect(codesOf).not.toContain("E-STRUCTURAL-ELEMENT-MISPLACED");
+      expect(r.diagnostics.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED").message).toContain("route file");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, { timeout: 300000 });
+});

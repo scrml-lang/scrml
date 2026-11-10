@@ -79,7 +79,10 @@ export function frontEnd(mods, files, entry, opts = {}) {
   // output keys hash from (core.scrml fileKeyPath); the reported file names stay `f.path`.
   // s474 (client-bang composition): `next` — the linker's first unused node id (composeFiles)
   // s475 r1: the sources too — analysis re-reads a file whose `m.x` it resolved to a namespace member
-  const tp = mods.analyze.analyzeSources(asts, files.map((f) => ({ path: f.path, src: f.src })), entry, opts.keyBase ?? "", next);
+  // s477 fix round 1 (F3): `opts.routeBase` — the files' root as the driver knows it (scrml-boot: its
+  // absolute path), which a build with no `<program>` reads route files against (§40.8 "anywhere in
+  // their path"); without one, keyBase (the root under the project root) is read, as before.
+  const tp = mods.analyze.analyzeSources(asts, files.map((f) => ({ path: f.path, src: f.src })), entry, opts.keyBase ?? "", opts.routeBase ?? opts.keyBase ?? "", next);
   // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
   const parseDiags0 = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   // s473 D28 — the named-refusal table (refusals.scrml): in a file that already fails, a construct
@@ -287,7 +290,7 @@ export function frontEndStdlib(mods, files, entry, opts = {}) {
   const readFroms = opts.importFroms ?? importFroms(mods);
   for (;;) {
     const std = stdlibSources(mods, files, { stdlibRoot: opts.stdlibRoot, exclude, importFroms: readFroms });
-    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path), keyBase: opts.keyBase });
+    const r = frontEnd(mods, [...files, ...std.sources.map((s) => ({ path: s.path, src: s.src }))], entry, { stdlibPaths: std.sources.map((s) => s.path), keyBase: opts.keyBase, routeBase: opts.routeBase });
     const bad = new Map(); // module → its Error diagnostics
     for (const d of r.diags) {
       if (!isError(d) || !String(d.file ?? "").startsWith(prefix)) continue;

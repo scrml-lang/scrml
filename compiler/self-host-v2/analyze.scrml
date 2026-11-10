@@ -2079,7 +2079,7 @@ ${
     // Every file: a second+ top-level `<program>` (E-PROGRAM-002), file-top
     // markup outside any `<program>`, and — for the entry file's program —
     // its attributes and the `<program>`s nested in its body.
-    fn programShapeDiags(files: FileAst[], entry: string, keyBase: string, st0: AS) -> AS {
+    fn programShapeDiags(files: FileAst[], entry: string, routeBase: string, st0: AS) -> AS {
         let st: AS = st0
         // s476 — whether the build has a `<program>` (§40.8: the build root, and
         // so which files are route files, is read off the entry file's program)
@@ -2108,7 +2108,7 @@ ${
                     }
                 }
                 const n: ANode | not = markupOfItem(it)
-                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, routeFile(f.path, entry, keyBase, buildHasProgram), st)
+                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, routeFile(f.path, entry, routeBase, buildHasProgram), st)
             }
         }
         return st
@@ -2119,18 +2119,24 @@ ${
     // `routes/` directory component". With an application `<program>` the build
     // root is the entry file's directory; with none, "route files are then the
     // files with a `pages/` or `routes/` component anywhere in their path".
-    // A file's path here is relative to the build's source root; `keyBase` is
-    // that root's path under the PROJECT root (scrml-boot keyBaseOf), so with no
-    // `<program>` the whole project-relative path is read (a `pages/about.scrml`
-    // compiled alone arrives as `about.scrml` with keyBase `pages`).
-    fn routeFile(path: string, entry: string, keyBase: string, buildHasProgram: boolean) -> boolean {
+    // A file's path here is relative to the build's source root; `routeBase` is
+    // that root's own path as the driver knows it, so with no `<program>` the
+    // whole path is read (a `pages/about.scrml` compiled alone arrives as
+    // `about.scrml` with routeBase `…/pages`).
+    // s477 fix round 1 (F3): scrml-boot hands the source root's ABSOLUTE path
+    // (routeBaseOf) — "anywhere in their path" is the whole path. It used to hand
+    // the root's path under the PROJECT root (keyBase), which is "" when no
+    // `scrml.toml` / `.git` marks a project above the file — so a lone
+    // `pages/about.scrml` was told its `<page>` was misplaced, "or … the root of a
+    // route file under `pages/`". (analyzeLinked, with no driver, reads keyBase.)
+    fn routeFile(path: string, entry: string, routeBase: string, buildHasProgram: boolean) -> boolean {
         let rel: string = path
         if (buildHasProgram) {
             const slash: int = entry.lastIndexOf("/")
             const root: string = slash < 0 ? "" : entry.substring(0, slash + 1)
             if (root != "" && path.startsWith(root)) rel = path.substring(root.length, path.length)
-        } else if (keyBase != "") {
-            rel = keyBase + "/" + path
+        } else if (routeBase != "") {
+            rel = routeBase + "/" + path
         }
         const parts: string[] = rel.split("/")
         let i = 0
@@ -6338,12 +6344,12 @@ ${
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
-    fn phaseA(files: FileAst[], entry: string, keyBase: string, carriers: int[], st0: AS) -> RGlobals {
+    fn phaseA(files: FileAst[], entry: string, routeBase: string, carriers: int[], st0: AS) -> RGlobals {
         let st: AS = st0
         const rs: RStubs = typeStubs(files, st)
         st = rs.st
         const rd: RDeclStubs = declStubs(files, entry, st)
-        st = programShapeDiags(files, entry, keyBase, rd.st)
+        st = programShapeDiags(files, entry, routeBase, rd.st)
         let declNames: string[] = []
         let declSyms: Sym[] = []
         let declFiles: string[] = []
@@ -38173,7 +38179,7 @@ ${
     // source root is the project root. The file names the front end reports are not changed.
     export fn analyzeKeyed(files: FileAst[], entry: string, keyBase: string) -> TypedProgram { return analyzeLinked(files, entry, keyBase, -1) }
 
-    export fn analyzeLinked(files0: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram { return analyzeSources(files0, [], entry, keyBase, nextId) }
+    export fn analyzeLinked(files0: FileAst[], entry: string, keyBase: string, nextId: int) -> TypedProgram { return analyzeSources(files0, [], entry, keyBase, keyBase, nextId) }
 
     // s475 r1 (review of #1746, item 1): `srcs` — the files' sources (the driver's: the tree holds no
     // text), for the namespace re-read. A namespace member is read by WHAT `m` RESOLVES TO here — the
@@ -38182,15 +38188,17 @@ ${
     // again. A nearer `m` (a local, a parameter, a prop or field, a host binding) keeps `m.x` a member
     // access on it, as it is without the import. Without a file's source nothing is re-read: its
     // `m.x` stays a member access on the namespace, refused (E-SCOPE-001 — fails closed).
-    export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, nextId: int) -> TypedProgram {
-        const r0: ARun = analyzeRun(files0, entry, keyBase, nextId >= 0, [])
+    // s477 fix round 1 (F3): `routeBase` — the source root's own path (scrml-boot: absolute), which
+    // a build with no `<program>` reads route files against (§40.8; routeFile).
+    export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId: int) -> TypedProgram {
+        const r0: ARun = analyzeRun(files0, entry, keyBase, routeBase, nextId >= 0, [])
         let files: FileAst[] = files0
         let r1: ARun = r0
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt)
             if (rr.changed) {
                 files = rr.files
-                r1 = analyzeRun(files, entry, keyBase, nextId >= 0, [])
+                r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, [])
             }
         }
         // s475 (slice S4): the pending cells (§13.9.2 "means exactly a plain cell initialized to
@@ -38205,16 +38213,16 @@ ${
             const pf: RFiles = pendFiles(files, r1.pend, next)
             files = pf.files
             next = pf.next
-            r1 = analyzeRun(files, entry, keyBase, nextId >= 0, [])
+            r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, [])
         }
         // s475-boot-caller-transport: a transport carrier's callers are judged against `E + Transport`
         // (FnInfo.derr) — known only once this run composed; the program is analyzed again with them,
         // so a caller's `.Transport` arm, a handler that omits it, and a `?` carrying it up are judged as
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
-        if (r1.retype) r1 = analyzeRun(files, entry, keyBase, nextId >= 0, r1.carriers)
+        if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers)
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
-        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, false, r1.carriers)
+        const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
         let notes: Diag[] = []
@@ -38302,9 +38310,9 @@ ${
         return m
     }
 
-    fn analyzeRun(files: FileAst[], entry: string, keyBase: string, allow: boolean, carriers: int[]) -> ARun {
+    fn analyzeRun(files: FileAst[], entry: string, keyBase: string, routeBase: string, allow: boolean, carriers: int[]) -> ARun {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
-        const ra0: RGlobals = phaseA(files, entry, keyBase, carriers, st0)
+        const ra0: RGlobals = phaseA(files, entry, routeBase, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
         let st: AS = checkImports(files, ra.g, ra.st)
