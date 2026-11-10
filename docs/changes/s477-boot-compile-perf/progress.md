@@ -1,0 +1,1 @@
+- 2026-11-10T15:21Z — start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a9e73c9407e4de53d (base 0487a8fa4 + merged s477-boot-dev-leak 04edd2ead). bun install + pretest OK.
