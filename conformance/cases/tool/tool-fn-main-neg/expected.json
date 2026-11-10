@@ -1,0 +1,20 @@
+{
+  "id": "tool-fn-main-neg",
+  "description": "§64.2 E-TOOL-004 — `main` declared with `fn` (the pure form) in a `kind=\"tool\"` program.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.2",
+  "rationale": "§64.2: \"A `fn main` in a `kind=\"tool\"` program is `E-TOOL-004` (steer to `function main`).\"",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-TOOL-004"
+    ],
+    "notCodes": [
+      "E-TOOL-001"
+    ],
+    "severity": {
+      "E-TOOL-004": "error"
+    }
+  }
+}

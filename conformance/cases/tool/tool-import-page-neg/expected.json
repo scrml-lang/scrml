@@ -1,0 +1,13 @@
+{
+  "id": "tool-import-page-neg",
+  "description": "§64.6 E-TOOL-006 — a `kind=\"tool\"` program imports a local `.scrml` file that is page-shaped (a top-level `<program>` with markup), not an importable library.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.6",
+  "rationale": "§64.5.1: \"A tool may import only an IMPORTABLE local `.scrml` module — a §21.5 library-shaped file (exports-bearing, no top-level `<program>` / page markup) … A tool importing a page-shaped / no-export `.scrml` is `E-TOOL-006` (fail-closed; §64.6).\"",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": ["E-TOOL-006"],
+    "severity": { "E-TOOL-006": "error" }
+  }
+}

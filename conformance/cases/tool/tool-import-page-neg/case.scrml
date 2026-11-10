@@ -1,0 +1,7 @@
+<program kind="tool" lang="js">
+    import { label } from "./page.scrml";
+
+    function main(args: string[]) -> number {
+        return 0;
+    }
+</program>

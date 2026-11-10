@@ -403,6 +403,7 @@ ${
             loads: [],
             envelopes: [],
             head: plainHead(),
+            tool: not,
         }
     }
 

@@ -1,0 +1,17 @@
+{
+  "id": "tool-foreign-unbuildable-neg",
+  "description": "§23.2.4a E-FOREIGN-007 — a tool slice that is not valid JavaScript as the body of a sealed async function.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: \"A slice that is not valid JavaScript as the body of a strict-mode async function whose parameters are its crossings SHALL be a compile error (E-FOREIGN-007)\".",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-FOREIGN-007"
+    ],
+    "severity": {
+      "E-FOREIGN-007": "error"
+    }
+  }
+}

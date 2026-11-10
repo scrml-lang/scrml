@@ -33,11 +33,11 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, CoreHead, CoreMeta, HeadTitle, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
+             CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
     import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              mkSpan } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -205,6 +205,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -237,6 +238,7 @@ ${
             .Validity(of: x) :> op
             .ServerCall(fn: x) :> op
             .Query(q: x) :> op
+            .Foreign(slice: fsl0) :> op
         }
     }
 
@@ -299,6 +301,7 @@ ${
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: fsl0) :> false
         }
     }
 
@@ -760,6 +763,7 @@ ${
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
             .Query(q: x) :> missing()
+            .Foreign(slice: fsl0) :> missing()
         }
     }
 
@@ -1405,6 +1409,7 @@ ${
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
             .Query(q: x) :> missing()
+            .Foreign(slice: fsl0) :> missing()
         }
     }
 
@@ -3506,7 +3511,7 @@ ${
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
             .HashRef(id: hr0) :> []
-            .Foreign(f: fb0) :> []
+            .Foreign(f: fb0) :> fb0.crossings            // s477: a foreign slice's crossings, read before it waits (§23.2.4a)
         }
     }
 
@@ -3520,6 +3525,7 @@ ${
             .SWaits(callee: f) :> Expr.Call(f, args)
             .SLocal(callee: f) :> Expr.Call(f, args)       // s468 (U1c): an in-place server→server call that waits
             .SQuery :> queryAt(c, e)                       // s468 (U1c): a `?{}` — a wait on the server
+            .SForeign :> foreignAt(c, e, args)              // s477: a §23.2.4a foreign slice — a wait at the host boundary
         }
         const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
@@ -3540,6 +3546,79 @@ ${
         const q: ASql | not = sqlOfExpr(node.k)
         if (q is not) return missing()
         return Expr.Query(sqlQueryOf(c, node, q, atSite))
+    }
+
+    // s477 — the foreign slice a `_={ … }=` suspension point runs (§23.2.4a): its crossings
+    // are the slice's parameters, `args` their values (suspendArgsOf: the crossings, in order).
+    fn foreignAt(c: LC, e: AExpr, args: Expr[]) -> Expr {
+        const f: AForeign | not = foreignOfK(e.k)
+        if (f is not) return missing()
+        let params: string[] = []
+        for (const x of f.crossings) { params = params.concat([crossingName(x)]) }
+        const slice: ForeignSlice = { site: { n: e.nid }, file: c.file, at: e.span.start, params: params, body: f.body }
+        return Expr.Foreign(slice, args)
+    }
+
+    fn foreignOfK(k: AExprK) -> AForeign | not {
+        return match k {
+            .Foreign(f: f) :> f
+            .HashRef(id: hr0) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+        }
+    }
+
+    // A crossing is a Name read (parse.scrml foreignHeader) — its name as written.
+    fn crossingName(x: AExpr) -> string {
+        const k: AExprK = x.k
+        return match k {
+            .Name(name: n) :> n
+            .Foreign(f: f) :> ""
+            .HashRef(id: hr0) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: y) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: y) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: y) :> ""
+            .Template(quasis: qs) :> ""
+        }
     }
 
     // s475 — SPEC §8.9.2 "Amendment S474" item 4: a query "whose failure is handled where it is
@@ -3952,8 +4031,8 @@ ${
         const consts: CoreConst[] = coreConsts(t)
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
         return { core: core, diags: tp.diags }
     }
 
@@ -4398,6 +4477,7 @@ ${
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 

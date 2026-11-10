@@ -1,0 +1,17 @@
+{
+  "id": "tool-exit-harness-stdout-pos",
+  "description": "§64.1 / §64.3 — a `kind=\"tool\"` program compiles to a runnable module; `function main(args: string[]) -> number` is invoked with the argument slice (empty here) and its host I/O block writes stdout. The (b) half RUNS the module with `bun` and asserts its stdout byte-for-byte.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.3",
+  "rationale": "§64.3: \"The emitted harness invokes `main(process.argv.slice(2))`. The RETURN-TYPE of `main` selects the harness arm\"; §64.1: \"It is runnable directly (`bun <emitted>.js <args…>`)\"; §23.2.4 form 3 admits the bare `_{}` host-I/O block in a tool function.",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-TOOL-",
+      "E-FOREIGN-"
+    ],
+    "stdout": "args=0\n"
+  }
+}

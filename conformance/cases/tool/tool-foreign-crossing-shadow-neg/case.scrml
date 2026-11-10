@@ -1,0 +1,10 @@
+<program kind="tool" lang="js">
+    function main(args: string[]) -> number {
+        const n = args.length;
+        const out = _={ in: { n }
+            const n = 1;
+            return n;
+        }=;
+        return 0;
+    }
+</program>

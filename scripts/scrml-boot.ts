@@ -27,6 +27,13 @@
  *   _scrml/<module>/<file>   that module's host file, copied from the stdlib (both artifacts import it)
  * The page loads ES modules, so open it over http (`scrml-boot dev`, or any static server), not file://.
  *
+ * A `<program kind="tool">` (SPEC §64, s477) is NOT a page: it compiles to a plain runnable module —
+ *   <name>.js                the tool (print-server.scrml printTool): its functions and the main() harness
+ *   scrml-server-runtime.js  its runtime, which imports ./runtime.js
+ *   runtime.js               (a copy of the bootstrap runtime)
+ *   _scrml/<module>/<file>   stdlib host files, as above
+ * Run it with `bun <dir>/<name>.js <args…>`; `scrml-boot dev` refuses a tool (it has no page).
+ *
  * DIAGNOSTICS print as impl#1's CLI prints them — `error [CODE]: message` then `  --> file:line:col`
  * and the source lines. `--format line` prints one line each, `file:line:col: error [CODE]: message`
  * (for an editor's quickfix / errorformat). Columns count UTF-16 code units (as JS strings and LSP do);
@@ -369,6 +376,7 @@ export type CompileResult = {
   outDir: string;
   written: string[]; // output file names
   server: boolean;
+  tool?: string; // s477: the tool module's file name, for a `kind="tool"` program
   ms: { boot: number; compile: number };
 };
 
@@ -391,6 +399,9 @@ export type CheckResult = {
   // the relative imports it reaches, copied to `_scrml_local/<path relative to the project root>`, and
   // `shims` the `_scrml/host-src/<K>.js` modules the client artifact imports (slice-m1/host-src.js)
   hostSrc?: { copies: Array<{ src: string; out: string }>; shims: Array<{ out: string; text: string }> }; // present when ok
+  // s477 — a `kind="tool"` program (SPEC §64): the runnable module, `file` its name in the output
+  // directory; present (instead of `client`) when ok
+  tool?: { file: string; js: string };
   ms: { boot: number; compile: number };
 };
 
@@ -610,6 +621,8 @@ export async function compileSource(
   // s473: §14.8.10 item (2) — a SQLite file the compile can open is scanned for undeclared tenant tables
   diagnostics.push(...tenantScan(fe.core, root, sources));
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  // s477 — a `kind="tool"` program (SPEC §64) is one runnable module, not a page.
+  if (fe.core.tool != null) return compileTool(boot, fe.core, entryAbs, root, relToAbs, sources, diagnostics, result, opts.stdlibRoot ?? STDLIB_ROOT);
   // printProgram / printServer run checkCore themselves (the gate at emission); a finding is a refusal.
   const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
   for (const r of out.refused ?? []) diagnostics.push(refusalDiag(String(r)));
@@ -632,12 +645,70 @@ export async function compileSource(
   return result(true, { client: { html: out.html, js: out.js }, serverJs, hostFiles, hostSrc: { copies: hs.copies, shims: hs.shims } });
 }
 
+/** s477 — the tool module's file name: the entry's base name, `.js` (`fleet.scrml` → `fleet.js`);
+ *  `<base>.tool.js` when that would be the name of a runtime file written beside it. */
+export function toolFileName(entryAbs: string): string {
+  const base = basename(entryAbs, extname(entryAbs));
+  if (base === "runtime" || base === "scrml-server-runtime") return base + ".tool.js";
+  return base + ".js";
+}
+
+/**
+ * s477 — SPEC §64.1: "A `kind="tool"` top-level program emits a plain ES module: NO html, NO client.js
+ * bundle, NO CSRF scaffold." The foreign slices are prepared first (their shape, E-FOREIGN-006 /
+ * E-FOREIGN-007 — slice-m1/tool-slices.js), then print-server.scrml printTool prints the module.
+ */
+async function compileTool(
+  boot: Boot, core: any, entryAbs: string, root: string, relToAbs: Map<string, string>, sources: Map<string, string>,
+  diagnostics: Diagnostic[], result: (ok: boolean, extra?: Partial<CheckResult>) => CheckResult, stdlibRoot: string,
+): Promise<CheckResult> {
+  const ps = boot.mods["print-server"];
+  const { prepareToolSlices } = await import("../compiler/self-host-v2/slice-m1/tool-slices.js");
+  const sourceOf = (rel: string) => { const f = relToAbs.get(rel); return f !== undefined ? sources.get(f) : undefined; };
+  const prep = prepareToolSlices(ps.toolSlices(core), sourceOf);
+  for (const d of prep.diags as Array<{ code: string; message: string; file: string; at: number }>) {
+    const f = relToAbs.get(d.file);
+    const src = f !== undefined ? sources.get(f) : undefined;
+    const lc = src !== undefined ? lineCol(src, d.at) : undefined;
+    diagnostics.push({ severity: "error", code: d.code, message: d.message, file: f, line: lc?.line, col: lc?.col });
+  }
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  const file = toolFileName(entryAbs);
+  const to = ps.printTool(core, file, "scrml-server-runtime.js", root, prep.sealed);
+  for (const r of to.refused ?? []) diagnostics.push(refusalDiag(String(r)));
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  const hostFiles = await hostFilesOf(core, stdlibRoot, diagnostics);
+  const { planHostSrcs } = await import("../compiler/self-host-v2/slice-m1/host-src.js");
+  const hs = planHostSrcs(core, root);
+  for (const d of hs.diags as Array<{ code: string; message: string; file?: string; at?: number }>) {
+    const f = d.file !== undefined ? relToAbs.get(d.file) : undefined;
+    const src = f !== undefined ? sources.get(f) : undefined;
+    const lc = src !== undefined && typeof d.at === "number" ? lineCol(src, d.at) : undefined;
+    diagnostics.push({ severity: "error", code: d.code, message: d.message, file: f, line: lc?.line, col: lc?.col });
+  }
+  if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  return result(true, { tool: { file, js: String(to.js) }, hostFiles, hostSrc: { copies: hs.copies, shims: hs.shims } });
+}
+
 export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
   const entryAbs = resolve(file);
   const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
   const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log, stdlibRoot: opts.stdlibRoot });
   const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
-    ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, ms: c.ms });
+    ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, tool: c.tool?.file, ms: c.ms });
+  // s477 — a `kind="tool"` program: the module, its runtime, and the host files it imports
+  if (c.ok && c.tool !== undefined) {
+    const touts: OutputFile[] = [
+      { rel: c.tool.file, text: c.tool.js },
+      { rel: "scrml-server-runtime.js", src: SERVER_RUNTIME },
+      { rel: "runtime.js", src: RUNTIME },
+    ];
+    for (const h of c.hostSrc?.copies ?? []) touts.push({ rel: h.out, src: h.src });
+    for (const h of c.hostSrc?.shims ?? []) touts.push({ rel: h.out, text: h.text });
+    for (const h of c.hostFiles ?? []) touts.push({ rel: h.out, src: h.src });
+    writeOutputs(outDir, touts);
+    return result(true, touts.map((o) => o.rel));
+  }
   if (!c.ok || c.client === undefined) return result(false);
 
   // The files this build writes, relative to `outDir` (`/`-separated). Nothing is written until the
@@ -1190,6 +1261,10 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
       log(red(`✗ ${reason}: compile failed — the last good build is still served`));
       const text = "scrml-boot: compile failed\n\n" + r.diagnostics.map((d) => formatDiagnostic(d, "line", process.cwd(), r.sources, opts.columns)).join("\n");
       for (const c of clients) { try { c.enqueue("data: " + JSON.stringify(text) + "\n\n"); } catch { clients.delete(c); } }
+      return;
+    }
+    if (r.tool !== undefined) {
+      log(red(`✗ ${reason}: ${shown(entryAbs)} is a \`kind="tool"\` program (SPEC §64) — it has no page to serve; run it with \`bun ${shown(join(r.outDir, r.tool))} <args…>\``));
       return;
     }
     current = r;

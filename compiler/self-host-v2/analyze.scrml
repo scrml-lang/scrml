@@ -45,7 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
@@ -510,9 +510,10 @@ ${
     // `plan` — the suspension plan (planPass) lower reads.
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[] }
+    // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[], tool: CoreTool | not }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [], tool: not } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -1882,10 +1883,11 @@ ${
     fn declStubs(files: FileAst[], entry: string, st0: AS) -> RDeclStubs {
         let st: AS = st0
         let out: DeclStub[] = []
+        const tool: boolean = entryIsTool(files, entry)
         for (const f of files) {
             for (const it of f.items) {
                 const k: AItemK = it.k
-                const r: RDeclStubs = isLaterProgram(f.items, it) ? noStubs(st) : declStubOf(k, f.path, entry, st)
+                const r: RDeclStubs = isLaterProgram(f.items, it) ? noStubs(st) : declStubOf(k, f.path, entry, tool, st)
                 out = out.concat(r.ds)
                 st = r.st
             }
@@ -1893,10 +1895,10 @@ ${
         return { ds: out, st: st }
     }
 
-    fn declStubOf(k: AItemK, file: string, entry: string, st: AS) -> RDeclStubs {
+    fn declStubOf(k: AItemK, file: string, entry: string, tool: boolean, st: AS) -> RDeclStubs {
         return match k {
             .DeclItem(d: d) :> userDeclStub(d, file, st)
-            .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, st), p, file)
+            .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, tool, st), p, file)
             .ConstItem(c: c) :> noStubs(st)
             .ImportItem(i: i) :> noStubs(st)
             .TypeItem(t: t) :> noStubs(st)
@@ -1986,9 +1988,17 @@ ${
         return { ds: out, st: st }
     }
 
-    fn programStub(p: AProgram, file: string, entry: string, st: AS) -> RDeclStubs {
+    fn programStub(p: AProgram, file: string, entry: string, tool: boolean, st: AS) -> RDeclStubs {
         let st2: AS = st
-        if (file != entry) st2 = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<program>` outside the entry file")
+        if (file != entry) {
+            // s477 — §64.6: "a `kind="tool"` program imports a local `.scrml` module that is NOT an
+            // importable library (§21.5 — it has a top-level `<program>` / page markup or no `export`s)"
+            if (tool) {
+                st2 = addDiag(st, file, p.span, "E-TOOL-006", toolImportMsg("has a top-level `<program>`"))
+            } else {
+                st2 = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<program>` outside the entry file")
+            }
+        }
         const r: RSym = mint(st2, "program")
         return { ds: [{ sym: r.s, file: file, isProgram: true, d: not, p: p, nid: p.nid }], st: r.st }
     }
@@ -2096,13 +2106,71 @@ ${
                     } else if (f.path == entry) {
                         st = topProgramAttrDiags(f.path, p, st)
                         st = nestedProgramDiags(f.path, p.items, st)
+                        if (programIsTool(p)) st = toolBodyDiags(f.path, p, st)     // s477: §64.2 / §64.4
                     }
                 }
                 const n: ANode | not = markupOfItem(it)
-                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, st)
+                if (n is given) {
+                    if (toolImport(files, entry, f.path)) {
+                        st = addDiag(st, f.path, it.span, "E-TOOL-006", toolImportMsg("holds page markup at its top level"))     // s477: §64.6
+                    } else {
+                        st = outsideProgramDiag(f.path, n, programs > 0, st)
+                    }
+                }
+            }
+            // s477 — §64.6: an imported local file with no `export` is not an importable library
+            if (toolImport(files, entry, f.path) && programs == 0 && !itemsExport(f.items) && !itemsHoldMarkup(f.items)) {
+                st = addDiag(st, f.path, mkSpan(0, 0), "E-TOOL-006", toolImportMsg("exports nothing"))
             }
         }
         return st
+    }
+
+    // s477 — §64.6 E-TOOL-006 / §64.5.1: "A tool may import only an IMPORTABLE local `.scrml`
+    // module — a §21.5 library-shaped file (exports-bearing, no top-level `<program>` / page
+    // markup)". A stdlib module is not a LOCAL import (it passes through to the stdlib).
+    fn toolImport(files: FileAst[], entry: string, file: string) -> boolean {
+        return file != entry && !isStdlibPath(file) && entryIsTool(files, entry)
+    }
+
+    fn entryIsTool(files: FileAst[], entry: string) -> boolean {
+        for (const f of files) {
+            if (f.path == entry) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) return programIsTool(p)
+                }
+            }
+        }
+        return false
+    }
+
+    fn toolImportMsg(why: string) -> string {
+        return "this file is imported by a `kind=\"tool\"` program, and it " + why + " — a tool may import only a library-shaped `.scrml` file (one with `export`s, and no top-level `<program>` or page markup, §21.5) or a `scrml:` module (§64.5.1)"
+    }
+
+    fn itemsExport(items: AItem[]) -> boolean {
+        for (const it of items) {
+            const k: AItemK = it.k
+            const e: boolean = match k {
+                .FnItem(f: f) :> f.exported
+                .ConstItem(c: c) :> c.exported
+                .DeclItem(d: d) :> d.exported
+                .TypeItem(t: t) :> t.exported
+                .ImportItem(i: x) :> false
+                .ProgramItem(p: x) :> false
+                .MarkupItem(n: x) :> false
+            }
+            if (e) return true
+        }
+        return false
+    }
+
+    fn itemsHoldMarkup(items: AItem[]) -> boolean {
+        for (const it of items) {
+            if (markupOfItem(it) is given) return true
+        }
+        return false
     }
 
     // Markup at a file's top level, outside any `<program>`. §38.1, §20.8.1
@@ -2263,6 +2331,10 @@ ${
                 // placePass's dbsPass checks it (E-SQL-005) and makes it a Core Db
             } else if (a.name == "lang") {
                 st = langAttrDiag(file, a, st)
+            } else if (a.name == "kind") {
+                st = kindAttrDiag(file, a, st)              // s477: §64 (the tool target)
+            } else if (a.name == "serve") {
+                st = serveAttrDiag(file, p, a, st)          // s477: §64.9
             } else if (a.name == "name") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
             } else if (isDocumentaryAttr(a.name)) {
@@ -2278,6 +2350,207 @@ ${
             }
         }
         return st
+    }
+
+    // =========================================================================
+    // s477 — §64 THE TOOL TARGET, `<program kind="tool">`: the program shape.
+    // §64: "The vocabulary is `"tool" | "service"` (closed vocabulary …); other
+    // values → `E-TOOL-002`. `kind=` on a NESTED `<program>` → `E-TOOL-002`."
+    // `"service"` (§68) is DRAFT and not built here: refused by name, INTERIM
+    // (g-boot-kind-service-unbuilt-s473). The emit is print.scrml printTool.
+    // =========================================================================
+    fn kindAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is given) {
+            if (v == "tool") return st
+            if (v == "service") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program kind=\"service\">` (§68, DRAFT — a long-running program) is not in the bootstrap yet: an INTERIM refusal by name (gap g-boot-kind-service-unbuilt-s473), never compiled as something else. A program that runs to completion is `kind=\"tool\"` (§64)")
+        }
+        return addDiag(st, file, a.span, "E-TOOL-002", "`kind=` is " + attrValueText(a.value) + " — the `<program kind=…>` vocabulary is closed: \"tool\" (§64) or \"service\" (§68)")
+    }
+
+    // §64.9: "`serve=` on a non-`kind="tool"` top-level `<program>` (serve requires
+    // the tool output shape)" → E-TOOL-SERVE-MISPLACED; a value that "is neither an
+    // integer literal (`serve=7878`, 0–65535; 0 = ephemeral) nor a `${expr}` runtime
+    // port" → E-TOOL-SERVE-PORT-INVALID. A well-formed `serve=` on a tool asks for the
+    // §64.9 serve-harness, which the bootstrap does not emit: refused by name, INTERIM
+    // (g-boot-tool-serve-unbuilt-s477).
+    fn serveAttrDiag(file: string, p: AProgram, a: AAttr, st: AS) -> AS {
+        if (!programIsTool(p)) return addDiag(st, file, a.span, "E-TOOL-SERVE-MISPLACED", "`serve=` on a `<program>` that is not `kind=\"tool\"` — a `serve=` listener is the headless serve-target of a tool (§64.9); add `kind=\"tool\"`, or remove `serve=`")
+        if (!servePortForm(a.value)) return addDiag(st, file, a.span, "E-TOOL-SERVE-PORT-INVALID", "`serve=` is " + attrValueText(a.value) + " — it must be an integer literal port 0–65535 (`serve=7878`; 0 = an ephemeral port) or a `${expr}` runtime port (§64.9)")
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program kind=\"tool\" serve=…>` — the §64.9 serve-harness (a `Bun.serve` mounting the program's routes) is not in the bootstrap yet: an INTERIM refusal by name (gap g-boot-tool-serve-unbuilt-s477). A tool without `serve=` compiles")
+    }
+
+    fn servePortForm(v: AAttrValue) -> boolean {
+        return match v {
+            .Bare(e: e) :> portLiteral(e)
+            .Braced(b: b) :> true
+            .Quoted(v: s) :> false
+            .NoValue :> false
+            .Paren(e: x) :> false
+        }
+    }
+
+    fn portLiteral(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const raw: string = match k {
+            .Num(raw: r) :> r
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
+            .Foreign(f: fb0) :> ""
+        }
+        if (raw == "" || raw.length > 5) return false
+        for (const ch of raw.split("")) {
+            if ("0123456789".indexOf(ch) < 0) return false
+        }
+        return parseInt(raw, 10) <= 65535
+    }
+
+    // s477 — the entry program's tool fact (§64.2 / §64.3): its `function main`, whether
+    // it declares a return type (toolBodyDiags admits only `-> number` / `-> int`, so a
+    // declared one is the exit-harness) and whether it takes the argument slice. `not`
+    // for a web application (or a tool with no `main` — E-TOOL-001 stops the build).
+    fn toolFact(g: Globals) -> CoreTool | not {
+        if (!fileIsTool(g, g.entry)) return not
+        for (const fs of g.fns) {
+            if (fs.info.file == g.entry && fs.info.name == "main" && !fs.f.pure) {
+                return { main: fs.info.sym, exits: fs.f.ret is given, argv: fs.f.params.length == 1 }
+            }
+        }
+        return not
+    }
+
+    fn programIsTool(p: AProgram) -> boolean {
+        const k: string | not = quotedAttr(p.attrs, "kind")
+        if (k is given) return k == "tool"
+        return false
+    }
+
+    // §64.2 / §64.4 — the body of the entry file's `kind="tool"` program:
+    //   "A `kind="tool"` program SHALL declare exactly one top-level entry
+    //   `function main` … with NO `main` → `E-TOOL-001`." (no `serve=` here: a
+    //   `serve=` tool is refused above, so `main` is never optional in the bootstrap)
+    //   "A `fn main` in a `kind="tool"` program is `E-TOOL-004` (steer to `function main`)."
+    //   "`<page>` children, markup body content, or client-reactive UI state inside a
+    //   `kind="tool"` program → `E-TOOL-003` (a hard error, never silently dropped).
+    //   The tool body is logic + `fn`/`function`/`type` declarations + `_{}` + `?{}` + `main`."
+    fn toolBodyDiags(file: string, p: AProgram, st0: AS) -> AS {
+        let st: AS = st0
+        let mains: AFn[] = []
+        for (const it of p.items) {
+            const why: string = toolItemWhy(it)
+            if (why != "") st = addDiag(st, file, it.span, "E-TOOL-003", why)
+            const fm: AFn | not = toolFnOfItem(it)
+            if (fm is given) {
+                if (fm.name == "main") mains = mains.concat([fm])
+            }
+        }
+        if (mains.length == 0) return addDiag(st, file, p.span, "E-TOOL-001", "this `kind=\"tool\"` program declares no top-level `function main` — a tool's entry is `function main(args: string[]) -> number` (or with no `->`: run, then let the host's event loop decide), which the module invokes with the command line's arguments (§64.2, §64.3)")
+        for (const m of mains) {
+            if (m.pure) {
+                st = addDiag(st, file, m.span, "E-TOOL-004", "`fn main` in a `kind=\"tool\"` program — `main` is the program's impure entry (it reads argv, sets the exit code and does host I/O), and `fn` is the pure form (§48.11); declare it `function main` (§64.2)")
+            } else {
+                st = mainShapeDiags(file, m, st)
+            }
+        }
+        return st
+    }
+
+    // Why an item of a tool's body is UI (E-TOOL-003), else "". A nested program is
+    // refused by nestedProgramDiags.
+    fn toolItemWhy(it: AItem) -> string {
+        const k: AItemK = it.k
+        return match k {
+            .FnItem(f: x) :> ""
+            .TypeItem(t: x) :> ""
+            .ImportItem(i: x) :> ""
+            .ConstItem(c: x) :> ""
+            .ProgramItem(p: x) :> ""
+            .MarkupItem(n: x) :> "markup in a `kind=\"tool\"` program — a tool emits a plain module with no page and no client (§64.1), so markup has nowhere to render (§64.4); a tool's output is host I/O: `_={ console.log(…) }=` in a `function`"
+            .DeclItem(d: d) :> "the declaration `<" + d.name + ">` in a `kind=\"tool\"` program — a declaration is reactive state or UI, and a tool has no client to hold it (§64.4: client-reactive UI state in a tool is E-TOOL-003); keep a value in a local of `main`, or a file-scope `const`"
+        }
+    }
+
+    fn toolFnOfItem(it: AItem) -> AFn | not {
+        const k: AItemK = it.k
+        return match k {
+            .FnItem(f: f) :> f
+            .TypeItem(t: x) :> not
+            .ImportItem(i: x) :> not
+            .ConstItem(c: x) :> not
+            .ProgramItem(p: x) :> not
+            .MarkupItem(n: x) :> not
+            .DeclItem(d: x) :> not
+        }
+    }
+
+    // §64.2: "Its parameter is the argv slice (`string[]`); its return type governs
+    // the process lifecycle (§64.3)" — `-> number` (the exit-harness) or none (the
+    // invoke-only harness). The SPEC names no code for any other shape; each is
+    // refused by name (INTERIM, ruling owed — docs/changes/s477-boot-kind-tool), never
+    // given a meaning: a second parameter (the harness passes one), a parameter that
+    // is not `string[]`, another return type, a failable `main` (what exit code a
+    // failure maps to is unsaid).
+    fn mainShapeDiags(file: string, m: AFn, st0: AS) -> AS {
+        let st: AS = st0
+        if (m.params.length > 1) st = addDiag(st, file, m.span, "E-BOOTSTRAP-UNSUPPORTED", "`function main` takes " + m.params.length + " parameters — the tool harness passes ONE, the command line's arguments as `string[]` (§64.2); the SPEC gives no other shape a meaning, so the bootstrap refuses it (INTERIM)")
+        if (m.params.length == 1) {
+            const pt: AType | not = m.params[0].ty
+            if (pt is given) {
+                if (!isStringSeqType(pt)) st = addDiag(st, file, m.params[0].span, "E-BOOTSTRAP-UNSUPPORTED", "`main`'s parameter `" + m.params[0].name + "` is not `string[]` — the tool harness passes the command line's arguments, a `string[]` (§64.2); the SPEC gives no other parameter type a meaning, so the bootstrap refuses it (INTERIM)")
+            }
+        }
+        const rt: AType | not = m.ret
+        if (rt is given) {
+            if (!isExitCodeType(rt)) st = addDiag(st, file, m.span, "E-BOOTSTRAP-UNSUPPORTED", "`function main` declares a return type that is not `number` — §64.3 names two harnesses: `-> number` (the value is the process exit code) and no return type (invoke only); the SPEC gives no other return type a meaning, so the bootstrap refuses it (INTERIM)")
+        }
+        if (m.failable) st = addDiag(st, file, m.span, "E-BOOTSTRAP-UNSUPPORTED", "a failable `function main` (`!`) — §64.3 does not say what a failure of `main` exits with, so the bootstrap refuses it (INTERIM); handle the failure inside `main` and return an exit code")
+        return st
+    }
+
+    fn isStringSeqType(t: AType) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TSeq(elem: e, grants: g) :> typeIsName(e, "string")
+            .TName(name: n) :> false
+            .TMaybe(inner: x) :> false
+            .TLife(pre: x) :> false
+        }
+    }
+
+    // §64.3 "declares a numeric return": `number` (as §64.2 spells it) or `int`.
+    fn isExitCodeType(t: AType) -> boolean {
+        return typeIsName(t, "number") || typeIsName(t, "int")
+    }
+
+    fn typeIsName(t: AType, name: string) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n == name
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: x) :> false
+            .TLife(pre: x) :> false
+        }
     }
 
     // s473 — `lang=` (§4.12 table: "Declares the foreign language toolchain for
@@ -2587,8 +2860,12 @@ ${
                 st = addDiag(st, file, a.span, "W-PROGRAM-TITLE-NESTED", "`" + a.name + "=` on a nested `<program>` is head metadata with no effect there (§40.7)")
             } else if (a.name == "capabilities") {
                 st = capabilitiesDiags(file, a, st)
-            } else if (a.name == "kind" || a.name == "serve") {
-                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on a nested `<program>` (§64) is not in the bootstrap")
+            } else if (a.name == "kind") {
+                // s477 — §64: "`kind=` on a NESTED `<program>` → `E-TOOL-002` (§43 infers nested kinds)"
+                st = addDiag(st, file, a.span, "E-TOOL-002", "`kind=` on a nested `<program>` — `kind=` selects the TOP-LEVEL program's output shape (§64); a nested program's kind is inferred from its attributes (§43). Remove it")
+            } else if (a.name == "serve") {
+                // s477 — §64.6: "`serve=` on a nested `<program>` (a §43 worker/sidecar, not a listener-owning target)"
+                st = addDiag(st, file, a.span, "E-TOOL-SERVE-MISPLACED", "`serve=` on a nested `<program>` — a nested program is a worker / sidecar context (§43), not a listener-owning target; `serve=` belongs on the top-level `<program kind=\"tool\">` (§64.9)")
             } else if (isNestedProgramAttr(a.name)) {
                 // §4.12.2's table: valid here (the nested program itself is refused above)
             } else if (isProgramAttrName(a.name)) {
@@ -9351,17 +9628,19 @@ ${
             if (bare) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lang=\"" + lang + "\"` foreign block in a tool function — the bootstrap runs only ts/js foreign code in-process"))
             return plain(not, addDiag(st, env.file, e.span, "E-FOREIGN-005", "an inline value-returning foreign block is supported only for `lang=\"ts\"` / `\"js\"`, and this one's language is `" + lang + "` (§23.2.4a: arbitrary-language inline value-flow has no runtime model yet) — use a `use foreign:` sidecar for an out-of-process `" + lang + "` service (§23.4)"))
         }
-        // Admitted, checked — and not emitted: the bootstrap has no lowering
-        // for the §23.2.3 CG contract (the slice built once as an async
-        // function in a SEALED scope of its crossings, called with their
-        // values behind a codegen-injected `await`, server-side only), nor the
-        // pre-emit checks that ride on it (E-FOREIGN-006 / E-FOREIGN-007).
+        // s477: in a `kind="tool"` program the block is BUILT — a suspension point
+        // (SuspendK.SForeign), lowered to Core Expr.Foreign, printed by the tool
+        // printer as a call of the sealed slice behind the boundary `await`
+        // (§23.2.3 CG row; print.scrml printTool, server-runtime.js foreignSeal).
+        if (tool) return plain(not, st)
+        // Elsewhere (a web application's server function, §23.2.4 form 2): admitted,
+        // checked — and not emitted: the server artifact carries no sealed slice yet.
         // Refused by name, never printed wrong.
         return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", foreignEmitMsg()))
     }
 
     fn foreignEmitMsg() -> string {
-        return "a foreign code block — read and checked (§23.2.4), but its emission (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap yet"
+        return "a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3 / §23.2.4a) is not in the bootstrap's server artifact yet; it is built in a `kind=\"tool\"` program (§64)"
     }
 
     fn foreignOf(e: AExpr) -> AForeign | not {
@@ -29840,6 +30119,7 @@ ${
             .SRemote(callee: c) :> c.id
             .SWaits(callee: c) :> -1
             .SQuery :> -1
+            .SForeign :> -1
             .SLocal(callee: c) :> -1
         }
     }
@@ -29849,6 +30129,7 @@ ${
             .SWaits(callee: c) :> c.id
             .SRemote(callee: c) :> -1
             .SQuery :> -1
+            .SForeign :> -1
             .SLocal(callee: c) :> -1
         }
     }
@@ -30791,7 +31072,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead() }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -31032,6 +31313,11 @@ ${
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
         foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
         repeats: ASpan[],       // s473 (ruled refusals): the regions of its body that may run more than once (repeatsInBlock)
+        // s477 — a `function` of a `kind="tool"` program (§64): the tool is "an in-process
+        // monolith with no client boundary" (§64.5.1), so every `function` of it runs where
+        // the module runs — server-side, its calls in place (§13.4). A `fn` stays ambient
+        // (pure; inherited by its server callers, §12.2 Trigger 5).
+        tool: boolean,
     }
     // A chain from a function down to a site (display labels, outermost first).
     type Reach:struct = { chain: string[], what: string }
@@ -31472,11 +31758,12 @@ ${
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
                  sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
-                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body) }
+                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body),
+                 tool: !fs.f.pure && fileIsTool(cx.g, fs.info.file) }
     }
 
     // ---- placement -------------------------------------------------------------
-    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.modifier }
+    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.modifier || f.tool }
     fn clientDirect(f: FnFacts) -> boolean { return f.reads.length > 0 || f.scan.writes.length > 0 || f.doms.length > 0 }
 
     // §12.2 + §19.9.5 / §6.6.9, by the function's OWN body. Calling a server
@@ -32111,7 +32398,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [] }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [], tool: toolFact(g) }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -32220,6 +32507,7 @@ ${
         if (f.foreigns.length > 0) return "a `_={ … }=` foreign code block"
         // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
         if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
+        if (f.tool) return "being a `function` of a `kind=\"tool\"` program (§64.5.1: the tool runs in process, with no client)"
         return "the `server` modifier"
     }
 
@@ -35644,7 +35932,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [] }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [], tool: false }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).
@@ -36018,7 +36306,9 @@ ${
     // =========================================================================
     // s468 (U1c): SQuery — a `?{}` in a server-side body; SLocal — an in-place call
     // (server→server, §13.4) of a function that waits on the server (`swaits`).
-    export type SuspendK:enum = { SRemote(callee: Sym), SWaits(callee: Sym), SQuery, SLocal(callee: Sym) }
+    // s477: SForeign — a §23.2.4a foreign block in a server-side body (a `kind="tool"`
+    // function): "the `await` of that call is INJECTED by codegen at the boundary".
+    export type SuspendK:enum = { SRemote(callee: Sym), SWaits(callee: Sym), SQuery, SLocal(callee: Sym), SForeign }
     export type SuspendAt:struct = { nid: int, bind: Sym, kind: SuspendK }
     export type TempFact:struct = { nid: int, sym: Sym }
     export type JoinFact:struct = { nid: int, k: Sym }
@@ -36629,6 +36919,7 @@ ${
     // the query itself when its `!` function propagates it, §19.8.2), or a call —
     // plain or handled — of a function that waits when it runs on the server.
     fn serverSuspendKind(cx: PCx, e: AExpr) -> SuspendK | not {
+        if (foreignOf(e) is given) return SuspendK.SForeign            // s477: §23.2.4a — awaited at the boundary
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
             if (sqlOfK(h.subject.k) is given) return SuspendK.SQuery
@@ -36823,7 +37114,7 @@ ${
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
             .HashRef(id: hr0) :> []
-            .Foreign(f: fb0) :> []
+            .Foreign(f: fb0) :> fb0.crossings          // s477: its crossings, read before it waits
         }
     }
 
@@ -36832,6 +37123,7 @@ ${
             .SRemote(callee: f) :> "a client call of the server function `" + f.hint + "` (§19.9.10) stands"
             .SWaits(callee: f) :> "a call of `" + f.hint + "`, which waits for the server (§13.2: it calls a server function), stands"
             .SQuery :> "a `" + sqlSigil() + "}` query — a waiting value (§13.8 item 2) — stands"
+            .SForeign :> "a foreign code block — a value awaited at the host boundary (§23.2.4a) — stands"
             .SLocal(callee: f) :> "a call of `" + f.hint + "`, which waits on the server (§13.8: it runs a `" + sqlSigil() + "}` query, directly or through a call), stands"
         }
     }
@@ -36843,6 +37135,7 @@ ${
             .SRemote(callee: c) :> c
             .SWaits(callee: c) :> not
             .SQuery :> not
+            .SForeign :> not
             .SLocal(callee: c) :> not
         }
         if (f is not) return ps0
@@ -38219,7 +38512,7 @@ ${
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes,
-                                  reqReads: requestReads(typedT, sum, pl.plan) }
+                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
