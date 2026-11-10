@@ -231,3 +231,67 @@ describe("`<page>` attributes (§40.8 per-route set)", () => {
     expect(codes(`<program>\n    <page label:string="a"/>\n    renders <p>\${label}</p>\n    <p>x</p>\n</program>\n`)).toContain("E-NAME-COLLIDES-RESERVED");
   });
 });
+
+// =============================================================================
+// FIX ROUND 1 (S477) — the page boundary survives the flattening (APage.body).
+// RED ON BASE (8ef320844): F1 (a `<db>` in the page supplied the program), F2 (a nested
+// `<channel>` was E-BOOTSTRAP-UNSUPPORTED), `<host>` in a page (accepted as a program child),
+// F3 (a marker-less `pages/about.scrml` was E-STRUCTURAL-ELEMENT-MISPLACED).
+// =============================================================================
+const SQ = "?" + "{";
+const fnQ = (name, t) => `function ${name}() -> int {\n        ${SQ}\`DELETE FROM ${t}\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`;
+const queryOf = (fn) => fn.body.stmts.find((x) => x.variant === "Suspend" && x.data.on.variant === "Query").data.on.data.q;
+const dbOf = (core, fname) => {
+  const fn = core.server.find((x) => x.sym.hint === fname);
+  if (!fn) return "(not a server function)";
+  const db = core.dbs.find((d) => d.sym.id === queryOf(fn).db.id);
+  return db && db.target;
+};
+const USE = (f) => `let <n:int=0/>\n    <button onclick={ @n = ${f}() !{ _ :> { 0 } }; }>go</button>`;
+
+describe("F1 — a `<db src=>` in a `<page>` is no direct child of `<program>` (§8.1.1 \"Direct child only\")", () => {
+  test("control: a `<db>` in a `<div>` does not supply the program — E-SQL-004", () => {
+    expect(codes(`<program>\n    <div>\n        <db src="./a.db"><p>a</p></db>\n    </div>\n    ${fnQ("fc", "tc")}\n    ${USE("fc")}\n</program>\n`)).toEqual(["E-SQL-004"]);
+  });
+  test("a `<db>` in a `<page>` does not supply the program — E-SQL-004 (used fn, and unused)", () => {
+    expect(codes(`<program>\n    <page>\n        <db src="./a.db"><p>a</p></db>\n    </page>\n    ${fnQ("fc", "tc")}\n    ${USE("fc")}\n</program>\n`)).toEqual(["E-SQL-004"]);
+    expect(codes(`<program>\n    <page>\n        <db src="./a.db"><p>a</p></db>\n    </page>\n    ${fnQ("fc", "tc")}\n    <main><p>x</p></main>\n</program>\n`)).toEqual(["E-SQL-004"]);
+  });
+  test("a direct `<db>` plus one in a `<page>`: the direct one is the only direct child — it supplies", () => {
+    const src = `<program>\n    <db src="./a.db"><p>a</p></db>\n    <page>\n        <db src="./b.db"><p>b</p></db>\n    </page>\n    ${fnQ("fc", "tc")}\n    ${USE("fc")}\n</program>\n`;
+    expect(dbOf(clean(src).core, "fc")).toBe("./a.db");
+  });
+  test("a `<db>` in a `<page>` still scopes its own children (nearest scope)", () => {
+    const src = `<program db="./main.db">\n    <page>\n        <db src="./a.db">\n            ${fnQ("fa", "ta")}\n        </db>\n        ${USE("fa")}\n    </page>\n</program>\n`;
+    expect(dbOf(clean(src).core, "fa")).toBe("./a.db");
+    const noDb = `<program>\n    <page>\n        <db src="./a.db">\n            ${fnQ("fa", "ta")}\n        </db>\n        ${USE("fa")}\n    </page>\n</program>\n`;
+    expect(dbOf(clean(noDb).core, "fa")).toBe("./a.db");
+  });
+});
+
+describe("F2 — a `<channel>` at any depth in a `<page>` is E-CHANNEL-INSIDE-PAGE (§38.1)", () => {
+  test("in an element inside the page", () => {
+    expect(codes(`<program>\n<page><div><channel name="c"></channel></div><p>x</p></page>\n</program>\n`)).toEqual(["E-CHANNEL-INSIDE-PAGE"]);
+  });
+  test("two levels down", () => {
+    expect(codes(page("", `<main><section><channel name="c">\n<p>x</p>\n</channel></section></main>`))).toEqual(["E-CHANNEL-INSIDE-PAGE"]);
+  });
+  test("unchanged: a `<channel>` in a `<div>` in the program body (no page) is the generic refusal", () => {
+    const c = codes(`<program>\n<div><channel name="c"></channel></div>\n<p>x</p>\n</program>\n`);
+    expect(c).not.toContain("E-CHANNEL-INSIDE-PAGE");
+    expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+});
+
+describe("`<host>` in a `<page>` is no direct child of `<program>` (§21.3.3 rule 1)", () => {
+  const HOST = `<host>\nfunction t() -> int\n</host>`;
+  test("in a page body: E-HOST-BINDING-PLACEMENT, its body never read", () => {
+    const d = run(page("", `${HOST}\n<p>x</p>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-HOST-BINDING-PLACEMENT"]);
+    expect(d[0].message).toContain("inside a `<page>`");
+  });
+  test("unchanged: directly in the program body it is read as a `<host>` block", () => {
+    expect(codes(`<program>\n${HOST}\n<p>x</p>\n</program>\n`)).not.toContain("E-HOST-BINDING-PLACEMENT");
+  });
+});
+

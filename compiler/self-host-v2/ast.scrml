@@ -530,9 +530,14 @@ ${
     // `<page>` … is not a separate compilation unit — it shares the application
     // `<program>` scope"), so the parser reads it with the program body's own
     // reader and its items JOIN the program's items in place. This record keeps
-    // what the flattening would lose: the opener (`span` = the `<page` tag) and
-    // its attributes, which analysis checks against §40.8's per-route set.
-    export type APage:struct = { span: ASpan, attrs: AAttr[] }
+    // what the flattening would lose: the opener (`span` = the `<page` tag), its
+    // attributes, which analysis checks against §40.8's per-route set, and
+    // (s477 fix round 1) `body` = the whole `<page>…</page>` extent — the page
+    // boundary, for the rules that are NOT shared with the program: a `<db src=>`
+    // in the page is no direct child of the `<program>` (§8.1.1 "Direct child
+    // only"), and a `<channel>` at any depth in it is E-CHANNEL-INSIDE-PAGE
+    // (§38.1). An item of the program whose span lies in a `body` came from the page.
+    export type APage:struct = { span: ASpan, attrs: AAttr[], body: ASpan }
     export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], first: int }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits

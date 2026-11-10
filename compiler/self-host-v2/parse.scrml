@@ -7118,7 +7118,7 @@ ${
     // An element after its opener: children until its closer.
     fn finishElem(o: Opener, mp: MP) -> RElem {
         // s473 (§21.3.3 rule 1): a `<host>` is read at an item position only (parseTagItem)
-        if (isHostOpener(o)) return refuseHostPlacement(o, mp)
+        if (isHostOpener(o)) return refuseHostPlacement(o, mp, "inside another element")
         if (o.vals.length > 0) {
             // s444 Phase B: a validator binds a DECLARATION's own value (§66.4 rule 3) — an element has none
             return finishElem(noVals(o), mDiag(mp, "E-PARSE-ATTR", "the validator `" + o.vals[0].name + "(…)` is on the element `<" + o.name + ">` — a validator belongs in a declaration's opener, binding its own value (§66.4 rule 3, §55.2)", o.vals[0].span.start, o.vals[0].span.end))
@@ -7838,7 +7838,7 @@ ${
 
     // Rule 1 — a `<host>` NOT at an item position: refused whole (opener to
     // `</host>`), its body never read as markup (it would render as page text).
-    fn refuseHostPlacement(o: Opener, mp: MP) -> RElem {
+    fn refuseHostPlacement(o: Opener, mp: MP, where: string) -> RElem {
         let end: int = mp.pos
         if (!o.selfClosing) {
             const close: int = mp.src.indexOf("</host>", mp.pos)
@@ -7848,7 +7848,7 @@ ${
                 end = close + 7
             }
         }
-        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-PLACEMENT", "`<host>` stands here inside another element — a `<host>` block SHALL appear at file top level or as a direct child of `<program>` (§21.3.3 rule 1); move it there", o.start, end)
+        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-PLACEMENT", "`<host>` stands here " + where + " — a `<host>` block SHALL appear at file top level or as a direct child of `<program>` (§21.3.3 rule 1); move it there", o.start, end)
         return elemFrom(noVals(o), [], m)
     }
 
@@ -9132,6 +9132,11 @@ ${
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
         // s473 (§21.3.3 rule 1): a `<host>` at file top or a direct child of `<program>`
+        // s477 fix round 1 — a `<page>` body is read by the program body's reader
+        // (pageItem), but a `<host>` there is no direct child of `<program>`. §21.3.3
+        // rule 1: "`<host>` SHALL appear at file top level or as a direct child of
+        // `<program>`. A `<host>` anywhere else SHALL be `E-HOST-BINDING-PLACEMENT`".
+        if (isHostOpener(o) && ctx == "page") return elemItem(refuseHostPlacement(o, letOnNonDecl(ro.mp, o, isLet), "inside a `<page>`"), exported)
         if (isHostOpener(o)) return finishHost(o, letOnNonDecl(ro.mp, o, isLet), exported)
         if (isEffectOpener(o)) {
             // s449: an `<effect>` at the program body top — owned by the program scope
@@ -9264,7 +9269,7 @@ ${
             items = r.items
             m = r.mp
         }
-        if (ctx == "program") m = withPage(m, { span: mkSpan(o.start, tagEnd), attrs: o.attrs })
+        if (ctx == "program") m = withPage(m, { span: mkSpan(o.start, tagEnd), attrs: o.attrs, body: mkSpan(o.start, m.pos) })
         return { items: items, mp: m }
     }
 
