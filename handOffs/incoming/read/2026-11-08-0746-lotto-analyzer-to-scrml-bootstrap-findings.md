@@ -84,3 +84,15 @@ This gives `E-BOOTSTRAP-UNSUPPORTED: member access .a on a value that is not a s
 Positive notes: E-HTML-PARSER-REPAIR (`<tr>` directly in `<table>`) and E-WRITE-NOT-GRANTED (outer `replace` vs inner tape) were both precise and told me exactly what to write.
 
 #adopter-findings #bootstrap #perf #reactivity #lotto-analyzer
+
+## 7. HIGH (resource) — `scrml-boot.ts dev` appears to leak across rebuilds (added 2026-11-10)
+
+`bun scripts/scrml-boot.ts dev analyzer.scrml --output-dir dist --port 4747` (scrml main, 2026-11-08), left running for one working session on the 2,300-line `analyzer.scrml`. Its rebuild times over 16 file-change rebuilds:
+
+543, 312, 792, 1045, 1773, 2361, 3344, 3226, 3892, 5849, 8156, 8804, 9782, 9801, 12035, 13903 ms
+
+The file grew during that time, but a fresh one-shot `compile` of the final, larger file peaks at 542 MB RSS and takes a few seconds. So rebuilds in the long-lived process got about 25× slower while the input grew far less. That looks like state kept from one rebuild to the next (module cache, AST, or watcher closures).
+
+Around the same time: 15 minutes after the last rebuild (11:39 → 11:54), systemd-oomd killed the terminal scope that held this process tree. The scope had 32 GB RAM and 43.7 GB swap in use. The dev server was the only long-lived compiler process in that tree, but it was not isolated, so this is circumstantial, not proven.
+
+Repro: run `dev` on a large file, touch it 15–20 times, and log RSS and rebuild time after each rebuild.
