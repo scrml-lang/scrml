@@ -1,0 +1,46 @@
+{
+  "id": "reactive-tape-bound-append-trap-rt",
+  "description": "O36 RULED S477: `@xs.append(3)` on `int[1..=2, append]` holding `[1, 2]` is not provable at compile time (a cell's length is not known), so it is checked at run time; past the bound it TRAPS (E-WRITE-INVARIANT-RT, §19.17) before the write — @xs stays 2 long and the handler's next statement never runs (@n stays 0).",
+  "language-version": "1.0",
+  "spec": "§66.11.7",
+  "provenance": "ruling:user-voice-scrml.md S477 \"⭐ RULED — O36\" (\"036 yes\")",
+  "rationale": "§66.11.7 (O36 RULED S477): \"a write whose effect the compiler cannot prove is checked at RUN TIME and TRAPS on violation\"; §19.17: \"A trap SHALL stop the current unit of execution at the trapping expression\"; the check runs before the write, so nothing is written.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "n": 0
+    },
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "0"
+      },
+      {
+        "selector": "#len",
+        "text": "2"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-bounds-unimplemented-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=4"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}
