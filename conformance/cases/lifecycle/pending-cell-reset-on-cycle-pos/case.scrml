@@ -1,0 +1,12 @@
+// §6.8.4 rule 3 — a pending cell that lists itself in `reset-on=` is a cycle (its load's settle would re-run it).
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    let <who:(not to string)=(loadName(1) !{ _ :> not }) reset-on=[@who]/>
+    <main>
+        <p id="who" if=@who>${@who}</p>
+    </main>
+</program>

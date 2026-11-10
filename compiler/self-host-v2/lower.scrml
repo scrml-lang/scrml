@@ -1449,6 +1449,13 @@ ${
         const di: DeclInfo | not = declInfo(c.t, d)
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
+        // s477 — §13.9.2 "A reset of a pending cell (§6.8) is the request's re-run": a new run of the
+        // hidden request (Core Refetch of its handle; requestView gives it one), never its desugared
+        // initializer `not`. The cell keeps its value until the load settles (§13.9.4).
+        if (isProgramKind(di.kind)) {
+            const prq: ReqFact | not = pendingReqAt(c.t, idx)
+            if (prq is given) return [Stmt.Eval(Expr.Refetch(prq.handle))].concat(surfaceReset(di, target, idx))
+        }
         const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx))
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not, rows: c.rows }
@@ -1777,8 +1784,59 @@ ${
         // s475 (slice S4): a PENDING CELL's request (§13.9.2) — no signals and no handle ("The
         // hidden request's controls are not reachable"; "no `.error`", §13.9.5): its body's own
         // Attempt handles the failure, and its one settle Write is the cell's
-        if (rq.pend >= 0) return View.Request(target, deps, body, true, not, not, cls)
+        // s477: a pending cell that is `reset(@x)` somewhere gets a handle — the program-level slot its
+        // reset re-runs it through (resetStmt, Core Refetch). The slot is the compiler's: the author
+        // still has no way to name it (no `<#id>`), so §13.9.2's "not reachable" holds.
+        if (rq.pend >= 0) {
+            if (pendResetUsed(c.t, rq)) return View.Request(target, deps, body, true, not, rq.handle, cls)
+            return View.Request(target, deps, body, true, not, not, cls)
+        }
         return View.Request(target, deps, body, true, state, rq.handle, cls)
+    }
+
+    // s477 — the pending cell's request that loads program field `idx` (§13.9.2), if any.
+    fn pendingReqAt(t: Tables, idx: int) -> ReqFact | not {
+        for (const rq of t.requests) {
+            if (rq.pend >= 0 && pendFieldIdx(rq.target) == idx) return rq
+        }
+        return not
+    }
+
+    fn pendFieldIdx(f: NameFact) -> int {
+        return match f {
+            .NField(idx: i) :> i
+            .NLocal(sym: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: rq0) :> -1
+        }
+    }
+
+    // s477 — some `reset(@x)` of the program names this pending cell (an EReset effect of its field).
+    fn pendResetUsed(t: Tables, rq: ReqFact) -> boolean {
+        const idx: int = pendFieldIdx(rq.target)
+        for (const ef of t.effects.facts) {
+            if (resetsProgramField(t, ef, idx)) return true
+        }
+        return false
+    }
+
+    fn resetsProgramField(t: Tables, f: EffectFact, idx: int) -> boolean {
+        return match f {
+            .EReset(decl: d, idx: i) :> d.id == t.program.id && i == idx
+            .EWrite(w: x) :> false
+            .ESpread(ws: x) :> false
+            .EAssignLocal(sym: x) :> false
+            .EEdits(w: x) :> false
+            .ERemove(w: x) :> false
+            .EElemAt(cap: x) :> false
+            .EPosition(cap: x) :> false
+            .ELocalEdit(sym: x) :> false
+        }
     }
 
     // s475 (slice S3b) — `<#id>.loading` / `.data` / `.error` / `.stale` (§6.7.7

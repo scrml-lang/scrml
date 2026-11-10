@@ -391,14 +391,6 @@ ${LOAD}export let <who:(not to string)=(loadName(1) !{ _ :> not })/>
     expect(e.some((d) => d.code === U && d.message.includes("whose load is a `" + SQ + "}` written in its declaration"))).toBe(true);
   });
 
-  test("`reset(@x)` / `reset-on=` on a pending cell are refused by name (§13.9.2: a reset is the request's re-run — INTERIM)", () => {
-    const r1 = errsOf(APP(PEND).replace(`<button id="u2" onclick={ @userId = 2; }>2</button>`, `<button id="u2" onclick={ reset(@who); }>2</button>`));
-    expect(r1.map((d) => d.code)).toEqual([U]);
-    expect(r1[0].message).toContain("the request's re-run");
-    const r2 = errsOf(APP(`let <who:(not to string)=(loadName(@userId) !{ _ :> not }) reset-on=[@show]/>`));
-    expect(r2.map((d) => d.code)).toEqual([U]);
-  });
-
   test("an author `<request>` that also loads the pending cell is refused (one request per target)", () => {
     const src = APP(PEND).replace("    <main>", `    <request id="again">${D} @who = loadName(@userId); }</request>\n    <main>`);
     expect(codes(src)).toContain(U);
@@ -1081,5 +1073,118 @@ ${LOAD}${pendFirst ? pend + req : req + pend}    <main>
     const src = APP(PEND).replace(`<p id="wait" else>loading</p>`, `<p id="wait" else>loading</p>\n        <button onclick={ ${"<" + "#who>"}.refetch(); }>r</button>`);
     const e = errsOf(src);
     expect(e.length).toBeGreaterThan(0);
+  });
+});
+
+// s477-boot-pending-rest (gap g-boot-pending-cell-reset-unbuilt-s475): §13.9.2 "A reset of a pending
+// cell (§6.8) is the request's re-run" · "The compiler SHALL NOT reset the cell by re-running the
+// initializer outside the request" · §13.9.4 "the request writes the cell only when a load settles" ·
+// §6.8.4 rule 1 "the runtime SHALL perform `reset(@self)`" · §13.9.1 S475 rule 5 "The compiler-written
+// load writes are exempt from grant checks". Red on base 709f53429: every program below was
+// E-BOOTSTRAP-UNSUPPORTED ("Re-running the hidden request from here is not in the bootstrap yet").
+describe("s477 — `reset(@x)` / `reset-on=` on a pending cell re-run its load (§13.9.2)", () => {
+  const RESET = (decl = PEND) => APP(decl).replace(`<button id="hide" onclick={ @show = false; }>hide</button>`,
+    `<button id="hide" onclick={ @show = false; }>hide</button>\n        <button id="rs" onclick={ reset(@who); }>rs</button>`);
+
+  test("`reset(@who)` compiles clean; the request gets a slot and the reset is a Core Refetch of it", () => {
+    const r = compile(RESET());
+    expect(check(r.core)).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.state).toBe(null);                    // still no `<#id>` signals
+    expect(rq.handle).not.toBe(null);              // the compiler's own slot
+    const js = printCore(r.core, "pend-reset-js").js;
+    expect(js).toContain("requestSlot()");
+    expect(js).toMatch(/refetch\(/);
+    // never the desugared initializer written back (§13.9.2 "SHALL NOT reset the cell by re-running the initializer")
+    expect(js).not.toMatch(/who[^\n]*\.set\(null\)/);
+  });
+
+  test("a pending cell that is never reset keeps no slot (minimal output)", () => {
+    const [rq] = requestsOf(compile(APP(PEND)).core);
+    expect(rq.handle).toBe(null);
+  });
+
+  test("a LOCKED pending cell may be reset: the load's write is the compiler's (§13.9.1 S475 rule 5)", () => {
+    expect(codes(RESET(`<who:(not to string)=(loadName(3) !{ _ :> not })/>`))).toEqual([]);
+    // a plain locked lifecycle cell still may not (§66.11.6 — unchanged)
+    expect(codes(RESET(`<who:(not to string)=not/>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+
+  test("`reset-on=` on a pending cell: its entries become the load's dependencies", () => {
+    const r = compile(APP(`<who:(not to string)=(loadName(3) !{ _ :> not }) reset-on=[@show]/>`));
+    expect(check(r.core)).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.deps.length).toBe(1);                 // @show (the locked load reads no cell itself)
+    const prog = r.core.decls.find((d) => d.sym.id === r.core.program.id);
+    expect(prog.renders.filter((v) => v.variant === "ResetOn")).toEqual([]);   // no plain reset write of `not`
+    // a cycle through a pending cell is still E-RESET-ON-CYCLE
+    const cyc = codes(APP(`let <who:(not to string)=(loadName(3) !{ _ :> not }) reset-on=[@who]/>`));
+    expect(cyc).toContain("E-RESET-ON-CYCLE");
+  });
+
+  test("run time: `reset(@who)` re-runs the load; the cell keeps its value until it settles (§13.9.4)", async () => {
+    const r = compile(RESET());
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-reset-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#rs"));
+    await settle(5);
+    expect(held.length).toBe(2);                    // the re-run
+    expect(cells(rt).who).toBe("a");                // never back to `not`, never the initializer
+    expect(shown()).toBe("a");
+    await held[1].go();
+    await settle();
+    expect(shown()).toBe("a");
+    // a second reset while one is in flight: the newest run wins, the older READ is aborted
+    click(document.querySelector("#rs"));
+    await settle(5);
+    click(document.querySelector("#rs"));
+    await settle(5);
+    expect(held.length).toBe(4);
+    expect(held[2].aborted).toBe(true);
+    await held[3].go();
+    await settle();
+    expect(shown()).toBe("a");
+  });
+
+  test("run time: a LOCKED mount-once pending cell reloads on `reset`, and only then", async () => {
+    const r = compile(RESET(`<who:(not to string)=(loadName(3) !{ _ :> not })/>`));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    await loadProgram(r.core, "pend-reset-locked-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("c");
+    click(document.querySelector("#u2"));           // not a dependency
+    await settle(5);
+    expect(held.length).toBe(1);
+    click(document.querySelector("#rs"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    await held[1].go();
+    await settle();
+    expect(shown()).toBe("c");
+  });
+
+  test("run time: `reset-on=[@userId]` re-runs a locked load when the entry changes", async () => {
+    const r = compile(APP(`<who:(not to string)=(loadName(3) !{ _ :> not }) reset-on=[@userId]/>`));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-reset-on-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    click(document.querySelector("#u2"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    expect(cells(rt).who).toBe("c");                // stale while reloading
+    await held[1].go();
+    await settle();
+    expect(shown()).toBe("c");
   });
 });

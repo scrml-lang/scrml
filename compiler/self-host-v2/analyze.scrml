@@ -11089,13 +11089,20 @@ ${
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
         }
-        // s475 (slice S4) — §13.9.2: "A reset of a pending cell (§6.8) is the request's re-run" and
-        // "The compiler SHALL NOT reset the cell by re-running the initializer outside the request".
-        // After the desugar the cell's initializer is `not`, so the plain reset would write `not` —
-        // neither. Refused by name, INTERIM: the capable form re-runs the hidden request through the
-        // program-level request route `<#id>.refetch()` uses (slice S3b, Core Expr.Refetch).
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4) — §13.9.2: "A reset of a
+        // pending cell (§6.8) is the request's re-run" and "The compiler SHALL NOT reset the cell by
+        // re-running the initializer outside the request". So the reset writes nothing itself: it
+        // starts the hidden request again (lower resetStmt: Core Refetch of the request's handle),
+        // and the cell keeps its value until that load settles (§13.9.4 "the request writes the cell
+        // only when a load settles"). The load's write is the compiler's, exempt from the cell's
+        // grant checks (§13.9.1 S475 rule 5) — so a LOCKED pending cell may be reset too, and the
+        // lifecycle / `replace` refusals below do not apply. It stays an EReset: a write of the
+        // cell for every write rule (§6.7.4 counts a re-run request's settle as a write of its
+        // target), and the typer ends the cell's narrowing at it (conservative: the re-run may
+        // settle `not`, §13.9.5).
         if (p.decl.sym.id == env.g.program.id && isPendingDecl(env.g, f.nid)) {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset(@" + f.sym.hint + ")`", f.sym.hint))
+            if (cap is not) return st                       // resolvePending reported it
+            return addEffect(st, e.nid, EffectFact.EReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
         }
         // s475 (s475-boot-lifecycle-reads): a LOCKED `(not to T)` cell's write grant is its
         // lifecycle (fieldOf rides it on `replace`), and a reset writes the pre-state `not`
@@ -30360,8 +30367,17 @@ ${
         }
         const f: FieldInfo = prog.info.fields[target]
         const gr: TransitionGraph | not = f.graph
-        // s475 (slice S4): as `reset(@x)` (resolveReset) — INTERIM
-        if (isPendingDecl(g, d.nid)) return { e: not, st: addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset-on=` on `@" + d.name + "`", d.name)) }
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4): §6.8.4 rule 1 — "the runtime
+        // SHALL perform `reset(@self)`" — and §13.9.2 "A reset of a pending cell (§6.8) is the
+        // request's re-run": on a pending cell the rule re-runs its load when an entry changes, which
+        // is exactly a dependency of the hidden request (pendResetDeps adds the entries to its deps,
+        // so the request-ring, write-SQL and plan rules see them). The load's write is the
+        // compiler's (§13.9.1 S475 rule 5): no `replace` grant is needed, and a pending cell has no
+        // `rule=` graph.
+        if (isPendingDecl(g, d.nid)) {
+            if (!ok) return { e: not, st: st }
+            return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+        }
         if (gr is given) {
             const refused: string = engineRefusals(g, gr, f.init)
             if (refused != "") {
@@ -30393,8 +30409,74 @@ ${
         return pendingDeclNids(p.items).indexOf(nid) >= 0
     }
 
-    fn pendResetMsg(what: string, n: string) -> string {
-        return what + " resets a pending cell, and §13.9.2 makes that a re-run of its load (\"A reset of a pending cell (§6.8) is the request's re-run\" — never its initializer again, never back to `not`). Re-running the hidden request from here is not in the bootstrap yet; to reload on demand, declare `@" + n + "` `=not` and load it with a `<request>` written by hand (§6.7.7)"
+    // s477 (s477-boot-pending-rest) — §6.8.4 rule 1 on a pending cell is its load's re-run
+    // (§13.9.2), so an accepted `reset-on=` rule whose target is a pending cell adds its entries to
+    // the hidden request's deps (its re-run on change), and leaves the plain reset rules (lower
+    // resetOnViews would write the desugared initializer, `not` — §13.9.2 "SHALL NOT reset the cell
+    // by re-running the initializer outside the request"). Runs before the tables are built, so
+    // requestCycles, the write-SQL rule and lowering all see the added deps.
+    type RPendResets:struct = { reqs: ReqFact[], infos: ResetOnInfo[] }
+
+    fn pendResetDeps(reqs: ReqFact[], infos: ResetOnInfo[]) -> RPendResets {
+        let outR: ReqFact[] = []
+        let taken: int[] = []
+        for (const rq of reqs) {
+            const ti: int = pendTargetIdx(rq)
+            if (ti < 0) {
+                outR = outR.concat([rq])
+            } else {
+                let deps: NameFact[] = rq.deps
+                for (const inf of infos) {
+                    if (inf.target == ti) {
+                        taken = taken.concat([ti])
+                        for (const tr of inf.triggers) {
+                            const f: NameFact = withFieldIdx(rq.target, tr)
+                            if (!hasDepFact(deps, f)) deps = deps.concat([f])
+                        }
+                    }
+                }
+                outR = outR.concat([{ nid: rq.nid, id: rq.id, file: rq.file, span: rq.span, target: rq.target, targetName: rq.targetName, deps: deps,
+                                      explicit: rq.explicit, signals: rq.signals, wcaps: rq.wcaps, handle: rq.handle, load: rq.load, rhs: rq.rhs,
+                                      dataTy: rq.dataTy, errTy: rq.errTy, err: rq.err, lins: rq.lins, req: rq.req, value: rq.value, pend: rq.pend }])
+            }
+        }
+        let outI: ResetOnInfo[] = []
+        for (const inf of infos) {
+            if (taken.indexOf(inf.target) < 0) outI = outI.concat([inf])
+        }
+        return { reqs: outR, infos: outI }
+    }
+
+    // A pending cell's request: the program field it loads (-1 for an author `<request>`).
+    fn pendTargetIdx(rq: ReqFact) -> int {
+        if (rq.pend < 0) return -1
+        const t: NameFact = rq.target
+        return match t {
+            .NField(idx: i) :> i
+            .NLocal(sym: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: rq0) :> -1
+        }
+    }
+
+    // Another field of the same declaration instance as `f` (an NField).
+    fn withFieldIdx(f: NameFact, idx: int) -> NameFact {
+        return match f {
+            .NField(decl: d, inst: i) :> NameFact.NField(d, i, idx)
+            .NLocal(sym: x) :> f
+            .NInst(decl: x) :> f
+            .NStruct(owner: x) :> f
+            .NFn(sym: x) :> f
+            .NLength :> f
+            .NSurface(of: x) :> f
+            .NConst(sym: x) :> f
+            .NReq(id: rq0) :> f
+        }
     }
 
     fn resetEntries(v: AAttrValue) -> AExpr[] | not {
@@ -38160,6 +38242,9 @@ ${
         st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
+        // s477: a `reset-on=` on a pending cell re-runs its load (§13.9.2) — the entries join its deps
+        const prr: RPendResets = pendResetDeps(st.reqs, rr.infos)
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs }
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
@@ -38175,7 +38260,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
