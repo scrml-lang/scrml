@@ -299,7 +299,12 @@ ${
         // so no alias of the old value sees it (§66.10). `arg`: the element
         // (append / prepend) or the index (remove); `elem`: the element type the
         // typer checks an element against (`not`: unchecked).
-        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not),
+        // s477 (s477-boot-tape-forms): `path` non-empty — an edit of a PART of the
+        // local (`b.xs.append(v)`, `g[i].pop()`), judged by the resolver against the
+        // part's own grants (resolveLocalPartEdit); Core rebinds the local WITH that
+        // path. `tmps`: two minted locals per index step of `path`, in order — the
+        // index, and the element it names — so each index is evaluated once.
+        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], tmps: Sym[]),
     }
     export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt }
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
@@ -12374,14 +12379,14 @@ ${
         }
     }
 
-    // An edit method on a part of a local (`p.xs.append(v)`, `xs[i].append(v)`), or
-    // on a local whose type the compiler cannot resolve: its values are resolved, and
-    // it is refused. INTERIM (gap g-boot-local-tape-part-edit-s475): the capable form
-    // is the edit of the part, judged by the part's own tape grants (§66.12.6 rule 1)
-    // and lowered as a local part write (Stmt.Assign with a path) of the edited part.
+    // An edit method on a receiver rooted at a local that is neither the local nor a
+    // part of it the bootstrap can walk (an `<each>` row, a part of a `given`-narrowed
+    // handle, a local whose type the compiler cannot resolve): its values are
+    // resolved, and it is refused. (s477: an edit of a PART of a local is built —
+    // resolveLocalPartEdit.)
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a part of a local (a field or a position of it), or on a local whose type the compiler cannot resolve, is not in the bootstrap yet — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on this receiver (an `<each>` row, a part of a `given`-narrowed handle, or a local whose type the compiler cannot resolve) is not in the bootstrap yet — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
     }
 
     // s475 (s475-boot-local-tape-edits) — `xs.append(v)` / `xs.prepend(v)` /
@@ -12405,6 +12410,10 @@ ${
         const n: string = exprName(m.obj)
         const l: LocalB | not = lookupLocal(env, n)
         if (n == "" || l is not) {
+            // s477 (s477-boot-tape-forms): an edit of a PART of a local (`b.xs.append(v)`,
+            // `g[i].pop()`), judged by the part's own tape grants (§66.12.6 rule 1)
+            const pl: LocalB | not = partLocal(env, m.obj)
+            if (pl is given) return resolveLocalPartEdit(env, e, m, args, pl, editName, st0)
             if (editName) return localEditRefused(env, e, meth, args, st0)
             return not
         }
@@ -12435,7 +12444,108 @@ ${
             if (meth == "remove") want = Type.Int
             st = resolveExpr(env, args[0], want, st).st
         }
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el))
+        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, [], []))
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-local-tape-part-edit-s475) — an edit
+    // METHOD on a PART of the local `l`: a tape field (`b.xs.append(v)`), a tape
+    // position (`g[i].pop()`), or any chain of them (`b.rows[i].tags.remove(k)`).
+    // §66.12.6 rule 1: "A tape's grants govern every write to it, in each position
+    // that can hold one: … a struct field whose type is a tape (§66.11.4: the field's
+    // tape type carries its grants); a tuple position whose type is a tape (… the
+    // tape's own grants govern edits of the tape in it)". So the edit is judged by
+    // the PART's tape type — the grants its declared field type writes when a struct
+    // field lies on the path; otherwise the part is a position of the local's own
+    // type, whose WRITTEN type gives the grants (an inferred one gives none:
+    // "Inference never invents a grant"). An edit of the part rebinds no name, so
+    // `const` on the root does not refuse it (§66.12.6 rule 3, RULED S475 "read as
+    // edit"). Core: the local rebound with a path to the part's edited value
+    // (Stmt.Assign(l, Prim(Tape…, [<the part>, v]), path), as a part write is), a
+    // NEW tape (§66.10): no alias of the old value sees it. Each index is evaluated
+    // ONCE, into a local (`tmps`, two per index step: the index, then the element it
+    // names), and the part is read through them before the edit — so a position
+    // past the end traps (E-INDEX-OUT-OF-RANGE-RT, §66.12.6 rule 3) and nothing is
+    // written. `not`: `remove` / `insert` on a part that is not a tape (a host value's
+    // own method), which the caller's paths take.
+    fn resolveLocalPartEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], l: LocalB, editName: boolean, st0: AS) -> AS | not {
+        const meth: string = m.method
+        const ps: PartStep[] = partSteps(m.obj)
+        const label: string = partLabel(l.name, ps)
+        const call: string = label + "." + meth + "(…)"
+        const lt: Type | not = l.ty
+        let wt: Type | not = writtenLocalType(st0, l.s)
+        if (wt is not) wt = lt
+        if (lt is not) {
+            if (!editName) return not
+            // only positions of the local's own tape, its type inferred: whatever that
+            // type is, inference gives it no grant (§66.12.6 rule 1), as a part write
+            if (!partHasField(ps) && writtenLocalType(st0, l.s) is not) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-WRITE-NOT-GRANTED", "`" + label + "." + localEditCall(localEditOpOf(meth)) + "` edits a tape inside the local `" + l.name + "`, whose type is inferred (no annotation), and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469) — write the grants in its type (`let " + l.name + ": T[free, " + meth + "][…] = …`)")
+            return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of `" + l.name + "`, whose type is not known here — annotate it (`let " + l.name + ": T = …`)")
+        }
+        const pw: PartWalk = walkLocalPart(env, l, lt, ps, call, "edits", env.file + ":" + lineOf(env.g, env.file, e.span.start))
+        if (pw.code != "") {
+            if (!editName) return not
+            return addDiag(resolveExprs(env, args, not, st0), env.file, m.obj.span, pw.code, pw.msg)
+        }
+        // `remove` / `insert` are tape methods only on a tape (a host value has its own)
+        if (!editName && seqElem(unMaybe(pw.t)) is not) return not
+        if (isRowLocal(env, l)) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of the row `" + l.name + "` — a row is a read-only projection of its source's element; write the source cell")
+        // the local's name is an APPEARANCE of the binding (§35.2), as in a part write
+        let st: AS = st0
+        const rn: AExpr | not = partRootName(m.obj)
+        if (rn is given) st = addName(st, rn.nid, NameFact.NLocal(l.s))
+        // the indices are evaluated before the argument, in source order — each once
+        let tmps: Sym[] = []
+        for (const s of ps) {
+            const ix: AExpr | not = s.index
+            if (ix is given) {
+                st = resolveExpr(env, ix, Type.Int, st).st
+                const mi: RSym = mint(st, "at")
+                const me: RSym = mint(mi.st, "part")
+                st = me.st
+                tmps = tmps.concat([mi.s, me.s])
+            }
+        }
+        if (meth == "insert") return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + ".insert(i, x)` is not in the bootstrap yet — an index past the end would break the tape's per-position type (E-WRITE-INVARIANT, §66.12.6 rule 3), and how that is enforced where the index is not provable is not ruled (⚑ O36). Use `append` / `prepend`")
+        const op: LocalEdit = localEditOpOf(meth)
+        const el: Type | not = seqElem(unMaybe(pw.t))
+        const takesArg: boolean = meth == "append" || meth == "prepend" || meth == "remove"
+        if (takesArg && args.length != 1) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + "." + meth + "(…)` takes exactly one " + localEditArgWhat(meth) + " (§66.12.6 rule 3: each grow method adds ONE value — call it once per value)")
+        if (!takesArg && args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + "." + meth + "()` takes no argument")
+        let arg: AExpr | not = not
+        if (takesArg) {
+            arg = args[0]
+            let want: Type | not = el
+            if (meth == "remove") want = Type.Int
+            st = resolveExpr(env, args[0], want, st).st
+        }
+        // the part's grants: its own tape type when a struct field lies on the path
+        // (the field's declared type writes them); else a position of the local's own
+        // type — its written type's, or none when the type is inferred (rule 1)
+        let judged: Type = pw.t
+        let tyText: string = tapeTypeName(pw.t)
+        if (!pw.viaField && writtenLocalType(st, l.s) is not) {
+            judged = ungranted(pw.t)
+            tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[…][…] = …`"
+        }
+        const pr: TapeDiag[] = localEditProblems(label, judged, tyText, op)
+        if (pr.length > 0) return addDiag(st, env.file, e.span, pr[0].code, pr[0].msg)
+        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, pw.steps, tmps))
+    }
+
+    fn partHasField(ps: PartStep[]) -> boolean {
+        for (const s of ps) {
+            if (s.index is not) return true
+        }
+        return false
+    }
+
+    fn localEditOpOf(meth: string) -> LocalEdit {
+        if (meth == "prepend") return LocalEdit.LPrepend
+        if (meth == "pop") return LocalEdit.LPop
+        if (meth == "shift") return LocalEdit.LShift
+        if (meth == "remove") return LocalEdit.LRemoveAt
+        return LocalEdit.LAppend
     }
 
     fn localEditArgWhat(meth: string) -> string {
@@ -12869,6 +12979,73 @@ ${
         return addDiag(resolveExpr(env, value, not, st).st, env.file, span, code, msg)
     }
 
+    // s477 (s477-boot-tape-forms): the walk of a local part's path, root first —
+    // shared by a part WRITE (resolveLocalPartWrite) and a part EDIT
+    // (resolveLocalPartEdit), so one rule says what a part of a local is. `t`: the
+    // part's type; `lastTape`: the tape whose position the last index step names
+    // (`not` when the last step is a field); `lastField`: the field the last step
+    // names; `fieldInTape`: a tape position lies before that field;
+    // `tapeViaField`: a struct field step lies before the last tape position;
+    // `viaField`: some struct field step was taken. `code` non-empty: refused.
+    // `written` is the part as the message names it (`a.xs[…] = …`), `verb` what
+    // the statement does to it ("writes", "edits").
+    type PartWalk:struct = { code: string, msg: string, t: Type, steps: LStep[], lastField: FieldDef | not, lastTape: Type | not, fieldInTape: boolean, tapeViaField: boolean, viaField: boolean }
+
+    fn partWalkRefused(lt: Type, code: string, msg: string) -> PartWalk {
+        return { code: code, msg: msg, t: lt, steps: [], lastField: not, lastTape: not, fieldInTape: false, tapeViaField: false, viaField: false }
+    }
+
+    fn walkLocalPart(env: Env, l: LocalB, lt: Type, ps: PartStep[], written: string, verb: string, loc: string) -> PartWalk {
+        let t: Type = lt
+        let steps: LStep[] = []
+        let lastField: FieldDef | not = not
+        let lastTape: Type | not = not
+        let sawIndex = false
+        let fieldInTape = false
+        let viaField = false          // a struct field step has been taken
+        let tapeViaField = false      // ... before the last tape position
+        let at: string = l.name
+        let part: string = "a part write"
+        if (verb != "writes") part = "a part edit"
+        for (const s of ps) {
+            if (maybeInner(t) is given) return partWalkRefused(lt, "E-BOOTSTRAP-UNSUPPORTED", "`" + written + "` " + verb + " through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and " + part + " through a `T | not` value is not in the bootstrap yet; bind the present value first")
+            const ix: AExpr | not = s.index
+            if (ix is given) {
+                const el: Type | not = seqElem(t)
+                if (el is not) return partWalkRefused(lt, "E-ASSIGN-TARGET", "`" + written + "` " + verb + " a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape")
+                steps = steps.concat([LStep.LIndex(ix, loc)])
+                lastTape = t
+                tapeViaField = viaField
+                lastField = not
+                sawIndex = true
+                t = el
+                at = at + "[…]"
+            } else {
+                const sy: Sym | not = namedOf(t)
+                const fs: FieldDef[] | not = structFieldsOfType(env, t)
+                // a named type with no struct fields here (a declaration's value, an
+                // enum): not a write Core has — refused, never approximated
+                if (sy is given && fs is not) return partWalkRefused(lt, "E-BOOTSTRAP-UNSUPPORTED", "`" + written + "` " + verb + " `." + s.field + "` of `" + at + "`, a `" + sy.hint + "` — " + part + " of a value of this type (a declaration's value or an enum) is not in the bootstrap yet")
+                if (sy is not || fs is not) return partWalkRefused(lt, "E-ASSIGN-TARGET", "`." + s.field + "` is not a field of a struct here — `" + at + "` is `" + typeName(t) + "`")
+                let k: int = -1
+                let i: int = 0
+                for (const fd of fs) {
+                    if (fd.sym.hint == s.field) k = i
+                    i = i + 1
+                }
+                if (k < 0) return partWalkRefused(lt, "E-SCOPE-001", "`" + sy.hint + "` has no field `" + s.field + "`")
+                steps = steps.concat([LStep.LField({ owner: sy, idx: k }, s.field)])
+                lastField = fs[k]
+                lastTape = not
+                fieldInTape = sawIndex
+                viaField = true
+                t = fs[k].ty
+                at = at + "." + s.field
+            }
+        }
+        return { code: "", msg: "", t: t, steps: steps, lastField: lastField, lastTape: lastTape, fieldInTape: fieldInTape, tapeViaField: tapeViaField, viaField: viaField }
+    }
+
     // A write to a PART of the local `l` (Core Assign with a path).
     fn resolveLocalPartWrite(env: Env, e: AExpr, target: AExpr, value: AExpr, l: LocalB, st0: AS) -> AS {
         const ps: PartStep[] = partSteps(target)
@@ -12898,52 +13075,14 @@ ${
             }
         }
         if (lt is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes a part of `" + l.name + "`, whose type is not known here — annotate it (`let " + l.name + ": T = …`)", st)
-        const loc: string = env.file + ":" + lineOf(env.g, env.file, e.span.start)
-        let t: Type = lt
-        let steps: LStep[] = []
-        let lastField: FieldDef | not = not
-        let lastTape: Type | not = not
-        let sawIndex = false
-        let fieldInTape = false
-        let viaField = false          // a struct field step has been taken
-        let tapeViaField = false      // ... before the last tape position
-        let at: string = l.name
-        for (const s of ps) {
-            if (maybeInner(t) is given) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and a part write through a `T | not` value is not in the bootstrap yet; bind the present value first", st)
-            const ix: AExpr | not = s.index
-            if (ix is given) {
-                const el: Type | not = seqElem(t)
-                if (el is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`" + label + " = …` writes a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape", st)
-                steps = steps.concat([LStep.LIndex(ix, loc)])
-                lastTape = t
-                tapeViaField = viaField
-                lastField = not
-                sawIndex = true
-                t = el
-                at = at + "[…]"
-            } else {
-                const sy: Sym | not = namedOf(t)
-                const fs: FieldDef[] | not = structFieldsOfType(env, t)
-                // a named type with no struct fields here (a declaration's value, an
-                // enum): not a write Core has — refused, never approximated
-                if (sy is given && fs is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes `." + s.field + "` of `" + at + "`, a `" + sy.hint + "` — a part write of a value of this type (a declaration's value or an enum) is not in the bootstrap yet", st)
-                if (sy is not || fs is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`." + s.field + "` is not a field of a struct here — `" + at + "` is `" + typeName(t) + "`", st)
-                let k: int = -1
-                let i: int = 0
-                for (const fd of fs) {
-                    if (fd.sym.hint == s.field) k = i
-                    i = i + 1
-                }
-                if (k < 0) return partRefused(env, value, target.span, "E-SCOPE-001", "`" + sy.hint + "` has no field `" + s.field + "`", st)
-                steps = steps.concat([LStep.LField({ owner: sy, idx: k }, s.field)])
-                lastField = fs[k]
-                lastTape = not
-                fieldInTape = sawIndex
-                viaField = true
-                t = fs[k].ty
-                at = at + "." + s.field
-            }
-        }
+        const pw: PartWalk = walkLocalPart(env, l, lt, ps, label + " = …", "writes", env.file + ":" + lineOf(env.g, env.file, e.span.start))
+        if (pw.code != "") return partRefused(env, value, target.span, pw.code, pw.msg, st)
+        const t: Type = pw.t
+        const steps: LStep[] = pw.steps
+        const lastField: FieldDef | not = pw.lastField
+        const lastTape: Type | not = pw.lastTape
+        const fieldInTape: boolean = pw.fieldInTape
+        const tapeViaField: boolean = pw.tapeViaField
         st = resolveExpr(env, value, t, st).st
         const key: string = placeKey(target)
         const tape: Type | not = lastTape
@@ -27405,11 +27544,11 @@ ${
     // written type, else its inferred type, which carries NO grant (§66.12.6 rule 1:
     // "Inference never invents a grant"; O63: a local `let` gives the tape nothing).
     // The element is checked against the element type; `remove`'s position is an `int`.
-    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not }
+    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[] }
 
     fn localEditOf(f: EffectFact | not) -> LocalEditFact | not {
         return match f {
-            .ELocalEdit(sym: s, op: op, arg: a, elem: el) :> localEditFact(s, op, a, el)
+            .ELocalEdit(sym: s, op: op, arg: a, elem: el, path: pa) :> localEditFact(s, op, a, el, pa)
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
@@ -27422,11 +27561,12 @@ ${
         }
     }
 
-    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not) -> LocalEditFact {
-        return { sym: s, op: op, arg: a, elem: el }
+    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, pa: LStep[]) -> LocalEditFact {
+        return { sym: s, op: op, arg: a, elem: el, path: pa }
     }
 
     fn typeLocalEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
+        if (le.path.length > 0) return typeLocalPartEdit(env, e, callee, le, ts0)
         let ts: TypeState = ts0
         const obj: AExpr | not = memberObj(callee)
         if (obj is given) ts = typeExpr(env, obj, ts).ts
@@ -27465,6 +27605,42 @@ ${
             }
         }
         return record(ts, e.nid, VType.Unknown)
+    }
+
+    // s477 (s477-boot-tape-forms) — an edit of a PART of a local: the resolver
+    // judged the grants (resolveLocalPartEdit, by the part's own tape type); here each
+    // index is an `int` (in order), and the argument is checked as `typeLocalEdit`
+    // checks it — the element against the part's element type, `remove`'s position
+    // an `int`. The receiver is typed as a part write's target is: its root is an
+    // appearance of the local (the resolver's name fact), not a read of a value.
+    fn typeLocalPartEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const st of le.path) {
+            for (const ix of lstepIndex(st)) {
+                const ri: RVT = typeExpr(env, ix, ts)
+                ts = checkIndex(env, ri.vt, ix.span, ri.ts)
+            }
+        }
+        const a: AExpr | not = le.arg
+        if (a is given) {
+            const ra: RVT = typeExpr(env, a, ts)
+            ts = ra.ts
+            if (le.op == LocalEdit.LRemoveAt) {
+                ts = checkIndex(env, ra.vt, a.span, ts)
+            } else {
+                const el: Type | not = le.elem
+                if (el is given) ts = checkNotElems(env, a, el, checkLitFields(env, a, checkValue(env, ra.vt, el, a.span, "an element of " + placeLabel(memberObjOr(callee)), ts)))
+            }
+        }
+        const obj: AExpr | not = memberObj(callee)
+        if (obj is given) ts = record(ts, obj.nid, VType.Unknown)
+        return record(record(ts, callee.nid, VType.Unknown), e.nid, VType.Unknown)
+    }
+
+    fn memberObjOr(callee: AExpr) -> AExpr {
+        const o: AExpr | not = memberObj(callee)
+        if (o is given) return o
+        return callee
     }
 
     // The type recorded for a node this pass already typed.

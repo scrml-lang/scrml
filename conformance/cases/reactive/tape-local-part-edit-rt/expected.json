@@ -1,0 +1,21 @@
+{
+  "id": "reactive-tape-local-part-edit-rt",
+  "description": "§66.12.6 rule 1 (a struct field whose type is a tape carries its grants) + rule 3 (tape methods are named after their grants) + §66.10 (aliases snapshot): `b.xs.append(…)` / `b.xs.pop()` edit the tape FIELD of a `const` struct local, judged by the field's type `int[free, append, pop]`; the edit rebinds no name (RULED S475), and `before`, taken from `b.xs` before the edits, keeps its one element. One #go click sets @n to 2 * 10 + 1 = 21.",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — NO unconstrained sequence behaviour anywhere in the language\" (\"No position escapes the grant check. That covers locals, parameters, returns, struct fields, tuple positions …\"); ruling:user-voice-scrml.md S475 \"⭐ RULED — local tape edit on a `const` local or parameter is an EDIT\" (\"read as edit\")",
+  "rationale": "§66.12.6 rule 1: \"a struct field whose type is a tape (§66.11.4: the field's tape type carries its grants)\"; rule 3: `xs.append(x)` is granted by `append`, `xs.pop()` by `pop`. §66.10 rule 1: \"A binding … initialized from … any value holds a snapshot of that value\", so `before` is unchanged by the later edits.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-WRITE-NOT-GRANTED", "E-ASSIGN-004"],
+    "input": [{ "click": "#go" }],
+    "state": { "n": 21 },
+    "domAnchored": [{ "selector": "#n", "text": "21" }]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-method-unproven-receiver-throws-s469",
+      "fails": { "runtime": "sha256:81d76607cf2cae2b" }
+    }
+  }
+}

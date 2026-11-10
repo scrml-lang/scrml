@@ -190,12 +190,8 @@ describe("E — what stays refused (INTERIM, named)", () => {
     expect(r.diags[0].message).toContain("O36");
   });
 
-  test("an edit of a PART of a local (gap g-boot-local-tape-part-edit-s475)", () => {
-    const decls = "    type B:struct = { xs: int[free, append] }";
-    const r = run(prog(decls, `        let b: B = { xs: [] };\n        b.xs.append(1);`));
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("part of a local");
-  });
+  // an edit of a PART of a local (gap g-boot-local-tape-part-edit-s475): BUILT by
+  // s477-boot-tape-forms — tape-forms-s477.test.js A1–A3.
 
   test("a spread value outside a recognized edit shape (gap g-boot-spread-value-s475)", () => {
     expect(codes(prog("", `        let a: int[] = [1];\n        const b: int[] = [...a, 2];`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
