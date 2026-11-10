@@ -129,3 +129,58 @@ describe("A3 — judged by the PART's own tape grants, with the codes a cell get
     expect(r.diags[0].message).toContain("O36");
   });
 });
+
+// ===========================================================================
+//   B. a removal used as a VALUE (gap g-boot-tape-removal-value-s475). SPEC §66.12.6
+//      rule 3: "`pop`, `shift` and `remove` return the removed value, typed `T | not`:
+//      on an empty tape, or a `remove(i)` with no position `i`, nothing is removed and
+//      the result is `not`".
+const OR = "    fn txtOr(v: int | not) -> string {\n        if (v is given) return `${v}`;\n        return \"not\";\n    }";
+const all = (...vs) => vs.map((v) => `txtOr(${v})`).join(' + "," + ');
+
+describe("B1 — `pop` / `shift` / `remove(i)` as a value, on a local, a part, a cell (§66.12.6 rule 3)", () => {
+  test("a local: the removed values in order, then `not` on an empty tape; the tape shrinks", async () => {
+    expect(await runShown(OR, `        let xs: int[free, pop, shift, remove] = [1, 2, 3, 4];\n        const a: int | not = xs.pop();\n        const b: int | not = xs.shift();\n        let c: int | not = xs.remove(0);\n        const d: int | not = xs.pop();\n        c = xs.pop();\n        @shown = ${all("a", "b", "c", "d")} + "|" + \`\${xs.length}\`;`)).toBe("4,1,not,3|0");
+  });
+
+  test("`remove(i)` with no position `i` (past the end, negative) is `not` and removes nothing", async () => {
+    expect(await runShown(OR, `        let xs: int[free, remove] = [5, 6];\n        const a: int | not = xs.remove(7);\n        const b: int | not = xs.remove(-1);\n        const c: int | not = xs.remove(1);\n        @shown = ${all("a", "b", "c")} + "|" + ${txt("xs")};`)).toBe("not,not,6|5");
+  });
+
+  test("a cell: `@xs.pop()` / `@xs.shift()` give the removed element and shrink the cell", async () => {
+    expect(await runShown(`${OR}\n    <xs:int[free, pop, shift]=([5, 6, 7])/>`, `        const a: int | not = @xs.pop();\n        const b: int | not = @xs.shift();\n        @shown = ${all("a", "b")} + "|" + ${txt("@xs")};`)).toBe("7,5|6");
+  });
+
+  test("a part of a local, a `return`, an assignment to a cell; `remove(i)`'s position read once", async () => {
+    const decls = `${OR}\n${B}\n    let <calls:int=0/>\n    let <last:int | not=(not)/>\n    function one() -> int {\n        @calls = @calls + 1;\n        return 1;\n    }\n    fn top(xs: int[free, pop]) -> int | not {\n        return xs.pop();\n    }`;
+    expect(await runShown(decls, `        const b: B = { n: 0, xs: [10, 20, 30] };\n        const p: int | not = b.xs.pop();\n        const q: int | not = b.xs.remove(one());\n        @last = top([8, 9]);\n        @shown = ${all("p", "q", "@last")} + "|" + ${txt("b.xs")} + "|" + \`\${@calls}\`;`)).toBe("30,20,9|10|1");
+  });
+});
+
+describe("B2 — value semantics: the removal is never visible through an earlier value (§66.10)", () => {
+  test("a local alias, a cell snapshot and a caller's argument keep every element", async () => {
+    const decls = `${OR}\n    <cs:int[free, pop]=([1, 2])/>\n    fn top(xs: int[free, pop]) -> int | not {\n        return xs.pop();\n    }`;
+    expect(await runShown(decls, `        let xs: int[free, pop] = [1, 2, 3];\n        const before: int[] = xs;\n        const snap: int[] = @cs;\n        const a: int | not = xs.pop();\n        const b: int | not = @cs.pop();\n        const arg: int[free, pop] = [4, 5];\n        const c: int | not = top(arg);\n        @shown = ${all("a", "b", "c")} + "|" + ${txt("before")} + "|" + ${txt("snap")} + "|" + ${txt("arg")} + "|" + ${txt("xs")} + "|" + ${txt("@cs")};`)).toBe("3,2,5|1,2,3|1,2|4,5|1,2|1");
+  });
+});
+
+describe("B3 — judged, typed, and where it stays refused (INTERIM)", () => {
+  test("the value is `T | not` (E-TYPE-031 into `T`); the edit is judged by the grants (E-WRITE-NOT-GRANTED)", () => {
+    expect(codes(prog("", `        let xs: int[free, pop] = [1];\n        const t: int = xs.pop();`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("", `        let xs: int[free, pop] = [1];\n        const t: int | not = xs.shift();`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog("    <xs:int[free, append]=([1])/>", `        const t: int | not = @xs.pop();`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog("", `        let xs = [1];\n        const t: int | not = xs.pop();`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+
+  test("a removal's value anywhere but a whole statement value: E-BOOTSTRAP-UNSUPPORTED, naming the gap", () => {
+    for (const body of [
+      `        let xs: int[free, pop] = [1];\n        @shown = txtOr(xs.pop());`,
+      `        let xs: int[free, pop] = [1, 2];\n        const t: bool = xs.pop() is given;`,
+      `        let xs: int[free, pop] = [1];\n        let ys: (int | not)[write] = [not];\n        ys[0] = xs.pop();`,
+    ]) {
+      const r = run(prog(OR, body));
+      expect(r.diags.map((d) => d.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+      expect(r.diags.map((d) => d.message).join("\n")).toContain("g-boot-tape-removal-value-position-s477");
+    }
+  });
+});

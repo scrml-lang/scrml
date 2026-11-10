@@ -1,0 +1,21 @@
+{
+  "id": "reactive-tape-removal-value-rt",
+  "description": "§66.12.6 rule 3: `pop` and `shift` return the removed value, typed `T | not`, and §66.10: an alias taken before the edits keeps every element. On `[3, 4, 5]`, `xs.pop()` is 5 and `xs.shift()` is 3, leaving `[4]`; `before` still holds 3 elements. One #go click sets @n to (5 + 3 * 10) * 100 + 1 * 10 + 3 = 3513.",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — tape methods are named after their grants; JS array method names are refused\" (\"Names match the grants (Recommended)\")",
+  "rationale": "§66.12.6 rule 3: \"`pop`, `shift` and `remove` return the removed value, typed `T | not`: on an empty tape, or a `remove(i)` with no position `i`, nothing is removed and the result is `not`\"; §66.10 rule 1: \"A binding … initialized from … any value holds a snapshot of that value.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-WRITE-NOT-GRANTED", "E-TYPE-031"],
+    "input": [{ "click": "#go" }],
+    "state": { "n": 3513 },
+    "domAnchored": [{ "selector": "#n", "text": "3513" }]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-alias-reference-semantics-s477",
+      "fails": { "runtime": "sha256:2ce76e9357555231" }
+    }
+  }
+}

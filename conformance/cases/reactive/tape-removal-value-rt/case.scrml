@@ -1,0 +1,15 @@
+<program>
+<n> = 0
+function drain() {
+    let xs: int[free, pop, shift] = [3, 4, 5];
+    const before: int[] = xs;
+    const last: int | not = xs.pop();
+    const first: int | not = xs.shift();
+    let sum: int = 0;
+    if (last is given) sum = sum + last;
+    if (first is given) sum = sum + first * 10;
+    @n = sum * 100 + xs.length * 10 + before.length;
+}
+<button id="go" onclick=drain()>go</button>
+<p id="n">${@n}</p>
+</program>

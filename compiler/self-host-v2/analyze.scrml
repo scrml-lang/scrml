@@ -289,7 +289,7 @@ ${
         // path), `ty` the type of the part written (the typer checks the value)
         EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
-        ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
+        ERemove(w: WriteFact, taken: SeqSnap | not),                          // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
         EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
         // s475 (s475-boot-local-tape-edits) — a GRANTED in-place edit of a LOCAL tape
@@ -304,7 +304,7 @@ ${
         // part's own grants (resolveLocalPartEdit); Core rebinds the local WITH that
         // path. `tmps`: two minted locals per index step of `path`, in order — the
         // index, and the element it names — so each index is evaluated once.
-        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], tmps: Sym[]),
+        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], tmps: Sym[], taken: Sym | not, at: Sym | not),
     }
     export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt }
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
@@ -7816,6 +7816,11 @@ ${
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
                 // s475: `xs.some(x => b)` / `xs.every(x => b)` — a `bool` (§66.12.1)
                 if (m.method == "some" || m.method == "every") return resolveSeqCall(env, e, m, args, st0)
+                // s477: a removal's VALUE, `T | not` (§66.12.6 rule 3)
+                if (m.method == "pop" || m.method == "shift" || m.method == "remove") {
+                    const rv: RX | not = resolveRemovalValue(env, e, m, args, st0)
+                    if (rv is given) return rv
+                }
                 // s469 — `xs.sort((a, b) => …)`: a comparator (a SeqCall, like filter / map)
                 if (m.method == "sort" && args.length == 1) return resolveSortBy(env, e, m, args, st0)
                 // s469 — `xs.at(i)` (§49.13): `T | not`, never a trap
@@ -11130,7 +11135,7 @@ ${
     fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
         const k: AExprK = e.k
         return match k {
-            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, "the right-hand side of an assignment"), e, t, v, st)
+            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, assignWhat(t)), e, t, v, st)
             .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
             .Name(name: n) :> resolveExpr(env, e, not, st).st
             .At(name: n) :> resolveExpr(env, e, not, st).st
@@ -11176,13 +11181,13 @@ ${
         const lm: MethodCall | not = memberCall(callee)
         if (lm is given) {
             if (rootIsLocal(env, lm.obj)) {
-                const le: AS | not = resolveLocalEdit(env, e, lm, args, st)
+                const le: AS | not = resolveLocalEdit(env, e, lm, args, false, st)
                 if (le is given) return le
             }
         }
         const rmv: MethodCall | not = removeCall(callee)
         if (rmv is given) {
-            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
+            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, false, st)
             return localEditRefused(env, e, rmv.method, args, st)
         }
         const m: MethodCall | not = methodCall(callee)
@@ -12403,7 +12408,7 @@ ${
     // `insert(i, x)` is refused, INTERIM (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469): its
     // index past the end breaks the per-position type (E-WRITE-INVARIANT), and how
     // that is enforced where the index is not provable is ⚑ O36 (§66.12.6 rule 3).
-    fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
+    fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS | not {
         const meth: string = m.method
         const editName: boolean = meth == "append" || meth == "prepend" || meth == "pop" || meth == "shift"
         if (!editName && meth != "remove" && meth != "insert") return not
@@ -12413,7 +12418,7 @@ ${
             // s477 (s477-boot-tape-forms): an edit of a PART of a local (`b.xs.append(v)`,
             // `g[i].pop()`), judged by the part's own tape grants (§66.12.6 rule 1)
             const pl: LocalB | not = partLocal(env, m.obj)
-            if (pl is given) return resolveLocalPartEdit(env, e, m, args, pl, editName, st0)
+            if (pl is given) return resolveLocalPartEdit(env, e, m, args, pl, editName, taken, st0)
             if (editName) return localEditRefused(env, e, meth, args, st0)
             return not
         }
@@ -12444,7 +12449,22 @@ ${
             if (meth == "remove") want = Type.Int
             st = resolveExpr(env, args[0], want, st).st
         }
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, [], []))
+        const tk: RTaken = mintTaken(st, taken, meth)
+        return addEffect(tk.st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, [], [], tk.taken, tk.at))
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-tape-removal-value-s475) — a removal
+    // used as a VALUE (`const top = xs.pop();`): the local the removed value is read
+    // into (`taken`) before the edit, and, for `remove(i)`, the local its position is
+    // evaluated into (`at`) — read by both the value and the edit, evaluated once.
+    type RTaken:struct = { taken: Sym | not, at: Sym | not, st: AS }
+
+    fn mintTaken(st0: AS, taken: boolean, meth: string) -> RTaken {
+        if (!taken) return { taken: not, at: not, st: st0 }
+        const t: RSym = mint(st0, "removed")
+        if (meth != "remove") return { taken: t.s, at: not, st: t.st }
+        const a: RSym = mint(t.st, "at")
+        return { taken: t.s, at: a.s, st: a.st }
     }
 
     // s477 (s477-boot-tape-forms, gap g-boot-local-tape-part-edit-s475) — an edit
@@ -12467,7 +12487,7 @@ ${
     // past the end traps (E-INDEX-OUT-OF-RANGE-RT, §66.12.6 rule 3) and nothing is
     // written. `not`: `remove` / `insert` on a part that is not a tape (a host value's
     // own method), which the caller's paths take.
-    fn resolveLocalPartEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], l: LocalB, editName: boolean, st0: AS) -> AS | not {
+    fn resolveLocalPartEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], l: LocalB, editName: boolean, taken: boolean, st0: AS) -> AS | not {
         const meth: string = m.method
         const ps: PartStep[] = partSteps(m.obj)
         const label: string = partLabel(l.name, ps)
@@ -12530,7 +12550,8 @@ ${
         }
         const pr: TapeDiag[] = localEditProblems(label, judged, tyText, op)
         if (pr.length > 0) return addDiag(st, env.file, e.span, pr[0].code, pr[0].msg)
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, pw.steps, tmps))
+        const tk: RTaken = mintTaken(st, taken, meth)
+        return addEffect(tk.st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, pw.steps, tmps, tk.taken, tk.at))
     }
 
     fn partHasField(ps: PartStep[]) -> boolean {
@@ -12584,7 +12605,7 @@ ${
         return not
     }
 
-    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
+    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
         const p: WPlace | not = rp.place
@@ -12620,7 +12641,77 @@ ${
         if (m.method == "pop") edit = EditKind.RemoveEnd
         const cap: Sym | not = f.wcap
         if (cap is not) return noCapability(env, e, st)
-        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
+        // s477: a removal used as a VALUE — the cell's removed element is read into
+        // `taken.local` (from the field `taken.decl` / `taken.idx`) before the Write
+        let sn: SeqSnap | not = not
+        if (taken) {
+            const tm: RSym = mint(st, "removed")
+            st = tm.st
+            sn = { local: tm.s, decl: p.decl.sym, idx: p.idx }
+        }
+        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, sn))
+    }
+
+    // s477: the position an assignment's value stands in (E-ERROR-012's message; a
+    // removal's value, resolveRemovalValue): a write of a whole local or cell
+    // (`x = …`, `@x = …`) evaluates its value FIRST; a write of a part evaluates
+    // the part's indices before it.
+    fn assignWhat(t: AExpr) -> string {
+        const k: string = placeKey(t)
+        if (k != "" && k.indexOf(".") < 0) return "the right-hand side of an assignment"
+        return "the right-hand side of an assignment to a part"
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-tape-removal-value-s475) — a removal
+    // used as a VALUE. §66.12.6 rule 3: "`pop`, `shift` and `remove` return the
+    // removed value, typed `T | not`: on an empty tape, or a `remove(i)` with no
+    // position `i`, nothing is removed and the result is `not`." The edit is judged
+    // exactly as in statement position (resolveLocalEdit / resolveLocalPartEdit /
+    // resolveRemoveCall); the removed value is read into a minted local just before
+    // the edit, and the expression's value is that local. Built where the removal is
+    // the WHOLE value of a statement that evaluates nothing before it — a `let` /
+    // `const` initializer, a `return` operand, the right-hand side of `x = …` /
+    // `@x = …` — so reading it first keeps the evaluation order. Anywhere else (an
+    // argument, an operand, an arm's value, a part write's value): refused, INTERIM
+    // (gap g-boot-tape-removal-value-position-s477) — the capable form evaluates the
+    // statement's earlier operands into locals first. `not`: not a tape removal (a
+    // host value's own `remove()`); the caller's paths take it.
+    fn resolveRemovalValue(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
+        let res: AS | not = not
+        if (rootIsLocal(env, m.obj)) {
+            res = resolveLocalEdit(env, e, m, args, true, st0)
+        } else if (m.method != "remove" && placeKey(m.obj).indexOf("@") == 0) {
+            res = resolveRemoveCall(env, e, m, args, true, st0)
+        }
+        if (res is not) return not
+        let st: AS = res
+        const w: string = env.fx.wholeWhat
+        const whole: boolean = env.fx.whole == e.nid && env.fx.inFn && (w == "a `return` operand" || w == "the right-hand side of an assignment" || w.indexOf("the initializer of `") == 0)
+        let rcall: string = placeKey(m.obj) + "." + m.method + "()"
+        if (m.method == "remove") rcall = placeKey(m.obj) + ".remove(…)"
+        if (!whole && st.diags.length == st0.diags.length) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "the value of `" + rcall + "` is in the bootstrap only as the WHOLE value of a `let` / `const` initializer, a `return`, or an assignment to a whole local or cell (`x = …`, `@x = …`) — bind it first (`const v = " + rcall + ";`) and use `v` (gap g-boot-tape-removal-value-position-s477)")
+        }
+        let ty: Type | not = not
+        const f: EffectFact | not = effectFactIn(st, e.nid)
+        const el: Type | not = localEditElem(f)
+        if (el is given) ty = Type.Maybe(el)
+        return plain(ty, st)
+    }
+
+    fn localEditElem(f: EffectFact | not) -> Type | not {
+        return match f {
+            .ELocalEdit(elem: el) :> el
+            .EWrite(w: x) :> not
+            .ESpread(ws: x) :> not
+            .EReset(w: x) :> not
+            .EAssignLocal(sym: x) :> not
+            .EEdits(w: x) :> not
+            .ERemove(w: x) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            not :> not
+        }
     }
 
     // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
@@ -26216,6 +26307,30 @@ ${
     // defaulted — is honoured by never guessing). Checked only when the
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
+        // s477 (s477-boot-tape-forms): a removal used as a VALUE (resolveRemovalValue) —
+        // the edit judged as in statement position, the value `T | not` (§66.12.6 rule 3)
+        const rf: EffectFact | not = effectFact(env.t.effects, e.nid)
+        const rle: LocalEditFact | not = localEditOf(rf)
+        if (rle is given) {
+            if (rle.taken) {
+                const lts: TypeState = typeLocalEdit(env, e, callee, rle, ts0)
+                const lel: Type | not = rle.elem
+                if (lel is given) return rvt(known(Type.Maybe(lel)), lts)
+                return rvt(VType.Unknown, lts)
+            }
+        }
+        const rmc: Sym | not = removedCellCap(rf)
+        if (rmc is given) {
+            const cts: TypeState = typePlace(env, callee, VType.Unknown, ts0)
+            const cf: FieldInfo | not = fieldOfCap(env.t, rmc)
+            if (cf is given) {
+                if (cf.trusted) {
+                    const cel: Type | not = seqElem(cf.ty)
+                    if (cel is given) return rvt(known(Type.Maybe(cel)), cts)
+                }
+            }
+            return rvt(VType.Unknown, cts)
+        }
         let ts: TypeState = typeExprs(env, args, ts0)
         // s472 — a payload-variant construction (resolveConstruct): each argument
         // against its declared field's type, as a `fail`'s payload (typeFail); its
@@ -27544,11 +27659,11 @@ ${
     // written type, else its inferred type, which carries NO grant (§66.12.6 rule 1:
     // "Inference never invents a grant"; O63: a local `let` gives the tape nothing).
     // The element is checked against the element type; `remove`'s position is an `int`.
-    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[] }
+    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], taken: boolean }
 
     fn localEditOf(f: EffectFact | not) -> LocalEditFact | not {
         return match f {
-            .ELocalEdit(sym: s, op: op, arg: a, elem: el, path: pa) :> localEditFact(s, op, a, el, pa)
+            .ELocalEdit(sym: s, op: op, arg: a, elem: el, path: pa, taken: tk) :> localEditFact(s, op, a, el, pa, tk is given)
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
@@ -27561,8 +27676,8 @@ ${
         }
     }
 
-    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, pa: LStep[]) -> LocalEditFact {
-        return { sym: s, op: op, arg: a, elem: el, path: pa }
+    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, pa: LStep[], tk: boolean) -> LocalEditFact {
+        return { sym: s, op: op, arg: a, elem: el, path: pa, taken: tk }
     }
 
     fn typeLocalEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
@@ -27605,6 +27720,27 @@ ${
             }
         }
         return record(ts, e.nid, VType.Unknown)
+    }
+
+    // A cell removal whose VALUE is used (`const v = @xs.pop()`): its write capability.
+    fn removedCellCap(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .ERemove(w: w, taken: sn) :> takenCap(w, sn)
+            .EWrite(w: x) :> not
+            .ESpread(ws: x) :> not
+            .EReset(w: x) :> not
+            .EAssignLocal(sym: x) :> not
+            .EEdits(w: x) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            .ELocalEdit(sym: x) :> not
+            not :> not
+        }
+    }
+
+    fn takenCap(w: WriteFact, sn: SeqSnap | not) -> Sym | not {
+        if (sn is not) return not
+        return w.cap
     }
 
     // s477 (s477-boot-tape-forms) — an edit of a PART of a local: the resolver
