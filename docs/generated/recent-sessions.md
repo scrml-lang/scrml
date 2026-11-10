@@ -9,6 +9,7 @@ The last-8 session-wrap anchors: SHA, push state, tag cut. Per-session narrative
 [`docs/changelog.md`](../changelog.md). Context: [`master-list.md`](../../master-list.md) §0.6.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `01634f258` — wrap(s475): 40 PRs landed; pending cells, literal transport carriers, local tape edits; hand-off rotated — **pushed**
 - `ec038b549` — Merge pull request #1742 from scrml-lang/wrap/s474-tail — **pushed**
 - `34ebef81d` — Merge pull request #1693 from scrml-lang/wrap/s473 — **pushed**
 - `a62629d68` — Merge pull request #1624 from scrml-lang/wrap/s472 — **pushed**
@@ -16,5 +17,4 @@ The last-8 session-wrap anchors: SHA, push state, tag cut. Per-session narrative
 - `a8bac7248` — Merge pull request #1583 from scrml-lang/wrap/s470 — **pushed**
 - `42f8a49d2` — Merge pull request #1541 from scrml-lang/wrap/s469 — **pushed**
 - `43ad24d9e` — wrap(s468): theRog first boot; 4 PRs merged, 11 in flight (all checkpointed); bootstrap U1c reviewed; eight impl#1 wrong-password paths found (#1452) — **pushed**
-- `1f1b5be4e` — wrap(s467): wrap anchor + theRog transfer note (#1438) — **pushed**
 <!-- @generated:recent-sessions END -->
