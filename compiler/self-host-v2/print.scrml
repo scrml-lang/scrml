@@ -624,6 +624,9 @@ ${
             .TapeRemoveAt :> rtCall(ctx, "tapeRemoveAt", a)
             .TapeConcat :> rtCall(ctx, "tapeConcat", a)
             .TapeIncludes :> rtCall(ctx, "tapeIncludes", a)
+            // s477 (O36 RULED S477) — a bounded tape's runtime length check; a local `insert`
+            .LengthCheck :> rtCall(ctx, "lengthCheck", a)
+            .TapeInsert :> rtCall(ctx, "tapeInsert", a)
         }
     }
 
@@ -1837,9 +1840,11 @@ ${
     fn commitJs(ctx: Ctx, ws: Stmt[]) -> JsStmt[] {
         let checks: JsStmt[] = []
         let writes: JsStmt[] = []
+        let k: int = 0
         for (const s of ws) {
-            checks = checks.concat(commitCheckJs(ctx, s))
+            checks = checks.concat(commitCheckJs(ctx, s)).concat(commitLengthJs(ctx, ws, k))
             writes = writes.concat(commitWriteJs(ctx, s))
+            k = k + 1
         }
         return checks.concat([sexpr(rtCall(ctx, "batch", [JsExpr.JArrow([], writes)]))])
     }
@@ -1867,6 +1872,74 @@ ${
             .Gather :> []
             .Lift :> []
         }
+    }
+
+    // s477 — the bound check of write `k` of a Commit (RuntimeLength), counting the
+    // length changes of the writes before it to the same capability
+    fn commitLengthJs(ctx: Ctx, ws: Stmt[], k: int) -> JsStmt[] {
+        const w: Stmt = ws[k]
+        return match w {
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> lengthGuardJs(ctx, cap, inst, commitDelta(ws, k, cap), ck)
+            .Commit :> []
+            .Let :> []
+            .Assign :> []
+            .If :> []
+            .Return :> []
+            .Eval :> []
+            .Suspend :> []
+            .ResetSurface :> []
+            .Defer :> []
+            .Unpersist :> []
+            .Attempt :> []
+            .Fail :> []
+            .Join :> []
+            .Jump :> []
+            .Loop :> []
+            .Break :> []
+            .Continue :> []
+            .Gather :> []
+            .Lift :> []
+        }
+    }
+
+    fn commitDelta(ws: Stmt[], k: int, cap: Sym) -> int {
+        let d: int = 0
+        let i: int = 0
+        while (i <= k) {
+            d = d + writeDeltaFor(ws[i], cap)
+            i = i + 1
+        }
+        return d
+    }
+
+    fn writeDeltaFor(s: Stmt, cap: Sym) -> int {
+        return match s {
+            .Write(cap: c, edit: edit, value: v) :> capDelta(c, cap, edit, v)
+            .Commit :> 0
+            .Let :> 0
+            .Assign :> 0
+            .If :> 0
+            .Return :> 0
+            .Eval :> 0
+            .Suspend :> 0
+            .ResetSurface :> 0
+            .Defer :> 0
+            .Unpersist :> 0
+            .Attempt :> 0
+            .Fail :> 0
+            .Join :> 0
+            .Jump :> 0
+            .Loop :> 0
+            .Break :> 0
+            .Continue :> 0
+            .Gather :> 0
+            .Lift :> 0
+        }
+    }
+
+    fn capDelta(c: Sym, cap: Sym, edit: EditKind, v: Expr) -> int {
+        if (c.id != cap.id) return 0
+        return editDelta(edit, v)
     }
 
     fn commitWriteJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
@@ -1926,20 +1999,21 @@ ${
         return match c {
             .RuntimeEdge :> true
             .Static :> false
+            .RuntimeLength(min: a) :> false
         }
     }
 
     fn editJs(ctx: Ctx, target: JsExpr, owner: CapOwner, edit: EditKind, v: JsExpr, check: Check) -> JsExpr {
         return match edit {
             .Replace :> jmcall(target, "set", [v])
-            .Append :> rtCall(ctx, "append", [target, v])
-            .Prepend :> rtCall(ctx, "prepend", [target, v])
+            .Append :> lengthEditJs(ctx, "append", "appendWithin", target, v, check)
+            .Prepend :> lengthEditJs(ctx, "prepend", "prependWithin", target, v, check)
             .Anywhere :> jmcall(target, "set", [v])
             .PositionWrite :> jmcall(target, "set", [v])
             .FieldAt(path: path) :> rtCall(ctx, "setIn", [target, fieldPathJs(ctx, path), v])
             .Transition :> transitionJs(ctx, target, owner, v, check)
-            .RemoveEnd :> rtCall(ctx, "removeEnd", [target, v])
-            .RemoveFront :> rtCall(ctx, "removeFront", [target, v])
+            .RemoveEnd :> lengthEditJs(ctx, "removeEnd", "removeEndWithin", target, v, check)
+            .RemoveFront :> lengthEditJs(ctx, "removeFront", "removeFrontWithin", target, v, check)
             .RemoveAnywhere :> jmcall(target, "set", [v])
             // s473: `@xs[i].f = v` — the element field, or the E-INDEX-OUT-OF-RANGE-RT trap (nothing written)
             .ElemAt(index: ix, path: path, loc: loc) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v, jstr(loc)])
@@ -1958,6 +2032,82 @@ ${
         return match check {
             .Static :> jmcall(target, "set", [v])
             .RuntimeEdge :> rtCall(ctx, "transition", [target, jid(nameOf(ctx.names, NameKey.Edges(owner.decl.sym.id, owner.idx))), v])
+            .RuntimeLength(min: a) :> jmcall(target, "set", [v])        // never on a transition (check.scrml C6)
+        }
+    }
+
+    // s477 (O36 RULED S477) — a length-changing edit of a cell whose tape type bounds
+    // its length (`T[min..=max, …]`): with a RuntimeLength check the bound is checked
+    // before the write (`rt.appendWithin` …; the E-WRITE-INVARIANT-RT trap, nothing
+    // written); Static — proven — the plain edit, no check.
+    fn lengthEditJs(ctx: Ctx, plain: string, within: string, target: JsExpr, v: JsExpr, check: Check) -> JsExpr {
+        return match check {
+            .RuntimeLength(min: a, max: b, loc: l) :> rtCall(ctx, within, [target, v, jnum(a), jnum(b), jstr(l)])
+            .Static :> rtCall(ctx, plain, [target, v])
+            .RuntimeEdge :> rtCall(ctx, plain, [target, v])
+        }
+    }
+
+    // s477 — in a Commit, every RuntimeLength write's bound is checked before ANY write
+    // (all-or-nothing, RULED S440): the length the commit leaves after this write —
+    // `delta` counts this and every earlier length-changing write of the same capability.
+    fn lengthGuardJs(ctx: Ctx, cap: Sym, inst: InstRef, delta: int, check: Check) -> JsStmt[] {
+        return match check {
+            .RuntimeLength(min: a, max: b, loc: l) :> lengthGuardOf(ctx, cap, inst, delta, a, b, l)
+            .Static :> []
+            .RuntimeEdge :> []
+        }
+    }
+
+    fn lengthGuardOf(ctx: Ctx, cap: Sym, inst: InstRef, delta: int, a: int, b: int, l: string) -> JsStmt[] {
+        const owner: CapOwner | not = capOwner(ctx.p, cap)
+        if (owner is not) return [sexpr(jid("danglingWriteCapability$" + cap.id))]
+        const target: JsExpr = fieldCell(instJs(ctx, inst), owner.decl, owner.idx)
+        return [sexpr(rtCall(ctx, "lengthGuard", [target, jnum(delta), jnum(a), jnum(b), jstr(l)]))]
+    }
+
+    // the length change of one edit in a Commit: +1 an append / prepend, -n a removal of n
+    fn editDelta(edit: EditKind, value: Expr) -> int {
+        if (edit == EditKind.Append || edit == EditKind.Prepend) return 1
+        if (edit == EditKind.RemoveEnd || edit == EditKind.RemoveFront) {
+            return 0 - removedCount(value)
+        }
+        return 0
+    }
+
+    // the count a RemoveEnd / RemoveFront removes: its Int literal (check.scrml: >= 1)
+    fn removedCount(e: Expr) -> int {
+        return match e {
+            .Lit(lit: l) :> intLitValue(l)
+            .Handle(inst: x) :> 1
+            .Assigned(local: x) :> 1
+            .InitOf(decl: x) :> 1
+            .Local(sym: x) :> 1
+            .Read(place: x) :> 1
+            .Call(callee: x) :> 1
+            .Prim(op: x) :> 1
+            .Match(scrut: x) :> 1
+            .ArrayOf(elems: x) :> 1
+            .StructOf(ty: x) :> 1
+            .VariantOf(enumSym: x) :> 1
+            .Host(call: x) :> 1
+            .Lambda(params: x) :> 1
+            .SeqCall(op: x) :> 1
+            .Refetch(req: rf0) :> 1
+            .Validity(of: x) :> 1
+            .ServerCall(fn: x) :> 1
+            .Query(q: x) :> 1
+        }
+    }
+
+    fn intLitValue(l: Literal) -> int {
+        return match l {
+            .Int(v: n) :> n
+            .Num(v: x) :> 1
+            .Str(v: x) :> 1
+            .Bool(v: x) :> 1
+            .Variant(enumSym: x) :> 1
+            .Absent :> 1
         }
     }
 

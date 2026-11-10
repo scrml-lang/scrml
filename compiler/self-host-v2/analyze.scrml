@@ -299,9 +299,9 @@ ${
         // so no alias of the old value sees it (§66.10). `arg`: the element
         // (append / prepend) or the index (remove); `elem`: the element type the
         // typer checks an element against (`not`: unchecked).
-        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not),
+        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, index: AExpr | not, loc: string),   // s477: `index` — `insert(i, x)`'s position; `loc` "file:line" for its trap
     }
-    export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt }
+    export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt, LInsert }   // s477: LInsert — `xs.insert(i, x)`
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
     // (`name` as written, for the narrowing key), or a tape position.
     export type LStep:enum = {
@@ -443,7 +443,11 @@ ${
     // value is a `T | not` — a PRESENCE TEST (RULED S440, truthiness Q1: "a
     // bare `@x` of type `T | not` IS a presence test … the compiler emits an
     // absence check, never JS truthiness"). `lower` wraps each in `IsSome`.
-    export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[] }
+    export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[], bounds: BoundCheck[] }
+    // s477 (O36 RULED S477): node `nid`'s value is checked at run time against the
+    // length bound `min..=max` of the tape type it flows into (the
+    // E-WRITE-INVARIANT-RT trap; `loc` "file:line" names the write).
+    export type BoundCheck:struct = { nid: int, min: int, max: int, loc: string }
     // r8 — Rule C for NAMES: a declared type that did not resolve (E-TYPE-UNKNOWN
     // answers with a placeholder type) is never checked against. `params`: the
     // parameter nids whose type did not resolve; `fields`: the struct FieldDef
@@ -11256,7 +11260,10 @@ ${
         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is given) {
-            return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
+            // s477 (O36 RULED S477): a bounded length — provably broken, or checked at run time
+            const lc: LengthCheckOf = cellLengthCheck(env, p.ty, e, "@" + f.sym.hint, m.method + "(…)", 1)
+            if (lc.violates != "") return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", lc.violates)
+            return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: lc.check }))
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
@@ -11716,6 +11723,10 @@ ${
             what = "a removal anywhere (granted by `remove`)"
             grows = false
         }
+        if (op == LocalEdit.LInsert) {
+            edit = EditKind.Anywhere
+            what = "a grow anywhere (granted by `insert`)"
+        }
         if (!grantsAdmit(tg, edit)) {
             return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + name + "." + call + "` is " + what + ", which the local tape `" + name + "`'s type (`" + tyText + "`) does not grant — a tape's grants govern it in every position, a local and a parameter included, and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469); write the grant in the type (`" + name + ": T[free, " + meth + "]`)" }]
         }
@@ -11740,6 +11751,7 @@ ${
             .LPop :> "pop"
             .LShift :> "shift"
             .LRemoveAt :> "remove"
+            .LInsert :> "insert"
         }
     }
 
@@ -11877,6 +11889,7 @@ ${
         let write = false
         let rep = false
         let seen: string[] = []
+        let lengthWord: string = ""        // s477: the length-axis value named so far (`free` or a bound)
         for (const g of gs) {
             const ax: GrantAxis = grantAxis(g)
             // r2 N3: a grant named twice is refused (E-GRANT-UNKNOWN: the list
@@ -11885,8 +11898,22 @@ ${
                 st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is granted twice — a grant list names each permission once (§66.12.2)")
             }
             seen = seen.concat([g])
+            const lengthAxis: boolean = ax == GrantAxis.GFree || isBoundWord(g)
+            if (lengthAxis && lengthWord != "" && lengthWord != g) {
+                // s477: the length axis has ONE value — fixed (none named), bounded or free (§66.12.2)
+                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", lengthTwiceMessage(lengthWord, g))
+            }
+            if (lengthAxis && lengthWord == "") lengthWord = g
             if (ax == GrantAxis.GFree) {
-                length = LengthGrant.Free
+                if (lengthWord == g) length = LengthGrant.Free
+            } else if (isBoundWord(g)) {
+                // s477 (s477-boot-tape-bounds; O36 RULED S477) — a bounded length `a..=b` / `a..b`
+                const bd: BoundRange | not = boundRange(g)
+                if (bd is not) {
+                    st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", badBoundMessage(g))
+                } else if (lengthWord == g) {
+                    length = LengthGrant.Bounded(bd.min, bd.max)
+                }
             } else if (ax == GrantAxis.GWrite) {
                 write = true
             } else if (ax == GrantAxis.GReplace) {
@@ -11900,8 +11927,6 @@ ${
                     where = where.concat([gp])
                 } else if (sp is given) {
                     shrinks = shrinks.concat([sp])
-                } else if (isBoundWord(g)) {
-                    st = addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", boundRefusal(g))
                 } else {
                     st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
                 }
@@ -11910,19 +11935,107 @@ ${
         return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
     }
 
-    // s475 r1 (#1812 review F3) — a bounded length `a..=b` / `a..b` (§66.12.2, the length axis) on any
-    // tape type — a cell, a field, a local, a parameter. INTERIM (gap g-boot-bounded-length-unenforced-s475):
-    // the bound is checked on every write (§66.11.2: "a length bound … checked on every write"), and how a
-    // write whose length the compiler cannot prove is enforced is ⚑ O36 — so the bootstrap refuses the
-    // bound rather than accept a length it never enforces. The capable form is bound enforcement: a provable
-    // violation E-WRITE-INVARIANT, the unprovable case per O36's ruling.
+    // s477 (s477-boot-tape-bounds) — a bounded length `a..=b` / `a..b` (§66.12.2, the length axis; the
+    // range glyphs of a loop head, S469 F3: `..=` inclusive, `..` half-open) on any tape type — a cell, a
+    // field, a local, a parameter, a return. The bound is an INVARIANT "checked on EVERY write" (§66.11.2):
+    // a write that provably breaks it is E-WRITE-INVARIANT, and one the compiler cannot prove is checked at
+    // RUN TIME and traps (E-WRITE-INVARIANT-RT) — O36 RULED S477 (ruling:user-voice-scrml.md S477 "⭐ RULED
+    // — O36"). Before S477 the bootstrap refused every bound (gap g-boot-bounded-length-unenforced-s475).
     fn isBoundWord(g: string) -> boolean {
         if (g.length == 0) return false
         return "0123456789".indexOf(g.slice(0, 1)) >= 0 && g.indexOf("..") > 0
     }
 
-    fn boundRefusal(g: string) -> string {
-        return "a bounded length `" + g + "` is not in the bootstrap yet — the bound is checked on every write (§66.11.2), and how a write whose length cannot be proven is enforced is not ruled (⚑ O36); the bootstrap enforces no bound, so it refuses one rather than accept a length it never checks. Write `free` (any length) or no length grant (a fixed length)"
+    // `a..=b` → min a, max b; `a..b` → min a, max b - 1. `not` when either end is not a
+    // decimal int literal or the range is empty.
+    type BoundRange:struct = { min: int, max: int }
+
+    fn boundRange(g: string) -> BoundRange | not {
+        const dots: int = g.indexOf("..")
+        if (dots <= 0) return not
+        const lo: int = boundEnd(g.slice(0, dots))
+        let rest: string = g.slice(dots + 2)
+        let inclusive: boolean = false
+        if (rest.slice(0, 1) == "=") {
+            inclusive = true
+            rest = rest.slice(1)
+        }
+        const hi: int = boundEnd(rest)
+        if (lo < 0 || hi < 0) return not
+        let max: int = hi
+        if (!inclusive) max = hi - 1
+        if (max < lo) return not
+        return { min: lo, max: max }
+    }
+
+    // a bound's end: plain decimal digits only (no sign, no radix, no fraction), else -1
+    fn boundEnd(t: string) -> int {
+        if (t.length == 0) return -1
+        let i: int = 0
+        while (i < t.length) {
+            if ("0123456789".indexOf(t.slice(i, i + 1)) < 0) return -1
+            i = i + 1
+        }
+        return intOfRaw(t)
+    }
+
+    fn badBoundMessage(g: string) -> string {
+        return "`" + g + "` is not a length bound — a bounded length is `a..=b` (inclusive) or `a..b` (half-open) with `a` and `b` decimal ints and at least one length in the range (§66.12.2; the range glyphs of a loop head, S469)"
+    }
+
+    fn lengthTwiceMessage(first: string, g: string) -> string {
+        return "`" + g + "` names the tape's length a second time (`" + first + "` already did) — the length axis has one value: fixed (no length grant), a bound (`1..=10`) or `free` (§66.12.2); a bound already lets the length change within it, so write it alone"
+    }
+
+    // s477 — the length bound a (resolved) tape type carries, else `not` (a fixed or free length,
+    // or not a tape). `T[…] | not` is read through its `not`.
+    fn boundOfType(t: Type) -> BoundRange | not {
+        return match t {
+            .Seq(elem: e, grants: g) :> boundOfGrant(g.length)
+            .Maybe(inner: i) :> boundOfType(i)
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> not
+        }
+    }
+
+    fn boundOfGrant(l: LengthGrant) -> BoundRange | not {
+        return match l {
+            .Bounded(min: a, max: b) :> { min: a, max: b }
+            .Fixed :> not
+            .Free :> not
+        }
+    }
+
+    // s477 — does a bounded type hold a bounded tape INSIDE it (an element type, at any depth)?
+    fn innerBounded(t: Type) -> boolean {
+        const el: Type | not = seqElem(unMaybe(t))
+        if (el is not) return false
+        if (boundOfType(el) is given) return true
+        return innerBounded(el)
+    }
+
+    // s477 — a grow / shrink edit of a bounded tape, judged by the bound ALONE (the tape's length is
+    // not known at compile time): `grows` +1, else -1. "proven" — the edit can never leave the bound
+    // (a shrink of a tape whose bound starts at 0: the length never falls below 0); "violates" — it
+    // always does (a bound of ONE length, `3..=3`: every grow passes it, and so does every shrink while
+    // that length is above 0); else "runtime" — checked when it runs (O36 RULED S477).
+    fn boundEditVerdict(b: BoundRange, grows: boolean) -> string {
+        if (grows) {
+            if (b.min == b.max) return "violates"
+            return "runtime"
+        }
+        if (b.min == 0) return "proven"
+        if (b.min == b.max) return "violates"
+        return "runtime"
+    }
+
+    fn boundEditMessage(label: string, call: string, b: BoundRange, grows: boolean) -> string {
+        let verb: string = "shrinks"
+        if (grows) verb = "grows"
+        return "`" + label + "." + call + "` " + verb + " a tape whose type bounds its length to exactly " + b.min + " (`" + b.min + "..=" + b.max + "`) — every such write leaves the bound, so it provably breaks the length invariant (§66.11.2, §66.12.2)"
     }
 
     // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
@@ -12337,7 +12450,12 @@ ${
         const sn: RSym = mint(st, "before_" + f.sym.hint)
         st = sn.st
         const snap: SeqSnap = { local: sn.s, decl: p.decl.sym, idx: p.idx }
-        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems, tmps, snap))
+        // s477 (O36 RULED S477): the shape adds `elems.length` values — a bound it provably breaks
+        // (more than the bound's span: even the shortest tape passes the top) is E-WRITE-INVARIANT;
+        // else each write's bound is checked at run time, all before any write (a Commit)
+        const lc: LengthCheckOf = cellLengthCheck(env, p.ty, e, "@" + f.sym.hint, "= [" + shapeWord(shape) + "]", elems.length)
+        if (lc.violates != "") return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", lc.violates)
+        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: lc.check }, elems, tmps, snap))
     }
 
     // r1 F1: is the place `e` names rooted in a local (a `let` / `const`, a
@@ -12395,9 +12513,10 @@ ${
     // grant). The element is resolved against the local's WRITTEN element type, so
     // an object literal has its struct. `not`: not a local tape edit — the caller's
     // paths take it (a host value's own `remove()`, a non-tape local).
-    // `insert(i, x)` is refused, INTERIM (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469): its
-    // index past the end breaks the per-position type (E-WRITE-INVARIANT), and how
-    // that is enforced where the index is not provable is ⚑ O36 (§66.12.6 rule 3).
+    // s477 (s477-boot-tape-bounds) — `insert(i, x)` (§66.12.6 rule 3: "grow anywhere: `x` becomes
+    // position `i`", granted by `insert`): built now that O36 is RULED (S477) — a position past the
+    // end, provable, is E-WRITE-INVARIANT; one the compiler cannot prove traps at run time
+    // (E-INDEX-OUT-OF-RANGE-RT, as a negative position does, §66.12.8 rule 7).
     fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
         const meth: string = m.method
         const editName: boolean = meth == "append" || meth == "prepend" || meth == "pop" || meth == "shift"
@@ -12417,15 +12536,22 @@ ${
         }
         if (isRowLocal(env, l)) return localEditRefused(env, e, meth, args, st0)
         let st: AS = resolveExpr(env, m.obj, not, st0).st       // the receiver: an appearance of the local
-        if (meth == "insert") return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".insert(i, x)` is not in the bootstrap yet — an index past the end would break the tape's per-position type (E-WRITE-INVARIANT, §66.12.6 rule 3), and how that is enforced where the index is not provable is not ruled (⚑ O36). Rebuild the tape (`" + n + " = …`, granted by the shape it is) or use `append` / `prepend`")
         let op: LocalEdit = LocalEdit.LAppend
         if (meth == "prepend") op = LocalEdit.LPrepend
         if (meth == "pop") op = LocalEdit.LPop
         if (meth == "shift") op = LocalEdit.LShift
         if (meth == "remove") op = LocalEdit.LRemoveAt
+        if (meth == "insert") op = LocalEdit.LInsert
         let el: Type | not = not
         if (wt is given) el = seqElem(wt)
         const takesArg: boolean = meth == "append" || meth == "prepend" || meth == "remove"
+        if (meth == "insert") {
+            // s477: `xs.insert(i, x)` — the position (an `int`), then the value
+            if (args.length != 2) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".insert(i, x)` takes a position (an `int`) and ONE value (§66.12.6 rule 3: each grow method adds one value — call it once per value)")
+            st = resolveExpr(env, args[0], Type.Int, st).st
+            st = resolveExpr(env, args[1], el, st).st
+            return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, args[1], el, args[0], env.file + ":" + lineOf(env.g, env.file, e.span.start)))
+        }
         if (takesArg && args.length != 1) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "(…)` takes exactly one " + localEditArgWhat(meth) + " (§66.12.6 rule 3: each grow method adds ONE value — call it once per value)")
         if (!takesArg && args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "()` takes no argument")
         let arg: AExpr | not = not
@@ -12435,12 +12561,44 @@ ${
             if (meth == "remove") want = Type.Int
             st = resolveExpr(env, args[0], want, st).st
         }
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el))
+        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, not, ""))
     }
 
     fn localEditArgWhat(meth: string) -> string {
         if (meth == "remove") return "position (an `int`)"
         return "value"
+    }
+
+    // s477 (s477-boot-tape-bounds; O36 RULED S477) — a length-changing edit of a CELL's
+    // tape by `delta` values (+ added, - removed), against its type's length bound
+    // (§66.12.2). A cell's length is never known at compile time, so the bound alone
+    // decides: `violates` (a message) when every such edit leaves it, else the Core
+    // check — Static when the edit can never leave it, RuntimeLength otherwise.
+    type LengthCheckOf:struct = { check: Check, violates: string }
+
+    fn cellLengthCheck(env: Env, ty: Type | not, e: AExpr, label: string, call: string, delta: int) -> LengthCheckOf {
+        if (ty is not) return { check: Check.Static, violates: "" }
+        const b: BoundRange | not = boundOfType(ty)
+        if (b is not) return { check: Check.Static, violates: "" }
+        if (delta > 0 && b.min + delta > b.max) {
+            return { check: Check.Static, violates: "`" + label + "." + call + "` adds " + delta + " value" + plural(delta) + " to a tape whose type bounds its length to `" + b.min + "..=" + b.max + "` — even at its shortest the tape would pass " + b.max + ", so the write provably breaks the length invariant (§66.11.2, §66.12.2)" }
+        }
+        if (delta < 0) {
+            const v: string = boundEditVerdict(b, false)
+            if (v == "proven") return { check: Check.Static, violates: "" }
+            if (v == "violates") return { check: Check.Static, violates: boundEditMessage(label, call, b, false) }
+        }
+        return { check: Check.RuntimeLength(b.min, b.max, env.file + ":" + lineOf(env.g, env.file, e.span.start)), violates: "" }
+    }
+
+    fn plural(n: int) -> string {
+        if (n == 1) return ""
+        return "s"
+    }
+
+    fn shapeWord(shape: int) -> string {
+        if (shape == 2) return "…, ...xs"
+        return "...xs, …"
     }
 
     fn fixedShrinkMessage(name: string, what: string) -> string {
@@ -12505,12 +12663,15 @@ ${
         // r2 N2 (F7's mirror): a removal SHRINKS — impossible on a fixed-length sequence
         if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(at.substring(1), what))
         if (args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + at + "." + m.method + "()` takes no argument")
+        // s477 (O36 RULED S477): a bounded length — provably broken, proven, or checked at run time
+        const lc: LengthCheckOf = cellLengthCheck(env, p.ty, e, at, m.method + "()", -1)
+        if (lc.violates != "") return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", lc.violates)
         // s444: a removal of one element — Core RemoveEnd / RemoveFront (count 1)
         let edit: EditKind = EditKind.RemoveFront
         if (m.method == "pop") edit = EditKind.RemoveEnd
         const cap: Sym | not = f.wcap
         if (cap is not) return noCapability(env, e, st)
-        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
+        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: lc.check }))
     }
 
     // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
@@ -22608,6 +22769,40 @@ ${
         return t.typing.exprs[i].vt
     }
 
+    // s477 — the run-time length check recorded for node `nid` (O36 RULED S477), else `not`.
+    export fn boundCheckAt(t: Tables, nid: int) -> BoundCheck | not {
+        for (const b of t.typing.bounds) {
+            if (b.nid == nid) return b
+        }
+        return not
+    }
+
+    // s477 — the typer's run-time length checks, each located "file:line" (one per node).
+    fn boundChecks(files: FileAst[], bs: BoundAt[]) -> BoundCheck[] {
+        let out: BoundCheck[] = []
+        let seen: int[] = []
+        for (const b of bs) {
+            if (seen.indexOf(b.nid) < 0) {
+                out = out.concat([{ nid: b.nid, min: b.min, max: b.max, loc: b.file + ":" + fileLineOf(files, b.file, b.offset) }])
+                seen = seen.concat([b.nid])
+            }
+        }
+        return out
+    }
+
+    fn fileLineOf(files: FileAst[], file: string, offset: int) -> int {
+        for (const f of files) {
+            if (f.path == file) {
+                let n: int = 0
+                for (const st of f.lines) {
+                    if (st <= offset) n = n + 1
+                }
+                return n
+            }
+        }
+        return 0
+    }
+
     // Is condition node `nid` a presence test (a `T | not` condition)?
     export fn presenceTest(t: Tables, nid: int) -> boolean {
         return t.typing.presence.indexOf(nid) >= 0
@@ -22615,7 +22810,7 @@ ${
 
     // The settled pass's types, indexed by NodeId (the first entry per node;
     // the same one-pass build as `nidIndex`, over the entries' own nids).
-    fn typingOf(exprs: ExprType[], presence: int[]) -> Typing {
+    fn typingOf(exprs: ExprType[], presence: int[], bounds: BoundCheck[]) -> Typing {
         let top: int = -1
         for (const x of exprs) {
             if (x.nid > top) top = x.nid
@@ -22626,13 +22821,17 @@ ${
             if (exprs[i].nid >= 0) at[exprs[i].nid] = i
             i = i - 1
         }
-        return { exprs: exprs, at: at, presence: presence }
+        return { exprs: exprs, at: at, presence: presence, bounds: bounds }
     }
 
     // `contribs`: every value an UNANNOTATED `let` local is given — its
     // initializer and each later assignment (a local's type is their join).
     // `presence`: the presence-test condition nodes (Typing.presence).
-    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[] }
+    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[], bounds: BoundAt[] }
+    // s477 (O36 RULED S477) — a value the typer could not prove inside its target's
+    // length bound: checked at run time where it is evaluated (lower wraps node `nid`
+    // in PrimOp.LengthCheck). `file` / `offset` locate it for the trap's message.
+    type BoundAt:struct = { nid: int, min: int, max: int, file: string, offset: int }
     type RTyping:struct = { typing: Typing, diags: Diag[] }
     type LocalT:struct = { id: int, vt: VType }
     // The typer's view of where it is: the tables, the file, the locals'
@@ -23452,19 +23651,177 @@ ${
     }
 
     fn record(ts: TypeState, nid: int, vt: VType) -> TypeState {
-        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
+        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
+    }
+
+    // =========================================================================
+    // s477 (s477-boot-tape-bounds) — THE LENGTH BOUND of a tape type (§66.12.2,
+    // `T[min..=max, …]`) on a value flowing into it. §66.11.2: "Invariants — length
+    // bounds and per-position types (§66.12) — are checked on EVERY write, however it
+    // is spelled." O36 RULED S477 (ruling:user-voice-scrml.md S477 "⭐ RULED — O36"):
+    // "a write that PROVABLY violates a sequence invariant … stays a compile error
+    // (`E-WRITE-INVARIANT`); a write whose effect the compiler cannot prove is checked
+    // at RUN TIME and TRAPS on violation". So, for a value `x` into a bounded position:
+    //   * an array literal of n plain elements: n in the bound, nothing at run time;
+    //     outside it, E-WRITE-INVARIANT;
+    //   * a read of a local, a parameter or a cell whose DECLARED type's bound lies
+    //     inside the target's: proven, nothing at run time;
+    //   * anything else (a call, a spread, a filter, a ternary …): checked at run time
+    //     where it is evaluated (BoundAt → lower's PrimOp.LengthCheck; the
+    //     E-WRITE-INVARIANT-RT trap, before the write).
+    // A bound on an ELEMENT type (`int[1..=3][free]`) is judged element by element for
+    // a literal and by declared type for a read; any other value is refused, INTERIM
+    // (the deep run-time check is not built — E-BOOTSTRAP-UNSUPPORTED, fail closed).
+    // =========================================================================
+    fn boundValue(env: TEnv, x: AExpr, target: Type, what: string, ts: TypeState) -> TypeState {
+        if (isNotLit(x)) return ts
+        let out: TypeState = ts
+        if (innerBounded(target)) out = innerBoundValue(env, x, target, what, out)
+        const b: BoundRange | not = boundOfType(target)
+        if (b is not) return out
+        const n: int = plainArrayLength(x)
+        if (n >= 0) {
+            if (n < b.min || n > b.max) return report(out, env, x.span, "E-WRITE-INVARIANT", what + " is a tape of length " + n + ", and its type bounds the length to `" + b.min + "..=" + b.max + "` — the write provably breaks the length invariant (§66.11.2, §66.12.2)")
+            return out
+        }
+        const d: Type | not = declaredTapeType(env, x, out)
+        if (d is given) {
+            const db: BoundRange | not = boundOfType(d)
+            if (db is given) {
+                if (db.min >= b.min && db.max <= b.max) return out
+            }
+        }
+        return recordBound(out, env, x, b)
+    }
+
+    fn recordBound(ts: TypeState, env: TEnv, x: AExpr, b: BoundRange) -> TypeState {
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet,
+                 bounds: ts.bounds.concat([{ nid: x.nid, min: b.min, max: b.max, file: env.file, offset: x.span.start }]) }
+    }
+
+    // an array literal's length when every element is plain (no spread); -1 otherwise
+    fn plainArrayLength(x: AExpr) -> int {
+        const k: AExprK = x.k
+        const isArr: boolean = match k {
+            .ArrayLit(elems: es) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: e) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+        }
+        if (!isArr) return -1
+        const es: AExpr[] = arrayElems(x)
+        for (const e of es) {
+            if (spreadInner(e) is given) return -1
+        }
+        return es.length
+    }
+
+    // The DECLARED type of a read of a local (its annotation, or a parameter's written
+    // type) or of a cell / declaration field (its declared type) — `not` for any other
+    // value. A declared type's bound is an invariant of every value it holds (every write
+    // into it was checked), so it proves a bound; an inferred or computed type does not.
+    fn declaredTapeType(env: TEnv, x: AExpr, ts: TypeState) -> Type | not {
+        const nf: NameFact | not = nameFact(env.t.names, x.nid)
+        return match nf {
+            .NLocal(sym: s) :> declaredLocalType(env, s)
+            .NField(decl: d) :> knownOf(exprType0(ts, x.nid))
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: f) :> not
+            .NLength :> not
+            .NSurface(of: o) :> not
+            .NConst(sym: c) :> not
+            .NReq(id: i) :> not
+            not :> not
+        }
+    }
+
+    fn declaredLocalType(env: TEnv, s: Sym) -> Type | not {
+        const a: Type | not = annotOf(env.t, s)
+        if (a is given) return a
+        return paramTypeOfSym(env.t, s)
+    }
+
+    // A bound on an ELEMENT type: a literal's elements one by one (a spread of a tape
+    // whose declared element bounds fit is proven); a read whose declared type's element
+    // bounds fit is proven; anything else refused (INTERIM).
+    fn innerBoundValue(env: TEnv, x: AExpr, target: Type, what: string, ts: TypeState) -> TypeState {
+        const el: Type | not = seqElem(unMaybe(target))
+        if (el is not) return ts
+        const k: AExprK = x.k
+        const es: AExpr[] = arrayElems(x)
+        if (plainArrayLength(x) >= 0 || es.length > 0) {
+            let out: TypeState = ts
+            for (const e of es) {
+                const sp: AExpr | not = spreadInner(e)
+                if (sp is given) {
+                    const sd: Type | not = declaredTapeType(env, sp, out)
+                    let ok: boolean = false
+                    if (sd is given) ok = boundsWithin(sd, target)
+                    if (!ok) out = innerRefusal(out, env, sp, what, target)
+                } else {
+                    out = boundValue(env, e, el, "an element of " + what, out)
+                }
+            }
+            return out
+        }
+        const d: Type | not = declaredTapeType(env, x, ts)
+        if (d is given) {
+            if (boundsWithin(d, target)) return ts
+        }
+        return innerRefusal(ts, env, x, what, target)
+    }
+
+    fn innerRefusal(ts: TypeState, env: TEnv, x: AExpr, what: string, target: Type) -> TypeState {
+        return report(ts, env, x.span, "E-BOOTSTRAP-UNSUPPORTED", what + " goes into `" + typeName(target) + "`, whose ELEMENTS are tapes with a bounded length (§66.12.2), and the compiler cannot prove this value's elements inside that bound — checking each element at run time is not in the bootstrap yet (O36 RULED S477 rules it a run-time check). Build the value as a literal, or from a value whose declared element type carries the same bound")
+    }
+
+    // Is every element bound of `v` (at every depth) inside `t`'s? (`v`'s top-level bound is not compared.)
+    fn boundsWithin(v: Type, t: Type) -> boolean {
+        const ve: Type | not = seqElem(unMaybe(v))
+        const te: Type | not = seqElem(unMaybe(t))
+        if (te is not) return true
+        if (ve is not) return false
+        const tb: BoundRange | not = boundOfType(te)
+        if (tb is given) {
+            const vb: BoundRange | not = boundOfType(ve)
+            if (vb is not) return false
+            if (vb.min < tb.min || vb.max > tb.max) return false
+        }
+        return boundsWithin(ve, te)
     }
 
     fn report(ts: TypeState, env: TEnv, span: ASpan, code: string, msg: string) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
+        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
     }
 
     fn contribute(ts: TypeState, s: Sym, vt: VType) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence, quiet: ts.quiet }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
     }
 
     fn markPresence(ts: TypeState, nid: int) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]), quiet: ts.quiet }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]), quiet: ts.quiet, bounds: ts.bounds }
     }
 
     // ---- THE LIFECYCLE READ RULE (s475-boot-lifecycle-reads, slice S1) -----------
@@ -23490,7 +23847,7 @@ ${
     // (E-OPERAND-NOT-NARROWED, E-COND-NOT-BOOLEAN, …) follows for the same read.
     fn quietPlace(ts: TypeState, x: AExpr) -> TypeState {
         if (atName(x) == "") return ts
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet.concat([x.nid]) }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet.concat([x.nid]), bounds: ts.bounds }
     }
 
     // A whole condition `c` that is a bare place is a presence test — except a
@@ -25171,6 +25528,8 @@ ${
             .TapeRemoveAt :> ts
             .TapeConcat :> ts
             .TapeIncludes :> ts
+            .LengthCheck :> ts
+            .TapeInsert :> ts
         }
     }
 
@@ -25914,6 +26273,8 @@ ${
             .TapeRemoveAt :> VType.Unknown
             .TapeConcat :> VType.Unknown
             .TapeIncludes :> VType.Unknown
+            .LengthCheck :> VType.Unknown
+            .TapeInsert :> VType.Unknown
         }
     }
 
@@ -26148,6 +26509,7 @@ ${
                 ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
                 ts = checkNotElems(env, args[i], pt, ts)
                 ts = checkArgTape(env, args[i], pt, what, ts)
+                ts = boundValue(env, args[i], pt, what, ts)
             }
             i = i + 1
         }
@@ -26182,7 +26544,7 @@ ${
         // §42.3.3 / §17.6 E-TYPE-043 (the more specific code), not the general E-TYPE-041.
         if (isAbsentVT(v) && maybeInner(rt) is not) return report(ts1, env, e.span, "E-TYPE-043", "this function is declared `-> " + typeName(rt) + "` and returns `not` here — a non-optional return type never holds the absence sentinel (§42.3.3). Declare `-> " + typeName(rt) + " | not`, or return a `" + typeName(rt) + "` value")
         // r7 A: full assignability for EVERY return type (§7.5.1 position 4)
-        return checkValue(env, v, rt, e.span, "the return value", ts1)
+        return boundValue(env, e, rt, "the return value", checkValue(env, v, rt, e.span, "the return value", ts1))
     }
 
     // A non-literal initializer into an `int`-bearing annotation (a literal is
@@ -26687,6 +27049,7 @@ ${
         for (const a of args) {
             if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) {
                 ts = checkValue(env, exprType0(ts, a.nid), fs[i].ty, a.span, "payload value " + (i + 1) + " (`" + fs[i].sym.hint + "`) of this construction", ts)
+                ts = boundValue(env, a, fs[i].ty, "payload value " + (i + 1) + " (`" + fs[i].sym.hint + "`) of this construction", ts)
                 // r1 F1: a struct literal's FIELD values (in a tape, a ternary, nested) against
                 // their declared fields — the literal's own type is the expected struct, so the
                 // whole-value check alone never sees `{ x: "s" }` into `{ x: int }` (§66.1 rule 5)
@@ -26945,7 +27308,7 @@ ${
         const annot: Type | not = annotOf(env.t, sym)
         if (annot is given) {
             let ts2: TypeState = checkAnnotInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", r.ts)
-            ts2 = checkNotElems(env, init, annot, checkLitFields(env, init, ts2))
+            ts2 = boundValue(env, init, annot, "`" + name + "`", checkNotElems(env, init, annot, checkLitFields(env, init, ts2)))
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
@@ -26984,7 +27347,7 @@ ${
         const annot: Type | not = ci.annot
         if (annot is not) return r.ts
         const ts: TypeState = checkAnnotInit(env, annot, literalKind(c.init), r.vt, c.init.span, "`" + c.name + "`", r.ts)
-        return checkNotElems(env, c.init, annot, checkLitFields(env, c.init, ts))
+        return boundValue(env, c.init, annot, "`" + c.name + "`", checkNotElems(env, c.init, annot, checkLitFields(env, c.init, ts)))
     }
 
     // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
@@ -27118,7 +27481,7 @@ ${
             const r0: RVT = typeExpr(env, value, ts3)
             ts3 = r0.ts
             const tt: Type | not = lp.ty
-            if (tt is given) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
+            if (tt is given) ts3 = boundValue(env, value, tt, placeLabel(target), checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3))))
             return record(record(ts3, target.nid, VType.Unknown), e.nid, VType.Unknown)
         }
         // s444: `@xs[i].f = v` — the value against the element field's type
@@ -27127,7 +27490,7 @@ ${
             const r0: RVT = typeExpr(env, value, ts0)
             let ts3: TypeState = typePlace(env, target, VType.Unknown, r0.ts)
             const tt: Type | not = pathType(env.t, ea)
-            if (tt is given) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
+            if (tt is given) ts3 = boundValue(env, value, tt, placeLabel(target), checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3))))
             // r2 F3: the index names a POSITION — an `int`
             const ix: AExpr | not = elemAtIndex(f)
             if (ix is given) ts3 = checkIndex(env, exprType0(ts3, ix.nid), ix.span, ts3)
@@ -27192,6 +27555,9 @@ ${
                     if (lt is given) tds = localTapeProblems(env.t.types, exprName(target), lt, value)
                     for (const d of tds) { ts1 = report(ts1, env, target.span, d.code, d.msg) }
                     if (growShape && tds.length == 0 && lt is given) ts1 = growShapeElems(env, exprName(target), lt, value, ts1)
+                    // s477: the local's length bound, on the value it is rebound to (a declared type only)
+                    const dlt: Type | not = declaredLocalType(env, ls)
+                    if (tds.length == 0 && dlt is given) ts1 = boundValue(env, value, dlt, placeLabel(target), ts1)
                 }
             }
         }
@@ -27211,7 +27577,7 @@ ${
         if (el is not) return report(ts, env, value.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + " = [...]` grows the local `" + name + "`, whose element type the compiler cannot name here, so the elements it adds cannot be checked — annotate the local (`let " + name + ": T[free, append] = …`)")
         for (const x of arrayElems(value)) {
             if (spreadInner(x) is not) {
-                ts = checkNotElems(env, x, el, checkLitFields(env, x, checkValue(env, exprType0(ts, x.nid), el, x.span, "an element of `" + name + "`", ts)))
+                ts = boundValue(env, x, el, "an element of `" + name + "`", checkNotElems(env, x, el, checkLitFields(env, x, checkValue(env, exprType0(ts, x.nid), el, x.span, "an element of `" + name + "`", ts))))
             }
         }
         return ts
@@ -27405,11 +27771,11 @@ ${
     // written type, else its inferred type, which carries NO grant (§66.12.6 rule 1:
     // "Inference never invents a grant"; O63: a local `let` gives the tape nothing).
     // The element is checked against the element type; `remove`'s position is an `int`.
-    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not }
+    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, index: AExpr | not }
 
     fn localEditOf(f: EffectFact | not) -> LocalEditFact | not {
         return match f {
-            .ELocalEdit(sym: s, op: op, arg: a, elem: el) :> localEditFact(s, op, a, el)
+            .ELocalEdit(sym: s, op: op, arg: a, elem: el, index: ix) :> localEditFact(s, op, a, el, ix)
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
@@ -27422,14 +27788,21 @@ ${
         }
     }
 
-    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not) -> LocalEditFact {
-        return { sym: s, op: op, arg: a, elem: el }
+    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, ix: AExpr | not) -> LocalEditFact {
+        return { sym: s, op: op, arg: a, elem: el, index: ix }
     }
 
     fn typeLocalEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
         let ts: TypeState = ts0
         const obj: AExpr | not = memberObj(callee)
         if (obj is given) ts = typeExpr(env, obj, ts).ts
+        const ixe: AExpr | not = le.index
+        let ixv: VType = VType.Unknown
+        if (ixe is given) {
+            const ri: RVT = typeExpr(env, ixe, ts)      // s477: `insert(i, x)`'s position, before the value
+            ts = ri.ts
+            ixv = ri.vt
+        }
         const a: AExpr | not = le.arg
         let av: VType = VType.Unknown
         if (a is given) {
@@ -27456,12 +27829,27 @@ ${
         if (lt is not) return record(report(ts, env, e.span, "E-WRITE-NOT-GRANTED", "`" + name + "." + localEditCall(le.op) + "` edits the local `" + name + "`, whose type is inferred (no annotation), and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469) — write the grants in its type (`let " + name + ": T[free, " + localEditMethodName(le.op) + "] = …`)"), e.nid, VType.Unknown)
         const pr: TapeDiag[] = localEditProblems(name, lt, tyText, le.op)
         if (pr.length > 0) return record(report(ts, env, e.span, pr[0].code, pr[0].msg), e.nid, VType.Unknown)
+        // s477 (O36 RULED S477) — the length bound (§66.12.2) on the edit: provably broken →
+        // E-WRITE-INVARIANT; unprovable → checked at run time (the edit's value, BoundAt → LengthCheck)
+        const lb: BoundRange | not = boundOfType(lt)
+        const growsEdit: boolean = le.op == LocalEdit.LAppend || le.op == LocalEdit.LPrepend || le.op == LocalEdit.LInsert
+        if (lb is given) {
+            const verdict: string = boundEditVerdict(lb, growsEdit)
+            if (verdict == "violates") return record(report(ts, env, e.span, "E-WRITE-INVARIANT", boundEditMessage(name, localEditCall(le.op), lb, growsEdit)), e.nid, VType.Unknown)
+            if (verdict == "runtime") ts = recordBound(ts, env, e, lb)
+        }
+        if (ixe is given) {
+            // s477 — the position: an `int`; past every length the bound admits, provably past the end
+            ts = checkIndex(env, ixv, ixe.span, ts)
+            const li: int = intLit(ixe)
+            if (lb is given && li > lb.max) return record(report(ts, env, ixe.span, "E-WRITE-INVARIANT", "`" + name + ".insert(" + li + ", …)` inserts at position " + li + ", and `" + name + "`'s type bounds its length to at most " + lb.max + " — the position is provably past the end, which would leave a position holding no value (§66.12.6 rule 3; scrml has no `undefined`, §42.1)"), e.nid, VType.Unknown)
+        }
         if (a is given) {
             if (le.op == LocalEdit.LRemoveAt) {
                 ts = checkIndex(env, av, a.span, ts)
             } else {
                 const el: Type | not = seqElem(lt)
-                if (el is given) ts = checkNotElems(env, a, el, checkLitFields(env, a, checkValue(env, av, el, a.span, "an element of `" + name + "`", ts)))
+                if (el is given) ts = boundValue(env, a, el, "an element of `" + name + "`", checkNotElems(env, a, el, checkLitFields(env, a, checkValue(env, av, el, a.span, "an element of `" + name + "`", ts))))
             }
         }
         return record(ts, e.nid, VType.Unknown)
@@ -27507,7 +27895,7 @@ ${
         if (f.life && w.edit == EditKind.Replace && pendingSettle(env.t, value.nid)) {
             const pt: Type | not = writeValueType(env.t, w)
             if (pt is not) return ts
-            return checkNotElems(env, value, pt, checkLitFields(env, value, checkValue(env, v, pt, value.span, what, ts)))
+            return boundValue(env, value, pt, what, checkNotElems(env, value, pt, checkLitFields(env, value, checkValue(env, v, pt, value.span, what, ts))))
         }
         // s475 S4 r1 (F2) — §13.9.4 ¶2 "An action-position write of a waiting value into a pending cell
         // (`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its
@@ -27520,7 +27908,7 @@ ${
         if (f.life && w.edit == EditKind.Replace && pendingField(env.t, f) && handledWait(env.t, value)) {
             const pt2: Type | not = writeValueType(env.t, w)
             if (pt2 is not) return ts
-            return checkNotElems(env, value, pt2, checkLitFields(env, value, checkValue(env, v, pt2, value.span, what, ts)))
+            return boundValue(env, value, pt2, what, checkNotElems(env, value, pt2, checkLitFields(env, value, checkValue(env, v, pt2, value.span, what, ts))))
         }
         if (f.life && w.edit == EditKind.Replace && isAbsentVT(v)) return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeBackMsg(f))
         if (f.life && w.edit == EditKind.Replace && admitsNotVT(v)) return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", lifeMaybeMsg(f, v))
@@ -27537,7 +27925,10 @@ ${
         }
         const target: Type | not = writeValueType(env.t, w)
         if (target is not) return ts
-        return checkNotElems(env, value, target, checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts)))
+        const ts9: TypeState = checkNotElems(env, value, target, checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts)))
+        // s477: a map / sort / reverse written back (PositionWrite) keeps the length — its bound holds
+        if (w.edit == EditKind.PositionWrite) return ts9
+        return boundValue(env, value, target, what, ts9)
     }
 
     // s475 S4 r1 (F2) — `e` is a waiting value as §13.9.4 ¶2 writes it: a `!{}`-handled call of a
@@ -27647,6 +28038,7 @@ ${
                 for (const fd of fs) {
                     if (fd.sym.hint == p.name && env.t.unresolved.fields.indexOf(fd.sym.id) < 0) {   // r8: not against an unresolved field type
                         ts = checkValue(env, exprType0(ts, p.value.nid), fd.ty, p.value.span, "`" + s.hint + "." + p.name + "`", ts)
+                        ts = boundValue(env, p.value, fd.ty, "`" + s.hint + "." + p.name + "`", ts)
                     }
                 }
                 ts = checkLitFields(env, p.value, ts)
@@ -28002,6 +28394,8 @@ ${
                     const lk: int = attrLiteralKind(a.value)
                     ts = checkAnnotInit(env, f.ty, lk, av, a.span, what, ts)
                     ts = checkAttrLitFields(env, a.value, f.ty, ts)
+                    const ax: AExpr | not = valueExpr(a.value)
+                    if (ax is given) ts = boundValue(env, ax, f.ty, what, ts)
                 }
             }
         }
@@ -28121,13 +28515,13 @@ ${
             const ts: TypeState = typePass(files, t, settled, prior, lk)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
-            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence), diags: ts.diags }
+            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence, boundChecks(files, ts.bounds)), diags: ts.diags }
             prev = settled
             settled = next
             pass = pass + 1
         }
         const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior, lk)
-        return { typing: typingOf(last.exprs, last.presence), diags: last.diags }
+        return { typing: typingOf(last.exprs, last.presence, boundChecks(files, last.bounds)), diags: last.diags }
     }
 
     fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
@@ -28146,7 +28540,7 @@ ${
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[], lk: Linkage) -> TypeState {
-        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [] }
+        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [], bounds: [] }
         const fnw: FnW[] = fnWrites(files, lk)
         const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
@@ -28290,7 +28684,7 @@ ${
             // s473: rule 10 (E-DECL-TYPE-UNPROVEN, originReport) is the initializer's one
             // report — what the typer now knows of an unproven callee's returns (a
             // `function`'s `int | string`, inferReturn) is not reported inside it again
-            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet }
+            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
             // s473: an initializer whose value §66.3 rule 10 reports unproven
             // (E-DECL-TYPE-UNPROVEN, originReport) is not ALSO checked against
             // the annotation — the typer may know it as a choice (a `function`'s
@@ -28299,6 +28693,8 @@ ${
                 const lk: int = attrLiteralKind(f.init)
                 ts = checkAnnotInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
                 ts = checkAttrLitFields(env, f.init, f.ty, ts)
+                const fx: AExpr | not = valueExpr(f.init)
+                if (fx is given) ts = boundValue(env, fx, f.ty, "`" + f.sym.hint + "`", ts)
             }
         }
         return ts
@@ -38174,7 +38570,7 @@ ${
         const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
+                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
@@ -38237,7 +38633,7 @@ ${
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
-        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [] }
+        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [], bounds: [] }
         const fns: int[] = refusedReturns(files, t)
         for (const di of t.decls) {
             const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }

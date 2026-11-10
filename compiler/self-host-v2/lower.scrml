@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -463,7 +463,7 @@ ${
 
     fn lowerExprAt(c: LC, e: AExpr) -> Expr {
         if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
-        return lowerExprK(c, e)
+        return boundChecked(c, e, lowerExprK(c, e))
     }
 
     // (s442 r4 (b)) A presence test of a HANDLE tests the handle, not a
@@ -1159,7 +1159,7 @@ ${
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
             .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value)
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
-            .ELocalEdit(sym: s, op: op, arg: a) :> localEditStmt(c, s, op, a)
+            .ELocalEdit(sym: s, op: op, arg: a, index: ix, loc: lc) :> localEditStmt(c, e, s, op, a, ix, lc)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -1169,18 +1169,32 @@ ${
     // grants, §66.12.6 rules 1 and 3) → Assign(xs, Prim(TapeAppend …, [xs, …]), []):
     // the local is rebound to the edited value, a NEW tape (§66.10 — no alias of the
     // old value sees the edit), as a local part write is (assignLocal).
-    fn localEditStmt(c: LC, s: Sym, op: LocalEdit, arg: AExpr | not) -> Stmt[] {
+    // s477 (s477-boot-tape-bounds): `xs.insert(i, v)` → Assign(xs, Prim(TapeInsert, [xs, i, v, loc]))
+    // (a position outside 0..=xs.length traps, E-INDEX-OUT-OF-RANGE-RT); and an edit of a
+    // tape whose length bound the typer could not prove (O36 RULED S477) is checked
+    // before the local is rebound: Prim(LengthCheck, [the edited tape, min, max, loc]).
+    fn localEditStmt(c: LC, e: AExpr, s: Sym, op: LocalEdit, arg: AExpr | not, ix: AExpr | not, loc: string) -> Stmt[] {
         const xs: Expr = Expr.Local(s)
         let args: Expr[] = [xs]
         if (arg is given) args = [xs, lowerExpr(c, arg)]
+        if (ix is given && arg is given) args = [xs, lowerExpr(c, ix), lowerExpr(c, arg), litStr(loc)]
         const prim: PrimOp = match op {
             .LAppend :> PrimOp.TapeAppend
             .LPrepend :> PrimOp.TapePrepend
             .LPop :> PrimOp.TapeDropEnd
             .LShift :> PrimOp.TapeDropFront
             .LRemoveAt :> PrimOp.TapeRemoveAt
+            .LInsert :> PrimOp.TapeInsert
         }
-        return [Stmt.Assign(s, Expr.Prim(prim, args), [])]
+        return [Stmt.Assign(s, boundChecked(c, e, Expr.Prim(prim, args)), [])]
+    }
+
+    // s477 (O36 RULED S477) — node `e`'s value, checked at run time against the length bound
+    // the typer could not prove (Typing.bounds); unchanged where it proved it.
+    fn boundChecked(c: LC, e: AExpr, v: Expr) -> Expr {
+        const b: BoundCheck | not = boundCheckAt(c.t, e.nid)
+        if (b is not) return v
+        return Expr.Prim(PrimOp.LengthCheck, [v, Expr.Lit(Literal.Int(b.min)), Expr.Lit(Literal.Int(b.max)), litStr(b.loc)])
     }
 
     // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index

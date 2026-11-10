@@ -2468,6 +2468,77 @@ export function tapeConcat(a, b) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// s477 (s477-boot-tape-bounds) — O36 RULED S477: a write whose effect on a
+// sequence invariant the compiler cannot prove is checked at RUN TIME and TRAPS
+// on violation (ruling:user-voice-scrml.md S477 "⭐ RULED — O36"; SPEC §66.11.2,
+// §66.12.2, §19.17). A bounded-length tape type `T[min..=max, …]` admits only
+// values whose length lies in min..=max: a value that would land outside is the
+// E-WRITE-INVARIANT-RT trap, raised BEFORE the write, so nothing is written (a
+// refused write refuses the whole write — no partial apply). The compiler emits
+// these only where it could not prove the bound; a proven write has no check.
+
+function lengthTrap(n, min, max, at) {
+  return new ScrmlTrap("E-WRITE-INVARIANT-RT", "the write would leave a tape of length " + n + ", outside its type's length bound " + min + "..=" + max + " (" + at + ") — nothing was written", { length: n, min, max, at });
+}
+
+/** A value flowing into a bounded tape type: `xs` itself when it fits (or is `not`), else the trap. */
+export function lengthCheck(xs, min, max, at) {
+  if (xs === null || xs === undefined) return xs;
+  if (xs.length < min || xs.length > max) throw lengthTrap(xs.length, min, max, at);
+  return xs;
+}
+
+/** The length a cell's tape would have after `delta` elements are added (negative: removed; never below 0) — checked before any write. */
+export function lengthGuard(target, delta, min, max, at) {
+  const n = Math.max(0, target.peek().length + delta);
+  if (n < min || n > max) throw lengthTrap(n, min, max, at);
+}
+
+/** `@xs.append(v)` on a bounded cell: the bound checked first, then the edit. */
+export function appendWithin(target, element, min, max, at) {
+  lengthGuard(target, 1, min, max, at);
+  append(target, element);
+}
+
+/** `@xs.prepend(v)` on a bounded cell. */
+export function prependWithin(target, element, min, max, at) {
+  lengthGuard(target, 1, min, max, at);
+  prepend(target, element);
+}
+
+/** `@xs.pop()` on a bounded cell (`n` removed at the end). */
+export function removeEndWithin(target, n, min, max, at) {
+  lengthGuard(target, -n, min, max, at);
+  removeEnd(target, n);
+}
+
+/** `@xs.shift()` on a bounded cell (`n` removed at the front). */
+export function removeFrontWithin(target, n, min, max, at) {
+  lengthGuard(target, -n, min, max, at);
+  removeFront(target, n);
+}
+
+/**
+ * `xs.insert(i, v)` (§66.12.6 rule 3, grow anywhere): a NEW tape with `v` at
+ * position `i` — `0 <= i <= xs.length` (`i == xs.length` adds at the end). A
+ * position outside that (negative, past the end, not an int) would leave a
+ * position holding no value: the E-INDEX-OUT-OF-RANGE-RT trap, and nothing is
+ * written (§66.12.8 rule 7; O36 RULED S477 extends the S473 index-past-end trap).
+ * Never writes `xs` (§66.10).
+ */
+export function tapeInsert(xs, i, v, at) {
+  if (!Number.isInteger(i) || i < 0 || i > xs.length) {
+    const ok = xs.length === 0 ? "the tape is empty: the only position is 0" : "its insert positions are 0..=" + xs.length;
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "insert position " + i + " is outside the tape (" + ok + ") (" + at + ") — nothing was written", { index: i, length: xs.length, at });
+  }
+  const out = new Array(xs.length + 1);
+  for (let k = 0; k < i; k++) out[k] = xs[k];
+  out[i] = v;
+  for (let k = i; k < xs.length; k++) out[k + 1] = xs[k];
+  return out;
+}
+
 /** `xs.join(sep)` on a tape of strings. */
 export function joinStr(xs, sep) {
   let out = "";

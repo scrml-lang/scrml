@@ -205,6 +205,19 @@ ${
         // s475 — `xs.includes(x)` on a tape (§66.12.1): `true` when some element is
         // structurally equal to `x` (§45, the one equality — EqStruct's), a `bool`.
         TapeIncludes,
+        // s477 (s477-boot-tape-bounds) — O36 RULED S477: a sequence invariant the
+        // compiler cannot prove is checked at RUN TIME and TRAPS on violation.
+        // LengthCheck(v, min, max, loc): `v` itself when `not` or when
+        // `min <= v.length <= max`; otherwise the E-WRITE-INVARIANT-RT trap
+        // (§19.17), naming the length, the bound and `loc` — nothing is written
+        // (the check runs before the write it guards). What a value lowers to
+        // when it flows into a bounded-length tape type (§66.12.2) and analyze
+        // could not prove the bound (Typing.bounds). TapeInsert(xs, i, v, loc):
+        // `xs.insert(i, v)` on a local (§66.12.6 rule 3, grow anywhere): a NEW
+        // tape with `v` at position `i`; `i` outside `0..=xs.length` (negative,
+        // past the end, not an int) is the E-INDEX-OUT-OF-RANGE-RT trap and
+        // nothing is written (§66.12.8 rule 7; O36 extends the S473 trap).
+        LengthCheck, TapeInsert,
     }
 
     export type Pattern:enum = {
@@ -489,8 +502,16 @@ ${
         PositionAt(index: Expr, loc: string),
     }
     // RuntimeEdge: a `rule=` edge whose from-state is not statically known
-    // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
-    export type Check:enum = { Static, RuntimeEdge }
+    // (§6.3). s477 — RuntimeLength: the invariant hook, O36 RULED S477 ("a
+    // write whose effect the compiler cannot prove is checked at RUN TIME and
+    // TRAPS on violation"): a length-changing edit (Append, Prepend, RemoveEnd,
+    // RemoveFront) of a field whose tape type has a bounded length
+    // (`T[min..=max, …]`, §66.12.2). The length the edit leaves is checked
+    // against `min..=max` BEFORE the write; outside it is the
+    // E-WRITE-INVARIANT-RT trap (§19.17) and nothing is written. `loc` names the
+    // source location. (A whole-value write of a bounded tape checks its value
+    // instead — PrimOp.LengthCheck.)
+    export type Check:enum = { Static, RuntimeEdge, RuntimeLength(min: int, max: int, loc: string) }
 
     // Commit: an ALL-OR-NOTHING group of Writes — the spread-override field
     // edit `@x = { ...@x, f: v, g: w }` (§66.11.3 item 1; RULED S440: "Should a
