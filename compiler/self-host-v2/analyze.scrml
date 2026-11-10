@@ -36670,11 +36670,19 @@ ${
         for (const a of handledArms(h)) {
             const b: AArmBody = a.body
             for (const x of armExprOf(b)) { ps = planExpr(cx, x, armPos, ps).ps }
-            for (const blk of armBlockOf(b)) {
-                for (const s of blk.stmts) {
-                    for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
-                }
-            }
+            for (const blk of armBlockOf(b)) { ps = planArmBlock(cx, blk, armPos, ps) }
+        }
+        return ps
+    }
+
+    // s477 (s477-boot-pending-rest; g-boot-plan-arms-nested-wait-s475) — an arm block's statements
+    // at EVERY depth: a wait inside an `if`, a loop (its head and a counted loop's init too) or an
+    // inner block of the arm gets the arm refusal here, not only Core C-S3 / C-S8s.
+    fn planArmBlock(cx: PCx, blk: ABlock, armPos: Pos, ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const s of blk.stmts) {
+            for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
+            for (const nb of stmtKidBlocks(s)) { ps = planArmBlock(cx, nb, armPos, ps) }
         }
         return ps
     }

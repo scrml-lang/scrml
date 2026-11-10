@@ -12,3 +12,8 @@ Governing sentences (SPEC):
 Meaning decided: reset target = the hidden request (a re-run, Core Refetch); the load re-runs; the cell keeps its value until it settles; no grant needed (locked allowed). reset-on= = the request's re-run on entry change = entries join the request's deps.
 Not ruled / not touched: `default=` on a pending cell (§6.8.1 vs §13.9.2 conflict) — the bootstrap has no `default=` at all, so unreachable here; owed if `default=` is built.
 Done: analyze resolveReset/resetEdgeOf/pendResetDeps; lower resetStmt/requestView; 7 unit tests; 3 conformance cases (bootstrap PASS); gap resolved; impl1 carried gap g-impl1-pending-cells-unbuilt-s477 filed for the xfails.
+- Unit 1 committed d6981a840; pushed; draft PR #1826.
+
+## Unit 4 — g-boot-plan-arms-nested-wait-s475 (done before unit 2: small)
+Governing: the bootstrap's own INTERIM arm refusal (planArms `armPos`; capable form = U1b arm-continuation follow-up); §13.8 (a suspension point needs a continuation). No meaning change — the same refusal now reaches nested statements (front-end diagnostic instead of Core C-S3 / C-S8s).
+Done: analyze planArmBlock (recursive); slice-m4/plan-arms-nested-wait-s477.test.js (5 tests; red without recursion: 3 fail). No conformance case (bootstrap-only refusal). Gap resolved.
