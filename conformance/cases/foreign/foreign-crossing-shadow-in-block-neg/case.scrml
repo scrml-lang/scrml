@@ -1,5 +1,5 @@
 <program kind="tool" lang="js">
-    function main(args: string[]): number {
+    function main(args: string[]) -> number {
         for (const a of args) {
             const out = _={ in: { a }
                 const a = 1;

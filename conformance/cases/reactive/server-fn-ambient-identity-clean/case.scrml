@@ -1,6 +1,6 @@
 <program db="sqlite:./orders.db" auth="required">
 <price> = 10
-function saveOrder(p:number) : number {
+function saveOrder(p:number) -> number {
     result = ?{`INSERT INTO orders (amount, uid, sid) VALUES (${p}, ${@currentUser.id}, ${session.userId}) RETURNING id`}
     return result
 }
