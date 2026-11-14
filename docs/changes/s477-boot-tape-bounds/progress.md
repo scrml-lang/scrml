@@ -48,7 +48,7 @@
 - `insert(i, x)` on a CELL (and `remove(i)` on a cell) stays E-BOOTSTRAP-UNSUPPORTED (it was; gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469 narrowed, not resolved).
 - `xs.length = n` (any position) is still E-ASSIGN-TARGET in the bootstrap (not a recognized edit) — its O36 case is SPEC-only.
 - No flow-sensitive length tracking: `let xs: int[1..=3, append] = [1, 2, 3]; xs.append(4);` traps at run time instead of a compile error (the compiler judges the bound from the type alone). Ruling's "provably" read as "provable from the types and literals"; a length tracker would move more cases to compile time.
-- A bounded local's edit carries a `LengthCheck` wrapper, so draft #1824's in-place `selfEdit` (which matches `xs = TapeAppend(xs, v)` exactly) will copy instead of editing in place for BOUNDED locals only — correct, not optimal.
+- A bounded local's edit carries a `LengthCheck` wrapper, so draft #1824's in-place `selfEdit` (which matches `xs = TapeAppend(xs, v)` exactly) will copy instead of editing in place for a CHECKED edit of a bounded local only — correct, not optimal. A PROVEN edit (a shrink of a bound whose min is 0) carries no `LengthCheck` and does take #1824's in-place path (correct; wording fixed in FIX ROUND 1).
 - Deep element-bound runtime check (INTERIM refusal above).
 
 ## Concurrency notes
@@ -62,3 +62,14 @@
 - slice-m1 167 pass (plain and `SLICE_CORE=lowered`), slice-m2 + slice-codec 785 pass, slice-m3 60 pass; lint-no-default-arm and lint-duplicate-fn clean.
 - Conformance (bootstrap): 1831 attempted · PASS 306 (+4) · FAIL 243 (=) · NOT-TWINNED 624 · UNSUPPORTED 658 · CRASH 0 · INVALID 0. The 4 new cases (reactive/tape-bound-append-rt, tape-bound-append-trap-rt, tape-bound-literal-neg, tape-insert-rt) PASS; no existing case moved. On impl#1 they XFAIL under the new carried gap g-impl1-tape-bounds-unimplemented-s477 (compiler/tests/conformance 2711 pass, 0 fail).
 - severity.test.js + diag-gate green (no regen needed); spec-coverage-check 0 violations; §34.0 s34-census --check-new PASS; delta-lint PASS. SPEC-INDEX row ranges are stale (bot-owned, B6).
+
+## FIX ROUND 1 (review of #1830)
+
+- Branch `tape-bounds-fix` from 17d83a675, merged origin/main (d564780fc, docs-only).
+- F1 (fail-open): `typeFail` now runs `boundValue` + `checkLitFields`/`checkNotElems` on each payload, as `checkConstructArgs` does (a `fail` is a construction, §19.3.3; §66.11.2 "checked on EVERY write"). Literal past the bound → E-WRITE-INVARIANT; computed → E-WRITE-INVARIANT-RT trap.
+- F2 (fail-open): `checkArgs` and `typeReturn` now run `checkLitFields`, so a struct literal's bounded field (literal → compile error; computed → trap) and its field TYPE (`{ xs: "s" }` into `{ xs: int[] }` → E-TYPE-031, newly rejecting) are checked in those positions.
+- Audit find (fail-open, same class): `checkLitFields` did not recurse into a `match` / `!{}` arm's value, so `const b: B = match @k { .A :> { xs: [1,2,3,4,5] }, … }` held 5 elements. New `handledArmValueExprs` (an arm's one expression, or a lifted block arm's last value) — checked like a ternary's branches.
+- S1: `commitDelta` / `capDelta` now key on capability AND instance (`commitInstKey`). Not buildable as a false trap today: every Commit writes one instance (lower `editStmts` / `spreadStmts`); defensive.
+- F3: §19.17 "seven traps" header, §19.17 trap-table row and §66.20 row marked "PA reading — ratification owed". Wording fixed: a PROVEN shrink (bound min 0) takes #1824's in-place path.
+- Positions audited (probe, bootstrap): construction payload (ok), `fail` payload (fixed), call arg incl. struct literal / tape of struct literals / nested struct literal (fixed), return incl. ternary / match (fixed), match arm into const/return (fixed), lifted block arm (refused earlier: E-BOOTSTRAP-UNSUPPORTED), cell init / cell write with replace (ok), local rebind / local field write (ok), local + cell append of a struct literal (ok), use-site attribute + declaration-field initializer (ok, already boundValue + checkAttrLitFields), server fn return (ok), `reset(@x)` (re-applies a checked initializer), `fail` with a struct-literal payload (refused: E-TYPE-STRUCT-CONTEXT), map-lambda with a braced body (refused), maps (no map type in the bootstrap), channel cells (NOT probed — not verified).
+- Newly rejected: 0 of 1831 conformance cases change bucket or emitted codes (PASS 306, FAIL 244, NOT-TWINNED 624, UNSUPPORTED 657, CRASH 0 — identical per case vs. the pre-fix tree); corpus (samples + examples, 952 .scrml files, single-file bootstrap front end): 0 files change their error set; full slice-m4 green in the hook.
