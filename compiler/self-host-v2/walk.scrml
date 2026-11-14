@@ -89,6 +89,10 @@ ${
         return out
     }
 
+    // s476: `kids` under a name a module that has its own `kids` locals can import
+    // (print.scrml ownScan — the in-place proof walks every child through it).
+    export fn nodeKids(n: Node) -> Node[] { return kids(n) }
+
     // The direct children of a node, in source order.
     export fn kids(n: Node) -> Node[] {
         return match n {
