@@ -1,0 +1,26 @@
+{
+  "id": "lifecycle-pending-tape-whole-write-not-granted-pos",
+  "description": "RULED S478 item 1: a whole-cell AUTHOR write (`@users = []`) into a `let` pending tape `(not to User[])` whose type grants no `replace` is E-WRITE-NOT-GRANTED, the same refusal any tape without `[replace]` gets. `let` and the lifecycle grant a tape nothing; the compiler-written settle write of the cell's own load stays exempt (the declaration itself compiles).",
+  "language-version": "1.0",
+  "spec": "§66.12.2",
+  "rationale": "ruling:user-voice-scrml.md S478 \"⭐ RULED — S477 owner questions 1 and 2\" item 1: \"A whole-cell author write into a pending `(not to S[…])` tape needs the `[replace]` grant like any other tape; the compiler-written settle write stays exempt (S475 item 1).\" §66.12.3: a sequence's grants live on its type; `let` on a sequence is E-GRANT-LET-ON-SEQUENCE. §13.9.1 S475 rule 5: \"The compiler-written load writes are exempt from grant checks.\"",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-TYPE-045=1",
+          "missing:E-WRITE-NOT-GRANTED"
+        ]
+      }
+    }
+  }
+}

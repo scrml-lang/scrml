@@ -1,0 +1,14 @@
+// §13.9.4 rule 3 (RULED S478 item 2) — a reset after a write starts later: its load wins.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    let <who:(not to string)=(loadName(1) !{ _ :> not })/>
+    <main>
+        <button id="go" onclick={ @who = "z"; reset(@who); }>go</button>
+        <p id="who" if=@who>${@who}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

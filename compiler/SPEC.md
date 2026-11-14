@@ -12180,8 +12180,19 @@ read any initializer: it "reads cells" when it reads a cell directly or through 
 4. **`let` is allowed on a pending tape** — a cell declared `(not to S[…])`, whose post-type is a tape. This is a
    carve-out from **E-GRANT-LET-ON-SEQUENCE** (§66.9 O3 = (c), *"`let` on a sequence is a compile error"*): on a
    pending tape `let` is the rule-1 spelling of a re-running load, not a request for `replace`.
-   *⚑ PA reading, not the ruling's words:* `let` there grants an AUTHOR write nothing beyond the tape type's own
-   bracket grants (O3's one spelling per grant stands for author writes); the load's own writes are rule 5's.
+   **RULED S478:** `let` there grants an AUTHOR write nothing beyond the tape type's own bracket grants (O3's one
+   spelling per grant stands for author writes), and neither does the lifecycle `(not to …)`: a whole-cell author
+   write into a pending tape, `let` or locked, needs `replace` in the tape's grants (`(not to S[replace])`) like any
+   other tape, and without it is **E-WRITE-NOT-GRANTED**. The load's own writes are rule 5's, and a reset (§6.8)
+   re-runs the load (§13.9.2), so neither needs `replace`.
+   > **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — S477 owner questions 1 and 2, PA recs adopted" item 1
+   > — *"**#1796 L3 — whole-cell write on a `let` or locked pending tape without `[replace]`: REFUSED.** PA rec:
+   > "refuse it. That is consistent with the grant model, and `[replace]` names the capability." A whole-cell author
+   > write into a pending `(not to S[…])` tape needs the `[replace]` grant like any other tape; the compiler-written
+   > settle write stays exempt (S475 item 1)."* The ⚑ PA reading this replaces said the same for `let`. ·
+   > **supersedes:** for a pending tape, §66.11.6's S475 item 3 (*"allowed for a pending cell (it reloads)"*: a locked
+   > pending cell's `T → T′` whole write) — a tape's whole write is its `replace` grant. **Direction of change:**
+   > **newly-rejecting** (a whole author write into a pending tape compiled on the bootstrap). Nominal on impl#1.
 5. **The compiler-written load writes are exempt from grant checks.** The desugared request's write of a settled
    load into the cell (§13.9.2) — the first `not → T`, a reload's `T → T′`, and the `not` a handled failure arm
    yields (§13.9.5) — is the compiler's, not the author's, and is not judged by the cell's write contract (§66.11:
@@ -12343,11 +12354,22 @@ than one of them is in flight, they are ordered as follows.
    that write is later discarded, the load it would have superseded stands.
 2. **A write starts at its last wait.** A write's start is the start of the last wait that comes before it in its
    continuation (the handler or function body it runs in, §13.8 (i)). A write with no wait before it starts when it
-   lands. A load starts when its run starts.
-3. **A load triggered by a write starts when that write's batch ends.** A dependency change re-runs the load
+   lands. A load starts when its run starts, and rule 3 says when a run starts.
+3. **A load triggered by a write starts when that write's batch ends; a load triggered by a reset starts at the
+   reset.** A dependency change re-runs the load
    (§13.9.2). That run starts when the batch that made the change ends: the handler, or the continuation after a
    wait, that wrote the dependency. So when one batch writes both a dependency and the cell, in either order, the
    load wins. It starts after both writes, which makes it the newest, and its result replaces the cell write.
+   A reset of the cell (`reset(@x)`, §6.8) re-runs the load too (§13.9.2), but that run starts at the reset
+   itself, not when the batch ends. So in `reset(@who); @who = "z";` the write starts later and wins (rule 1):
+   the reset's load is superseded, its result is discarded, and a load classified READ has its transport
+   aborted. In `@who = "z"; reset(@who);` the reset is the later start, and its load's result replaces `"z"`
+   when it settles. A dependency change in the same batch still re-runs the load when the batch ends, after
+   both, and that run wins. *⚑ PA reading, not the ruling's words:* a reset's start is dated the way rule 2
+   dates a write — at the last wait before the reset in its continuation, or when the reset runs if there is
+   none — and between a reset and a write that share a start (the same continuation), the one that runs later
+   is the later start. A `reset-on=` entry's change (§6.8.4) is a write that triggers the load, so its run
+   starts when that write's batch ends.
 4. **A winning write of `not` re-runs the load.** When a winning write's value is `not`, the write SHALL supersede
    the load in flight and then start the cell's load again. This includes a host `null` or `undefined`, which is
    `not` at the interop boundary (§42.9). This is the reset rule of §13.9.2 ("A reset of a pending cell (§6.8) is the
@@ -12376,12 +12398,25 @@ Under the `<request>` rule, an older load would overwrite the author's newer val
 > themselves. Author writes joining the supersede order are not in the literal desugar, so this paragraph adds them.
 > **Direction of change:** **semantics-defined**, since the SPEC was silent. Nominal on impl#1, which does not
 > implement §13.9. The bootstrap builds it in #1796.
+>
+> **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — S477 owner questions 1 and 2, PA recs adopted" item 2
+> — *"**g-spec-pending-reset-then-write-order-s477 — in `reset(@who); @who = "z";` the later write WINS.** PA rec:
+> "the reset's load starts at the reset, so the later write wins (most recently started)." The run a reset triggers
+> starts at the reset (§13.9.4 rule 1, most-recently-started wins); the author write after it starts later and wins.
+> §13.9.4 rules 2–3 are amended to say when a reset-triggered run starts."* Rules 2–3 did not say when a run
+> triggered by a reset starts; the bootstrap had queued it to the end of the batch, so the load won (gap
+> g-spec-pending-reset-then-write-order-s477, review:s477-1826(S1)). · **supersedes:** nothing written (the
+> bootstrap's batch-end timing for a reset was an implementation choice). **Direction of change:**
+> **semantics-changed** for `reset(@x)` followed by a write of `@x` in the same batch (the write now wins; the
+> load won before). Nominal on impl#1, which does not implement §13.9. The bootstrap builds it in
+> s478-boot-pending-rulings.
 
 ```scrml
 <team> = "core";
 <members>: (not to int) = teamCount(@team) !{ _ :> not };
 <button onclick={ @members = 0; }>Clear</button>                  // rule 1: lands at once; a load in flight is discarded (a READ load is aborted)
 <button onclick={ @team = "infra"; @members = 0; }>Infra</button> // rule 3: the reload starts at the batch end, so it wins over the 0
+<button onclick={ reset(@members); @members = 0; }>Zero</button>  // rule 3: the reset's reload starts at the reset, so the 0 wins
 <button onclick={ @members = teamCount("ops") !{ _ :> not }; }>Ops</button>
 // rule 2: the write starts at its wait. If @team changes before it lands, the newer reload wins and this write
 // is discarded. If it wins and its arm yields `not`, the load re-runs (rule 4).
@@ -12525,6 +12560,9 @@ ${
   reads no cell SHALL load once, on mount; a locked pending cell whose initializer reads cells is derived and SHALL
   be E-VALUE-SERVER-CALL. `let` SHALL be allowed on a `(not to S[…])` pending tape (not E-GRANT-LET-ON-SEQUENCE).
   The compiler-written load writes SHALL NOT be judged by the cell's grant checks.
+- *(S478.)* A whole-cell author write into a pending tape SHALL need `replace` in the tape's grants; without it the
+  write SHALL be E-WRITE-NOT-GRANTED, for a `let` and a locked pending tape alike. A load triggered by `reset(@x)`
+  SHALL start at the reset (§13.9.4 rule 3), so a write of `@x` after the reset wins over that load.
 - A failable pending initializer SHALL be handled in the declaration (`!{}`). Unhandled, it SHALL be E-ERROR-002.
   The desugared request SHALL NOT handle it, and no implicit `.error` surface exists.
 - An async-colored function SHALL be bound only by a `function` declaration. A binding that holds one SHALL be
