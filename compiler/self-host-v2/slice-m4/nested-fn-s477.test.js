@@ -238,6 +238,46 @@ describe("§7.3.1 / §48 — purity, scope and naming rules (refused)", () => {
   });
 });
 
+// s477 fix r1 (F1) — §7.5.1 position 3: the arguments of a call of a NESTED function are checked
+// against its parameters exactly as a file-level callee's are (before: a nested callee had no `fnw`
+// entry, so checkArgs found no parameter nids and skipped every check — a string landed in an `int`).
+describe("§7.5.1 position 3 — arguments to a nested function are type-checked", () => {
+  const F = (body) => `    function f(n: int) -> int {\n${body}\n    }`;
+  const C = (fns) => errs(fe(prog(fns, "f(0)")));
+  const e031 = (ds, part) => {
+    expect(ds.map((d) => d.code)).toEqual(["E-TYPE-031"]);
+    expect(ds[0].message).toContain(part);
+  };
+  test("a string literal into a nested `function`'s `int` parameter", () => {
+    e031(C(F(`        function g(k: int) -> int { return k; }\n        return g("x");`)), "argument 1 of `g` expects `int`");
+  });
+  test("a string into a nested `fn`'s `int` parameter", () => {
+    e031(C(F(`        fn g(k: int) -> int { return k * 2; }\n        return g("ab");`)), "argument 1 of `g` expects `int`");
+  });
+  test("an `int` into a nested function's struct parameter", () => {
+    e031(C(`    type S:struct = { a: int }\n` + F(`        function g(s: S) -> int { return s.a; }\n        return g(5);`)), "expects `S`");
+  });
+  test("an un-narrowed `int | not` into an `int` parameter", () => {
+    e031(C(F(`        function g(k: int) -> int { return k + 1; }\n        let x: int | not = not;\n        return g(x);`)), "`int | not`");
+  });
+  test("two levels deep", () => {
+    e031(C(F(`        function g(k: int) -> int {\n            function h(m: int) -> int { return m; }\n            return h("q");\n        }\n        return g(1);`)), "argument 1 of `h`");
+  });
+  test("a nested call in an argument ends the narrowing of the next argument (as for a file-level `add`)", () => {
+    const body = `        let x: int | not = n;\n        function clear() -> int { x = not; return 0; }\n        if (x is given) {\n            return add(clear(), x);\n        }\n        return 0;`;
+    e031(C(F(`        fn add(a: int, b: int) -> int { return a + b; }\n` + body)), "argument 2 of `add`");
+    e031(C(`    fn add(a: int, b: int) -> int { return a + b; }\n` + F(body)), "argument 2 of `add`");
+  });
+  test("a tape argument to a nested function must grant what the parameter does (§66.12.3)", () => {
+    const ds = C(F(`        let xs: int[] = [1];\n        function g(ys: int[free, append]) -> int { return ys.length; }\n        return g(xs);`));
+    expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(ds[0].message).toContain("argument 1 of `g` is the tape `xs`");
+  });
+  test("a well-typed call still compiles and runs", async () => {
+    expect((await run(prog(F(`        function g(k: int) -> int { return k + 1; }\n        return g(n);`), "f(4)"))).c).toBe("5");
+  });
+});
+
 describe("INTERIM refusals — by name, never a silent guess (the language allows or does not rule these)", () => {
   const C = (fns, markup = "") => errs(fe(prog(fns, "0").replace("</program>", markup + "</program>")));
   const one = (ds, part) => {

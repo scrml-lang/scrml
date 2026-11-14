@@ -23954,6 +23954,7 @@ ${
         let out: FnW[] = []
         // s474: one per LOCAL name the function is bound under (an alias: the call writes the alias)
         for (const w of ws) {
+            if (w.name == "" && w.file == file) out = out.concat([w])     // s477 fix r1: a nested function's parameters (fnWrites)
             for (const local of boundAs(lk, file, NameKind.KFn, w.name, w.file)) {
                 out = out.concat([{ name: local, nid: w.nid, file: w.file, keys: w.keys, params: w.params }])
             }
@@ -24071,6 +24072,17 @@ ${
             }
             ws = next
             pass = pass + 1
+        }
+        // s477 fix r1 (F1) — a NESTED function (§7.3.1) gets its entry too, for its PARAMETERS
+        // only: checkArgs finds THE callee's parameter nids by its node, and without this a
+        // nested callee had none, so every argument check (§7.5.1 position 3) was skipped.
+        // Its name is "" — never a call's name — so callKeys never denotes it: a call of a
+        // nested function still ends every narrowing (tUnnarrowEffects), as before. It is in
+        // no file scope; fnwIn passes it through unbound.
+        for (const f of files) {
+            for (const nf of fnsWithNested(fnItems(f.items))) {
+                if (nf.outer >= 0) ws = ws.concat([{ name: "", nid: nf.f.nid, file: f.path, keys: [], params: paramNids(nf.f.params) }])
+            }
         }
         return ws
     }
