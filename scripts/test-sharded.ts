@@ -483,6 +483,7 @@ interface Counts {
   fail: number;
   skip: number;
   todo: number;
+  errors: number; // bun's "N error(s)": an unhandled error between tests — exit 1 with 0 fail (S478)
   expects: number;
   tests: number;
   files: number;
@@ -504,12 +505,17 @@ interface ShardResult {
 }
 
 function parseCounts(lines: string[]): Counts | null {
-  const c: Counts = { pass: 0, fail: 0, skip: 0, todo: 0, expects: 0, tests: 0, files: 0 };
+  const c: Counts = { pass: 0, fail: 0, skip: 0, todo: 0, errors: 0, expects: 0, tests: 0, files: 0 };
   let sawSummary = false;
   for (const line of lines) {
     let m = /^\s*(\d+) (pass|fail|skip|todo)$/.exec(line);
     if (m) {
       c[m[2] as "pass" | "fail" | "skip" | "todo"] = Number(m[1]);
+      continue;
+    }
+    m = /^\s*(\d+) errors?$/.exec(line);
+    if (m) {
+      c.errors = Number(m[1]);
       continue;
     }
     m = /^\s*(\d+) expect\(\) calls?$/.exec(line);
@@ -534,8 +540,13 @@ function parseCounts(lines: string[]): Counts | null {
 // the error and stack sit just above the `(fail)` line), plus bun's closing summary. A shard that died without a
 // `(fail)` line (a crash, an error outside any test) gets its last REPORT_TAIL lines instead.
 const REPORT_TAIL = 150;
+// bun's banner for an error thrown outside any test (a late timer, an unawaited rejection, a top-level throw after
+// the tests were collected). It prints NO `(fail)` line, counts it as " N error" and exits 1 with " 0 fail" — so
+// every place that looks for `(fail)` must also look for this, or the run reads as "0 fail, exit 1" (S478,
+// g-hook-sharded-prepush-exit-s477).
+const UNHANDLED = /^# Unhandled error/;
 const FILE_HEADER = /^\S.*(\.test|_test|\.spec|_spec)\.(js|jsx|ts|tsx|mjs|cjs|mts|cts):$/;
-const SUMMARY_LINE = /^\s*\d+ (pass|fail|skip|todo|expect\(\) calls?)$|^Ran \d+ tests? across|^Bailed out after/;
+const SUMMARY_LINE = /^\s*\d+ (pass|fail|skip|todo|errors?|expect\(\) calls?)$|^Ran \d+ tests? across|^Bailed out after/;
 
 function failureReport(output: string[]): string[] {
   const sections: string[][] = [];
@@ -550,7 +561,7 @@ function failureReport(output: string[]): string[] {
   }
   sections.push(cur);
   const out: string[] = [];
-  const failing = sections.filter((s) => s.some((l) => l.startsWith("(fail) ")));
+  const failing = sections.filter((s) => s.some((l) => l.startsWith("(fail) ") || UNHANDLED.test(l)));
   const clip = (lines: string[]) =>
     lines.length > REPORT_TAIL ? [`  … ${lines.length - REPORT_TAIL} earlier line(s) in the full log …`, ...lines.slice(-REPORT_TAIL)] : lines;
   if (failing.length === 0) return clip(output.filter((l) => !/^bun test v\d/.test(l)));
@@ -771,6 +782,10 @@ async function main(): Promise<void> {
           failLines.push(line);
           if (!opts.verbose) console.log(`[s${shard.index}] ${line}`);
           if (!stopReason.has(shard.index)) bail(shard.index);
+        } else if (UNHANDLED.test(line)) {
+          failLines.push(`(error) ${line.replace(/^#\s*/, "")} in ${lastFile ?? "(no file header yet)"}`);
+          if (!opts.verbose) console.log(`[s${shard.index}] ${failLines[failLines.length - 1]}`);
+          if (!stopReason.has(shard.index)) bail(shard.index);
         }
       };
       const spawnOpts = { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, ...shard.env }, detached: true } as const;
@@ -853,7 +868,7 @@ async function main(): Promise<void> {
       if (outcome !== "ok" && outcome !== "stopped") bail(shard.index);
       if (!opts.verbose) {
         const status = outcome === "ok" ? "ok" : outcome === "stopped" ? "stopped" : `${outcome.toUpperCase()} (exit ${exitCode})`;
-        const c = counts ? `${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip` : "no summary";
+        const c = counts ? `${counts.pass} pass, ${counts.fail} fail${counts.errors ? `, ${counts.errors} UNHANDLED ERROR(S)` : ""}, ${counts.skip} skip` : "no summary";
         console.log(`[s${shard.index}] ${status}: ${shard.files.length} files${groupNote(shard)}, ${c}, ${seconds.toFixed(1)}s`);
       }
       let measured: Timings = {};
@@ -907,8 +922,8 @@ async function main(): Promise<void> {
     }
   }
 
-  const total: Counts = { pass: 0, fail: 0, skip: 0, todo: 0, expects: 0, tests: 0, files: 0 };
-  console.log("\nshard  files   pass  fail  skip  todo  seconds  peakMB");
+  const total: Counts = { pass: 0, fail: 0, skip: 0, todo: 0, errors: 0, expects: 0, tests: 0, files: 0 };
+  console.log("\nshard  files   pass  fail   err  skip  todo  seconds  peakMB");
   for (const r of results) {
     const c = r.counts;
     const state =
@@ -922,8 +937,8 @@ async function main(): Promise<void> {
     console.log(
       `${String(r.shard.index).padStart(5)}  ${String(r.shard.files.length).padStart(5)}  ` +
         (c
-          ? `${String(c.pass).padStart(5)} ${String(c.fail).padStart(5)} ${String(c.skip).padStart(5)} ${String(c.todo).padStart(5)}`
-          : "    -     -     -     -") +
+          ? `${String(c.pass).padStart(5)} ${String(c.fail).padStart(5)} ${String(c.errors).padStart(5)} ${String(c.skip).padStart(5)} ${String(c.todo).padStart(5)}`
+          : "    -     -     -     -     -") +
         `  ${r.seconds.toFixed(1).padStart(7)}  ${r.peakRssMb.toFixed(0).padStart(6)}${state}${pathGroups.length > 1 ? `  group ${r.shard.group}${r.shard.tag}` : ""}`,
     );
     if (c) for (const k of Object.keys(total) as (keyof Counts)[]) total[k] += c[k];
@@ -932,7 +947,7 @@ async function main(): Promise<void> {
   const wall = ((Date.now() - started) / 1000).toFixed(1);
   console.log(
     `\n${complete ? "TOTAL" : "PARTIAL TOTAL (not every shard finished)"}: ` +
-      `${total.pass} pass, ${total.fail} fail, ${total.skip} skip, ${total.todo} todo, ` +
+      `${total.pass} pass, ${total.fail} fail, ${total.errors} error, ${total.skip} skip, ${total.todo} todo, ` +
       `${total.expects} expect() calls; ran ${total.tests} tests across ${total.files} files in ${wall}s wall`,
   );
   console.log(`peak RSS, all shards together: ${peakTotalRss.toFixed(0)} MB (ceiling ${opts.memMb} MB per shard; timeout ${opts.timeoutS}s per shard)`);
@@ -943,7 +958,29 @@ async function main(): Promise<void> {
   }
   if (bailedBy !== null) console.log(`\nBailed out: first failure in shard ${bailedBy}; other shards stopped.`);
   if (failed.length > 0) console.log(`\nFAILED shard(s): ${failed.map((r) => `${r.shard.index} (${r.outcome})`).join(", ")}`);
-  process.exit(failed.length > 0 || integrity.length > 0 || bailedBy !== null ? 1 : 0);
+  const failing = failed.length > 0 || integrity.length > 0 || bailedBy !== null;
+  // ONE verdict line, always last, naming every reason — a caller that captures the output (the pre-push hook)
+  // prints it, so "exit 1, 0 fail" can never reach the user without its cause (S478). The pre-push hook also
+  // refuses an exit 0 that has no `RESULT: PASS` line.
+  const reasons: string[] = [];
+  if (total.fail > 0) reasons.push(`${total.fail} test(s) failed`);
+  if (total.errors > 0) reasons.push(`${total.errors} unhandled error(s) outside any test (bun prints "# Unhandled error between tests"; exit 1 with 0 fail)`);
+  for (const r of failed) {
+    if (r.outcome === "failed" && r.counts && r.counts.fail === 0 && r.counts.errors === 0) reasons.push(`shard ${r.shard.index} exited ${r.exitCode} with no failing test and no unhandled error`);
+    else if (r.outcome === "failed" && !r.counts) reasons.push(`shard ${r.shard.index} exited ${r.exitCode} with no test summary (crash?)`);
+    else if (r.outcome !== "failed") reasons.push(`shard ${r.shard.index}: ${r.outcome}`);
+  }
+  if (integrity.length > 0) reasons.push("integrity error (see above)");
+  if (failing && reasons.length === 0) reasons.push(bailedBy !== null ? `bailed out by shard ${bailedBy}` : "unknown");
+  console.log(failing ? `\nRESULT: FAIL — ${reasons.join("; ")}` : "\nRESULT: PASS");
+  process.exit(failing ? 1 : 0);
 }
 
-await main();
+// A runner fault (an exception in this script, not in a test) must never read as a test result: it prints its own
+// verdict and exits 3, distinct from a test failure's 1 (S478, g-hook-sharded-prepush-exit-s477).
+try {
+  await main();
+} catch (e) {
+  console.log(`\nRESULT: FAIL — test-sharded RUNNER CRASHED: ${(e as Error)?.stack ?? String(e)}`);
+  process.exit(3);
+}
