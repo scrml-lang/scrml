@@ -174,13 +174,17 @@ ${
     export type SealedSlice:struct = { n: int, label: string, source: string }
     export type ToolOutput:struct = { js: string, refused: string[] }
 
-    // The foreign slices the tool module runs (the functions `main` reaches), each once.
+    // The foreign slices of EVERY function of the tool program, each once — the driver checks
+    // them all (E-FOREIGN-006 / E-FOREIGN-007 are compile errors at the slice, §23.2.4a / §23.2.6,
+    // whether or not `main` reaches its function; s477 r1, review F3), and printTool prints only
+    // the ones `main` reaches (it looks each up by site in `sealed`).
     export fn toolSlices(p: CoreProgram) -> ToolSlice[] {
         const tl: CoreTool | not = p.tool
         if (tl is not) return []
-        const mf: ServerFn | not = findServerFn(p, tl.main)
-        if (mf is not) return []
-        return slicesIn(p, serverReach(p, [mf]))
+        let every: int[] = []
+        for (const sf of p.server) { every = every.concat([sf.sym.id]) }
+        for (const f of p.fns) { every = every.concat([f.sym.id]) }
+        return slicesIn(p, every)
     }
 
     export fn printTool(p: CoreProgram, jsFile: string, runtimeFile: string, root: string, sealed: SealedSlice[]) -> ToolOutput {
