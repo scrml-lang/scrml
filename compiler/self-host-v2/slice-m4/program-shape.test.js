@@ -107,8 +107,9 @@ describe("(A) every other top-level attribute: its code, or a refusal — never 
   });
   // (`db=` is read since s451 U1a — the program's database, §8.1.1: server.test.js)
   // (s473: `title=` / `description=` / `lang=` are read and `mcp` has its own refusal — program-attrs-s473.test.js)
+  // (s477: `kind=` is read — §64, the tool target: kind-tool-s477.test.js; `kind="v"` is E-TOOL-002)
   for (const a of ["tables", "cors", "log", "headers", "csrf", "loginRedirect",
-                   "sessionExpiry", "session-secure", "kind", "idempotency-store", "transactions"]) {
+                   "sessionExpiry", "session-secure", "idempotency-store", "transactions"]) {
     test(`\`${a}=\` is not read by the bootstrap → one E-BOOTSTRAP-UNSUPPORTED naming it`, () => {
       const d = run(prog(`${a}="v"`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
+             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
     import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -417,6 +417,7 @@ ${
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
             .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(ctx.p, f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")])
             .Query(q: q) :> queryJs(ctx, q)
+            .Foreign(slice: fsl0, args: args) :> foreignJs(ctx, fsl0, args)      // s477: a sealed foreign slice (§23.2.4a)
         }
     }
 
@@ -451,6 +452,17 @@ ${
     // program name collides): a database's connection, a query site's text.
     export fn dbVarName(db: Sym) -> string { return "db$" + db.id }
     export fn sqlTextName(site: int) -> string { return "sql$" + site }
+    // s477 — the module-level sealed function of a foreign slice (print-server.scrml printTool)
+    export fn sliceName(site: int) -> string { return "slice$" + site }
+
+    // s477 — a §23.2.4a foreign slice, called with its crossings' values, in
+    // `in:{}` order: `slice$<site>(a, b)`. `slice$<site>` is the sealed function
+    // the tool module builds once at load (print-server.scrml printTool,
+    // server-runtime.js foreignSeal). It stands only as a Suspend's `on`
+    // (check.scrml C-F1), so the call is always awaited — the boundary `await`.
+    fn foreignJs(ctx: Ctx, s: ForeignSlice, args: Expr[]) -> JsExpr {
+        return jcall(jid(sliceName(s.site.n)), exprsJs(ctx, args))
+    }
 
     // s454 (U1b) — a call of a WAITING client function (Fn.waits, §13.2 async
     // colour) hands it the caller's task first: its continuations run in that
@@ -823,6 +835,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
         if (cp is not) return not
         if (!cycleWaits(cp.body)) return not
@@ -877,6 +890,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1040,6 +1054,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1065,6 +1080,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1076,6 +1092,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Join(k: x) :> false
             .Suspend(bind: x) :> false
             .Let(sym: x) :> false
@@ -1132,6 +1149,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -1168,6 +1186,7 @@ ${
             .Continue(target: t) :> continueJs(ctx, t)
             .Gather(g: g) :> stmtGatherJs(ctx, g, assigned)                     // s469 (§49.6)
             .Lift(into: i, what: w) :> [liftJs(ctx, i, w)]
+            .LocalFn(f: f) :> [localFnJs(ctx, f)]                             // s477 (§7.3.1)
         }
     }
 
@@ -1695,6 +1714,7 @@ ${
             .Break(target: x) :> ownKids(Node.NStmt(s))
             .Continue(target: x) :> ownKids(Node.NStmt(s))
             .Lift(into: x) :> ownKids(Node.NStmt(s))
+            .LocalFn(f: f) :> ownBad(blockLocals(f.body))     // s477: a closure (§7.3.1) may see any local it names, whenever it runs — every write of one copies
         }
     }
 
@@ -1760,6 +1780,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: x) :> not
         }
     }
 
@@ -1784,6 +1805,7 @@ ${
             .Validity(of: x) :> ownKids(Node.NExpr(e))
             .ServerCall(fn: x) :> ownKids(Node.NExpr(e))
             .Query(q: x) :> ownKids(Node.NExpr(e))
+            .Foreign(slice: x) :> ownKids(Node.NExpr(e))     // s477: a crossing is an ordinary read — host code may keep it
         }
     }
 
@@ -1840,6 +1862,7 @@ ${
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
+            .Foreign(slice: x) :> -1
         }
     }
 
@@ -1865,6 +1888,7 @@ ${
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: x) :> false     // s477: host code may hold what it returns
         }
     }
 
@@ -1896,6 +1920,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: x) :> not
         }
     }
 
@@ -2045,6 +2070,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: x) :> []
             .Lift(into: x) :> []
+            .LocalFn(f: x) :> []
         }
     }
 
@@ -2070,6 +2096,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -2125,6 +2152,7 @@ ${
             .Continue(target: t) :> t.id
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -2315,6 +2343,7 @@ ${
             .Continue :> []
             .Gather :> []
             .Lift :> []
+            .LocalFn :> []
         }
     }
 
@@ -2343,6 +2372,7 @@ ${
             .Continue :> []
             .Gather :> []
             .Lift :> []
+            .LocalFn :> []
         }
     }
 
@@ -2381,6 +2411,7 @@ ${
             .Continue :> 0
             .Gather :> 0
             .Lift :> 0
+            .LocalFn :> 0
         }
     }
 
@@ -2425,6 +2456,7 @@ ${
             .Continue :> []
             .Gather :> []
             .Lift :> []
+            .LocalFn :> []
         }
     }
 
@@ -2558,6 +2590,7 @@ ${
             .Validity(of: x) :> 1
             .ServerCall(fn: x) :> 1
             .Query(q: x) :> 1
+            .Foreign(slice: x) :> 1
         }
     }
 
@@ -2951,6 +2984,7 @@ ${
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
+            .Foreign(slice: fsl0) :> -1
         }
     }
 
@@ -3097,6 +3131,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -3214,6 +3249,7 @@ ${
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 
@@ -3326,6 +3362,7 @@ ${
             .JAwait :> false
             .JAssignE :> false
             .JNew :> false
+            .JText :> false
         }
     }
 
@@ -3453,6 +3490,7 @@ ${
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 
@@ -4064,6 +4102,21 @@ ${
 
     fn hostKind(k: string) -> JsExpr { return JsExpr.JObject([{ key: "k", value: jstr(k) }]) }
 
+    // s477 — a NESTED function (Stmt.LocalFn, §7.3.1), printed where it stands as
+    // a host function declaration: "closes over the outer function's `let`,
+    // `const`, and `lin` bindings with standard JavaScript closure semantics",
+    // and a host declaration is hoisted to its block (§48.6.4). It never waits,
+    // so it returns plainly (`ret` "") whatever its enclosing function does; it
+    // stands at the top of a function body, so no row, loop or Tier-0 context
+    // reaches it. Its shared-instance reads use the enclosing function's
+    // prologue locals (sharedRefs walks into it).
+    fn localFnJs(ctx: Ctx, f: Fn) -> JsStmt {
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns, owned: ownedLocals(f.body) }
+        let params: string[] = []
+        for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
+        return JsStmt.SFunc(symName(ctx, f.sym), params, blockJs(fctx, f.body))
+    }
+
     fn fnJs(ctx: Ctx, f: Fn) -> JsStmt {
         const hf: HostFn | not = f.host
         if (hf is given) return hostFnJs(ctx, f, hf)
@@ -4198,6 +4251,7 @@ ${
     fn exprIsQuery(e: Expr) -> boolean {
         return match e {
             .Query(q: x) :> true
+            .Foreign(slice: fsl0) :> false
             .Lit(lit: x) :> false
             .Local(sym: x) :> false
             .Read(place: x) :> false
@@ -4451,6 +4505,7 @@ ${
         return match e {
             .ServerCall(fn: f) :> f
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -4571,6 +4626,7 @@ ${
             .Call(callee: f) :> f
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -4612,6 +4668,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 

@@ -74,6 +74,7 @@ ${
             .Continue(target: x) :> "Continue"
             .Gather(g: x) :> "Gather"
             .Lift(into: x) :> "Lift"
+            .LocalFn(f: x) :> "LocalFn"
         }
     }
 
@@ -98,6 +99,7 @@ ${
             .Validity(of: x) :> "Validity"
             .ServerCall(fn: x) :> "ServerCall"
             .Query(q: x) :> "Query"
+            .Foreign(slice: fsl0) :> "Foreign"
         }
     }
 

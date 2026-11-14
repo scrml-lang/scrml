@@ -1,0 +1,20 @@
+{
+  "id": "tool-foreign-crossing-shadow-neg",
+  "description": "§23.2.4a E-FOREIGN-006 — a tool slice declares a top-level `const` with the same name as its `in:{}` crossing (the crossing is the sealed slice's parameter).",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: \"a crossing name that the slice ALSO declares at its TOP LEVEL … This SHALL be a compile error (E-FOREIGN-006) that NAMES the shadowed binding.\"",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-FOREIGN-006"
+    ],
+    "notCodes": [
+      "E-FOREIGN-007"
+    ],
+    "severity": {
+      "E-FOREIGN-006": "error"
+    }
+  }
+}

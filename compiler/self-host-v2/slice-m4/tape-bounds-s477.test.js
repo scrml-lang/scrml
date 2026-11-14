@@ -17,7 +17,10 @@
 //   E. `insert(i, x)`: the grant, the bound, the position (E-INDEX-OUT-OF-RANGE-RT).
 //   F. value semantics (§66.10) hold through the checked edits.
 
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
@@ -549,4 +552,87 @@ describe("H4 — an edit as a `match` / `!{}` arm's EXPRESSION is checked as in 
     click(btn("go"));
     expect($("#o").textContent).toBe("1,2,3");
   });
+});
+
+// =============================================================================
+// G. a TOOL (`<program kind="tool">`, §64 — merge of s477-boot-kind-tool × this lane):
+// a foreign slice's value (§23.2.4a) is host code's — its length is UNKNOWN, so a write
+// of it into a bounded slot is never proven; it is checked at run time on the SETTLED
+// value (every value foreign block in a tool suspends — lower's lowerExpr reads the
+// Suspend's bind, and the typer's unproven bound is checked on it there). The emitted
+// tool module is compiled by the real driver and RUN with bun.
+// =============================================================================
+describe("G — a tool: a foreign value into a bounded slot is checked at run time", () => {
+  let tmp;
+  let compileFile;
+  beforeAll(async () => {
+    tmp = mkdtempSync(join(tmpdir(), "s477-tb-tool-"));
+    ({ compileFile } = await import("../../../scripts/scrml-boot.ts"));
+  });
+  afterAll(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
+
+  async function buildTool(name, body) {
+    const dir = mkdtempSync(join(tmp, name + "-"));
+    const file = join(dir, name + ".scrml");
+    writeFileSync(file, `<program kind="tool" lang="js">\n\${\n${body}\n}\n</program>\n`);
+    const out = join(dir, "out");
+    const r = await compileFile(file, { outDir: out });
+    return { r, js: join(out, name + ".js") };
+  }
+  function exec(js, args = []) {
+    const p = Bun.spawnSync(["bun", js, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+    return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
+  }
+
+  test("`const small: int[1..=2] = _={ … }=`: in range runs; `[1, 2, 3]` traps E-WRITE-INVARIANT-RT before the write", async () => {
+    const b = await buildTool("fbound", [
+      "    function main(args: string[]) -> number {",
+      "        const small: int[1..=2] = _={ in: { args }",
+      "            if (args.length > 0) return [1, 2];",
+      "            return [1, 2, 3];",
+      "        }=;",
+      "        const n = small.length;",
+      '        _={ in: { n } console.log("len " + n) }=;',
+      "        return 0;",
+      "    }",
+    ].join("\n"));
+    expect(b.r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(b.r.ok).toBe(true);
+    expect(readFileSync(b.js, "utf8")).toContain("rt.lengthCheck(settled, 1, 2,");
+    const ok = exec(b.js, ["x"]);
+    expect(ok.out).toBe("len 2\n");
+    expect(ok.code).toBe(0);
+    const bad = exec(b.js, []);
+    expect(bad.out).toBe("");
+    expect(bad.err).toContain("E-WRITE-INVARIANT-RT");
+    expect(bad.err).toContain("length 3, outside its type's length bound 1..=2");
+    expect(bad.code).not.toBe(0);
+  }, 300000);
+
+  test("a foreign value rebinds a bounded local through a read; `insert` and the bounded `append` run in a tool", async () => {
+    const b = await buildTool("fins", [
+      "    function main(args: string[]) -> number {",
+      "        const raw: int[] = _={ in: { args } return args.map((a) => a.length); }=;",
+      "        let xs: int[0..=3, append, insert, replace] = [];",
+      "        xs = raw;",
+      "        xs.insert(0, 9);",
+      "        xs.append(7);",
+      '        _={ in: { xs } console.log(xs.length + ":" + xs.join(",")) }=;',
+      "        return 0;",
+      "    }",
+    ].join("\n"));
+    expect(b.r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(b.r.ok).toBe(true);
+    const ok = exec(b.js, ["a"]);
+    expect(ok.out).toBe("3:9,1,7\n");
+    expect(ok.code).toBe(0);
+    // two args: the rebind holds 2, the insert makes 3, the append would make 4 — trapped
+    const grow = exec(b.js, ["a", "bb"]);
+    expect(grow.out).toBe("");
+    expect(grow.err).toContain("E-WRITE-INVARIANT-RT");
+    // four args: the rebind itself is past the bound — trapped before the write
+    const wide = exec(b.js, ["a", "b", "c", "d"]);
+    expect(wide.err).toContain("E-WRITE-INVARIANT-RT");
+    expect(wide.err).toContain("length 4");
+  }, 300000);
 });

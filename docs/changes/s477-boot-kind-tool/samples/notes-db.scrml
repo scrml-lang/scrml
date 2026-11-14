@@ -1,0 +1,33 @@
+<program kind="tool" lang="js" db="./notes.db">
+${
+    // s477 sample — `?{}` in a tool (SPEC §64.5: "`kind="tool"` + `db=` … lowers `?{}`
+    // identically to a `<program db>` web app; only the emit shape differs").
+    // `bun notes-db.js add <text>` stores a note; `bun notes-db.js` lists them. The
+    // queries run in a `!` function (its failure propagates, §19.8.2 — and its body is
+    // one transaction, §8.9.2); `main` handles the failure and sets the exit code.
+    type Note:struct = { id: int, body: string }
+
+    function store(args: string[])! SqlError {
+        ?{`CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL)`}.run();
+        if (args.length >= 2 && args[0] == "add") {
+            const body = args[1];
+            ?{`INSERT INTO notes (body) VALUES (${body})`}.run();
+        }
+        const rows: Note[] = ?{`SELECT id, body FROM notes ORDER BY id`}.all();
+        _={ in: { rows }
+            for (const r of rows) console.log(r.id + ": " + r.body);
+        }=;
+        return rows.length;
+    }
+
+    function main(args: string[]) -> number {
+        const n = store(args) !{ _ :> -1, };
+        if (n < 0) {
+            _={ console.error("notes-db: the database failed") }=;
+            return 1;
+        }
+        _={ in: { n } console.log("total: " + n) }=;
+        return 0;
+    }
+}
+</program>

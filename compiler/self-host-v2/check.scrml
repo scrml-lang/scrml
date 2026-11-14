@@ -99,7 +99,7 @@
 ${
     import { Sym, Type, LengthGrant, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, RequestState, ReqClass, SqlKind, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
+             DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver, ForeignSlice,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes, requestStateDeps, requestHandles, boundSyms } from "./walk.scrml"
@@ -206,6 +206,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: x) :> not     // s477: its crossings are its kids (walk), each its own Local
         }
     }
 
@@ -238,6 +239,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not                            // s477: declaring a nested function reads no local (its body's nodes are walked; its name is bound — walk.scrml stmtBinds)
         }
     }
 
@@ -388,6 +390,7 @@ ${
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
+            .Foreign(slice: fsl0) :> -1
         }
     }
 
@@ -782,6 +785,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
@@ -943,6 +947,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: g) :> loopNeverEnds(g.label, g.head, g.body)
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .If(thenB: t, elseB: el) :> ifDiverges(t, el)
             .Attempt(result: x) :> false
             .Let(sym: x) :> false
@@ -1049,6 +1054,8 @@ ${
         let out: string[] = []
         for (const n of allNodes(root)) {
             if (nodeIsSql(n)) out = out.concat(["C-S2: a `" + sqlSigil() + "}` query in client code (" + where + ") — a query stands only in a server function"])
+            // s477 (C-F1): a foreign slice runs server-side only (§23.2.4: "the opaque slice is emitted server-side ONLY")
+            if (nodeForeign(n) is given) out = out.concat(["C-F1: a foreign slice in client code (" + where + ") — a foreign slice stands only in a server-side body"])
             // (s454: C-S3's plain-call rule is checkClientCalls' — a Fn only client
             // code reaches; a declaration's own nodes are client code by construction)
             const callee: Sym | not = nodeCallee(n)
@@ -1152,6 +1159,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""                        // s477: its body's own nodes are visited (allNodes walks into the NFn)
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -1170,6 +1178,7 @@ ${
             .Validity(of: x) :> "reads a validity surface"
             .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
             .Query(q: x) :> ""
+            .Foreign(slice: fsl0) :> ""
             .Lit(lit: x) :> ""
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
@@ -1207,9 +1216,81 @@ ${
         }
     }
 
+    // s477 (C-F1) — a §23.2.4a foreign slice (Expr.Foreign), else not.
+    fn nodeForeign(n: Node) -> ForeignSlice | not {
+        return match n {
+            .NExpr(e: e) :> exprForeign(e)
+            .NStmt(s: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprForeign(e: Expr) -> ForeignSlice | not {
+        return match e {
+            .Foreign(slice: fs) :> fs
+            .Query(q: x) :> not
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+        }
+    }
+
+    // its crossing values, one per parameter
+    fn foreignArgs(e: Expr) -> int {
+        return match e {
+            .Foreign(slice: fs, args: a) :> a.length
+            .Query(q: x) :> -1
+            .Lit(lit: x) :> -1
+            .Local(sym: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .Assigned(local: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Refetch(req: rf0) :> -1
+            .Validity(of: x) :> -1
+            .ServerCall(fn: x) :> -1
+        }
+    }
+
     fn exprQuery(e: Expr) -> SqlQuery | not {
         return match e {
             .Query(q: q) :> q
+            .Foreign(slice: fsl0) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -1255,6 +1336,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1305,6 +1387,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -1393,6 +1476,7 @@ ${
             .Continue(target: x) :> ["C8: a bind's write is not a Write"]
             .Gather(g: x) :> ["C8: a bind's write is not a Write"]
             .Lift(into: x) :> ["C8: a bind's write is not a Write"]
+            .LocalFn(f: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -1449,6 +1533,7 @@ ${
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: fsl0) :> false
         }
     }
 
@@ -1474,6 +1559,7 @@ ${
             .Validity(of: x) :> "(not a cell read)"
             .ServerCall(fn: x) :> "(not a cell read)"
             .Query(q: x) :> "(not a cell read)"
+            .Foreign(slice: fsl0) :> "(not a cell read)"
         }
     }
 
@@ -1766,6 +1852,7 @@ ${
             .Continue(target: x) :> ReqStmt.ROther
             .Gather(g: x) :> ReqStmt.ROther
             .Lift(into: x) :> ReqStmt.ROther
+            .LocalFn(f: x) :> ReqStmt.ROther
         }
     }
 
@@ -1890,6 +1977,7 @@ ${
             .Break(target: x) :> 0
             .Continue(target: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0                                  // s477: declaring a nested function writes nothing
         }
     }
 
@@ -2060,6 +2148,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -2120,6 +2209,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -2244,6 +2334,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -2268,6 +2359,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -2356,6 +2448,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -2399,6 +2492,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -2583,6 +2677,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
         }
     }
 
@@ -2634,6 +2729,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -2723,6 +2819,7 @@ ${
             .Continue(target: x) :> 0
             .Gather(g: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0
         }
     }
 
@@ -2756,6 +2853,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -2857,6 +2955,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: g) :> tailBlock(g.body, false, [], where)
             .Lift(into: x) :> []
+            .LocalFn(f: x) :> []                                 // s477: never a continuation (C-N1: its body holds no Suspend / Join / Jump)
             .If(thenB: t, elseB: el) :> ifTails(b, i, t, el, tail, last, joins, where)
             .Attempt(ok: ok, arms: arms) :> attemptTails(ok, arms, where)
             .Defer(body: d) :> tailBlock(d, false, [], where)
@@ -2906,6 +3005,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -2957,6 +3057,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -2982,6 +3083,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -3041,6 +3143,8 @@ ${
         let legalOn: int = 0
         let legalQuery: int = 0
         let legalSettled: int = 0
+        let legalForeign: int = 0          // s477 (C-F1)
+        let foreigns: int = 0
         let calls: int = 0
         let queries: int = 0
         let settled: int = 0
@@ -3049,8 +3153,14 @@ ${
             if (nodeServerCallSym(n) is given) calls = calls + 1
             if (nodeQuery(n) is given) queries = queries + 1
             if (nodeSettled(n) is given) settled = settled + 1
+            if (nodeForeign(n) is given) foreigns = foreigns + 1
             const sp: SuspendParts | not = nodeSuspendParts(n)
             if (sp is given) {
+                const fsl: ForeignSlice | not = exprForeign(sp.on)
+                if (fsl is given) {
+                    legalForeign = legalForeign + 1
+                    if (foreignArgs(sp.on) != fsl.params.length) out = out.concat(["C-F1: a foreign slice is called with " + foreignArgs(sp.on) + " value(s) for its " + fsl.params.length + " crossing(s)"])
+                }
                 const on: Sym | not = exprServerCallSym(sp.on)
                 if (on is given) {
                     legalOn = legalOn + 1
@@ -3078,6 +3188,7 @@ ${
         }
         if (calls != legalOn) out = out.concat(["C-S3: " + (calls - legalOn) + " ServerCall(s) stand outside a Suspend's `on` (a client call of a server function is a suspension point, §12.3 / §19.9.10)"])
         if (queries != legalQuery) out = out.concat(["C-SQL2: " + (queries - legalQuery) + " query(ies) stand outside a Suspend's `on` (a query is a wait — §13.8 item 2 — and is awaited where it stands, the S467 §13 gate)"])
+        if (foreigns != legalForeign) out = out.concat(["C-F1: " + (foreigns - legalForeign) + " foreign slice(s) stand outside a Suspend's `on` (a slice's value is awaited at the boundary, §23.2.4a)"])
         if (settled != legalSettled) out = out.concat(["C-S7: " + (settled - legalSettled) + " FSettled outcome(s) are not the call of the Attempt that begins their Suspend's `then`"])
         // C-S3: client code never plain-calls a ServerFn — a Fn a client root
         // reaches, or one that touches client state itself (client by its own body)
@@ -3325,6 +3436,7 @@ ${
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: fsl0) :> false
         }
     }
 
@@ -3368,6 +3480,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -3394,6 +3507,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
             .Let(sym: x) :> not
@@ -3467,6 +3581,7 @@ ${
         return match e {
             .ServerCall(fn: f) :> f
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -3562,6 +3677,69 @@ ${
         return []
     }
 
+    // s477 — C-N1: a NESTED function (Stmt.LocalFn, §7.3.1) never waits, is never
+    // failable and is no host binding (analyze refuses those shapes), so nothing
+    // in its body — its own nested functions included — is a Suspend, a Join, a
+    // Jump or a Fail: each would be judged against, or continue, the ENCLOSING
+    // function. (Its Returns are its own: the printer prints it plainly.)
+    fn checkLocalFn(f: Fn) -> string[] {
+        let out: string[] = []
+        const who: string = "the nested function " + f.sym.hint + "()"
+        if (f.waits) out = out.concat(["C-N1: " + who + " waits"])
+        if (f.err is given) out = out.concat(["C-N1: " + who + " is failable"])
+        if (f.host is given) out = out.concat(["C-N1: " + who + " is a host binding"])
+        for (const n of allNodes(Node.NFn(f))) {
+            const what: string = nestedForbidden(n)
+            if (what != "") out = out.concat(["C-N1: " + who + " holds " + what])
+        }
+        return out
+    }
+
+    fn nestedForbidden(n: Node) -> string {
+        return match n {
+            .NStmt(s: s) :> nestedForbiddenStmt(s)
+            .NExpr(e: x) :> ""
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> ""
+            .NServerFn(f: x) :> "a server function"
+            .NBlock(b: x) :> ""
+            .NPlace(pl: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NView(v: x) :> "a view"
+            .NAttr(a: x) :> "a markup attribute"
+        }
+    }
+
+    fn nestedForbiddenStmt(s: Stmt) -> string {
+        return match s {
+            .Suspend(bind: x) :> "a Suspend"
+            .Join(k: x) :> "a Join"
+            .Jump(k: x) :> "a Jump"
+            .Fail(err: x) :> "a Fail"
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .Write(cap: x) :> ""
+            .Commit(writes: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .ResetSurface(of: x) :> ""
+            .Defer(body: x) :> ""
+            .Unpersist(decl: x) :> ""
+            .Attempt(result: x) :> ""
+            .Loop(label: x) :> ""
+            .Break(target: x) :> ""
+            .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
+        }
+    }
+
     fn checkStmt(p: CoreProgram, ob: OnceBinds, encl: Decl[], s: Stmt) -> string[] {
         return match s {
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, ob, encl, cap, inst, edit, v, ck)
@@ -3584,6 +3762,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: g) :> checkLoop(g.head, g.body).concat(gatherDirectDefers(g.body))
             .Lift(into: x) :> []
+            .LocalFn(f: f) :> checkLocalFn(f)                      // s477 (C-N1)
         }
     }
 
@@ -3668,6 +3847,7 @@ ${
             .Continue(target: x) :> 0
             .Gather(g: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0
         }
     }
 
@@ -3714,6 +3894,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> "a nested function"        // s477: one stands only at the top of a function body
         }
     }
 
@@ -3777,6 +3958,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -3843,6 +4025,7 @@ ${
             .Continue(target: x) :> -1
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -3957,6 +4140,7 @@ ${
             .Continue(target: t) :> jumpTo(t, loops, "Continue")
             .Gather(g: g) :> jumpBlock(g.body, [g.label.id])   // s469: a bound loop is a jump boundary (§49.6 rule 6, C20)
             .Lift(into: x) :> []
+            .LocalFn(f: f) :> jumpBlock(f.body, [])             // s477: a function body is a jump boundary (§49.4.3)
             .If(thenB: t, elseB: el) :> jumpBlockIn(t, loops, cyc).concat(jumpMaybe(el, loops, cyc))
             .Attempt(ok: ok, arms: arms) :> jumpAttempt(ok.body, arms, loops, cyc)
             .Suspend(then: t) :> jumpBlockIn(t, cyc, cyc)
@@ -4018,6 +4202,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -4132,6 +4317,7 @@ ${
     fn liftStmt(s: Stmt, into: int, rows: int) -> string[] {
         return match s {
             .Lift(into: i, what: w) :> liftTarget(i, w, into, rows)
+            .LocalFn(f: f) :> liftBlock(f.body, -1, -1)         // s477: a function body is a lift boundary
             .Gather(g: g) :> gatherProblems(g, -1)
             .Loop(body: lb) :> liftBlock(lb, into, rows)
             .If(thenB: t, elseB: el) :> liftBlock(t, into, rows).concat(liftMaybe(el, into, rows))
@@ -4198,6 +4384,7 @@ ${
     fn liftsIntoStmt(s: Stmt, into: int) -> int {
         return match s {
             .Lift(into: i) :> liftIs(i, into)
+            .LocalFn(f: x) :> 0
             .Loop(body: lb) :> liftsInto(lb, into)
             .If(thenB: t, elseB: el) :> liftsInto(t, into) + liftsIntoMaybe(el, into)
             .Attempt(ok: ok) :> liftsInto(ok.body, into)
@@ -4277,6 +4464,7 @@ ${
             .Continue(target: x) :> -1
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Join(k: x) :> -1
             .Jump(k: x) :> -1
         }
@@ -4325,6 +4513,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
         }
     }
 
@@ -4381,6 +4570,7 @@ ${
             .Continue(target: x) :> ""        // (jumpStmt), so a Break / Continue names a Loop inside it
             .Gather(g: x) :> "a Gather"
             .Lift(into: x) :> "a Lift"
+            .LocalFn(f: x) :> "a nested function"
         }
     }
 
@@ -4421,6 +4611,7 @@ ${
             .Continue(target: x) :> "a Continue inside a Commit"
             .Gather(g: x) :> "a Gather inside a Commit"
             .Lift(into: x) :> "a Lift inside a Commit"
+            .LocalFn(f: x) :> "a nested function inside a Commit"
         }
     }
 
@@ -4445,6 +4636,7 @@ ${
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
             .ServerCall(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Query(q: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Foreign(slice: fsl0) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -4534,6 +4726,7 @@ ${
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Query(q: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Foreign(slice: fsl0) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -4582,6 +4775,7 @@ ${
             .Validity(of: x) :> bad
             .ServerCall(fn: x) :> bad
             .Query(q: x) :> bad
+            .Foreign(slice: fsl0) :> bad
         }
     }
 
@@ -4759,6 +4953,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -5049,6 +5244,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -5085,6 +5281,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -5156,6 +5353,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -5201,6 +5399,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -5328,6 +5527,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -5357,6 +5557,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -5392,6 +5593,7 @@ ${
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 
@@ -5511,6 +5713,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 

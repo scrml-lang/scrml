@@ -1,0 +1,6 @@
+<program kind="tool" lang="js">
+    function main(args: string[]) -> number {
+        return 0;
+    }
+    <p>"a tool has no page"</p>
+</program>

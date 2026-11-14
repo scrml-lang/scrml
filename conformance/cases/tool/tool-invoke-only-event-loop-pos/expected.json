@@ -1,0 +1,17 @@
+{
+  "id": "tool-invoke-only-event-loop-pos",
+  "description": "§64.3 — a `main` with NO declared return gets the invoke-only harness: the module awaits `main(…)` and does NOT call `process.exit`, so a timer the setup opened still fires before the process ends.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.3",
+  "rationale": "§64.3: \"`function main(args: string[])` (NO declared return) → invoke-only harness: `await main(process.argv.slice(2));` — and then NOTHING. The harness does NOT call `process.exit`.\" and \"the process stays alive while there is an active handle … and exits 0 when the loop drains\".",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-TOOL-",
+      "E-FOREIGN-"
+    ],
+    "stdout": "setup\nlater\n"
+  }
+}

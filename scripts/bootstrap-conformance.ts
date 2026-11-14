@@ -21,8 +21,9 @@
  *
  *   PASS         codes half holds AND the runtime half (if the case has one) executed and held.
  *   CODES-ONLY   codes half holds; the case HAS a runtime half the bootstrap cannot execute — an
- *                SSR (firstPaint / ssr) or tool (stdout) run. The bootstrap emits no SSR or tool
- *                artifact, so that half is not attempted. (s454 U1b: a `serverStub` case IS
+ *                SSR (firstPaint / ssr) run. The bootstrap emits no SSR artifact, so that half is
+ *                not attempted. (s477: a tool (`stdout`) run IS executed — the bootstrap's own
+ *                `kind="tool"` module, run with `bun`; see `runBootstrapTool`.) (s454 U1b: a `serverStub` case IS
  *                executed — the stub answers the bootstrap's own client calls over its route
  *                manifest; see `stubFetch`. s468 U1c: a `serverDb` case IS executed — the
  *                bootstrap's OWN server artifact answers them; see `serverFetch`.)
@@ -450,7 +451,28 @@ export function codeUnitCmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The runtime half's SSR / tool selectors — halves the bootstrap emits no artifact for.
+/**
+ * s477 — the tool run half (SPEC §64, §20.7): print the bootstrap's own `kind="tool"` module
+ * (print-server.scrml printTool, its foreign slices sealed by slice-m1/tool-slices.js), write it beside
+ * its runtime into a fresh directory (a relative SQLite path resolves there), RUN it with `bun`, and
+ * return what it wrote to stdout — compared byte-for-byte with `expect.stdout`, as impl#1's adapter does.
+ */
+async function runBootstrapTool(boot: Bootstrap, core: any, sealed: unknown[]): Promise<{ refused: string[]; stdout: string; stderr: string; exitCode: number }> {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-conf-tool-"));
+  try {
+    const to = boot.mods["print-server"].printTool(core, "case.tool.js", "scrml-server-runtime.js", dir, sealed);
+    if (to.refused && to.refused.length > 0) return { refused: to.refused as string[], stdout: "", stderr: "", exitCode: 1 };
+    writeFileSync(join(dir, "case.tool.js"), String(to.js));
+    copyFileSync(BOOT_RUNTIME, join(dir, "runtime.js"));
+    copyFileSync(BOOT_SERVER_RUNTIME, join(dir, "scrml-server-runtime.js"));
+    const proc = Bun.spawnSync(["bun", join(dir, "case.tool.js")], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+    return { refused: [], stdout: new TextDecoder().decode(proc.stdout), stderr: new TextDecoder().decode(proc.stderr), exitCode: proc.exitCode ?? 0 };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The runtime half's SSR / tool selectors — halves the bootstrap emits no client artifact for.
  *  (s454 U1b: `serverStub` is not one — its stub answers the client artifact's calls. s468 U1c:
  *  `serverDb` is not one — the bootstrap's own server artifact answers them, `serverFetch`.) */
 export function nonClientRuntimeKeys(c: LoadedCase): string[] {
@@ -916,6 +938,18 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
     return v("CRASH", "front end threw", { failures: [String((e as Error)?.message ?? e).split("\n")[0]] });
   }
   fe = { ...fe, parseDiags: specSpelling(fe.parseDiags), diags: specSpelling(fe.diags), infos: specSpelling(fe.infos) };
+  // s477 — a `kind="tool"` program's foreign slices are judged as `scrml-boot compile` judges them
+  // (slice-m1/tool-slices.js: their shape, E-FOREIGN-006, E-FOREIGN-007); a refused slice leaves no module.
+  let toolSealed: unknown[] = [];
+  if (fe.core != null && fe.core.tool != null) {
+    const { prepareToolSlices } = await import("../compiler/self-host-v2/slice-m1/tool-slices.js");
+    const prep = prepareToolSlices(boot.mods["print-server"].toolSlices(fe.core), (p: string) => files.find((f) => f.path === p)?.src);
+    toolSealed = prep.sealed;
+    if (prep.diags.length > 0) {
+      const extra: Diag[] = prep.diags.map((d: { code: string; message: string; file: string }) => ({ code: d.code, severity: "Error", message: d.message, file: d.file }));
+      fe = { ...fe, diags: [...fe.diags, ...extra], core: null };
+    }
+  }
   const expectedCodes = new Set<string>(ex.codes ?? []);
   const emitted = [...new Set(fe.diags.map((d) => d.code))].sort();
   const unexpected = emitted.filter((code) => !expectedCodes.has(code));
@@ -950,6 +984,20 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
     return codeFailures.length === 0 ? v("PASS", "codes", base) : v("FAIL", "codes", { ...base, failures: codeFailures });
   }
   const nonClient = nonClientRuntimeKeys(cx);
+  // s477 — a tool's stdout: executed on the bootstrap's own tool module
+  if (nonClient.length === 1 && nonClient[0] === "stdout" && fe.core != null && fe.core.tool != null) {
+    let tr: Awaited<ReturnType<typeof runBootstrapTool>>;
+    try {
+      tr = await runBootstrapTool(boot, fe.core, toolSealed);
+    } catch (e) {
+      return v("CRASH", "tool run threw", { ...base, runtimeExecuted: true, failures: [...codeFailures, String((e as Error)?.message ?? e).split("\n")[0]] });
+    }
+    if (tr.refused.length > 0) return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: tr.refused });
+    const rt = tr.stdout === ex.stdout ? [] : [`stdout: expected ${JSON.stringify(ex.stdout)}, got ${JSON.stringify(tr.stdout)} (exit ${tr.exitCode}${tr.stderr ? `; stderr: ${tr.stderr.split("\n")[0]}` : ""})`];
+    const all = [...codeFailures, ...rt];
+    if (all.length === 0) return v("PASS", "codes+tool", { ...base, runtimeExecuted: true });
+    return v("FAIL", codeFailures.length && rt.length ? "codes+runtime" : codeFailures.length ? "codes" : "runtime", { ...base, failures: all, runtimeExecuted: true });
+  }
   if (nonClient.length > 0) {
     return codeFailures.length === 0
       ? v("CODES-ONLY", `runtime half not executable: ${nonClient.join("+")}`, base)

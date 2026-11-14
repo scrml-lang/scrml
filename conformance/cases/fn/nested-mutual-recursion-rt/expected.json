@@ -1,0 +1,14 @@
+{
+  "id": "fn-nested-mutual-recursion-rt",
+  "description": "§48.6.4 / §7.3.1 — nested function declarations hoist to the enclosing function body's local scope: `isEven` calls `isOdd`, declared after it, and back (mutual recursion with no source-order constraint). parity(4) = \"even\", parity(7) = \"odd\": trace = \"even;odd;\".",
+  "language-version": "1.0",
+  "spec": "§48.6.4",
+  "provenance": "spec:§48.6.4",
+  "rationale": "§48.6.4: 'Inner `fn` declarations (nested inside an outer `fn` body, per §7.3.1) hoist to the enclosing `fn` body's local scope, not to the file scope'; §7.3.1: an inner function closes over the outer body's bindings with standard JavaScript closure semantics (a function declaration is hoisted to its block).",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "even;odd;" },
+    "domAnchored": [{ "selector": "#out", "text": "even;odd;" }]
+  }
+}

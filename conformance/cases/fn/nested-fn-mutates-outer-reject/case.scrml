@@ -1,0 +1,20 @@
+${
+    <trace> = ""
+
+    function f(n: int) -> int {
+        let pos = 0;
+        fn bump() -> int {
+            pos = pos + 1;
+            return pos;
+        }
+        return bump() + n;
+    }
+
+    function go() {
+        @trace = `${f(1)}`;
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>
