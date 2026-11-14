@@ -93,3 +93,29 @@
 - Hook: `SCRML_HOOK_SHARDS=1` fails on base on compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js
   (passes alone — single-process order pollution, impl#1, untouched here); the default sharded hook with
   SCRML_HOOK_SHARD_MEM_MB=4608 passed: 54,297 pass / 0 fail (slices included).
+
+## FIX ROUND 1 (S239 review of PR #1831)
+
+- start: branch nested-fn-fix from worktree-agent-a752ba24dd57d8992 @ 22cb87c56, merged origin/main (88218b50b).
+- Every finding was reproduced first (the review's probe harness, copied, pointed at this worktree).
+- F1 (MISCOMPILE, §7.5.1 position 3): arguments to a NESTED function were never checked — `checkArgs` reads
+  the callee's parameter nids from `env.fnw`, and `fnWrites` built it from file-level functions only. Root fix:
+  `fnWrites` mints a params-only FnW for every nested function (name "" — never a call name, so `callKeys` and
+  every narrowing rule are unchanged: a nested call still ends every narrowing); `fnwIn` passes it through for
+  its file. Now E-TYPE-031 for: string literal → nested `function`/`fn` `int` param, int → struct param,
+  un-narrowed `int | not`, two levels deep, `add(clear(), x)` with a nested `add` (same as file-level `add`);
+  checkArgTape fires too (§66.12.3 grant subset). 8 tests.
+- F2 (fail-open, INTERIM TDZ refusal): captures counted bare-name READS only. `writtenLocalsIn` adds the locals a
+  nested body WRITES (binder effect facts EAssignLocal — rebinding and part write — and ELocalEdit); they flow
+  through sibling calls like reads. Message: "which it reads or writes". 4 tests (assign, part write, tape edit,
+  through a sibling) + the after-declaration case runs (6).
+- F3: E-FN-004's `Date.now()` text said "a `function` body is pure" for EVERY pure body — the text stood inline in
+  resolveHost's match arm, where impl#1 prints the string's "`fn`" as "`function`" (an impl#1 string miscompile,
+  not chased here). `clockInPureText` builds it outside the match and names the pure function: `fn now` itself,
+  or "the nested function `w` is inside `fn p4`" (NestCtx.pureFn). 1 test.
+- F4 (optional) NOT relaxed: a `defer` runs at EVERY exit, including a `return` / `fail` that precedes the
+  binding's declaration, so `defer @hits = early();` before `let k` is only safe when no exit precedes `let k` —
+  not a trivial rule. Left refused (INTERIM).
+- Counts: nested-fn-s477 49 pass / 0 fail; slice-m4 5715 pass / 0 fail / 113 skip; bootstrap conformance
+  PASS 307, FAIL 243, UNSUPPORTED 658, NOT-TWINNED 624, CRASH 0 — per-case diff vs the pre-fix tree: 0 cases
+  changed bucket or emitted codes (no existing case newly rejected). Hook (sharded, 4608 MB): 54,310 pass / 0 fail.
