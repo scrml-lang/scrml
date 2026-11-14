@@ -2111,7 +2111,11 @@ ${
                 }
                 const n: ANode | not = markupOfItem(it)
                 if (n is given) {
-                    if (toolImport(files, entry, f.path)) {
+                    // s477 r1 (review F2): `<foreign lang>` (§23.6) and `<db src>` (§44.7.1) are a
+                    // LIBRARY's surface, not page markup — §64.5.1 lets a tool import "a `<foreign
+                    // lang>` lib `export fn`" and "a db-bound library fn"; they get what a web
+                    // program's import of the same file gets (outsideProgramDiag)
+                    if (toolImport(files, entry, f.path) && !isLibrarySurface(n)) {
                         st = addDiag(st, f.path, it.span, "E-TOOL-006", toolImportMsg("holds page markup at its top level"))     // s477: §64.6
                     } else {
                         st = outsideProgramDiag(f.path, n, programs > 0, st)
@@ -2168,8 +2172,23 @@ ${
 
     fn itemsHoldMarkup(items: AItem[]) -> boolean {
         for (const it of items) {
-            if (markupOfItem(it) is given) return true
+            const n: ANode | not = markupOfItem(it)
+            if (n is given) {
+                if (!isLibrarySurface(n)) return true
+            }
         }
+        return false
+    }
+
+    // s477 r1 — a library file's own top-level declarations that are written as tags:
+    // `<foreign lang="…">` (§23.6 "Library Foreign-Language Declaration") and `<db src=…>`
+    // (§44.7.1, "a library declaring its own `<db src>`"). Not page markup (§64.5.1).
+    fn isLibrarySurface(n: ANode) -> boolean {
+        const e: AElem | not = topElemOf(n)
+        if (e is not) return false
+        const t: string = e.tag.toLowerCase()
+        if (t == "foreign") return attrNamed(e.attrs, "lang") is given
+        if (t == "db") return attrNamed(e.attrs, "src") is given
         return false
     }
 
