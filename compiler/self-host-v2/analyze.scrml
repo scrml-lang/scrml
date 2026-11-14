@@ -13335,8 +13335,8 @@ ${
     // paths take it (a host value's own `remove()`, a non-tape local).
     // s477 (s477-boot-tape-bounds) — `insert(i, x)` (§66.12.6 rule 3: "grow anywhere: `x` becomes
     // position `i`", granted by `insert`): built now that O36 is RULED (S477) — a position past the
-    // end, provable, is E-WRITE-INVARIANT; one the compiler cannot prove traps at run time
-    // (E-INDEX-OUT-OF-RANGE-RT, as a negative position does, §66.12.8 rule 7).
+    // end, provable, is E-WRITE-INVARIANT, as is a negative literal one (S477, typeLocalEdit);
+    // one the compiler cannot prove traps at run time (E-INDEX-OUT-OF-RANGE-RT, §66.12.8 rule 7).
     // `taken` (s477-boot-tape-forms): the removal is used as a VALUE (resolveRemovalValue).
     fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS | not {
         const meth: string = m.method
@@ -29701,6 +29701,7 @@ ${
         if (ixe is given) {
             // s477 — the position: an `int`; past every length the bound admits, provably past the end
             ts = checkIndex(env, ixv, ixe.span, ts)
+            if (negIntLiteral(ixe)) return record(report(ts, env, ixe.span, "E-WRITE-INVARIANT", negInsertMessage(name)), e.nid, VType.Unknown)
             const li: int = intLit(ixe)
             if (lb is given && li > lb.max) return record(report(ts, env, ixe.span, "E-WRITE-INVARIANT", "`" + name + ".insert(" + li + ", …)` inserts at position " + li + ", and `" + name + "`'s type bounds its length to at most " + lb.max + " — the position is provably past the end, which would leave a position holding no value (§66.12.6 rule 3; scrml has no `undefined`, §42.1)"), e.nid, VType.Unknown)
         }
@@ -29761,6 +29762,7 @@ ${
         if (ixe is given) {
             const rix: RVT = typeExpr(env, ixe, ts)      // `insert(i, x)`'s position, before the value
             ts = checkIndex(env, rix.vt, ixe.span, rix.ts)
+            if (negIntLiteral(ixe)) return record(report(ts, env, ixe.span, "E-WRITE-INVARIANT", negInsertMessage(label)), e.nid, VType.Unknown)
         }
         const a: AExpr | not = le.arg
         if (a is given) {
@@ -29789,6 +29791,21 @@ ${
         const obj: AExpr | not = memberObj(callee)
         if (obj is given) ts = record(ts, obj.nid, VType.Unknown)
         return record(record(ts, callee.nid, VType.Unknown), e.nid, VType.Unknown)
+    }
+
+    // s477 (s477-insert-negative-literal; ruled S477 "compile error on negative insert") — a
+    // negative LITERAL `insert` position (`xs.insert(-1, x)`, `-(1)`, `(-1)`) can never name a
+    // place in the tape: provably out of range, so E-WRITE-INVARIANT at compile time (O36,
+    // §66.11.7; §66.12.8 rule 7). A computed negative position still traps at run time.
+    fn negIntLiteral(x: AExpr) -> boolean {
+        if (!negLiteral(x)) return false
+        const t: Type | not = literalType(x)
+        if (t is not) return false
+        return t == Type.Int       // a `number` literal is E-TYPE-031 already (checkIndex)
+    }
+
+    fn negInsertMessage(label: string) -> string {
+        return "`" + label + ".insert(i, x)`'s position is a negative literal — a negative position can never name a place in the tape (positions count from 0; there is no counting from the end), so the write provably breaks the tape's positions (§66.12.8 rule 7; O36, §66.11.7). Write the position from 0, e.g. `" + label + ".length - 1`"
     }
 
     fn memberObjOr(callee: AExpr) -> AExpr {

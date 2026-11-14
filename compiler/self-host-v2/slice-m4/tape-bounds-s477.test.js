@@ -256,6 +256,57 @@ describe("E — `insert(i, x)` (§66.12.6 rule 3: grow anywhere, granted by `ins
 });
 
 // ---------------------------------------------------------------------------
+// s477-insert-negative-literal (ruled S477, bryan: "compile error on negative insert") —
+// gap g-boot-insert-negative-literal-static-s477. A negative LITERAL position provably
+// names no place in the tape: E-WRITE-INVARIANT at compile time (O36, §66.11.7;
+// §66.12.8 rule 7). A computed one (a variable, a cell) still traps at run time.
+describe("E2 — a negative literal `insert` position is a compile error (§66.12.8 rule 7, O36)", () => {
+  const W = `    type W:struct = { xs: int[free, insert] }`;
+  test("a local: `xs.insert(-1, x)` is E-WRITE-INVARIANT, naming the negative position", () => {
+    const e = errs(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(-1, 9);`));
+    expect(e.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(e[0].message).toContain("negative");
+    expect(e[0].message).toContain("never name a place in the tape");
+  });
+
+  test("`-(1)`, `(-1)` and `-5` are negative literals too", () => {
+    for (const p of ["-(1)", "(-1)", "-5", "(-(2))"]) {
+      expect(codes(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(${p}, 9);`))).toEqual(["E-WRITE-INVARIANT"]);
+    }
+  });
+
+  test("a part: `b.xs.insert(-1, x)` is E-WRITE-INVARIANT (bounded or not)", () => {
+    expect(codes(prog(W, `        let b: W = { xs: [1] };\n        b.xs.insert(-1, 2);`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(P, `        let b: P = { n: 0, xs: [1] };\n        b.xs.insert(-(1), 5);`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("`0`, `-0` and positive literal positions are unchanged", async () => {
+    expect(codes(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(0, 0);\n        xs.insert(-0, 0);\n        xs.insert(1, 2);`))).toEqual([]);
+    await load(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(0, 0);\n        xs.insert(-0, 7);\n        xs.insert(3, 2);\n${show("xs")}`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("7,0,1,2");
+  });
+
+  test("a non-literal negative position (a local variable) still compiles and traps at run time", async () => {
+    const src = prog("", `        const i: int = 0 - 1;\n        let xs: int[free, insert] = [1];\n        @shown = "before";\n        xs.insert(i, 9);\n        @shown = "after";`);
+    expect(codes(src)).toEqual([]);
+    await load(src);
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect($("#o").textContent).toBe("before");
+  });
+
+  test("a non-literal negative position on a part still compiles and traps at run time", async () => {
+    const src = prog(W, `        const i: int = 0 - 1;\n        let b: W = { xs: [1] };\n        b.xs.insert(i, 2);\n        @shown = "unreached";`);
+    expect(codes(src)).toEqual([]);
+    await load(src);
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect($("#o").textContent).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe("F — value semantics hold through the checked edits (§66.10)", () => {
   test("an alias of a bounded local, and a cell copied into one, are not changed by its edits", async () => {
     await load(prog("    <c:int[1..=4, append]=([1])/>", `        let xs: int[1..=4, append, insert] = @c;\n        const a: int[] = xs;\n        xs.append(2);\n        xs.insert(0, 0);\n        @shown = ${txt("xs")} + "|" + ${txt("a")} + "|" + ${txt("@c")};`));
