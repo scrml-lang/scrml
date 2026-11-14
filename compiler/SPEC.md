@@ -21452,7 +21452,7 @@ It is the canonical shape for a state-machine *fold* — the per-step transition
 one exhaustive `match` over `(currentState, event)`:
 
 ```scrml
-fn step(st: LexState): LexState {
+fn step(st: LexState) -> LexState {
     return match (st.mode, classify(st.cur, lastKind(st))) {
         (.InCode, .SawQuote(q))             :> scanString(st, q),     // q binds the event payload
         (.InCode, .SawBacktick)             :> enterTemplate(st),
@@ -30173,7 +30173,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-FOREIGN-007 | §23.2.4a | an in-process `_{}` slice (the inline value-returning form, or the §64 tool host-I/O form) that is not valid JavaScript as the body of a strict-mode async function of its crossings: a syntax error, `import.meta` / a static `import` (a slice is evaluated in a sealed scope, not as a module), or TypeScript type syntax (the slice is not transpiled). Author error at the slice, naming its source location. (S455 — emit-logic.ts `case "foreign"` + codegen/foreign-seal.ts; g-foreign-iife-captures-module-scope-s454.) (Emitted at `compiler/src/codegen/emit-logic.ts:3681`.) | Error |
 | E-FOREIGN-LANG-DUPLICATE | §23.6 | More than one top-level `<foreign lang=…>` block in a file. A file has ONE foreign-language context (the `lang=` sibling of the §44.7.1 module-with-db-context — like ONE `<db src>`) — keep a single `<foreign lang=…>` and remove the others. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-FOREIGN-LANG-IN-PROGRAM | §23.6 | A `<foreign lang=…>` block in a file that ALSO declares a top-level `<program>`. The two do not stack (§23.6.1): a program file declares the foreign-code language on the `<program lang=…>` attribute (§23.2.1). `<foreign lang>` is the library-file surface (§21.5 — a file with `export` fns and NO `<program>`). Resolution: remove the `<foreign lang=…>` block and set `lang=` on the `<program>`. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
-| E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `: number` for the process exit code; §64.3) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |
+| E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `-> number` for the process exit code; §64.3 — spelled `->` per §7, amended S477) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |
 | E-TOOL-002 | §64, §68 | A `kind=` value other than `"tool"` or `"service"` (closed vocabulary — ~~`"tool"` is the only legal value; a long-running server is a `kind="tool"` whose `function main` does not return, so there is no `kind="service"`~~ `"tool" \| "service"`, S473), OR a `kind=` attribute on a NESTED `<program>` (`kind=` is a TOP-LEVEL output-shape selector; nested execution-context kinds are INFERRED from attribute combinations per §43). (S238 — Standalone Tool Target, §64.) Emitted at `compiler/src/type-system.ts` (impl#1, value and placement limbs). **S473:** `"service"` joins the vocabulary (§68, DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1, *"This reverses S238's "no separate `kind="service"`""*; newly-accepting. The widening is **Nominal / spec-ahead — not yet emitted** by any compiler: impl#1 still reports `kind="service"` as E-TOOL-002 (carried, §34.0), and the bootstrap has no `kind=` emit yet. | Error |
 | E-TOOL-003 | §64.4 | A `<page>` route, markup body content, or client-reactive UI state appears inside a `kind="tool"` program. A tool emits a plain runnable module with no html/client to host them (§64.1). The tool body is logic + `fn`/`function`/`type` declarations + `_{}` + `?{}` + `main` only. (S238 — Standalone Tool Target, §64.) | Error |
 | E-TOOL-004 | §64.2 | `fn main` in a `kind="tool"` program. `main` is the program's IMPURE entry point (it reads argv, calls `process.exit`, and does `_{}` host I/O), and `fn` (§48.11) is the canonical PURE form which cannot hold those side effects — declare it `function main(args: string[])`. (S238 — Standalone Tool Target, §64.) **S473:** also fires in a `kind="service"` program (§68 statements 1, 6; DRAFT) — ruling:user-voice-scrml.md S473 "⭐ RULED — long-running program kind, owner questions Q1–Q4 (PA recs)" item 1; the service trigger is **Nominal / spec-ahead — not yet emitted**. | Error |
@@ -44798,7 +44798,7 @@ This restriction prevents a single type from appearing in two authority contexts
 <CardDraft> @draft      // client-local
 
 // The authority boundary is explicit: submitDraft is the crossing point.
-function submitDraft(draft: CardDraft): Card {
+function submitDraft(draft: CardDraft) -> Card {
     ?{`INSERT INTO cards (title, column_name) VALUES (${draft.title}, ${draft.column})`}.run();
     return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get();
 }
@@ -50498,6 +50498,12 @@ deprecation) · Rust editions + `cargo fix` · Go `//go:fix` + `go fix` · TypeS
 
 ## 64. Standalone Tool Target — `<program kind="tool">`
 
+> **Amended S477:** the `main` return type is spelled `->` — `function main(args: string[]) -> number`. §7's
+> "`->` is the sole return-type annotation syntax" governs; the `): number` spelling §64 / §64.2 / §64.3 / §64.7
+> showed was a stray spelling, not a second syntax. Direction of change: newly-rejecting for a `): T` return
+> annotation (legacy sources migrate mechanically, `): T` → `-> T`). Capability unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S477 "⭐ RULED — tool main return type spelled ->" · supersedes: the §64 / §64.2 `): number` spelling
+
 **Added S238.** The FIRST explicit top-level `kind=` on `<program>`. It re-targets the top-level
 program's EMIT from a web application (html + client.js + CSRF + server routes; §40.8) to a **plain
 runnable module** — a CLI tool or long-running server runnable as `bun <emitted>.js`. It composes with
@@ -50533,7 +50539,7 @@ headless serve-target**, not a web app (and NOT a "server shell" — that aliase
 shell). Cookie-session `auth=` on a `serve=` tool is `E-TOOL-SERVE-AUTH-UNSUPPORTED` (§64.9): the
 headless shape has no cookie session, so bearer auth is the (later-unit) headless auth story.
 
-### 64.2 Entry convention — `function main(args: string[]): number`
+### 64.2 Entry convention — `function main(args: string[]) -> number`
 
 A `kind="tool"` program SHALL declare exactly one top-level entry `function main`. Its parameter is the
 argv slice (`string[]`); its return type governs the process lifecycle (§64.3). A `kind="tool"` program
@@ -50564,7 +50570,7 @@ The emitted harness invokes `main(process.argv.slice(2))`. The RETURN-TYPE of `m
 harness arm — the signature IS the "returns-vs-blocks" process-model signal (co-located; the
 co-location-of-behaviour axiom):
 
-- **`function main(args: string[]): number`** (declares a numeric return) → **exit-harness**:
+- **`function main(args: string[]) -> number`** (declares a numeric return) → **exit-harness**:
   `const code = await main(process.argv.slice(2)); process.exit(code);`. The return value is the process
   exit code. For run-and-exit CLIs (and a blocking loop that returns a code on drain — e.g. a stdin
   read-loop returning 0 on EOF).
@@ -50591,7 +50597,7 @@ questions Q1–Q4 (PA recs)" item 1 (*"This reverses S238's "no separate `kind="
 invoke-only harness and `serve=` stay unchanged."*). The invoke-only harness above and §64.9 `serve=` are NOT
 changed.)*
 
-The only theoretical mis-fire is a tool that starts a server AND declares `: number` and returns a code
+The only theoretical mis-fire is a tool that starts a server AND declares `-> number` and returns a code
 (the exit-harness would kill the live server). This is not guarded in v1: "you returned → you meant to
 exit" is the predictable rule, and no realistic tool both serves and returns an exit code.
 
@@ -50649,7 +50655,7 @@ await-coloring). This is the tool half of the D5-GENERALIZE consumer-shaped emit
 ```scrml
 // fleet.ts → fleet.scrml — run-and-exit CLI, db-bound
 <program kind="tool" lang="ts" db="./flogence.db">
-    function main(args: string[]): number {
+    function main(args: string[]) -> number {
         if args.length == 0 { _={ console.error("usage: fleet <cmd>") }= ; return 2; }
         … ?{ SELECT … }.all() …
         return 0;
