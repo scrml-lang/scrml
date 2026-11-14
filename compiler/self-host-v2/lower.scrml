@@ -827,7 +827,7 @@ ${
     fn lowerStmt(c: LC, s: AStmt) -> Stmt[] {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> hoistStmtExpr(c, e).concat(removalPre(c, assignedValueOf(e.k))).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
+            .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
             .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(removalPre(c, i)).concat(letStmt(c, s, i))
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat(removalPre(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
@@ -3291,7 +3291,12 @@ ${
             }
         }
         const v: AExpr | not = assignedValueOf(e.k)
-        return pre.concat(attemptsFor(c, v)).concat(exprStmt(c, e))
+        // s477 FIX ROUND 1: a removal as the assigned value is read here, so every
+        // statement lowered through evalStmt — a block `Eval`, a statement `match`
+        // arm (plainArmBlock), a handled statement arm (armExprBody), a handler —
+        // carries it; analyze admits the value only at those positions (FailCtx.pre).
+        // A counted head's step (lowerSteps → exprStmt) never reaches here: refused.
+        return pre.concat(removalPre(c, v)).concat(attemptsFor(c, v)).concat(exprStmt(c, e))
     }
 
     // The value of an assignment `t = v` (only an assignment's — an edit call's

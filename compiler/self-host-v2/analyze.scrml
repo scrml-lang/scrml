@@ -6841,9 +6841,16 @@ ${
     // s475-boot-caller-transport: `derr` — the function's DECLARED error enum, which a `fail` names
     // (§19.3.3); `err` differs from it only for a transport carrier (FnInfo.derr), whose `err` is the
     // failure set its callers see (`E + Transport`).
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not }
+    // s477 (s477-boot-tape-forms FIX ROUND 1): `pre` — the node that is the whole value of a
+    // statement whose lowering reads a removal's value BEFORE the statement (lower.scrml
+    // removalPre: a block `let` / `const`, a block `return`, an assignment statement to a whole
+    // local or cell, a statement `match` / handled arm's assignment); -1: none. Threaded by
+    // position (withPre / withEvalPre), never read off `wholeWhat`'s wording — a counted head's
+    // `step` / `init`, a value arm and a request body are assignments too, and their lowerings
+    // emit no removalPre (resolveRemovalValue refuses there).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not, pre: int }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not, pre: -1 } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -6852,7 +6859,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -6863,12 +6870,59 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+    }
+
+    // s477 FIX ROUND 1: `nid`'s lowering reads a removal's value before its statement (FailCtx.pre).
+    fn withPre(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: nid })
+    }
+
+    // s477 FIX ROUND 1: `e` is an expression STATEMENT whose lowering is lower.scrml's
+    // evalStmt (a block `Eval`, a statement `match` arm, a handled statement arm): an
+    // assignment to a whole local or cell there has its value's removal read first.
+    fn withEvalPre(env: Env, e: AExpr) -> Env {
+        const k: AExprK = e.k
+        const v: AExpr | not = match k {
+            .Assign(target: t, value: v0) :> wholeAssignValue(t, v0)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Member(obj: o) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+        }
+        if (v is not) return env
+        return withPre(env, v.nid)
+    }
+
+    fn wholeAssignValue(t: AExpr, v: AExpr) -> AExpr | not {
+        if (!wholeAssignTarget(t)) return not
+        return v
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     // s469 (#1471 round-2 MED-2): `nid` is a call evaluated as a STATEMENT (its result is
@@ -6876,12 +6930,12 @@ ${
     // E-ERROR-012) — resolveCall does not report it as a value use.
     fn withStmtCall(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr, pre: f.pre })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -12861,9 +12915,13 @@ ${
     // (`x = …`, `@x = …`) evaluates its value FIRST; a write of a part evaluates
     // the part's indices before it.
     fn assignWhat(t: AExpr) -> string {
-        const k: string = placeKey(t)
-        if (k != "" && k.indexOf(".") < 0) return "the right-hand side of an assignment"
+        if (wholeAssignTarget(t)) return "the right-hand side of an assignment"
         return "the right-hand side of an assignment to a part"
+    }
+
+    fn wholeAssignTarget(t: AExpr) -> boolean {
+        const k: string = placeKey(t)
+        return k != "" && k.indexOf(".") < 0
     }
 
     // s477 (s477-boot-tape-forms, gap g-boot-tape-removal-value-s475) — a removal
@@ -12878,7 +12936,12 @@ ${
     // `@x = …` — so reading it first keeps the evaluation order. Anywhere else (an
     // argument, an operand, an arm's value, a part write's value): refused, INTERIM
     // (gap g-boot-tape-removal-value-position-s477) — the capable form evaluates the
-    // statement's earlier operands into locals first. `not`: not a tape removal (a
+    // statement's earlier operands into locals first. FIX ROUND 1: "the statement"
+    // is a POSITION, threaded as FailCtx.pre by the sites whose lowering emits
+    // removalPre (resolveLocal, resolveMaybeExpr, withEvalPre at a block `Eval` /
+    // a statement arm) — an assignment in a counted head's `init` / `step`
+    // (lowerSteps / lowerInits), a value arm's write, a request body or a handler
+    // is refused here, never miscompiled. `not`: not a tape removal (a
     // host value's own `remove()`); the caller's paths take it.
     fn resolveRemovalValue(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
         let res: AS | not = not
@@ -12889,12 +12952,12 @@ ${
         }
         if (res is not) return not
         let st: AS = res
-        const w: string = env.fx.wholeWhat
-        const whole: boolean = env.fx.whole == e.nid && env.fx.inFn && (w == "a `return` operand" || w == "the right-hand side of an assignment" || w.indexOf("the initializer of `") == 0)
+        // FIX ROUND 1: admitted only where the lowering reads the removal first (FailCtx.pre)
+        const whole: boolean = env.fx.pre == e.nid && env.fx.whole == e.nid && env.fx.inFn
         let rcall: string = placeKey(m.obj) + "." + m.method + "()"
         if (m.method == "remove") rcall = placeKey(m.obj) + ".remove(…)"
         if (!whole && st.diags.length == st0.diags.length) {
-            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "the value of `" + rcall + "` is in the bootstrap only as the WHOLE value of a `let` / `const` initializer, a `return`, or an assignment to a whole local or cell (`x = …`, `@x = …`) — bind it first (`const v = " + rcall + ";`) and use `v` (gap g-boot-tape-removal-value-position-s477)")
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "the value of `" + rcall + "` is in the bootstrap only as the WHOLE value of a `let` / `const` statement's initializer, a `return`, or an assignment STATEMENT to a whole local or cell (`x = …;`, `@x = …;`, also as a statement `match` arm) — not in a counted loop's head, an operand, an argument or an arm's value; bind it first (`const v = " + rcall + ";`) and use `v` (gap g-boot-tape-removal-value-position-s477)")
         }
         let ty: Type | not = not
         const f: EffectFact | not = effectFactIn(st, e.nid)
@@ -13431,7 +13494,7 @@ ${
     fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(env, e, st))
+            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(withEvalPre(env, e), e, st))
             .Local(name: n, mutable: m, ty: y, init: i) :> resolveLocal(env, s, n, m, y, i, st)
             .Return(e: e) :> keepEnv(env, resolveReturnExpr(env, e, st))
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
@@ -15300,7 +15363,7 @@ ${
     }
 
     fn armExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st: AS) -> AS {
-        if (cx.stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
+        if (cx.stmt) return resolveStmtExpr(withEvalPre(withWhole(env, x.nid), x), x, st)
         return armValueExpr(env, a, x, cx, st)
     }
 
@@ -16725,7 +16788,7 @@ ${
         if (e is not) return st
         // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
         // anywhere else a `return` operand is a value position
-        let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
+        let renv: Env = withPre(withWholeAt(env, e.nid, "a `return` operand"), e.nid)
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
         // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
         // type is the enclosing function's declared return type — §18.5 reads an object
@@ -16794,7 +16857,7 @@ ${
         if (fi is given) {
             ri = resolveForeignAt(env, init, fi, false, st)      // s473: `const x = _={ … }=` (§23.2.4)
         } else {
-            ri = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
+            ri = resolveExpr(withPre(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init.nid), init, annot, st)
         }
         const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
@@ -22295,7 +22358,7 @@ ${
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr }
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1 }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
             const fte: TypeEnv = teAt(g.te, fs.info.file)
             for (const p of fs.f.params) {

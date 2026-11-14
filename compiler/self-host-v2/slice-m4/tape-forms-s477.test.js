@@ -185,6 +185,48 @@ describe("B3 — judged, typed, and where it stays refused (INTERIM)", () => {
   });
 });
 
+// FIX ROUND 1 (S239 review F1): the removal's value is admitted only at a statement whose
+// LOWERING reads it first (FailCtx.pre, threaded by position — not by wholeWhat's wording).
+// Every other assignment position is refused by name, never compiled to an unminted read.
+const STEP = (v) => `        let s: string = "";\n        let v: int | not = 0;\n        for (let i: int = 0; i < 2; v = ${v}) {\n            s = s + txtOr(v);\n            i = i + 1;\n        }\n        @shown = s;`;
+const KD = `${OR}\n    type K:enum = { A, B }`;
+const AUTH = `    type AuthErr:enum = { Denied, Locked }\n    function check(p: string)! AuthErr {\n        if (p == "locked") fail AuthErr.Locked;\n        return "ok";\n    }`;
+describe("B4 — FIX ROUND 1: every assignment position is either lowered with the removal or refused", () => {
+  const refusedAt = (decls, body) => {
+    const r = run(prog(decls, body));
+    expect(r.diags.map((d) => d.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(r.diags.map((d) => d.message).join("\n")).toContain("g-boot-tape-removal-value-position-s477");
+  };
+  test("a counted head's `step` (a local, a cell, a part) and `init` (an assignment, a `let`): refused, naming the gap", () => {
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n${STEP("xs.pop()")}`);
+    refusedAt(`${OR}\n    <cx:int[free, pop]=([1, 2, 3])/>`, STEP("@cx.pop()"));
+    refusedAt(`${OR}\n    type P:struct = { xs: int[free, pop] }`, `        const b: P = { xs: [1, 2, 3] };\n${STEP("b.xs.pop()")}`);
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let s: string = "";\n        let v: int | not = 0;\n        for (v = xs.pop(); v is given; v = not) {\n            s = s + txtOr(v);\n        }\n        @shown = s;`);
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let s: string = "";\n        for (let v: int | not = xs.pop(); v is given; v = not) {\n            s = s + txtOr(v);\n        }\n        @shown = s;`);
+  });
+  test("a value `match` arm, a value `if` arm, a condition-head assignment, a `lift` operand: refused, naming the gap", () => {
+    refusedAt(KD, `        let xs: int[free, pop] = [1, 2, 3];\n        const k: K = K.A;\n        const v: int | not = match k { .A :> xs.pop(), .B :> not, };\n        @shown = txtOr(v);`);
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        const b: bool = true;\n        const v: int | not = if (b) { xs.pop() } else { not };\n        @shown = txtOr(v);`);
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = not;\n        if ((v = xs.pop())) {\n            @shown = txtOr(v);\n        }`);
+    refusedAt(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        lift xs.pop();\n        @shown = "a";`);
+  });
+  test("a statement `match` arm's assignment (a local, a cell): lowered with the removal, runs", async () => {
+    expect(await runShown(KD, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        const k: K = K.A;\n        match k {\n            .A :> v = xs.pop(),\n            .B :> v = not,\n        }\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("3|1,2");
+    expect(await runShown(`${KD}\n    <cx:int[free, pop]=([1, 2, 3])/>\n    let <cv:int | not=(not)/>`, `        const k: K = K.B;\n        match k {\n            .A :> @cv = not,\n            .B :> @cv = @cx.pop(),\n        }\n        @shown = txtOr(@cv) + "|" + ${txt("@cx")};`)).toBe("3|1,2");
+    // the arm NOT taken removes nothing
+    expect(await runShown(KD, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        const k: K = K.B;\n        match k {\n            .A :> v = xs.pop(),\n            .B :> v = not,\n        }\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("not|1,2,3");
+  });
+  test("a handled statement arm's assignment: lowered with the removal, runs only when the arm is taken", async () => {
+    const body = (p) => `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        check("${p}") !{ _ :> v = xs.pop() };\n        @shown = txtOr(v) + "|" + ${txt("xs")};`;
+    expect(await runShown(`${OR}\n${AUTH}`, body("locked"))).toBe("3|1,2");
+    expect(await runShown(`${OR}\n${AUTH}`, body("fine"))).toBe("0|1,2,3");
+  });
+  test("a single-statement `if` / `else` body's assignment: runs", async () => {
+    expect(await runShown(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        if (true) v = xs.pop();\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("3|1,2");
+    expect(await runShown(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        if (false) { v = 1; } else v = xs.pop();\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("3|1,2");
+  });
+});
+
 // ===========================================================================
 //   C. a spread as a VALUE (gap g-boot-spread-value-s475). §66.12.1: "Non-mutating
 //      operations (`map`, `filter`, `slice`, `concat`, …) are always allowed; they return
