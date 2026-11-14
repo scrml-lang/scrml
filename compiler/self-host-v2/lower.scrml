@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -459,14 +459,18 @@ ${
             // s468 (U1c, fix round 1 F1): a `?{}` its `!` function propagates
             // implicitly (§19.8.2) is a handled form too — it reads its Attempt's
             // result (handledRead, below), never the raw settled outcome (C-S7)
-            if (sa is given && handledOfK(e.k) is not && sqlOfExpr(e.k) is not) return Expr.Local(sa.bind)
+            // s477 (merge of s477-boot-kind-tool × s477-boot-tape-bounds): the settled value is
+            // what flows into the bounded slot, so the typer's unproven bound (Typing.bounds,
+            // O36 RULED S477) is checked on it here — a foreign slice's value (§23.2.4a, every
+            // value form in a tool suspends) or a waiting call's result has an UNKNOWN length
+            if (sa is given && handledOfK(e.k) is not && sqlOfExpr(e.k) is not) return boundChecked(c, e, Expr.Local(sa.bind))
         }
         return lowerExprAt(c, e)
     }
 
     fn lowerExprAt(c: LC, e: AExpr) -> Expr {
         if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
-        return lowerExprK(c, e)
+        return boundChecked(c, e, lowerExprK(c, e))
     }
 
     // (s442 r4 (b)) A presence test of a HANDLE tests the handle, not a
@@ -1165,7 +1169,7 @@ ${
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
             .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value)
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
-            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm) :> localEditStmt(c, s, op, a, pa, tm, not, not)
+            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, index: ix, loc: lc) :> localEditStmt(c, e, s, op, a, pa, tm, not, not, ix, lc)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -1175,6 +1179,14 @@ ${
     // grants, §66.12.6 rules 1 and 3) → Assign(xs, Prim(TapeAppend …, [xs, …]), []):
     // the local is rebound to the edited value, a NEW tape (§66.10 — no alias of the
     // old value sees the edit), as a local part write is (assignLocal).
+    // s477 (s477-boot-tape-bounds): `xs.insert(i, v)` → Assign(xs, Prim(TapeInsert, [xs, i, v, loc]))
+    // (a position outside 0..=xs.length traps, E-INDEX-OUT-OF-RANGE-RT); and an edit of a
+    // tape whose length bound the typer could not prove (O36 RULED S477) is checked
+    // before the local is rebound: Prim(LengthCheck, [the edited tape, min, max, loc]) —
+    // for a part edit, the PART's edited tape against the part's bound; the check runs
+    // before the Assign, so a trap writes nothing. The edit's bound is keyed on the
+    // call's CALLEE node (editBoundNid): the call node's own bound, if any, is its VALUE's
+    // (a removal used as a value flowing into a bounded position).
     // s477 (s477-boot-tape-forms) — an edit of a PART of the local (`path`
     // non-empty, `b.xs.append(v)` / `g[i].pop()`): each index evaluated once into
     // its local (`tmps[2k]`), the element it names read into the next
@@ -1185,7 +1197,7 @@ ${
     // s477 — a removal used as a VALUE (`taken` given): its position (`remove(i)`)
     // evaluated once into `at`, the removed element read into `taken` (AtRead: `not`
     // on an empty tape or with no position `i`, §66.12.6 rule 3), then the edit.
-    fn localEditStmt(c: LC, s: Sym, op: LocalEdit, arg: AExpr | not, path: LStep[], tmps: Sym[], taken: Sym | not, at: Sym | not) -> Stmt[] {
+    fn localEditStmt(c: LC, e: AExpr, s: Sym, op: LocalEdit, arg: AExpr | not, path: LStep[], tmps: Sym[], taken: Sym | not, at: Sym | not, ix: AExpr | not, loc: string) -> Stmt[] {
         let pre: Stmt[] = []
         let part: Expr = Expr.Local(s)
         let steps: PathStep[] = []
@@ -1205,6 +1217,7 @@ ${
                 av = Expr.Local(at)
             }
             args = [part, av]
+            if (ix is given) args = [part, lowerExpr(c, ix), av, litStr(loc)]
         }
         if (taken is given) pre = pre.concat([Stmt.Let(taken, removedRead(op, part, args))])
         const prim: PrimOp = match op {
@@ -1213,8 +1226,21 @@ ${
             .LPop :> PrimOp.TapeDropEnd
             .LShift :> PrimOp.TapeDropFront
             .LRemoveAt :> PrimOp.TapeRemoveAt
+            .LInsert :> PrimOp.TapeInsert
         }
-        return pre.concat([Stmt.Assign(s, Expr.Prim(prim, args), steps)])
+        return pre.concat([Stmt.Assign(s, boundCheckedAt(c, editBoundNid(e), Expr.Prim(prim, args)), steps)])
+    }
+
+    // s477 (O36 RULED S477) — node `e`'s value, checked at run time against the length bound
+    // the typer could not prove (Typing.bounds); unchanged where it proved it.
+    fn boundChecked(c: LC, e: AExpr, v: Expr) -> Expr {
+        return boundCheckedAt(c, e.nid, v)
+    }
+
+    fn boundCheckedAt(c: LC, nid: int, v: Expr) -> Expr {
+        const b: BoundCheck | not = boundCheckAt(c.t, nid)
+        if (b is not) return v
+        return Expr.Prim(PrimOp.LengthCheck, [v, Expr.Lit(Literal.Int(b.min)), Expr.Lit(Literal.Int(b.max)), litStr(b.loc)])
     }
 
     // The element a removal removes, read before the edit: `xs.pop()` the last
@@ -1227,6 +1253,7 @@ ${
             .LRemoveAt :> Expr.Prim(PrimOp.AtRead, [tape, args[1]])
             .LAppend :> Expr.Lit(Literal.Absent)
             .LPrepend :> Expr.Lit(Literal.Absent)
+            .LInsert :> Expr.Lit(Literal.Absent)
         }
     }
 
@@ -1267,7 +1294,7 @@ ${
         if (v is not) return []
         const f: EffectFact | not = effectFact(c.t.effects, v.nid)
         return match f {
-            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, taken: tk, at: at) :> takenLocalPre(c, s, op, a, pa, tm, tk, at)
+            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, taken: tk, at: at) :> takenLocalPre(c, v, s, op, a, pa, tm, tk, at)
             .ERemove(w: w, taken: sn) :> takenCellPre(c, w, sn)
             .EWrite(w: x) :> []
             .ESpread(ws: x) :> []
@@ -1280,9 +1307,9 @@ ${
         }
     }
 
-    fn takenLocalPre(c: LC, s: Sym, op: LocalEdit, a: AExpr | not, pa: LStep[], tm: Sym[], tk: Sym | not, at: Sym | not) -> Stmt[] {
+    fn takenLocalPre(c: LC, e: AExpr, s: Sym, op: LocalEdit, a: AExpr | not, pa: LStep[], tm: Sym[], tk: Sym | not, at: Sym | not) -> Stmt[] {
         if (tk is not) return []
-        return localEditStmt(c, s, op, a, pa, tm, tk, at)
+        return localEditStmt(c, e, s, op, a, pa, tm, tk, at, not, "")
     }
 
     // `@xs.pop()` / `@xs.shift()` as a value: the removed element of the cell's field

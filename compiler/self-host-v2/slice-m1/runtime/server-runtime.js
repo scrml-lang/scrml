@@ -59,6 +59,8 @@ export { parseIntText, parseNumText, parseBoolText };
 export { textOf };
 // s472 (boot-math-port) — a host-backed function's return-point decode (§21.3.1; print.scrml hostFnJs)
 export { hostResult };
+// s477 (s477-boot-tape-bounds) — a bounded tape's runtime length check and a local `insert` (O36 RULED S477): the SAME functions
+export { lengthCheck, tapeInsert } from "./runtime.js";
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the

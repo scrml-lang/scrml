@@ -184,10 +184,9 @@ describe("D — judged by the local's TYPE grants, with the codes a cell gets", 
 
 // ---------------------------------------------------------------------------
 describe("E — what stays refused (INTERIM, named)", () => {
-  test("`insert(i, x)` — its out-of-range enforcement is ⚑ O36 (gap g-bootstrap-tape-methods-insert-remove-fill-owed-s469)", () => {
-    const r = run(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(0, 2);`));
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("O36");
+  // s477 (s477-boot-tape-bounds): `insert(i, x)` is built — O36 RULED S477; see tape-bounds-s477.test.js E
+  test("`insert(i, x)` is no longer refused (O36 RULED S477)", () => {
+    expect(codes(prog("", `        let xs: int[free, insert] = [1];\n        xs.insert(0, 2);`))).toEqual([]);
   });
 
   // an edit of a PART of a local (gap g-boot-local-tape-part-edit-s475): BUILT by
@@ -330,20 +329,14 @@ describe("I — the elements a local grow shape adds are checked (review F2)", (
 // (§66.11.2), and the unprovable case is ⚑ O36: the bootstrap enforces no bound, so it refuses one on
 // EVERY tape type — a cell, a local, a `const`, a parameter — by name. INTERIM (gap
 // g-boot-bounded-length-unenforced-s475; capable form: bound enforcement).
-describe("J — a bounded length is refused by name, on every tape type (INTERIM, ⚑ O36; review F3)", () => {
-  test("a local, a `const`, a parameter and a cell: E-BOOTSTRAP-UNSUPPORTED naming the bound, §66.11.2 and O36", () => {
-    for (const src of [
-      prog("", `        let xs: int[1..=3, free, append] = [1];\n        xs.append(2);`),
-      prog("", `        let xs: int[1..=3, append] = [1];`),
-      prog("", `        const xs: int[1..=3] = [1, 2, 3, 4, 5];`),
-      prog("", `        let xs: int[0..3] = [1];`),
-      prog("    fn f(xs: int[1..=3, free, append]) -> int { return 0; }", ""),
-      prog("    <c:int[1..=3, free, append]=([1])/>", ""),
-    ]) {
-      const ds = run(src).diags.filter((d) => d.severity === "Error");
-      expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(ds[0].message).toMatch(/a bounded length `\d\.\.=?\d` .*§66\.11\.2.*O36/);
-    }
+// s477 (s477-boot-tape-bounds): a bounded length is BUILT (O36 RULED S477) — tape-bounds-s477.test.js.
+describe("J — a bounded length is read, not refused (O36 RULED S477; review F3)", () => {
+  test("a local, a `const`, a parameter and a cell: the bound is enforced (E-WRITE-INVARIANT on a provable violation)", () => {
+    expect(codes(prog("", `        let xs: int[1..=3, append] = [1];\n        xs.append(2);`))).toEqual([]);
+    expect(codes(prog("", `        const xs: int[1..=3] = [1, 2, 3, 4, 5];`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog("    fn f(xs: int[1..=3, append]) -> int { return 0; }", ""))).toEqual([]);
+    expect(codes(prog("    <c:int[1..=3, append]=([1])/>", ""))).toEqual([]);
+    expect(codes(prog("", `        let xs: int[1..=3, free, append] = [1];`))).toEqual(["E-GRANT-UNKNOWN"]);
   });
 
   test("a number-led token run in a local's grant list is one grant word, never dropped (`3` is no axis value)", () => {

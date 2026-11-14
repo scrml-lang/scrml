@@ -1416,6 +1416,8 @@ ${
             .TapeRemoveAt :> "TapeRemoveAt"
             .TapeConcat :> "TapeConcat"
             .TapeIncludes :> "TapeIncludes"
+            .LengthCheck :> "LengthCheck"
+            .TapeInsert :> "TapeInsert"
         }
     }
 }
