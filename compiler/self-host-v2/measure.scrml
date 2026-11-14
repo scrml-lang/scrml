@@ -74,6 +74,7 @@ ${
             .Continue(target: x) :> "Continue"
             .Gather(g: x) :> "Gather"
             .Lift(into: x) :> "Lift"
+            .LocalFn(f: x) :> "LocalFn"
         }
     }
 

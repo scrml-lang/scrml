@@ -1,0 +1,11 @@
+{
+  "id": "fn-nested-fn-mutates-outer-reject",
+  "description": "§7.3.1 / §48.3.3 — a nested `fn` (the pure form) closes over the outer `let pos` and may read it, but `pos = pos + 1` mutates a binding declared outside the `fn`: E-FN-003.",
+  "language-version": "1.0",
+  "spec": "§7.3.1",
+  "provenance": "spec:§7.3.1",
+  "rationale": "§7.3.1: 'Inner `fn` declarations are subject to the same purity constraints as top-level `fn` (§48) — they may read outer bindings but may not mutate them (E-FN-003).' §48.3.3: 'A `fn` body SHALL NOT write to any variable declared outside the `fn`'s own scope boundary.'",
+  "expect": {
+    "codes": ["E-FN-003"]
+  }
+}

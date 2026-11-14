@@ -244,6 +244,14 @@ ${
         // nearest enclosing bound loop (§49.6 rule 7). Which loop that is, and
         // whether there is one, is analyze's (resolveLift).
         Lift(what: ALift),
+        // s477 — a NESTED function declaration (§7.3.1: "Function declarations
+        // inside `${}` logic blocks MAY be nested"): `function name(…) { … }` /
+        // `fn name(…) { … }` where a statement stands. It closes over the
+        // enclosing function's bindings; its name is bound for its whole block
+        // (hoisted, §48.6.4: "Inner `fn` declarations … hoist to the enclosing
+        // `fn` body's local scope"). Which positions admit one, what it may
+        // capture and where it runs are analyze's (resolveLocalFn).
+        LocalFn(f: AFn),
     }
 
     // s469 — what a `lift` appends: a value, or (in a Tier-0 `${ for … }` in

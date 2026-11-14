@@ -1,0 +1,14 @@
+{
+  "id": "fn-nested-closure-mutates-outer-let-rt",
+  "description": "§7.3.1 — a nested `function` declared in a function body closes over the outer `let pos` and MAY rebind it: each f() call has its own `pos`, advanced twice by the inner function. f(1) = 3, f(10) = 12: trace = \"3;12;\".",
+  "language-version": "1.0",
+  "spec": "§7.3.1",
+  "provenance": "spec:§7.3.1",
+  "rationale": "§7.3.1: 'An inner function declared inside the body of an outer `function` or `fn` closes over the outer function's `let`, `const`, and `lin` bindings with standard JavaScript closure semantics' and 'Inner `function` declarations MAY mutate outer `let` bindings.'",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "3;12;" },
+    "domAnchored": [{ "selector": "#out", "text": "3;12;" }]
+  }
+}

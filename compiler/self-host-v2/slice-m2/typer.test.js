@@ -516,17 +516,16 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
 });
 
 // Ruling B1 (ruling:user-voice-scrml.md S439 #6 (B1)): a nested `function x`
-// in a body whose PARAMETER is `x` is EXEMPT from E-SCOPE-REDECLARE. The slice
-// front end has no nested-function statement (§7.3.1 is front-end growth, M3
-// item 4): `function x() { }` in a body parses as expression statements, so no
-// declaration reaches the scope pass and the exemption holds by construction.
-// This pins that; the exemption must be implemented in `blockRedeclares` the
-// day nested functions parse. The let / const twin still fires.
+// in a body whose PARAMETER is `x` is EXEMPT from E-SCOPE-REDECLARE.
+// FLIPPED (s477-boot-nested-fn): nested function declarations parse (§7.3.1),
+// and `blockRedeclares` implements the exemption (a nested function is compared
+// with its block's locals, never with the parameters). The let / const twin
+// still fires.
 describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
   test("no E-SCOPE-REDECLARE — `function f(x: int) { function x() { } }`", () => {
     expect(inApp("    function f(x: int) { function x() { } }")).not.toContain("E-SCOPE-REDECLARE");
-    // s469: the shape as written (a nested declaration, which the bootstrap does not parse) — pinned whole
-    expect(inApp("    function f(x: int) { function x() { } }")).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]);
+    // s477: the shape as written now compiles — no Error (was a parse cascade, s469)
+    expect(inApp("    function f(x: int) { function x() { } }").filter((c) => c.startsWith("E-"))).toEqual([]);
   });
   test("twin fires — `let x` / `const x` over parameter `x`", () => {
     expect(inApp("    function f(x: int) { let x = 1; }")).toEqual(["E-SCOPE-REDECLARE"]);

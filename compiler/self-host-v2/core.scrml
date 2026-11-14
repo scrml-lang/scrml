@@ -608,6 +608,17 @@ ${
         // `LRow(idx)`: row template `idx` of the enclosing View.Gather (a
         // Tier-0 `${ for … lift <li/> }`, §17.4) — never in a Stmt.Gather.
         Lift(into: Sym, what: Lifted),
+        // s477 — a NESTED function declaration (§7.3.1): `f` is a function
+        // whose body closes over the enclosing function's locals ("standard
+        // JavaScript closure semantics") — it reads them, and a non-pure one
+        // may rebind them. It stands only at the top level of a function body
+        // (its own included), never waits and is never failable (analyze
+        // refuses those shapes); it runs where its enclosing function runs and
+        // is printed in place, as a host function declaration (hoisted to its
+        // block, §48.6.4). It is NOT in CoreProgram.fns / .server: only its
+        // enclosing body can call it (a Call naming `f.sym`). Its body is its
+        // own owner for Return / Break / Continue (check.scrml C-N1).
+        LocalFn(f: Fn),
     }
     export type Block:struct = { stmts: Stmt[] }
 

@@ -814,6 +814,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
         if (cp is not) return not
         if (!cycleWaits(cp.body)) return not
@@ -868,6 +869,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1031,6 +1033,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1056,6 +1059,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1067,6 +1071,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Join(k: x) :> false
             .Suspend(bind: x) :> false
             .Let(sym: x) :> false
@@ -1123,6 +1128,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -1159,6 +1165,7 @@ ${
             .Continue(target: t) :> continueJs(ctx, t)
             .Gather(g: g) :> stmtGatherJs(ctx, g, assigned)                     // s469 (§49.6)
             .Lift(into: i, what: w) :> [liftJs(ctx, i, w)]
+            .LocalFn(f: f) :> [localFnJs(ctx, f)]                             // s477 (§7.3.1)
         }
     }
 
@@ -1598,6 +1605,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: x) :> []
             .Lift(into: x) :> []
+            .LocalFn(f: x) :> []
         }
     }
 
@@ -1623,6 +1631,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -1678,6 +1687,7 @@ ${
             .Continue(target: t) :> t.id
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -1866,6 +1876,7 @@ ${
             .Continue :> []
             .Gather :> []
             .Lift :> []
+            .LocalFn :> []
         }
     }
 
@@ -1891,6 +1902,7 @@ ${
             .Continue :> []
             .Gather :> []
             .Lift :> []
+            .LocalFn :> []
         }
     }
 
@@ -2486,6 +2498,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -3429,6 +3442,21 @@ ${
 
     fn hostKind(k: string) -> JsExpr { return JsExpr.JObject([{ key: "k", value: jstr(k) }]) }
 
+    // s477 — a NESTED function (Stmt.LocalFn, §7.3.1), printed where it stands as
+    // a host function declaration: "closes over the outer function's `let`,
+    // `const`, and `lin` bindings with standard JavaScript closure semantics",
+    // and a host declaration is hoisted to its block (§48.6.4). It never waits,
+    // so it returns plainly (`ret` "") whatever its enclosing function does; it
+    // stands at the top of a function body, so no row, loop or Tier-0 context
+    // reaches it. Its shared-instance reads use the enclosing function's
+    // prologue locals (sharedRefs walks into it).
+    fn localFnJs(ctx: Ctx, f: Fn) -> JsStmt {
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns }
+        let params: string[] = []
+        for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
+        return JsStmt.SFunc(symName(ctx, f.sym), params, blockJs(fctx, f.body))
+    }
+
     fn fnJs(ctx: Ctx, f: Fn) -> JsStmt {
         const hf: HostFn | not = f.host
         if (hf is given) return hostFnJs(ctx, f, hf)
@@ -3971,6 +3999,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 

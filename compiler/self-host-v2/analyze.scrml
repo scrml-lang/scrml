@@ -195,9 +195,13 @@ ${
     // ServerCallError)`". A carrier's `err` is that set (`E + Transport`, minted as for a server function's
     // client call — E itself when E declares the wrapper), so its callers' handlers and `?` are judged
     // against it, and Core gives the function that enum; its own `fail` still names E (FailCtx.derr).
+    // s477 — `outer`: -1 for a function ITEM; for a NESTED function declaration (§7.3.1,
+    // AStmtK.LocalFn) the Sym id of the function whose body declares it. A nested function
+    // is in no file scope (fnNamed skips it): its name is bound in its block (Env.nest).
     export type FnInfo:struct = { nid: int, span: ASpan, sym: Sym, name: string, file: string, exported: boolean,
                                   pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not,
-                                  serverOwn: boolean, rerr: Sym | not, host: HostFn | not, derr: Sym | not }
+                                  serverOwn: boolean, rerr: Sym | not, host: HostFn | not, derr: Sym | not,
+                                  outer: int }
 
     // A classified write (§6.2): the capability, the instance, the edit, the check.
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
@@ -1868,7 +1872,7 @@ ${
         if (from == "") return not
         const orig: string = scopeOrig(g.te.link, file, NameKind.KFn, name)   // s474: an alias names its export
         for (const f of g.fns) {
-            if (f.info.name == orig && f.info.file == from) return f.info
+            if (f.info.name == orig && f.info.file == from && f.info.outer < 0) return f.info   // s477: a nested function is in no file scope
         }
         return not
     }
@@ -3495,6 +3499,7 @@ ${
                 .Break(label: x) :> noRets(done)
                 .Continue(label: x) :> noRets(done)
                 .Lift(what: w) :> retsInList(cx, liftExprs(w), sc, stack, done)
+                .LocalFn(f: x) :> noRets(done)                  // s477: a nested function's returns are its own
                 .Eval(e: x) :> retsInExpr(cx, x, sc, stack, done)
                 .Local(name: n, init: i) :> retsInExpr(cx, i, sc, stack, done)
                 .EffectStmt(w: w) :> noRets(done)
@@ -3525,6 +3530,7 @@ ${
             .Given(name: n) :> noBind(done)
             .For(f: lf) :> forBinding(cx, lf, done)        // s469: a bound loop binds its name (§49.6)
             .Lift(what: x) :> noBind(done)
+            .LocalFn(f: x) :> noBind(done)
             .Break(label: x) :> noBind(done)
             .Continue(label: x) :> noBind(done)
             .Eval(e: x) :> noBind(done)
@@ -3567,6 +3573,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -3584,6 +3591,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .Eval(e: x) :> not
             .Local(name: n) :> not
             .EffectStmt(w: w) :> not
@@ -4654,7 +4662,14 @@ ${
         let out: FnSrc[] = []
         for (const f of files) {
             const fte: TypeEnv = teAt(te, f.path)
-            for (const af of fnItems(f.items)) {
+            // s477: each function item, then the nested function declarations in it
+            // (§7.3.1), each after the function that declares it (outer = its Sym id)
+            for (const nf of fnsWithNested(fnItems(f.items))) {
+                const af: AFn = nf.f
+                let outer: int = -1
+                for (const o of out) {
+                    if (o.info.nid == nf.outer) outer = o.info.sym.id
+                }
                 // s473: a db cell's load `@rows` is minted as `load$rows` (its Sym hint names generated code)
                 // s474: a composed batch `#book` is minted as `book#batch` (composeFiles; the printers write `#` as `_`)
                 let hint: string = af.name
@@ -4684,12 +4699,64 @@ ${
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret,
                                        failable: af.failable, err: re.err,
-                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not, host: not, derr: re.err }
+                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not, host: not, derr: re.err,
+                                       outer: outer }
                 st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
         }
         return { fs: out, st: st }
+    }
+
+    // s477 — a function and the node id of the function whose body declares it
+    // (-1: a function item).
+    type NestedFn:struct = { f: AFn, outer: int }
+
+    // The functions `fs` and, after each, the nested function declarations
+    // anywhere in its body (a nested one's own included) — every one the
+    // binder mints. Where one may stand is resolveLocalFn's: a declaration the
+    // bootstrap refuses there is still minted (its calls resolve; no cascade).
+    fn fnsWithNested(fs: AFn[]) -> NestedFn[] {
+        let out: NestedFn[] = []
+        for (const f of fs) { out = out.concat([{ f: f, outer: -1 }]).concat(nestedFnsIn(f.body, f.nid)) }
+        return out
+    }
+
+    fn nestedFnsIn(b: ABlock, outer: int) -> NestedFn[] {
+        let out: NestedFn[] = []
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) out = out.concat([{ f: lf, outer: outer }]).concat(nestedFnsIn(lf.body, lf.nid))
+            for (const nb of nestedBlocks(s)) { out = out.concat(nestedFnsIn(nb, outer)) }
+        }
+        return out
+    }
+
+    // The nested function declaration statement `s` is, else not.
+    fn localFnOf(s: AStmt) -> AFn | not {
+        const k: AStmtK = s.k
+        return match k {
+            .LocalFn(f: f) :> f
+            .Eval(e: x) :> not
+            .Local(name: x) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: x) :> not
+            .EffectStmt(w: x) :> not
+            .Defer(body: x) :> not
+            .Fail(f: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Lift(what: x) :> not
+        }
+    }
+
+    // Every function the binder mints, its nested declarations included (s477).
+    fn allFnItems(items: AItem[]) -> AFn[] {
+        let out: AFn[] = []
+        for (const nf of fnsWithNested(fnItems(items))) { out = out.concat([nf.f]) }
+        return out
     }
 
     // =========================================================================
@@ -4727,7 +4794,7 @@ ${
         for (const fs of fs0) {
             let next: FnSrc = fs
             const c: CallParts | not = wholeReturnCall(fs.f.body)
-            if (c is given) {
+            if (c is given && fs.info.outer < 0) {   // s477: a nested function is never a host wrapper
                 const h: string = exprName(c.callee)
                 const b: AImport | not = hostImportBinding(files, fs.info.file, h)
                 if (b is given && h != "" && !paramNamed(fs.f.params, h) && hostImportAdmitted(fs.info.file, b)) {
@@ -5478,7 +5545,7 @@ ${
     fn fnWithHost(i: FnInfo, h: HostFn) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
-                 serverOwn: i.serverOwn, rerr: i.rerr, host: h, derr: i.derr }
+                 serverOwn: i.serverOwn, rerr: i.rerr, host: h, derr: i.derr, outer: i.outer }
     }
 
     // Why the function `fs` (whose whole body is `return h(…)`) is not the
@@ -5553,6 +5620,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: w) :> not
+            .LocalFn(f: x) :> not
         }
         if (e is not) return not
         return callParts(e)
@@ -5763,13 +5831,13 @@ ${
     fn withCarrierErr(i: FnInfo, err: Sym | not) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: err,
-                 serverOwn: i.serverOwn, rerr: i.rerr, host: i.host, derr: i.derr }
+                 serverOwn: i.serverOwn, rerr: i.rerr, host: i.host, derr: i.derr, outer: i.outer }
     }
 
     fn withRemoteErr(i: FnInfo, rerr: Sym | not) -> FnInfo {
         return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
                  pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
-                 serverOwn: i.serverOwn, rerr: rerr, host: i.host, derr: i.derr }
+                 serverOwn: i.serverOwn, rerr: rerr, host: i.host, derr: i.derr, outer: i.outer }
     }
 
     // Does enum `e` declare a variant named `Transport`: -1 none; 0 exactly
@@ -6556,6 +6624,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: w) :> exprsClock(liftExprs(w))
+            .LocalFn(f: f) :> blockClock(f.body)             // s477: textually in this body
             .EffectStmt(w: w) :> blockClock(w.body)
             .Defer(body: b) :> blockClock(b)
             .Fail(f: f) :> exprsClock(failExprs(f))
@@ -6669,6 +6738,51 @@ ${
         inEffect: boolean,      // s449: inside an effect body (an effect there is E-LIFECYCLE-016, §6.7.4)
         fx: FailCtx,            // s451 (Ue): the error-model context (see FailCtx)
         lift: LiftCtx,          // s469 (§49.6): where a `lift` here appends (see LiftCtx)
+        nest: NestCtx,          // s477 (§7.3.1): the nested functions in scope, and what this body captures (see NestCtx)
+    }
+
+    // s477 — nested function declarations (§7.3.1). `fns`: the nested functions
+    // bound here, innermost last — those of every enclosing block of this body
+    // and of the bodies that enclose it (a nested function's name is bound for
+    // its whole block, §48.6.4 "Inner `fn` declarations … hoist to the
+    // enclosing `fn` body's local scope"). `top`: the node ids of the nested
+    // declarations that stand at the TOP LEVEL of the function body being
+    // resolved — the one position the bootstrap builds (resolveLocalFn).
+    // `caps`: the Sym ids of the bindings this body CAPTURES — the enclosing
+    // functions' parameters and locals, visible in it ("closes over the outer
+    // function's `let`, `const`, and `lin` bindings with standard JavaScript
+    // closure semantics"); a write to one from a pure `fn` is E-FN-003
+    // ("they may read outer bindings but may not mutate them").
+    // `pureCaps`: the captured bindings declared OUTSIDE a pure `fn` this body is
+    // (or is nested in) — a write to one is E-FN-003 (§48.3.3; §48.3: "anywhere
+    // inside a `fn` body, including inside nested closures").
+    type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[] }
+
+    fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [] } }
+
+    fn withNest(env: Env, n: NestCtx) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: n }
+    }
+
+    // s477 — the function `name` denotes here: a nested function bound by an
+    // enclosing block (innermost first), else the file-scope one (fnNamed).
+    fn fnNamedIn(env: Env, name: string) -> FnInfo | not {
+        let i: int = env.nest.fns.length - 1
+        while (i >= 0) {
+            if (env.nest.fns[i].name == name) return env.nest.fns[i]
+            i = i - 1
+        }
+        return fnNamed(env.g, env.file, name)
+    }
+
+    fn localFnNamed(env: Env, name: string) -> FnInfo | not {
+        let i: int = env.nest.fns.length - 1
+        while (i >= 0) {
+            if (env.nest.fns[i].name == name) return env.nest.fns[i]
+            i = i - 1
+        }
+        return not
     }
 
     // s469 — where a `lift` appends (§49.6 rule 7: "to the nearest enclosing
@@ -6686,7 +6800,7 @@ ${
 
     fn withLift(env: Env, l: LiftCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: l }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: l, nest: env.nest }
     }
 
     // s451 (Ue) — the error-model context of the code being resolved.
@@ -6714,7 +6828,7 @@ ${
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: fx, lift: env.lift, nest: env.nest }
     }
 
     fn withSubject(env: Env, nid: int) -> Env {
@@ -6753,34 +6867,34 @@ ${
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn withPresent(env: Env, name: string) -> Env {
         if (name == "") return env
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn withHost(env: Env, h: HostCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn withOwn(env: Env, name: string) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     // s449: an effect body — a logic context (§6.7.4 "same rules as `${}`") run
@@ -6789,7 +6903,7 @@ ${
     // E-LIFECYCLE-016.
     fn effectBodyEnv(env: Env) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true, fx: env.fx, lift: LiftCtx.NoLift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true, fx: env.fx, lift: LiftCtx.NoLift, nest: env.nest }
     }
 
     // s444 — O54 = (a) (RULED S442: "`@email` inside `email`'s own `renders` …
@@ -7041,7 +7155,7 @@ ${
         if (l is given && exprName(t) != "") {
             let st1: AS = rp.st
             if (!l.mutable) st1 = addDiag(st1, env.file, t.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
-            st1 = addEffect(st1, e.nid, EffectFact.EAssignLocal(l.s, [], not))
+            st1 = addEffect(capWrite(env, l, t.span, st1), e.nid, EffectFact.EAssignLocal(l.s, [], not))
             return resolveExpr(env, v, l.ty, st1)
         }
         if (rp.place is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a CELL as the target of a condition-head assignment (`((" + placeKey(t) + " = …))`, §50.3.4) is not in the bootstrap yet — write the cell in a statement before the test (`" + placeKey(t) + " = …;` then `if (" + placeKey(t) + " …)`); a `let` local is built (`((x = e))`)", resolveExpr(env, v, not, rp.st).st)
@@ -7073,6 +7187,21 @@ ${
         return resolveNameOf(env, e, name, reservedName(st, env.file, e.span, name))
     }
 
+    // A name that denotes function `f` (file-scope, imported, or nested — s477).
+    fn fnNameRef(env: Env, e: AExpr, name: string, f: FnInfo, st: AS) -> RX {
+        const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
+        if (env.fx.fnRef == e.nid) return plain(not, st2)
+        // s451 (Ue, review HIGH-2): a function named without being called —
+        // an alias, a returned / passed / stored function. Core has no
+        // function value (only a Lambda as a SeqCall argument), so it was
+        // lowered as `null`. A `!` function there is a call left unhandled
+        // (§19.4.3 / §19.4.4: an unhandled `!` call SHALL be E-ERROR-002);
+        // any other function value is refused. (s477: so a nested function
+        // never escapes the activation of the function that declares it.)
+        if (f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-ERROR-002", "the failable function '" + f.name + "' is used as a value — whatever calls it later would discard its error. Call it here and handle the result (`" + f.name + "(…) !{ … }`, `match`, `?`) (§19.4.3)"))
+        return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later \"function values\" slice; call it directly: `" + name + "(…)`"))
+    }
+
     fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
         // s475 r1 (review of #1746, item 1) — `m.x` is one name only where THIS resolver already found
         // the plain `m` to be the namespace import, after every nearer binding (below: a local, a
@@ -7091,6 +7220,9 @@ ${
             if (l.narrowed is given) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
+        // s477: a nested function (§7.3.1) is bound in its block, so it shadows every file-scope name
+        const lf: FnInfo | not = localFnNamed(env, name)
+        if (lf is given) return fnNameRef(env, e, name, lf, st)
         // s472 (boot-math-port): an `import:host` binding of this file (§21.3.1)
         const hb: AImport | not = hostImportBinding(env.g.files, env.file, name)
         if (hb is given) return resolveHostBinding(env, e, name, hb, st)
@@ -7119,19 +7251,8 @@ ${
             if (!kc.ready) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is read before it is initialized — a file-scope constant's initializer reads only the constants initialized before it (declared earlier in this file, or in a file this one imports)", st)
             return plain(kc.ty, addName(st, e.nid, NameFact.NConst(kc.sym)))
         }
-        const f: FnInfo | not = fnNamed(env.g, env.file, name)
-        if (f is given) {
-            const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
-            if (env.fx.fnRef == e.nid) return plain(not, st2)
-            // s451 (Ue, review HIGH-2): a function named without being called —
-            // an alias, a returned / passed / stored function. Core has no
-            // function value (only a Lambda as a SeqCall argument), so it was
-            // lowered as `null`. A `!` function there is a call left unhandled
-            // (§19.4.3 / §19.4.4: an unhandled `!` call SHALL be E-ERROR-002);
-            // any other function value is refused.
-            if (f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-ERROR-002", "the failable function '" + f.name + "' is used as a value — whatever calls it later would discard its error. Call it here and handle the result (`" + f.name + "(…) !{ … }`, `match`, `?`) (§19.4.3)"))
-            return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later \"function values\" slice; call it directly: `" + name + "(…)`"))
-        }
+        const f: FnInfo | not = fnNamedIn(env, name)
+        if (f is given) return fnNameRef(env, e, name, f, st)
         const pi: DeclInfo | not = programInfo(env)
         if (pi is given) {
             if (fieldIndex(pi, name) >= 0) {
@@ -8174,6 +8295,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: w) :> blocksValueReturn(fs, v, liftBlocks(w))
+            .LocalFn(f: x) :> false
             .Eval(e: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .Local(name: n, init: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .EffectStmt(w: w) :> false
@@ -8248,6 +8370,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
@@ -10366,7 +10489,7 @@ ${
     // `open` (no local or declared function shadows it), or one on a receiver
     // that names a window or a document? (`indexedDB.open(name)` is not.)
     fn sinkWindowish(ch: string[], i: int, env: Env) -> boolean {
-        if (i == 0) return lookupLocal(env, ch[0]) is not && fnNamed(env.g, env.file, ch[0]) is not
+        if (i == 0) return lookupLocal(env, ch[0]) is not && fnNamedIn(env, ch[0]) is not
         const r: string = ch[i - 1]
         return r == "window" || r == "globalThis" || r == "self" || r == "top" || r == "parent" || r == "opener"
             || r == "frames" || r == "document" || r == "contentWindow" || r == "defaultView" || r == "ownerDocument"
@@ -10421,7 +10544,7 @@ ${
         const v: SinkView = sinkView(a)
         if (v.kind == 7) return true
         if (v.kind == 12) return true      // a parse-error placeholder (a braced arrow): the parser reported it
-        if (v.kind == 1) return lookupLocal(env, v.name) is not && fnNamed(env.g, env.file, v.name) is given
+        if (v.kind == 1) return lookupLocal(env, v.name) is not && fnNamedIn(env, v.name) is given
         return false
     }
 
@@ -10642,7 +10765,7 @@ ${
             // s469-boot-tape-grants: §50 decides whether the name may be rebound (above);
             // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
             // the typer's (typeAssign → localTapeProblems), where an inferred type is known
-            st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, [], not))
+            st = addEffect(capWrite(env, l, target.span, st), e.nid, EffectFact.EAssignLocal(l.s, [], not))
             // s475 (s475-boot-local-tape-edits): the recognized grow shapes of the local
             // itself, `xs = [...xs, e]` / `xs = [e, ...xs]` (§66.11.2; §66.12.6 rule 4 —
             // the typer classifies the edit and judges it by the local's TYPE grants):
@@ -12435,7 +12558,7 @@ ${
             if (meth == "remove") want = Type.Int
             st = resolveExpr(env, args[0], want, st).st
         }
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el))
+        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.ELocalEdit(l.s, op, arg, el))
     }
 
     fn localEditArgWhat(meth: string) -> string {
@@ -12980,18 +13103,18 @@ ${
                 if (stt.diags.length > st.diags.length) return stt
             }
         }
-        return addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, steps, t))
+        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.EAssignLocal(l.s, steps, t))
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
         let st: AS = st0
-        let env2: Env = env
+        let env2: Env = bindLocalFns(env, b)     // s477: hoisted (§48.6.4)
         for (const s of b.stmts) {
             const r: RB = resolveStmt(env2, s, st)
             env2 = r.env
             st = r.st
         }
-        return st
+        return resolveLocalFns(env2, b, st)      // s477: in the block's final scope
     }
 
     fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
@@ -13007,6 +13130,7 @@ ${
             .Break(label: x) :> keepEnv(env, st)
             .Continue(label: x) :> keepEnv(env, st)
             .Lift(what: w) :> keepEnv(env, resolveLift(env, s, w, st))  // s469 (§49.6.2)
+            .LocalFn(f: x) :> keepEnv(env, st)            // s477: bound at the block's entry, resolved at its end (resolveBlock)
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
             .Defer(body: b, arrayLead: a, bare: bare) :> keepEnv(env, resolveDefer(env, s, b, a, bare, st))
         }
@@ -13036,8 +13160,9 @@ ${
     // `break` / `continue`, the CPS split of a function body — have no source
     // form here (a parse or scope error, so the compile has no Core —
     // lower.scrml's gate), so no `defer` can meet them and be mis-run. For the
-    // same reason -DUPLICATE-FUNCTION (no function declaration inside a body)
-    // and -SERVER-IN-SPLIT (no split) have no trigger the bootstrap can parse.
+    // same reason -SERVER-IN-SPLIT (no split) has no trigger the bootstrap can
+    // parse. s477: nested function declarations parse (§7.3.1), so
+    // -DUPLICATE-FUNCTION is reported (blockRedeclares).
     // (Ue) E-DEFER-UNHANDLED-FAILABLE is the binder's (resolveCall /
     // resolveSql / guarded, under FailCtx.defer); `fail` / `?` inside a
     // deferred body are E-DEFER-CONTROL-FLOW (deferBodyRule / deferExprRules).
@@ -13080,7 +13205,7 @@ ${
     fn deferBound(env: Env) -> boolean {
         if (lookupLocal(env, "defer") is given) return true
         if (lookupHandle(env, "defer") is given) return true
-        return fnNamed(env.g, env.file, "defer") is given
+        return fnNamedIn(env, "defer") is given
     }
 
     // A `let` / `const` written AFTER a position in a block of the function.
@@ -13129,6 +13254,7 @@ ${
             .Break(label: x) :> st
             .Continue(label: x) :> st
             .Lift(what: w) :> deferChecksBlocks(file, liftBlocks(w), later, st)
+            .LocalFn(f: x) :> st                       // s477: its body is checked as a function body of its own
             .Eval(e: e) :> deferChecksBlocks(file, allExprBlocks(e), later, st)        // s451 (Ue): a braced arm block is a defer site (§19.16.2)
             .Local(name: n, init: i) :> deferChecksBlocks(file, allExprBlocks(i), later, st)
             .Return(e: e) :> deferChecksBlocks(file, maybeExprBlocks(e), later, st)
@@ -13152,9 +13278,10 @@ ${
     // `?` (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a
     // `return`, a `fail`, a `?` propagation"), no `defer` (E-DEFER-NESTED —
     // "A deferred body SHALL NOT contain a `defer` statement"), the arms of a
-    // handling form included (s451 Ue). The bootstrap parses no `yield` and no
-    // nested function body (a lambda body is an expression), so a `return`
-    // here always leaves the deferred body.
+    // handling form included (s451 Ue). The bootstrap parses no `yield`, and a
+    // lambda body is an expression; a nested function declaration (s477) stands
+    // only at the top of a function body — never in a deferred body
+    // (resolveLocalFn) — so a `return` here always leaves the deferred body.
     // s471 — `break` / `continue`: "A `break`/`continue` that targets a loop
     // INSIDE the deferred body is permitted" (§19.16.3 rule 1). `loops` holds
     // the labels of the loops inside the deferred body that enclose the
@@ -13189,6 +13316,7 @@ ${
             // s471 review F2 — RULED (user-voice S471, "your recs"): §19.16.3 rule 1 gains
             // `lift` — a deferred body SHALL NOT append to an enclosing value-bound loop
             .Lift(what: w) :> deferLiftRules(file, liftExprs(w), loops, addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `lift` (nor a `return`, a `fail`, a `?` propagation or a `break`/`continue` that leaves it) — it runs while its block is already exiting (§19.16.3 rule 1)"))
+            .LocalFn(f: x) :> st                         // s477: refused by position (resolveLocalFn)
             .Eval(e: e) :> deferExprRules(file, e, loops, st)
             .Local(name: n, init: i) :> deferExprRules(file, i, loops, st)
             .EffectStmt(w: w) :> st
@@ -13280,6 +13408,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> exprsNameRefs(liftExprs(w), bound)
+            .LocalFn(f: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: d) :> blockNameRefs(d, bound)
             .Fail(f: f) :> exprsNameRefs(failExprs(f), bound)
@@ -13399,6 +13528,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -13723,7 +13853,7 @@ ${
         const n: string = exprName(c)
         if (n == "") return false
         if (lookupLocal(env, n) is given) return false
-        const f: FnInfo | not = fnNamed(env.g, env.file, n)
+        const f: FnInfo | not = fnNamedIn(env, n)
         if (f is not) return false
         return f.failable
     }
@@ -13768,7 +13898,7 @@ ${
         const n: string = exprName(c)
         if (n == "") return not
         if (lookupLocal(env, n) is given) return not
-        const f: FnInfo | not = fnNamed(env.g, env.file, n)
+        const f: FnInfo | not = fnNamedIn(env, n)
         if (f is not) return not
         const r: Type | not = f.ret
         if (r is not) return not
@@ -14358,7 +14488,7 @@ ${
         const n: string = exprName(c)
         if (n == "") return not
         if (lookupLocal(env, n) is given) return not
-        const f: FnInfo | not = fnNamed(env.g, env.file, n)
+        const f: FnInfo | not = fnNamedIn(env, n)
         if (f is not) return not
         if (!f.serverOwn) return not
         return f
@@ -14988,6 +15118,7 @@ ${
                 .Break(label: x) :> false
                 .Continue(label: x) :> false
                 .Lift(what: x) :> false
+                .LocalFn(f: x) :> false
                 .EffectStmt(w: w) :> false
                 .Fail(f: x) :> false
             }
@@ -15008,6 +15139,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -15059,6 +15191,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -15090,6 +15223,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: w) :> liftHasBareReturn(w)
+            .LocalFn(f: x) :> false                  // s477: its bare `return` is its own
             .Eval(e: x) :> exprHasBareReturn(x)
             .Local(name: n, init: i) :> exprHasBareReturn(i)
             .EffectStmt(w: w) :> false
@@ -15199,6 +15333,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: x) :> false
         }
@@ -15481,6 +15616,7 @@ ${
                 .Break(label: x) :> false
                 .Continue(label: x) :> false
                 .Lift(what: x) :> false
+                .LocalFn(f: x) :> false
                 .EffectStmt(w: x) :> false
                 .Defer(body: x) :> false
                 .Fail(f: x) :> false
@@ -15495,6 +15631,7 @@ ${
                 .Break(label: x) :> not
                 .Continue(label: x) :> not
                 .Lift(what: x) :> not
+                .LocalFn(f: x) :> not
                 .EffectStmt(w: x) :> not
                 .Defer(body: x) :> not
                 .Fail(f: x) :> not
@@ -16104,6 +16241,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .EffectStmt(w: x) :> not
             .Defer(body: x) :> not
             .Fail(f: x) :> not
@@ -16114,7 +16252,7 @@ ${
     // it (as in a handler); not an effect body (E-LIFECYCLE-016 is the effect's).
     fn requestBodyEnv(env: Env) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: false, fx: env.fx, lift: LiftCtx.NoLift }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: false, fx: env.fx, lift: LiftCtx.NoLift, nest: env.nest }
     }
 
     // `deps=[…]`: its entries, or `not` when the value is not a `[ ]` list.
@@ -16273,6 +16411,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: x) :> []
+            .LocalFn(f: x) :> []
             .Fail(f: x) :> []
         }
     }
@@ -16531,6 +16670,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Lift(what: x) :> true
+            .LocalFn(f: x) :> false
             .If(cond: c, thenB: tb, elseB: el) :> liftReachable(tb) || liftReachableMaybe(el)
             .Given(name: n, body: gb) :> liftReachable(gb)
             .For(f: lf) :> lf.bound is not && liftReachable(lf.body)
@@ -16561,6 +16701,7 @@ ${
             .EffectStmt(w: x) :> false
             .Defer(body: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -16847,6 +16988,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -16873,6 +17015,7 @@ ${
                 .Break(label: x) :> []
                 .Continue(label: x) :> []
                 .Lift(what: x) :> []
+                .LocalFn(f: x) :> []
             }
             out = out.concat(own)
             for (const nb of nestedBlocks(s)) { out = out.concat(failSpansIn(nb)) }
@@ -16910,6 +17053,7 @@ ${
             .Break(label: x) :> keepEnv(env, st)
             .Continue(label: x) :> keepEnv(env, st)
             .Lift(what: x) :> keepEnv(env, st)
+            .LocalFn(f: x) :> keepEnv(env, st)
         }
     }
 
@@ -17120,6 +17264,7 @@ ${
             const k: AStmtK = s.k
             const own: ANode[] = match k {
                 .Lift(what: w) :> liftRowOf(w)
+                .LocalFn(f: x) :> []
                 .If(cond: c, thenB: tb, elseB: el) :> rowsOfBlock(tb).concat(rowsOfMaybe(el))
                 .Given(name: n, body: gb) :> rowsOfBlock(gb)
                 .For(f: lf) :> rowsOfBlock(lf.body)
@@ -17273,6 +17418,7 @@ ${
             .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
             .Continue(label: l) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false                       // s477: a function body is a jump boundary (§49.4.3)
             .For(f: lf) :> blockBreaksTo(lf.body, label, false)
             .Eval(e: x) :> blocksBreakTo(nestedBlocks(s), label, direct)
             .Local(name: n) :> blocksBreakTo(nestedBlocks(s), label, direct)
@@ -17367,6 +17513,7 @@ ${
             .Continue(label: l) :> l != "" && !labelOwned(l, owned)
             .For(f: lf) :> blockCrossesOut(lf.body, owned.concat([lf.label]))
             .Lift(what: w) :> blocksCrossOut(nestedBlocks(s), owned)
+            .LocalFn(f: x) :> false
             .Eval(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
             .Local(name: n) :> blocksCrossOut(nestedBlocks(s), owned)
             .Return(e: x) :> blocksCrossOut(nestedBlocks(s), owned)
@@ -17495,6 +17642,7 @@ ${
             .Eval(e: e) :> exprWayOut(e, label, direct, cont)
             .Local(name: n, init: i) :> exprWayOut(i, label, direct, cont)
             .Lift(what: w) :> exprsWayOut(liftExprs(w), label, direct, cont)
+            .LocalFn(f: x) :> false
             .If(cond: c, thenB: t, elseB: el) :> exprWayOut(c, label, direct, cont) || blockWayOut(t, label, direct, cont) || blockWayOutMaybe(el, label, direct, cont)
             .Given(name: n, subject: x, body: gb) :> exprWayOut(x, label, direct, cont) || blockWayOut(gb, label, direct, cont)
             .For(f: lf) :> exprsWayOut(forExprs(lf), label, false, cont) || blockWayOut(lf.body, label, false, cont)
@@ -17536,9 +17684,11 @@ ${
     // s469 — THE LOOP-CONTROL PASS (§49.4; §49.10: "reported after AST
     // construction and scope resolution, in the loop control-flow validation
     // pass"). One walk per body ROOT — a function body, an event-handler
-    // block, an effect body; each is a boundary (§49.4.3). The bootstrap has no
-    // nested function declaration and no statement-bodied lambda, so nothing
-    // here can cross one: E-LOOP-005 has no source form yet.
+    // block, an effect body; each is a boundary (§49.4.3). A nested function
+    // declaration (s477) stands only at the top of a function body — never in a
+    // loop — and is a root of its own (resolveFnBody); there is no
+    // statement-bodied lambda. So nothing here can cross one: E-LOOP-005 has no
+    // source form yet.
     //   E-LOOP-001 / -002   `break` / `continue` with no enclosing loop
     //   E-LOOP-003 / -004   `break l` / `continue l` naming no enclosing loop
     //                       ("any ancestor loop within the same function body",
@@ -17682,6 +17832,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Lift(what: w) :> liftExprs(w).length == 0
+            .LocalFn(f: x) :> true                          // s477: a closure may read the copy whenever it runs — never guess
             .EffectStmt(w: w) :> true
             .Defer(body: d) :> true
             .For(f: lf) :> false
@@ -17707,6 +17858,7 @@ ${
                 .Break(label: x) :> not
                 .Continue(label: x) :> not
                 .Lift(what: w) :> not
+                .LocalFn(f: x) :> not
                 .Local(name: n) :> not
                 .Return(e: x) :> not
                 .If(cond: c) :> not
@@ -17790,6 +17942,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .Eval(e: x) :> not
             .Local(name: n) :> not
             .Return(e: x) :> not
@@ -17838,6 +17991,7 @@ ${
             .Break(label: l) :> loopJump(file, s, l, true, stack, inDefer, st)
             .Continue(label: l) :> loopJump(file, s, l, false, stack, inDefer, st)
             .Lift(what: w) :> loopBlocks(file, liftBlocks(w), stack, inDefer, st)
+            .LocalFn(f: x) :> st                              // s477: its body is a loop-control boundary, checked as its own (resolveFnBody)
             .Defer(body: d) :> loopDefer(file, s, d, stack, st)
             .EffectStmt(w: w) :> loopBlock(file, w.body, [], inDefer, st)
             .Eval(e: x) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
@@ -17941,6 +18095,7 @@ ${
             .Eval(e: x) :> false
             .Fail(f: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -18177,6 +18332,7 @@ ${
             const k: AStmtK = s.k
             const own: AExpr[] = match k {
                 .Lift(what: w) :> liftExprs(w)
+                .LocalFn(f: x) :> []
                 .If(cond: c, thenB: tb, elseB: el) :> liftOperands(tb).concat(liftOperandsMaybe(el))
                 .Given(name: n, body: gb) :> liftOperands(gb)
                 .For(f: lf) :> nestedLiftOperands(lf)
@@ -18419,6 +18575,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: x) :> []
+            .LocalFn(f: x) :> []
         }
     }
 
@@ -21602,7 +21759,7 @@ ${
 
     fn constEnv(g: Globals, file: string) -> Env {
         return { g: g, file: file, ctx: CtxK.InFn, locals: [], rows: [], handles: [], inRenders: false, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift }
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift, nest: noNest() }
     }
 
     fn constValue(g: Globals, c: ConstInfo, st0: AS) -> RConst1 {
@@ -21794,7 +21951,7 @@ ${
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift }
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift, nest: noNest() }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -21825,52 +21982,482 @@ ${
         let progHandles: HandleInfo[] = []
         if (prog is given) progHandles = handlesOwnedBy(g, prog.info.nid)
         for (const fs of g.fns) {
+            if (fs.info.outer >= 0) continue      // s477: a nested function is resolved in its block's scope (resolveLocalFns)
             let hs: HandleInfo[] = []
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
                                   fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr }
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
-            const fte: TypeEnv = teAt(g.te, fs.info.file)
-            for (const p of fs.f.params) {
-                const rs: RSym = mint(reservedName(st, fs.info.file, p.span, p.name), p.name)
-                st = rs.st
-                let pty: Type = Type.Str
-                let proven: boolean = false
-                const at: AType | not = p.ty
-                if (at is given) {
-                    // a type that failed to parse is not resolved (its parse
-                    // error is the diagnostic; the typer treats it as unproven)
-                    if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
-                        const rt: RType = resolveType(fte, at, st)
-                        pty = rt.t
-                        const unresolved: boolean = rt.unresolved
-                        st = rt.st
-                        if (unresolved) st = badParam(st, p.nid)     // r8: never checked against
-                        if (!unresolved) proven = true
-                    }
-                } else {
-                    // s473 (ruled refusals): §7.5 (S469) — the SPEC's code, not E-BOOTSTRAP-UNSUPPORTED.
-                    // A NAMELESS parameter is the parser's reading of a form it does not read (a default
-                    // value or a rest parameter — g-boot-param-default-and-rest-s473), not a missing type.
-                    if (!plainParamName(p.name)) {
-                        st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter")
-                    } else st = addDiag(st, fs.info.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` has no type — every function parameter carries `: T` (§7.5, S469): write `" + p.name + ": Type`. A default does not stand in for the type (`n = 1` → `n: int = 1`)")
-                }
-                st = addBind(st, p.nid, BindFact.BParam(rs.s, pty))
-                // s473 (#1663 F1): a parameter whose type is unwritten or did not resolve
-                // (a host type such as `Event`) has NO known type here — its `string`
-                // placeholder is not a type the sink judgment may trust (fail closed)
-                let lty: Type | not = not
-                if (proven) lty = pty
-                env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false })
-            }
-            st = resolveBlock(env, fs.f.body, st)
-            st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
-            st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
+            const env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: noNest() }
+            st = resolveFnBody(env, fs, st)
         }
         return st
+    }
+
+    // One function's parameters and body, in `env0`: an empty scope for a
+    // function item; for a NESTED function (s477, §7.3.1) the scope of the block
+    // that declares it (resolveLocalFn). `top` is set here: the nested
+    // declarations standing at the top level of THIS body.
+    fn resolveFnBody(env0: Env, fs: FnSrc, st0: AS) -> AS {
+        let st: AS = st0
+        const g: Globals = env0.g
+        let env: Env = withNest(env0, { fns: env0.nest.fns, top: topLocalFns(fs.f.body), caps: env0.nest.caps, pureCaps: env0.nest.pureCaps })
+        const fte: TypeEnv = teAt(g.te, fs.info.file)
+        for (const p of fs.f.params) {
+            const rs: RSym = mint(reservedName(st, fs.info.file, p.span, p.name), p.name)
+            st = rs.st
+            let pty: Type = Type.Str
+            let proven: boolean = false
+            const at: AType | not = p.ty
+            if (at is given) {
+                // a type that failed to parse is not resolved (its parse
+                // error is the diagnostic; the typer treats it as unproven)
+                if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
+                    const rt: RType = resolveType(fte, at, st)
+                    pty = rt.t
+                    const unresolved: boolean = rt.unresolved
+                    st = rt.st
+                    if (unresolved) st = badParam(st, p.nid)     // r8: never checked against
+                    if (!unresolved) proven = true
+                }
+            } else {
+                // s473 (ruled refusals): §7.5 (S469) — the SPEC's code, not E-BOOTSTRAP-UNSUPPORTED.
+                // A NAMELESS parameter is the parser's reading of a form it does not read (a default
+                // value or a rest parameter — g-boot-param-default-and-rest-s473), not a missing type.
+                if (!plainParamName(p.name)) {
+                    st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter")
+                } else st = addDiag(st, fs.info.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` has no type — every function parameter carries `: T` (§7.5, S469): write `" + p.name + ": Type`. A default does not stand in for the type (`n = 1` → `n: int = 1`)")
+            }
+            st = addBind(st, p.nid, BindFact.BParam(rs.s, pty))
+            // s473 (#1663 F1): a parameter whose type is unwritten or did not resolve
+            // (a host type such as `Event`) has NO known type here — its `string`
+            // placeholder is not a type the sink judgment may trust (fail closed)
+            let lty: Type | not = not
+            if (proven) lty = pty
+            env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false })
+        }
+        st = resolveBlock(env, fs.f.body, st)
+        st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
+        st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
+        return st
+    }
+
+    // s477 — the node ids of the nested function declarations at the top level of `b`.
+    fn topLocalFns(b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const s of b.stmts) {
+            if (localFnOf(s) is given) out = out.concat([s.nid])
+        }
+        return out
+    }
+
+    fn fnSrcByNid(g: Globals, nid: int) -> FnSrc | not {
+        for (const fs of g.fns) {
+            if (fs.info.nid == nid) return fs
+        }
+        return not
+    }
+
+    // s477 — a block's nested function declarations are bound for the WHOLE
+    // block (§48.6.4: "Inner `fn` declarations … hoist to the enclosing `fn`
+    // body's local scope"; JavaScript hoists a function declaration to its
+    // block). Each shadows an outer binding of its name — a parameter included
+    // (§7.3.3: a `function` declaration named like a parameter "replaces the
+    // parameter's value for the whole body").
+    fn bindLocalFns(env: Env, b: ABlock) -> Env {
+        let fns: FnInfo[] = env.nest.fns
+        let shadow: string[] = []
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) {
+                const fs: FnSrc | not = fnSrcByNid(env.g, lf.nid)
+                if (fs is given) {
+                    fns = fns.concat([fs.info])
+                    shadow = shadow.concat([lf.name])
+                }
+            }
+        }
+        if (shadow.length == 0) return env
+        let locals: LocalB[] = []
+        for (const l of env.locals) {
+            if (shadow.indexOf(l.name) < 0) locals = locals.concat([l])
+        }
+        const e2: Env = { g: env.g, file: env.file, ctx: env.ctx, locals: locals, rows: env.rows,
+                          handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
+        return withNest(e2, { fns: fns, top: env.nest.top, caps: env.nest.caps, pureCaps: env.nest.pureCaps })
+    }
+
+    // s477 — each nested function declaration of block `b`, resolved in `env`:
+    // the block's scope at its END, so the body sees every binding of the block
+    // ("standard JavaScript closure semantics", §7.3.1 — a closure reads a binding
+    // declared after it once that binding is initialized; nestedFnPass refuses a
+    // call that could run before one is).
+    fn resolveLocalFns(env: Env, b: ABlock, st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) st = resolveLocalFn(env, s, lf, st)
+        }
+        return st
+    }
+
+    // s477 — a nested function declaration (§7.3.1: "Function declarations inside
+    // `${}` logic blocks MAY be nested. An inner function declared inside the body
+    // of an outer `function` or `fn` closes over the outer function's `let`,
+    // `const`, and `lin` bindings with standard JavaScript closure semantics").
+    // BUILT: one at the TOP LEVEL of a function body (a nested function's own
+    // included), neither `!` nor `server`, whose body holds no `?{}` — and
+    // (nestedFnPass) that does not wait, in a client function that does not wait.
+    // Everything else is refused by name, INTERIM (the language allows it; this
+    // compiler does not build it yet) — see the messages.
+    fn resolveLocalFn(env: Env, s: AStmt, f: AFn, st0: AS) -> AS {
+        let st: AS = st0
+        const fs: FnSrc | not = fnSrcByNid(env.g, f.nid)
+        const kw: string = nestedKw(f)
+        if (fs is not || !env.fx.inFn) {
+            // an event handler, an effect body, a `<request>` body: not a function body
+            return addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `" + kw + " " + f.name + "` outside a function body (an event handler, an effect or a `<request>` body) — §7.3.1 nests a function \"inside the body of an outer `function` or `fn`\"; the bootstrap builds that position only (INTERIM — the language does not rule a declaration here; ruling owed). Declare `" + f.name + "` in the program's logic and call it from here")
+        }
+        if (env.nest.top.indexOf(s.nid) < 0) {
+            st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `" + kw + " " + f.name + "` inside a block of the function body (an `if`, a loop, a `match` arm, a `given` or `defer` body) — the bootstrap builds a nested function only at the TOP LEVEL of a function body (INTERIM: §7.3.1 says \"Each inner function's scope is the enclosing function body\", §48.6.4 hoists it \"to the enclosing `fn` body's local scope\" — whether one declared in an inner block is visible after that block is not ruled; ruling owed). Declare it at the top of the function body")
+        }
+        if (f.server) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `server` modifier on a nested `" + kw + " " + f.name + "` — a nested function runs where the function that declares it runs (it closes over that function's bindings, §7.3.1), so it is no route of its own; the modifier is deprecated (§52.10) and the bootstrap refuses it here (INTERIM; ruling owed: what `server` on a nested declaration means). Remove `server`")
+        if (f.failable) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a failable nested function `" + kw + " " + f.name + "(…)!` — the language allows it (§7.3.1, §19.4); the bootstrap does not build a nested `!` function yet (INTERIM — its failures, `?` propagation and transaction envelope are not wired through a nested declaration). Declare `" + f.name + "` at file level")
+        if (sqlsInBlock(f.body).length > 0) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested function `" + f.name + "` that runs a `" + sqlSigil() + "}` query — the language allows it (§7.3.1; a query is a wait, §13.8); the bootstrap does not build a nested function that waits yet (INTERIM). Run the query in a file-level server function and call it")
+        // §7.6 (S473 D14) rules a LOCAL named like a cell E-NAME-COLLIDES-STATE and says "nested
+        // `function` declarations are not decided by this ruling" — refused by name, INTERIM
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is given) {
+            for (const cf of pi.fields) {
+                if (cf.sym.hint == f.name) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the nested function `" + f.name + "` takes the name of the cell `@" + f.name + "` — §7.6 rules a LOCAL named like a cell E-NAME-COLLIDES-STATE and leaves \"nested `function` declarations\" undecided (S473 D14); the bootstrap refuses it (INTERIM; ruling owed). Rename the function")
+            }
+        }
+        if (fs is not) return st
+        let host: HostCtx = HostCtx.HostOk
+        if (f.pure || env.host == HostCtx.HostPure) host = HostCtx.HostPure     // §48.3: "anywhere inside a `fn` body, including inside nested closures"
+        const fx: FailCtx = { inFn: true, fnName: f.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
+                              fnSym: fs.info.sym.id, serverOwn: env.fx.serverOwn || fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr }
+        let caps: int[] = env.nest.caps
+        for (const l of env.locals) { caps = caps.concat([l.s.id]) }
+        let pureCaps: int[] = env.nest.pureCaps
+        if (f.pure) pureCaps = caps
+        const env0: Env = { g: env.g, file: env.file, ctx: CtxK.InFn, locals: env.locals, rows: [], handles: env.handles, inRenders: false, narrows: [], present: [],
+                            host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: { fns: env.nest.fns, top: [], caps: caps, pureCaps: pureCaps } }
+        return resolveFnBody(env0, fs, st)
+    }
+
+    // s477 — a write (a rebinding, a part write, a tape edit) to a binding a pure
+    // `fn` captures: §7.3.1 "Inner `fn` declarations are subject to the same purity
+    // constraints as top-level `fn` (§48) — they may read outer bindings but may not
+    // mutate them (E-FN-003)"; §48.3.3 "A `fn` body SHALL NOT write to any variable
+    // declared outside the `fn`'s own scope boundary".
+    fn capWrite(env: Env, l: LocalB, span: ASpan, st: AS) -> AS {
+        if (env.nest.pureCaps.indexOf(l.s.id) < 0) return st
+        return addDiag(st, env.file, span, "E-FN-003", "a `fn` body writes `" + l.name + "`, which is declared outside it (in the function that declares this one) — a nested `fn` may read the bindings it closes over but not mutate them (§7.3.1, §48.3.3); return the new value and write it in the enclosing function, or declare the inner function with `function`")
+    }
+
+    // s477 — is `id` a nested function's Sym?
+    fn nestedSym(g: Globals, id: int) -> boolean {
+        for (const fs of g.fns) {
+            if (fs.info.sym.id == id) return fs.info.outer >= 0
+        }
+        return false
+    }
+
+    // s477 — is `name` the name of a nested function of `file`?
+    fn nestedNamed(t: Tables, file: string, name: string) -> boolean {
+        for (const f of t.fns) {
+            if (f.outer >= 0 && f.file == file && f.name == name) return true
+        }
+        return false
+    }
+
+    // s477 — a nested function runs where the function that declares it runs: it
+    // closes over that function's bindings (§7.3.1), so it cannot be a route of
+    // its own (§12.3) nor run on the other side of one. Its placement is its
+    // declarer's (functions are in declaration order: a declarer is placed first).
+    fn nestedPlaces(g: Globals, ps: PlaceFact[]) -> PlaceFact[] {
+        let out: PlaceFact[] = ps
+        for (const fs of g.fns) {
+            if (fs.info.outer >= 0) {
+                const pk: PlaceK = placeOf(out, fs.info.outer)
+                let next: PlaceFact[] = []
+                for (const p of out) {
+                    if (p.sym == fs.info.sym.id) {
+                        next = next.concat([{ sym: p.sym, name: p.name, place: pk }])
+                    } else {
+                        next = next.concat([p])
+                    }
+                }
+                out = next
+            }
+        }
+        return out
+    }
+
+    // …and it is server-placed by inheritance (§12.2 T5) exactly when its declarer is.
+    fn nestedInherited(g: Globals, inh: int[]) -> int[] {
+        let out: int[] = []
+        for (const x of inh) {
+            if (!nestedSym(g, x)) out = out.concat([x])
+        }
+        for (const fs of g.fns) {
+            if (fs.info.outer >= 0 && out.indexOf(fs.info.outer) >= 0) out = out.concat([fs.info.sym.id])
+        }
+        return out
+    }
+
+    // s477 — the summary scan of a nested declaration: a nested `function`'s body
+    // is scanned as part of the body that declares it (§48.3: a `fn`'s
+    // prohibitions reach "anywhere inside a `fn` body, including inside nested
+    // closures"). A nested `fn`'s body is its own: its writes are judged on it
+    // (fnWritePass), never twice.
+    fn scanLocalFn(cx: WCx, f: AFn, acc: BodyScan) -> BodyScan {
+        if (f.pure) return acc
+        return scanBlock(cx, f.body, acc)
+    }
+
+    // s477 — the bare-name nodes anywhere in a block, nested functions' bodies included.
+    fn nameExprsIn(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(nameExprsInExpr(e)) }
+            for (const nb of nestedBlocks(s)) { out = out.concat(nameExprsIn(nb)) }
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) out = out.concat(nameExprsIn(lf.body))
+        }
+        return out
+    }
+
+    fn nameExprsInExpr(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = []
+        if (exprName(e) != "") out = [e]
+        for (const x of exprKids(e)) { out = out.concat(nameExprsInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(nameExprsIn(b)) }
+        return out
+    }
+
+    // The bare-name nodes of one statement, NOT inside a nested declaration it is.
+    fn stmtNameExprs(s: AStmt) -> AExpr[] {
+        if (localFnOf(s) is given) return []
+        let out: AExpr[] = []
+        for (const e of stmtExprs(s)) { out = out.concat(nameExprsInExpr(e)) }
+        for (const nb of nestedBlocks(s)) { out = out.concat(nameExprsIn(nb)) }
+        return out
+    }
+
+    fn localSymOfName(t: Tables, nid: int) -> int {
+        const f: NameFact | not = nameFact(t.names, nid)
+        return match f {
+            .NLocal(sym: s) :> s.id
+            .NField(decl: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: x) :> -1
+            not :> -1
+        }
+    }
+
+    fn fnSymOfName(t: Tables, nid: int) -> int {
+        const f: NameFact | not = nameFact(t.names, nid)
+        return match f {
+            .NFn(sym: s) :> s.id
+            .NLocal(sym: x) :> -1
+            .NField(decl: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: x) :> -1
+            not :> -1
+        }
+    }
+
+    // s477 (§35.6) — a nested function that names a `lin` binding of an enclosing
+    // function CAPTURES it: "Capturing a `lin` variable in a closure (arrow function
+    // expression or `function` expression) SHALL count as one consumption". A
+    // DECLARATION is not an expression and is hoisted (§48.6.4) — whether its
+    // capture is consumed at the declaration, at the block's start or at each call
+    // is not ruled: refused by name, INTERIM (ruling owed). The binding is then
+    // taken as consumed (no second report).
+    fn linLocalFn(cx: LinCx, f: AFn, s0: LinSt) -> LinR {
+        let s: LinSt = s0
+        let ids: int[] = []
+        for (const x of nameExprsIn(f.body)) { ids = ids.concat([localSymOfName(cx.t, x.nid)]) }
+        let vars: LinVar[] = []
+        for (const v of s.vars) {
+            if (!v.used && ids.indexOf(v.id) >= 0) {
+                s = linDiag(cx, s, "E-BOOTSTRAP-UNSUPPORTED", f.span, "the nested function `" + f.name + "` names the `lin` binding `" + v.name + "` (declared at " + offsetOf(v.decl) + ") of the function that declares it — §35.6 makes a closure's capture its one consumption, but a nested DECLARATION is hoisted (§48.6.4) and where its capture is consumed is not ruled; the bootstrap refuses it (INTERIM; ruling owed). Pass `" + v.name + "` to it as a `lin` parameter")
+                vars = vars.concat([{ id: v.id, name: v.name, decl: v.decl, used: true, at: f.span, depth: v.depth, scope: v.scope }])
+            } else {
+                vars = vars.concat([v])
+            }
+        }
+        return linGo({ vars: vars, diags: s.diags, reported: s.reported, scopes: s.scopes })
+    }
+
+    // =========================================================================
+    // s477 — THE NESTED-FUNCTION PASS (§7.3.1), after placement and the
+    // suspension plan. Refused by name, INTERIM (the language allows each; this
+    // compiler does not build it yet):
+    //   - a nested function that WAITS (a server call, a waiting call — §13.9.6
+    //     binds a waiting function "by a `function` declaration … including … a
+    //     `function` declared inside another function's body")
+    //   - a nested function in a CLIENT function that waits: the client prints
+    //     such a body in explicit continuations, which would move a declaration
+    //     out of the scope its calls see
+    //   - a call of a nested function that can run before a binding it captures
+    //     is declared (it would read it in its temporal dead zone — a host error;
+    //     §7.3.1 "standard JavaScript closure semantics" does not say what that is
+    //     in scrml: ruling owed)
+    // =========================================================================
+    fn nestedFnPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        const plan: SuspendPlan = t.server.plan
+        for (const fs of g.fns) {
+            const id: int = fs.info.sym.id
+            if (fs.info.outer >= 0 && plan.waiting.indexOf(id) >= 0) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the nested function `" + fs.info.name + "` waits (it calls a server function, or a function that waits) — the language allows a waiting nested `function` (§13.9.6); the bootstrap does not build one yet (INTERIM). Make the call in the function that declares it, or declare `" + fs.info.name + "` at file level", fs.info.file, fs.f.span)])
+            }
+            const pk: PlaceK = placeOf(t.server.places, id)
+            const clientSide: boolean = (pk == PlaceK.Client || pk == PlaceK.Ambient) && t.server.inherited.indexOf(id) < 0
+            if (clientSide && plan.waiting.indexOf(id) >= 0) {
+                for (const s of fs.f.body.stmts) {
+                    const lf: AFn | not = localFnOf(s)
+                    if (lf is given) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the nested function `" + lf.name + "` is declared in `" + fs.info.name + "`, a client function that waits for the server — the bootstrap prints such a body in explicit continuations and does not carry a nested declaration through them yet (INTERIM; the language allows it, §7.3.1). Declare `" + lf.name + "` at file level", fs.info.file, lf.span)])
+                }
+            }
+            out = out.concat(nestedTdz(t, fs))
+        }
+        return out
+    }
+
+    // The temporal-dead-zone rule for one function body (see nestedFnPass).
+    fn nestedTdz(t: Tables, fs: FnSrc) -> Diag[] {
+        const ss: AStmt[] = fs.f.body.stmts
+        let fids: int[] = []
+        let fns: AFn[] = []
+        for (const s of ss) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) {
+                const sy: Sym | not = bindSym(bindFact(t.binds, lf.nid))
+                if (sy is given) {
+                    fids = fids.concat([sy.id])
+                    fns = fns.concat([lf])
+                }
+            }
+        }
+        if (fns.length == 0) return []
+        // the block's own bindings, and the statement each is declared at
+        let lids: int[] = []
+        let lat: int[] = []
+        let i: int = 0
+        while (i < ss.length) {
+            const b: int = topBindId(t, ss[i])
+            if (b >= 0) {
+                lids = lids.concat([b])
+                lat = lat.concat([i])
+            }
+            i = i + 1
+        }
+        // what each nested function reads of them, through the siblings it calls
+        let caps: int[][] = []
+        let calls: int[][] = []
+        for (const f of fns) {
+            let c: int[] = []
+            let k: int[] = []
+            for (const x of nameExprsIn(f.body)) {
+                const ls: int = localSymOfName(t, x.nid)
+                if (ls >= 0 && lids.indexOf(ls) >= 0 && c.indexOf(ls) < 0) c = c.concat([ls])
+                const fsy: int = fnSymOfName(t, x.nid)
+                if (fsy >= 0 && fids.indexOf(fsy) >= 0 && k.indexOf(fsy) < 0) k = k.concat([fsy])
+            }
+            caps = caps.concat([c])
+            calls = calls.concat([k])
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            let next: int[][] = []
+            let j: int = 0
+            for (const c0 of caps) {
+                let c: int[] = c0
+                for (const callee of calls[j]) {
+                    for (const x of caps[fids.indexOf(callee)]) {
+                        if (c.indexOf(x) < 0) {
+                            c = c.concat([x])
+                            changed = true
+                        }
+                    }
+                }
+                next = next.concat([c])
+                j = j + 1
+            }
+            caps = next
+        }
+        let out: Diag[] = []
+        i = 0
+        while (i < ss.length) {
+            for (const x of stmtNameExprs(ss[i])) {
+                const fsy: int = fnSymOfName(t, x.nid)
+                const fi: int = fids.indexOf(fsy)
+                if (fsy >= 0 && fi >= 0) {
+                    for (const c of caps[fi]) {
+                        const at: int = lat[lids.indexOf(c)]
+                        if (at >= i) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this call of the nested function `" + fns[fi].name + "` runs before `" + bindNameAt(ss[at]) + "`, which it reads (directly or through a nested function it calls), is declared — JavaScript would read it in its temporal dead zone (a host error), and §7.3.1's \"standard JavaScript closure semantics\" does not say what that is in scrml (INTERIM; ruling owed). Declare `" + bindNameAt(ss[at]) + "` before the first call", fs.info.file, x.span)])
+                    }
+                }
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // The Sym id a top-level statement binds (a `let` / `const` / `lin`, a bound
+    // loop), -1 none.
+    fn topBindId(t: Tables, s: AStmt) -> int {
+        const k: AStmtK = s.k
+        const bnid: int = match k {
+            .Local(name: x) :> s.nid
+            .For(f: lf) :> forBoundNid(lf)
+            .Eval(e: x) :> -1
+            .Return(e: x) :> -1
+            .If(cond: x) :> -1
+            .Given(name: x) :> -1
+            .EffectStmt(w: x) :> -1
+            .Defer(body: x) :> -1
+            .Fail(f: x) :> -1
+            .Break(label: x) :> -1
+            .Continue(label: x) :> -1
+            .Lift(what: x) :> -1
+            .LocalFn(f: x) :> -1
+        }
+        if (bnid < 0) return -1
+        const sy: Sym | not = bindSym(bindFact(t.binds, bnid))
+        if (sy is not) return -1
+        return sy.id
+    }
+
+    fn forBoundNid(lf: AFor) -> int {
+        const b: AForBound | not = lf.bound
+        if (b is not) return -1
+        return b.nid
+    }
+
+    fn bindNameAt(s: AStmt) -> string {
+        const n: string = localNameOf(s)
+        return n
+    }
+
+    fn nestedKw(f: AFn) -> string {
+        if (f.pure) return "fn"
+        return "function"
     }
 
     // =========================================================================
@@ -21928,7 +22515,7 @@ ${
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t, lk)).concat(builtinRedeclares(t)).concat(fileNameClashes(files, t, lk)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(files, t))
         for (const f of files) {
-            for (const af of fnItems(f.items)) {
+            for (const af of allFnItems(f.items)) {      // s477: a nested function's body too
                 out = out.concat(dupParams(f.path, af.params))
                 out = out.concat(blockRedeclares(f.path, af.body, af.params, true))
             }
@@ -22024,7 +22611,7 @@ ${
             if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", kind: "type", nid: ti.nid, exported: ti.exported }])
         }
         for (const f of t.fns) {
-            if (f.host is not) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])
+            if (f.host is not && f.outer < 0) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])   // s477: a nested function is in no file scope
         }
         // s473 review LOW-1: a constant is one more file-scope binding
         for (const c of t.consts) {
@@ -22277,13 +22864,20 @@ ${
     fn dupFns(t: Tables) -> Diag[] {
         let out: Diag[] = []
         let names: string[] = []
-        for (const f of t.fns) { names = names.concat([f.name]) }
+        let fns: FnInfo[] = []
+        for (const f of t.fns) {
+            // s477: a nested function is in no file scope (its block's duplicates: blockRedeclares)
+            if (f.outer < 0) {
+                names = names.concat([f.name])
+                fns = fns.concat([f])
+            }
+        }
         let j = 0
         while (j < names.length) {
             const i: int = earlierSame(names, j)
             if (i >= 0) {
-                const f: FnInfo = t.fns[j]
-                const first: FnInfo = t.fns[i]
+                const f: FnInfo = fns[j]
+                const first: FnInfo = fns[i]
                 // s472: in two files it is two functions — each call resolves in its own file's scope
                 // s473: two `<db>` cells of one name are reported once, as the cells (their loads `@c` follow)
                 if (first.file == f.file && !isLoadName(f.name)) {
@@ -22384,9 +22978,20 @@ ${
     // shadow). `inFn` = a function body; else an inline handler block, which
     // §7.3.3 does not name (bootstrap-local code). Only `let` / `const` locals
     // are compared: ruling:user-voice-scrml.md S439 #6 (B1) exempts a nested
-    // `function x` over a parameter `x` — the slice's statement grammar has no
-    // nested function yet, so that holds by construction; when one parses it
-    // must NOT be compared against the parameters here.
+    // `function x` over a parameter `x`.
+    // s477 — a nested `function` / `fn` declaration (§7.3.1) is compared with
+    // the `let` / `const` / `lin` locals of its block, in both directions
+    // ("SHALL NOT redeclare a name already bound in the SAME block — another
+    // `let` / `const` / `lin` / `function` declaration of that block"), and
+    // NOT with the parameters (§7.3.3: "A `function` declaration named like one
+    // of the function's PARAMETERS is outside this rule"). Two nested functions
+    // of one name in one block are "outside this rule" too (§7.3.3) — §19.16.6:
+    // "§7.3.3 deliberately does not reject duplicate `function` declarations
+    // inside a function body" — so they compile and, hoisted, the LATER one is
+    // the one every call reaches (bindLocalFns binds the last); in a block that
+    // contains a `defer` they are E-DEFER-DUPLICATE-FUNCTION ("the block that
+    // contains the `defer` declares the same `function` name twice … the
+    // compiler names both declarations rather than fail at codegen").
     fn blockRedeclares(file: string, b: ABlock, params: AParam[], inFn: boolean) -> Diag[] {
         let out: Diag[] = []
         let names: string[] = []
@@ -22396,11 +23001,34 @@ ${
             spans = spans.concat([p.span])
         }
         const nParams: int = params.length
+        let fnNames: string[] = []
+        let fnSpans: ASpan[] = []
+        let hasDefer = false
+        for (const s0 of b.stmts) {
+            if (isDeferStmt(s0)) hasDefer = true
+        }
         for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) {
+                const fi: int = fnNames.indexOf(lf.name)
+                if (fi >= 0) {
+                    if (hasDefer) out = out.concat([mkDiag(file, lf.span, "E-DEFER-DUPLICATE-FUNCTION", "`function " + lf.name + "` is declared twice in a block that contains a `defer` (here and at " + offsetOf(fnSpans[fi]) + ") — the deferred block is lowered to a host `try` block, where a second declaration of one function name is not allowed (§19.16.6); rename one, or remove one declaration")])
+                } else {
+                    let j: int = nParams
+                    while (j < names.length) {
+                        if (names[j] == lf.name) out = out.concat([redeclareDiag(file, lf.name, lf.span, spans[j], false, inFn)])
+                        j = j + 1
+                    }
+                }
+                fnNames = fnNames.concat([lf.name])
+                fnSpans = fnSpans.concat([lf.span])
+            }
             const n: string = localNameOf(s)
             if (n != "") {
                 const i: int = names.indexOf(n)
                 if (i >= 0) out = out.concat([redeclareDiag(file, n, s.span, spans[i], i < nParams, inFn)])
+                const k: int = fnNames.indexOf(n)
+                if (i < 0 && k >= 0) out = out.concat([redeclareDiag(file, n, s.span, fnSpans[k], false, inFn)])
                 names = names.concat([n])
                 spans = spans.concat([s.span])
             }
@@ -22442,6 +23070,7 @@ ${
             .Break(label: x) :> ""
             .Continue(label: x) :> ""
             .Lift(what: x) :> ""
+            .LocalFn(f: x) :> ""                            // s477: compared on its own (blockRedeclares — §7.3.3 exempts a parameter and a second `function`)
             .EffectStmt(w: w) :> ""
             .Defer(body: b) :> ""
             .Fail(f: x) :> ""
@@ -22457,6 +23086,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> liftBlocks(w)
+            .LocalFn(f: x) :> []                          // s477: a nested function's body is another function's
             .EffectStmt(w: w) :> []
             .Eval(e: e) :> allExprBlocks(e)                 // s451 (Ue): a handling form's arm blocks
             .Local(name: n, init: i) :> allExprBlocks(i)
@@ -22987,6 +23617,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: b) :> false
             .Fail(f: x) :> true                  // s451 (Ue): `fail` leaves the function (§19.3.2)
@@ -23184,6 +23815,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> aliased(exprsEffects(liftExprs(w)), al)
+            .LocalFn(f: x) :> []                           // s477: declaring runs nothing (a call of it is `()name`)
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
             .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
             .Fail(f: f) :> aliased(exprsEffects(failExprs(f)), al)
@@ -23424,6 +24056,9 @@ ${
         if (env.narrowed.length == 0) return env
         let out: TEnv = env
         for (const eff of effs) {
+            // s477: a call of a NESTED function (§7.3.1) may rebind a local it closes
+            // over — a binding no write set names — so it ends every narrowing
+            if (eff.indexOf("()") == 0 && nestedNamed(env.t, env.file, eff.substring(2))) return tNoNarrow(out)
             if (eff.indexOf("()") == 0) {
                 for (const k of callKeys(env.fnw, eff.substring(2))) {
                     if (k == "*") out = tUnnarrowCells(out)
@@ -26298,7 +26933,18 @@ ${
             env2 = r.env
             ts = r.ts
         }
+        // s477 — each nested function (§7.3.1), in the block's final scope (as
+        // resolveLocalFns resolved it): the types of every binding it captures.
+        // No narrowing enters it — it runs whenever it is called, after any write.
+        for (const s2 of b.stmts) {
+            const lf: AFn | not = localFnOf(s2)
+            if (lf is given) ts = typeFn(tNoNarrow(env2), lf, ts)
+        }
         return { env: env2, ts: ts }
+    }
+
+    fn tNoNarrow(env: TEnv) -> TEnv {
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: [], fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     fn keepTEnv(env: TEnv, ts: TypeState) -> RTEnv { return { env: env, ts: ts } }
@@ -26760,6 +27406,7 @@ ${
             .Break(label: x) :> keepTEnv(env, ts)
             .Continue(label: x) :> keepTEnv(env, ts)
             .Lift(what: w) :> keepTEnv(env, typeLift(env, w, ts))       // s469 (§49.6.2)
+            .LocalFn(f: x) :> keepTEnv(env, ts)              // s477: typed at the block's end (typeBlock)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
             .Fail(f: f) :> keepTEnv(env, typeFail(env, s, f, ts))               // s451 (Ue)
@@ -28173,7 +28820,7 @@ ${
     fn refusedReturns(files: FileAst[], t: Tables) -> int[] {
         let out: int[] = []
         for (const f of files) {
-            for (const af of fnItems(f.items)) {
+            for (const af of allFnItems(f.items)) {      // s477
                 const s: Sym | not = bindSym(bindFact(t.binds, af.nid))
                 if (s is given) {
                     const fi: FnInfo | not = fnInfoOf(t, s)
@@ -28689,6 +29336,7 @@ ${
             .Break(label: x) :> acc
             .Continue(label: x) :> acc
             .Lift(what: w) :> scanExprs(cx, liftExprs(w), acc)
+            .LocalFn(f: f) :> scanLocalFn(cx, f, acc)         // s477
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> scanBlock(cx, b, acc)
             .Fail(f: f) :> scanExprs(cx, failExprs(f), acc)
@@ -31060,6 +31708,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> sqlsInExprs(liftExprs(w))
+            .LocalFn(f: f) :> sqlsInBlock(f.body)            // s477: textually in this body
             .EffectStmt(w: w) :> sqlsInBlock(w.body)
             .Defer(body: b) :> sqlsInBlock(b)
             .Fail(f: f) :> sqlsInExprs(failExprs(f))
@@ -31087,6 +31736,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> foreignsInExprs(liftExprs(w))
+            .LocalFn(f: f) :> foreignsInBlock(f.body)
             .EffectStmt(w: w) :> foreignsInBlock(w.body)
             .Defer(body: b) :> foreignsInBlock(b)
             .Fail(f: f) :> foreignsInExprs(failExprs(f))
@@ -31117,6 +31767,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> repeatsInExprs(liftExprs(w))
+            .LocalFn(f: f) :> [f.body.span]              // s477: a nested function may run any number of times per call
             .EffectStmt(w: w) :> repeatsInBlock(w.body)
             .Defer(body: b) :> repeatsInBlock(b)
             .Fail(f: f) :> repeatsInExprs(failExprs(f))
@@ -31309,6 +31960,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> readsInExprs(t, liftExprs(w))
+            .LocalFn(f: f) :> readsInBlock(t, f.body)
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> readsInBlock(t, b)
             .Fail(f: f) :> readsInExprs(t, failExprs(f))
@@ -31397,6 +32049,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> domsInExprs(t, liftExprs(w))
+            .LocalFn(f: f) :> domsInBlock(t, f.body)
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> domsInBlock(t, b)
             .Fail(f: f) :> domsInExprs(t, failExprs(f))
@@ -32062,6 +32715,7 @@ ${
         let jOff: JournalOff[] = []                 // s473: `PRAGMA journal_mode = OFF` sites (journalDiags)
         let bangWrites: int[] = []                  // s473: the databases a `!` function writes
         for (const f of all) {
+            if (nestedSym(g, f.sym)) continue     // s477: placed with, and printed inside, the function that declares it (nestedPlaces)
             const pk: PlaceK = placeOf(places, f.sym)
             if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
             if (f.doms.length > 0 && serverTriggered(f)) {
@@ -32755,6 +33409,7 @@ ${
             .Given(name: n) :> false
             .For(f: lf) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: x) :> false
             .Defer(body: b) :> false
         }
@@ -32794,6 +33449,7 @@ ${
             .Break(label: x) :> a
             .Continue(label: x) :> a
             .Lift(what: w) :> cfExprs(liftExprs(w), a)
+            .LocalFn(f: x) :> a                                 // s477: composeOne refuses a body that declares one
             .EffectStmt(w: w) :> cfEffect(a)
             .Defer(body: b) :> cfStmts(b.stmts, a)
             .Fail(f: f) :> cfExprs(failExprs(f), cfExit(a, s.span))
@@ -32957,6 +33613,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> []
+            .LocalFn(f: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> []
             .Fail(f: f) :> []
@@ -33003,6 +33660,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: w) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: w) :> false
             .Fail(f: f) :> false
         }
@@ -33021,6 +33679,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: w) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: w) :> false
             .Fail(f: f) :> false
         }
@@ -33041,6 +33700,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: w) :> not
+            .LocalFn(f: x) :> not
             .EffectStmt(w: w) :> not
             .Fail(f: f) :> not
         }
@@ -33273,6 +33933,8 @@ ${
         const name: string = fs.info.name
         const file: string = fs.info.file
         if (!allow) return composeRefuse(st, file, fs.info.span, name, why, "the composed batch is written with the linker's node ids, which this analysis was not given. Compose the calls in one server `!` function and call that once")
+        // s477: the batch would move statements away from the nested functions they call (INTERIM)
+        if (topLocalFns(fs.f.body).length > 0) return composeRefuse(st, file, fs.info.span, name, why, "a function that declares a nested function (§7.3.1) — the batch would move statements out of the scope of the nested functions they call (INTERIM). Declare the helper at file level")
         const ss: AStmt[] = fs.f.body.stmts
         const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss)
         // the batch: first through last statement that calls a server function
@@ -33533,6 +34195,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: w) :> not
+            .LocalFn(f: x) :> not
         }
         if (e is not) return not
         const hv0: HView = hostView(e)
@@ -33560,6 +34223,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: w) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -33776,6 +34440,7 @@ ${
             .Given(name: n) :> false
             .For(f: lf) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .EffectStmt(w: x) :> false
             .Defer(body: b) :> false
         }
@@ -33792,6 +34457,7 @@ ${
             .Return(e: e) :> pwSimple(maybeExprs(e), [], call, w)
             .Fail(f: f) :> pwHitAfter(pwSimple(failExprs(f), [], call, w), s.span)
             .Lift(what: x) :> pwSimple(liftExprs(x), [], call, w)
+            .LocalFn(f: x) :> w
             .Defer(body: b) :> pwSimple([], [b], call, w)
             .EffectStmt(w: x) :> pwSimple([], [], call, w)
             .Break(label: x) :> w
@@ -34443,6 +35109,7 @@ ${
             .Break(label: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
             .Continue(label: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
             .Lift(what: w) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
+            .LocalFn(f: x) :> { nid: s.nid, span: s.span, k: AExprK.Recovered }
         }
     }
 
@@ -34519,6 +35186,7 @@ ${
             .Break(label: x) :> k
             .Continue(label: x) :> k
             .Lift(what: w) :> AStmtK.Lift(mLift(w, m))
+            .LocalFn(f: x) :> k                                  // s477: composeOne refuses a body that declares one
         }
         return { nid: s.nid, span: s.span, k: k2 }
     }
@@ -35401,10 +36069,11 @@ ${
             if (pk == PlaceK.Ambient && client[nodeIdx(nodes, p.sym)].length > 0) pk = PlaceK.Client
             places = places.concat([{ sym: p.sym, name: p.name, place: pk }])
         }
+        places = nestedPlaces(g, places)      // s477
         // s454 (U1b) — §12.2 Trigger 5 (inheritance) and the client cause (below)
         const prefs: PosRef[] = positionRefs(g, t)
         const rev: int[][] = referrers(nodes, all)
-        const inherited: int[] = inheritedFns(nodes, places, rev, prefs)
+        const inherited: int[] = nestedInherited(g, inheritedFns(nodes, places, rev, prefs))   // s477
         const causes: Cause[] = clientCauses(g, nodes, places, rev, prefs, inherited)
         // routeOpen / waits / clock / noValue — functions only
         let ownR: FxAtom[][] = []
@@ -35822,6 +36491,7 @@ ${
             .Break(label: x) :> false
             .Continue(label: x) :> false
             .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -35851,6 +36521,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> liftRetCalls(t, w)
+            .LocalFn(f: x) :> []
             .Eval(e: x) :> retCallsExpr(t, x)
             .Local(name: n, init: i) :> retCallsExpr(t, i)
             .EffectStmt(w: w) :> []
@@ -36232,6 +36903,7 @@ ${
             .Break(label: x) :> ps
             .Continue(label: x) :> ps
             .Lift(what: w) :> planExprs(cx, liftExprs(w), ps)
+            .LocalFn(f: x) :> ps                              // s477: planned as a function of its own (planPass)
             .EffectStmt(w: w) :> ps
             .Defer(body: b) :> planDeferBody(cx, b, ps)
             .Fail(f: f) :> planExprs(cx, failExprs(f), ps)
@@ -36406,6 +37078,7 @@ ${
             .Break(label: x) :> []
             .Continue(label: x) :> []
             .Lift(what: w) :> liftExprs(w)
+            .LocalFn(f: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> []
             .Fail(f: f) :> failExprs(f)
@@ -36430,6 +37103,7 @@ ${
                 .Break(label: x) :> []
                 .Continue(label: x) :> []
                 .Lift(what: x) :> []
+                .LocalFn(f: x) :> []
                 .Eval(e: x) :> []
                 .Local(name: n) :> []
                 .Return(e: x) :> []
@@ -36915,6 +37589,7 @@ ${
                 .Break(label: x) :> []
                 .Continue(label: x) :> []
                 .Lift(what: w) :> liftReturnSites(w)
+                .LocalFn(f: x) :> []                           // s477: its returns are its own
                 .Eval(e: x) :> returnSitesIn(x)
                 .Local(name: n, init: i) :> returnSitesIn(i)
                 .EffectStmt(w: w) :> []
@@ -37549,6 +38224,7 @@ ${
             .Break(label: l) :> linJump(cx, st, l, "`break`", s)
             .Continue(label: l) :> linJump(cx, st, l, "`continue`", s)
             .Lift(what: w) :> linExprs(cx, liftExprs(w), s)
+            .LocalFn(f: f) :> linLocalFn(cx, f, s)            // s477 (§35.6)
             .EffectStmt(w: w) :> linGo(s)
             .Defer(body: b) :> linGo(linBlock(cx, b, s).st)
         }
@@ -38224,7 +38900,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
-        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers))
+        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, typedT, base0))
