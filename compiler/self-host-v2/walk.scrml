@@ -341,21 +341,22 @@ ${
     }
 
     // Every node under (and including) `root`, preorder.
+    // s477 (s477-boot-compile-perf): built by halving each node's children, so every
+    // node is copied once per (ancestor × log2 of that ancestor's child count) — an
+    // accumulator rebound to `out.concat([n])` per node copied the whole prefix every
+    // time (O(n²) per walk; the dominant cost of compiling a 2,000-line program).
+    // Same nodes, same order as the stack walk it replaces.
     export fn allNodes(root: Node) -> Node[] {
-        let out: Node[] = []
-        let stack: Node[] = [root]
-        while (stack.length > 0) {
-            const n: Node = stack[stack.length - 1]
-            stack = stack.slice(0, stack.length - 1)
-            out = out.concat([n])
-            const ks: Node[] = kids(n)
-            let i: int = ks.length - 1
-            while (i >= 0) {
-                stack = stack.concat([ks[i]])
-                i = i - 1
-            }
-        }
-        return out
+        const ks: Node[] = kids(root)
+        if (ks.length == 0) return [root]
+        return [root].concat(allNodesOf(ks, 0, ks.length))
+    }
+
+    // The preorder of ks[lo], …, ks[hi - 1], in turn (hi > lo).
+    fn allNodesOf(ks: Node[], lo: int, hi: int) -> Node[] {
+        if (hi - lo == 1) return allNodes(ks[lo])
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return allNodesOf(ks, lo, mid).concat(allNodesOf(ks, mid, hi))
     }
 
     // -------------------------------------------------------------------------

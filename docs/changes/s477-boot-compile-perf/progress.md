@@ -1,1 +1,4 @@
 - 2026-11-10T15:21Z — start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a9e73c9407e4de53d (base 0487a8fa4 + merged s477-boot-dev-leak 04edd2ead). bun install + pretest OK.
+- 2026-11-14T09:40Z — RESUMED after API outage. F4 re-checked; origin/main still 0487a8fa4 (already includes #1823/#1824) — nothing to merge.
+- 2026-11-14T09:48Z — BASELINE (base tree = 0487a8fa4+bench, one-shot wall incl. bun start): g9 211L 325ms · g18 418L 543 · g36 832L 1929 · g72 1660L 7877 · g108 2488L 22303 · g144 3316L 53780 · adopt23 2312L 10454 · adopt27 2720L 16595. Profile adopt27: allNodes 11.6 s SELF (its own out.concat([n]) per node = O(n²) per walk) of 16.7 s; onceBoundInit 6.3 s, isParam 3.2, reinitUsed 3.2 incl.
+- unit 1: walk.allNodes rebuilt by halving children (same preorder). adopt27 16.6 s -> 3.9 s, g72 7.9 -> 1.4 s; outputs identical. Next: advance1/cursorAt 1.27 s, structural_eq 1.06 s (analyze boundAs/fnWrites).
