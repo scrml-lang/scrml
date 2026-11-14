@@ -31764,7 +31764,7 @@ Unreachable today. If it becomes reachable, a pending cell would track too few c
 It fails closed (an over-refusal, not a hole). Who pays: an author who has to move the `defer` below the binding for no reason.
 
 <!-- @gap id=g-boot-bound-branch-literal-static-s477 sev=LOW status=resolved resolved-by=s478-boot-bound-branch-static locus=compiler/self-host-v2/analyze.scrml(boundValue → choiceLengths / lengthVerdict / armVerdict) prov=lane:s477-boot-tape-bounds(fix1);spec:§66.11.7(O36 "A write that PROVABLY violates a sequence invariant … stays a compile error") -->
-### g-boot-bound-branch-literal-static-s477 — `const xs: int[1..=2] = @c ? [1,2,3,4,5] : [1]` (and match arms whose values are array literals) traps at run time (E-WRITE-INVARIANT-RT) instead of being a compile error, though each branch could be judged statically — `NEW S477; LOW; RESOLVED S478 (s478-boot-bound-branch-static)`
+### g-boot-bound-branch-literal-static-s477 — a bounded write whose EVERY value-yielding branch is a provably out-of-bound literal (`const xs: int[1..=2] = @c ? [1,2,3] : []`, and the same over match arms) traps at run time (E-WRITE-INVARIANT-RT) instead of being a compile error — `NEW S477; LOW; RESOLVED S478 (s478-boot-bound-branch-static)`. The mixed case (`@c ? [1,2,3,4,5] : [1]`, one branch in range) still traps by design; whether it should be a compile error is g-boot-bound-branch-any-literal-ruling-s478
 
 It fails closed: the trap fires before the bad value is stored. Judging each branch's literal length at compile time would move the error to compile time.
 
