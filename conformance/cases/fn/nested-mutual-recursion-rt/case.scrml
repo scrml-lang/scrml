@@ -1,0 +1,24 @@
+${
+    <trace> = ""
+
+    function parity(n: int) -> string {
+        function isEven(k: int) -> bool {
+            if (k == 0) { return true; }
+            return isOdd(k - 1);
+        }
+        function isOdd(k: int) -> bool {
+            if (k == 0) { return false; }
+            return isEven(k - 1);
+        }
+        if (isEven(n)) { return "even"; }
+        return "odd";
+    }
+
+    function go() {
+        @trace = @trace + parity(4) + ";" + parity(7) + ";";
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

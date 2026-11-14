@@ -1,0 +1,5 @@
+<program kind="tool" lang="js">
+    fn main(args: string[]) -> number {
+        return 0;
+    }
+</program>

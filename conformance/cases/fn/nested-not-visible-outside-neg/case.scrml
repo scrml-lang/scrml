@@ -1,0 +1,22 @@
+${
+    <trace> = ""
+
+    function host(n: int) -> int {
+        function helper() -> int {
+            return n;
+        }
+        return helper();
+    }
+
+    function outside() -> int {
+        return helper();
+    }
+
+    function go() {
+        @trace = `${host(1)}${outside()}`;
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

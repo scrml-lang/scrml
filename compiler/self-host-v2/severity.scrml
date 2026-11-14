@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 308 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 316 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -134,6 +134,7 @@ ${
             "E-DECL-USE-ATTR" :> Severity.Error
             "E-DEFER-AMBIGUOUS-LEAD" :> Severity.Error
             "E-DEFER-CONTROL-FLOW" :> Severity.Error
+            "E-DEFER-DUPLICATE-FUNCTION" :> Severity.Error
             "E-DEFER-LATER-SHADOW" :> Severity.Error
             "E-DEFER-NESTED" :> Severity.Error
             "E-DEFER-OUTSIDE-FUNCTION" :> Severity.Error
@@ -345,6 +346,13 @@ ${
             "E-TEXT-NON-PRIMITIVE" :> Severity.Error
             "E-THEME-TOKEN-UNKNOWN" :> Severity.Error
             "E-THROW-NOT-IN-SCRML" :> Severity.Error
+            "E-TOOL-001" :> Severity.Error
+            "E-TOOL-002" :> Severity.Error
+            "E-TOOL-003" :> Severity.Error
+            "E-TOOL-004" :> Severity.Error
+            "E-TOOL-006" :> Severity.Error
+            "E-TOOL-SERVE-MISPLACED" :> Severity.Error
+            "E-TOOL-SERVE-PORT-INVALID" :> Severity.Error
             "E-TRY-NOT-IN-SCRML" :> Severity.Error
             "E-TX-CLIENT-MULTI-CALL" :> Severity.Error
             "E-TX-FAIL-AFTER-COMMIT" :> Severity.Error

@@ -1,0 +1,11 @@
+<program kind="tool" lang="js">
+    fn label(n: int) -> string {
+        return `args=${n}`;
+    }
+
+    function main(args: string[]) -> number {
+        const s = label(args.length);
+        _={ in: { s } process.stdout.write(s + "\n") }=;
+        return 0;
+    }
+</program>

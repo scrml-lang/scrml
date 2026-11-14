@@ -1,0 +1,5 @@
+<program kind="cli" lang="js">
+    function main(args: string[]) -> number {
+        return 0;
+    }
+</program>

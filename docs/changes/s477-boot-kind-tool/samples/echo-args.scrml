@@ -1,0 +1,22 @@
+<program kind="tool" lang="js">
+${
+    // s477 sample — args echo + exit code (SPEC §64.2 / §64.3). `bun echo-args.js a b`
+    // prints each argument on its own line, then `hello <first> (2 args)`, and exits
+    // with the argument count.
+    fn greet(name: string) -> string {
+        return "hello " + name;
+    }
+
+    function main(args: string[]) -> number {
+        const n = args.length;
+        for (const a of args) {
+            _={ in: { a } console.log("arg: " + a) }=;
+        }
+        let first = "nobody";
+        if (n > 0) { first = args[0]; }
+        const line = `${greet(first)} (${n} args)`;
+        _={ in: { line } console.log(line) }=;
+        return n;
+    }
+}
+</program>

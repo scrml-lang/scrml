@@ -2735,6 +2735,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not          // s469: a `lift` operand is a value position (§40.8)
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -2880,6 +2881,7 @@ ${
             .Break(label: x) :> true
             .Continue(label: x) :> true
             .Lift(what: x) :> true
+            .LocalFn(f: x) :> false             // s477: block-like — its `}` ends it
         }
     }
 
@@ -3000,6 +3002,20 @@ ${
         if (isWord(tp, "lift")) return parseLift(tp)
         // s472 (review F3): an `import` / `import:<tag>` in a statement position
         if (isWord(tp, "import")) return nestedImport(tp)
+        // s477 — a nested function declaration (§7.3.1). `fn` starts one only
+        // before a name (`fn(…) { … }` is an anonymous `fn` expression, §48.2.1);
+        // `server` only before `function` / `fn` (analyze refuses the modifier
+        // on a nested declaration). Where one may stand is analyze's.
+        if (localFnAhead(tp)) {
+            let lt: TP = tp
+            let srv = false
+            if (isWord(lt, "server")) {
+                srv = true
+                lt = adv(lt)
+            }
+            const rf: RFnDecl = parseFnDecl(lt, start, false, isWord(lt, "fn"), srv)
+            return mkS(rf.tp, start, AStmtK.LocalFn(rf.f))
+        }
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
             if (nx.cls == TC.End || tk(nx, "}") || tk(nx, ";")) {
@@ -3060,6 +3076,17 @@ ${
         }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    // s477 — does a nested function declaration start here (§7.3.1)?
+    // `function`, `fn name`, `server function`, `server fn name`.
+    fn localFnAhead(tp: TP) -> boolean {
+        let k: int = 0
+        if (isWord(tp, "server")) k = 1
+        const a: PTok = peekAt(tp, k)
+        if (a.cls != TC.Ident && a.cls != TC.Keyword) return false
+        if (a.v == "function") return true
+        return a.v == "fn" && peekAt(tp, k + 1).cls == TC.Ident
     }
 
     // s469 r3 — after a block-like statement's `}` (token tp.i - 1): does the
@@ -3462,6 +3489,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -3650,6 +3678,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Lift(what: w) :> withStmtK(s, AStmtK.Lift(fillLift(w, rows)))
+            .LocalFn(f: x) :> s                  // s477: a nested function's body is not the loop's row scope
             .If(cond: c, thenB: tb, elseB: el) :> withStmtK(s, AStmtK.If(c, fillRowsBlock(tb, rows), fillRowsMaybe(el, rows)))
             .Given(name: n, subject: sub, body: b) :> withStmtK(s, AStmtK.Given(n, sub, fillRowsBlock(b, rows)))
             .For(f: lf) :> withStmtK(s, AStmtK.For(fillRowsFor(lf, rows)))
@@ -4323,6 +4352,7 @@ ${
             .Break(label: x) :> s
             .Continue(label: x) :> s
             .Lift(what: x) :> s
+            .LocalFn(f: x) :> s
         }
     }
 
@@ -4982,6 +5012,7 @@ ${
             .Break(label: x) :> not
             .Continue(label: x) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -5296,6 +5327,16 @@ ${
     // s451 (U1a): `server` = written with the deprecated modifier; (Ue) a `!`
     // after the parameter list is a failable function, its error type `err`.
     fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RItems {
+        const r: RFnDecl = parseFnDecl(tp, start, exported, pure, server)
+        return mkItem(r.tp, start, AItemK.FnItem(r.f))
+    }
+
+    // s477 — the declaration itself, shared by a function ITEM (parseFn) and a
+    // NESTED declaration in a body (§7.3.1; parseStmt -> AStmtK.LocalFn). The
+    // returned `tp` is past the function's own node id.
+    type RFnDecl:struct = { f: AFn, tp: TP }
+
+    fn parseFnDecl(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RFnDecl {
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
@@ -5359,7 +5400,7 @@ ${
         if (ret is given && !voidType(ret)) t = dropTailNoEffect(t, body.b, n0)
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
                          name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable, err: err }
-        return mkItem(bumpId(t), start, AItemK.FnItem(f))
+        return { f: f, tp: bumpId(t) }
     }
 
     // =========================================================================

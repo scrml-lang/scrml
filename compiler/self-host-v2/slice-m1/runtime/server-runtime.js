@@ -72,6 +72,63 @@ export function sqlText(chunks) {
 }
 
 // ---------------------------------------------------------------------------
+// s477 — a FOREIGN SLICE (SPEC §23.2.4a), sealed. A `kind="tool"` module (§64)
+// builds each of its `_={ … }=` blocks once, at load:
+//   const slice$9 = rt.foreignSeal("app.scrml:7:9", `async function (g) {…}`, import.meta);
+// and a block is an awaited call of it with its crossings' values, `await slice$9(g)`.
+// "A slice is evaluated in a SEALED scope. The names it can resolve are exactly: its
+// `in:{}` crossings …; host globals …; the host module context the emitted module would
+// itself have — `require`, `__dirname`, `__filename`, and dynamic `import()`." So the
+// source TEXT is compiled by the Function constructor, whose only lexical scope is the
+// global one (impl#1 compiler/src/codegen/foreign-seal.ts does the same; its comment
+// records why real code re-read from `toString()` is unsound under Bun). The module's
+// own host context comes in through `meta` — the TOOL module's `import.meta`, read here
+// (syntax, never a bare name a binding could own); a name the host does not provide is
+// left unbound, as host code sees it.
+// "A settled `null`/`undefined` OUT arrives as scrml `not` (§42.9)": `undefined` → null.
+// `source` is an `async function (crossings…) { … }` the driver built and syntax-checked
+// at compile time (slice-m1/tool-slices.js — E-FOREIGN-006 / E-FOREIGN-007).
+// ---------------------------------------------------------------------------
+export function foreignSeal(site, source, meta) {
+  const hostNames = [];
+  const hostValues = [];
+  const m = meta !== null && typeof meta === "object" ? meta : {};
+  let req = m.require;
+  if (typeof req !== "function" && typeof m.url === "string") {
+    const proc = globalThis.process;
+    const mod = proc && typeof proc.getBuiltinModule === "function" ? proc.getBuiltinModule("module") : null;
+    if (mod && typeof mod.createRequire === "function") req = mod.createRequire(m.url);
+  }
+  const dirname = m.dir ?? m.dirname;
+  const filename = m.path ?? m.filename;
+  if (typeof req === "function") { hostNames.push("require"); hostValues.push(req); }
+  if (typeof dirname === "string") { hostNames.push("__dirname"); hostValues.push(dirname); }
+  if (typeof filename === "string") { hostNames.push("__filename"); hostValues.push(filename); }
+  const label = String(site).replace(/[\r\n\u2028\u2029]/g, " ");
+  // s477 r1 (review F1): built on the slice's FIRST CALL, once — as impl#1's helper does — so
+  // loading the module evaluates no slice text. The compile-time check (tool-slices.js) is what
+  // proves `source` is exactly one async function; building late only keeps a slice that is never
+  // reached from being compiled at all.
+  let slice = null;
+  return async (...args) => {
+    if (slice === null) {
+      const build = new globalThis.Function(...hostNames, "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + label);
+      slice = build(...hostValues);
+    }
+    try {
+      const v = await slice(...args);
+      return v === undefined ? null : v;
+    } catch (e) {
+      // a name the slice reads that is not crossed is not in scope: say so, at the slice
+      if (e instanceof globalThis.ReferenceError && typeof e.message === "string" && !e.message.includes("§23.2.4a")) {
+        e.message += " (raised in the foreign-code slice at " + label + ": only the names in its in:{} header cross into a slice, plus host globals — SPEC §23.2.4a)";
+      }
+      throw e;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Connections (§8.1.1 / §44.2). `desc` = { driver: "sqlite" | "postgres" |
 // "mysql", target, file }: `target` is the connection value with any `sqlite:`
 // prefix removed, `file` the project-relative path of the declaring file (a

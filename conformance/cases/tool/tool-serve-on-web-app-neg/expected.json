@@ -1,0 +1,17 @@
+{
+  "id": "tool-serve-on-web-app-neg",
+  "description": "§64.9 E-TOOL-SERVE-MISPLACED — `serve=` on a top-level `<program>` that is not `kind=\"tool\"`.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.9",
+  "rationale": "§64.6: \"`E-TOOL-SERVE-MISPLACED` | `serve=` on a non-`kind=\"tool\"` top-level `<program>` (serve requires the tool output shape)\".",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-TOOL-SERVE-MISPLACED"
+    ],
+    "severity": {
+      "E-TOOL-SERVE-MISPLACED": "error"
+    }
+  }
+}

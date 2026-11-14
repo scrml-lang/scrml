@@ -46,11 +46,11 @@
 // binding (positional binding over an imported enum is silently dropped).
 // =============================================================================
 ${
-    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block,
+    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
-    import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, printModule } from "./js.scrml"
-    import { RouteOut, Ctx, coreRefusal, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
+    import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
+    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
              sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
@@ -141,6 +141,213 @@ ${
             JsStmt.SExportFunc("createServer", ["host$"], inner),
         ])
         return { js: printModule(body), refused: [], routes: routes }
+    }
+
+    // =========================================================================
+    // s477 — THE TOOL ARTIFACT (SPEC §64, `<program kind="tool">`).
+    //
+    // §64.1: "A `kind="tool"` top-level program emits a plain ES module: NO html,
+    // NO client.js bundle, NO CSRF scaffold. The module contains the file's logic
+    // (fn/const/type declarations), its `_{}` foreign blocks (via `lang=`), its
+    // `?{}` db calls (via `db=` + §44), and the `main()` invocation harness
+    // (§64.3). It is runnable directly (`bun <emitted>.js <args…>`)." What it
+    // prints, from Core and the driver's sealed slices:
+    //
+    //   import * as rt from "./scrml-server-runtime.js";
+    //   const host$ = { root: "<the build's source root>" };          // only with a database
+    //   const sql$12 = rt.sqlText([…]);                               // a query site's text
+    //   const slice$9 = rt.foreignSeal("app.scrml:7:9", `async function (g) {…}`, import.meta);
+    //   const db$7 = rt.connection(host$, { driver, target, file });
+    //   async function main(args) { … await slice$9(g) … }             // server mode: `await` at each Suspend
+    //   const exitCode$ = await main(globalThis.process.argv.slice(2)); // §64.3, `-> number`
+    //   globalThis.process.exit(exitCode$);
+    //
+    // Every `function` of a tool is server-placed (analyze.scrml FnFacts.tool: the
+    // tool "is an in-process monolith with no client boundary", §64.5.1), so the
+    // module holds `main` and everything it reaches (serverReach), printed exactly as
+    // the server artifact prints them — no routes, no `createServer`, no client.
+    // A foreign slice's text is OPAQUE to the compiler (§23.2.3): the driver reads its
+    // shape and builds the sealed function's source (slice-m1/tool-slices.js, on
+    // impl#1's parser-token scan — the proven path), and hands it in as `sealed`.
+    // =========================================================================
+    export type ToolSlice:struct = { n: int, file: string, at: int, params: string[], body: string }
+    export type SealedSlice:struct = { n: int, label: string, source: string }
+    export type ToolOutput:struct = { js: string, refused: string[] }
+
+    // The foreign slices of EVERY function of the tool program, each once — the driver checks
+    // them all (E-FOREIGN-006 / E-FOREIGN-007 are compile errors at the slice, §23.2.4a / §23.2.6,
+    // whether or not `main` reaches its function; s477 r1, review F3), and printTool prints only
+    // the ones `main` reaches (it looks each up by site in `sealed`).
+    export fn toolSlices(p: CoreProgram) -> ToolSlice[] {
+        const tl: CoreTool | not = p.tool
+        if (tl is not) return []
+        let every: int[] = []
+        for (const sf of p.server) { every = every.concat([sf.sym.id]) }
+        for (const f of p.fns) { every = every.concat([f.sym.id]) }
+        return slicesIn(p, every)
+    }
+
+    export fn printTool(p: CoreProgram, jsFile: string, runtimeFile: string, root: string, sealed: SealedSlice[]) -> ToolOutput {
+        const ill: string[] = coreRefusal(p)
+        if (ill.length > 0) return { js: "", refused: ill }
+        const tl: CoreTool | not = p.tool
+        if (tl is not) return { js: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: printTool was handed a program that is not a tool (no CoreProgram.tool) — a driver defect"] }
+        const mf: ServerFn | not = findServerFn(p, tl.main)
+        if (mf is not) return { js: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: the tool's `main` is not a server-placed function — the Core is ill-formed (every `function` of a tool runs in process, §64.5.1)"] }
+        const refused: string[] = serverPrintRefusal(p)
+        if (refused.length > 0) return { js: "", refused: refused }
+        const ctx: Ctx = serverCtx(p)
+        const reach: int[] = serverReach(p, [mf])
+        let reachedFns: Fn[] = []
+        for (const rf of p.fns) {
+            if (reach.indexOf(rf.sym.id) >= 0) reachedFns = reachedFns.concat([rf])
+        }
+        let body: JsStmt[] = [
+            JsStmt.SComment(jsFile + " — generated by the scrml bootstrap printer (self-host-v2, s477) — a tool module, SPEC §64. Do not edit."),
+            JsStmt.SComment("Run it: bun " + jsFile + " <args…>"),
+            JsStmt.SImportAll("rt", "./" + runtimeFile),
+        ]
+        body = body.concat(hostImports(p, reachedFns))
+
+        // the constants the reached functions read
+        let roots: Node[] = []
+        for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
+        for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
+        body = body.concat(constStmts(ctx, constsReadIn(p, roots)))
+
+        // the queries' text, frozen once at load (§8.1)
+        const queries: SqlQuery[] = queriesIn(p, reach)
+        if (queries.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("query text (literal runs only — every value is a bound parameter, §8.1)")])
+        for (const q of queries) {
+            let runs: JsExpr[] = []
+            for (const c of q.chunks) { runs = runs.concat([jstr(c)]) }
+            body = body.concat([JsStmt.SConst(sqlTextName(q.site.n), jcall(jmember(jid("rt"), "sqlText"), [JsExpr.JArray(runs)]))])
+        }
+
+        // the foreign slices, each built ONCE, sealed (§23.2.4a)
+        const slices: ToolSlice[] = slicesIn(p, reach)
+        if (slices.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("foreign slices (§23.2.4a) — each built once, in a sealed scope: it sees its in:{} crossings (its parameters), host globals and this module's require / __dirname / __filename, and no scrml binding")])
+        for (const sl of slices) {
+            const ss: SealedSlice | not = sealedOf(sealed, sl.n)
+            if (ss is not) return { js: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: the foreign slice at " + sl.file + " (offset " + sl.at + ") reached the printer without its sealed source — the driver prepares every slice (slice-m1/tool-slices.js); a driver defect"] }
+            body = body.concat([JsStmt.SConst(sliceName(sl.n), jcall(jmember(jid("rt"), "foreignSeal"), [jstr(ss.label), JsExpr.JText(ss.source), jmember(jid("import"), "meta")]))])
+        }
+
+        // the databases (§8.1.1 / §44.2) — a SQLite path resolves against the build's source
+        // root, which is where the compile-time schema read found it (§47.14, SCRML_DATA_DIR: gap)
+        const conns: Db[] = dbsOf(p, queries)
+        const envRefused: string[] = envelopeRefusal(p, reach, conns)
+        if (envRefused.length > 0) return { js: "", refused: envRefused }
+        if (conns.length > 0) {
+            body = body.concat([JsStmt.SBlank, JsStmt.SComment("the databases — a relative SQLite path resolves against the directory the program was compiled from (§8.1.1)"),
+                                JsStmt.SConst("host$", JsExpr.JObject([{ key: "root", value: jstr(root) }]))])
+        }
+        for (const d of conns) {
+            body = body.concat([JsStmt.SConst(dbVarName(d.sym), jcall(jmember(jid("rt"), "connection"), [jid("host$"), dbJs(d)]))])
+        }
+
+        // the functions
+        body = body.concat([JsStmt.SBlank, JsStmt.SComment("functions")])
+        for (const sf of p.server) {
+            if (reach.indexOf(sf.sym.id) >= 0) body = body.concat([bodyFnJs(ctx, p, sf.sym, sf.params, sf.body, sf.waits)])
+        }
+        for (const f of p.fns) {
+            if (reach.indexOf(f.sym.id) >= 0) body = body.concat([serverFnOf(ctx, p, f)])
+        }
+
+        // §64.3 the harness: "The emitted harness invokes `main(process.argv.slice(2))`.
+        // The RETURN-TYPE of `main` selects the harness arm" — `-> number`: the exit-harness;
+        // no return type: invoke-only ("The harness does NOT call `process.exit`"). "Both
+        // arms `await main(...)`". `globalThis.process`: no scrml binding can shadow it.
+        let argv: JsExpr[] = []
+        if (tl.argv) argv = [jmcall(jmember(jmember(jid("globalThis"), "process"), "argv"), "slice", [jnum(2)])]
+        const run: JsExpr = JsExpr.JAwait(jcall(jid(symNameOf(ctx, tl.main)), argv))
+        body = body.concat([JsStmt.SBlank])
+        if (tl.exits) {
+            body = body.concat([
+                JsStmt.SComment("main() harness (§64.3) — `main` returns a number: it is the process exit code"),
+                JsStmt.SConst("exitCode$", run),
+                sexpr(jmcall(jmember(jid("globalThis"), "process"), "exit", [jid("exitCode$")])),
+            ])
+        } else {
+            body = body.concat([
+                JsStmt.SComment("main() harness (§64.3) — `main` returns nothing: invoke it, then the host's event loop decides when the process ends"),
+                sexpr(run),
+            ])
+        }
+        return { js: printModule(body), refused: [] }
+    }
+
+    fn sealedOf(ss: SealedSlice[], n: int) -> SealedSlice | not {
+        for (const s of ss) {
+            if (s.n == n) return s
+        }
+        return not
+    }
+
+    // Every foreign slice the reached functions hold, in program order, each site once.
+    fn slicesIn(p: CoreProgram, reach: int[]) -> ToolSlice[] {
+        let roots: Node[] = []
+        for (const sf of p.server) { if (reach.indexOf(sf.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf)]) }
+        for (const f of p.fns) { if (reach.indexOf(f.sym.id) >= 0) roots = roots.concat([Node.NFn(f)]) }
+        let out: ToolSlice[] = []
+        let seen: int[] = []
+        for (const r of roots) {
+            for (const n of allNodes(r)) {
+                const fs: ForeignSlice | not = nodeSlice(n)
+                if (fs is given) {
+                    if (seen.indexOf(fs.site.n) < 0) {
+                        seen = seen.concat([fs.site.n])
+                        out = out.concat([{ n: fs.site.n, file: fs.file, at: fs.at, params: fs.params, body: fs.body }])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn nodeSlice(n: Node) -> ForeignSlice | not {
+        return match n {
+            .NExpr(e: e) :> exprSlice(e)
+            .NStmt(s: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprSlice(e: Expr) -> ForeignSlice | not {
+        return match e {
+            .Foreign(slice: fs) :> fs
+            .Query(q: x) :> not
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+        }
     }
 
     // A reached Fn: a host-backed one is its signature around the decoded host call (print.scrml hostFnJs).
@@ -288,6 +495,7 @@ ${
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: fsl0) :> not
         }
     }
 
@@ -313,6 +521,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -367,6 +576,7 @@ ${
     fn exprQuery(e: Expr) -> SqlQuery | not {
         return match e {
             .Query(q: q) :> q
+            .Foreign(slice: fsl0) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -455,6 +665,7 @@ ${
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: fsl0) :> false
         }
     }
 }

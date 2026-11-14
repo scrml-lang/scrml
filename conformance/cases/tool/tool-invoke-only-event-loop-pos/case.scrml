@@ -1,0 +1,8 @@
+<program kind="tool" lang="js">
+    function main(args: string[]) {
+        _={
+            process.stdout.write("setup\n");
+            setTimeout(() => process.stdout.write("later\n"), 20);
+        }=;
+    }
+</program>

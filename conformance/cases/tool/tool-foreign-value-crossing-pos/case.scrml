@@ -1,0 +1,12 @@
+<program kind="tool" lang="js">
+    function shout(word: string) -> string {
+        const up: string = _={ in: { word } word.toUpperCase() + "!" }=;
+        return up;
+    }
+
+    function main(args: string[]) -> number {
+        const w = shout("hi");
+        _={ in: { w } process.stdout.write(w + "\n") }=;
+        return 0;
+    }
+</program>

@@ -1,0 +1,26 @@
+<program kind="tool" lang="js">
+${
+    // s477 sample — host I/O through `_{}` (SPEC §23.2.4 form 3, §23.2.4a): read a
+    // file named on the command line, count its lines, print the count. A missing
+    // argument prints usage to stderr and exits 2 (the exit-harness, §64.3).
+    function readText(path: string) -> string {
+        const text: string = _={ in: { path }
+            const f = Bun.file(path);
+            if (!(await f.exists())) return "";
+            return await f.text();
+        }=;
+        return text;
+    }
+
+    function main(args: string[]) -> number {
+        if (args.length == 0) {
+            _={ console.error("usage: line-count <file>") }=;
+            return 2;
+        }
+        const text: string = readText(args[0]);
+        const lines = text.split("\n").length;
+        _={ in: { lines } console.log("lines: " + lines) }=;
+        return 0;
+    }
+}
+</program>

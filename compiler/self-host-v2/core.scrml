@@ -321,8 +321,24 @@ ${
         // condition (analyze admits it there and nowhere else; E-ASSIGN-POSITION
         // elsewhere); `local` is a `let` local (walk.scrml assignedSyms counts it).
         Assigned(local: Sym, value: Expr),
+        // s477 — a §23.2.4a FOREIGN SLICE, run in process: "The crossings are the
+        // parameters of the sealed slice and the block is a call of it with the
+        // same-named enclosing values; the `await` of that call is INJECTED by
+        // codegen at the boundary" — so, like a Query, it is legal ONLY as the `on`
+        // of a Suspend in a server-side body (check.scrml C-F1): one wait, awaited
+        // where it stands. `args[i]` is the value of crossing `slice.params[i]`.
+        // Built in a `kind="tool"` program only (§64; analyze refuses it elsewhere).
+        Foreign(slice: ForeignSlice, args: Expr[]),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
+
+    // s477 — one foreign slice (§23.2.2 ForeignBlock): `params` its `in:{}` crossing
+    // names, in header order; `body` the verbatim slice with the header stripped —
+    // OPAQUE (§23.2.3): Core never reads it; the tool printer carries it into the
+    // artifact as the text of a sealed function, shaped by the driver
+    // (single-expression vs statement body, §23.2.4a). `file` / `at` where the block
+    // stands (the slice's site label); `site` its node.
+    export type ForeignSlice:struct = { site: NodeId, file: string, at: int, params: string[], body: string }
 
     // -------------------------------------------------------------------------
     // s451 (Ue) — the error model (SPEC §19). A FAILABLE is something whose
@@ -608,6 +624,17 @@ ${
         // `LRow(idx)`: row template `idx` of the enclosing View.Gather (a
         // Tier-0 `${ for … lift <li/> }`, §17.4) — never in a Stmt.Gather.
         Lift(into: Sym, what: Lifted),
+        // s477 — a NESTED function declaration (§7.3.1): `f` is a function
+        // whose body closes over the enclosing function's locals ("standard
+        // JavaScript closure semantics") — it reads them, and a non-pure one
+        // may rebind them. It stands only at the top level of a function body
+        // (its own included), never waits and is never failable (analyze
+        // refuses those shapes); it runs where its enclosing function runs and
+        // is printed in place, as a host function declaration (hoisted to its
+        // block, §48.6.4). It is NOT in CoreProgram.fns / .server: only its
+        // enclosing body can call it (a Call naming `f.sym`). Its body is its
+        // own owner for Return / Break / Continue (check.scrml C-N1).
+        LocalFn(f: Fn),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -1018,7 +1045,16 @@ ${
         // reader is analyze foreignLangOf, the language of a file's `_{}`
         // blocks, §23.2.1.)
         head: CoreHead,
+        // s477 — §64: the program is a `kind="tool"` (a plain runnable module, no page,
+        // no client — print-server.scrml printTool), and its entry; `not` for a web application.
+        tool: CoreTool | not,
     }
+
+    // s477 — §64.2 / §64.3: `main` the entry function (a ServerFn — every `function`
+    // of a tool runs in process); `exits` — it declares a numeric return, so the
+    // harness exits the process with its value (the exit-harness), else it only
+    // invokes it (the invoke-only harness). `argv` — it takes the argument slice.
+    export type CoreTool:struct = { main: Sym, exits: boolean, argv: boolean }
 
     // s473 — §40.7. `title`: which `<title>` the page's `<head>` holds —
     // `Default` (the compiler's own), `Documentary` (`title="…"`), or `Author`
