@@ -1,0 +1,13 @@
+<program>
+${
+    type Log:struct = { xs: int[free, append] }
+}
+<n> = 0
+function drop() {
+    const b: Log = { xs: [1, 2] };
+    b.xs.pop();
+    @n = b.xs.length;
+}
+<button id="go" onclick=drop()>go</button>
+<p id="n">${@n}</p>
+</program>

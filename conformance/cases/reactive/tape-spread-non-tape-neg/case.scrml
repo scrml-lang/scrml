@@ -1,0 +1,10 @@
+<program>
+<n> = 0
+function build() {
+    const a: string[] = ["x"];
+    const b: int[] = [...a, 1];
+    @n = b.length;
+}
+<button id="go" onclick=build()>go</button>
+<p id="n">${@n}</p>
+</program>

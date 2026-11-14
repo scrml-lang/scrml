@@ -1,0 +1,15 @@
+{
+  "id": "reactive-tape-spread-value-rt",
+  "description": "§66.12.1 (non-mutating operations return new values) + §66.10 (aliases snapshot): `[0, ...a, 3]`, `a.concat([9])` and `[...b, ...c]` are NEW tapes built from their operands, which they leave unchanged. One #go click sets @n to 4 * 100 + 3 * 10 + 7 - 2 = 435.",
+  "language-version": "1.0",
+  "spec": "§66.12.1",
+  "provenance": "ruling:user-voice-scrml.md S435 \"type, and 1 both, 2 lift, 3 C, 4 suppress\" (one sequence kind; non-mutating operations always allowed); ruling:user-voice-scrml.md S435 (dpa-052 item 1) \"1 yes, 2 yes\" (value semantics)",
+  "rationale": "§66.12.1: \"Non-mutating operations (`map`, `filter`, `slice`, `concat`, `find`, `some`, `every`, `reduce`, …) are always allowed; they return new values.\" §66.10 rule 2: \"No write to a source is observable through a value taken from it earlier\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-WRITE-NOT-GRANTED", "E-TYPE-031"],
+    "input": [{ "click": "#go" }],
+    "state": { "n": 435 },
+    "domAnchored": [{ "selector": "#n", "text": "435" }]
+  }
+}

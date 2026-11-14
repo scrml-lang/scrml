@@ -551,7 +551,7 @@ ${
             .VTemplate(text: tx) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             .VMethod(op: o) :> methodExpr(c, o, cal, args)
-            not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            not :> removalOrCall(c, e, cal, args)
         }
     }
 
@@ -828,8 +828,8 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
-            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(letStmt(c, s, i))
-            .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
+            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(removalPre(c, i)).concat(letStmt(c, s, i))
+            .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat(removalPre(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
             .For(f: lf) :> joinMark(c, s).concat(loopStmts(c, lf))   // s469 (§49; a bound loop, §49.6); s471: a loop that waits — its exit join
@@ -1159,7 +1159,7 @@ ${
             .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
             .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value)
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value)
-            .ELocalEdit(sym: s, op: op, arg: a) :> localEditStmt(c, s, op, a)
+            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm) :> localEditStmt(c, s, op, a, pa, tm, not, not)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -1169,10 +1169,38 @@ ${
     // grants, §66.12.6 rules 1 and 3) → Assign(xs, Prim(TapeAppend …, [xs, …]), []):
     // the local is rebound to the edited value, a NEW tape (§66.10 — no alias of the
     // old value sees the edit), as a local part write is (assignLocal).
-    fn localEditStmt(c: LC, s: Sym, op: LocalEdit, arg: AExpr | not) -> Stmt[] {
-        const xs: Expr = Expr.Local(s)
-        let args: Expr[] = [xs]
-        if (arg is given) args = [xs, lowerExpr(c, arg)]
+    // s477 (s477-boot-tape-forms) — an edit of a PART of the local (`path`
+    // non-empty, `b.xs.append(v)` / `g[i].pop()`): each index evaluated once into
+    // its local (`tmps[2k]`), the element it names read into the next
+    // (`tmps[2k + 1]`, IndexRead — a position past the end traps before anything is
+    // written), the part read through them, and the local rebound WITH the path to
+    // the part's edited value: Assign(b, Prim(TapeAppend, [<b.xs>, v]), path) — a
+    // local part write (§66.10: no alias of the old value sees it).
+    // s477 — a removal used as a VALUE (`taken` given): its position (`remove(i)`)
+    // evaluated once into `at`, the removed element read into `taken` (AtRead: `not`
+    // on an empty tape or with no position `i`, §66.12.6 rule 3), then the edit.
+    fn localEditStmt(c: LC, s: Sym, op: LocalEdit, arg: AExpr | not, path: LStep[], tmps: Sym[], taken: Sym | not, at: Sym | not) -> Stmt[] {
+        let pre: Stmt[] = []
+        let part: Expr = Expr.Local(s)
+        let steps: PathStep[] = []
+        let k: int = 0
+        for (const st of path) {
+            const ps: PartRead = partReadStep(c, st, part, tmps, k)
+            pre = pre.concat(ps.lets)
+            part = ps.part
+            steps = steps.concat([ps.step])
+            k = ps.k
+        }
+        let args: Expr[] = [part]
+        if (arg is given) {
+            let av: Expr = lowerExpr(c, arg)
+            if (at is given) {
+                pre = pre.concat([Stmt.Let(at, av)])
+                av = Expr.Local(at)
+            }
+            args = [part, av]
+        }
+        if (taken is given) pre = pre.concat([Stmt.Let(taken, removedRead(op, part, args))])
         const prim: PrimOp = match op {
             .LAppend :> PrimOp.TapeAppend
             .LPrepend :> PrimOp.TapePrepend
@@ -1180,7 +1208,108 @@ ${
             .LShift :> PrimOp.TapeDropFront
             .LRemoveAt :> PrimOp.TapeRemoveAt
         }
-        return [Stmt.Assign(s, Expr.Prim(prim, args), [])]
+        return pre.concat([Stmt.Assign(s, Expr.Prim(prim, args), steps)])
+    }
+
+    // The element a removal removes, read before the edit: `xs.pop()` the last
+    // (`xs.at(xs.length - 1)`), `xs.shift()` the first (`xs.at(0)`), `xs.remove(i)`
+    // position `i` (`xs.at(i)`) — `not` where nothing is removed (§66.12.6 rule 3).
+    fn removedRead(op: LocalEdit, tape: Expr, args: Expr[]) -> Expr {
+        return match op {
+            .LPop :> Expr.Prim(PrimOp.AtRead, [tape, Expr.Prim(PrimOp.Sub, [Expr.Prim(PrimOp.Length, [tape]), Expr.Lit(Literal.Int(1))])])
+            .LShift :> Expr.Prim(PrimOp.AtRead, [tape, Expr.Lit(Literal.Int(0))])
+            .LRemoveAt :> Expr.Prim(PrimOp.AtRead, [tape, args[1]])
+            .LAppend :> Expr.Lit(Literal.Absent)
+            .LPrepend :> Expr.Lit(Literal.Absent)
+        }
+    }
+
+    // s477 (s477-boot-tape-forms) — a removal used as a VALUE (analyze admitted it
+    // only as the whole value of a `let` / `const`, a `return`, or `x = …` /
+    // `@x = …`): its expression is the local the removed element was read into,
+    // and the statements that read it and make the edit come first (removalPre).
+    fn removalOrCall(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
+        const tk: Sym | not = takenOf(effectFact(c.t.effects, e.nid))
+        if (tk is given) return Expr.Local(tk)
+        return callExpr(c, nameFact(c.t.names, cal.nid), args)
+    }
+
+    fn takenOf(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .ELocalEdit(taken: tk) :> tk
+            .ERemove(w: w, taken: sn) :> snapLocal(sn)
+            .EWrite(w: x) :> not
+            .ESpread(ws: x) :> not
+            .EReset(w: x) :> not
+            .EAssignLocal(sym: x) :> not
+            .EEdits(w: x) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            not :> not
+        }
+    }
+
+    fn snapLocal(sn: SeqSnap | not) -> Sym | not {
+        if (sn is not) return not
+        return sn.local
+    }
+
+    // The statements a removal VALUE needs before the statement that uses it: `v`
+    // is the statement's whole value (a `let` initializer, a `return` operand, an
+    // assignment's right-hand side); nothing when it is not a taken removal.
+    fn removalPre(c: LC, v: AExpr | not) -> Stmt[] {
+        if (v is not) return []
+        const f: EffectFact | not = effectFact(c.t.effects, v.nid)
+        return match f {
+            .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, taken: tk, at: at) :> takenLocalPre(c, s, op, a, pa, tm, tk, at)
+            .ERemove(w: w, taken: sn) :> takenCellPre(c, w, sn)
+            .EWrite(w: x) :> []
+            .ESpread(ws: x) :> []
+            .EReset(w: x) :> []
+            .EAssignLocal(sym: x) :> []
+            .EEdits(w: x) :> []
+            .EElemAt(cap: x) :> []
+            .EPosition(cap: x) :> []
+            not :> []
+        }
+    }
+
+    fn takenLocalPre(c: LC, s: Sym, op: LocalEdit, a: AExpr | not, pa: LStep[], tm: Sym[], tk: Sym | not, at: Sym | not) -> Stmt[] {
+        if (tk is not) return []
+        return localEditStmt(c, s, op, a, pa, tm, tk, at)
+    }
+
+    // `@xs.pop()` / `@xs.shift()` as a value: the removed element of the cell's field
+    // read into `sn.local`, then the cell's Write (RemoveEnd / RemoveFront, count 1).
+    fn takenCellPre(c: LC, w: WriteFact, sn: SeqSnap | not) -> Stmt[] {
+        if (sn is not) return []
+        const inst: InstRef = instOf(c, w.inst)
+        const tape: Expr = Expr.Read(Place.Cell(sn.decl, inst, [{ owner: sn.decl, idx: sn.idx }]))
+        let op: LocalEdit = LocalEdit.LShift
+        if (w.edit == EditKind.RemoveEnd) op = LocalEdit.LPop
+        return [Stmt.Let(sn.local, removedRead(op, tape, [tape])), Stmt.Write(w.cap, inst, w.edit, Expr.Lit(Literal.Int(1)), w.check)]
+    }
+
+    // One step of a part edit's path: the Lets it needs, the part read so far, the
+    // Core path step, and the next index into `tmps`.
+    type PartRead:struct = { lets: Stmt[], part: Expr, step: PathStep, k: int }
+
+    fn partReadStep(c: LC, st: LStep, part: Expr, tmps: Sym[], k: int) -> PartRead {
+        return match st {
+            .LField(ref: r) :> fieldPartRead(part, r, k)
+            .LIndex(index: ix, loc: lc) :> indexPartRead(c, ix, lc, part, tmps, k)
+        }
+    }
+
+    fn fieldPartRead(part: Expr, r: FieldRef, k: int) -> PartRead {
+        return { lets: [], part: stepInto(part, r), step: PathStep.StepField(r), k: k }
+    }
+
+    fn indexPartRead(c: LC, ix: AExpr, loc: string, part: Expr, tmps: Sym[], k: int) -> PartRead {
+        const at: Sym = tmps[k]
+        const el: Sym = tmps[k + 1]
+        const lets: Stmt[] = [Stmt.Let(at, lowerExpr(c, ix)), Stmt.Let(el, Expr.Prim(PrimOp.IndexRead, [part, Expr.Local(at), litStr(loc)]))]
+        return { lets: lets, part: Expr.Local(el), step: PathStep.StepIndex(Expr.Local(at), loc), k: k + 2 }
     }
 
     // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index
@@ -3162,7 +3291,12 @@ ${
             }
         }
         const v: AExpr | not = assignedValueOf(e.k)
-        return pre.concat(attemptsFor(c, v)).concat(exprStmt(c, e))
+        // s477 FIX ROUND 1: a removal as the assigned value is read here, so every
+        // statement lowered through evalStmt — a block `Eval`, a statement `match`
+        // arm (plainArmBlock), a handled statement arm (armExprBody), a handler —
+        // carries it; analyze admits the value only at those positions (FailCtx.pre).
+        // A counted head's step (lowerSteps → exprStmt) never reaches here: refused.
+        return pre.concat(removalPre(c, v)).concat(attemptsFor(c, v)).concat(exprStmt(c, e))
     }
 
     // The value of an assignment `t = v` (only an assignment's — an edit call's
