@@ -1642,7 +1642,7 @@ ${
     }
 
     // The locals of one function body that own their value (and are edited).
-    fn ownedLocals(b: Block) -> OwnedLocal[] {
+    export fn ownedLocals(b: Block) -> OwnedLocal[] {
         const s: OwnScan = ownScan(Node.NBlock(b))
         let out: OwnedLocal[] = []
         let seen: int[] = []
@@ -1704,10 +1704,10 @@ ${
             .Commit(writes: x) :> ownKids(Node.NStmt(s))
             .If(cond: x) :> ownKids(Node.NStmt(s))
             .Eval(e: x) :> ownKids(Node.NStmt(s))
-            .Suspend(bind: x) :> ownKids(Node.NStmt(s))
+            .Suspend(bind: b) :> ownJoin(ownKids(Node.NStmt(s)), ownBad([b.id]))     // s478: the bind is a Sym (walk.kids carries no Node for it)
             .ResetSurface(of: x) :> ownKids(Node.NStmt(s))
             .Unpersist(decl: x) :> ownKids(Node.NStmt(s))
-            .Attempt(result: x) :> ownKids(Node.NStmt(s))
+            .Attempt(result: r, call: c, ok: ok, arms: arms) :> ownJoin(ownKids(Node.NStmt(s)), ownBad(attemptSyms(r, c, ok, arms)))   // s478: see attemptSyms
             .Fail(err: x) :> ownKids(Node.NStmt(s))
             .Join(k: x) :> ownKids(Node.NStmt(s))
             .Jump(k: x) :> ownKids(Node.NStmt(s))
@@ -1715,6 +1715,31 @@ ${
             .Continue(target: x) :> ownKids(Node.NStmt(s))
             .Lift(into: x) :> ownKids(Node.NStmt(s))
             .LocalFn(f: f) :> ownBad(blockLocals(f.body))     // s477: a closure (§7.3.1) may see any local it names, whenever it runs — every write of one copies
+        }
+    }
+
+    // s478 (s478-boot-ownership-hardening): the locals an Attempt names as Syms, not
+    // as Nodes — walk.kids does not reach them (a Sym is a leaf of the walk), so the
+    // scan above would not see them: its `result` (bound to the taken branch's value),
+    // an FSettled call's `outcome` (a READ of the Suspend's bind), the success
+    // binder and each failure arm's whole-error binder. Each is disqualified (fail
+    // closed). Today every one is a binder analyze / lower mints fresh (never a Let),
+    // so no owned local changes; a lowering that ever names a Let here copies.
+    fn attemptSyms(result: Sym | not, call: Failable, ok: OkArm, arms: ErrArm[]) -> int[] {
+        let out: int[] = [ok.bind.id]
+        if (result is given) out = out.concat([result.id])
+        out = out.concat(failableSyms(call))
+        for (const a of arms) {
+            const w: Sym | not = a.whole
+            if (w is given) out = out.concat([w.id])
+        }
+        return out
+    }
+
+    fn failableSyms(c: Failable) -> int[] {
+        return match c {
+            .FSettled(outcome: o) :> [o.id]
+            .FCall(fn: f) :> []          // its arguments are Nodes (walk.kids); `fn` names a function, not a local
         }
     }
 
@@ -1788,7 +1813,7 @@ ${
         return match e {
             .Local(sym: s) :> ownBad([s.id])
             .Prim(op: op, args: args) :> ownPrim(op, args)
-            .SeqCall(op: o, seq: sq, f: f) :> ownSeq(sq, f)
+            .SeqCall(op: o, seq: sq, f: f) :> ownSeq(o, sq, f)
             .Assigned(local: l, value: v) :> ownJoin(ownBad([l.id]), ownExpr(v))
             .Lit(lit: x) :> ownKids(Node.NExpr(e))
             .Read(place: x) :> ownKids(Node.NExpr(e))
@@ -1833,12 +1858,34 @@ ${
         return 0
     }
 
-    // `seq.map(f)` …: a bare-local receiver is read without keeping when `f` is a
-    // lambda of at most two parameters (element, position); otherwise an ordinary read.
-    fn ownSeq(sq: Expr, f: Expr) -> OwnScan {
+    // `seq.map(f)` …: a bare-local receiver is read without keeping when the op is on
+    // the allowlist below AND `f` is a lambda of at most two parameters (element,
+    // position); otherwise an ordinary read (the receiver escapes: every write copies).
+    fn ownSeq(o: SeqFn, sq: Expr, f: Expr) -> OwnScan {
         const n: int = lambdaArity(f)
-        if (exprLocalOf(sq) >= 0 && n >= 0 && n <= 2) return ownExpr(f)
+        if (seqKeepsNoReceiver(o) && exprLocalOf(sq) >= 0 && n >= 0 && n <= 2) return ownExpr(f)
         return ownJoin(ownExpr(sq), ownExpr(f))
+    }
+
+    // s478 (s478-boot-ownership-hardening): the sequence functions PROVEN to keep no
+    // reference to their receiver and hand it to no one (with a lambda of at most two
+    // parameters, which never binds the host's third `array` argument):
+    //   Filter — host `Array.prototype.filter`: a NEW array of the elements; the receiver is not kept
+    //   Map    — host `Array.prototype.map`: a NEW array of the lambda's results; the receiver is not kept
+    //   Some   — host `Array.prototype.some`: a boolean
+    //   Every  — host `Array.prototype.every`: a boolean
+    //   SortBy — runtime.js `sortBy`: sorts `copyOf(xs)` and calls the comparator as `cmp(a, b)` (two elements)
+    // An op NOT listed here is an ordinary read of its receiver (fail closed): a new
+    // SeqFn variant copies on every write of its receiver until it is proven and listed.
+    fn receiverSafeSeqs() -> SeqFn[] {
+        return [SeqFn.Filter, SeqFn.Map, SeqFn.Some, SeqFn.Every, SeqFn.SortBy]
+    }
+
+    fn seqKeepsNoReceiver(o: SeqFn) -> boolean {
+        for (const s of receiverSafeSeqs()) {
+            if (s == o) return true
+        }
+        return false
     }
 
     fn lambdaArity(e: Expr) -> int {

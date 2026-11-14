@@ -31727,10 +31727,10 @@ The refusal itself is an unbuilt case, not a ruling, so the message should say w
 <!-- @gap id=g-boot-qualified-enum-literal-receiver-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(litRecvText — qualified enum variant elements) prov=review:s477-1823 -->
 ### g-boot-qualified-enum-literal-receiver-s477 — an array literal of qualified enum variants (`[C.Red, C.Green]`) is refused as a receiver / loop source, though its element type `C` is knowable — `NEW S477; LOW; open`
 
-<!-- @gap id=g-boot-ownseq-op-allowlist-s477 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(ownSeq ~:1811) prov=review:s477-1824 -->
+<!-- @gap id=g-boot-ownseq-op-allowlist-s477 sev=LOW status=resolved resolved-by=s478-boot-ownership-hardening locus=compiler/self-host-v2/print.scrml(ownSeq ~:1811) prov=review:s477-1824 -->
 ### g-boot-ownseq-op-allowlist-s477 — `ownSeq` exempts the receiver of ANY `SeqCall` from the in-place ownership scan, rather than an allowlist of ops known not to retain or alias the receiver; sound for today's ops (the #1824 review found the ownership proof unbroken), but a new op that keeps its receiver would silently break in-place editing — `NEW S477; LOW; open (hardening)`
 
-<!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=open locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
+<!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=resolved resolved-by=s478-boot-ownership-hardening locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
 ### g-boot-ownedlocals-kids-blind-spots-s477 — `walk.kids` does not descend into `FSettled`, `Suspend.bind` or `Attempt.result`, so the owned-locals scan built on it cannot see a use of a local there; no escape found by the #1824 review, but the scan's soundness rests on those nodes never carrying an alias — `NEW S477; LOW; open (hardening)`
 
 <!-- @gap id=g-impl1-colon-return-accepted-s477 sev=LOW status=carried locus=compiler/src/ast-builder.js(function-decl head readers — the `if (peek().text === ":")` return-type branch, ~:14178 / ~:14461 / ~:18287 / ~:18603) prov=ruling:user-voice-scrml.md-S477-⭐-RULED-tool-main-return-type-spelled-arrow;empirical:s477-boot-colon-return-reject(conformance/run.ts---xfail-signature-fn/return-colon-spelling-neg) -->
