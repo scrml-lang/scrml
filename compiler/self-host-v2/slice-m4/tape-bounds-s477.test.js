@@ -259,4 +259,12 @@ describe("F — value semantics hold through the checked edits (§66.10)", () =>
     click(btn("go"));
     expect($("#o").textContent).toBe("0,1,2|1|1");
   });
+
+  // s477 r-merge: composes with the in-place edits of an OWNED local (#1824, print.scrml ownedLocals):
+  // a checked edit (LengthCheck) is not an in-place self-edit, so it copies; `insert` builds a new tape
+  test("an owned local edited in place, then inserted into and bound-checked, in a loop — values exact, alias untouched", async () => {
+    await load(prog("", `        let xs: int[0..=6, append, insert] = [];\n        let ys: int[free, append, insert] = [];\n        for (i of 0..3) {\n            xs.append(i);\n            ys.append(i);\n            ys.insert(0, 9);\n        }\n        const a: int[] = ys;\n        ys.append(7);\n        xs.insert(1, 5);\n        @shown = ${txt("xs")} + "|" + ${txt("ys")} + "|" + ${txt("a")};`));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("0,5,1,2|9,9,9,0,1,2,7|9,9,9,0,1,2");
+  });
 });

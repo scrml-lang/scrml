@@ -293,7 +293,9 @@ describe("D — a part write in a SERVER function (the server runtime's writePat
     const { core } = SA.compile(src);
     expect(SA.check(core)).toEqual([]);
     const { srv, routes, js } = await SA.serve(core, SA.spyDriver().fn);
-    expect(js).toContain("writePath(");
+    // s476 (s476-boot-tape-inplace): `ys` is a fresh local nothing else reads whole, so its part write is
+    // the server runtime's OWNED writer — in place, through the same checked path (the trap below is unchanged)
+    expect(js).toContain("writePathOwned(true");
     const ok = await SA.post(srv, SA.pathOf(routes, "put"), [1, 10]);
     expect([ok.status, ok.json]).toEqual([200, 14]);
     const bad = await SA.post(srv, SA.pathOf(routes, "put"), [3, 10]);

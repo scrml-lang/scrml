@@ -6645,8 +6645,8 @@ ${
     // initializers, markup, `if=` / `in=` values — not in the bootstrap (HostNo).
     type HostCtx:enum = { HostNo, HostOk, HostPure }
 
-    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment)
-    type RowB:struct = { bind: Sym, ty: Type | not }
+    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean, via: string }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment); s476 `via`: why a loop binder has no type ("" = no reason recorded — srcWhy)
+    type RowB:struct = { bind: Sym, ty: Type | not, via: string }
     // `@name` narrowed by an enclosing `given c = @name :> { … }` (§66.7.5, O56
     // RULED S435: "A direct `@handle.field = …` inside the narrowed block is
     // legal"; reads S437): inside the block `@name` IS the narrowed instance
@@ -6761,7 +6761,7 @@ ${
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
-        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false }
+        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: row.via }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
                  handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift }
     }
@@ -7482,6 +7482,8 @@ ${
             if (isDomElementIface(hostSlotText(env.g.types, unMaybe(t)))) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on the DOM element type `" + typeName(unMaybe(t)) + "` — DOM members stay open in logic (§21.3.3 rule 16, S473 round 2 item 7), but open, untyped DOM member access is not in the bootstrap; declare a `<host>` binding for it", st)
             if (isHostType(env.g.types, unMaybe(t))) return diagX(env, e, "E-HOST-HANDLE-MEMBER", "member access " + hostMemberText(typeName(unMaybe(t)), name), st)
         }
+        const via: string = viaText(env, obj)
+        if (via != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on `" + exprName(obj) + "` — " + via, st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
     }
 
@@ -8697,6 +8699,11 @@ ${
         const call: string = "`." + m.method + "(…)`"
         if (ot is not) {
             if (strMethodOp(m.method) is not && strReceiver(env, m.obj, ro)) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
+            // s476: a literal receiver / a binder of an untyped call source — the real limit, by name
+            const lr: string = litRecvText(m.obj)
+            if (lr != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on an array literal: " + lr, args, st)
+            const vt: string = viaText(env, m.obj)
+            if (vt != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on `" + exprName(m.obj) + "` — " + vt, args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
         }
         const fix: string = tapeJsFix(m.method)
@@ -8869,12 +8876,63 @@ ${
     fn recvType(env: Env, obj: AExpr, ro: RX) -> Type | not {
         const rt: Type | not = ro.x.ty
         if (rt is given) return rt
+        // s476 (s476-boot-call-source-types) — a LITERAL receiver: §66.3 rule 5 (a)
+        // "a non-empty sequence literal `[…]` whose elements are all such literals of
+        // one base type | the literal's (rule 3); `[1, 2, 3]` → `int[]`, `[1, 2.5]` →
+        // `number[]`" (literalType — the one reader of that rule). `[10, 9, 2].sort()`
+        // is a method of an `int[]`, exactly as it is on a typed `int[]` local.
+        const lt: Type | not = literalType(obj)
+        if (lt is given) return lt
         const c: AExpr | not = calleeOf(obj.k)
         if (c is not) return not
         const f: FnInfo | not = calledFn(env, nameFactIn(ro.st, c.nid))
         if (f is not) return not
         if (f.failable || f.serverOwn || f.host is given) return not
         return f.ret
+    }
+
+    // s476 (s476-boot-call-source-types) — why an each / for SOURCE gives its binder
+    // no type, for the refusal a use of the binder then meets (`viaText`): "" when no
+    // reason is recorded. A call of a declared function with NO `-> T`: §48.8 "The
+    // compiler infers the return type from the `return` statements" — that inference
+    // is not built for a loop source in the bootstrap (INTERIM). Its type is the
+    // callee's declared return type (recvType) when it has one.
+    // Read only where the source gave no type; `st` is the state after it resolved.
+    fn srcWhy(env: Env, src: AExpr, st: AS) -> string {
+        const c: AExpr | not = calleeOf(src.k)
+        if (c is not) return ""
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return ""
+        if (f.ret is given || f.failable || f.serverOwn || f.host is given) return ""
+        return f.name
+    }
+
+    // s476 — why an array literal is not a typed receiver (recvType reads §66.3 rule 5
+    // (a) through literalType): "" when `obj` is not an array literal.
+    fn litRecvText(obj: AExpr) -> string {
+        if (!isArrayLit(obj)) return ""
+        const es: AExpr[] = arrayElems(obj)
+        const fix: string = " — bind it to a typed local first (`const xs: T[] = […]`) and call the method on `xs`"
+        if (es.length == 0) return "an empty array literal `[]` has no element type (§66.3 rule 5 (a) types a NON-EMPTY literal)" + fix
+        let allLit: boolean = true
+        for (const x of es) {
+            const t: Type | not = literalType(x)
+            if (t is not) allLit = false
+        }
+        if (allLit) return "the elements of this array literal are not of one base type, so it is not a tape of one element type (§66.3 rule 5 (a): \"a non-empty sequence literal `[…]` whose elements are all such literals of one base type\"; `int` with `number` is `number`)"
+        return "an array literal is a typed receiver when its elements are scalar literals of one base type (§66.3 rule 5 (a)); typing one from other elements (names, calls, objects) is not built in the bootstrap (INTERIM)" + fix
+    }
+
+    // The INTERIM refusal text for a use of a binder `srcWhy` recorded a reason on
+    // (`""` when `obj` is not such a binder).
+    fn viaText(env: Env, obj: AExpr) -> string {
+        const n: string = exprName(obj)
+        if (n == "") return ""
+        const l: LocalB | not = lookupLocal(env, n)
+        if (l is not) return ""
+        if (l.ty is given || l.via == "") return ""
+        const f: string = l.via
+        return "`" + n + "` has no type here: an each/for source that is a call takes its element type from the callee's declared return type, and `" + f + "(…)` declares no return type — inferring one from its `return`s (§48.8) is not built for a loop source in the bootstrap (INTERIM). Declare it (`fn " + f + "(…) -> T[]`), or bind first: `const xs: T[] = " + f + "(…)`, then iterate `xs`"
     }
 
     fn isStrOrMaybeStr(t: Type) -> boolean {
@@ -9039,7 +9097,7 @@ ${
             st = rs.st
             syms = syms.concat([rs.s])
             if (ty is given) st = addAnnot(st, rs.s, ty)
-            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false })
+            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
         }
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
         const b: AExpr | not = lambdaBody(lam)
@@ -14894,7 +14952,7 @@ ${
         const rb: RSym = mint(reservedName(st0, env.file, b.span, b.name), b.name)
         const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         if (b.name == "_") return { env: env, st: st }
-        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false }), st: st }
+        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" }), st: st }
     }
 
     // §18.2's message at a failable site (a `!{}` arm, a `match` on a failable result).
@@ -14971,7 +15029,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let ty: Type | not = not
             if (i < fs.length) ty = fs[i].ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
             i = i + 1
         }
         return { env: env, st: st }
@@ -14987,7 +15045,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let t: Type | not = not
             if (i == 0) t = ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
             i = i + 1
         }
         return { env: env, st: st }
@@ -16530,7 +16588,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init) }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "" }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -16553,7 +16611,7 @@ ${
         const rs: RSym = mint(reservedName(st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
-        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false }
+        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false, via: "" }
         let inner: Env = withLocal(env, l)
         // the subject handle itself is narrowed inside the block too (§66.7.5)
         const hn: string = atName(subject)
@@ -16644,7 +16702,7 @@ ${
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
-        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false }
+        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -17111,7 +17169,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -17167,7 +17225,10 @@ ${
         st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
-        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false }
+        let via: string = ""
+        const ix: AExpr | not = iterOfExpr(src)
+        if (rx.x.ty is not && ix is given) via = srcWhy(env, ix, st)
+        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: via }
         const benv: Env = withLocal(env, l)
         // s474 — the header `key` (§17.4b): read in the body's scope (it reads
         // the binder), once per iteration — into a local minted HERE (lower
@@ -17192,9 +17253,20 @@ ${
         const ia: AExpr | not = iterOfExpr(src)
         if (ia is given && !env.fx.serverOwn && sinkYieldsAttr(ia)) return diagX(env, ia, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkAttrBindWhy("a loop variable")), st)
         return match src {
-            .IterOf(e: x) :> iterElemType(resolveExpr(env, x, not, st))
+            .IterOf(e: x) :> iterElemType(srcTyped(env, x, resolveExpr(env, x, not, st)))
             .IterRange(lo: lo, hi: hi) :> plain(Type.Int, resolveExpr(env, hi, Type.Int, resolveExpr(env, lo, Type.Int, st).st).st)
         }
+    }
+
+    // s476 (s476-boot-call-source-types) — a source that resolved to no type, typed as a
+    // receiver is (recvType): a call of a function with a declared return type (§48.8;
+    // §66.3 rule 5 (g)), a literal (§66.3 rule 5 (a)). §49.3.5: "For each element, in
+    // the iterable's order, the binder is bound to the element".
+    fn srcTyped(env: Env, x: AExpr, r: RX) -> RX {
+        if (r.x.ty is given || r.x.inst is given) return r
+        const t: Type | not = recvType(env, x, r)
+        if (t is not) return r
+        return plain(t, r.st)
     }
 
     fn iterOfExpr(src: AIterSrc) -> AExpr | not {
@@ -21560,6 +21632,7 @@ ${
     fn resolveEach(env: Env, e: AElem, st0: AS) -> AS {
         let st: AS = st0
         let srcTy: Type | not = not
+        let srcVia: string = ""
         let asName: string = ""
         for (const a of e.attrs) {
             if (a.name == "in") {
@@ -21567,7 +21640,10 @@ ${
                 if (ex is given) {
                     const r: RX = resolveExpr(env, ex, not, st)
                     st = r.st
-                    srcTy = r.x.ty
+                    // s476 (s476-boot-call-source-types): a call source is its callee's
+                    // declared return type (§48.8; §66.3 rule 5 (g)) — recvType, as a receiver
+                    srcTy = recvType(env, ex, r)
+                    if (srcTy is not) srcVia = srcWhy(env, ex, r.st)
                 }
                 st = addAttr(st, a.nid, AttrKind.AEachIn)
             } else if (a.name == "as") {
@@ -21588,7 +21664,7 @@ ${
                 hsyms = hsyms.concat([h.sym])
             }
         }
-        const row: RowB = { bind: rs.s, ty: elemTy }
+        const row: RowB = { bind: rs.s, ty: elemTy, via: srcVia }
         const renv: Env = withRow(env, row, asName, rowHandles)
         // `key=` is an attribute of `<each>`, not part of the row TEMPLATE: it
         // reads the row's item, never an `as=` handle of the row it keys
@@ -22025,7 +22101,7 @@ ${
                 // placeholder is not a type the sink judgment may trust (fail closed)
                 let lty: Type | not = not
                 if (proven) lty = pty
-                env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false })
+                env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
             }
             st = resolveBlock(env, fs.f.body, st)
             st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
