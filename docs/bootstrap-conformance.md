@@ -13,24 +13,24 @@ Scope: **1827 of 1827 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 302 | 16.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 243 | 13.3% |
+| FAIL | 244 | 13.4% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 624 | 34.2% |
-| UNSUPPORTED | 658 | 36.0% |
+| UNSUPPORTED | 657 | 36.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 545; of those, 302 hold (55.4%). Runtime half executed on the bootstrap for 109 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 546; of those, 302 hold (55.3%). Runtime half executed on the bootstrap for 109 case(s).
 
 - **Vacuous** passes: 17 of 302 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **285**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 243; the other 168 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 244; the other 169 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 658.
+UNSUPPORTED by reason: bootstrap-unsupported 657.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **859** — PASS 185 · FAIL 207 · UNSUPPORTED 467. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **859** — PASS 185 · FAIL 208 · UNSUPPORTED 466. Twin holds 185 (non-vacuous 172). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -135,7 +135,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | match-block | 22 | 4 | · | 3 | · | 6 | 9 | · | · |
 | match-codes | 25 | 4 | · | 10 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 46 | 16 | · | 5 | · | 12 | 13 | · | · |
+| match-leave | 46 | 16 | · | 6 | · | 12 | 12 | · | · |
 | md | 18 | · | · | 1 | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
@@ -164,7 +164,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 2 | 23 | · | · |
 
-### FAIL (243)
+### FAIL (244)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -772,6 +772,11 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
   - E-PARSE-ARM: expected `:>` after the arm's pattern, found `given`
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
 - `match-leave/given-arm-in-expression-position-match` (twin · parse-reject)
+  - forbidden E-SCOPE-001 fired
+  - E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
+  - E-PARSE-ARM: expected `:>` after the arm's pattern, found `given`
+  - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
+- `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` (twin · parse-reject)
   - forbidden E-SCOPE-001 fired
   - E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
   - E-PARSE-ARM: expected `:>` after the arm's pattern, found `given`
@@ -1413,7 +1418,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (658)
+### UNSUPPORTED (657)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1737,7 +1742,6 @@ none
 - `match-leave/dpa068-decl-bare-return` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-leave/dpa068-nested-match-bare-return` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
-- `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-undeclared-name-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: `multi-scrutinee match` (§18.19) is not in the bootstrap yet; it is refused here by name rather than misread — match one value, and nest a second `match` in its arms
@@ -1980,7 +1984,7 @@ none
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
 - `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
-- `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
+- `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
 - `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: `on mount { }` (§6.7.1a) is not in the bootstrap yet; it is refused here by name rather than misread — write `<onMount>${ … }</>` (§6.7.1a, S449)
 - `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored

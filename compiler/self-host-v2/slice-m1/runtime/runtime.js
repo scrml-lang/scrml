@@ -2454,6 +2454,67 @@ export function tapeRemoveAt(xs, i) {
   return out;
 }
 
+// s476 (s476-boot-tape-inplace) — the same edits of a local, IN PLACE when the local OWNS its value.
+// `owned` is the printer's proof (print.scrml ownedLocals): no other binding, cell, argument, field,
+// element, iteration or deferred body can see the local's current value, so editing it is
+// unobservable (§66.10 item 5: "The copy strategy is not part of the contract"). `owned` false: the
+// copying edit above, exactly. Each returns the local's new value; the printer rebinds the local to it.
+
+/** `xs.append(v)` on a local: `xs` itself, `v` pushed, when owned; else a new tape. */
+export function tapeAppendOwned(owned, xs, v) {
+  if (!owned) return tapeAppend(xs, v);
+  xs.push(v);
+  return xs;
+}
+
+/** `xs.prepend(v)` on a local: `xs` itself, `v` at the front, when owned; else a new tape. */
+export function tapePrependOwned(owned, xs, v) {
+  if (!owned) return tapePrepend(xs, v);
+  xs.unshift(v);
+  return xs;
+}
+
+/** `xs.pop()` on a local: `xs` itself without its last position, when owned (an empty tape stays empty). */
+export function tapeDropEndOwned(owned, xs) {
+  if (!owned) return tapeDropEnd(xs);
+  if (xs.length > 0) xs.pop();
+  return xs;
+}
+
+/** `xs.shift()` on a local: `xs` itself without its first position, when owned (an empty tape stays empty). */
+export function tapeDropFrontOwned(owned, xs) {
+  if (!owned) return tapeDropFront(xs);
+  if (xs.length > 0) xs.shift();
+  return xs;
+}
+
+/** `xs.remove(i)` on a local: `xs` itself without position `i`, when owned; no position `i`, nothing is removed. */
+export function tapeRemoveAtOwned(owned, xs, i) {
+  if (!owned) return tapeRemoveAt(xs, i);
+  if (Number.isInteger(i) && i >= 0 && i < xs.length) xs.splice(i, 1);
+  return xs;
+}
+
+/**
+ * A part write of a local (`xs[i] = v`, `p.f = v`, `a.xs[i].f = v`) when the local OWNS its value:
+ * the TOP of the value (a tape or a struct the local alone holds) is written in place; every step
+ * below it is the copying writePath, because an element may be held elsewhere (`const e = xs[i]`).
+ * A step the copying writer would refuse — an index outside the tape, not a field — goes to it, so
+ * the trap (or the defect) is the same, raised before anything is written. `owned` false: writePath.
+ */
+export function writePathOwned(owned, value, path, v, at) {
+  if (!owned || path.length === 0) return writePath(value, path, v, at);
+  const k = path[0];
+  const fits = Array.isArray(value)
+    ? Number.isInteger(k) && k >= 0 && k < value.length
+    : value !== null && typeof value === "object" && typeof k === "string" && Object.prototype.hasOwnProperty.call(value, k);
+  if (!fits) return writePath(value, path, v, at);
+  // the rest of the path first: an inner trap leaves the value unwritten
+  const below = path.length === 1 ? v : writePath(value[k], path.slice(1), v, at);
+  value[k] = below;
+  return value;
+}
+
 /** `xs.includes(x)` on a tape: some element is structurally equal to `x` (§45 — the same `eq` as `==`). */
 export function tapeIncludes(xs, x) {
   for (let i = 0; i < xs.length; i++) if (eq(xs[i], x)) return true;
