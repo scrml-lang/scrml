@@ -6756,9 +6756,11 @@ ${
     // `pureCaps`: the captured bindings declared OUTSIDE a pure `fn` this body is
     // (or is nested in) — a write to one is E-FN-003 (§48.3.3; §48.3: "anywhere
     // inside a `fn` body, including inside nested closures").
-    type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[] }
+    // s477 fix r1 (F3) — `pureFn`: the name of the `fn` a NESTED body is inside ("" in a
+    // file-level body, or outside every `fn`), so a purity report names the `fn` that makes it pure.
+    type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[], pureFn: string }
 
-    fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [] } }
+    fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [], pureFn: "" } }
 
     fn withNest(env: Env, n: NestCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -8427,12 +8429,26 @@ ${
     // of a `fn` body — so the spelling is never written whole in one here.)
     fn dateNowText() -> string { return "`Date" + ".now()`" }
 
+    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` names the `fn` that makes the body pure:
+    // the function itself, or — in a nested function — the enclosing `fn` (§48.3: "anywhere
+    // inside a `fn` body, including inside nested closures"), never "a `function` body".
+    // (Built outside resolveHost's match: impl#1 printed this text's "`fn`" as "`function`"
+    // when it stood inline in the match arm.)
+    fn clockInPureText(env: Env) -> string {
+        const tail: string = " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter"
+        const outer: string = env.nest.pureFn
+        if (outer != "" && outer != env.fx.fnName) {
+            return dateNowText() + " is non-deterministic — the nested function `" + env.fx.fnName + "` is inside `fn " + outer + "`, which is pure (nested functions included, §48.3) and cannot call it" + tail
+        }
+        return dateNowText() + " is non-deterministic — `fn " + env.fx.fnName + "` is pure and cannot call it" + tail
+    }
+
     fn resolveHost(env: Env, e: AExpr, args: AExpr[], st: AS) -> RX {
         if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " takes no argument", st)
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — a `fn` body is pure and cannot call it (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
+            .HostPure :> diagX(env, e, "E-FN-004", clockInPureText(env), st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
@@ -22078,7 +22094,7 @@ ${
     fn resolveFnBody(env0: Env, fs: FnSrc, st0: AS) -> AS {
         let st: AS = st0
         const g: Globals = env0.g
-        let env: Env = withNest(env0, { fns: env0.nest.fns, top: topLocalFns(fs.f.body), caps: env0.nest.caps, pureCaps: env0.nest.pureCaps })
+        let env: Env = withNest(env0, { fns: env0.nest.fns, top: topLocalFns(fs.f.body), caps: env0.nest.caps, pureCaps: env0.nest.pureCaps, pureFn: env0.nest.pureFn })
         const fte: TypeEnv = teAt(g.te, fs.info.file)
         for (const p of fs.f.params) {
             const rs: RSym = mint(reservedName(st, fs.info.file, p.span, p.name), p.name)
@@ -22161,7 +22177,7 @@ ${
         }
         const e2: Env = { g: env.g, file: env.file, ctx: env.ctx, locals: locals, rows: env.rows,
                           handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
-        return withNest(e2, { fns: fns, top: env.nest.top, caps: env.nest.caps, pureCaps: env.nest.pureCaps })
+        return withNest(e2, { fns: fns, top: env.nest.top, caps: env.nest.caps, pureCaps: env.nest.pureCaps, pureFn: env.nest.pureFn })
     }
 
     // s477 — each nested function declaration of block `b`, resolved in `env`:
@@ -22218,8 +22234,11 @@ ${
         for (const l of env.locals) { caps = caps.concat([l.s.id]) }
         let pureCaps: int[] = env.nest.pureCaps
         if (f.pure) pureCaps = caps
+        let pureFn: string = env.nest.pureFn
+        if (pureFn == "" && env.host == HostCtx.HostPure) pureFn = env.fx.fnName      // the `fn` this nested body is in
+        if (f.pure) pureFn = ""                                                        // a nested `fn` is pure itself: the report names it
         const env0: Env = { g: env.g, file: env.file, ctx: CtxK.InFn, locals: env.locals, rows: [], handles: env.handles, inRenders: false, narrows: [], present: [],
-                            host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: { fns: env.nest.fns, top: [], caps: caps, pureCaps: pureCaps } }
+                            host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: { fns: env.nest.fns, top: [], caps: caps, pureCaps: pureCaps, pureFn: pureFn } }
         return resolveFnBody(env0, fs, st)
     }
 
@@ -22312,6 +22331,46 @@ ${
         for (const x of exprKids(e)) { out = out.concat(nameExprsInExpr(x)) }
         for (const b of exprBlocks(e)) { out = out.concat(nameExprsIn(b)) }
         return out
+    }
+
+    // s477 fix r1 (F2) — the locals a block WRITES, nested functions' bodies included: a
+    // rebinding / a part write (EAssignLocal) or an in-place edit (ELocalEdit), by the
+    // effect the binder recorded on the writing node. A write target is no bare-name READ
+    // (its Name node carries no NLocal fact), so nameExprsIn alone misses it — and a write
+    // in a binding's temporal dead zone is a host error exactly as a read is.
+    fn writtenLocalsIn(t: Tables, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(writtenLocalsInExpr(t, e)) }
+            for (const nb of nestedBlocks(s)) { out = out.concat(writtenLocalsIn(t, nb)) }
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) out = out.concat(writtenLocalsIn(t, lf.body))
+        }
+        return out
+    }
+
+    fn writtenLocalsInExpr(t: Tables, e: AExpr) -> int[] {
+        let out: int[] = []
+        const w: int = writtenLocalOf(effectFact(t.effects, e.nid))
+        if (w >= 0) out = [w]
+        for (const x of exprKids(e)) { out = out.concat(writtenLocalsInExpr(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(writtenLocalsIn(t, b)) }
+        return out
+    }
+
+    fn writtenLocalOf(f: EffectFact | not) -> int {
+        return match f {
+            .EAssignLocal(sym: s) :> s.id
+            .ELocalEdit(sym: s) :> s.id
+            .EWrite(w: w) :> -1
+            .ESpread(ws: ws) :> -1
+            .EReset(w: w) :> -1
+            .EEdits(w: w) :> -1
+            .ERemove(w: w) :> -1
+            .EElemAt(cap: c) :> -1
+            .EPosition(cap: c) :> -1
+            not :> -1
+        }
     }
 
     // The bare-name nodes of one statement, NOT inside a nested declaration it is.
@@ -22454,6 +22513,10 @@ ${
                 const fsy: int = fnSymOfName(t, x.nid)
                 if (fsy >= 0 && fids.indexOf(fsy) >= 0 && k.indexOf(fsy) < 0) k = k.concat([fsy])
             }
+            // s477 fix r1 (F2): what it WRITES of them too (an assignment, a part write, an edit)
+            for (const ws of writtenLocalsIn(t, f.body)) {
+                if (lids.indexOf(ws) >= 0 && c.indexOf(ws) < 0) c = c.concat([ws])
+            }
             caps = caps.concat([c])
             calls = calls.concat([k])
         }
@@ -22486,7 +22549,7 @@ ${
                 if (fsy >= 0 && fi >= 0) {
                     for (const c of caps[fi]) {
                         const at: int = lat[lids.indexOf(c)]
-                        if (at >= i) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this call of the nested function `" + fns[fi].name + "` runs before `" + bindNameAt(ss[at]) + "`, which it reads (directly or through a nested function it calls), is declared — JavaScript would read it in its temporal dead zone (a host error), and §7.3.1's \"standard JavaScript closure semantics\" does not say what that is in scrml (INTERIM; ruling owed). Declare `" + bindNameAt(ss[at]) + "` before the first call", fs.info.file, x.span)])
+                        if (at >= i) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this call of the nested function `" + fns[fi].name + "` runs before `" + bindNameAt(ss[at]) + "`, which it reads or writes (directly or through a nested function it calls), is declared — JavaScript would reach it in its temporal dead zone (a host error), and §7.3.1's \"standard JavaScript closure semantics\" does not say what that is in scrml (INTERIM; ruling owed). Declare `" + bindNameAt(ss[at]) + "` before the first call", fs.info.file, x.span)])
                     }
                 }
             }

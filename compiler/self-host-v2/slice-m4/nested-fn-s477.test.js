@@ -212,6 +212,18 @@ describe("§7.3.1 / §48 — purity, scope and naming rules (refused)", () => {
   test("a nested `fn` reading the clock is E-FN-004", () => {
     expect(C(`    function p3(n: int) -> int {\n        fn now() -> number { return Date.now(); }\n        return n;\n    }`)).toEqual(["E-FN-004"]);
   });
+  // s477 fix r1 (F3) — the report names the `fn` that makes the body pure (before: "a `function` body is pure")
+  test("E-FN-004 names the pure function: the nested `fn` itself, or the `fn` a nested `function` is inside", () => {
+    const msg = (fns) => errs(fe(prog(fns, "0"))).map((d) => d.code + ": " + d.message);
+    const own = msg(`    function p3(n: int) -> int {\n        fn now() -> number { return Date.now(); }\n        return n;\n    }`);
+    expect(own.length).toBe(1);
+    expect(own[0]).toContain("`fn now` is pure");
+    const outer = msg(`    fn p4(n: int) -> int {\n        function w() -> number { return Date.now(); }\n        return n;\n    }`);
+    expect(outer.length).toBe(1);
+    expect(outer[0]).toContain("E-FN-004: ");
+    expect(outer[0]).toContain("the nested function `w` is inside `fn p4`, which is pure");
+    expect(outer[0]).not.toContain("a `function` body is pure");
+  });
   test("a nested function is not visible outside the body that declares it (E-SCOPE-001)", () => {
     expect(C(`    function outside() -> int { return helper(); }\n    function host(n: int) -> int {\n        function helper() -> int { return n; }\n        return helper();\n    }`)).toEqual(["E-SCOPE-001"]);
   });
@@ -297,6 +309,21 @@ describe("INTERIM refusals — by name, never a silent guess (the language allow
   });
   test("…through a sibling it calls", () => {
     one(C(`    function c(n: int) -> int {\n        const r: int = a();\n        let k: int = n;\n        function a() -> int { return b(); }\n        function b() -> int { return k; }\n        return r;\n    }`), "temporal dead zone");
+  });
+  // s477 fix r1 (F2) — a WRITE in the dead zone is the same host error as a read (before: only
+  // bare-name reads were captures, so these compiled and threw "Cannot access 'k' before initialization")
+  test("…a call that ASSIGNS a captured binding before it is declared", () => {
+    one(C(`    function c(n: int) -> int {\n        const r: int = a();\n        let k: int = n;\n        function a() -> int { k = 5; return 1; }\n        return r + k;\n    }`), "runs before `k`, which it reads or writes");
+  });
+  test("…a part write and an in-place tape edit", () => {
+    one(C(`    type P:struct = { a: int }\n    function c(n: int) -> int {\n        const r: int = a();\n        let p: P = { a: 1 };\n        function a() -> int { p.a = 5; return 1; }\n        return r + p.a;\n    }`), "runs before `p`");
+    one(C(`    function c(n: int) -> int {\n        const r: int = a();\n        let xs: int[free, append] = [];\n        function a() -> int { xs.append(1); return 1; }\n        return r + xs.length;\n    }`), "runs before `xs`");
+  });
+  test("…a write through a sibling it calls", () => {
+    one(C(`    function c(n: int) -> int {\n        const r: int = a();\n        let k: int = n;\n        function a() -> int { return b(); }\n        function b() -> int { k = 2; return 1; }\n        return r + k;\n    }`), "runs before `k`");
+  });
+  test("the same writing call AFTER the declaration compiles and runs", async () => {
+    expect((await run(prog(`    function c(n: int) -> int {\n        let k: int = n;\n        function a() -> int { k = 5; return 1; }\n        const r: int = a();\n        return r + k;\n    }`, "c(1)"))).c).toBe("6");
   });
   test("a nested function named like a cell — §7.6 D14 leaves it undecided", () => {
     one(C(`    function f6(n: int) -> int {\n        function hits() -> int { return 1; }\n        return hits();\n    }`), "takes the name of the cell");
