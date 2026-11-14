@@ -21,9 +21,11 @@ const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\
 // s452: `db` left it — `<db src=…>` (§4 state block, §8.1.1 scope) is implemented (error-rulings.test.js).
 // s475 (S3a): `request` left this list — `<request>` (§6.7.7) is built (acceptance/request/,
 // request-surface-s475.test.js); its non-body shapes are refused by their own codes (below).
+// s476: `page` left it — `<page>` in `<program>` (§40.8) is built (page-s476.test.js); a `<page>`
+// inside markup, as here, is E-STRUCTURAL-ELEMENT-MISPLACED (§4.15) — still never an HTML element.
 const STRUCTURAL = [
   "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
-  "page", "engine", "onTransition", "onTimeout", "onIdle", "match", "empty", "render", "outlet", "column",
+  "engine", "onTransition", "onTimeout", "onIdle", "match", "empty", "render", "outlet", "column",
   "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
 ];
@@ -37,6 +39,11 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(d[0].message).toContain("structural element");
     });
   }
+  test("s476: a `<page>` inside markup is never an HTML element — E-STRUCTURAL-ELEMENT-MISPLACED (§4.15)", () => {
+    const d = run(inMain(`<page x="1"><p>inside</p></page>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
+    expect(d[0].message).toContain("`<page>`");
+  });
   test("s475: a `<request>` with a markup body is never an HTML element — E-PARSE-ITEM (its body is one `${ … }` block)", () => {
     const d = run(inMain(`<request id="r"><p>inside</p></request>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-PARSE-ITEM"]);
