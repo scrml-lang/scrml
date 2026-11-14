@@ -28,5 +28,20 @@
 - slice-m4/ownership-hardening-s478.test.js: 13 tests. On base (with only `export` added to ownedLocals so
   the test can call it): 8 pass / 5 fail — exactly the hypothetical-op test and the four Sym-position tests.
 
-## Emit differential
-- (see below)
+## Emit differential (base 314bad402 vs branch, the bootstrap via scripts/scrml-boot.ts compileSource)
+- Inputs: 3,126 .scrml — conformance/cases 1,899 + samples 881 (excluding dist/) + slice-* 57 (excluding
+  bundle.scrml) + acceptance 289. Each artifact = client.js + client.html + server.js + tool module, or the
+  diagnostics when the compile is refused.
+- Result: 3,126 / 3,126 byte-identical. Per side: OK 216, ERR 2,905, HANG 5 (identical on both sides).
+- HANG (>90 s, killed by the watchdog — same on base): slice-m1/{counter,dropdown,valuesem}.core.scrml,
+  slice-m3/css.core.scrml, slice-m3/css-bundle.scrml — bootstrap SOURCE modules (impl#1 scrml), not
+  bootstrap-language programs; pre-existing, out of scope.
+- COVERAGE CAVEAT (base §8): 0 of the 3,126 artifacts contain an owned writer (`…Owned(`), and only 2 OK
+  artifacts use a SeqCall at all — the corpus barely reaches the in-place path, so "identical" here says
+  little about this change. The in-place shapes are pinned by slice-m4/tape-inplace-s476.test.js (31 tests,
+  printed `tapeAppendOwned(` / `rt.tapeAppend(` shapes + runtime behaviour), unchanged and green, and by
+  the new test's per-op in-place assertions.
+
+## Gates
+- pre-commit hook: 54,618 pass / 0 fail.
+- CI slices job locally: lints 0/0; slice-m1+m2+m3+codec 1,012/0; m1 lowered 167/0; m4 6,110 (113 skip, 1 todo) / 0 fail.
