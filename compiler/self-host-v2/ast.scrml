@@ -532,7 +532,21 @@ ${
     // s475 r1 — `first`: the file's first node id, so analysis can re-read it (from the
     // driver's source, never a text held in the tree) once it knows which `m.x` are
     // namespace members (parse.scrml PNs, analyze.scrml analyzeSources).
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], first: int }
+    // s476 — a `<page>` written as a direct child of a top-level `<program>` (§40.8
+    // "Multi-page apps", §4.15). Its body is a code-default body like the
+    // program's own (§40.8 S441 bullet) and shares the program's scope (§58.8: "A
+    // `<page>` … is not a separate compilation unit — it shares the application
+    // `<program>` scope"), so the parser reads it with the program body's own
+    // reader and its items JOIN the program's items in place. This record keeps
+    // what the flattening would lose: the opener (`span` = the `<page` tag), its
+    // attributes, which analysis checks against §40.8's per-route set, and
+    // (s477 fix round 1) `body` = the whole `<page>…</page>` extent — the page
+    // boundary, for the rules that are NOT shared with the program: a `<db src=>`
+    // in the page is no direct child of the `<program>` (§8.1.1 "Direct child
+    // only"), and a `<channel>` at any depth in it is E-CHANNEL-INSIDE-PAGE
+    // (§38.1). An item of the program whose span lies in a `body` came from the page.
+    export type APage:struct = { span: ASpan, attrs: AAttr[], body: ASpan }
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], first: int }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)

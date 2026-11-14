@@ -49,7 +49,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, Diag, ASql, ASqlMode,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
@@ -5385,7 +5385,7 @@ ${
     // read in a `<db>` body (parseDbBody), waiting for the nearest item list
     // (parseMarkupItems drains them into the program body or the file top);
     // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], ns: PNs }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], ns: PNs }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -5411,7 +5411,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -5426,20 +5426,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -5544,7 +5544,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -6365,7 +6365,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -7159,7 +7159,7 @@ ${
     // An element after its opener: children until its closer.
     fn finishElem(o: Opener, mp: MP) -> RElem {
         // s473 (§21.3.3 rule 1): a `<host>` is read at an item position only (parseTagItem)
-        if (isHostOpener(o)) return refuseHostPlacement(o, mp)
+        if (isHostOpener(o)) return refuseHostPlacement(o, mp, "inside another element")
         if (o.vals.length > 0) {
             // s444 Phase B: a validator binds a DECLARATION's own value (§66.4 rule 3) — an element has none
             return finishElem(noVals(o), mDiag(mp, "E-PARSE-ATTR", "the validator `" + o.vals[0].name + "(…)` is on the element `<" + o.name + ">` — a validator belongs in a declaration's opener, binding its own value (§66.4 rule 3, §55.2)", o.vals[0].span.start, o.vals[0].span.end))
@@ -7548,10 +7548,12 @@ ${
     // O61 (§66.2.5, RULED S469 — "Allowed, scoped to the block (Rec)"; "Same
     // rule as channel/db (Rec)"): a `<db>`, `<channel>`, `<page>` or `<theme>`
     // body is an ITEM position, so `let <x/>` / `export <x/>` there is never
-    // E-DECL-KEYWORD-NOT-ITEM. `<channel>`, `<page>` and `<theme>` are refused
-    // whole (E-BOOTSTRAP-UNSUPPORTED — `<theme>` here, `<channel>` / `<page>` in
+    // E-DECL-KEYWORD-NOT-ITEM. `<channel>` and `<theme>` are refused
+    // whole (E-BOOTSTRAP-UNSUPPORTED — `<theme>` here, `<channel>` in
     // analyze's structural-tag check), so their own body decides nothing and
-    // reports no keyword: one fail-closed code each. A `<db>` body is not a
+    // reports no keyword: one fail-closed code each. A `<page>` directly in a
+    // `<program>` body is read as an item body (s476, pageItem); one that
+    // reaches here is inside markup, refused whole by analyze (resolveElem). A `<db>` body is not a
     // free-text body at all (s472 — parseDbBody), so it never reaches here.
     fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" || tag == "channel" }
 
@@ -7722,7 +7724,7 @@ ${
             const fid: int = fnIdOfItem(it.k)
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, ns: r.mp.ns }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, ns: r.mp.ns }
         return { e: r.e, mp: m }
     }
 
@@ -7877,7 +7879,7 @@ ${
 
     // Rule 1 — a `<host>` NOT at an item position: refused whole (opener to
     // `</host>`), its body never read as markup (it would render as page text).
-    fn refuseHostPlacement(o: Opener, mp: MP) -> RElem {
+    fn refuseHostPlacement(o: Opener, mp: MP, where: string) -> RElem {
         let end: int = mp.pos
         if (!o.selfClosing) {
             const close: int = mp.src.indexOf("</host>", mp.pos)
@@ -7887,7 +7889,7 @@ ${
                 end = close + 7
             }
         }
-        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-PLACEMENT", "`<host>` stands here inside another element — a `<host>` block SHALL appear at file top level or as a direct child of `<program>` (§21.3.3 rule 1); move it there", o.start, end)
+        const m: MP = mDiag(mAt(mp, end), "E-HOST-BINDING-PLACEMENT", "`<host>` stands here " + where + " — a `<host>` block SHALL appear at file top level or as a direct child of `<program>` (§21.3.3 rule 1); move it there", o.start, end)
         return elemFrom(noVals(o), [], m)
     }
 
@@ -8210,7 +8212,7 @@ ${
             }
         }
         ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)))
-        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), ns: mp.ns }
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, ns: mp.ns }
         return { items: [it], mp: m }
     }
 
@@ -8452,7 +8454,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -9065,6 +9067,15 @@ ${
     // ---- items: a file or `<program>` body ----------------------------------
     // Items until EOF or a closer (consumed when `tag` != "").
     fn parseMarkupItems(mp: MP, tag: string) -> RMItems {
+        return parseMarkupItemsIn(mp, tag, tag)
+    }
+
+    // s476 — `ctx`: whose body this is. "" the file top level, "program" the
+    // top-level `<program>`'s body, "nested" a nested `<program>`'s body
+    // (§4.12.2), "page" a `<page>` body (§40.8). Only a direct child of a
+    // body decides anything by it (parseTagItem: where a `<page>` / a
+    // `<channel>` may stand).
+    fn parseMarkupItemsIn(mp: MP, tag: string, ctx: string) -> RMItems {
         let m: MP = mp
         let out: AItem[] = []
         let going = true
@@ -9083,7 +9094,7 @@ ${
                 }
             } else {
                 const before: int = m.pos
-                const r: RMItems = parseMarkupItem(m, tag == "")
+                const r: RMItems = parseMarkupItem(m, ctx)
                 // s472: the `<db>`-body items read inside this item (MP.hoist)
                 // join this item list, right after it
                 out = out.concat(r.items).concat(r.mp.hoist)
@@ -9095,7 +9106,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -9103,8 +9114,10 @@ ${
         return { items: [it], mp: mBump(mp) }
     }
 
-    // `fileTop`: this item stands at file top level (not in a `<program>` body).
-    fn parseMarkupItem(mp: MP, fileTop: boolean) -> RMItems {
+    // `ctx` (parseMarkupItemsIn): "" = this item stands at file top level (not
+    // in a `<program>` body).
+    fn parseMarkupItem(mp: MP, ctx: string) -> RMItems {
+        const fileTop: boolean = ctx == ""
         const start: int = mp.pos
         if (atCss(mp)) {
             const rc: RCss = parseCssNode(mp)
@@ -9118,22 +9131,22 @@ ${
             const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
             return { items: inner.items, mp: backToMarkup(mp, t2) }
         }
-        if (chAt(mp, 0) == "<") return parseTagItem(mp, false, false)
+        if (chAt(mp, 0) == "<") return parseTagItem(mp, false, false, ctx)
         const w: RWord = readName(mp)
         // a program body is an item position (§66.2.5): `export` / `let` before
         // a tag's `<`, in JS order. `let` followed by a name stays the logic
         // binding (no statements at program level in the slice).
         if (w.w == "let") {
             const afterLet: MP = skipTrivia(w.mp)
-            if (chAt(afterLet, 0) == "<") return parseTagItem(afterLet, false, true)
+            if (chAt(afterLet, 0) == "<") return parseTagItem(afterLet, false, true, ctx)
         }
         if (w.w == "export") {
             const after: MP = skipTrivia(w.mp)
-            if (chAt(after, 0) == "<") return parseTagItem(after, true, false)
+            if (chAt(after, 0) == "<") return parseTagItem(after, true, false, ctx)
             const wl: RWord = readName(after)
             if (wl.w == "let") {
                 const after2: MP = skipTrivia(wl.mp)
-                if (chAt(after2, 0) == "<") return parseTagItem(after2, true, true)
+                if (chAt(after2, 0) == "<") return parseTagItem(after2, true, true, ctx)
             }
             return logicRegionItem(mp, LexStop.Statement, false)
         }
@@ -9153,13 +9166,18 @@ ${
         return { items: r.items, mp: backToMarkup(mp, r.tp) }
     }
 
-    fn parseTagItem(mp: MP, exported: boolean, isLet: boolean) -> RMItems {
+    fn parseTagItem(mp: MP, exported: boolean, isLet: boolean, ctx: string) -> RMItems {
         // s462: §4.17 — refused whole, before its attributes or body are read
         if (scriptStyleAt(mp) != "") return { items: [], mp: refuseScriptStyle(mp) }
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
         // s473 (§21.3.3 rule 1): a `<host>` at file top or a direct child of `<program>`
+        // s477 fix round 1 — a `<page>` body is read by the program body's reader
+        // (pageItem), but a `<host>` there is no direct child of `<program>`. §21.3.3
+        // rule 1: "`<host>` SHALL appear at file top level or as a direct child of
+        // `<program>`. A `<host>` anywhere else SHALL be `E-HOST-BINDING-PLACEMENT`".
+        if (isHostOpener(o) && ctx == "page") return elemItem(refuseHostPlacement(o, letOnNonDecl(ro.mp, o, isLet), "inside a `<page>`"), exported)
         if (isHostOpener(o)) return finishHost(o, letOnNonDecl(ro.mp, o, isLet), exported)
         if (isEffectOpener(o)) {
             // s449: an `<effect>` at the program body top — owned by the program scope
@@ -9177,10 +9195,22 @@ ${
             const rn: ANode = { nid: rm.nid, span: rr.r.span, k: ANodeK.Request(rr.r) }
             return mItem(mBump(rm), rr.r.span.start, AItemK.MarkupItem(rn))
         }
+        // s476 — a `<page>` standing directly in a `<program>` / `<page>` body
+        // (§40.8, §4.15); at the file top level it stays an element, for
+        // analyze's outsideProgramDiag (a route file's `<page>` root, or one out
+        // of place), and inside markup it is an element (resolveElem). A
+        // DECLARATION opener named `page` (`let <page:int=1/>` — an own value, a
+        // `:Type`, a typed attribute, §66.2.2) is a declaration, as before: a
+        // user cell is judged by its own rules (E-NAME-COLLIDES-RESERVED for a
+        // user declaration so named, §4.15).
+        if (!o.star && o.name == "page" && ctx != "" && !isDeclOpener(o)) return pageItem(o, pageOpenerDiags(o, ro.mp, exported, isLet), ctx)
+        // §38.1 / §34: "A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE`"
+        // — one report: the element is read (so its closer is found) and dropped.
+        if (!o.star && o.name == "channel" && ctx == "page") return channelInPage(o, letOnNonDecl(ro.mp, o, isLet))
         const k: TagKind = tagKind(o)
         const od: Opener = isLet ? withLet(o) : o
         return match k {
-            .IsProgram :> programItem(o, programOpenerDiags(o, letOnNonDecl(ro.mp, o, isLet), exported))
+            .IsProgram :> programItem(o, programOpenerDiags(o, letOnNonDecl(ro.mp, o, isLet), exported), ctx == "")
             .IsDecl :> declItem(finishDecl(od, ro.mp, exported))
             .IsElem :> elemItem(finishElem(o, letOnNonDecl(ro.mp, o, isLet)), exported)
         }
@@ -9235,16 +9265,87 @@ ${
         return m
     }
 
-    fn programItem(o: Opener, mp: MP) -> RMItems {
+    fn programItem(o: Opener, mp: MP, top: boolean) -> RMItems {
         let items: AItem[] = []
         let m: MP = mp
         if (!o.selfClosing) {
-            const r: RMItems = parseMarkupItems(mp, "program")
+            const r: RMItems = parseMarkupItemsIn(mp, "program", top ? "program" : "nested")
             items = r.items
             m = r.mp
         }
         const p: AProgram = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, items: items }
         return mItem(mBump(m), o.start, AItemK.ProgramItem(p))
+    }
+
+    // s476 — `<page>` (§40.8 "Multi-page apps", §4.15). A `<page>` written
+    // directly in the top-level `<program>`'s body is that program's page: its
+    // body is a code-default body exactly like the program's (§40.8 S441 bullet:
+    // "A `<program>`, `<page>` or `<channel>` body is a code-default body"; "A
+    // `<page>` body … and a `<channel>` body … are the same locus and follow the
+    // same rule"), so it is read by the program body's own reader, and its items
+    // stand in the program's item list in place — it "shares the application
+    // `<program>` scope" (§58.8) and renders where it is written. The `<page>`
+    // itself is no DOM element (impl#1 behaviour, emit-html: "it does NOT
+    // correspond to a DOM element"). Its opener and attributes are recorded
+    // (MP.pages → FileAst.pages) for analyze's per-route attribute check.
+    //   `ctx` "page": a `<page>` in a `<page>` body — §4.15: "`<page>` is
+    //     grammatical only as a child of `<program>` … Use outside the owning
+    //     locus is `E-STRUCTURAL-ELEMENT-MISPLACED`".
+    //   `ctx` "nested": in a nested `<program>` (§4.12.2: a worker / sidecar /
+    //     scoped-db context). ⚑ No SPEC sentence says what a `<page>` there
+    //     means (searched §4.12, §4.15, §40.8, §43), so it is refused by name.
+    // In either refused place the body is still read (to find its closer); the
+    // error stops the build.
+    fn pageItem(o: Opener, mp: MP, ctx: string) -> RMItems {
+        let m: MP = mp
+        const tagEnd: int = o.start + 5
+        if (ctx == "page") {
+            m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` inside a `<page>` — a `<page>` is grammatical only as a direct child of `<program>` (§4.15, §40.8); close the first `<page>` before opening the next", o.start, tagEnd)
+        } else if (ctx == "nested") {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<page>` inside a nested `<program>` is not in the bootstrap — the SPEC gives a `<page>` no meaning inside a worker / sidecar / scoped-db program (§4.12.2, §40.8); put the `<page>` in the top-level `<program>`", o.start, tagEnd)
+        }
+        let items: AItem[] = []
+        if (!o.selfClosing) {
+            const r: RMItems = parseMarkupItemsIn(m, "page", "page")
+            items = r.items
+            m = r.mp
+        }
+        if (ctx == "program") m = withPage(m, { span: mkSpan(o.start, tagEnd), attrs: o.attrs, body: mkSpan(o.start, m.pos) })
+        return { items: items, mp: m }
+    }
+
+    fn withPage(mp: MP, pg: APage) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), ns: mp.ns }
+    }
+
+    // A `<page>` opener carries plain attributes only (the §40.8 per-route set —
+    // analyze checks the names and values). It is no declaration opener (no own
+    // value, `:Type` or typed attribute — parseTagItem reads those as a
+    // declaration named `page`). Anything else the opener parsed would be
+    // dropped by APage, so each is refused here: a validator call is an
+    // attribute outside the per-route set (§40.8: "any other attribute on
+    // `<page>` fires `E-PAGE-INVALID-ATTR`"); a `:`-shorthand body has no SPEC
+    // meaning on `<page>` (searched §4.15, §40.8, §4.14 — as for `<program>`,
+    // programOpenerDiags); `export` / `let` apply to declarations only.
+    fn pageOpenerDiags(o: Opener, mp: MP, exported: boolean, isLet: boolean) -> MP {
+        let m: MP = letOnNonDecl(mp, o, isLet)
+        const at: int = o.start
+        const why: string = " on `<page>` is not in the bootstrap — a `<page>` opener carries plain per-route attributes only (§40.8); it is not a declaration"
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to a `<page>`", at, at + 5)
+        for (const v of o.vals) {
+            m = mDiag(m, "E-PAGE-INVALID-ATTR", "the validator `" + v.name + "(…)` on `<page>` — a `<page>` takes only the per-route attributes `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` (§40.8)", v.span.start, v.span.end)
+        }
+        if (o.short is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body" + why, at, at + 5)
+        return m
+    }
+
+    // §38.1: "A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE`"
+    // (§34). Read whole, so its closer is found, and not kept: the error stops
+    // the build, and analyze does not also report it as an unbuilt `<channel>`.
+    fn channelInPage(o: Opener, mp: MP) -> RMItems {
+        const r: RElem = finishElem(o, mp)
+        const m: MP = mDiag(r.mp, "E-CHANNEL-INSIDE-PAGE", "`<channel>` inside `<page>` — a channel is app-scope shared state, not a per-route declaration (§38.1, §40.8); move it up into the `<program>`, beside the `<page>`", o.start, o.start + 8)
+        return { items: [], mp: m }
     }
 
     // =========================================================================
@@ -9266,7 +9367,7 @@ ${
     // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
     // offsets its first analysis proved, PNs.at).
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], ns: ns }
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], ns: ns }
         const r: RMItems = parseMarkupItems(m0, "")
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
@@ -9275,7 +9376,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, pages: r.mp.pages, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).
