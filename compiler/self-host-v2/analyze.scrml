@@ -12646,10 +12646,13 @@ ${
     // part of it the bootstrap can walk (an `<each>` row, a part of a `given`-narrowed
     // handle, a local whose type the compiler cannot resolve): its values are
     // resolved, and it is refused. (s477: an edit of a PART of a local is built —
-    // resolveLocalPartEdit.)
+    // resolveLocalPartEdit.) INTERIM (gap g-boot-local-edit-receiver-residue-s477,
+    // S477 FIX ROUND 1 / review F2): SPEC does not make an `<each>` row read-only
+    // (§17.7 / §66.7.3 say nothing on writing one — "a read-only projection" is the
+    // bootstrap's own wording, ruling owed); the capable forms are recorded in the gap.
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on this receiver (an `<each>` row, a part of a `given`-narrowed handle, or a local whose type the compiler cannot resolve) is not in the bootstrap yet — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on this receiver (an `<each>` row, a part of a `given`-narrowed handle, or a local whose type the compiler cannot resolve) is not in the bootstrap yet (gap g-boot-local-edit-receiver-residue-s477) — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
     }
 
     // s475 (s475-boot-local-tape-edits) — `xs.append(v)` / `xs.prepend(v)` /
@@ -12767,7 +12770,7 @@ ${
         }
         // `remove` / `insert` are tape methods only on a tape (a host value has its own)
         if (!editName && seqElem(unMaybe(pw.t)) is not) return not
-        if (isRowLocal(env, l)) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of the row `" + l.name + "` — a row is a read-only projection of its source's element; write the source cell")
+        if (isRowLocal(env, l)) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of the row `" + l.name + "` — an edit of a row is not in the bootstrap yet (gap g-boot-local-edit-receiver-residue-s477); write the source cell")
         // the local's name is an APPEARANCE of the binding (§35.2), as in a part write
         let st: AS = st0
         const rn: AExpr | not = partRootName(m.obj)

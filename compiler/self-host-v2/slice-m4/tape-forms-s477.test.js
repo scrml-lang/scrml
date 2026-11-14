@@ -227,6 +227,21 @@ describe("B4 — FIX ROUND 1: every assignment position is either lowered with t
   });
 });
 
+describe("A4 — FIX ROUND 1 (review F2): the residual receivers are refused by name, under a gap", () => {
+  test("an edit of an `<each>` row (the row's tape, a tape field of the row): E-BOOTSTRAP-UNSUPPORTED naming g-boot-local-edit-receiver-residue-s477", () => {
+    const P = (decls, rows, h) => `<program>\n${decls}\n    <main><ul><each in=${rows} as r><li><button onclick={ ${h} }>a</button></li></each></ul></main>\n</program>\n`;
+    for (const src of [
+      P("    type R:struct = { id: int, xs: int[free, append, pop] }\n    <rs:R[replace]=([{ id: 1, xs: [1] }])/>", "@rs key=@.id", "r.xs.append(1);"),
+      P("    type R:struct = { id: int, xs: int[free, append, pop] }\n    <rs:R[replace]=([{ id: 1, xs: [1] }])/>", "@rs key=@.id", "r.xs.pop();"),
+      P("    <g:int[free, append][replace]=([[1]])/>", "@g", "r.append(1);"),
+    ]) {
+      const ds = run(src).diags;
+      expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(ds[0].message).toContain("g-boot-local-edit-receiver-residue-s477");
+    }
+  });
+});
+
 // ===========================================================================
 //   C. a spread as a VALUE (gap g-boot-spread-value-s475). §66.12.1: "Non-mutating
 //      operations (`map`, `filter`, `slice`, `concat`, …) are always allowed; they return
