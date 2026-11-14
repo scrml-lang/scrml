@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1827 of 1827 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1833 of 1833 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 305 | 16.7% |
+| PASS | 311 | 17.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 252 | 13.8% |
+| FAIL | 252 | 13.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 624 | 34.2% |
-| UNSUPPORTED | 646 | 35.4% |
+| NOT-TWINNED | 624 | 34.0% |
+| UNSUPPORTED | 646 | 35.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 557; of those, 305 hold (54.8%). Runtime half executed on the bootstrap for 109 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 563; of those, 311 hold (55.2%). Runtime half executed on the bootstrap for 112 case(s).
 
-- **Vacuous** passes: 17 of 305 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **288**.
+- **Vacuous** passes: 17 of 311 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **294**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 74 of 252; the other 178 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 646.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **859** — PASS 187 · FAIL 212 · UNSUPPORTED 460. Twin holds 187 (non-vacuous 174). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **865** — PASS 193 · FAIL 212 · UNSUPPORTED 460. Twin holds 193 (non-vacuous 180). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -150,7 +150,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 29 | · | 14 | · | 44 | 28 | · | · |
+| reactive | 121 | 35 | · | 14 | · | 44 | 28 | · | · |
 | refinement | 57 | · | · | 12 | · | 23 | 22 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -1140,7 +1140,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (305)
+### PASS / CODES-ONLY (311)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1426,6 +1426,12 @@ none
 - `reactive/reserved-prefix-declaration-pos` — PASS · TWIN
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
+- `reactive/tape-local-part-edit-rt` — PASS · TWIN
+- `reactive/tape-local-part-edit-ungranted-neg` — PASS · TWIN
+- `reactive/tape-removal-value-not-t-neg` — PASS · TWIN
+- `reactive/tape-removal-value-rt` — PASS · TWIN
+- `reactive/tape-spread-non-tape-neg` — PASS · TWIN
+- `reactive/tape-spread-value-rt` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
 - `server-db/sql-aggregate-group-rt-twin` — PASS
@@ -2002,7 +2008,7 @@ none
 - `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `.preventDefault(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.r
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
-- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value
+- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
