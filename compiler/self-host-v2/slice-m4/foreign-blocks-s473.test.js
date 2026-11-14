@@ -19,8 +19,10 @@
 // The shapes below are minimal excerpts of real flogence code (src/ports/*.scrml), copied,
 // never edited in place.
 //
-// Emission is NOT built: an admitted block is refused by name (E-BOOTSTRAP-UNSUPPORTED,
-// "not in the bootstrap yet") — fail closed, never printed wrong.
+// Emission outside a tool is NOT built: an admitted block in a web application's server
+// function is refused by name (E-BOOTSTRAP-UNSUPPORTED, "not in the bootstrap's server artifact
+// yet") — fail closed, never printed wrong. s477-boot-kind-tool: in a `kind="tool"` program the
+// block IS emitted (a sealed slice behind the boundary await) — kind-tool-s477.test.js.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -32,7 +34,7 @@ const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const errs = (src) => run(src).diags.filter((d) => String(d.severity).toLowerCase() === "error");
 const codes = (src) => [...new Set(run(src).diags.map((d) => d.code))].sort();
 const diagsOf = (src, code) => run(src).diags.filter((d) => d.code === code);
-const EMIT = "is not in the bootstrap yet";
+const EMIT = "is not in the bootstrap's server artifact yet";   // s477: emitted in a `kind="tool"` program (kind-tool-s477.test.js)
 // every Error is the named emission refusal, one per admitted block
 const onlyEmitRefusals = (src, n) => {
   const es = errs(src);
@@ -222,10 +224,11 @@ describe("C — positions and language", () => {
     expect(d[0].message).toContain("kind=\"tool\"");
   });
 
-  test("a bare block in a `kind=\"tool\"` program's function is admitted (§23.2.4 form 3) — the tool program itself is refused", () => {
+  test("a bare block in a `kind=\"tool\"` program's function is admitted (§23.2.4 form 3) — and, since s477, built (no refusal)", () => {
     const src = '<program kind="tool" lang="ts">\n    function main(args: string[]) -> int {\n        _={ console.log("no pending tasks to dispatch.") }=;\n        return 0;\n    }\n</program>\n';
     expect(codes(src)).not.toContain("E-FOREIGN-004");
-    expect(run(src).diags.some((d) => d.message.includes(EMIT))).toBe(true);
+    // s477-boot-kind-tool: the tool emits the block (kind-tool-s477.test.js runs it)
+    expect(run(src).diags).toEqual([]);
   });
 
   test("E-FOREIGN-004: inside another expression, an assignment's value, a handler, a file-scope const", () => {

@@ -1,0 +1,17 @@
+{
+  "id": "tool-markup-body-neg",
+  "description": "§64.4 E-TOOL-003 — markup in the body of a `kind=\"tool\"` program (a tool has no page to render it into).",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64.4",
+  "rationale": "§64.4: \"`<page>` children, markup body content, or client-reactive UI state inside a `kind=\"tool\"` program → `E-TOOL-003` (a hard error, never silently dropped).\"",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-TOOL-003"
+    ],
+    "severity": {
+      "E-TOOL-003": "error"
+    }
+  }
+}

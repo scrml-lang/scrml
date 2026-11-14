@@ -280,6 +280,7 @@ ${
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
             .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
             .Query(q: q) :> exprNodes(q.params)                 // s468 (U1c): its values (the text is data)
+            .Foreign(slice: fsl0, args: args) :> exprNodes(args)    // s477: its crossing values (the slice text is data)
         }
     }
 
@@ -541,6 +542,7 @@ ${
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
             .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 
@@ -689,6 +691,7 @@ ${
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
+            .Foreign(slice: fsl0) :> -1
         }
     }
 

@@ -1,0 +1,17 @@
+{
+  "id": "tool-kind-unknown-neg",
+  "description": "§64 E-TOOL-002 — a `kind=` value outside the closed vocabulary.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§64",
+  "rationale": "§64: \"The vocabulary is `\"tool\" | \"service\"` (closed vocabulary, mirroring §23.5.3); other values → `E-TOOL-002`.\"",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [
+      "E-TOOL-002"
+    ],
+    "severity": {
+      "E-TOOL-002": "error"
+    }
+  }
+}

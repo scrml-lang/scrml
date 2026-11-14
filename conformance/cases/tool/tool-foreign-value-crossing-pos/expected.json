@@ -1,0 +1,17 @@
+{
+  "id": "tool-foreign-value-crossing-pos",
+  "description": "§23.2.4a — an inline value-returning foreign block in a tool function: its `in:{}` crossing is the sealed slice's parameter, the single-expression slice gets the injected `return`, and the settled value flows back into the scrml local (awaited at the boundary).",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/kind-tool-s477.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: \"The crossings are the parameters of the sealed slice and the block is a call of it with the same-named enclosing values; the `await` of that call is INJECTED by codegen at the boundary\"; \"Single-expression slice … Codegen injects the `return`\".",
+  "provenance": "dispatch:s477-boot-kind-tool",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-TOOL-",
+      "E-FOREIGN-"
+    ],
+    "stdout": "HI!\n"
+  }
+}

@@ -98,6 +98,7 @@ ${
             .Validity(of: x) :> "Validity"
             .ServerCall(fn: x) :> "ServerCall"
             .Query(q: x) :> "Query"
+            .Foreign(slice: fsl0) :> "Foreign"
         }
     }
 
