@@ -83,3 +83,13 @@
   68 AStmtK match arms.
 - core: Stmt.LocalFn(f: Fn); walk/measure/print/print-server/check/lower arms; check C-N1.
 - print: `localFnJs` — a host `function` declaration in place.
+- merged origin/main (#1823 call-source types, #1824 in-place tape edits): print.scrml `ownStmt` gets a LocalFn
+  arm (every local a nested body names copies on write; the nested body prints with its own ownedLocals).
+- Bootstrap conformance (origin/main 0487a8fa4 report → this branch): PASS 302 → 307 (+5: the five new
+  fn/nested-* cases), FAIL 244 → 243 (refinement/nested-fn-param-reject-rt FAIL → UNSUPPORTED: its `string(url)`
+  parameter is now refused by name instead of a parse cascade), UNSUPPORTED 657 → 658, NOT-TWINNED 624,
+  CRASH 0, INVALID 0. No old case lost PASS. defer/duplicate-function-{neg,no-defer-ok} stay FAIL as on base
+  (their twins' newline-terminated `return 1` is E-STMT-MISSING-SEMICOLON, dpa-073 — not this lane).
+- Hook: `SCRML_HOOK_SHARDS=1` fails on base on compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js
+  (passes alone — single-process order pollution, impl#1, untouched here); the default sharded hook with
+  SCRML_HOOK_SHARD_MEM_MB=4608 passed: 54,297 pass / 0 fail (slices included).
