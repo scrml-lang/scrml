@@ -2,11 +2,11 @@ ${
     type Row:struct = { id: number, text: string }
     <a> : Row[] = []
     <b> : Row[] = []
-    function loadA() : Row[] {
+    function loadA() -> Row[] {
         rows = ?{`SELECT id, text FROM a`} !{ _ :> [] }
         return rows
     }
-    function loadB() : Row[] {
+    function loadB() -> Row[] {
         rows = ?{`SELECT id, text FROM b`} !{ _ :> [] }
         return rows
     }

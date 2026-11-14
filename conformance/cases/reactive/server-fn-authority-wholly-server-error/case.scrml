@@ -1,6 +1,6 @@
 <program db="sqlite:./orders.db">
 <price server> = 10
-function bump() : number {
+function bump() -> number {
     result = ?{`UPDATE prices SET n = ${@price} + 1 RETURNING n`}
     return result
 }

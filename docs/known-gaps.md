@@ -888,8 +888,10 @@ Measured on `origin/main` (`dd373f8aa`): `bun scripts/scrml-boot.ts compile` of 
 
 The bootstrap compiles a program's file set into one Core (link.scrml), so an imported library's reached functions are printed in the tool module itself; the behaviour is the same, the artifact shape is not (no `<base>.js` per library, no cross-module await-coloring at an `import` boundary — every call is in one module). A page-shaped or export-less import is E-TOOL-006 (built). Becomes observable with a separately emitted library module (§21.5 library mode, not in the bootstrap).
 
-<!-- @gap id=g-spec-tool-colon-return-s477 sev=LOW status=open locus=compiler/SPEC.md(§64.2 / §64.3 / §64.7 / §34 E-TOOL-001 spell `function main(args: string[]): number`;§14 SPEC.md:8871 "`->` is the sole return-type annotation syntax") prov=dispatch:s477-boot-kind-tool(ruling owed) -->
+<!-- @gap id=g-spec-tool-colon-return-s477 sev=LOW status=resolved resolved-by=s477-tool-arrow-return locus=compiler/SPEC.md(§64.2 / §64.3 / §64.7 / §34 E-TOOL-001 spell `function main(args: string[]): number`;§14 SPEC.md:8871 "`->` is the sole return-type annotation syntax") prov=dispatch:s477-boot-kind-tool(ruling owed) -->
 ### g-spec-tool-colon-return-s477 — SPEC §64 spells the tool entry `function main(args: string[]): number`, but §14 says "`->` is the sole return-type annotation syntax for `function` and `fn` declarations" — `NEW S477 (s477-boot-kind-tool); LOW; open (ruling owed)`
+
+**Resolved S477** (ruling:user-voice-scrml.md S477 "⭐ RULED — tool `main` return type spelled `->`"): §64 is amended to `->` (§64 heading note, §64.2 heading, §64.3 bullet, §64.7 example, the §34 E-TOOL-001 row); the two other colon returns the SPEC showed (§18.19 `fn step`, §52.3.7 `submitDraft`) are migrated too; the 38 conformance cases that spelled a return with `:` migrate to `->`.
 
 The bootstrap follows §14 (`function main(args: string[]) -> number`); `): number` is a parse error there as for any function. The nine corpus cases written `): number` (`print/tool-println-clean-stdout`, `server-fn/session-value-in-tool-neg`, `sql/prepare-tool-in-block-e-sql-006-neg`, six `foreign/*` slice cases — they also omit the dpa-073 `;`) were bucketed UNSUPPORTED on the bootstrap behind the `kind=` refusal and are now FAIL parse-reject; the twin rules (`fix-s66`) do not rewrite the return-type colon. Ruling owed: amend §64's spelling to `->` (PA recommendation — §14's sentence is the explicit normative one), or admit `: T` returns. `conformance/cases/tool/` is written `->` and passes on both implementations.
 
@@ -31704,6 +31706,11 @@ The refusal itself is an unbuilt case, not a ruling, so the message should say w
 
 <!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=open locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
 ### g-boot-ownedlocals-kids-blind-spots-s477 — `walk.kids` does not descend into `FSettled`, `Suspend.bind` or `Attempt.result`, so the owned-locals scan built on it cannot see a use of a local there; no escape found by the #1824 review, but the scan's soundness rests on those nodes never carrying an alias — `NEW S477; LOW; open (hardening)`
+
+<!-- @gap id=g-impl1-colon-return-accepted-s477 sev=LOW status=carried locus=compiler/src/ast-builder.js(function-decl head readers — the `if (peek().text === ":")` return-type branch, ~:14178 / ~:14461 / ~:18287 / ~:18603) prov=ruling:user-voice-scrml.md-S477-⭐-RULED-tool-main-return-type-spelled-arrow;empirical:s477-boot-colon-return-reject(conformance/run.ts---xfail-signature-fn/return-colon-spelling-neg) -->
+### g-impl1-colon-return-accepted-s477 — impl#1 accepts a colon-spelled return type `function f(…) : T { … }` / `(…): T` as a return annotation, silently, where SPEC §7 says "`->` is the sole return-type annotation syntax for `function` and `fn` declarations" and bryan S477 ruled `): T` newly rejected; the bootstrap reports E-PARSE-FN (s477-boot-colon-return-reject) — `NEW S477; LOW; carried`
+
+Carried by `conformance/cases/fn/return-colon-spelling-neg` (impl1-ts xfail: E-PARSE-FN fires 0 times). Status `carried` (owed by the bootstrap, xfail on impl#1 — S430 P7; the conformance runner refuses an xfail naming a `deferred` gap); no impl#1 fix is scheduled (S471 impl#1 policy, no `compiler/src` change). Who pays while it stays: an author on impl#1 who writes the stray spelling gets no signal, and the same source then fails on the bootstrap.
 
 ## §S477 review follow-ups (round 2) — LOW items from the #1826 / #1828 / #1830 / #1831 / #1835 reviews and fix rounds, and S477 tooling lanes
 

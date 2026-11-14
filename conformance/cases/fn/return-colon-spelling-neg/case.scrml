@@ -1,0 +1,7 @@
+// §7 — `->` is the sole return-type annotation syntax; `) : T` (a colon) is a compile error (S477).
+<program>
+    function total(n: int) : int {
+        return n + 1;
+    }
+    <main><p>${total(1)}</p></main>
+</program>

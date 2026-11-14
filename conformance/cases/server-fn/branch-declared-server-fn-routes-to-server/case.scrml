@@ -4,7 +4,7 @@ ${
 }
 <div id="wrap" if=@open>
     ${
-        server fn branchLoad() : string {
+        server fn branchLoad() -> string {
             return "COMPUTED-IN-THE-BODY"
         }
         function pull() {
