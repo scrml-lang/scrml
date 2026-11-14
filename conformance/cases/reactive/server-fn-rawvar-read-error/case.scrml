@@ -1,6 +1,6 @@
 ${
     <price> = 10
-    function saveOrder() : number {
+    function saveOrder() -> number {
         result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`}
         return result
     }

@@ -2,7 +2,7 @@
 ${
     type User:struct = { id: number, name: string }
     <users> : User[] = []
-    function loadUsers() : User[] {
+    function loadUsers() -> User[] {
         return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
     }
 }

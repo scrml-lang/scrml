@@ -1,5 +1,5 @@
 <program kind="tool" lang="js">
-    function main(args: string[]): number {
+    function main(args: string[]) -> number {
         const greeting = "hello"
         const n = 2
         const sum = _={ in: { n } await Promise.resolve(n + 40) }=

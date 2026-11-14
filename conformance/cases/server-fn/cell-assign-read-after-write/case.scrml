@@ -1,7 +1,7 @@
 ${
     <out> : number = 0
     <seen> : number = -1
-    server fn double(n: number) : number {
+    server fn double(n: number) -> number {
         return n * 2
     }
     function go() {

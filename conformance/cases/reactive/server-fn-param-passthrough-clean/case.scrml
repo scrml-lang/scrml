@@ -1,7 +1,7 @@
 ${
     <price> = 10
     const <total> = @price * 3
-    function saveOrder(total:number) : number {
+    function saveOrder(total:number) -> number {
         result = ?{`INSERT INTO orders (amount) VALUES (${total}) RETURNING id`}
         return result
     }
