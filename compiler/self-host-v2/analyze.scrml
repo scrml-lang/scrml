@@ -12182,6 +12182,15 @@ ${
         return { replace: g.replace, edits: seqEdits(g) }
     }
 
+    // s478 (RULED S478 item 1) — may an AUTHOR replace pending cell `f` whole (checkWrite)? A
+    // scalar pending cell: yes (its lifecycle governs the value). A pending TAPE: only when its own
+    // type grants `replace` (§66.12.2) — `let` and the lifecycle `(not to …)` grant a tape nothing.
+    fn pendTapeReplaces(f: FieldInfo) -> boolean {
+        const gs: GrantSet | not = tapeGrants(f.ty)
+        if (gs is not) return true
+        return grantsAdmit(gs, EditKind.Replace)
+    }
+
     // One tape field a whole-struct write replaces: where it is (for the
     // message), its type, and its OWN grants (the FieldDef's — never the
     // owning struct's `replace`). `inner`: the tape is held by an ELEMENT of a
@@ -29856,6 +29865,16 @@ ${
             if (pt is not) return ts
             return boundValue(env, value, pt, what, checkNotElems(env, value, pt, checkLitFields(env, value, checkValue(env, v, pt, value.span, what, ts))))
         }
+        // s478 (s478-boot-pending-rulings; RULED S478 item 1, #1796 review L3) — "A whole-cell author
+        // write into a pending `(not to S[…])` tape needs the `[replace]` grant like any other tape;
+        // the compiler-written settle write stays exempt (S475 item 1)". fieldOf gives a pending cell
+        // the `replace` channel for its lifecycle (and `let`), so the settle write and `reset` have a
+        // capability — but on a TAPE that channel is not the author's: a tape's grants live on its
+        // type (§66.12.2, §66.12.3), whatever the declaration says. Before the handled-wait carve-out
+        // below, so `@xs = load() !{ _ :> not }` into a pending tape is refused the same way.
+        if (w.edit == EditKind.Replace && pendingField(env.t, f) && !pendTapeReplaces(f)) {
+            return report(ts, env, value.span, "E-WRITE-NOT-GRANTED", pendTapeReplaceMsg(f))
+        }
         // s475 S4 r1 (F2) — §13.9.4 ¶2 "An action-position write of a waiting value into a pending cell
         // (`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its
         // suspension point (§13.8 (i)) and lands when the value arrives" — the author's own handled load
@@ -29900,6 +29919,14 @@ ${
         const s: Sym | not = fnSymOf(nameFact(t.names, c.nid))
         if (s is not) return false
         return t.waits.indexOf(s.id) >= 0
+    }
+
+    fn pendTapeReplaceMsg(f: FieldInfo) -> string {
+        const n: string = f.sym.hint
+        let el: string = "S"
+        const et: Type | not = seqElem(unMaybe(f.ty))
+        if (et is given) el = typeName(et)
+        return "`@" + n + "` is a pending tape whose type grants nothing — this whole-value write needs `replace` in the tape's grants (`(not to " + el + "[replace])`, §66.12.2), like any other tape: `let` and the lifecycle `(not to …)` grant a tape no `replace` (its grants live on the type, §66.12.3; RULED S478). Only the cell's own load writes it whole (§13.9.2) — `reset(@" + n + ")` re-runs that load. (A granted tape inside a lifecycle type is not in the bootstrap yet, gap g-boot-pending-tape-granted-lifecycle-s478.)"
     }
 
     // s475 (S4) — `nid` is the right-hand side of a pending cell's settle write (§13.9.2).

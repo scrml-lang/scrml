@@ -511,7 +511,10 @@ function pendWrite(cell, v) {
   const s = curStamp !== 0 ? curStamp : ++pendSeq;
   if (p.load > s || p.wrote > s) return PEND_STALE;   // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
-  if (p.load < s) p.req.supersede();                  // r4 F-A: every winning write, a no-op included
+  // r4 F-A: every winning write, a no-op included. s478: `<=` — a tie is a reset's run and a write
+  // in the SAME continuation (resetRun dates the run as a write is dated); the write runs after it
+  // there, so it is the later start and wins (`reset(@x); @x = v;`, RULED S478 item 2).
+  if (p.load <= s) p.req.supersede();
   return v === null || v === undefined ? PEND_RELOAD : PEND_LAND;
 }
 
@@ -540,14 +543,29 @@ class Request {
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
   }
-  run() {
+  /**
+   * s478 (RULED S478 item 2; SPEC §13.9.4 rule 3) — `reset(@x)` of a pending cell: the run it
+   * triggers STARTS AT THE RESET, so it runs now (not at the end of the batch, as a dependency
+   * change's run does) and its start is dated as a write's is (rule 2): the running continuation's
+   * wait stamp, or a fresh one in a handler's synchronous part. An author write after the reset is
+   * therefore the later start and supersedes it when it lands (`reset(@who); @who = "z";` keeps
+   * "z"; a READ run's transport is aborted); a dependency change in the same batch still re-runs
+   * the load at the batch's end, the newest start (rule 3).
+   */
+  resetRun() {
+    if (this.disposed) return;
+    this.run(curStamp !== 0 ? curStamp : ++pendSeq);
+  }
+  run(start = 0) {
     if (this.disposed) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
     const p = this.target.pend;
-    if (p !== null && p.req === this) p.load = ++pendSeq;     // N2: this load's start stamp
+    // N2: this load's start stamp — a reset's (resetRun), else now (a mount / dependency-change run
+    // starts when it runs: the end of the batch that triggered it, §13.9.4 rule 3)
+    if (p !== null && p.req === this) p.load = start > 0 ? start : ++pendSeq;
     const st = this.state;
     try {
       if (st) {
@@ -699,7 +717,12 @@ export function requestSlot() {
  */
 export function refetch(slot) {
   const r = slot ? slot.request : null;
-  if (r) r.markStale();
+  if (!r) return;
+  // s478: a pending cell's hidden request is reached only by `reset(@x)` (§13.9.2: it has no
+  // `refetch()`), and the run a reset triggers starts at the reset (§13.9.4 rule 3, RULED S478)
+  const p = r.target.pend;
+  if (p !== null && p.req === r) r.resetRun();
+  else r.markStale();
 }
 
 /**
