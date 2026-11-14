@@ -132,3 +132,50 @@ narrowed to that locus).
   UNSUPPORTED 658 → 649 (−9) · NOT-TWINNED 624 = · CRASH 0 · INVALID 0 · runtime half executed 109 → 112.
   The +9 FAIL are the nine legacy `): number` tool cases (UNSUPPORTED behind the old `kind=` refusal,
   now FAIL parse-reject — g-spec-tool-colon-return-s477). No other case moved.
+
+## FIX ROUND 1 (review s477-1828)
+
+Merged `origin/main` (#1823 / #1824 — s476 call-source-types, tape-inplace). Clean textual merge, but
+main's five new exhaustive `Expr` matches in print.scrml (literalParts, ownExpr, lambdaArity, ownFresh,
+selfEdit) predate `Expr.Foreign` and the bundle failed E-TYPE-020; added the arms, fail-closed (a
+crossing is an ordinary read — host code may keep it; a slice's result is not fresh; never a self-edit).
+
+**F1 (MEDIUM, security) — E-FOREIGN-007 fail-open; eager build ran injected code at load.** Governing:
+§23.2.4a "A slice is evaluated as the body of a strict-mode async function"; §23.2.6 "A slice that is
+not valid JavaScript as the body of a strict-mode async function whose parameters are its crossings
+SHALL be a compile error (E-FOREIGN-007)". `checkForeignSliceSyntax` parses `return (SOURCE);`, and a
+slice closing the sealed function's own `}` makes SOURCE a comma expression of functions, which parses.
+Fix (root): `slice-m1/tool-slices.js` `isOneFunction` parses the same probe and requires the returned
+value to be ONE async FunctionExpression spanning all of SOURCE (and the probe to be exactly the
+wrapper + that return) — parser tokens, so `})` inside strings / comments / templates / regexes is not
+mistaken for an escape. Else E-FOREIGN-007 at the slice. Also `foreignSeal` now builds on first call,
+once (impl#1's laziness; defence in depth, not the fix). Tests: kind-tool-s477 D — 8 escape variants
+(+ one with a crossing), 9 non-escape `})`-bearing / normal slices, the reviewer's `esc.scrml` end to
+end (E-FOREIGN-007, nothing written), the lazy build.
+impl#1 accepts the same text (lazily): filed `g-impl1-foreign-slice-wrapper-escape-s477` (MED, deferred,
+prov=review:s477-1828(F1)); impl#1 not changed (policy). Severity note: foreign code is author-trusted
+(§23.2.3 "not a sandbox"), so the impact is the check's and the seal's shape failing open, and code
+running at load instead of at the call — not a privilege boundary.
+
+**F2 (LOW-MED) — a `<foreign lang>` / `<db src>` library was E-TOOL-006.** Governing §64.5.1: "An async
+imported library fn (e.g. a `<foreign lang>` lib `export fn` …)" and "A tool MAY import a db-bound library
+fn — … (a library declaring its own `<db src>`)". analyze.scrml `isLibrarySurface` keeps both tags out of
+the page-markup test (the "holds page markup" and "exports nothing" arms); the tag then gets exactly what a
+web program's import of the same file gets (outsideProgramDiag — today the INTERIM E-BOOTSTRAP-UNSUPPORTED:
+the bootstrap builds neither library surface for a web program either). A file with only the tag and no
+`export`, or with page markup beside it, is still E-TOOL-006. Test: kind-tool-s477 D/F2.
+
+**F3 (LOW) — slices in functions `main` never reaches were not checked.** E-FOREIGN-006 / 007 are compile
+errors at the slice (§23.2.4a / §23.2.6), not run-time ones. print-server.scrml `toolSlices` now returns
+the slices of EVERY function of the program; printTool still prints only the ones `main` reaches (it looks
+each up by site). Tests: kind-tool-s477 D/F3 (`import.meta` → 007, a crossing shadow → 006, both in an
+unreached function; an unreached valid slice is checked but not printed).
+
+### Measured (fix round 1)
+- kind-tool-s477 33/0 (27 → 33) · foreign-blocks-s473 + program-shape 110/0 · pre-commit gate (shards=1)
+  green on each commit.
+- Bootstrap conformance: attempted 1838 · PASS 313 · FAIL 253 · UNSUPPORTED 648 · NOT-TWINNED 624 ·
+  CRASH 0 · INVALID 0 · runtime half 112. vs the round-0 run (313 / 252 / 649): the one moved case is
+  `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` UNSUPPORTED → FAIL, which main
+  already lists as FAIL (docs/bootstrap-conformance.md on main) — it came in with the merge, not these fixes.
+  vs main's doc (1827 · 302 / 244 / 657): +11 PASS (the tool cases), +9 FAIL (the `): number` cases), as round 0.
