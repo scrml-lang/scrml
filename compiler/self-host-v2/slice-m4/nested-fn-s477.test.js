@@ -141,6 +141,18 @@ describe("§7.3.1 / §48.6.4 — scope, hoisting, closures (run)", () => {
     const r = await run(prog(fns, "tally(4)"));
     expect([r.c, r.h]).toEqual(["7", "2"]);
   });
+  test("a tape a closure can see is never edited in place (§66.10 snapshot — s476 in-place edits)", async () => {
+    const fns = `    function snapLen() -> int {
+        let xs: int[free, append] = [];
+        function snap() -> int[free, append] { return xs; }
+        xs.append(1);
+        const a: int[free, append] = snap();
+        xs.append(2);
+        xs.append(3);
+        return a.length * 10 + xs.length;
+    }`;
+    expect((await run(prog(fns, "snapLen()"))).c).toBe("13");
+  });
   test("a nested `fn` calling a nested `fn` (§48.6.1) inside a `fn`", async () => {
     const fns = `    fn p4(n: int) -> int {
         fn sq(k: int) -> int { return k * k; }
@@ -189,7 +201,7 @@ describe("§7.3.1 / §48 — purity, scope and naming rules (refused)", () => {
     expect(C(`    function a(n: int) -> int {\n        let pos = 0;\n        fn bump() -> int { pos = pos + 1; return pos; }\n        return bump() + n;\n    }`)).toEqual(["E-FN-003"]);
   });
   test("a nested `fn` growing a captured tape is E-FN-003", () => {
-    expect(C(`    function a(n: int) -> int {\n        let xs: int[append] = [];\n        fn push() { xs.append(1); }\n        push();\n        return n;\n    }`)).toContain("E-FN-003");
+    expect(C(`    function a(n: int) -> int {\n        let xs: int[free, append] = [];\n        fn push() { xs.append(1); }\n        push();\n        return n;\n    }`)).toContain("E-FN-003");
   });
   test("a `fn` calling a nested `function` is E-FN-003 (§48.6.2)", () => {
     expect(C(`    fn p1(n: int) -> int {\n        function helper() -> int { return n; }\n        return helper();\n    }`)).toEqual(["E-FN-003"]);

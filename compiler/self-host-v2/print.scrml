@@ -33,7 +33,7 @@ ${
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
-    import { Node, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml"
+    import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
     import { HAttr, HNode, Page, printPage, isVoid, dropsLeadingLf, cutNewline } from "./html.scrml"
@@ -97,6 +97,10 @@ ${
         // (renderViews), and, for a hole being wired, the context AT the hole
         // (wireHole): `htmlNs()`, or "svg" / "math" / "math-text" / "annot".
         ns: string,
+        // s476 (s476-boot-tape-inplace): the locals of the function being printed
+        // that own their value (ownedLocals) — their edits are made in place.
+        // Empty outside a function body.
+        owned: OwnedLocal[],
     }
 
     // s474: `key` — a KEYED loop's (§17.4b) iteration-key local (its name and
@@ -876,7 +880,7 @@ ${
     fn withCycle(ctx: Ctx, c: CycleJs) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
-                 cycles: ctx.cycles.concat([c]), ns: ctx.ns }
+                 cycles: ctx.cycles.concat([c]), ns: ctx.ns, owned: ctx.owned }
     }
 
     fn cycleOf(ctx: Ctx, t: Sym) -> CycleJs | not {
@@ -1145,8 +1149,8 @@ ${
 
     fn stmtJs(ctx: Ctx, s: Stmt, assigned: int[]) -> JsStmt[] {
         return match s {
-            .Let(sym: sym, init: init) :> [letJs(ctx, sym, init, assigned)]
-            .Assign(local: l, value: v, path: pa) :> [JsStmt.SAssign(jid(symName(ctx, l)), assignedJs(ctx, l, v, pa))]
+            .Let(sym: sym, init: init) :> letStmtsJs(ctx, sym, init, assigned)                 // s476: + an owned local's flag
+            .Assign(local: l, value: v, path: pa) :> assignStmtsJs(ctx, l, v, pa)            // s476: an owned local's edit in place
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
             .Commit(writes: ws) :> commitJs(ctx, ws)
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
@@ -1185,12 +1189,12 @@ ${
 
     fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
     fn withNs(ctx: Ctx, ns: string) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns, owned: ctx.owned }
     }
 
     // -------------------------------------------------------------------------
@@ -1542,14 +1546,453 @@ ${
     // then never rebound (values are immutable, §66.10 — no alias sees it).
     fn assignedJs(ctx: Ctx, l: Sym, v: Expr, path: PathStep[]) -> JsExpr {
         if (path.length == 0) return exprJs(ctx, v)
+        return rtCall(ctx, "writePath", [jid(symName(ctx, l)), pathStepsJs(ctx, path), exprJs(ctx, v), jstr(pathLoc(path))])
+    }
+
+    // s472: a part write's path as the runtime takes it (`["head"]`, `[i]`), and the
+    // source location its trap reports (the first index step's)
+    fn pathStepsJs(ctx: Ctx, path: PathStep[]) -> JsExpr {
         let steps: JsExpr[] = []
+        for (const st of path) { steps = steps.concat([pathStepJs(ctx, st)]) }
+        return JsExpr.JArray(steps)
+    }
+
+    fn pathLoc(path: PathStep[]) -> string {
         let loc: string = ""
         for (const st of path) {
-            steps = steps.concat([pathStepJs(ctx, st)])
             const sl: string = pathStepLoc(st)
             if (loc == "") loc = sl
         }
-        return rtCall(ctx, "writePath", [jid(symName(ctx, l)), JsExpr.JArray(steps), exprJs(ctx, v), jstr(loc)])
+        return loc
+    }
+
+    // -------------------------------------------------------------------------
+    // s476 (s476-boot-tape-inplace) — an edit of a local IN PLACE when nothing
+    // else can see its value. A granted edit of a local (`xs.append(v)` …
+    // `xs.remove(i)`) and a part write (`xs[i] = v`, `p.f = v`) rebind the local
+    // to a COPY with the edit (§66.10 item 1: "A binding, argument or field
+    // initialized from a cell (or from any value) holds a snapshot of that
+    // value"). When no other binding, cell, argument, field, element, iteration
+    // or deferred body can ever hold the local's current value, the copy is
+    // unobservable, and the edit is made in place (§66.10 item 5, non-normative:
+    // "The copy strategy is not part of the contract") — so building a tape in a
+    // loop is amortized O(1) per append, not O(n).
+    //
+    // The proof is over the WHOLE function body, in no order, so a read in one
+    // loop iteration and a write in the next can never meet: a `let` local is
+    // OWNED when every read of it is one that keeps no reference to its value —
+    //   * the receiver of a built-in that yields a part or a NEW value
+    //     (`.length`, `xs[i]`, `xs.at(i)`, `join`, `includes`, `is given`, `sort`,
+    //     `reverse`, the Tape* edits; both sides of `==` (§45) and of a spread
+    //     `[...a, ...b]`);
+    //   * the receiver of `map` / `filter` / `some` / `every` / `sortBy` whose
+    //     function is a lambda of at most two parameters (JavaScript hands the
+    //     array itself to a third);
+    //   * a field read `p.f` (a part);
+    //   * `return x`, also as a field / element of a struct or tape literal the
+    //     `return` builds (the frame ends; a `defer` that could still write is below).
+    // ANY other read — a call argument, another binding's initializer, a cell
+    // write, a struct or tape element, a `for … of` iterable, a `match`, a lambda
+    // body that yields it, a `lift`, a `fail`, a server call — and any mention in
+    // a `defer` body (it runs after `return` has evaluated its value, §19.16.2)
+    // makes the local copy on EVERY write, as before. A local bound in a counted
+    // loop's head or by a condition assignment (`for ((x = …))`) is not owned (those
+    // print elsewhere). When unsure, it copies: the walk below reaches every
+    // expression through walk.scrml `kids`, and every local it meets in a
+    // position not listed above is disqualified.
+    //
+    // FRESH values — an array or struct literal, a Tape* / sort / reverse /
+    // `map` / `filter` / `sortBy` result — are held by nobody else. A local only
+    // ever bound to fresh values owns its value always (`fixed`: the edit is
+    // `rt.tapeAppendOwned(true …)`). A local ever bound to a value someone else
+    // may hold (a parameter, a field, a call's result) carries a flag `x$own`:
+    // false after such a binding, true after an edit (whose result is new when it
+    // copied) — so its FIRST edit copies and the rest are in place.
+    // -------------------------------------------------------------------------
+    type OwnedLocal:struct = { id: int, fixed: boolean }
+    // `lets` the locals a statement Let binds; `stale` those ever bound to a value
+    // someone else may hold; `edited` those an edit or a part write rebinds; `bad`
+    // those read where the read may keep their value, or bound where no flag prints.
+    type OwnScan:struct = { lets: int[], stale: int[], edited: int[], bad: int[] }
+    // an edit of a local by itself (`xs = TapeAppend(xs, v)`): the runtime's owned
+    // writer and the edit's other arguments
+    type SelfEdit:struct = { fn: string, args: Expr[] }
+
+    fn ownNone() -> OwnScan { return { lets: [], stale: [], edited: [], bad: [] } }
+    fn ownBad(ids: int[]) -> OwnScan { return { lets: [], stale: [], edited: [], bad: ids } }
+    fn ownJoin(a: OwnScan, b: OwnScan) -> OwnScan {
+        return { lets: a.lets.concat(b.lets), stale: a.stale.concat(b.stale), edited: a.edited.concat(b.edited), bad: a.bad.concat(b.bad) }
+    }
+
+    // The locals of one function body that own their value (and are edited).
+    fn ownedLocals(b: Block) -> OwnedLocal[] {
+        const s: OwnScan = ownScan(Node.NBlock(b))
+        let out: OwnedLocal[] = []
+        let seen: int[] = []
+        for (const id of s.lets) {
+            if (!hasInt(seen, id) && hasInt(s.edited, id) && !hasInt(s.bad, id)) {
+                out = out.concat([{ id: id, fixed: !hasInt(s.stale, id) }])
+            }
+            seen = seen.concat([id])
+        }
+        return out
+    }
+
+    fn ownScan(n: Node) -> OwnScan {
+        return match n {
+            .NStmt(s: s) :> ownStmt(s)
+            .NExpr(e: e) :> ownExpr(e)
+            .NInst(i: i) :> ownBad(instLocals(i))
+            .NProgram(p: x) :> ownKids(n)
+            .NDecl(d: x) :> ownKids(n)
+            .NField(f: x) :> ownKids(n)
+            .NFn(f: x) :> ownKids(n)
+            .NServerFn(f: x) :> ownKids(n)
+            .NBlock(b: x) :> ownKids(n)
+            .NPlace(pl: x) :> ownKids(n)
+            .NPattern(pat: x) :> ownKids(n)
+            .NEdit(k: x) :> ownKids(n)
+            .NView(v: x) :> ownKids(n)
+            .NAttr(a: x) :> ownKids(n)
+        }
+    }
+
+    fn ownKids(n: Node) -> OwnScan {
+        let out: OwnScan = ownNone()
+        for (const k of nodeKids(n)) { out = ownJoin(out, ownScan(k)) }
+        return out
+    }
+
+    // a handle local an instance reference names (never a tape; disqualified all the same)
+    fn instLocals(i: InstRef) -> int[] {
+        return match i {
+            .Alias(sym: s) :> [s.id]
+            .Narrowed(sym: s) :> [s.id]
+            .Kid(of: o) :> instLocals(o)
+            .HandleOf(of: o, sym: s) :> instLocals(o).concat([s.id])
+            .Shared(decl: x) :> []
+            .Lexical(depth: x) :> []
+        }
+    }
+
+    fn ownStmt(s: Stmt) -> OwnScan {
+        return match s {
+            .Let(sym: sym, init: init) :> ownLet(sym, init)
+            .Assign(local: l, value: v, path: pa) :> ownAssign(l, v, pa)
+            .Return(e: e) :> ownReturn(e)
+            .Defer(body: b) :> ownBad(blockLocals(b))
+            .Loop(label: x, head: h) :> ownJoin(ownKids(Node.NStmt(s)), ownBad(headBound(h)))
+            .Gather(g: g) :> ownJoin(ownKids(Node.NStmt(s)), ownBad(headBound(g.head)))
+            .Write(cap: x) :> ownKids(Node.NStmt(s))
+            .Commit(writes: x) :> ownKids(Node.NStmt(s))
+            .If(cond: x) :> ownKids(Node.NStmt(s))
+            .Eval(e: x) :> ownKids(Node.NStmt(s))
+            .Suspend(bind: x) :> ownKids(Node.NStmt(s))
+            .ResetSurface(of: x) :> ownKids(Node.NStmt(s))
+            .Unpersist(decl: x) :> ownKids(Node.NStmt(s))
+            .Attempt(result: x) :> ownKids(Node.NStmt(s))
+            .Fail(err: x) :> ownKids(Node.NStmt(s))
+            .Join(k: x) :> ownKids(Node.NStmt(s))
+            .Jump(k: x) :> ownKids(Node.NStmt(s))
+            .Break(target: x) :> ownKids(Node.NStmt(s))
+            .Continue(target: x) :> ownKids(Node.NStmt(s))
+            .Lift(into: x) :> ownKids(Node.NStmt(s))
+            .LocalFn(f: f) :> ownBad(blockLocals(f.body))     // s477: a closure (§7.3.1) may see any local it names, whenever it runs — every write of one copies
+        }
+    }
+
+    fn ownLet(sym: Sym, init: Expr) -> OwnScan {
+        let r: OwnScan = ownJoin(ownExpr(init), { lets: [sym.id], stale: [], edited: [], bad: [] })
+        if (!ownFresh(init)) r = ownJoin(r, { lets: [], stale: [sym.id], edited: [], bad: [] })
+        return r
+    }
+
+    fn ownAssign(l: Sym, v: Expr, path: PathStep[]) -> OwnScan {
+        let r: OwnScan = ownExpr(v)
+        for (const st of path) { r = ownJoin(r, ownStep(st)) }
+        if (path.length > 0) return ownJoin(r, { lets: [], stale: [], edited: [l.id], bad: [] })
+        const se: SelfEdit | not = selfEdit(l, v)
+        if (se is given) return ownJoin(r, { lets: [], stale: [], edited: [l.id], bad: [] })
+        if (!ownFresh(v)) r = ownJoin(r, { lets: [], stale: [l.id], edited: [], bad: [] })
+        return r
+    }
+
+    fn ownStep(st: PathStep) -> OwnScan {
+        return match st {
+            .StepIndex(index: ix) :> ownExpr(ix)
+            .StepField(ref: r) :> ownNone()
+        }
+    }
+
+    // `return x`, and `return { a: x, b: [y] }`: the frame ends, so a local the
+    // returned value holds — whole, or as a field / element of a struct or tape
+    // literal built right there — is never written again (a `defer` that could is
+    // disqualified above). What the caller gets is held by nobody else; the caller
+    // binds it as a value someone else may hold all the same (a call's result is
+    // not fresh), so its own first edit copies.
+    fn ownReturn(e: Expr) -> OwnScan {
+        if (exprLocalOf(e) >= 0) return ownNone()
+        const parts: Expr[] | not = literalParts(e)
+        if (parts is given) {
+            let r: OwnScan = ownNone()
+            for (const p of parts) { r = ownJoin(r, ownReturn(p)) }
+            return r
+        }
+        return ownExpr(e)
+    }
+
+    // the parts of a struct or tape literal; `not` for anything else
+    fn literalParts(e: Expr) -> Expr[] | not {
+        return match e {
+            .ArrayOf(elems: es) :> es
+            .StructOf(ty: x, fields: fs) :> fs
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    fn ownExpr(e: Expr) -> OwnScan {
+        return match e {
+            .Local(sym: s) :> ownBad([s.id])
+            .Prim(op: op, args: args) :> ownPrim(op, args)
+            .SeqCall(op: o, seq: sq, f: f) :> ownSeq(sq, f)
+            .Assigned(local: l, value: v) :> ownJoin(ownBad([l.id]), ownExpr(v))
+            .Lit(lit: x) :> ownKids(Node.NExpr(e))
+            .Read(place: x) :> ownKids(Node.NExpr(e))
+            .Call(callee: x) :> ownKids(Node.NExpr(e))
+            .Match(scrut: x) :> ownKids(Node.NExpr(e))
+            .ArrayOf(elems: x) :> ownKids(Node.NExpr(e))
+            .StructOf(ty: x) :> ownKids(Node.NExpr(e))
+            .VariantOf(enumSym: x) :> ownKids(Node.NExpr(e))
+            .Handle(inst: x) :> ownKids(Node.NExpr(e))
+            .InitOf(decl: x) :> ownKids(Node.NExpr(e))
+            .Host(call: x) :> ownKids(Node.NExpr(e))
+            .Lambda(params: x) :> ownKids(Node.NExpr(e))
+            .Refetch(req: x) :> ownKids(Node.NExpr(e))
+            .Validity(of: x) :> ownKids(Node.NExpr(e))
+            .ServerCall(fn: x) :> ownKids(Node.NExpr(e))
+            .Query(q: x) :> ownKids(Node.NExpr(e))
+        }
+    }
+
+    // A built-in's arguments: its first `wholeReads(op)` may be a bare local (the
+    // built-in keeps no reference to it); every other argument is an ordinary read.
+    fn ownPrim(op: PrimOp, args: Expr[]) -> OwnScan {
+        const keep: int = wholeReads(op)
+        let r: OwnScan = ownNone()
+        let i: int = 0
+        for (const a of args) {
+            if (i >= keep || exprLocalOf(a) < 0) r = ownJoin(r, ownExpr(a))
+            i = i + 1
+        }
+        return r
+    }
+
+    // How many leading arguments of a built-in it reads without keeping: each
+    // returns a scalar, an element (a part), or a NEW value (runtime.js). Not
+    // listed: 0 — an ordinary read (fail closed).
+    fn wholeReads(op: PrimOp) -> int {
+        if (op == PrimOp.EqStruct || op == PrimOp.NeqStruct || op == PrimOp.TapeConcat) return 2
+        if (op == PrimOp.Length || op == PrimOp.IndexRead || op == PrimOp.AtRead || op == PrimOp.Join || op == PrimOp.TapeIncludes) return 1
+        if (op == PrimOp.IsSome || op == PrimOp.IsNot || op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return 1
+        if (op == PrimOp.TapeAppend || op == PrimOp.TapePrepend || op == PrimOp.TapeDropEnd || op == PrimOp.TapeDropFront || op == PrimOp.TapeRemoveAt) return 1
+        return 0
+    }
+
+    // `seq.map(f)` …: a bare-local receiver is read without keeping when `f` is a
+    // lambda of at most two parameters (element, position); otherwise an ordinary read.
+    fn ownSeq(sq: Expr, f: Expr) -> OwnScan {
+        const n: int = lambdaArity(f)
+        if (exprLocalOf(sq) >= 0 && n >= 0 && n <= 2) return ownExpr(f)
+        return ownJoin(ownExpr(sq), ownExpr(f))
+    }
+
+    fn lambdaArity(e: Expr) -> int {
+        return match e {
+            .Lambda(params: ps) :> ps.length
+            .Lit(lit: x) :> -1
+            .Local(sym: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .Assigned(local: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Refetch(req: x) :> -1
+            .Validity(of: x) :> -1
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
+        }
+    }
+
+    // A value no other binding holds: a NEW array or struct each time it is evaluated.
+    fn ownFresh(e: Expr) -> boolean {
+        return match e {
+            .ArrayOf(elems: x) :> true
+            .StructOf(ty: x) :> true
+            .Prim(op: op) :> freshPrim(op)
+            .SeqCall(op: o) :> o == SeqFn.Filter || o == SeqFn.Map || o == SeqFn.SortBy
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Match(scrut: x) :> false
+            .VariantOf(enumSym: x) :> false
+            .Handle(inst: x) :> false
+            .Assigned(local: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .Refetch(req: x) :> false
+            .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
+        }
+    }
+
+    // the built-ins whose result is a new tape (runtime.js: each builds its own)
+    fn freshPrim(op: PrimOp) -> boolean {
+        if (op == PrimOp.TapeAppend || op == PrimOp.TapePrepend || op == PrimOp.TapeDropEnd || op == PrimOp.TapeDropFront || op == PrimOp.TapeRemoveAt) return true
+        return op == PrimOp.TapeConcat || op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse
+    }
+
+    // `l = TapeAppend(l, v)` …: the owned writer, and the edit's other arguments
+    fn selfEdit(l: Sym, v: Expr) -> SelfEdit | not {
+        return match v {
+            .Prim(op: op, args: args) :> selfEditOf(l, op, args)
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .Assigned(local: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    fn selfEditOf(l: Sym, op: PrimOp, args: Expr[]) -> SelfEdit | not {
+        if (args.length == 0) return not
+        if (exprLocalOf(args[0]) != l.id) return not
+        let f: string = ""
+        if (op == PrimOp.TapeAppend) f = "tapeAppendOwned"
+        if (op == PrimOp.TapePrepend) f = "tapePrependOwned"
+        if (op == PrimOp.TapeDropEnd) f = "tapeDropEndOwned"
+        if (op == PrimOp.TapeDropFront) f = "tapeDropFrontOwned"
+        if (op == PrimOp.TapeRemoveAt) f = "tapeRemoveAtOwned"
+        if (f == "") return not
+        return { fn: f, args: args }
+    }
+
+    // every local a block mentions — read, part-read or assigned
+    fn blockLocals(b: Block) -> int[] {
+        let out: int[] = assignedSyms(Node.NBlock(b))
+        for (const n of allNodes(Node.NBlock(b))) {
+            const id: int = localReadOf(n)
+            if (id >= 0) out = out.concat([id])
+        }
+        return out
+    }
+
+    // the locals a counted loop's head binds or assigns (printed by forInitJs / assignItems)
+    fn headBound(h: LoopHead) -> int[] {
+        return match h {
+            .Counted(init: i, step: sp) :> headStmtsBound(i.concat(sp))
+            .Forever :> []
+            .While(cond: x) :> []
+            .Each(h: x) :> []
+            .Range(h: x) :> []
+        }
+    }
+
+    fn headStmtsBound(ss: Stmt[]) -> int[] {
+        const b: Block = { stmts: ss }
+        let out: int[] = blockLocals(b)
+        for (const s of boundSyms(Node.NBlock(b))) { out = out.concat([s.id]) }
+        return out
+    }
+
+    fn ownedOf(ctx: Ctx, id: int) -> OwnedLocal | not {
+        for (const o of ctx.owned) {
+            if (o.id == id) return o
+        }
+        return not
+    }
+
+    fn ownFlag(ctx: Ctx, l: Sym) -> string { return symName(ctx, l) + "$own" }
+
+    // what the owned writer is told: `true` (a `fixed` local always owns its value), else its flag
+    fn ownedArg(ctx: Ctx, l: Sym, o: OwnedLocal) -> JsExpr {
+        if (o.fixed) return JsExpr.JAnnot(JsExpr.JBool(true), symName(ctx, l) + " alone holds its value")
+        return jid(ownFlag(ctx, l))
+    }
+
+    // A Let; an owned local that is not `fixed` gets its flag beside it — true when
+    // the initializer is fresh.
+    fn letStmtsJs(ctx: Ctx, sym: Sym, init: Expr, assigned: int[]) -> JsStmt[] {
+        const one: JsStmt = letJs(ctx, sym, init, assigned)
+        const o: OwnedLocal | not = ownedOf(ctx, sym.id)
+        if (o is given && !o.fixed) return [one, JsStmt.SLet(ownFlag(ctx, sym), JsExpr.JBool(ownFresh(init)))]
+        return [one]
+    }
+
+    // An Assign. An owned local's edit or part write goes through the runtime's
+    // owned writer (in place when owned, else the copy — whose result it then owns);
+    // a rebinding of a flagged local sets its flag to whether the new value is fresh.
+    fn assignStmtsJs(ctx: Ctx, l: Sym, v: Expr, path: PathStep[]) -> JsStmt[] {
+        const name: string = symName(ctx, l)
+        const o: OwnedLocal | not = ownedOf(ctx, l.id)
+        if (o is not) return [JsStmt.SAssign(jid(name), assignedJs(ctx, l, v, path))]
+        const own: JsExpr = ownedArg(ctx, l, o)
+        const se: SelfEdit | not = selfEdit(l, v)
+        let value: JsExpr = exprJs(ctx, v)
+        let owns: boolean = ownFresh(v)
+        if (path.length > 0) {
+            value = rtCall(ctx, "writePathOwned", [own, jid(name), pathStepsJs(ctx, path), exprJs(ctx, v), jstr(pathLoc(path))])
+            owns = true
+        } else if (se is given) {
+            value = rtCall(ctx, se.fn, [own].concat(exprsJs(ctx, se.args)))
+            owns = true
+        }
+        const out: JsStmt[] = [JsStmt.SAssign(jid(name), value)]
+        if (o.fixed) return out
+        return out.concat([JsStmt.SAssign(jid(ownFlag(ctx, l)), JsExpr.JBool(owns))])
+    }
+
+    fn withOwned(ctx: Ctx, owned: OwnedLocal[]) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: owned }
     }
 
     fn pathStepJs(ctx: Ctx, st: PathStep) -> JsExpr {
@@ -2150,7 +2593,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -2288,7 +2731,7 @@ ${
     // s474 — a keyed row's snapshot locals are CELLS in its markup (`x.get()`).
     fn withRowCells(ctx: Ctx, ids: int[]) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns }
+                 rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
     // The loop's locals (`local`: the Syms the Gather binds, at any depth of
@@ -2679,7 +3122,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: [],
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -2855,7 +3298,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs() }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -2865,7 +3308,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns, owned: [] }
     }
 
     // s474: `uses` — the contexts each declaration is used in (declNsUses); its
@@ -3451,7 +3894,7 @@ ${
     // reaches it. Its shared-instance reads use the enclosing function's
     // prologue locals (sharedRefs walks into it).
     fn localFnJs(ctx: Ctx, f: Fn) -> JsStmt {
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns, owned: ownedLocals(f.body) }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         return JsStmt.SFunc(symName(ctx, f.sym), params, blockJs(fctx, f.body))
@@ -3470,7 +3913,11 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns }
+        // s476: a function that does not wait prints its body straight through, so its owned
+        // locals' edits are made in place; a waiting one's body is continuations (copies, as before)
+        let owned: OwnedLocal[] = []
+        if (!f.waits) owned = ownedLocals(f.body)
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns, owned: owned }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -3496,14 +3943,16 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs() }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
         let ps: string[] = []
         for (const prm of params) { ps = ps.concat([symName(ctx, prm.sym)]) }
-        if (waits) return JsStmt.SAsyncFunc(symName(ctx, sym), ps, blockJs(ctx, body))
-        return JsStmt.SFunc(symName(ctx, sym), ps, blockJs(ctx, body))
+        // s476: a server body prints natively (an `await` in place), so its owned locals' edits are in place
+        const octx: Ctx = withOwned(ctx, ownedLocals(body))
+        if (waits) return JsStmt.SAsyncFunc(symName(ctx, sym), ps, blockJs(octx, body))
+        return JsStmt.SFunc(symName(ctx, sym), ps, blockJs(octx, body))
     }
 
     // s474 (U1e) — a `!` function with an Envelope (CoreProgram.envelopes, SPEC
@@ -3526,7 +3975,7 @@ ${
         if (writes) begin = "IMMEDIATE"
         const run: JsExpr = rtCall(ctx, "envelope", [jid(dbVarName(db)), jid("body$"), JsExpr.JBool(standalone), JsExpr.JStr(begin)])
         return JsStmt.SAsyncFunc(symName(ctx, sym), ps, [
-            JsStmt.SAsyncFunc("body$", [], blockJs(ctx, body)),
+            JsStmt.SAsyncFunc("body$", [], blockJs(withOwned(ctx, ownedLocals(body)), body)),
             JsStmt.SReturn(JsExpr.JAwait(run)),
         ])
     }
