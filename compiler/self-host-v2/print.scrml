@@ -1767,6 +1767,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: x) :> not
         }
     }
 
@@ -1791,6 +1792,7 @@ ${
             .Validity(of: x) :> ownKids(Node.NExpr(e))
             .ServerCall(fn: x) :> ownKids(Node.NExpr(e))
             .Query(q: x) :> ownKids(Node.NExpr(e))
+            .Foreign(slice: x) :> ownKids(Node.NExpr(e))     // s477: a crossing is an ordinary read — host code may keep it
         }
     }
 
@@ -1847,6 +1849,7 @@ ${
             .Validity(of: x) :> -1
             .ServerCall(fn: x) :> -1
             .Query(q: x) :> -1
+            .Foreign(slice: x) :> -1
         }
     }
 
@@ -1872,6 +1875,7 @@ ${
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
             .Query(q: x) :> false
+            .Foreign(slice: x) :> false     // s477: host code may hold what it returns
         }
     }
 
@@ -1903,6 +1907,7 @@ ${
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
+            .Foreign(slice: x) :> not
         }
     }
 
