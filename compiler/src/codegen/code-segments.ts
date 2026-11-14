@@ -660,3 +660,107 @@ export function rewriteCodeSegments(
 
   return result.join("");
 }
+
+// ---------------------------------------------------------------------------
+// Code-only view + `replaceInCode` (S478, g-impl1-bootstrap-build-rewrites-string-literals-s473)
+//
+// The SAME lexical fence as `rewriteCodeSegments`, offered in a second shape for passes that
+// cannot work one code segment at a time. `rewriteCodeSegments` hands the transform each code
+// run on its own, so a pattern whose match legitimately SPANS a literal (`T.toEnum("x")`, the
+// `[\s\S]*` of an inline `match`, a paren-balanced argument list holding a string) cannot be
+// expressed with it. Here the pattern is run over a SAME-LENGTH view of the whole text in which
+// every literal / comment character is replaced by NON_CODE, and the match is spliced into the
+// ORIGINAL text: capture groups are read from the original by their indices, so a literal a
+// match spans comes through byte for byte. Matches that begin outside code are skipped, so no
+// pattern can act on the content of a string, a template literal's static text, a regex body or
+// a comment, while a template's `${ … }` interpolations stay code (they are rewritten).
+// ---------------------------------------------------------------------------
+
+/** What a non-code character becomes in `codeOnlyView`. Matches no identifier, space, quote or bracket class. */
+export const NON_CODE = "\u0000";
+
+/** True when `expr` has no character that can open a literal or comment — it is all code. */
+function allCode(expr: string): boolean {
+  return !/["'`/]/.test(expr);
+}
+
+/**
+ * `expr` with every character that is NOT code (string / template-static / regex / comment
+ * text, delimiters included; a template's `${` `}` are delimiters, its interpolation interior
+ * is code) replaced by `NON_CODE`. Same length as `expr`. The fence is `rewriteCodeSegments`;
+ * code-ness is read with two distinct marks, so a literal that happens to hold a mark
+ * character can never pass for code.
+ */
+export function codeOnlyView(expr: string): string {
+  if (!expr || allCode(expr)) return expr;
+  const A = "\u0001";
+  const B = "\u0002";
+  const a = rewriteCodeSegments(expr, (seg) => A.repeat(seg.length));
+  const b = rewriteCodeSegments(expr, (seg) => B.repeat(seg.length));
+  // The fence never changes the length (non-code is copied, code is replaced 1:1); if it ever
+  // did, the safe answer is "nothing is code" — a pass then rewrites nothing.
+  if (a.length !== expr.length || b.length !== expr.length) return NON_CODE.repeat(expr.length);
+  let out = "";
+  for (let i = 0; i < expr.length; i++) out += a[i] === A && b[i] === B ? expr[i] : NON_CODE;
+  return out;
+}
+
+type InCodeReplacer = (match: string, ...rest: any[]) => string;
+
+/** Expand `$&` / `$1`…`$99` / `$$` in a replacement string, from ORIGINAL-text groups. */
+function expandReplacement(rep: string, whole: string, groups: Array<string | undefined>): string {
+  return rep.replace(/\$(\$|&|\d{1,2})/g, (tok, g: string) => {
+    if (g === "$") return "$";
+    if (g === "&") return whole;
+    const n = Number(g);
+    return n >= 1 && n <= groups.length ? groups[n - 1] ?? "" : tok;
+  });
+}
+
+/**
+ * `expr.replace(re, replacement)`, acting ONLY where the match begins in code (see the section
+ * header). The pattern is matched against `codeOnlyView(expr)`; the match text, the capture
+ * groups and the offset handed to a replacer function are the ORIGINAL text's, as
+ * `String.prototype.replace` hands them (`(match, g1, …, gN, offset, whole)`). `re` is always
+ * applied globally. Text with nothing that can open a literal is a plain `replace`.
+ */
+export function replaceInCode(expr: string, re: RegExp, replacement: string | InCodeReplacer): string {
+  if (!expr || typeof expr !== "string") return expr;
+  const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
+  if (allCode(expr)) return expr.replace(new RegExp(re.source, flags), replacement as any);
+  const view = codeOnlyView(expr);
+  const rx = new RegExp(re.source, flags.includes("d") ? flags : flags + "d");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(view)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (m[0].length === 0 || view[start] === NON_CODE) { rx.lastIndex = start + 1; continue; }
+    const whole = expr.slice(start, end);
+    const groups = (m.indices ?? []).slice(1).map((ix) => (ix ? expr.slice(ix[0], ix[1]) : undefined));
+    const rep = typeof replacement === "function"
+      ? replacement(whole, ...groups, start, expr)
+      : expandReplacement(replacement, whole, groups);
+    out += expr.slice(last, start) + rep;
+    last = end;
+  }
+  return last === 0 ? expr : out + expr.slice(last);
+}
+
+/**
+ * Every match of `re` that begins in code, with its ORIGINAL text and groups — the read-only
+ * twin of `replaceInCode`, for scans that only report.
+ */
+export function matchAllInCode(
+  expr: string,
+  re: RegExp,
+): Array<{ index: number; text: string; groups: Array<string | undefined> }> {
+  const hits: Array<{ index: number; text: string; groups: Array<string | undefined> }> = [];
+  if (!expr || typeof expr !== "string") return hits;
+  replaceInCode(expr, re, (whole: string, ...rest: any[]) => {
+    hits.push({ index: rest[rest.length - 2] as number, text: whole, groups: rest.slice(0, -2) });
+    return whole;
+  });
+  return hits;
+}

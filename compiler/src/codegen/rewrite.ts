@@ -13,7 +13,7 @@ import { ScrmlParser } from "../scrml-acorn.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
-import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup } from "./code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup, replaceInCode, matchAllInCode, codeOnlyView, NON_CODE } from "./code-segments.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText, lowerVariantTagRead, lowerVariantCheck, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
@@ -1257,8 +1257,10 @@ export function rewriteIsOperator(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   // `is null` / `is undefined` — after rewriteNotKeyword converts `not` → `null`,
   // `x is not` becomes `x is null`. Rewrite to strict equality check.
-  expr = expr.replace(/\bis\s+null\b/g, '=== null');
-  expr = expr.replace(/\bis\s+undefined\b/g, '=== undefined');
+  // S478 — every pattern in this pass acts in CODE only (`replaceInCode`): `is .V` in a string
+  // or a template literal's text is the author's text (g-impl1-bootstrap-build-rewrites-string-literals-s473).
+  expr = replaceInCode(expr, /\bis\s+null\b/g, '=== null');
+  expr = replaceInCode(expr, /\bis\s+undefined\b/g, '=== undefined');
   // S470 (s470-unit-variant-tag-read) — `<operand> is .V` / `is T.V` with a readable
   // operand lowers to the tag-normalized test (`lowerVariantCheck`, the structured
   // path's form): a payload variant is `{ variant, data }`, so the bare `=== "V"`
@@ -1267,8 +1269,8 @@ export function rewriteIsOperator(expr: string): string {
   expr = rewriteIsVariantWithOperand(expr);
   // Allow optional whitespace between '.' and variant name: block-splitter may emit
   // "is . Small" (space after dot). The \s* handles both "is .Small" and "is . Small".
-  expr = expr.replace(/\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
-  expr = expr.replace(/\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
+  expr = replaceInCode(expr, /\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
+  expr = replaceInCode(expr, /\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   return expr;
 }
 
@@ -2090,11 +2092,14 @@ export function rewriteMatchExpr(expr: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Rewrite scrml `fn` shorthand to `function` keyword.
+ * Rewrite scrml `fn` shorthand to `function` keyword — in CODE only (`replaceInCode`): the word
+ * `fn` inside a string, a template literal's text or a comment is the author's text, not the
+ * keyword (g-impl1-bootstrap-build-rewrites-string-literals-s473,
+ * g-match-arm-string-literal-fn-rewritten-to-function). A template's `${ … }` is code.
  */
 export function rewriteFnKeyword(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
-  return expr.replace(/\bfn\b/g, "function");
+  return replaceInCode(expr, /\bfn\b/g, "function");
 }
 
 // ---------------------------------------------------------------------------
@@ -2299,10 +2304,16 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // so the negative lookbehind below can correctly distinguish member access (e.g.
   // `Color . Red` → `Color.Red`, kept as-is) from standalone `.VariantName`.
   // Only collapse when the property starts uppercase to avoid touching `todo . completed`.
-  expr = expr.replace(/([A-Za-z0-9_$])\s+\.\s+([A-Z][A-Za-z0-9_$]*)/g, "$1.$2");
+  //
+  // S478 — every pattern from here on acts in CODE only (`replaceInCode`): `.Variant`, `X.y`
+  // and `T::V` inside a string, a template literal's text or a comment are the author's text
+  // (g-impl1-bootstrap-build-rewrites-string-literals-s473,
+  // g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant). The placeholder
+  // unmask above stays whole-text: it restores a compiler placeholder, wherever it was put.
+  expr = replaceInCode(expr, /([A-Za-z0-9_$])\s+\.\s+([A-Z][A-Za-z0-9_$]*)/g, "$1.$2");
 
   // §14.4.2 — EnumType.variants → EnumType_variants (PascalCase identifiers only)
-  expr = expr.replace(/\b([A-Z][A-Za-z0-9_]*)\s*\.\s*variants\b/g, "$1_variants");
+  expr = replaceInCode(expr, /\b([A-Z][A-Za-z0-9_]*)\s*\.\s*variants\b/g, "$1_variants");
 
   // §14.5 — Payload variant construction is now handled by the emitted enum
   // constructor function (see emit-client.ts:emitEnumVariantObjects).
@@ -2338,15 +2349,15 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // Standalone .VariantName (unit variant — NOT followed by `(`) → "VariantName".
   // The `(?!\s*\()` negative lookahead excludes any payload-variant constructor
   // call form (now handled by `_rewritePayloadVariantConstructorCalls` above).
-  expr = expr.replace(/(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
   // Qualified unit-variant READ (`Enum::Variant` / `::Variant`, NOT a call) → the
   // bare string tag. The `(?!\s*\()` negative lookahead is load-bearing: a
   // qualified payload-bearing CONSTRUCTOR CALL (`LoadError::NotFound(id)`) must
   // NOT be stripped to `"NotFound"(id)` — a string invoked as a function (the
   // g-failable-arm-nested-constructor-crash runtime crash). The call form is
   // collapsed to a valid frozen-enum constructor call below instead.
-  expr = expr.replace(/\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
-  expr = expr.replace(/(?<![A-Za-z0-9_$])::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /(?<![A-Za-z0-9_$])::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
   // A surviving qualified CONSTRUCTOR CALL (`Enum::Variant(args)` — the
   // `::`-strips above skipped it via the `(?!\s*\()` guard) collapses to the
   // standard member-access form `Enum.Variant(args)`, which invokes the frozen
@@ -2355,7 +2366,7 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // byte-identical to how the structured-AST path lowers the same construct in a
   // plain `function` body (the control). Closes g-failable-arm-nested-
   // constructor-crash (S195/S196).
-  expr = expr.replace(/(\b[A-Z][A-Za-z0-9_]*)\s*::\s*([A-Z][A-Za-z0-9_]*)(\s*\()/g, '$1.$2$3');
+  expr = replaceInCode(expr, /(\b[A-Z][A-Za-z0-9_]*)\s*::\s*([A-Z][A-Za-z0-9_]*)(\s*\()/g, '$1.$2$3');
   return expr;
 }
 
