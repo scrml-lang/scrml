@@ -1,0 +1,14 @@
+// §13.9.1 S475 rule 2 — a locked pending cell whose initializer calls a CELL-FREE client helper reads no cell: it loads once, on mount.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function one() -> int { return 1; }
+    <who:(not to string)=(loadName(one()) !{ _ :> not })/>
+    <main>
+        <p id="who" if=@who>${@who}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

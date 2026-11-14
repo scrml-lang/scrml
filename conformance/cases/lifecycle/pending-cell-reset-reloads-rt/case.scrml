@@ -1,0 +1,19 @@
+// §13.9.2 — `reset(@who)` on a pending cell re-runs its load; it never writes the desugared `not`.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function rename(id: int) -> int {
+        ?{`UPDATE users SET name = 'z' WHERE id = ${id}`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
+    let <done:int=0/>
+    <who:(not to string)=(loadName(1) !{ _ :> not })/>
+    <main>
+        <button id="rename" onclick={ @done = rename(1) !{ _ :> 0 }; reset(@who); }>rename</button>
+        <p id="who" if=@who>${@who}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

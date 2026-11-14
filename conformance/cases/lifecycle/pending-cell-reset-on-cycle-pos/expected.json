@@ -1,0 +1,26 @@
+{
+  "id": "lifecycle-pending-cell-reset-on-cycle-pos",
+  "description": "§6.8.4 rule 3 holds for a pending cell: `reset-on=[@who]` on `@who` itself is E-RESET-ON-CYCLE. A pending cell's reset is its load's re-run (§13.9.2), so the rule would re-run the load on its own settle, forever.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 3: \"A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.\" §13.9.2: \"A reset of a pending cell (§6.8) is the request's re-run.\"",
+  "expect": {
+    "codes": [
+      "E-RESET-ON-CYCLE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-TYPE-045=1",
+          "missing:E-RESET-ON-CYCLE"
+        ]
+      }
+    }
+  }
+}

@@ -32,22 +32,61 @@ ${
         NAttr(a: Attr),
     }
 
+    // s477 (s477-boot-compile-perf): a long list (a program's markup, a block's statements)
+    // is built by halves — one accumulator rebound per element copied the whole prefix each
+    // time, and every walk rebuilds these lists. Same nodes, same order.
     fn exprNodes(es: Expr[]) -> Node[] {
-        let out: Node[] = []
-        for (const e of es) { out = out.concat([Node.NExpr(e)]) }
-        return out
+        return exprNodesOf(es, 0, es.length)
+    }
+
+    fn exprNodesOf(es: Expr[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NExpr(es[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return exprNodesOf(es, lo, mid).concat(exprNodesOf(es, mid, hi))
     }
 
     fn viewNodes(vs: View[]) -> Node[] {
-        let out: Node[] = []
-        for (const v of vs) { out = out.concat([Node.NView(v)]) }
-        return out
+        return viewNodesOf(vs, 0, vs.length)
+    }
+
+    fn viewNodesOf(vs: View[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NView(vs[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return viewNodesOf(vs, lo, mid).concat(viewNodesOf(vs, mid, hi))
     }
 
     fn stmtNodes(ss: Stmt[]) -> Node[] {
-        let out: Node[] = []
-        for (const s of ss) { out = out.concat([Node.NStmt(s)]) }
-        return out
+        return stmtNodesOf(ss, 0, ss.length)
+    }
+
+    fn stmtNodesOf(ss: Stmt[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NStmt(ss[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return stmtNodesOf(ss, lo, mid).concat(stmtNodesOf(ss, mid, hi))
     }
 
     fn maybeExpr(e: Expr | not) -> Node[] {
@@ -342,21 +381,22 @@ ${
     }
 
     // Every node under (and including) `root`, preorder.
+    // s477 (s477-boot-compile-perf): built by halving each node's children, so every
+    // node is copied once per (ancestor × log2 of that ancestor's child count) — an
+    // accumulator rebound to `out.concat([n])` per node copied the whole prefix every
+    // time (O(n²) per walk; the dominant cost of compiling a 2,000-line program).
+    // Same nodes, same order as the stack walk it replaces.
     export fn allNodes(root: Node) -> Node[] {
-        let out: Node[] = []
-        let stack: Node[] = [root]
-        while (stack.length > 0) {
-            const n: Node = stack[stack.length - 1]
-            stack = stack.slice(0, stack.length - 1)
-            out = out.concat([n])
-            const ks: Node[] = kids(n)
-            let i: int = ks.length - 1
-            while (i >= 0) {
-                stack = stack.concat([ks[i]])
-                i = i - 1
-            }
-        }
-        return out
+        const ks: Node[] = kids(root)
+        if (ks.length == 0) return [root]
+        return [root].concat(allNodesOf(ks, 0, ks.length))
+    }
+
+    // The preorder of ks[lo], …, ks[hi - 1], in turn (hi > lo).
+    fn allNodesOf(ks: Node[], lo: int, hi: int) -> Node[] {
+        if (hi - lo == 1) return allNodes(ks[lo])
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return allNodesOf(ks, lo, mid).concat(allNodesOf(ks, mid, hi))
     }
 
     // -------------------------------------------------------------------------

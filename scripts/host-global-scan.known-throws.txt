@@ -49,6 +49,11 @@
 [esm] conformance/cases/forms/surface-top-level-validated-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/forms/validator-live-let-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/lifecycle/effect-on-derived-engine/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/lifecycle/pending-cell-locked-through-call-derived-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1826)
+[esm] conformance/cases/lifecycle/pending-cell-reset-on-cycle-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1826)
+[esm] conformance/cases/lifecycle/pending-cell-reset-on-reloads-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1826)
+[esm] conformance/cases/lifecycle/pending-cell-reset-reloads-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1826)
+[esm] conformance/cases/lifecycle/pending-cell-through-call-reloads-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1826)
 [esm] conformance/cases/loop/loop-001-break-outside/case.scrml  # emit-client-esm: Unsyntactic break
 [esm] conformance/cases/loop/loop-002-continue-outside/case.scrml  # emit-client-esm: Unsyntactic continue
 [esm] conformance/cases/loop/loop-005-break-pos/case.scrml  # emit-client-esm: Unexpected token

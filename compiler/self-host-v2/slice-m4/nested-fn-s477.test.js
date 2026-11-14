@@ -370,3 +370,115 @@ describe("server code — a nested function runs where its declarer runs (§12, 
     expect(ds.some((d) => d.message.includes("query"))).toBe(true);
   });
 });
+
+// s477 merge composition (s477-boot-nested-fn × s477-boot-tape-forms #1834): a removal used as a
+// VALUE and an edit of a PART of a local, inside a nested function body and on a binding a closure
+// captures. §66.10 rule 1 (a binding holds a snapshot) — a tape a closure can see is never edited in
+// place (print.scrml ownStmt LocalFn arm); §7.3.1 / §48.3.3 — a nested `fn` may not mutate what it
+// closes over (analyze.scrml capWrite, now on the removal-value and part-edit paths too).
+describe("nested functions × tape forms (removal as a value, part edits) — run", () => {
+  const B = "    type B:struct = { n: int, xs: int[free, append, pop] }";
+  test("a removal as a value on the nested function's OWN tape", async () => {
+    const fns = `    function f(n: int) -> int {
+        function popTop() -> int {
+            let xs: int[free, pop, remove] = [1, 2, n];
+            const top: int | not = xs.pop();
+            const first: int | not = xs.remove(0);
+            if (top is given) {
+                if (first is given) { return top * 100 + first * 10 + xs.length; }
+            }
+            return 0;
+        }
+        return popTop();
+    }`;
+    expect((await run(prog(fns, "f(7)"))).c).toBe("711");
+  });
+  test("a closure-visible tape: a removal as a value copies once a closure saw it (never in place)", async () => {
+    const fns = `    function g(n: int) -> int {
+        let xs: int[free, pop] = [1, 2, n];
+        function snap() -> int[free, pop] { return xs; }
+        const t0: int | not = xs.pop();
+        const a: int[free, pop] = snap();
+        const t1: int | not = xs.pop();
+        if (t0 is given) {
+            if (t1 is given) { return t0 * 1000 + t1 * 100 + a.length * 10 + xs.length; }
+        }
+        return 0;
+    }`;
+    expect((await run(prog(fns, "g(3)"))).c).toBe("3221");
+  });
+  test("a nested `function` taking a removal value from a CAPTURED tape rebinds the outer `let`", async () => {
+    const fns = `    function t(n: int) -> int {
+        let xs: int[free, pop] = [n, 2, 3];
+        const before: int[free, pop] = xs;
+        function take() -> int {
+            const v: int | not = xs.pop();
+            if (v is given) { return v; }
+            return 0;
+        }
+        const a: int = take();
+        const b: int = take();
+        return xs.length * 1000 + a * 100 + b * 10 + before.length;
+    }`;
+    expect((await run(prog(fns, "t(1)"))).c).toBe("1323");
+  });
+  test("part edits of a captured struct's tape field, inside and outside a closure — snapshots hold", async () => {
+    const fns = `${B}
+    function h(n: int) -> int {
+        let b: B = { n: 1, xs: [1] };
+        const keep: B = b;
+        function grow() { b.xs.append(n); }
+        grow();
+        grow();
+        function snap() -> B { return b; }
+        const s: B = snap();
+        b.xs.pop();
+        return keep.xs.length * 100 + s.xs.length * 10 + b.xs.length;
+    }`;
+    expect((await run(prog(fns, "h(5)"))).c).toBe("132");
+  });
+  test("a part edit on the nested `fn`'s OWN struct is allowed (it closes over nothing it writes)", async () => {
+    const fns = `${B}
+    function h2(n: int) -> int {
+        fn grown(k: int) -> int {
+            const b: B = { n: k, xs: [k] };
+            b.xs.append(k);
+            const v: int | not = b.xs.pop();
+            if (v is given) { return v + b.xs.length; }
+            return 0;
+        }
+        return grown(n);
+    }`;
+    expect((await run(prog(fns, "h2(4)"))).c).toBe("5");
+  });
+  test("a nested `fn` taking a removal value from, or part-editing, a CAPTURED binding is E-FN-003", () => {
+    const C = (fns) => codes(prog(fns, "0"));
+    expect(C(`    function a(n: int) -> int {\n        let xs: int[free, pop] = [1];\n        fn take() -> int { const v: int | not = xs.pop(); return n; }\n        return take();\n    }`)).toContain("E-FN-003");
+    expect(C(`${B}\n    function a(n: int) -> int {\n        let b: B = { n: 1, xs: [] };\n        fn grow() { b.xs.append(n); }\n        grow();\n        return n;\n    }`)).toContain("E-FN-003");
+  });
+});
+
+// s477 merge composition (× s477-boot-compile-perf #1835 NameTable / mint): nested-function names
+// minted with the rest — one name in two declarers, a file-level function of the same name, and a
+// local of that name in a third function each keep their own binding.
+describe("nested-function names × the minted NameTable (#1835)", () => {
+  test("`step` nested in two functions, at file level, and as a local: each call reaches its own", async () => {
+    const fns = `    function step(k: int) -> int { return k + 1000; }
+    function a(n: int) -> int {
+        function step(k: int) -> int { return k + 10; }
+        return step(n);
+    }
+    function b(n: int) -> int {
+        function step(k: int) -> int { return k + 100; }
+        return step(n) + a(n);
+    }
+    function c(n: int) -> int {
+        const s: int = step(n);
+        let r: int = 0;
+        function bump() -> int { r = r + s; return r; }
+        return bump() + bump();
+    }`;
+    // b(1) = 101 + 11 = 112; c(1): s = 1001, bump twice → 1001 + 2002 = 3003
+    expect((await run(prog(fns, "b(1) + c(1)"))).c).toBe("3115");
+  });
+});

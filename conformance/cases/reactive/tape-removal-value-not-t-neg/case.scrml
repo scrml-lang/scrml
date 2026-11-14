@@ -1,0 +1,10 @@
+<program>
+<n> = 0
+function top() {
+    let xs: int[free, pop] = [3, 4];
+    const last: int = xs.pop();
+    @n = last;
+}
+<button id="go" onclick=top()>go</button>
+<p id="n">${@n}</p>
+</program>

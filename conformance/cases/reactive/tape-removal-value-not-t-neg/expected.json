@@ -1,0 +1,17 @@
+{
+  "id": "reactive-tape-removal-value-not-t-neg",
+  "description": "§66.12.6 rule 3: a removal's value is `T | not` (`not` on an empty tape), so `const last: int = xs.pop()` puts an `int | not` into an `int` — E-TYPE-031 (ruled S442: \"`T | not` into `T` is an error for all types\"). Narrow it first (`if (v is given)`).",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — tape methods are named after their grants; JS array method names are refused\" (\"Names match the grants (Recommended)\")",
+  "rationale": "§66.12.6 rule 3: \"`pop`, `shift` and `remove` return the removed value, typed `T | not`\"; a `T | not` value into a `T` annotation is E-TYPE-031 (§34).",
+  "expect": {
+    "codes": ["E-TYPE-031"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-removal-value-untyped-s477",
+      "fails": { "codes": ["missing:E-TYPE-031"] }
+    }
+  }
+}

@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1827 of 1827 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1839 of 1839 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 305 | 16.7% |
+| PASS | 316 | 17.2% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 252 | 13.8% |
+| FAIL | 252 | 13.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 624 | 34.2% |
-| UNSUPPORTED | 646 | 35.4% |
+| NOT-TWINNED | 624 | 33.9% |
+| UNSUPPORTED | 647 | 35.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 557; of those, 305 hold (54.8%). Runtime half executed on the bootstrap for 109 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 316 hold (55.6%). Runtime half executed on the bootstrap for 116 case(s).
 
-- **Vacuous** passes: 17 of 305 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **288**.
+- **Vacuous** passes: 17 of 316 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **299**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 74 of 252; the other 178 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 646.
+UNSUPPORTED by reason: bootstrap-unsupported 647.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **859** — PASS 187 · FAIL 212 · UNSUPPORTED 460. Twin holds 187 (non-vacuous 174). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **865** — PASS 193 · FAIL 212 · UNSUPPORTED 460. Twin holds 193 (non-vacuous 180). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -127,7 +127,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
 | hostmethod | 1 | · | · | 1 | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 56 | 15 | · | 4 | · | 22 | 15 | · | · |
+| lifecycle | 62 | 20 | · | 4 | · | 22 | 16 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -150,7 +150,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 115 | 29 | · | 14 | · | 44 | 28 | · | · |
+| reactive | 121 | 35 | · | 14 | · | 44 | 28 | · | · |
 | refinement | 57 | · | · | 12 | · | 23 | 22 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -1140,7 +1140,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (305)
+### PASS / CODES-ONLY (316)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1321,6 +1321,11 @@ none
 - `lifecycle/effect-writes-state-direct-pos` — PASS · TWIN
 - `lifecycle/effect-writes-state-neg` — PASS · TWIN
 - `lifecycle/effect-writes-state-transitive-pos` — PASS · TWIN
+- `lifecycle/pending-cell-cell-free-helper-loads-once-rt` — PASS
+- `lifecycle/pending-cell-reset-on-cycle-pos` — PASS
+- `lifecycle/pending-cell-reset-on-reloads-rt` — PASS
+- `lifecycle/pending-cell-reset-reloads-rt` — PASS
+- `lifecycle/pending-cell-through-call-reloads-rt` — PASS
 - `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN
 - `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
@@ -1426,6 +1431,12 @@ none
 - `reactive/reserved-prefix-declaration-pos` — PASS · TWIN
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
+- `reactive/tape-local-part-edit-rt` — PASS · TWIN
+- `reactive/tape-local-part-edit-ungranted-neg` — PASS · TWIN
+- `reactive/tape-removal-value-not-t-neg` — PASS · TWIN
+- `reactive/tape-removal-value-rt` — PASS · TWIN
+- `reactive/tape-spread-non-tape-neg` — PASS · TWIN
+- `reactive/tape-spread-value-rt` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
 - `server-db/sql-aggregate-group-rt-twin` — PASS
@@ -1448,7 +1459,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (646)
+### UNSUPPORTED (647)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1698,6 +1709,7 @@ none
 - `lifecycle/effect-write-unproven-pos` — twin · bootstrap-unsupported: `beacon` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `beacon(…)`
 - `lifecycle/effect-writes-state-function-value-pos` — twin · bootstrap-unsupported: `bump` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `bump(…)`
 - `lifecycle/on-transition-from` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/pending-cell-locked-through-call-derived-pos` — bootstrap-unsupported: `who` is derived (a locked declaration whose initializer calls `cur()`, which the bootstrap counts as reading cells, §66.9 rule 3), and a derived cell cannot carry a lifecycle type — a lifecycle const
 - `lifecycle/request-body-client-wrapper-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-data-is-some-if-attr-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
 - `lifecycle/request-data-is-some-value-bool-class-attr-rt` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
@@ -2002,7 +2014,7 @@ none
 - `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `.preventDefault(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.r
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
-- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value
+- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
