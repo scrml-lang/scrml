@@ -225,6 +225,18 @@ describe("B4 — FIX ROUND 1: every assignment position is either lowered with t
     expect(await runShown(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        if (true) v = xs.pop();\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("3|1,2");
     expect(await runShown(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        let v: int | not = 0;\n        if (false) { v = 1; } else v = xs.pop();\n        @shown = txtOr(v) + "|" + ${txt("xs")};`)).toBe("3|1,2");
   });
+  test("C21 (defence in depth): a Core that reads a local nothing binds fails checkCore — the shape the step miscompile printed", () => {
+    const r = clean(prog(OR, `        let xs: int[free, pop] = [1, 2, 3];\n        const v: int | not = xs.pop();\n        @shown = txtOr(v);`));
+    const go = r.core.fns.find((f) => f.sym.hint === "go");
+    const lets = go.body.stmts.filter((s) => s.variant === "Let");
+    expect(lets.length).toBeGreaterThan(0);
+    // drop the Let of the removed element's minted local (keep its init as an Eval): its read is unbound
+    const removed = lets.find((s) => s.data.sym.hint === "removed");
+    expect(removed).toBeDefined();
+    const bad = { ...r.core, fns: r.core.fns.map((f) => (f !== go ? f : { ...f, body: { ...f.body, stmts: f.body.stmts.map((s) => (s !== removed ? s : { variant: "Eval", data: { e: s.data.init } })) } })) };
+    const ck = mods.check.checkCore(bad);
+    expect(ck.some((m) => m.startsWith("C21: the local removed"))).toBe(true);
+  });
 });
 
 describe("A4 — FIX ROUND 1 (review F2): the residual receivers are refused by name, under a gap", () => {

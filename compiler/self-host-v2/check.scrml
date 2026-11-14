@@ -102,7 +102,7 @@ ${
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
-    import { Node, allNodes, requestStateDeps, requestHandles } from "./walk.scrml"
+    import { Node, allNodes, requestStateDeps, requestHandles, boundSyms } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
@@ -128,7 +128,116 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p)).concat(checkLocalsBound(p))
+    }
+
+    // =========================================================================
+    // C21 (s477 FIX ROUND 1, review F1 defence-in-depth) — EVERY LOCAL IS BOUND.
+    // A local read (`Local`, a `LocalPath` place) and a local rebinding
+    // (`Assign`, `Assigned`) name a Sym that something in the program binds —
+    // the set the printer mints names for (print.scrml planNames): walk.scrml
+    // `boundSyms` (a Let, a parameter, a lambda / pattern / loop / Attempt /
+    // Suspend / Join / view binder, a request handle, a bind sink), a file-scope
+    // constant, a function, a server function, a `<db>` cell's loaded value.
+    // A Sym none of these binds prints as `unminted$…` and is a ReferenceError
+    // when run: a lowering that read a minted local it never emitted the `Let`
+    // of (the S477 counted-loop `step` removal value). Program-wide, not
+    // scope-aware: it catches a binding that is MISSING, not one out of scope.
+    // =========================================================================
+    fn checkLocalsBound(p: CoreProgram) -> string[] {
+        let bound: int[] = []
+        for (const s of boundSyms(Node.NProgram(p))) { bound = bound.concat([s.id]) }
+        for (const k of p.consts) { bound = bound.concat([k.sym.id]) }
+        for (const f of p.fns) { bound = bound.concat([f.sym.id]) }
+        for (const sf of p.server) { bound = bound.concat([sf.sym.id]) }
+        for (const ld of p.loads) { bound = bound.concat([ld.val.id]) }
+        let out: string[] = []
+        let seen: int[] = []
+        for (const n of allNodes(Node.NProgram(p))) {
+            const s: Sym | not = nodeLocalUse(n)
+            if (s is given) {
+                if (bound.indexOf(s.id) < 0 && seen.indexOf(s.id) < 0) {
+                    seen = seen.concat([s.id])
+                    out = out.concat(["C21: the local " + s.hint + " (sym " + s.id + ") is read or rebound but nothing in the program binds it"])
+                }
+            }
+        }
+        return out
+    }
+
+    fn nodeLocalUse(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> exprLocalUse(e)
+            .NPlace(pl: pl) :> placeLocalUse(pl)
+            .NStmt(s: s) :> stmtLocalUse(s)
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprLocalUse(e: Expr) -> Sym | not {
+        return match e {
+            .Local(sym: s) :> s
+            .Assigned(local: s) :> s
+            .Lit(lit: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    fn placeLocalUse(pl: Place) -> Sym | not {
+        return match pl {
+            .LocalPath(sym: s) :> s
+            .Cell(decl: x) :> not
+        }
+    }
+
+    fn stmtLocalUse(s: Stmt) -> Sym | not {
+        return match s {
+            .Assign(local: l) :> l
+            .Let(sym: x) :> not
+            .Write :> not
+            .Commit :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
     }
 
     // =========================================================================
