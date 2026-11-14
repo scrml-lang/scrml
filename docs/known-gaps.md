@@ -31553,3 +31553,38 @@ SPEC §6.7.7 "An `id` that `<#id>` cannot name (S475)" and the §34 row: a `<req
 ### g-boot-mount-trap-blanks-page-s476 — one runtime trap inside one text effect during mount (`round(NaN, .HalfUp)` → E-INT-CONVERSION-RT from a 0/0 in a derived summary) aborts the whole mount: the entire `<main>`, inputs included, never renders — `NEW S476; LOW; open (owner question: mount-time isolation)`
 
 The trap is right (§41.18). Whether a trap should take down only its hole or the whole mount is unruled; §68.6 rules turn-scoped isolation for services ("a trap aborts only its turn"), and the view mount has no equivalent sentence. PA did not re-run this one (adopter repro only).
+
+<!-- @gap id=g-boot-compile-superquadratic-s477 sev=HIGH status=open locus=compiler/self-host-v2/check.scrml(onceBoundInit)+compiler/self-host-v2/print.scrml(isParam,reinitUsed)+compiler/self-host-v2/walk.scrml(allNodes) prov=adopter:lotto-analyzer-inbox-2026-11-08§7+measure:s477-boot-dev-leak -->
+### g-boot-compile-superquadratic-s477 — bootstrap compile time is super-quadratic in file size (per-item whole-program walks); an adopter's 2.7k-line app takes 10–18 s per compile; misreported as a dev-server leak (NOT REPRODUCED, PR #1827) — `NEW S477; HIGH; open`
+
+Adopter report (lotto-analyzer inbox §7, added 2026-11-10; source `handOffs/incoming/read/2026-11-08-0746-lotto-analyzer-to-scrml-bootstrap-findings.md`): `bun scripts/scrml-boot.ts dev analyzer.scrml --output-dir dist --port 4747` (main 2026-11-08), left running for one working session on the 2,300-line `analyzer.scrml`, took *"543, 312, 792, 1045, 1773, 2361, 3344, 3226, 3892, 5849, 8156, 8804, 9782, 9801, 12035, 13903 ms"* over 16 file-change rebuilds; the adopter read it as state kept from one rebuild to the next. **Measured S477 (lane `s477-boot-dev-leak`, PR #1827): NOT REPRODUCED.** Rebuild time and RSS stay flat across 20 rebuilds on 3 inputs, the adopter's app included. The real cause is that ONE bootstrap compile is super-quadratic in file size: 234 lines 0.16 s · 924 lines 1.65 s · 1,844 lines 11.4 s · 2,720 lines 18.1 s. The adopter's file grew by hundreds of lines across 15 commits during that session, and the 13.9 s last rebuild equals a one-shot compile of the final file. A profile puts 9.6 of 12.3 s in `walk.allNodes`, driven by whole-program walks run once per item: `check.scrml` `onceBoundInit`, and `print.scrml` `isParam` / `reinitUsed`. Who pays: every adopter whose file passes ~1k lines (each save costs seconds, then tens of seconds). **The OOM is unexplained:** systemd-oomd killed the adopter's terminal scope 15 minutes after the last rebuild (32 GB RAM + 43.7 GB swap in use), but dev RSS stayed at 300–480 MB in the measurement, so the dev server is not shown to be the cause. Fix lane `s477-boot-compile-perf` is in flight. §1–§5 of the same inbox are filed under §S476-adopter; §6 was already-known gaps (no action).
+
+## §S477-review follow-ups — LOW items from the #1823 / #1824 reviews and the s477-boot-kind-tool lane (both PRs merged S477, LAND-W-F/U)
+
+<!-- @gap id=g-boot-nested-literal-receiver-message-false-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(litRecvText ~:8908) prov=review:s477-1823 -->
+### g-boot-nested-literal-receiver-message-false-s477 — `[[1],[2]].reverse()` is refused with "the elements are not of one base type", which is false (both are `int[]`), and the message carries no INTERIM label — `NEW S477; LOW; open`
+
+The refusal itself is an unbuilt case, not a ruling, so the message should say what is not built (nested-tape literal receivers) and tag it INTERIM.
+
+<!-- @gap id=g-boot-literal-member-length-generic-message-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(member path; does not consult litRecvText) prov=review:s477-1823 -->
+### g-boot-literal-member-length-generic-message-s477 — `[].length` gets the generic "needs a receiver of a known type" message, because the member path does not consult `litRecvText` as the method path does — `NEW S477; LOW; open`
+
+<!-- @gap id=g-boot-untyped-callee-hint-string-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(untyped loop-source callee hint ~:8931) prov=review:s477-1823 -->
+### g-boot-untyped-callee-hint-string-s477 — the INTERIM hint for an untyped loop-source callee suggests only `-> T[]`; it should add "(or `-> string`)", since a string is also an iterable source — `NEW S477; LOW; open`
+
+<!-- @gap id=g-boot-proven-return-loop-source-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(ownProvenReturn ~:3434; loop-source typing) prov=review:s477-1823;spec:§66.3(rule 5(g)) -->
+### g-boot-proven-return-loop-source-s477 — §66.3 rule 5(g)'s resolver-mode inference (`ownProvenReturn`) proves a callee's return type for other positions but is not used to type a loop source, so `for (x of f())` with an undeclared but provable `f` is refused INTERIM — `NEW S477; LOW; open`
+
+<!-- @gap id=g-boot-qualified-enum-literal-receiver-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(litRecvText — qualified enum variant elements) prov=review:s477-1823 -->
+### g-boot-qualified-enum-literal-receiver-s477 — an array literal of qualified enum variants (`[C.Red, C.Green]`) is refused as a receiver / loop source, though its element type `C` is knowable — `NEW S477; LOW; open`
+
+<!-- @gap id=g-boot-ownseq-op-allowlist-s477 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(ownSeq ~:1811) prov=review:s477-1824 -->
+### g-boot-ownseq-op-allowlist-s477 — `ownSeq` exempts the receiver of ANY `SeqCall` from the in-place ownership scan, rather than an allowlist of ops known not to retain or alias the receiver; sound for today's ops (the #1824 review found the ownership proof unbroken), but a new op that keeps its receiver would silently break in-place editing — `NEW S477; LOW; open (hardening)`
+
+<!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=open locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
+### g-boot-ownedlocals-kids-blind-spots-s477 — `walk.kids` does not descend into `FSettled`, `Suspend.bind` or `Attempt.result`, so the owned-locals scan built on it cannot see a use of a local there; no escape found by the #1824 review, but the scan's soundness rests on those nodes never carrying an alias — `NEW S477; LOW; open (hardening)`
+
+<!-- @gap id=g-spec-tool-colon-return-s477 sev=LOW status=open locus=compiler/SPEC.md(§64 tool example `): number` vs §14 return-type rule) prov=lane:s477-boot-kind-tool -->
+### g-spec-tool-colon-return-s477 — SPEC §64 spells the tool entry convention's return type with a colon (§64.2 heading and its examples: `function main(args: string[]): number`), while the SPEC's return-type rule says "`->` is the sole return-type annotation syntax for `function` and `fn` declarations"; an owner ruling is owed (fix §64 to `->`, or rule a §64 exception) — `NEW S477; LOW; open (owner ruling)`
+
+The coordinator's brief cites that rule as §14; in this tree the sentence sits under `## 7. Logic Contexts` (SPEC.md ~:8871). The record keeps §14 as the brief's label and gives the line. PA rec: fix §64 to `->`. A second return-type spelling for one declaration kind buys nothing, and the rule sentence is categorical. Who pays if it stays: an author who copies §64.2 gets a spelling that the rest of the SPEC forbids.
