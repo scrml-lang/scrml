@@ -304,3 +304,108 @@ describe("C — §64.1 the emitted module, run with bun", () => {
     expect(toolFileName("/x/fleet.scrml")).toBe("fleet.js");
   }, 300000);
 });
+
+// =============================================================================
+// D. FIX ROUND 1 (review s477-1828)
+// =============================================================================
+describe("D — review s477-1828 fix round 1", () => {
+  // F1 — §23.2.4a "A slice is evaluated as the body of a strict-mode async function"; §23.2.6
+  // E-FOREIGN-007 "A slice that is not valid JavaScript as the body of a strict-mode async function
+  // whose parameters are its crossings SHALL be a compile error". A slice that closes the sealed
+  // function's `}` itself is not such a body, even when the wrapped text parses.
+  const prep = async (body, params = []) => {
+    const { prepareToolSlices } = await import("../slice-m1/tool-slices.js");
+    return prepareToolSlices([{ n: 1, file: "t.scrml", at: 0, params, body }], null);
+  };
+  const ESCAPES = [
+    ' return 1; }), (console.log("RAN AT LOAD", typeof require), globalThis.PWN = 1), (async function () { return 2; ',
+    " 1 })",
+    " 1 }), (",
+    " return 1; }), (globalThis.X = 1), (async function () {",
+    " return 1; }); globalThis.X = 1; (async function () {",
+    " return 1; }, async function () { return 2; ",
+    ' return 1; }), (globalThis.X = "})"), (async function () { return `})`; ',
+    " return 1; }), /* }) */ (globalThis.X = 1), (async function () { // })\n return 2; ",
+  ];
+  test("F1: a slice that escapes the sealed function body is E-FOREIGN-007, whatever its shape", async () => {
+    for (const b of ESCAPES) {
+      const r = await prep(b);
+      expect(r.sealed).toEqual([]);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-FOREIGN-007"]);
+    }
+    const withCrossing = await prep(" return r; }), (globalThis.X = r), (async function (r) { return r; ", ["r"]);
+    expect(withCrossing.diags.map((d) => d.code)).toEqual(["E-FOREIGN-007"]);
+  });
+
+  test("F1: `})` inside strings, comments, template literals and regexes is not an escape — those slices still seal", async () => {
+    const OK = [
+      ' "})" ',
+      " // })\n 1 ",
+      " /* }), ( */ 2 ",
+      ' `})${"})"}` ',
+      ' /\\}\\)/.test("x") ',
+      ' const a = "}), ("; return a; ',
+      " console.log(1) ",
+      " const x = 1;\n return x; ",
+      " return (async function () { return 1; })(); ",
+    ];
+    for (const b of OK) {
+      const r = await prep(b);
+      expect(r.diags).toEqual([]);
+      expect(r.sealed.length).toBe(1);
+    }
+  });
+
+  test("F1: the reviewer's reproducer compiles to E-FOREIGN-007, nothing written, nothing run", async () => {
+    const b = await build("esc", tool('    function never() -> number {\n        _={ return 1; }), (console.log("RAN AT LOAD", typeof require), globalThis.PWN = 1), (async function () { return 2; }=;\n        return 0;\n    }\n    function main(args: string[]) -> number {\n        _={ console.log("main; PWN =", globalThis.PWN) }=;\n        if (args.length > 5) { never(); }\n        return 0;\n    }'));
+    expect(b.r.ok).toBe(false);
+    expect(b.r.diagnostics.map((d) => d.code)).toEqual(["E-FOREIGN-007"]);
+    expect(b.r.diagnostics[0].line).toBe(3);
+    expect(existsSync(b.out)).toBe(false);
+  }, 300000);
+
+  test("F1: the runtime builds a slice on its first call, not at module load (as impl#1 does)", async () => {
+    const { foreignSeal } = await import("../slice-m1/runtime/server-runtime.js");
+    globalThis.__s477Built = 0;
+    const f = foreignSeal("t.scrml:1:1", "async function (a) {\nreturn (a + globalThis.__s477Built++\n);\n}", {});
+    expect(globalThis.__s477Built).toBe(0);
+    expect(await f(10)).toBe(10);
+    expect(await f(10)).toBe(11);
+    delete globalThis.__s477Built;
+  });
+
+  // F3 — E-FOREIGN-006 / E-FOREIGN-007 are compile errors at the slice, for every slice of the
+  // tool program, whether or not `main` reaches its function.
+  test("F3: a slice in a function `main` never reaches is still checked (E-FOREIGN-007, E-FOREIGN-006)", async () => {
+    const u = await build("unr", tool("    function unused() -> number { const v: int = _={ import.meta.url }=; return v; }\n    function main(args: string[]) -> number { return 0; }"));
+    expect(u.r.diagnostics.map((d) => d.code)).toEqual(["E-FOREIGN-007"]);
+    expect(existsSync(u.out)).toBe(false);
+    const s = await build("unr6", tool("    function unused(n: int) -> number {\n        const o: int = _={ in: { n }\n            const n = 1;\n            return n;\n        }=;\n        return o;\n    }\n    function main(args: string[]) -> number { return 0; }"));
+    expect(s.r.diagnostics.map((d) => d.code)).toEqual(["E-FOREIGN-006"]);
+    // the module still prints only the slices `main` reaches
+    const ok = await build("unr-ok", tool('    function unused() -> number { const v: int = _={ 7 }=; return v; }\n    function main(args: string[]) -> number { _={ console.log("m") }=; return 0; }'));
+    expect(ok.r.ok).toBe(true);
+    const js = readFileSync(ok.js, "utf8");
+    expect(js).not.toContain("return (7");
+    expect(exec(ok.js).out).toBe("m\n");
+  }, 300000);
+
+  // F2 — §64.5.1: a tool MAY import "a `<foreign lang>` lib `export fn`" and "a db-bound library fn
+  // … (a library declaring its own `<db src>`)". Those tags are the library's surface, not page markup.
+  test("F2: a library with `<foreign lang>` / `<db src>` is not E-TOOL-006 — it gets exactly what a web program's import gets", () => {
+    const pair = (lib, importer) => frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "t.scrml", src: importer }], "t.scrml").diags;
+    const viaTool = (lib) => pair(lib, tool('    import { twice } from "./lib.scrml";\n    function main(args: string[]) -> number { const r = twice(21); return 0; }'));
+    const viaWeb = (lib) => pair(lib, '<program lang="js">\n    ${ import { twice } from "./lib.scrml"; }\n    <p>${twice(2)}</p>\n</program>\n');
+    const FOREIGN = '<foreign lang="js" />\nexport function twice(n: int) -> int { return n * 2; }\n';
+    const DB = '<db src="./x.db" tables="t" />\nexport function twice(n: int) -> int { return n * 2; }\n';
+    for (const lib of [FOREIGN, DB]) {
+      const t = viaTool(lib).filter((d) => d.file === "lib.scrml").map((d) => d.code);
+      expect(t).not.toContain("E-TOOL-006");
+      expect(t).toEqual(viaWeb(lib).filter((d) => d.file === "lib.scrml").map((d) => d.code));
+    }
+    // a library surface tag is not an export: such a file with no `export` is still E-TOOL-006
+    expect(viaTool('<foreign lang="js" />\nfunction twice(n: int) -> int { return n * 2; }\n').map((d) => d.code)).toContain("E-TOOL-006");
+    // and page markup beside it still is
+    expect(viaTool('<foreign lang="js" />\n<p>"x"</p>\nexport function twice(n: int) -> int { return n * 2; }\n').map((d) => d.code)).toContain("E-TOOL-006");
+  });
+});

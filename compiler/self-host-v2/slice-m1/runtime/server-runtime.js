@@ -105,9 +105,16 @@ export function foreignSeal(site, source, meta) {
   if (typeof dirname === "string") { hostNames.push("__dirname"); hostValues.push(dirname); }
   if (typeof filename === "string") { hostNames.push("__filename"); hostValues.push(filename); }
   const label = String(site).replace(/[\r\n\u2028\u2029]/g, " ");
-  const build = new globalThis.Function(...hostNames, "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + label);
-  const slice = build(...hostValues);
+  // s477 r1 (review F1): built on the slice's FIRST CALL, once — as impl#1's helper does — so
+  // loading the module evaluates no slice text. The compile-time check (tool-slices.js) is what
+  // proves `source` is exactly one async function; building late only keeps a slice that is never
+  // reached from being compiled at all.
+  let slice = null;
   return async (...args) => {
+    if (slice === null) {
+      const build = new globalThis.Function(...hostNames, "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + label);
+      slice = build(...hostValues);
+    }
     try {
       const v = await slice(...args);
       return v === undefined ? null : v;
