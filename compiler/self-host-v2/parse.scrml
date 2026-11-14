@@ -5286,6 +5286,12 @@ ${
         return { ps: params, tp: t }
     }
 
+    // s477 — the E-PARSE-FN text for a `:`-spelled return / error type.
+    fn colonReturnMsg(name: string, failable: boolean) -> string {
+        if (failable) return "a type after a parameter list is never introduced by `:` — a failable function names its error type `function " + name + "(…)! ErrorType { … }` or `function " + name + "(…)! -> ErrorType { … }` (§19.4.1; §7: `->` is the sole return-type annotation syntax)"
+        return "a return type is written `-> T` (§7: \"`->` is the sole return-type annotation syntax\") — write `function " + name + "(…) -> T { … }`, not `(…): T`"
+    }
+
     // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
     // s451 (U1a): `server` = written with the deprecated modifier; (Ue) a `!`
     // after the parameter list is a failable function, its error type `err`.
@@ -5310,6 +5316,14 @@ ${
                 const re: RType = parseType(adv(adv(t)))
                 err = re.t
                 t = re.tp
+            } else if (isP(t, ":")) {
+                // s477 — `)! : E`: a colon never introduces a type after a
+                // parameter list (§7: "`->` is the sole return-type annotation
+                // syntax"). Named, then the type read so the body parses.
+                t = diagAt(t, "E-PARSE-FN", colonReturnMsg(nameTok.v, true), ea)
+                const rc: RType = parseType(adv(t))
+                err = rc.t
+                t = rc.tp
             } else if (!isP(t, "{")) {
                 const re2: RType = parseType(t)
                 err = re2.t
@@ -5324,6 +5338,17 @@ ${
             const r2: RType = parseType(adv(adv(t)))
             if (!failable) ret = r2.t
             t = r2.tp
+        } else if (isP(t, ":")) {
+            // s477 (bryan S477 "⭐ RULED — tool main return type spelled ->"):
+            // `): T` / `) : T` (any spacing, a newline included) is newly
+            // rejected — §7: "`->` is the sole return-type annotation syntax
+            // for `function` and `fn` declarations". A written type is never
+            // dropped: it is named here, then read (and kept as the declared
+            // return, so the body is judged as the author meant) — no cascade.
+            t = diagAt(t, "E-PARSE-FN", colonReturnMsg(nameTok.v, failable), a)
+            const rc2: RType = parseType(adv(t))
+            if (!failable) ret = rc2.t
+            t = rc2.tp
         }
         const n0: int = t.diags.length
         const body: RBlock = parseBlock(t)
@@ -8126,6 +8151,9 @@ ${
             const rr: RType = parseType(t)
             ret = rr.t
             t = rr.tp
+        } else if (isP(t, ":")) {
+            // s477 — §7: "`->` is the sole return-type annotation syntax"
+            return hostMalformed(mp, at, end, "a binding's result type is written `-> T`, not `: T` — write `" + nameTok.v + "(…) -> T = target` (§21.3.3; §7)")
         }
         if (isP(t, "!")) {
             failable = true
