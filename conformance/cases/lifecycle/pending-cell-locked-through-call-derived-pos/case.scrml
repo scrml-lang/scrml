@@ -1,0 +1,17 @@
+// §13.9.1 S475 rule 3 — a LOCKED pending cell that reads a cell through a called function is derived: E-VALUE-SERVER-CALL.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function cur() -> string {
+        const n = loadName(@userId) !{ _ :> "?" };
+        return n;
+    }
+    let <userId:int=1/>
+    <who:(not to string)=(cur())/>
+    <main>
+        <p id="who" if=@who>${@who}</p>
+    </main>
+</program>

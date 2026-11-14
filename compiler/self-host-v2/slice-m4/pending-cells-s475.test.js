@@ -292,15 +292,37 @@ describe("refusals kept (each named)", () => {
     expect(errsOf(src).find((d) => d.code === "E-VALUE-SERVER-CALL").message).toContain("the formula of derived `@who`");
   });
 
-  test("`let` + a client-function call is refused by name: its deps cannot be inferred (r1 F1, INTERIM)", () => {
-    const e = errsOf(APP(`let <who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR));
+  // s477-boot-pending-rest (g-boot-pending-cell-opaque-call-s475) — §13.9.1 S475: the initializer
+  // "reads cells" when it reads a cell directly or through a called function (§13.9.2's deps). Red on
+  // base 709f53429: every `let` case below was E-BOOTSTRAP-UNSUPPORTED ("cannot infer the load's
+  // dependencies"), and the locked cell-free helper was counted derived (E-VALUE-SERVER-CALL).
+  test("`let` + a client function that reads a cell: its reads are the load's dependencies (s477)", () => {
+    const r = compile(APP(`let <who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR));
+    expect(check(r.core)).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.deps.length).toBe(1);                 // @userId, read inside cur()
+  });
+
+  test("a cell-free client helper in the initializer: `let` and locked both load once (s477)", () => {
+    for (const decl of [`let <who:(not to string)=(loadName(one()) !{ _ :> not })/>`, `<who:(not to string)=(loadName(one()) !{ _ :> not })/>`]) {
+      const r = compile(APP(decl).replace(LOAD, LOAD + CUR));
+      expect(check(r.core)).toEqual([]);
+      const [rq] = requestsOf(r.core);
+      expect(rq.deps).toEqual([]);
+    }
+  });
+
+  test("a called function whose read cannot be a dependency (a derived cell) is refused by name (INTERIM)", () => {
+    const CURD = `    function curD() -> string { const n = loadName(@dbl) !{ _ :> "?" }; return n; }
+`;
+    const src = (decl) => APP(decl).replace(LOAD, LOAD + CURD).replace("    let <show", "    <dbl:int=(@userId * 2)/>\n    let <show");
+    const e = errsOf(src(`let <who:(not to string)=(curD())/>`));
     expect(e.map((d) => d.code)).toEqual([U]);
     expect(e[0].message).toContain("cannot infer the load's dependencies");
+    expect(e[0].message).toContain("reads the derived cell `@dbl`");
     expect(e[0].message).toContain("g-boot-pending-cell-opaque-call-s475");
-    // INTERIM over-refusal, recorded in the gap: a cell-free client helper in the initializer
-    const o = errsOf(APP(`let <who:(not to string)=(loadName(one()) !{ _ :> not })/>`).replace(LOAD, LOAD + CUR));
-    expect(o.map((d) => d.code)).toEqual([U]);
-    expect(o[0].message).toContain("`one()`");
+    // locked: it reads a cell through the call, so it is derived (ruling S475 item 1, PERMANENT)
+    expect(codes(src(`<who:(not to string)=(curD())/>`))).toContain("E-VALUE-SERVER-CALL");
   });
 
   test("a file-scope (imported module) `(not to T)` cell with a waiting initializer is refused by name (r1 L1, INTERIM)", () => {
@@ -367,12 +389,14 @@ ${LOAD}export let <who:(not to string)=(loadName(1) !{ _ :> not })/>
   });
 
   test("E-DERIVED-WRITE names the reads and the calls — never \"reads (), ()\" (r2 cosmetic)", () => {
-    // the reviewer's case: a `(not to T)` cell made derived by its call, then written
-    const src = APP(`<who:(not to string)=(loadName(one()) !{ _ :> not })/>`).replace(LOAD, LOAD + CUR)
+    // the reviewer's case: a `(not to T)` cell made derived by its call, then written. s477: the
+    // call must READ a cell to make it derived (`cur()` reads `@userId`); the reviewer's cell-free
+    // `loadName(one())` is now a load-once pending cell (g-boot-pending-cell-opaque-call-s475)
+    const src = APP(`<who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR)
       .replace(`onclick={ @userId = 2; }`, `onclick={ @who = "z"; }`);
     const m = errsOf(src).find((d) => d.code === "E-DERIVED-WRITE");
     expect(m.message).not.toContain("reads ()");
-    expect(m.message).toContain("calls `loadName()`, `one()`");
+    expect(m.message).toContain("calls `cur()`");
     const src2 = `<program>
     let <a:int=1/>
     function f(x: int) -> int { return x; }
@@ -977,12 +1001,14 @@ describe("merge with #1794 / #1797 — a pending cell's load under the new READ 
 
   // r3 cosmetic (red on ec2850635: two diagnostics — the Ue2 "handled failable … only as a statement's
   // whole value" plus "calls `pick()` … but its initializer also calls `pick()`"): ONE clear refusal.
-  test("a pending initializer through a client `!` carrier is ONE refusal, naming the carrier once", () => {
-    const e = errsOf(APP(`let <who:(not to string)=(pick(@userId) !{ _ :> not })/>`).replace(LOAD, LOAD + BANG));
-    expect(e.map((d) => d.code)).toEqual([U]);
-    expect(e[0].message).toContain("but `pick()` is not a server function");
-    expect(e[0].message).not.toContain("also calls");
-    expect(e[0].message).toContain("g-boot-pending-cell-opaque-call-s475");
+  // s477: the carrier `pick()` reads no cell (its server call reaches no client state), so a pending
+  // initializer through it is no longer refused: its deps are the initializer's own `@userId`.
+  test("a pending initializer through a client `!` carrier compiles; its deps are the initializer's reads (s477)", () => {
+    const src = APP(`let <who:(not to string)=(pick(@userId) !{ _ :> not })/>`).replace(LOAD, LOAD + BANG);
+    expect(errsOf(src)).toEqual([]);
+    const r = compile(src);
+    expect(check(r.core)).toEqual([]);
+    expect(requestsOf(r.core)[0].deps.length).toBe(1);
   });
 
   test("an author waiting write through a client `!` carrier (#1797) must cover `E + Transport`", () => {
@@ -1186,5 +1212,26 @@ describe("s477 — `reset(@x)` / `reset-on=` on a pending cell re-run its load (
     await held[1].go();
     await settle();
     expect(shown()).toBe("c");
+  });
+});
+
+describe("s477 — a pending load through a client function re-runs on the cells that function reads", () => {
+  test("run time: `let <who=(cur())>` reloads when `@userId` (read inside `cur()`) changes", async () => {
+    const r = compile(APP(`let <who:(not to string)=(cur())/>`).replace(LOAD, LOAD + CUR));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "pend-through-call-" + k++);
+    await settle(5);
+    expect(held.length).toBe(1);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#u2"));
+    await settle(5);
+    expect(held.length).toBe(2);                    // the re-run (red on base: refused at compile time)
+    expect(cells(rt).who).toBe("a");                // stale while reloading
+    await held[1].go();
+    await settle();
+    expect(shown()).toBe("b");
   });
 });

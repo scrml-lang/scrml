@@ -17,3 +17,16 @@ Done: analyze resolveReset/resetEdgeOf/pendResetDeps; lower resetStmt/requestVie
 ## Unit 4 — g-boot-plan-arms-nested-wait-s475 (done before unit 2: small)
 Governing: the bootstrap's own INTERIM arm refusal (planArms `armPos`; capable form = U1b arm-continuation follow-up); §13.8 (a suspension point needs a continuation). No meaning change — the same refusal now reaches nested statements (front-end diagnostic instead of Core C-S3 / C-S8s).
 Done: analyze planArmBlock (recursive); slice-m4/plan-arms-nested-wait-s477.test.js (5 tests; red without recursion: 3 fail). No conformance case (bootstrap-only refusal). Gap resolved.
+- Unit 4 committed 4836a440a. (API outage; resumed S477 2026-11-14.) Merged origin/main (#1823, #1824) clean: 73e881cf8.
+
+## Unit 2 — g-boot-pending-cell-opaque-call-s475 (initializer calling a non-server function)
+Governing sentences (SPEC):
+- §13.9.1 "The spelling decides the load": "The rule reads the initializer exactly as §66.9 rules 3–4 read any initializer: it "reads cells" when it reads a cell directly or through a called function (§13.9.2's deps)."
+- §13.9.2: "deps are inferred from the initializer's `@` reads, as `<request>` infers them (§6.7.7)."
+- §13.9.1 rule 3: "locked + an initializer that reads cells is a derived cell … and stays refused, E-VALUE-SERVER-CALL" (PERMANENT).
+Meaning: through-call reads = transitive `@` reads of the called client functions (server / host fns not walked, §12.4). Mutable program-cell reads are deps; locked are reads only. Provable-or-refuse: derived-cell / instance / surface / request-state reads, calls through non-function names, missing bodies → INTERIM named refusal (gap narrowed, residue stays open).
+Done: analyze callReach/fnReach/readReach/pendCallDeps + initPos/lifeDerived/pendingCell; tests updated/added (incl. runtime re-run through cur()); 3 conformance cases (2 PASS; locked-derived-pos UNSUPPORTED on bootstrap: it also emits the derived-lifecycle E-BOOTSTRAP-UNSUPPORTED beside E-VALUE-SERVER-CALL — pre-existing double report that §66.9 rule 3's ⚑ PA reading says should be one).
+
+## Units 3 and 5 — not built (owed)
+- Unit 3 (g-boot-pending-cell-outside-program-s475): a file-scope / module cell is a USER declaration's shared instance (§66.6.4), not a program field; the capable form needs the hidden request targeting a shared-instance field and mounted by each importing program (pendFiles / resolvePending / requestView all assume a program field). Not started; refusal stays INTERIM.
+- Unit 5: §34 code for the derived-lifecycle refusal — SPEC §66.9 rule 3: "no language code names this refusal yet, and none is minted here (§66.20's house rule…)"; owed a language code when one is named (owner). S6 display-position pending values: SPEC §13.7 S474 note — owed capable form; "fallback spelling not ruled". Not started.
