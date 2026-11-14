@@ -484,3 +484,69 @@ describe("H3 — a spread / concat WHOLE write into a bounded slot is bound-chec
     expect($("#o").textContent).toBe("2,1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 2 (review of #1830, F1 — fail-open): an edit written as the ONE EXPRESSION of a
+// statement `match` arm or a `!{}` handler arm (`.A :> xs.append(3),`) was never typed — no
+// bound, grant, element-type or element-bound check (typeCall typed a local edit only when it
+// was a removal value). §66.11.2: "checked on EVERY write, however it is spelled"; §66.12.6
+// rule 3: each method is a write checked against the target's grants.
+describe("H4 — an edit as a `match` / `!{}` arm's EXPRESSION is checked as in statement position", () => {
+  const K = `    type K:enum = { A, C }\n    <k:K=(K.A)/>`;
+  const E = `    type AuthErr:enum = { Denied, Locked }\n    function check(p: string)! AuthErr {\n        if (p != "secret") fail AuthErr.Denied;\n        return true;\n    }`;
+  const ARMS = {
+    match: { decls: K, wrap: (x) => `        match @k {\n            .A :> ${x},\n            else :> ${x}\n        }` },
+    handled: { decls: E, wrap: (x) => `        check("x") !{ _ :> ${x} };` },
+  };
+  // a target: its declarations and body, given the tape type, its initial value and the edit
+  const TARGETS = {
+    local: (ty, init, ed, arm) => ["", `        let xs: ${ty} = ${init};\n${arm(`xs.${ed}`)}\n        @shown = "unreached";`],
+    part: (ty, init, ed, arm) => [`    type P:struct = { n: int, xs: ${ty} }`, `        let b: P = { n: 0, xs: ${init} };\n${arm(`b.xs.${ed}`)}\n        @shown = "unreached";`],
+    "parameter part": (ty, init, ed, arm) => [`    type P:struct = { n: int, xs: ${ty} }\n    function grow(b: P) -> int {\n${arm(`b.xs.${ed}`)}\n        return b.xs.length;\n    }`, `        @shown = \`\${grow({ n: 0, xs: ${init} })}\`;`],
+    cell: (ty, init, ed, arm) => [`    <c:${ty}=(${init})/>`, `${arm(`@c.${ed}`)}\n        @shown = "unreached";`],
+  };
+  // the edit: an end-append, or (for "part insert") an insert at 0
+  const EDITS = { append: { grant: "append", ed: (v) => `append(${v})` }, insert: { grant: "insert", ed: (v) => `insert(0, ${v})` } };
+  const COMBOS = [];
+  for (const t of Object.keys(TARGETS)) COMBOS.push([t, t, EDITS.append]);
+  COMBOS.push(["part insert", "part", EDITS.insert]);
+  COMBOS.push(["local insert", "local", EDITS.insert]);
+  const src = (armName, tgt, ty, init, ed) => {
+    const a = ARMS[armName];
+    const [d, b] = TARGETS[tgt](ty, init, ed, a.wrap);
+    return prog(`${a.decls}\n${d}`, b);
+  };
+  const uniq = (cs) => [...new Set(cs)];
+  for (const armName of Object.keys(ARMS)) {
+    for (const [label, tgt, ed] of COMBOS) {
+      const g = ed.grant;
+      test(`${armName} arm · ${label}: an unprovable edit past the bound traps (E-WRITE-INVARIANT-RT), nothing after it runs`, async () => {
+        const s = src(armName, tgt, `int[1..=2, ${g}]`, "[1, 2]", ed.ed("3"));
+        await load(s);
+        const e = clickTrap(btn("go"));
+        expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+        expect($("#o").textContent).toBe("");
+      });
+      test(`${armName} arm · ${label}: a provable bound violation is E-WRITE-INVARIANT`, () => {
+        expect(uniq(codes(src(armName, tgt, `int[2..=2, ${g}]`, "[1, 2]", ed.ed("3"))))).toEqual(["E-WRITE-INVARIANT"]);
+      });
+      test(`${armName} arm · ${label}: an ungranted edit is E-WRITE-NOT-GRANTED`, () => {
+        expect(uniq(codes(src(armName, tgt, "int[free]", "[1, 2]", ed.ed("3"))))).toEqual(["E-WRITE-NOT-GRANTED"]);
+      });
+      test(`${armName} arm · ${label}: a wrongly typed element is E-TYPE-031`, () => {
+        expect(uniq(codes(src(armName, tgt, `int[free, ${g}]`, "[1, 2]", ed.ed(`"s"`))))).toEqual(["E-TYPE-031"]);
+      });
+      test(`${armName} arm · ${label}: an element past the element bound is E-WRITE-INVARIANT`, () => {
+        expect(uniq(codes(src(armName, tgt, `int[1..=2][free, ${g}]`, "[]", ed.ed("[1, 2, 3]"))))).toEqual(["E-WRITE-INVARIANT"]);
+      });
+    }
+  }
+
+  test("an in-range edit in an arm's expression runs, and carries its check", async () => {
+    const s = prog(K, `        let xs: int[1..=3, append] = [1, 2];\n        match @k {\n            .A :> xs.append(3),\n            else :> xs.append(4)\n        }\n${show("xs")}`);
+    expect(lengthChecks(clean(s).core).length).toBeGreaterThan(0);
+    await load(s);
+    click(btn("go"));
+    expect($("#o").textContent).toBe("1,2,3");
+  });
+});
