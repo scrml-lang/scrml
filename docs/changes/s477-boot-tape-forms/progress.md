@@ -19,3 +19,16 @@ Meaning change: `const v = xs.pop()` (and shift / remove(i), cell pop / shift) w
 Built: analyze `resolveRemovalValue`, `assignWhat` (a part-target assignment's value position is named "… to a part"), `mintTaken`; ELocalEdit `taken` / `at`, ERemove `taken: SeqSnap | not`; typer `typeCall` branch; lower `removalPre` / `removalOrCall` / `removedRead` (AtRead), in Local / Return / Eval.
 INTERIM (named refusal, gap g-boot-tape-removal-value-position-s477): any position other than a whole statement value — SPEC is not silent here (it types the value everywhere); the refusal is a bootstrap capability limit (Core has no value-yielding rebind outside condition heads), capable form recorded in the gap.
 Tests: tape-forms-s477 B1–B3; conformance reactive/tape-removal-value-{rt,not-t-neg} (impl#1 xfail on new carried gaps g-impl1-tape-alias-reference-semantics-s477 — §66.10 already records the divergence as CARRIED — and g-impl1-tape-removal-value-untyped-s477).
+
+## Resume after API outage (2026-11-14)
+- commit 2 (fef25d0ca) had landed. F4 re-checked. Merged origin/main (0487a8fa4, carrying #1823 + #1824) — clean, no conflicts; tape-forms-s477 + tape-inplace-s476 + local-tape-edits-s475 green together (82 pass). #1824's owned in-place edits compose with the part-edit / removal-value lowering (aliases still unchanged in every value-semantics test).
+
+## Item 3 — g-boot-spread-value-s475 (BUILT; call spread INTERIM)
+Governing sentences: §66.12.1 "Non-mutating operations (`map`, `filter`, `slice`, `concat`, `find`, `some`, `every`, `reduce`, …) are always allowed; they return new values." §66.10 item 2: "No write to a source is observable through a value taken from it earlier". §66.12.6 rule 4: a whole-value write "is a recognized reassignment shape …, a certified helper's result …, or else a `replace`."
+Built: resolveArray admits spread elements; typeArray refuses a non-tape operand (E-TYPE-031 — SPEC silent on the code; searched §66.12 / §34 for a spread-of-non-tape code, none; E-TYPE-031 is the general mismatch code); checkNotElems checks spread elements; methodArgCheck types a literal tape argument from the parameter.
+INTERIM: call spread `f(...xs)` — parse error; needs rest parameters (§7.5) and the §7.3 spread-argument PA reading is flagged for veto → ruling owed (gap g-boot-call-spread-s477).
+
+## Item 4 — survey + `concat`
+Survey of tape refusals (probe at 709f53429): pop/shift/remove VALUE (built, item 2); part edits (built, item 1); `@r.xs.append` cell sub-field edit (gap g-boot-cell-subfield-tape-edit-s477); `@xs.remove(i)` cell; `insert` (O36, out of scope); `concat`, `slice`, `indexOf`, `find`, `findIndex`, `reduce`, `fill`, `copyWithin`, `flatMap`, `forEach` on a tape.
+Built: `concat` (one tape argument). Rest INTERIM with reasons in g-bootstrap-tape-methods-insert-remove-fill-owed-s469 (rulings owed: fill/copyWithin negative positions vs §66.12.8 rule 7; find/indexOf/reduce result types). `flatMap` / `forEach` are not named in §66.12 (only the §7.5 lambda list) — left refused.
+Tests: tape-forms-s477 C1–C2, D; conformance reactive/tape-spread-{value-rt,non-tape-neg} (rt passes on impl#1 too; neg xfail on new carried g-impl1-tape-spread-elements-unchecked-s477).

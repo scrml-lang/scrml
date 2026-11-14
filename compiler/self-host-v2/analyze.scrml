@@ -7016,7 +7016,7 @@ ${
             .Assign(target: t, value: av, kept: kp) :> assignAsValue(env, e, t, av, kp, st)   // s474: the §50 kept form
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
-            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
+            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` outside a tape value (a call argument, `f(...xs)`) is not in the bootstrap — rest parameters are not parsed (gap g-boot-call-spread-s477); pass the tape itself, or spread it into a tape value (`[...xs, e]`)", st)
             .Index(obj: o, idx: ix) :> resolveIndexRead(env, e, o, ix, st)   // s469 (§49.13)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
@@ -8509,7 +8509,7 @@ ${
     }
 
     fn isBuiltinMethodName(n: string) -> boolean {
-        return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || tapeJsFix(n) != ""
+        return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || n == "concat" || tapeJsFix(n) != ""
     }
 
     fn isStrMethodName(n: string) -> boolean {
@@ -8568,6 +8568,7 @@ ${
         if (n == "reverse") return PrimOp.Reverse
         if (n == "join" && el == Type.Str) return PrimOp.Join
         if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
+        if (n == "concat") return PrimOp.TapeConcat          // s477 (§66.12.1): `a.concat(b)` — a NEW tape; ONE tape argument
         if (n == "sort") {
             if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
             if (el == Type.Str) return PrimOp.SortStr
@@ -8625,11 +8626,14 @@ ${
             const el: Type | not = seqElem(recv)
             if (el is given) return [el]
         }
+        // s477: `a.concat(b)` — `b` a tape of the receiver's element type (its grants
+        // are not asked: concat reads it)
+        if (op == PrimOp.TapeConcat) return [ungranted(recv)]
         return methodSig(op)
     }
 
     fn methodMinArity(op: PrimOp) -> int {
-        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes) return 1
+        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes || op == PrimOp.TapeConcat) return 1
         return methodSig(op).length
     }
 
@@ -8642,7 +8646,7 @@ ${
         if (op == PrimOp.ParseNum) return Type.Maybe(Type.Num)
         if (op == PrimOp.ParseBool) return Type.Maybe(Type.Bool)
         if (op == PrimOp.StrSplit) return Type.Seq(Type.Str, anySeqGrants())
-        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return ungranted(recv)
+        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse || op == PrimOp.TapeConcat) return ungranted(recv)
         return Type.Str
     }
 
@@ -8658,6 +8662,7 @@ ${
 
     // A built-in's name as written (for messages).
     fn methodName(op: PrimOp) -> string {
+        if (op == PrimOp.TapeConcat) return "concat"
         if (op == PrimOp.StrUpper) return "toUpperCase"
         if (op == PrimOp.StrLower) return "toLowerCase"
         if (op == PrimOp.StrTrim) return "trim"
@@ -9570,7 +9575,20 @@ ${
     fn resolveArray(env: Env, e: AExpr, es: AExpr[], expected: Type | not, st0: AS) -> RX {
         let elem: Type | not = not
         if (expected is given) elem = seqElem(expected)
-        const st: AS = resolveExprs(env, es, elem, st0)
+        // s477 (s477-boot-tape-forms, gap g-boot-spread-value-s475): a spread element
+        // `...xs` is a run of the operand tape's elements — the operand is resolved as a
+        // tape of the array's own type (the typer checks it is a tape, typeArray), and
+        // lower.scrml `arrayValue` makes the value a TapeConcat of its runs: a NEW tape
+        // (§66.10, §66.12.1 "Non-mutating operations … return new values").
+        let st: AS = st0
+        for (const x of es) {
+            const inner: AExpr | not = spreadInner(x)
+            if (inner is given) {
+                st = resolveExpr(env, inner, expected, st).st
+            } else {
+                st = resolveExpr(env, x, elem, st).st
+            }
+        }
         return plain(expected, st)
     }
 
@@ -25117,7 +25135,7 @@ ${
         // s475: a tape's `includes(x)` — the argument against the receiver's element type
         // s475 r1 (#1812 review F4): a receiver whose type the typer cannot name fails closed — the
         // argument is never compared unchecked
-        if (op == PrimOp.TapeIncludes) {
+        if (op == PrimOp.TapeIncludes || op == PrimOp.TapeConcat) {
             sig = []
             const cl: AExpr | not = calleeOf(e.k)
             if (cl is given) {
@@ -25135,7 +25153,11 @@ ${
             if (i < sig.length) {
                 const vt: VType = exprType0(ts, a.nid)
                 const what: string = "argument " + (i + 1) + " of `." + methodName(op) + "(…)`"
-                if (knownOf(vt) is not && !isAbsentVT(vt)) {
+                if (isArrayLit(a) && knownOf(vt) is not && seqElem(sig[i]) is given) {
+                    // s477: a tape literal argument (`.concat([])`, `.concat([1, x])`) takes
+                    // its type from the parameter — each element checked against it
+                    ts = checkNotElems(env, a, sig[i], ts)
+                } else if (knownOf(vt) is not && !isAbsentVT(vt)) {
                     if (!hasErrIn(env.errs, a.span)) ts = report(ts, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", what + " has a type the compiler cannot resolve — a built-in method's argument must be a `" + typeName(sig[i]) + "` the compiler can see; annotate it")
                 } else {
                     ts = checkValue(env, vt, sig[i], a.span, what + " (a `" + typeName(sig[i]) + "`)", ts)
@@ -26337,6 +26359,11 @@ ${
         return report(ts, env, s.span, "E-TEXT-NON-PRIMITIVE", "a template slot is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§14.13.2). Interpolate a field (`p.name`), a `scrml:format` call, or show it with `log()`")
     }
 
+    fn maybeSpreadHint(t: Type) -> string {
+        if (maybeInner(t) is given) return " — it may be `not`; narrow it first (`if (x is given) { … }`)"
+        return ""
+    }
+
     fn typeArray(env: TEnv, es: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = ts0
         let elem: VType = VType.Unknown
@@ -26354,6 +26381,9 @@ ${
                 if (it is given) {
                     const iel: Type | not = seqElem(it)
                     if (iel is given) ev = known(iel)
+                    // s477: a spread of a value that is not a tape (a string, a struct, a
+                    // `T | not` that may be `not`) has no elements to run — refused
+                    if (iel is not && !hasErrIn(env.errs, inner.span)) ts = report(ts, env, inner.span, "E-TYPE-031", "a spread `...` in a tape value needs a tape, and this operand is `" + typeName(it) + "` (§66.12.1: one sequence kind, the tape)" + maybeSpreadHint(it))
                 }
             }
             if (first) {
@@ -26558,7 +26588,16 @@ ${
         let out: TypeState = ts
         for (const x of es) {
             const xv: VType = exprType0(out, x.nid)
-            if (isNotLit(x)) {
+            // s477: a spread element is a run of its operand's elements — each a value
+            // of the target's element type (a non-tape operand: typeArray refused it)
+            const sp: AExpr | not = spreadInner(x)
+            if (sp is given) {
+                const st0: Type | not = knownOf(exprType0(out, sp.nid))
+                if (st0 is given) {
+                    const sel: Type | not = seqElem(st0)
+                    if (sel is given) out = checkValue(env, known(sel), te, sp.span, "an element of `" + typeName(target) + "` (spread from `" + typeName(st0) + "`)", out)
+                }
+            } else if (isNotLit(x)) {
                 out = checkAbsent(env, te, x.span, "an element of `" + typeName(target) + "`", out)
             } else if (knownOf(xv) is given || oneOfMembers(xv).length > 0 || isPartialVT(xv)) {
                 // s475 (#1777 review r1 F1): a Partial element's proven members are

@@ -184,3 +184,56 @@ describe("B3 — judged, typed, and where it stays refused (INTERIM)", () => {
     }
   });
 });
+
+// ===========================================================================
+//   C. a spread as a VALUE (gap g-boot-spread-value-s475). §66.12.1: "Non-mutating
+//      operations (`map`, `filter`, `slice`, `concat`, …) are always allowed; they return
+//      new values." §66.10: the new tape shares no identity with its operands.
+describe("C1 — `[...a, x]` / `[x, ...a, ...b]` in a const, a return, an argument, a cell write", () => {
+  test("the values, in order; an empty operand; a spread of a parameter and of a call result", async () => {
+    const decls = `    <c:int[replace]=([])/>\n    fn ends(xs: int[], x: int) -> int[] {\n        return [x, ...xs, x];\n    }\n    fn sum(xs: int[]) -> int {\n        let s: int = 0;\n        for (v of xs) { s = s + v; }\n        return s;\n    }`;
+    expect(await runShown(decls, `        const a: int[] = [1, 2];\n        const e: int[] = [];\n        const b: int[] = [...a, 3];\n        const d: int[] = [0, ...a, ...e, ...b];\n        @c = [...ends(a, 9), 7];\n        const n: int = sum([...a, ...a]);\n        @shown = ${txt("b")} + "|" + ${txt("d")} + "|" + ${txt("@c")} + "|" + \`\${n}\`;`)).toBe("1,2,3|0,1,2,1,2,3|9,1,2,9,7|6");
+  });
+
+  test("value semantics: the new tape is not its operand — an edit of either is never seen by the other", async () => {
+    expect(await runShown("", `        let a: int[free, append] = [1];\n        let b: int[free, append] = [...a];\n        a.append(2);\n        b.append(3);\n        const s: int[] = [...b];\n        b.append(4);\n${show("a", "b", "s")}`)).toBe("1,2|1,3,4|1,3");
+  });
+});
+
+describe("C2 — judged: the operand is a tape of the element type; a whole write is still classified", () => {
+  test("a spread of a non-tape: E-TYPE-031; elements of another type: E-TYPE-031", () => {
+    expect(codes(prog("", `        const s: string = "ab";\n        const b: string[] = [...s];`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog("", `        const a: string[] = ["x"];\n        const b: int[] = [...a, 1];`))).toContain("E-TYPE-031");
+  });
+
+  test("a whole write of another tape's spread is a `replace` (§66.12.6 rule 4) — not granted by `append`", () => {
+    expect(codes(prog("    <c:int[free, append]=([])/>", `        const a: int[] = [1];\n        @c = [...a, 2];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog("", `        let xs: int[free, append] = [];\n        const a: int[] = [1];\n        xs = [...a, 2];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+
+  test("a call-argument spread `f(...xs)` stays refused — the parser takes no spread argument (gap g-boot-call-spread-s477)", () => {
+    const r = run(prog("    fn f(a: int, b: int) -> int { return a + b; }", `        const xs: int[] = [1, 2];\n        const n: int = f(...xs);`));
+    expect(r.diags.map((d) => d.code)).toContain("E-PARSE-EXPR");
+  });
+});
+
+// ===========================================================================
+//   D. other tape methods SPEC names (§66.12.1): `concat` built; the rest INTERIM.
+describe("D — `a.concat(b)` (§66.12.1): a new tape; one tape argument of the element type", () => {
+  test("runs, leaves both operands unchanged, and carries no grant", async () => {
+    expect(await runShown("", `        const a: int[] = [1, 2];\n        const b: int[] = [3];\n        const c: int[] = a.concat(b);\n        const d: int[] = c.concat([]);\n${show("a", "b", "c", "d")}`)).toBe("1,2|3|1,2,3|1,2,3");
+    expect(codes(prog("", `        const a: int[] = [1];\n        let c = a.concat([2]);\n        c.append(3);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+
+  test("the argument is a tape of the element type (E-TYPE-031); exactly one (E-CALL-ARITY)", () => {
+    expect(codes(prog("", `        const a: int[] = [1];\n        const c: int[] = a.concat(["x"]);`))).toContain("E-TYPE-031");
+    expect(codes(prog("", `        const a: int[] = [1];\n        const c: int[] = a.concat(2);`))).toContain("E-TYPE-031");
+    expect(codes(prog("", `        const a: int[] = [1];\n        const c: int[] = a.concat([2], [3]);`))).toEqual(["E-CALL-ARITY"]);
+  });
+
+  test("still refused by name (INTERIM): tape `slice` / `indexOf` / `find` / `findIndex` / `reduce` / `fill` / `copyWithin`", () => {
+    for (const m of ["slice(1)", "indexOf(1)", "find(x => x > 0)", "findIndex(x => x > 0)", "reduce((s, x) => s + x, 0)", "fill(0)", "copyWithin(0, 1)"]) {
+      expect(codes(prog("", `        const a: int[] = [1];\n        const r: int[] = a.${m};`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    }
+  });
+});

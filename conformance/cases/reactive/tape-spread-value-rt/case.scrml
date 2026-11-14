@@ -1,0 +1,12 @@
+<program>
+<n> = 0
+function build() {
+    const a: int[] = [1, 2];
+    const b: int[] = [0, ...a, 3];
+    const c: int[] = a.concat([9]);
+    const d: int[] = [...b, ...c];
+    @n = b.length * 100 + c.length * 10 + d.length - a.length;
+}
+<button id="go" onclick=build()>go</button>
+<p id="n">${@n}</p>
+</program>

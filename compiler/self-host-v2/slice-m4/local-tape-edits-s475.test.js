@@ -193,9 +193,8 @@ describe("E — what stays refused (INTERIM, named)", () => {
   // an edit of a PART of a local (gap g-boot-local-tape-part-edit-s475): BUILT by
   // s477-boot-tape-forms — tape-forms-s477.test.js A1–A3.
 
-  test("a spread value outside a recognized edit shape (gap g-boot-spread-value-s475)", () => {
-    expect(codes(prog("", `        let a: int[] = [1];\n        const b: int[] = [...a, 2];`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-  });
+  // a spread value outside a recognized edit shape (gap g-boot-spread-value-s475): BUILT by
+  // s477-boot-tape-forms — tape-forms-s477.test.js C1–C2.
 });
 
 // ---------------------------------------------------------------------------
