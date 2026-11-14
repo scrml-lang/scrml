@@ -31725,10 +31725,10 @@ The refusal itself is an unbuilt case, not a ruling, so the message should say w
 <!-- @gap id=g-boot-qualified-enum-literal-receiver-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(litRecvText — qualified enum variant elements) prov=review:s477-1823 -->
 ### g-boot-qualified-enum-literal-receiver-s477 — an array literal of qualified enum variants (`[C.Red, C.Green]`) is refused as a receiver / loop source, though its element type `C` is knowable — `NEW S477; LOW; open`
 
-<!-- @gap id=g-boot-ownseq-op-allowlist-s477 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(ownSeq ~:1811) prov=review:s477-1824 -->
+<!-- @gap id=g-boot-ownseq-op-allowlist-s477 sev=LOW status=resolved resolved-by=s478-boot-ownership-hardening locus=compiler/self-host-v2/print.scrml(ownSeq ~:1811) prov=review:s477-1824 -->
 ### g-boot-ownseq-op-allowlist-s477 — `ownSeq` exempts the receiver of ANY `SeqCall` from the in-place ownership scan, rather than an allowlist of ops known not to retain or alias the receiver; sound for today's ops (the #1824 review found the ownership proof unbroken), but a new op that keeps its receiver would silently break in-place editing — `NEW S477; LOW; open (hardening)`
 
-<!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=open locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
+<!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=resolved resolved-by=s478-boot-ownership-hardening locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
 ### g-boot-ownedlocals-kids-blind-spots-s477 — `walk.kids` does not descend into `FSettled`, `Suspend.bind` or `Attempt.result`, so the owned-locals scan built on it cannot see a use of a local there; no escape found by the #1824 review, but the scan's soundness rests on those nodes never carrying an alias — `NEW S477; LOW; open (hardening)`
 
 ## §S477 review follow-ups (round 2) — LOW items from the #1826 / #1828 / #1830 / #1831 / #1835 reviews and fix rounds, and S477 tooling lanes
