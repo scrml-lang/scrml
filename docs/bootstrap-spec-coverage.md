@@ -34,8 +34,8 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 | status | rows |
 |---|---:|
 | BUILT | 314 |
-| PARTIAL | 153 |
-| REFUSED-LOUD | 311 |
+| PARTIAL | 156 |
+| REFUSED-LOUD | 308 |
 | DEFERRED-RULED | 59 |
 | N/A | 220 |
 | SILENT-ACCEPT | 17 |
