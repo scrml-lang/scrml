@@ -1,0 +1,11 @@
+{
+  "id": "fn-nested-redeclare-local-neg",
+  "description": "§7.3.3 — a nested `function step` in the same block as `let step` binds one name twice in that block: E-SCOPE-REDECLARE.",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #6 (the four defer SPEC calls, all recs)",
+  "rationale": "§7.3.3: 'Inside a function body, a `let`, `const`, `lin` or `function` declaration SHALL NOT redeclare a name already bound in the SAME block — another `let` / `const` / `lin` / `function` declaration of that block'.",
+  "expect": {
+    "codes": ["E-SCOPE-REDECLARE"]
+  }
+}

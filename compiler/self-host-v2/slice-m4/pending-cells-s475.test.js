@@ -1235,3 +1235,52 @@ describe("s477 — a pending load through a client function re-runs on the cells
     expect(shown()).toBe("b");
   });
 });
+
+// s477-boot-nested-fn x s477-boot-pending-rest (merge composition): a pending cell's deps through
+// its called functions (callReach / fnReach) reach a NESTED function's body too — a nested function
+// is a FnSrc of its own (g.fns, outer >= 0) named by an NFn fact at its call, so the walk follows it;
+// a read it cannot take as a dependency is refused naming the nested function. Never dropped (a missed
+// dependency is a stale cell).
+describe("a NESTED function inside the initializer's helper (s477 nested-fn x callReach)", () => {
+  // the helper does not wait (a nested function in a WAITING client function is refused, INTERIM)
+  const CURN = `    function idOf() -> int {
+        function uid() -> int { return @userId; }
+        return uid();
+    }
+`;
+  const INIT = `(loadName(idOf()) !{ _ :> not })`;
+  const nested = (decl) => APP(decl).replace(LOAD, LOAD + CURN);
+  test("`let`: the nested function's cell read is the load's dependency", () => {
+    const r = compile(nested(`let <who:(not to string)=${INIT}/>`));
+    expect(check(r.core)).toEqual([]);
+    const [rq] = requestsOf(r.core);
+    expect(rq.deps.length).toBe(1);                 // @userId, read inside uid() inside idOf()
+  });
+  test("locked: it reads a cell through the call, so it is DERIVED (E-VALUE-SERVER-CALL)", () => {
+    expect(codes(nested(`<who:(not to string)=${INIT}/>`))).toContain("E-VALUE-SERVER-CALL");
+  });
+  test("a nested function reading a derived cell is refused naming it", () => {
+    const src = APP(`let <who:(not to string)=${INIT}/>`)
+      .replace(LOAD, LOAD + CURN.replace("return @userId;", "return @dbl;"))
+      .replace("    let <show", "    <dbl:int=(@userId * 2)/>\n    let <show");
+    const e = errsOf(src);
+    expect(e.map((d) => d.code)).toEqual([U]);
+    expect(e[0].message).toContain("`uid()` reads the derived cell `@dbl`");
+  });
+  test("run time: a change of the cell the nested function reads re-runs the load", async () => {
+    const r = compile(nested(`let <who:(not to string)=${INIT}/>`));
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS));
+    const held = heldTransport(srv);
+    await loadProgram(r.core, "pend-nested-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a");
+    click(document.querySelector("#u2"));
+    await settle(5);
+    expect(held.length).toBe(2);
+    await held[1].go();
+    await settle();
+    expect(shown()).toBe("b");
+  });
+});

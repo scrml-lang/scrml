@@ -239,6 +239,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not                            // s477: declaring a nested function reads no local (its body's nodes are walked; its name is bound — walk.scrml stmtBinds)
         }
     }
 
@@ -784,6 +785,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
@@ -945,6 +947,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: g) :> loopNeverEnds(g.label, g.head, g.body)
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .If(thenB: t, elseB: el) :> ifDiverges(t, el)
             .Attempt(result: x) :> false
             .Let(sym: x) :> false
@@ -1156,6 +1159,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""                        // s477: its body's own nodes are visited (allNodes walks into the NFn)
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -1332,6 +1336,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -1471,6 +1476,7 @@ ${
             .Continue(target: x) :> ["C8: a bind's write is not a Write"]
             .Gather(g: x) :> ["C8: a bind's write is not a Write"]
             .Lift(into: x) :> ["C8: a bind's write is not a Write"]
+            .LocalFn(f: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -1846,6 +1852,7 @@ ${
             .Continue(target: x) :> ReqStmt.ROther
             .Gather(g: x) :> ReqStmt.ROther
             .Lift(into: x) :> ReqStmt.ROther
+            .LocalFn(f: x) :> ReqStmt.ROther
         }
     }
 
@@ -1970,6 +1977,7 @@ ${
             .Break(target: x) :> 0
             .Continue(target: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0                                  // s477: declaring a nested function writes nothing
         }
     }
 
@@ -2140,6 +2148,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -2200,6 +2209,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -2324,6 +2334,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -2348,6 +2359,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -2436,6 +2448,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -2479,6 +2492,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -2663,6 +2677,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
         }
     }
 
@@ -2804,6 +2819,7 @@ ${
             .Continue(target: x) :> 0
             .Gather(g: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0
         }
     }
 
@@ -2939,6 +2955,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: g) :> tailBlock(g.body, false, [], where)
             .Lift(into: x) :> []
+            .LocalFn(f: x) :> []                                 // s477: never a continuation (C-N1: its body holds no Suspend / Join / Jump)
             .If(thenB: t, elseB: el) :> ifTails(b, i, t, el, tail, last, joins, where)
             .Attempt(ok: ok, arms: arms) :> attemptTails(ok, arms, where)
             .Defer(body: d) :> tailBlock(d, false, [], where)
@@ -2988,6 +3005,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -3039,6 +3057,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -3064,6 +3083,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -3460,6 +3480,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -3486,6 +3507,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
             .Let(sym: x) :> not
@@ -3655,6 +3677,69 @@ ${
         return []
     }
 
+    // s477 — C-N1: a NESTED function (Stmt.LocalFn, §7.3.1) never waits, is never
+    // failable and is no host binding (analyze refuses those shapes), so nothing
+    // in its body — its own nested functions included — is a Suspend, a Join, a
+    // Jump or a Fail: each would be judged against, or continue, the ENCLOSING
+    // function. (Its Returns are its own: the printer prints it plainly.)
+    fn checkLocalFn(f: Fn) -> string[] {
+        let out: string[] = []
+        const who: string = "the nested function " + f.sym.hint + "()"
+        if (f.waits) out = out.concat(["C-N1: " + who + " waits"])
+        if (f.err is given) out = out.concat(["C-N1: " + who + " is failable"])
+        if (f.host is given) out = out.concat(["C-N1: " + who + " is a host binding"])
+        for (const n of allNodes(Node.NFn(f))) {
+            const what: string = nestedForbidden(n)
+            if (what != "") out = out.concat(["C-N1: " + who + " holds " + what])
+        }
+        return out
+    }
+
+    fn nestedForbidden(n: Node) -> string {
+        return match n {
+            .NStmt(s: s) :> nestedForbiddenStmt(s)
+            .NExpr(e: x) :> ""
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> ""
+            .NServerFn(f: x) :> "a server function"
+            .NBlock(b: x) :> ""
+            .NPlace(pl: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NView(v: x) :> "a view"
+            .NAttr(a: x) :> "a markup attribute"
+        }
+    }
+
+    fn nestedForbiddenStmt(s: Stmt) -> string {
+        return match s {
+            .Suspend(bind: x) :> "a Suspend"
+            .Join(k: x) :> "a Join"
+            .Jump(k: x) :> "a Jump"
+            .Fail(err: x) :> "a Fail"
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .Write(cap: x) :> ""
+            .Commit(writes: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .ResetSurface(of: x) :> ""
+            .Defer(body: x) :> ""
+            .Unpersist(decl: x) :> ""
+            .Attempt(result: x) :> ""
+            .Loop(label: x) :> ""
+            .Break(target: x) :> ""
+            .Continue(target: x) :> ""
+            .Gather(g: x) :> ""
+            .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
+        }
+    }
+
     fn checkStmt(p: CoreProgram, ob: OnceBinds, encl: Decl[], s: Stmt) -> string[] {
         return match s {
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, ob, encl, cap, inst, edit, v, ck)
@@ -3677,6 +3762,7 @@ ${
             .Continue(target: x) :> []
             .Gather(g: g) :> checkLoop(g.head, g.body).concat(gatherDirectDefers(g.body))
             .Lift(into: x) :> []
+            .LocalFn(f: f) :> checkLocalFn(f)                      // s477 (C-N1)
         }
     }
 
@@ -3761,6 +3847,7 @@ ${
             .Continue(target: x) :> 0
             .Gather(g: x) :> 0
             .Lift(into: x) :> 0
+            .LocalFn(f: x) :> 0
         }
     }
 
@@ -3807,6 +3894,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> "a nested function"        // s477: one stands only at the top of a function body
         }
     }
 
@@ -3870,6 +3958,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
         }
     }
 
@@ -3936,6 +4025,7 @@ ${
             .Continue(target: x) :> -1
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Loop(label: x) :> -1
             .Let(sym: x) :> -1
             .Assign(local: x) :> -1
@@ -4050,6 +4140,7 @@ ${
             .Continue(target: t) :> jumpTo(t, loops, "Continue")
             .Gather(g: g) :> jumpBlock(g.body, [g.label.id])   // s469: a bound loop is a jump boundary (§49.6 rule 6, C20)
             .Lift(into: x) :> []
+            .LocalFn(f: f) :> jumpBlock(f.body, [])             // s477: a function body is a jump boundary (§49.4.3)
             .If(thenB: t, elseB: el) :> jumpBlockIn(t, loops, cyc).concat(jumpMaybe(el, loops, cyc))
             .Attempt(ok: ok, arms: arms) :> jumpAttempt(ok.body, arms, loops, cyc)
             .Suspend(then: t) :> jumpBlockIn(t, cyc, cyc)
@@ -4111,6 +4202,7 @@ ${
             .Continue(target: x) :> false
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Attempt(result: x) :> false
             .Defer(body: x) :> false
             .Commit(writes: x) :> false
@@ -4225,6 +4317,7 @@ ${
     fn liftStmt(s: Stmt, into: int, rows: int) -> string[] {
         return match s {
             .Lift(into: i, what: w) :> liftTarget(i, w, into, rows)
+            .LocalFn(f: f) :> liftBlock(f.body, -1, -1)         // s477: a function body is a lift boundary
             .Gather(g: g) :> gatherProblems(g, -1)
             .Loop(body: lb) :> liftBlock(lb, into, rows)
             .If(thenB: t, elseB: el) :> liftBlock(t, into, rows).concat(liftMaybe(el, into, rows))
@@ -4291,6 +4384,7 @@ ${
     fn liftsIntoStmt(s: Stmt, into: int) -> int {
         return match s {
             .Lift(into: i) :> liftIs(i, into)
+            .LocalFn(f: x) :> 0
             .Loop(body: lb) :> liftsInto(lb, into)
             .If(thenB: t, elseB: el) :> liftsInto(t, into) + liftsIntoMaybe(el, into)
             .Attempt(ok: ok) :> liftsInto(ok.body, into)
@@ -4370,6 +4464,7 @@ ${
             .Continue(target: x) :> -1
             .Gather(g: x) :> -1
             .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
             .Join(k: x) :> -1
             .Jump(k: x) :> -1
         }
@@ -4418,6 +4513,7 @@ ${
             .Continue(target: x) :> ""
             .Gather(g: x) :> ""
             .Lift(into: x) :> ""
+            .LocalFn(f: x) :> ""
         }
     }
 
@@ -4474,6 +4570,7 @@ ${
             .Continue(target: x) :> ""        // (jumpStmt), so a Break / Continue names a Loop inside it
             .Gather(g: x) :> "a Gather"
             .Lift(into: x) :> "a Lift"
+            .LocalFn(f: x) :> "a nested function"
         }
     }
 
@@ -4514,6 +4611,7 @@ ${
             .Continue(target: x) :> "a Continue inside a Commit"
             .Gather(g: x) :> "a Gather inside a Commit"
             .Lift(into: x) :> "a Lift inside a Commit"
+            .LocalFn(f: x) :> "a nested function inside a Commit"
         }
     }
 
@@ -5248,6 +5346,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Attempt(result: x) :> not
             .Defer(body: x) :> not
             .Commit(writes: x) :> not
@@ -5421,6 +5520,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 

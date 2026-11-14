@@ -1,0 +1,19 @@
+{
+  "id": "fn-nested-not-visible-outside-neg",
+  "description": "§7.3.1 — a nested function's scope is the body that declares it: `helper`, declared inside `host`, is not in scope in `outside` — the call there names no declared function (E-SCOPE-001).",
+  "language-version": "1.0",
+  "spec": "§7.3.1",
+  "provenance": "spec:§7.3.1",
+  "rationale": "§7.3.1: 'The compiler SHALL NOT hoist inner function declarations out of their enclosing function body. Each inner function's scope is the enclosing function body, not the `${}` block.'",
+  "expect": {
+    "codes": ["E-SCOPE-001"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-nested-fn-out-of-scope-call-unrefused-s477",
+      "fails": {
+        "codes": ["missing:E-SCOPE-001"]
+      }
+    }
+  }
+}

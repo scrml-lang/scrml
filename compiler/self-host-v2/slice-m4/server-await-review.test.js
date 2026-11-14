@@ -61,9 +61,10 @@ const REVIEW_EXPECT = {
   "s1/bareQueryNoHandler": ["REFUSED", ["E-ERROR-010"]],
   "s1/bareQueryNonFailable": ["REFUSED", ["E-ERROR-002"]],
   "s1/isGivenPos": ["PASS"],
-  // s469 (dpa-073 F1): a nested `function` declaration is not a bootstrap statement — its pieces are read as
-  // expression statements, one of which now also lacks its `;`
-  "s1/nestedFnDecl": ["REFUSED", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-STMT-MISSING-SEMICOLON", "E-TYPE-STRUCT-CONTEXT"]],
+  // s477 (s477-boot-nested-fn): a nested `function` declaration parses (§7.3.1); one that WAITS (here it calls
+  // the server-waiting `check`) is refused by name, INTERIM (nestedFnPass) — never an unawaited call. The
+  // probe's `return check(p, h) }` also lacks its `;` (dpa-073 F1). Was (s469): a parse cascade.
+  "s1/nestedFnDecl": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-STMT-MISSING-SEMICOLON"]],
   "s1/arithmetic": ["PASS"],
   "s1/unusedResult": ["PASS"],
   "s1/returnCheckDirect": ["PASS"],

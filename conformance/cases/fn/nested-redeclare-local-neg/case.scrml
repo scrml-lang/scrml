@@ -1,0 +1,19 @@
+${
+    <trace> = ""
+
+    function f(n: int) -> int {
+        let step: int = 2;
+        function step() -> int {
+            return 1;
+        }
+        return n;
+    }
+
+    function go() {
+        @trace = `${f(1)}`;
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

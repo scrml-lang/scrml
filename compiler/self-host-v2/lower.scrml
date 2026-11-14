@@ -840,6 +840,7 @@ ${
             .Break(label: x) :> jumpStmts(c, s, true)
             .Continue(label: x) :> jumpStmts(c, s, false)
             .Lift(what: w) :> liftStmts(c, s, w)            // s469 (§49.6.2)
+            .LocalFn(f: f) :> lowerLocalFn(c, f)              // s477 (§7.3.1)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
             .Fail(f: f) :> hoistExprs(c, f.args).concat(failStmt(c, s, f))   // s451 (Ue, §19.3)
@@ -976,6 +977,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Lift(what: w) :> liftedNode(w)
+            .LocalFn(f: x) :> []                            // s477: a nested function's body is not the loop's row scope
             .If(cond: x, thenB: tb, elseB: el) :> rowNodesOf(tb).concat(rowNodesMaybe(el))
             .Given(name: n, body: b) :> rowNodesOf(b)
             .For(f: lf) :> rowNodesOf(lf.body)
@@ -2057,6 +2059,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
             .Suspend(bind: x) :> not
         }
     }
@@ -2765,6 +2768,21 @@ ${
         return not
     }
 
+    // s477 — a NESTED function declaration (§7.3.1) lowers in place to a
+    // Stmt.LocalFn: its Sym and parameters are the binder's (analyze fnsOf /
+    // resolveLocalFn), its body lowered in a function context of its own. It
+    // never waits and is never failable (analyze refuses both), so no
+    // continuation pass and no error enum. `lower` decides nothing here: where
+    // it may stand and what it may capture were judged by analyze.
+    fn lowerLocalFn(c: LC, f: AFn) -> Stmt[] {
+        const s: Sym | not = letSym(bindFact(c.t.binds, f.nid))
+        if (s is not) return []
+        const fc: LC = { t: c.t, file: c.file, subst: not, snap: not, rows: [] }
+        let params: Param[] = []
+        for (const p of f.params) { params = params.concat(paramOf(bindFact(c.t.binds, p.nid))) }
+        return [Stmt.LocalFn({ sym: s, params: params, body: lowerBlock(fc, f.body), pure: f.pure, err: not, waits: false, host: not })]
+    }
+
     // s451 (U1a): a function route inference placed on the server (analyze
     // placePass — `Tables.server.servers`) lowers to a Core ServerFn. Lower
     // decides nothing: the placement is analyze's fact.
@@ -2909,6 +2927,7 @@ ${
             .Defer(body: d) :> missing()
             .Fail(f: x) :> missing()
             .Lift(what: x) :> missing()
+            .LocalFn(f: x) :> missing()
         }
     }
 
@@ -3321,6 +3340,7 @@ ${
             .Continue(label: x) :> not
             .EffectStmt(w: w) :> not
             .Lift(what: x) :> not
+            .LocalFn(f: x) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
         }
@@ -3920,6 +3940,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -3945,6 +3966,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -3972,6 +3994,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -3997,6 +4020,7 @@ ${
             .Continue(target: x) :> not
             .Gather(g: x) :> not
             .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
         }
     }
 
@@ -4011,6 +4035,7 @@ ${
             .Continue(target: x) :> true
             .Gather(g: x) :> false
             .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
             .Suspend(bind: x) :> true
             .If(cond: x) :> false
             .Let(sym: x) :> false
@@ -4209,6 +4234,7 @@ ${
         let fns: Fn[] = []
         let server: ServerFn[] = []
         for (const info of t.fns) {
+            if (info.outer >= 0) continue      // s477: a nested function is lowered in place (lowerLocalFn)
             if (isServerPlaced(t, info.sym)) {
                 const sf: ServerFn | not = lowerServerFn(t, fsx, info)
                 if (sf is given) server = server.concat([sf])
