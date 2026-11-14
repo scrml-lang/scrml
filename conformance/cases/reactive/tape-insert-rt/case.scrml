@@ -1,0 +1,14 @@
+// §66.12.6 rule 3 — `xs.insert(i, x)`: grow anywhere, granted by `insert`; `x` becomes position `i`.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let xs: int[free, insert] = [1, 3];
+        xs.insert(1, 2);
+        xs.insert(0, 0);
+        @shown = xs.map(v => `${v}`).join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="o">${@shown}</p>
+    </main>
+</program>

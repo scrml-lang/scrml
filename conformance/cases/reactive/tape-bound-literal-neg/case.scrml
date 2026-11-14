@@ -1,0 +1,8 @@
+// §66.12.2 + O36 RULED S477 — a literal outside the type's length bound provably breaks the
+// invariant: E-WRITE-INVARIANT at compile time.
+<program>
+    <xs:int[1..=2, append]=([1, 2, 3])/>
+    <main>
+        <p id="n">${@xs.length}</p>
+    </main>
+</program>

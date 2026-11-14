@@ -97,7 +97,7 @@
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
+    import { Sym, Type, LengthGrant, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, RequestState, ReqClass, SqlKind, Field, Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver, ForeignSlice,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
@@ -4712,7 +4712,7 @@ ${
             .Local(sym: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Read(place: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Call(callee: x) :> "a shrink-anywhere's value is not a filter of the field"
-            .Prim(op: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Prim(op: o, args: xs) :> checkedFilterProblem(d, idx, o, xs)      // s477: a bound-checked filter
             .Match(scrut: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ArrayOf(elems: x) :> "a shrink-anywhere's value is not a filter of the field"
             .StructOf(ty: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -4728,6 +4728,13 @@ ${
             .Query(q: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Foreign(slice: fsl0) :> "a shrink-anywhere's value is not a filter of the field"
         }
+    }
+
+    // s477 (O36 RULED S477) — a filter of a bounded tape whose length the typer could not
+    // prove is checked at run time: LengthCheck(SeqCall(Filter, <the field>, λ), min, max, loc)
+    fn checkedFilterProblem(d: Sym, idx: int, op: PrimOp, xs: Expr[]) -> string {
+        if (op != PrimOp.LengthCheck || xs.length != 4) return "a shrink-anywhere's value is not a filter of the field"
+        return filterProblem(d, idx, xs[0])
     }
 
     fn filterOf(d: Sym, idx: int, op: SeqFn, sq: Expr) -> string {
@@ -5635,6 +5642,52 @@ ${
         return match c {
             .Static :> true
             .RuntimeEdge :> false
+            .RuntimeLength(min: a) :> false
+        }
+    }
+
+    // s477 (O36 RULED S477) — a RuntimeLength check stands only on a
+    // length-changing edit (Append, Prepend, RemoveEnd, RemoveFront) of a field
+    // whose tape type bounds its length to exactly `min..=max`.
+    fn lengthCheckProblem(f: Field, edit: EditKind, check: Check) -> string {
+        return match check {
+            .Static :> ""
+            .RuntimeEdge :> ""
+            .RuntimeLength(min: a, max: b) :> lengthCheckFits(f, edit, a, b)
+        }
+    }
+
+    fn lengthCheckFits(f: Field, edit: EditKind, a: int, b: int) -> string {
+        const grows: boolean = edit == EditKind.Append || edit == EditKind.Prepend
+        const shrinks: boolean = edit == EditKind.RemoveEnd || edit == EditKind.RemoveFront
+        if (!grows && !shrinks) return "a RuntimeLength check on a write that does not change a tape's length by an edit"
+        const t: Type = f.ty
+        const ok: boolean = match t {
+            .Seq(elem: e, grants: g) :> boundIs(g.length, a, b)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: s) :> false
+            .Maybe(inner: i) :> false
+        }
+        if (!ok) return "a RuntimeLength check whose bound is not the field's tape length bound"
+        return ""
+    }
+
+    fn boundIs(l: LengthGrant, a: int, b: int) -> boolean {
+        return match l {
+            .Bounded(min: x, max: y) :> x == a && y == b
+            .Fixed :> false
+            .Free :> false
+        }
+    }
+
+    fn isRuntimeEdgeCheck(c: Check) -> boolean {
+        return match c {
+            .RuntimeEdge :> true
+            .Static :> false
+            .RuntimeLength(min: a) :> false
         }
     }
 
@@ -5721,9 +5774,11 @@ ${
         if (isTransition(edit)) {
             const g: TransitionGraph | not = f.graph
             if (g is not) return ""                              // already C3
+            if (!isStatic(check) && !isRuntimeEdgeCheck(check)) return "a RuntimeLength check on a transition"
             return graphCheckProblem(p, g, value, check)
         }
         if (isStatic(check)) return ""
+        if (!isRuntimeEdgeCheck(check)) return lengthCheckProblem(f, edit, check)
         return "a RuntimeEdge check on a write that is not a transition"
     }
 

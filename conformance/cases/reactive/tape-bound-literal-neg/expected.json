@@ -1,0 +1,28 @@
+{
+  "id": "reactive-tape-bound-literal-neg",
+  "description": "O36 RULED S477: a literal `[1, 2, 3]` into `int[1..=2, append]` provably breaks the length bound — E-WRITE-INVARIANT at compile time.",
+  "language-version": "1.0",
+  "spec": "§66.11.7",
+  "provenance": "ruling:user-voice-scrml.md S477 \"⭐ RULED — O36\" (\"036 yes\")",
+  "rationale": "§66.11.7 (O36 RULED S477): \"a write that PROVABLY violates a sequence invariant … stays a compile error (`E-WRITE-INVARIANT`)\".",
+  "expect": {
+    "codes": [
+      "E-WRITE-INVARIANT"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-bounds-unimplemented-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-WRITE-INVARIANT"
+        ]
+      }
+    }
+  }
+}

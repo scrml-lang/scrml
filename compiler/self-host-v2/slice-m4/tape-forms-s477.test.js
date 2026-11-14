@@ -121,12 +121,12 @@ describe("A3 — judged by the PART's own tape grants, with the codes a cell get
     expect(codes(prog("", `        let g: int[free, append][write] = [[1]];\n        g["a"].append(1);`))).toEqual(["E-TYPE-031"]);
   });
 
-  test("a part that is not a tape, a JS method name, `insert` (⚑ O36)", () => {
+  test("a part that is not a tape, a JS method name; `insert` on a part is built (O36 RULED S477, merged with s477-boot-tape-bounds)", async () => {
     expect(codes(prog(B, `        let b: B = { n: 1, xs: [] };\n        b.n.append(1);`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(B, `        let b: B = { n: 1, xs: [] };\n        b.xs.push(1);`))).toEqual(["E-TAPE-JS-METHOD"]);
-    const r = run(prog("    type I:struct = { xs: int[free, insert] }", `        let b: I = { xs: [] };\n        b.xs.insert(0, 1);`));
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("O36");
+    expect(await runShown("    type I:struct = { xs: int[free, insert] }", `        let b: I = { xs: [] };\n        b.xs.insert(0, 1);\n        b.xs.insert(0, 0);\n        b.xs.insert(2, 2);\n${show("b.xs")}`)).toBe("0,1,2");
+    // the part's own grants: `append` does not grant `insert`
+    expect(codes(prog(B, `        let b: B = { n: 1, xs: [] };\n        b.xs.insert(0, 1);`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
 

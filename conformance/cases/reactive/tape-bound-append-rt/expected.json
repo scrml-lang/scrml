@@ -1,0 +1,42 @@
+{
+  "id": "reactive-tape-bound-append-rt",
+  "description": "§66.12.2: a bounded length `1..=3` lets `@xs` grow within the bound — `[1, 2]` appended once is 3 long, inside the bound, so the write lands (an unprovable grow is checked at run time and passes, O36 RULED S477).",
+  "language-version": "1.0",
+  "spec": "§66.12.2",
+  "provenance": "ruling:user-voice-scrml.md S477 \"⭐ RULED — O36\" (\"036 yes\")",
+  "rationale": "§66.12.2: the length axis is \"fixed · bounded (e.g. `1..=10`) · free\"; §66.11.2: invariants \"are checked on EVERY write\". A grow that stays inside the bound is legal: one #go click appends 3 and sets @n to 3.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "n": 3
+    },
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "3"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-bounds-unimplemented-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

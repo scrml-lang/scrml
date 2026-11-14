@@ -1,0 +1,16 @@
+// §66.12.2 + O36 RULED S477 — an append the compiler cannot prove inside the bound is checked at run
+// time; past the bound it traps (E-WRITE-INVARIANT-RT, §19.17) before the write: nothing is written,
+// and the rest of the handler does not run.
+<program>
+    <xs:int[1..=2, append]=([1, 2])/>
+    let <n:int=0/>
+    function grow() {
+        @xs.append(3);
+        @n = @xs.length;
+    }
+    <main>
+        <button id="go" onclick=grow()>go</button>
+        <p id="n">${@n}</p>
+        <p id="len">${@xs.length}</p>
+    </main>
+</program>
