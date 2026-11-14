@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 304 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 308 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -103,6 +103,7 @@ ${
             "E-AUTH-ATTR-INVALID" :> Severity.Error
             "E-AWAIT-NOT-IN-SCRML" :> Severity.Error
             "E-CALL-ARITY" :> Severity.Error
+            "E-CHANNEL-INSIDE-PAGE" :> Severity.Error
             "E-CHANNEL-OUTSIDE-PROGRAM" :> Severity.Error
             "E-CLASS-NOT-IN-SCRML" :> Severity.Error
             "E-CLOSER-001" :> Severity.Error
@@ -248,6 +249,8 @@ ${
             "E-NAME-COLLIDES-STATE" :> Severity.Error
             "E-OBJECT-SHORTHAND-CELL" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
+            "E-PAGE-INVALID-ATTR" :> Severity.Error
+            "E-PAGE-ROUTE-ATTR-FORBIDDEN" :> Severity.Error
             "E-PARAM-TYPE-REQUIRED" :> Severity.Error
             "E-PARSE-001" :> Severity.Error
             "E-PARSE-ARM" :> Severity.Error
@@ -326,6 +329,7 @@ ${
             "E-STRING-METHOD-UNKNOWN" :> Severity.Error
             "E-STRUCT-DUPLICATE-KEY" :> Severity.Error
             "E-STRUCT-FUNCTION-FIELD" :> Severity.Error
+            "E-STRUCTURAL-ELEMENT-MISPLACED" :> Severity.Error
             "E-STYLE-001" :> Severity.Error
             "E-STYLE-VALUE-NOT-STYLE" :> Severity.Error
             "E-SWITCH-FORBIDDEN" :> Severity.Error
