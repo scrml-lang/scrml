@@ -1,0 +1,17 @@
+{
+  "id": "reactive-tape-local-part-edit-ungranted-neg",
+  "description": "§66.12.6 rules 1 and 3: `b.xs.pop()` on the tape FIELD of a struct local is a shrink at the end, judged by the field's own type `int[free, append]`, which grants no `pop` (nor `remove`) — E-WRITE-NOT-GRANTED. Holding the tape inside a local struct does not lift its grants.",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — NO unconstrained sequence behaviour anywhere in the language\" (\"No position escapes the grant check. That covers locals, parameters, returns, struct fields, tuple positions …\")",
+  "rationale": "§66.12.6 rule 3: \"Each method is a write: it is checked against the target's grants exactly as a whole-value write is … An ungranted one is E-WRITE-NOT-GRANTED\"; rule 1: \"a struct field whose type is a tape (§66.11.4: the field's tape type carries its grants)\".",
+  "expect": {
+    "codes": ["E-WRITE-NOT-GRANTED"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-method-unproven-receiver-throws-s469",
+      "fails": { "codes": ["missing:E-WRITE-NOT-GRANTED"] }
+    }
+  }
+}

@@ -102,7 +102,7 @@ ${
              DeclKind, FieldMode, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db, Driver,
              Pattern, Failable, OkArm, ErrArm, HostCall, Gather, Lifted, GatherRow,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
-    import { Node, allNodes, requestStateDeps, requestHandles } from "./walk.scrml"
+    import { Node, allNodes, requestStateDeps, requestHandles, boundSyms } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
@@ -112,23 +112,133 @@ ${
 
     export fn checkCore(p: CoreProgram) -> string[] {
         let out: string[] = []
+        const ob: OnceBinds = onceBinds(p)
         for (const d of p.decls) {
-            for (const f of d.fields) { out = out.concat(checkField(d, f)).concat(checkPersist(p, d, f)) }
+            for (const f of d.fields) { out = out.concat(checkField(d, f)).concat(checkPersist(p, ob, d, f)) }
         }
         // Context = the lexically enclosing declarations (index 0 = nearest). In
         // Core, declarations do not nest (a child declaration is a Field), so a
         // node inside declaration d's initializers/renders has context [d], and a
         // function body has none.
         for (const d of p.decls) {
-            for (const n of allNodes(Node.NDecl(d))) { out = out.concat(checkNode(p, [d], n)) }
+            for (const n of allNodes(Node.NDecl(d))) { out = out.concat(checkNode(p, ob, [d], n)) }
         }
         for (const f of p.fns) {
-            for (const n of allNodes(Node.NFn(f))) { out = out.concat(checkNode(p, [], n)) }
+            for (const n of allNodes(Node.NFn(f))) { out = out.concat(checkNode(p, ob, [], n)) }
         }
         for (const s of p.server) {
-            for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
+            for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, ob, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p)).concat(checkLocalsBound(p))
+    }
+
+    // =========================================================================
+    // C21 (s477 FIX ROUND 1, review F1 defence-in-depth) — EVERY LOCAL IS BOUND.
+    // A local read (`Local`, a `LocalPath` place) and a local rebinding
+    // (`Assign`, `Assigned`) name a Sym that something in the program binds —
+    // the set the printer mints names for (print.scrml planNames): walk.scrml
+    // `boundSyms` (a Let, a parameter, a lambda / pattern / loop / Attempt /
+    // Suspend / Join / view binder, a request handle, a bind sink), a file-scope
+    // constant, a function, a server function, a `<db>` cell's loaded value.
+    // A Sym none of these binds prints as `unminted$…` and is a ReferenceError
+    // when run: a lowering that read a minted local it never emitted the `Let`
+    // of (the S477 counted-loop `step` removal value). Program-wide, not
+    // scope-aware: it catches a binding that is MISSING, not one out of scope.
+    // =========================================================================
+    fn checkLocalsBound(p: CoreProgram) -> string[] {
+        let bound: int[] = []
+        for (const s of boundSyms(Node.NProgram(p))) { bound = bound.concat([s.id]) }
+        for (const k of p.consts) { bound = bound.concat([k.sym.id]) }
+        for (const f of p.fns) { bound = bound.concat([f.sym.id]) }
+        for (const sf of p.server) { bound = bound.concat([sf.sym.id]) }
+        for (const ld of p.loads) { bound = bound.concat([ld.val.id]) }
+        let out: string[] = []
+        let seen: int[] = []
+        for (const n of allNodes(Node.NProgram(p))) {
+            const s: Sym | not = nodeLocalUse(n)
+            if (s is given) {
+                if (bound.indexOf(s.id) < 0 && seen.indexOf(s.id) < 0) {
+                    seen = seen.concat([s.id])
+                    out = out.concat(["C21: the local " + s.hint + " (sym " + s.id + ") is read or rebound but nothing in the program binds it"])
+                }
+            }
+        }
+        return out
+    }
+
+    fn nodeLocalUse(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> exprLocalUse(e)
+            .NPlace(pl: pl) :> placeLocalUse(pl)
+            .NStmt(s: s) :> stmtLocalUse(s)
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprLocalUse(e: Expr) -> Sym | not {
+        return match e {
+            .Local(sym: s) :> s
+            .Assigned(local: s) :> s
+            .Lit(lit: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .VariantOf(enumSym: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Refetch(req: rf0) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    fn placeLocalUse(pl: Place) -> Sym | not {
+        return match pl {
+            .LocalPath(sym: s) :> s
+            .Cell(decl: x) :> not
+        }
+    }
+
+    fn stmtLocalUse(s: Stmt) -> Sym | not {
+        return match s {
+            .Assign(local: l) :> l
+            .Let(sym: x) :> not
+            .Write :> not
+            .Commit :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+        }
     }
 
     // =========================================================================
@@ -1208,9 +1318,9 @@ ${
         return []
     }
 
-    fn checkNode(p: CoreProgram, encl: Decl[], n: Node) -> string[] {
+    fn checkNode(p: CoreProgram, ob: OnceBinds, encl: Decl[], n: Node) -> string[] {
         return match n {
-            .NStmt(s: s) :> checkStmt(p, encl, s)
+            .NStmt(s: s) :> checkStmt(p, ob, encl, s)
             .NPlace(pl: pl) :> checkPlace(p, encl, pl)
             .NExpr(e: e) :> checkExpr(p, encl, e)
             .NProgram(p: q) :> []
@@ -2184,7 +2294,7 @@ ${
     // An Unpersist resolves (C4's rule) to a persisted field, and stands right
     // after the reset Write of that same field (and its ResetSurface).
     // -------------------------------------------------------------------------
-    fn checkPersist(p: CoreProgram, d: Decl, f: Field) -> string[] {
+    fn checkPersist(p: CoreProgram, ob: OnceBinds, d: Decl, f: Field) -> string[] {
         const ps: Persist | not = f.persist
         if (ps is not) return []
         const at: string = "C17: <" + d.sym.hint + ">." + f.sym.hint + " is persisted (key \"" + ps.key + "\")"
@@ -2196,7 +2306,7 @@ ${
         // s469-boot-tape-grants (review r2 H1): that whole-value write replaces a struct's tape
         // fields too (§66.12.6 rule 4) — a struct must not carry an append-only tape past the line above
         if (local) {
-            const tp: string = structTapeKept(p, f.ty, not, d.sym, InstRef.Lexical(0), [], f.sym.hint, [])
+            const tp: string = structTapeKept(p, ob, f.ty, not, d.sym, InstRef.Lexical(0), [], f.sym.hint, [])
             if (tp != "") out = out.concat([at + " in localStorage, but a cross-tab value is a whole-value write and " + tp])
         }
         const wb: WireBuild = wireBuild(p, f.ty)
@@ -3452,9 +3562,9 @@ ${
         return []
     }
 
-    fn checkStmt(p: CoreProgram, encl: Decl[], s: Stmt) -> string[] {
+    fn checkStmt(p: CoreProgram, ob: OnceBinds, encl: Decl[], s: Stmt) -> string[] {
         return match s {
-            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, encl, cap, inst, edit, v, ck)
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, ob, encl, cap, inst, edit, v, ck)
             .Commit(writes: ws) :> checkCommit(ws)
             .Let(sym: sym) :> []
             .Assign(local: l) :> []
@@ -4338,7 +4448,7 @@ ${
         }
     }
 
-    fn checkWrite(p: CoreProgram, encl: Decl[], cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> string[] {
+    fn checkWrite(p: CoreProgram, ob: OnceBinds, encl: Decl[], cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> string[] {
         const owner: CapOwner | not = capOwner(p, cap)
         if (owner is not) return ["C2: a write names sym " + cap.id + " (`" + cap.hint + "`), which is not a write capability"]
         const d: Decl = owner.decl
@@ -4355,7 +4465,7 @@ ${
         }
         const problem: string = editProblem(p, f, edit)
         if (problem != "") out = out.concat(["C3: " + where + ": " + problem])
-        const tp: string = tapeReplaceProblem(p, d.sym, owner.idx, inst, f, edit, value)
+        const tp: string = tapeReplaceProblem(p, ob, d.sym, owner.idx, inst, f, edit, value)
         if (tp != "") out = out.concat(["C3: " + where + ": " + tp])
         const cp: string = checkProblem(p, f, edit, value, check)
         if (cp != "") out = out.concat(["C6: " + where + ": " + cp])
@@ -4586,32 +4696,32 @@ ${
     // back (`sort` / `reverse`) is exempt — it creates no new element value (item 2); an
     // element that is itself a tape is replaced together with every tape ITS elements hold,
     // at any depth (item 1, innerTapeKept). The analyzer's twin is tapeWriteInnerProblems.
-    fn positionTapeProblem(p: CoreProgram, f: Field, value: Expr, what: string) -> string {
+    fn positionTapeProblem(p: CoreProgram, ob: OnceBinds, f: Field, value: Expr, what: string) -> string {
         if (permutationValue(value)) return ""
         const et: Type | not = seqElemOf(f.ty)
         if (et is not) return ""
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
             if (!ig) return what + " replaces an element of `" + f.sym.hint + "` that is itself a tape, whose grants give no `replace` (§66.12.6 rule 1)"
-            return innerTapeKept(p, et, f.sym, f.sym.hint + "[…]", [])
+            return innerTapeKept(p, ob, et, f.sym, f.sym.hint + "[…]", [])
         }
-        return elemAtTapeKept(p, f, value, [])
+        return elemAtTapeKept(p, ob, f, value, [])
     }
 
     // RULED S472 item 1 — every tape the ELEMENTS of tape `tape` hold, at any depth, needs
     // `replace` when the tape is replaced whole ("A `replace` (or any whole write) of a tape
     // counts as a `replace` of every tape its elements hold, RECURSIVELY"). "" when each
     // does, else why. `d` only seeds structTapeKept (path [] — nothing is "kept" there).
-    fn innerTapeKept(p: CoreProgram, tape: Type, d: Sym, label: string, seen: int[]) -> string {
+    fn innerTapeKept(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, seen: int[]) -> string {
         const et: Type | not = seqElemOf(unMaybeC(tape))
         if (et is not) return ""
         const at: string = label + "[…]"
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
             if (!ig) return "the write replaces the tape `" + at + "` held by an element of a replaced tape, whose type grants no `replace` — an outer `replace` does not override an inner tape's grants (§66.12.6 rule 1, RULED S472)"
-            return innerTapeKept(p, et, d, at, seen)
+            return innerTapeKept(p, ob, et, d, at, seen)
         }
-        return structTapeKept(p, et, not, d, InstRef.Lexical(0), [], at, seen)
+        return structTapeKept(p, ob, et, not, d, InstRef.Lexical(0), [], at, seen)
     }
 
     // s472-boot-map-grants — a FieldAt whose target is a tape writes that tape WHOLE: it is
@@ -4619,10 +4729,10 @@ ${
     // value is a PERMUTATION of that same place (`{ ...@b, g: @b.g.reverse() }` — item 2:
     // "they create no new element value"). The analyzer's twin is fieldAtWrite's
     // tapeWriteInnerProblems(…, whole = true).
-    fn fieldAtPermutation(p: CoreProgram, d: Sym, inst: InstRef, path: FieldRef[], value: Expr) -> boolean {
+    fn fieldAtPermutation(p: CoreProgram, ob: OnceBinds, d: Sym, inst: InstRef, path: FieldRef[], value: Expr) -> boolean {
         const op: Expr | not = permutationOperand(value)
         if (op is not) return false
-        return keepKey(p, boundValue(p, op, 0)) == placeKeyOf(d, inst, path)
+        return keepKey(p, ob, boundValue(p, ob, op, 0)) == placeKeyOf(d, inst, path)
     }
 
     // A PERMUTATION of a tape (RULED S472 item 2): a comparator sort (SeqCall SortBy), a
@@ -4782,27 +4892,27 @@ ${
     // grants do not apply inside it (RULED S469, "Not a tape position").
     // The analyzer's twin is analyze.scrml `structTapeWrites`.
     // -------------------------------------------------------------------------
-    fn tapeReplaceProblem(p: CoreProgram, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
+    fn tapeReplaceProblem(p: CoreProgram, ob: OnceBinds, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
         const base: FieldRef[] = [{ owner: d, idx: idx }]
         return match edit {
-            .Replace :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
-            .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
-            .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
+            .Replace :> structTapeKept(p, ob, f.ty, value, d, inst, base, f.sym.hint, [])
+            .FieldAt(path: path) :> fieldAtTapeKept(p, ob, f.ty, value, d, inst, base, path, f.sym.hint)
+            .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, ob, f, value, path)
             // s472: the element is replaced whole — each tape field of it the value changes is a `replace` of that field (rule 4)
-            .PositionAt(index: ix) :> positionTapeProblem(p, f, value, "a PositionAt")
+            .PositionAt(index: ix) :> positionTapeProblem(p, ob, f, value, "a PositionAt")
             .Transition :> ""
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
             // s472-boot-map-grants: a map written back replaces EVERY element (a sort / reverse is exempt, RULED S472)
-            .PositionWrite :> positionTapeProblem(p, f, value, "a PositionWrite (a map written back)")
+            .PositionWrite :> positionTapeProblem(p, ob, f, value, "a PositionWrite (a map written back)")
             .RemoveEnd :> ""
             .RemoveFront :> ""
             .RemoveAnywhere :> ""
         }
     }
 
-    fn fieldAtTapeKept(p: CoreProgram, fty: Type, value: Expr, d: Sym, inst: InstRef, base: FieldRef[], path: FieldRef[], label: string) -> string {
+    fn fieldAtTapeKept(p: CoreProgram, ob: OnceBinds, fty: Type, value: Expr, d: Sym, inst: InstRef, base: FieldRef[], path: FieldRef[], label: string) -> string {
         let ty: Type = fty
         let at: string = label
         for (const step of path) {
@@ -4811,11 +4921,11 @@ ${
             ty = fd.ty
             at = at + "." + fd.sym.hint
         }
-        if (isTapeType(ty) && fieldAtPermutation(p, d, inst, base.concat(path), value)) return ""
-        return structTapeKept(p, ty, value, d, inst, base.concat(path), at, [])
+        if (isTapeType(ty) && fieldAtPermutation(p, ob, d, inst, base.concat(path), value)) return ""
+        return structTapeKept(p, ob, ty, value, d, inst, base.concat(path), at, [])
     }
 
-    fn elemAtTapeKept(p: CoreProgram, f: Field, value: Expr, path: FieldRef[]) -> string {
+    fn elemAtTapeKept(p: CoreProgram, ob: OnceBinds, f: Field, value: Expr, path: FieldRef[]) -> string {
         const et: Type | not = seqElemOf(f.ty)
         if (et is not) return ""
         let ty: Type = et
@@ -4827,7 +4937,7 @@ ${
             at = at + "." + fd.sym.hint
         }
         // an element has no place spelling here: no tape field of it is "kept"
-        return structTapeKept(p, ty, value, f.sym, InstRef.Lexical(0), [], at, [])
+        return structTapeKept(p, ob, ty, value, f.sym, InstRef.Lexical(0), [], at, [])
     }
 
     fn structStep(p: CoreProgram, ty: Type, step: FieldRef) -> FieldDef | not {
@@ -4843,16 +4953,16 @@ ${
 
     // "" when every tape field the value replaces grants `replace`, else why.
     // `path` empty: the value has no place (nothing is kept).
-    fn structTapeKept(p: CoreProgram, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
+    fn structTapeKept(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
         let v: Expr | not = not
-        if (v0 is given) v = boundValue(p, v0, 0)
+        if (v0 is given) v = boundValue(p, ob, v0, 0)
         // s469 F4: the value IS the written place — nothing in it is replaced
         if (v is given && path.length > 0) {
-            if (keepKey(p, v) == placeKeyOf(d, inst, path)) return ""
+            if (keepKey(p, ob, v) == placeKeyOf(d, inst, path)) return ""
         }
         // s472-boot-map-grants (RULED S472 item 1): a tape written whole replaces every tape
         // its elements hold, at any depth
-        if (isTapeType(ty)) return innerTapeKept(p, ty, d, label, seen)
+        if (isTapeType(ty)) return innerTapeKept(p, ob, ty, d, label, seen)
         const s: Sym | not = namedSym(unMaybeC(ty))
         if (s is not) return ""
         if (seen.indexOf(s.id) >= 0) return ""
@@ -4871,15 +4981,15 @@ ${
             }
             let kept = false
             if (fv is given && path.length > 0) {
-                if (keepKey(p, boundValue(p, fv, 0)) == placeKeyOf(d, inst, sub)) kept = true
+                if (keepKey(p, ob, boundValue(p, ob, fv, 0)) == placeKeyOf(d, inst, sub)) kept = true
             }
             if (!kept) {
                 if (isTapeType(fd.ty)) {
                     if (!fd.grants.replace) return "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)"
-                    const ir: string = innerTapeKept(p, fd.ty, d, label + "." + fd.sym.hint, seen.concat([s.id]))
+                    const ir: string = innerTapeKept(p, ob, fd.ty, d, label + "." + fd.sym.hint, seen.concat([s.id]))
                     if (ir != "") return ir
                 } else {
-                    const r: string = structTapeKept(p, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, seen.concat([s.id]))
+                    const r: string = structTapeKept(p, ob, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, seen.concat([s.id]))
                     if (r != "") return r
                 }
             }
@@ -4896,18 +5006,18 @@ ${
     // read through a snapshot Local (`Let before = Read(Cell(…))`, then
     // `Read(LocalPath(before, path))`) as the place it snapshots, extended by
     // the path. Anything else is not a cell read (readKey).
-    fn keepKey(p: CoreProgram, e: Expr) -> string {
+    fn keepKey(p: CoreProgram, ob: OnceBinds, e: Expr) -> string {
         const pm: Place | not = cellReadOf(e)
         if (pm is not) return readKey(e)
         const pl: Place = pm
         return match pl {
             .Cell(decl: d, inst: i, path: path) :> placeKeyOf(d, i, path)
-            .LocalPath(sym: s, path: path) :> snapshotKey(p, s, path)
+            .LocalPath(sym: s, path: path) :> snapshotKey(p, ob, s, path)
         }
     }
 
-    fn snapshotKey(p: CoreProgram, s: Sym, path: FieldRef[]) -> string {
-        const init: Expr | not = onceBoundInit(p, s)
+    fn snapshotKey(p: CoreProgram, ob: OnceBinds, s: Sym, path: FieldRef[]) -> string {
+        const init: Expr | not = onceBoundInit(ob, s)
         if (init is not) return "(a local path)"
         const cm: Place | not = cellReadOf(init)
         if (cm is not) return "(a local path)"
@@ -4945,13 +5055,13 @@ ${
     // s469 F3: a Local the program binds ONCE stands for its init (the spread
     // lowering's `Let tmp = StructOf(…)`, a Commit's value), followed a few
     // steps; any other value is itself.
-    fn boundValue(p: CoreProgram, e: Expr, depth: int) -> Expr {
+    fn boundValue(p: CoreProgram, ob: OnceBinds, e: Expr, depth: int) -> Expr {
         if (depth > 8) return e
         const s: Sym | not = localSymOf(e)
         if (s is not) return e
-        const init: Expr | not = onceBoundInit(p, s)
+        const init: Expr | not = onceBoundInit(ob, s)
         if (init is not) return e
-        return boundValue(p, init, depth + 1)
+        return boundValue(p, ob, init, depth + 1)
     }
 
     fn localSymOf(e: Expr) -> Sym | not {
@@ -4980,21 +5090,36 @@ ${
 
     // The init of the ONE Let binding `s`, when nothing Assigns `s` (else not):
     // only then is the Local's value its init wherever it is read.
-    fn onceBoundInit(p: CoreProgram, s: Sym) -> Expr | not {
-        let found: Expr | not = not
-        let lets = 0
+    fn onceBoundInit(ob: OnceBinds, s: Sym) -> Expr | not {
+        if (ob.assigned.indexOf(s.id) >= 0) return not
+        const i: int = ob.lets.indexOf(s.id)
+        if (i < 0) return not
+        if (ob.lets.lastIndexOf(s.id) != i) return not
+        return ob.inits[i]
+    }
+
+    // s477 (s477-boot-compile-perf): every Let and Assign of the program, read in ONE
+    // walk by checkCore — onceBoundInit walked the whole program per query (per
+    // tape-replace write), O(writes × program). `lets[k]` is bound by a Let to
+    // `inits[k]` (program preorder); `assigned` every local some Assign rebinds.
+    type OnceBinds:struct = { lets: int[], inits: Expr[], assigned: int[] }
+
+    fn onceBinds(p: CoreProgram) -> OnceBinds {
+        let lets: int[] = []
+        let inits: Expr[] = []
+        let assigned: int[] = []
         for (const n of allNodes(Node.NProgram(p))) {
             const b: LetBind | not = nodeLetBind(n)
             if (b is given) {
-                if (b.sym.id == s.id) {
-                    if (!b.isLet) return not
-                    lets = lets + 1
-                    found = b.init
+                if (b.isLet) {
+                    lets = lets.concat([b.sym.id])
+                    inits = inits.concat([b.init])
+                } else {
+                    assigned = assigned.concat([b.sym.id])
                 }
             }
         }
-        if (lets != 1) return not
-        return found
+        return { lets: lets, inits: inits, assigned: assigned }
     }
 
     type LetBind:struct = { sym: Sym, init: Expr, isLet: boolean }

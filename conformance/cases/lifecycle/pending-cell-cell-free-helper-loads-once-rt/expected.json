@@ -1,0 +1,54 @@
+{
+  "id": "lifecycle-pending-cell-cell-free-helper-loads-once-rt",
+  "description": "§13.9.1 S475 rule 2: a locked pending cell whose initializer reads no cell loads once, on mount. Calling a client function that reads no cell (`one()`) is not a read, so the cell is not derived (no E-VALUE-SERVER-CALL): it loads \"a\" on mount. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.1",
+  "rationale": "§13.9.1 \"The spelling decides the load\": the initializer \"reads cells\" when it reads a cell directly or through a called function; rule 2: \"locked + an initializer that reads no cell loads once, on mount\". ruling:user-voice-scrml.md S475 \"⭐ RULED — S475 owner questions, PA recs adopted wholesale\" item 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "who": "a"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "a"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:4c080ecc03e0fa70"
+      }
+    }
+  }
+}

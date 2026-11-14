@@ -289,7 +289,7 @@ ${
         // path), `ty` the type of the part written (the typer checks the value)
         EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
-        ERemove(w: WriteFact),                            // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
+        ERemove(w: WriteFact, taken: SeqSnap | not),                          // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
         EPosition(cap: Sym, inst: InstRef, index: AExpr, loc: string),   // s472: `@xs[i] = v` — a position write (Core PositionAt; §66.12.6 rule 3); `loc` "file:line" for the trap
         // s475 (s475-boot-local-tape-edits) — a GRANTED in-place edit of a LOCAL tape
@@ -299,7 +299,15 @@ ${
         // so no alias of the old value sees it (§66.10). `arg`: the element
         // (append / prepend) or the index (remove); `elem`: the element type the
         // typer checks an element against (`not`: unchecked).
-        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, index: AExpr | not, loc: string),   // s477: `index` — `insert(i, x)`'s position; `loc` "file:line" for its trap
+        // s477 (s477-boot-tape-forms): `path` non-empty — an edit of a PART of the
+        // local (`b.xs.append(v)`, `g[i].pop()`), judged by the resolver against the
+        // part's own grants (resolveLocalPartEdit); Core rebinds the local WITH that
+        // path. `tmps`: two minted locals per index step of `path`, in order — the
+        // index, and the element it names — so each index is evaluated once.
+        // s477 (s477-boot-tape-bounds): `index` — `insert(i, x)`'s position; `loc` "file:line"
+        // for its trap; `tape` — the edited tape's type (the part's, for a part edit), whose
+        // length bound the typer judges (§66.12.2, O36 RULED S477).
+        ELocalEdit(sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], tmps: Sym[], taken: Sym | not, at: Sym | not, index: AExpr | not, loc: string, tape: Type | not),
     }
     export type LocalEdit:enum = { LAppend, LPrepend, LPop, LShift, LRemoveAt, LInsert }   // s477: LInsert — `xs.insert(i, x)`
     // s472 — one step of a local part write's path (EAssignLocal): a struct field
@@ -832,7 +840,15 @@ ${
         hostSites: HostSite[],  // s472 (boot-math-port): every wrapper-shaped host call, judged (hostWrappers)
         consts: ConstInfo[],    // s472: the file-scope constants, in link order then source order (constPass)
         succs: FnSucc[],        // s475: each failable function's INFERRED success type, where proven (failableSuccs)
+        // s477 (s477-boot-compile-perf): facts the resolver asked per element / per name and
+        // re-derived from the whole file each time, read once here
+        singles: string[],      // the program's cells declared `single` (singleCells)
+        hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
     }
+
+    // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
+    // imports), read once for a pass that asks per name
+    type FileImports:struct = { file: string, imps: AImport[] }
 
     // s475 (s475-boot-handled-landing-check) — a failable function's success type,
     // inferred from its returns (§19.4.1: no success-type slot). The resolver reads it
@@ -992,7 +1008,12 @@ ${
     // Every TypeItem of a file, the program's included.
     fn typeItems(items: AItem[]) -> ATypeDecl[] {
         let out: ATypeDecl[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(typeItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(typeItemOf(it))   // s451: a second top-level program is E-PROGRAM-002, not read
+            i = i + 1
+        }
         return out
     }
 
@@ -1887,11 +1908,14 @@ ${
         let st: AS = st0
         let out: DeclStub[] = []
         for (const f of files) {
+            const later: boolean[] = laterPrograms(f.items)
+            let i = 0
             for (const it of f.items) {
                 const k: AItemK = it.k
-                const r: RDeclStubs = isLaterProgram(f.items, it) ? noStubs(st) : declStubOf(k, f.path, entry, st)
+                const r: RDeclStubs = later[i] ? noStubs(st) : declStubOf(k, f.path, entry, st)
                 out = out.concat(r.ds)
                 st = r.st
+                i = i + 1
             }
         }
         return { ds: out, st: st }
@@ -2006,17 +2030,26 @@ ${
     // it. The governing sentences are quoted in
     // docs/changes/s451-boot-program-shape/progress.md.
 
-    // Is this item the second (or later) top-level `<program>` of its file?
+    // For each item of `items`: is it the second (or later) top-level `<program>` of its file?
     // §40.8: "A second (or later) top-level `<program>` in the SAME file …
     // SHALL be `E-PROGRAM-002`" — it is reported (programShapeDiags), and no
     // stub is minted for it, so its body is not analyzed as the program.
-    fn isLaterProgram(items: AItem[], it: AItem) -> boolean {
+    // s477 (s477-boot-compile-perf): one pass over `items` for all of them (a per-item
+    // question scanned the items before it: O(items²) per file). `at[j]`: items[j] is a
+    // program item after another one; an item answers for the FIRST item of its nid.
+    fn laterPrograms(items: AItem[]) -> boolean[] {
+        let nids: int[] = []
+        let at: boolean[] = []
         let seen = 0
         for (const x of items) {
-            if (x.nid == it.nid) return seen > 0 && programOfItem(x) is given
-            if (programOfItem(x) is given) seen = seen + 1
+            const isProgram: boolean = programOfItem(x) is given
+            nids = nids.concat([x.nid])
+            at = at.concat([seen > 0 && isProgram])
+            if (isProgram) seen = seen + 1
         }
-        return false
+        let out: boolean[] = []
+        for (const it of items) { out = out.concat([at[nids.indexOf(it.nid)]]) }
+        return out
     }
 
     fn programOfItem(it: AItem) -> AProgram | not {
@@ -5725,6 +5758,28 @@ ${
 
     // The `import:<tag>` declaration of `file` that binds `local` — the LAST
     // one (§41.7: a later import of a name wins); `not` when none does.
+    // s477 (s477-boot-compile-perf): hostImportBinding(g.files, file, local) from the host
+    // imports read once per file (Globals.hostImps) — the resolver asks it per name.
+    fn hostBinding(g: Globals, file: string, local: string) -> AImport | not {
+        let found: AImport | not = not
+        for (const f of g.hostImps) {
+            if (f.file == file) {
+                for (const h of f.imps) {
+                    for (const n of h.names) {
+                        if (n.name == local) found = h
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    fn hostImportsByFile(files: FileAst[]) -> FileImports[] {
+        let out: FileImports[] = []
+        for (const f of files) { out = out.concat([{ file: f.path, imps: hostImportsOfItems(f.items) }]) }
+        return out
+    }
+
     fn hostImportBinding(files: FileAst[], file: string, local: string) -> AImport | not {
         let found: AImport | not = not
         for (const f of files) {
@@ -6025,7 +6080,12 @@ ${
 
     fn fnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(fnItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(fnItemOf(it))   // s451: a second top-level program is E-PROGRAM-002, not read
+            i = i + 1
+        }
         return out
     }
 
@@ -6045,7 +6105,12 @@ ${
     // s472 — the file-scope constants of `items` (a `<program>`'s `${ }` included), in source order.
     fn constItems(items: AItem[]) -> AConst[] {
         let out: AConst[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(constItemOf(it)) }
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(constItemOf(it))
+            i = i + 1
+        }
         return out
     }
 
@@ -6442,7 +6507,7 @@ ${
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
-                             succs: failableSuccs(icx, rf.fs, ownTab) }
+                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files) }
         return { g: g, st: st }
     }
 
@@ -6840,9 +6905,16 @@ ${
     // s475-boot-caller-transport: `derr` — the function's DECLARED error enum, which a `fail` names
     // (§19.3.3); `err` differs from it only for a transport carrier (FnInfo.derr), whose `err` is the
     // failure set its callers see (`E + Transport`).
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not }
+    // s477 (s477-boot-tape-forms FIX ROUND 1): `pre` — the node that is the whole value of a
+    // statement whose lowering reads a removal's value BEFORE the statement (lower.scrml
+    // removalPre: a block `let` / `const`, a block `return`, an assignment statement to a whole
+    // local or cell, a statement `match` / handled arm's assignment); -1: none. Threaded by
+    // position (withPre / withEvalPre), never read off `wholeWhat`'s wording — a counted head's
+    // `step` / `init`, a value arm and a request body are assignments too, and their lowerings
+    // emit no removalPre (resolveRemovalValue refuses there).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not, pre: int }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not, pre: -1 } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -6851,7 +6923,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -6862,12 +6934,59 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+    }
+
+    // s477 FIX ROUND 1: `nid`'s lowering reads a removal's value before its statement (FailCtx.pre).
+    fn withPre(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: nid })
+    }
+
+    // s477 FIX ROUND 1: `e` is an expression STATEMENT whose lowering is lower.scrml's
+    // evalStmt (a block `Eval`, a statement `match` arm, a handled statement arm): an
+    // assignment to a whole local or cell there has its value's removal read first.
+    fn withEvalPre(env: Env, e: AExpr) -> Env {
+        const k: AExprK = e.k
+        const v: AExpr | not = match k {
+            .Assign(target: t, value: v0) :> wholeAssignValue(t, v0)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Member(obj: o) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+        }
+        if (v is not) return env
+        return withPre(env, v.nid)
+    }
+
+    fn wholeAssignValue(t: AExpr, v: AExpr) -> AExpr | not {
+        if (!wholeAssignTarget(t)) return not
+        return v
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     // s469 (#1471 round-2 MED-2): `nid` is a call evaluated as a STATEMENT (its result is
@@ -6875,12 +6994,12 @@ ${
     // E-ERROR-012) — resolveCall does not report it as a value use.
     fn withStmtCall(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr, pre: f.pre })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -7143,7 +7262,7 @@ ${
             .Assign(target: t, value: av, kept: kp) :> assignAsValue(env, e, t, av, kp, st)   // s474: the §50 kept form
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
-            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
+            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` outside a tape value (a call argument, `f(...xs)`) is not in the bootstrap — rest parameters are not parsed (gap g-boot-call-spread-s477); pass the tape itself, or spread it into a tape value (`[...xs, e]`)", st)
             .Index(obj: o, idx: ix) :> resolveIndexRead(env, e, o, ix, st)   // s469 (§49.13)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
@@ -7224,7 +7343,7 @@ ${
             return plain(l.ty, st2)
         }
         // s472 (boot-math-port): an `import:host` binding of this file (§21.3.1)
-        const hb: AImport | not = hostImportBinding(env.g.files, env.file, name)
+        const hb: AImport | not = hostBinding(env.g, env.file, name)
         if (hb is given) return resolveHostBinding(env, e, name, hb, st)
         // §66.5.2: inside a declaration's renders / initializers, its fields are
         // bare read-only projections of the current instance.
@@ -7284,7 +7403,7 @@ ${
     // (a local or parameter, a host binding, the current declaration's prop or field).
     fn nsShadowed(env: Env, n: string) -> boolean {
         if (lookupLocal(env, n) is given) return true
-        if (hostImportBinding(env.g.files, env.file, n) is given) return true
+        if (hostBinding(env.g, env.file, n) is given) return true
         const d: DeclSrc | not = ctxDecl(env)
         if (d is given) {
             if (!d.isProgram && fieldIndex(d.info, n) >= 0) return true
@@ -7945,6 +8064,11 @@ ${
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
                 // s475: `xs.some(x => b)` / `xs.every(x => b)` — a `bool` (§66.12.1)
                 if (m.method == "some" || m.method == "every") return resolveSeqCall(env, e, m, args, st0)
+                // s477: a removal's VALUE, `T | not` (§66.12.6 rule 3)
+                if (m.method == "pop" || m.method == "shift" || m.method == "remove") {
+                    const rv: RX | not = resolveRemovalValue(env, e, m, args, st0)
+                    if (rv is given) return rv
+                }
                 // s469 — `xs.sort((a, b) => …)`: a comparator (a SeqCall, like filter / map)
                 if (m.method == "sort" && args.length == 1) return resolveSortBy(env, e, m, args, st0)
                 // s469 — `xs.at(i)` (§49.13): `T | not`, never a trap
@@ -8156,10 +8280,12 @@ ${
     // function has no success-type slot (§19.4.1): not judged here.
     fn fallOffPass(g: Globals, t: Tables) -> Diag[] {
         let out: Diag[] = []
+        // s477 (s477-boot-compile-perf): the functions in scope in each file, read once (hasValueReturn)
+        const scoped: FileFns[] = fnsInScopes(g.fns, g.te.link)
         for (const fs of g.fns) {
             // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
             // s473: a `<host>` binding has no scrml body (§21.3.3 — its target is the function)
-            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !isHostBindFn(g.files, fs)) out = out.concat(fallOffDiags(g, t, fs))
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !isHostBindFn(g.files, fs)) out = out.concat(fallOffDiags(g, t, scoped, fs))
         }
         return out
     }
@@ -8168,7 +8294,7 @@ ${
     // a declared-return function (`-> T | not` included) `return`s on every path — `return not;`
     // written out; a function with no return type returns nothing, and if any path of it returns
     // a value, every path must.
-    fn fallOffDiags(g: Globals, t: Tables, fs: FnSrc) -> Diag[] {
+    fn fallOffDiags(g: Globals, t: Tables, scoped: FileFns[], fs: FnSrc) -> Diag[] {
         const b: ABlock = fs.f.body
         const r: AType | not = fs.f.ret
         const file: string = fs.info.file
@@ -8177,7 +8303,7 @@ ${
         // returns a value, every path returns one (or fails) — a bare `return` included
         // (in a `!` function it is a SUCCESS carrying nothing: `.Ok(v)` would take it)
         if (fs.info.failable || r is not) {
-            if (hasValueReturn(g, file, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
+            if (hasValueReturn(g, scoped, file, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
             return []
         }
         if (fs.info.ret is not || declaresVoid(r)) return []
@@ -8241,13 +8367,16 @@ ${
                 v = v.concat([f.info.sym.id])
             }
         }
+        // s477 (s477-boot-compile-perf): `fs` and `lk` are fixed — the functions in scope in each
+        // file are read once, not once per function per round
+        const scoped: FileFns[] = fnsInScopes(fs, lk)
         let changed = true
         while (changed) {
             changed = false
             let next: int[] = []
             for (const f of fs) {
                 if (v.indexOf(f.info.sym.id) >= 0) {
-                    if (fnDeclaredVoid(f) || !valueReturnIn(fnsInScope(fs, lk, f.info.file), v, f.f.body)) {
+                    if (fnDeclaredVoid(f) || !valueReturnIn(fnsInScopeOf(scoped, fs, lk, f.info.file), v, f.f.body)) {
                         next = next.concat([f.info.sym.id])
                     } else {
                         changed = true
@@ -8272,8 +8401,8 @@ ${
 
     // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included) — a `return`
     // whose operand is not `void` (`return f()` of a void `f` passes `void` on)?
-    fn hasValueReturn(g: Globals, file: string, b: ABlock) -> boolean {
-        return valueReturnIn(fnsInScope(g.fns, g.te.link, file), g.voids, b)
+    fn hasValueReturn(g: Globals, scoped: FileFns[], file: string, b: ABlock) -> boolean {
+        return valueReturnIn(fnsInScopeOf(scoped, g.fns, g.te.link, file), g.voids, b)
     }
 
     // s472: the functions whose names are in scope in `file` — one per name, so
@@ -8289,6 +8418,31 @@ ${
             for (const local of boundAs(lk, file, NameKind.KFn, f.info.name, f.info.file)) { out = out.concat([{ local: local, id: f.info.sym.id }]) }
         }
         return out
+    }
+
+    // s477 (s477-boot-compile-perf): fnsInScope(fs, lk, file) for every file a function of `fs`
+    // is declared in, each read once — the per-function callers re-read it per function
+    // (O(functions² × names)).
+    type FileFns:struct = { file: string, fns: ScopedFn[] }
+
+    fn fnsInScopes(fs: FnSrc[], lk: Linkage) -> FileFns[] {
+        let out: FileFns[] = []
+        let files: string[] = []
+        for (const f of fs) {
+            if (files.indexOf(f.info.file) < 0) {
+                files = files.concat([f.info.file])
+                out = out.concat([{ file: f.info.file, fns: fnsInScope(fs, lk, f.info.file) }])
+            }
+        }
+        return out
+    }
+
+    // fnsInScope(fs, lk, file), read from `scoped` when it holds `file`
+    fn fnsInScopeOf(scoped: FileFns[], fs: FnSrc[], lk: Linkage, file: string) -> ScopedFn[] {
+        for (const s of scoped) {
+            if (s.file == file) return s.fns
+        }
+        return fnsInScope(fs, lk, file)
     }
 
     fn valueReturnIn(fs: ScopedFn[], v: int[], b: ABlock) -> boolean {
@@ -8631,7 +8785,7 @@ ${
     }
 
     fn isBuiltinMethodName(n: string) -> boolean {
-        return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || tapeJsFix(n) != ""
+        return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || n == "concat" || tapeJsFix(n) != ""
     }
 
     fn isStrMethodName(n: string) -> boolean {
@@ -8690,6 +8844,7 @@ ${
         if (n == "reverse") return PrimOp.Reverse
         if (n == "join" && el == Type.Str) return PrimOp.Join
         if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
+        if (n == "concat") return PrimOp.TapeConcat          // s477 (§66.12.1): `a.concat(b)` — a NEW tape; ONE tape argument
         if (n == "sort") {
             if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
             if (el == Type.Str) return PrimOp.SortStr
@@ -8747,11 +8902,14 @@ ${
             const el: Type | not = seqElem(recv)
             if (el is given) return [el]
         }
+        // s477: `a.concat(b)` — `b` a tape of the receiver's element type (its grants
+        // are not asked: concat reads it)
+        if (op == PrimOp.TapeConcat) return [ungranted(recv)]
         return methodSig(op)
     }
 
     fn methodMinArity(op: PrimOp) -> int {
-        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes) return 1
+        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd || op == PrimOp.TapeIncludes || op == PrimOp.TapeConcat) return 1
         return methodSig(op).length
     }
 
@@ -8764,7 +8922,7 @@ ${
         if (op == PrimOp.ParseNum) return Type.Maybe(Type.Num)
         if (op == PrimOp.ParseBool) return Type.Maybe(Type.Bool)
         if (op == PrimOp.StrSplit) return Type.Seq(Type.Str, anySeqGrants())
-        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return ungranted(recv)
+        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse || op == PrimOp.TapeConcat) return ungranted(recv)
         return Type.Str
     }
 
@@ -8780,6 +8938,7 @@ ${
 
     // A built-in's name as written (for messages).
     fn methodName(op: PrimOp) -> string {
+        if (op == PrimOp.TapeConcat) return "concat"
         if (op == PrimOp.StrUpper) return "toUpperCase"
         if (op == PrimOp.StrLower) return "toLowerCase"
         if (op == PrimOp.StrTrim) return "trim"
@@ -9692,7 +9851,20 @@ ${
     fn resolveArray(env: Env, e: AExpr, es: AExpr[], expected: Type | not, st0: AS) -> RX {
         let elem: Type | not = not
         if (expected is given) elem = seqElem(expected)
-        const st: AS = resolveExprs(env, es, elem, st0)
+        // s477 (s477-boot-tape-forms, gap g-boot-spread-value-s475): a spread element
+        // `...xs` is a run of the operand tape's elements — the operand is resolved as a
+        // tape of the array's own type (the typer checks it is a tape, typeArray), and
+        // lower.scrml `arrayValue` makes the value a TapeConcat of its runs: a NEW tape
+        // (§66.10, §66.12.1 "Non-mutating operations … return new values").
+        let st: AS = st0
+        for (const x of es) {
+            const inner: AExpr | not = spreadInner(x)
+            if (inner is given) {
+                st = resolveExpr(env, inner, expected, st).st
+            } else {
+                st = resolveExpr(env, x, elem, st).st
+            }
+        }
         return plain(expected, st)
     }
 
@@ -11279,13 +11451,20 @@ ${
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
         }
-        // s475 (slice S4) — §13.9.2: "A reset of a pending cell (§6.8) is the request's re-run" and
-        // "The compiler SHALL NOT reset the cell by re-running the initializer outside the request".
-        // After the desugar the cell's initializer is `not`, so the plain reset would write `not` —
-        // neither. Refused by name, INTERIM: the capable form re-runs the hidden request through the
-        // program-level request route `<#id>.refetch()` uses (slice S3b, Core Expr.Refetch).
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4) — §13.9.2: "A reset of a
+        // pending cell (§6.8) is the request's re-run" and "The compiler SHALL NOT reset the cell by
+        // re-running the initializer outside the request". So the reset writes nothing itself: it
+        // starts the hidden request again (lower resetStmt: Core Refetch of the request's handle),
+        // and the cell keeps its value until that load settles (§13.9.4 "the request writes the cell
+        // only when a load settles"). The load's write is the compiler's, exempt from the cell's
+        // grant checks (§13.9.1 S475 rule 5) — so a LOCKED pending cell may be reset too, and the
+        // lifecycle / `replace` refusals below do not apply. It stays an EReset: a write of the
+        // cell for every write rule (§6.7.4 counts a re-run request's settle as a write of its
+        // target), and the typer ends the cell's narrowing at it (conservative: the re-run may
+        // settle `not`, §13.9.5).
         if (p.decl.sym.id == env.g.program.id && isPendingDecl(env.g, f.nid)) {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset(@" + f.sym.hint + ")`", f.sym.hint))
+            if (cap is not) return st                       // resolvePending reported it
+            return addEffect(st, e.nid, EffectFact.EReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
         }
         // s475 (s475-boot-lifecycle-reads): a LOCKED `(not to T)` cell's write grant is its
         // lifecycle (fieldOf rides it on `replace`), and a reset writes the pre-state `not`
@@ -11315,7 +11494,7 @@ ${
     fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
         const k: AExprK = e.k
         return match k {
-            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, "the right-hand side of an assignment"), e, t, v, st)
+            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, assignWhat(t)), e, t, v, st)
             .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
             .Name(name: n) :> resolveExpr(env, e, not, st).st
             .At(name: n) :> resolveExpr(env, e, not, st).st
@@ -11361,13 +11540,13 @@ ${
         const lm: MethodCall | not = memberCall(callee)
         if (lm is given) {
             if (rootIsLocal(env, lm.obj)) {
-                const le: AS | not = resolveLocalEdit(env, e, lm, args, st)
+                const le: AS | not = resolveLocalEdit(env, e, lm, args, false, st)
                 if (le is given) return le
             }
         }
         const rmv: MethodCall | not = removeCall(callee)
         if (rmv is given) {
-            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
+            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, false, st)
             return localEditRefused(env, e, rmv.method, args, st)
         }
         const m: MethodCall | not = methodCall(callee)
@@ -12678,14 +12857,17 @@ ${
         }
     }
 
-    // An edit method on a part of a local (`p.xs.append(v)`, `xs[i].append(v)`), or
-    // on a local whose type the compiler cannot resolve: its values are resolved, and
-    // it is refused. INTERIM (gap g-boot-local-tape-part-edit-s475): the capable form
-    // is the edit of the part, judged by the part's own tape grants (§66.12.6 rule 1)
-    // and lowered as a local part write (Stmt.Assign with a path) of the edited part.
+    // An edit method on a receiver rooted at a local that is neither the local nor a
+    // part of it the bootstrap can walk (an `<each>` row, a part of a `given`-narrowed
+    // handle, a local whose type the compiler cannot resolve): its values are
+    // resolved, and it is refused. (s477: an edit of a PART of a local is built —
+    // resolveLocalPartEdit.) INTERIM (gap g-boot-local-edit-receiver-residue-s477,
+    // S477 FIX ROUND 1 / review F2): SPEC does not make an `<each>` row read-only
+    // (§17.7 / §66.7.3 say nothing on writing one — "a read-only projection" is the
+    // bootstrap's own wording, ruling owed); the capable forms are recorded in the gap.
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a part of a local (a field or a position of it), or on a local whose type the compiler cannot resolve, is not in the bootstrap yet — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on this receiver (an `<each>` row, a part of a `given`-narrowed handle, or a local whose type the compiler cannot resolve) is not in the bootstrap yet (gap g-boot-local-edit-receiver-residue-s477) — edit a local tape whose type names its grants (`let xs: T[free, append] = …; xs.append(v);`), or write the part whole")
     }
 
     // s475 (s475-boot-local-tape-edits) — `xs.append(v)` / `xs.prepend(v)` /
@@ -12703,13 +12885,18 @@ ${
     // position `i`", granted by `insert`): built now that O36 is RULED (S477) — a position past the
     // end, provable, is E-WRITE-INVARIANT; one the compiler cannot prove traps at run time
     // (E-INDEX-OUT-OF-RANGE-RT, as a negative position does, §66.12.8 rule 7).
-    fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
+    // `taken` (s477-boot-tape-forms): the removal is used as a VALUE (resolveRemovalValue).
+    fn resolveLocalEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS | not {
         const meth: string = m.method
         const editName: boolean = meth == "append" || meth == "prepend" || meth == "pop" || meth == "shift"
         if (!editName && meth != "remove" && meth != "insert") return not
         const n: string = exprName(m.obj)
         const l: LocalB | not = lookupLocal(env, n)
         if (n == "" || l is not) {
+            // s477 (s477-boot-tape-forms): an edit of a PART of a local (`b.xs.append(v)`,
+            // `g[i].pop()`), judged by the part's own tape grants (§66.12.6 rule 1)
+            const pl: LocalB | not = partLocal(env, m.obj)
+            if (pl is given) return resolveLocalPartEdit(env, e, m, args, pl, editName, taken, st0)
             if (editName) return localEditRefused(env, e, meth, args, st0)
             return not
         }
@@ -12736,7 +12923,7 @@ ${
             if (args.length != 2) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".insert(i, x)` takes a position (an `int`) and ONE value (§66.12.6 rule 3: each grow method adds one value — call it once per value)")
             st = resolveExpr(env, args[0], Type.Int, st).st
             st = resolveExpr(env, args[1], el, st).st
-            return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, args[1], el, args[0], env.file + ":" + lineOf(env.g, env.file, e.span.start)))
+            return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, args[1], el, [], [], not, not, args[0], env.file + ":" + lineOf(env.g, env.file, e.span.start), not))
         }
         if (takesArg && args.length != 1) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "(…)` takes exactly one " + localEditArgWhat(meth) + " (§66.12.6 rule 3: each grow method adds ONE value — call it once per value)")
         if (!takesArg && args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + meth + "()` takes no argument")
@@ -12747,7 +12934,138 @@ ${
             if (meth == "remove") want = Type.Int
             st = resolveExpr(env, args[0], want, st).st
         }
-        return addEffect(st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, not, ""))
+        const tk: RTaken = mintTaken(st, taken, meth)
+        return addEffect(tk.st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, [], [], tk.taken, tk.at, not, "", not))
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-tape-removal-value-s475) — a removal
+    // used as a VALUE (`const top = xs.pop();`): the local the removed value is read
+    // into (`taken`) before the edit, and, for `remove(i)`, the local its position is
+    // evaluated into (`at`) — read by both the value and the edit, evaluated once.
+    type RTaken:struct = { taken: Sym | not, at: Sym | not, st: AS }
+
+    fn mintTaken(st0: AS, taken: boolean, meth: string) -> RTaken {
+        if (!taken) return { taken: not, at: not, st: st0 }
+        const t: RSym = mint(st0, "removed")
+        if (meth != "remove") return { taken: t.s, at: not, st: t.st }
+        const a: RSym = mint(t.st, "at")
+        return { taken: t.s, at: a.s, st: a.st }
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-local-tape-part-edit-s475) — an edit
+    // METHOD on a PART of the local `l`: a tape field (`b.xs.append(v)`), a tape
+    // position (`g[i].pop()`), or any chain of them (`b.rows[i].tags.remove(k)`).
+    // §66.12.6 rule 1: "A tape's grants govern every write to it, in each position
+    // that can hold one: … a struct field whose type is a tape (§66.11.4: the field's
+    // tape type carries its grants); a tuple position whose type is a tape (… the
+    // tape's own grants govern edits of the tape in it)". So the edit is judged by
+    // the PART's tape type — the grants its declared field type writes when a struct
+    // field lies on the path; otherwise the part is a position of the local's own
+    // type, whose WRITTEN type gives the grants (an inferred one gives none:
+    // "Inference never invents a grant"). An edit of the part rebinds no name, so
+    // `const` on the root does not refuse it (§66.12.6 rule 3, RULED S475 "read as
+    // edit"). Core: the local rebound with a path to the part's edited value
+    // (Stmt.Assign(l, Prim(Tape…, [<the part>, v]), path), as a part write is), a
+    // NEW tape (§66.10): no alias of the old value sees it. Each index is evaluated
+    // ONCE, into a local (`tmps`, two per index step: the index, then the element it
+    // names), and the part is read through them before the edit — so a position
+    // past the end traps (E-INDEX-OUT-OF-RANGE-RT, §66.12.6 rule 3) and nothing is
+    // written. `not`: `remove` / `insert` on a part that is not a tape (a host value's
+    // own method), which the caller's paths take.
+    fn resolveLocalPartEdit(env: Env, e: AExpr, m: MethodCall, args: AExpr[], l: LocalB, editName: boolean, taken: boolean, st0: AS) -> AS | not {
+        const meth: string = m.method
+        const ps: PartStep[] = partSteps(m.obj)
+        const label: string = partLabel(l.name, ps)
+        const call: string = label + "." + meth + "(…)"
+        const lt: Type | not = l.ty
+        let wt: Type | not = writtenLocalType(st0, l.s)
+        if (wt is not) wt = lt
+        if (lt is not) {
+            if (!editName) return not
+            // only positions of the local's own tape, its type inferred: whatever that
+            // type is, inference gives it no grant (§66.12.6 rule 1), as a part write
+            if (!partHasField(ps) && writtenLocalType(st0, l.s) is not) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-WRITE-NOT-GRANTED", "`" + label + "." + localEditCall(localEditOpOf(meth)) + "` edits a tape inside the local `" + l.name + "`, whose type is inferred (no annotation), and an inferred type carries no grant (§66.12.6 rules 1 and 3, O63 ruled S469) — write the grants in its type (`let " + l.name + ": T[free, " + meth + "][…] = …`)")
+            return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of `" + l.name + "`, whose type is not known here — annotate it (`let " + l.name + ": T = …`)")
+        }
+        const pw: PartWalk = walkLocalPart(env, l, lt, ps, call, "edits", env.file + ":" + lineOf(env.g, env.file, e.span.start))
+        if (pw.code != "") {
+            if (!editName) return not
+            return addDiag(resolveExprs(env, args, not, st0), env.file, m.obj.span, pw.code, pw.msg)
+        }
+        // `remove` / `insert` are tape methods only on a tape (a host value has its own)
+        if (!editName && seqElem(unMaybe(pw.t)) is not) return not
+        if (isRowLocal(env, l)) return addDiag(resolveExprs(env, args, not, st0), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + call + "` edits a part of the row `" + l.name + "` — an edit of a row is not in the bootstrap yet (gap g-boot-local-edit-receiver-residue-s477); write the source cell")
+        // the local's name is an APPEARANCE of the binding (§35.2), as in a part write
+        let st: AS = st0
+        const rn: AExpr | not = partRootName(m.obj)
+        if (rn is given) st = addName(st, rn.nid, NameFact.NLocal(l.s))
+        // the indices are evaluated before the argument, in source order — each once
+        let tmps: Sym[] = []
+        for (const s of ps) {
+            const ix: AExpr | not = s.index
+            if (ix is given) {
+                st = resolveExpr(env, ix, Type.Int, st).st
+                const mi: RSym = mint(st, "at")
+                const me: RSym = mint(mi.st, "part")
+                st = me.st
+                tmps = tmps.concat([mi.s, me.s])
+            }
+        }
+        const op: LocalEdit = localEditOpOf(meth)
+        const el: Type | not = seqElem(unMaybe(pw.t))
+        const takesArg: boolean = meth == "append" || meth == "prepend" || meth == "remove"
+        if (takesArg && args.length != 1) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + "." + meth + "(…)` takes exactly one " + localEditArgWhat(meth) + " (§66.12.6 rule 3: each grow method adds ONE value — call it once per value)")
+        if (!takesArg && meth != "insert" && args.length > 0) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + "." + meth + "()` takes no argument")
+        let arg: AExpr | not = not
+        let ixArg: AExpr | not = not
+        if (meth == "insert") {
+            // s477 (s477-boot-tape-bounds; O36 RULED S477): `part.insert(i, x)` — the position
+            // (an `int`), then the value, as on a whole local (resolveLocalEdit)
+            if (args.length != 2) return addDiag(resolveExprs(env, args, not, st), env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + ".insert(i, x)` takes a position (an `int`) and ONE value (§66.12.6 rule 3: each grow method adds one value — call it once per value)")
+            st = resolveExpr(env, args[0], Type.Int, st).st
+            st = resolveExpr(env, args[1], el, st).st
+            ixArg = args[0]
+            arg = args[1]
+        }
+        if (takesArg) {
+            arg = args[0]
+            let want: Type | not = el
+            if (meth == "remove") want = Type.Int
+            st = resolveExpr(env, args[0], want, st).st
+        }
+        // the part's grants: its own tape type when a struct field lies on the path
+        // (the field's declared type writes them); else a position of the local's own
+        // type — its written type's, or none when the type is inferred (rule 1)
+        let judged: Type = pw.t
+        let tyText: string = tapeTypeName(pw.t)
+        if (!pw.viaField && writtenLocalType(st, l.s) is not) {
+            judged = ungranted(pw.t)
+            tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[…][…] = …`"
+        }
+        const pr: TapeDiag[] = localEditProblems(label, judged, tyText, op)
+        if (pr.length > 0) return addDiag(st, env.file, e.span, pr[0].code, pr[0].msg)
+        const tk: RTaken = mintTaken(st, taken, meth)
+        // s477 (s477-boot-tape-bounds): `judged` carries the part's length bound (§66.12.2) — the
+        // typer judges the edit against it (typeLocalPartEdit), as typeLocalEdit does a local's
+        let ixLoc: string = ""
+        if (ixArg is given) ixLoc = env.file + ":" + lineOf(env.g, env.file, e.span.start)
+        return addEffect(tk.st, e.nid, EffectFact.ELocalEdit(l.s, op, arg, el, pw.steps, tmps, tk.taken, tk.at, ixArg, ixLoc, judged))
+    }
+
+    fn partHasField(ps: PartStep[]) -> boolean {
+        for (const s of ps) {
+            if (s.index is not) return true
+        }
+        return false
+    }
+
+    fn localEditOpOf(meth: string) -> LocalEdit {
+        if (meth == "prepend") return LocalEdit.LPrepend
+        if (meth == "pop") return LocalEdit.LPop
+        if (meth == "shift") return LocalEdit.LShift
+        if (meth == "remove") return LocalEdit.LRemoveAt
+        if (meth == "insert") return LocalEdit.LInsert
+        return LocalEdit.LAppend
     }
 
     fn localEditArgWhat(meth: string) -> string {
@@ -12818,7 +13136,7 @@ ${
         return not
     }
 
-    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
+    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
         const p: WPlace | not = rp.place
@@ -12857,7 +13175,86 @@ ${
         if (m.method == "pop") edit = EditKind.RemoveEnd
         const cap: Sym | not = f.wcap
         if (cap is not) return noCapability(env, e, st)
-        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: lc.check }))
+        // s477: a removal used as a VALUE — the cell's removed element is read into
+        // `taken.local` (from the field `taken.decl` / `taken.idx`) before the Write
+        let sn: SeqSnap | not = not
+        if (taken) {
+            const tm: RSym = mint(st, "removed")
+            st = tm.st
+            sn = { local: tm.s, decl: p.decl.sym, idx: p.idx }
+        }
+        return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: lc.check }, sn))   // s477-boot-tape-bounds: the length check
+    }
+
+    // s477: the position an assignment's value stands in (E-ERROR-012's message; a
+    // removal's value, resolveRemovalValue): a write of a whole local or cell
+    // (`x = …`, `@x = …`) evaluates its value FIRST; a write of a part evaluates
+    // the part's indices before it.
+    fn assignWhat(t: AExpr) -> string {
+        if (wholeAssignTarget(t)) return "the right-hand side of an assignment"
+        return "the right-hand side of an assignment to a part"
+    }
+
+    fn wholeAssignTarget(t: AExpr) -> boolean {
+        const k: string = placeKey(t)
+        return k != "" && k.indexOf(".") < 0
+    }
+
+    // s477 (s477-boot-tape-forms, gap g-boot-tape-removal-value-s475) — a removal
+    // used as a VALUE. §66.12.6 rule 3: "`pop`, `shift` and `remove` return the
+    // removed value, typed `T | not`: on an empty tape, or a `remove(i)` with no
+    // position `i`, nothing is removed and the result is `not`." The edit is judged
+    // exactly as in statement position (resolveLocalEdit / resolveLocalPartEdit /
+    // resolveRemoveCall); the removed value is read into a minted local just before
+    // the edit, and the expression's value is that local. Built where the removal is
+    // the WHOLE value of a statement that evaluates nothing before it — a `let` /
+    // `const` initializer, a `return` operand, the right-hand side of `x = …` /
+    // `@x = …` — so reading it first keeps the evaluation order. Anywhere else (an
+    // argument, an operand, an arm's value, a part write's value): refused, INTERIM
+    // (gap g-boot-tape-removal-value-position-s477) — the capable form evaluates the
+    // statement's earlier operands into locals first. FIX ROUND 1: "the statement"
+    // is a POSITION, threaded as FailCtx.pre by the sites whose lowering emits
+    // removalPre (resolveLocal, resolveMaybeExpr, withEvalPre at a block `Eval` /
+    // a statement arm) — an assignment in a counted head's `init` / `step`
+    // (lowerSteps / lowerInits), a value arm's write, a request body or a handler
+    // is refused here, never miscompiled. `not`: not a tape removal (a
+    // host value's own `remove()`); the caller's paths take it.
+    fn resolveRemovalValue(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
+        let res: AS | not = not
+        if (rootIsLocal(env, m.obj)) {
+            res = resolveLocalEdit(env, e, m, args, true, st0)
+        } else if (m.method != "remove" && placeKey(m.obj).indexOf("@") == 0) {
+            res = resolveRemoveCall(env, e, m, args, true, st0)
+        }
+        if (res is not) return not
+        let st: AS = res
+        // FIX ROUND 1: admitted only where the lowering reads the removal first (FailCtx.pre)
+        const whole: boolean = env.fx.pre == e.nid && env.fx.whole == e.nid && env.fx.inFn
+        let rcall: string = placeKey(m.obj) + "." + m.method + "()"
+        if (m.method == "remove") rcall = placeKey(m.obj) + ".remove(…)"
+        if (!whole && st.diags.length == st0.diags.length) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "the value of `" + rcall + "` is in the bootstrap only as the WHOLE value of a `let` / `const` statement's initializer, a `return`, or an assignment STATEMENT to a whole local or cell (`x = …;`, `@x = …;`, also as a statement `match` arm) — not in a counted loop's head, an operand, an argument or an arm's value; bind it first (`const v = " + rcall + ";`) and use `v` (gap g-boot-tape-removal-value-position-s477)")
+        }
+        let ty: Type | not = not
+        const f: EffectFact | not = effectFactIn(st, e.nid)
+        const el: Type | not = localEditElem(f)
+        if (el is given) ty = Type.Maybe(el)
+        return plain(ty, st)
+    }
+
+    fn localEditElem(f: EffectFact | not) -> Type | not {
+        return match f {
+            .ELocalEdit(elem: el) :> el
+            .EWrite(w: x) :> not
+            .ESpread(ws: x) :> not
+            .EReset(w: x) :> not
+            .EAssignLocal(sym: x) :> not
+            .EEdits(w: x) :> not
+            .ERemove(w: x) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            not :> not
+        }
     }
 
     // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
@@ -13216,6 +13613,73 @@ ${
         return addDiag(resolveExpr(env, value, not, st).st, env.file, span, code, msg)
     }
 
+    // s477 (s477-boot-tape-forms): the walk of a local part's path, root first —
+    // shared by a part WRITE (resolveLocalPartWrite) and a part EDIT
+    // (resolveLocalPartEdit), so one rule says what a part of a local is. `t`: the
+    // part's type; `lastTape`: the tape whose position the last index step names
+    // (`not` when the last step is a field); `lastField`: the field the last step
+    // names; `fieldInTape`: a tape position lies before that field;
+    // `tapeViaField`: a struct field step lies before the last tape position;
+    // `viaField`: some struct field step was taken. `code` non-empty: refused.
+    // `written` is the part as the message names it (`a.xs[…] = …`), `verb` what
+    // the statement does to it ("writes", "edits").
+    type PartWalk:struct = { code: string, msg: string, t: Type, steps: LStep[], lastField: FieldDef | not, lastTape: Type | not, fieldInTape: boolean, tapeViaField: boolean, viaField: boolean }
+
+    fn partWalkRefused(lt: Type, code: string, msg: string) -> PartWalk {
+        return { code: code, msg: msg, t: lt, steps: [], lastField: not, lastTape: not, fieldInTape: false, tapeViaField: false, viaField: false }
+    }
+
+    fn walkLocalPart(env: Env, l: LocalB, lt: Type, ps: PartStep[], written: string, verb: string, loc: string) -> PartWalk {
+        let t: Type = lt
+        let steps: LStep[] = []
+        let lastField: FieldDef | not = not
+        let lastTape: Type | not = not
+        let sawIndex = false
+        let fieldInTape = false
+        let viaField = false          // a struct field step has been taken
+        let tapeViaField = false      // ... before the last tape position
+        let at: string = l.name
+        let part: string = "a part write"
+        if (verb != "writes") part = "a part edit"
+        for (const s of ps) {
+            if (maybeInner(t) is given) return partWalkRefused(lt, "E-BOOTSTRAP-UNSUPPORTED", "`" + written + "` " + verb + " through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and " + part + " through a `T | not` value is not in the bootstrap yet; bind the present value first")
+            const ix: AExpr | not = s.index
+            if (ix is given) {
+                const el: Type | not = seqElem(t)
+                if (el is not) return partWalkRefused(lt, "E-ASSIGN-TARGET", "`" + written + "` " + verb + " a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape")
+                steps = steps.concat([LStep.LIndex(ix, loc)])
+                lastTape = t
+                tapeViaField = viaField
+                lastField = not
+                sawIndex = true
+                t = el
+                at = at + "[…]"
+            } else {
+                const sy: Sym | not = namedOf(t)
+                const fs: FieldDef[] | not = structFieldsOfType(env, t)
+                // a named type with no struct fields here (a declaration's value, an
+                // enum): not a write Core has — refused, never approximated
+                if (sy is given && fs is not) return partWalkRefused(lt, "E-BOOTSTRAP-UNSUPPORTED", "`" + written + "` " + verb + " `." + s.field + "` of `" + at + "`, a `" + sy.hint + "` — " + part + " of a value of this type (a declaration's value or an enum) is not in the bootstrap yet")
+                if (sy is not || fs is not) return partWalkRefused(lt, "E-ASSIGN-TARGET", "`." + s.field + "` is not a field of a struct here — `" + at + "` is `" + typeName(t) + "`")
+                let k: int = -1
+                let i: int = 0
+                for (const fd of fs) {
+                    if (fd.sym.hint == s.field) k = i
+                    i = i + 1
+                }
+                if (k < 0) return partWalkRefused(lt, "E-SCOPE-001", "`" + sy.hint + "` has no field `" + s.field + "`")
+                steps = steps.concat([LStep.LField({ owner: sy, idx: k }, s.field)])
+                lastField = fs[k]
+                lastTape = not
+                fieldInTape = sawIndex
+                viaField = true
+                t = fs[k].ty
+                at = at + "." + s.field
+            }
+        }
+        return { code: "", msg: "", t: t, steps: steps, lastField: lastField, lastTape: lastTape, fieldInTape: fieldInTape, tapeViaField: tapeViaField, viaField: viaField }
+    }
+
     // A write to a PART of the local `l` (Core Assign with a path).
     fn resolveLocalPartWrite(env: Env, e: AExpr, target: AExpr, value: AExpr, l: LocalB, st0: AS) -> AS {
         const ps: PartStep[] = partSteps(target)
@@ -13245,52 +13709,14 @@ ${
             }
         }
         if (lt is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes a part of `" + l.name + "`, whose type is not known here — annotate it (`let " + l.name + ": T = …`)", st)
-        const loc: string = env.file + ":" + lineOf(env.g, env.file, e.span.start)
-        let t: Type = lt
-        let steps: LStep[] = []
-        let lastField: FieldDef | not = not
-        let lastTape: Type | not = not
-        let sawIndex = false
-        let fieldInTape = false
-        let viaField = false          // a struct field step has been taken
-        let tapeViaField = false      // ... before the last tape position
-        let at: string = l.name
-        for (const s of ps) {
-            if (maybeInner(t) is given) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes through `" + at + "`, which is `" + typeName(t) + "` — it may be `not`, and a part write through a `T | not` value is not in the bootstrap yet; bind the present value first", st)
-            const ix: AExpr | not = s.index
-            if (ix is given) {
-                const el: Type | not = seqElem(t)
-                if (el is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`" + label + " = …` writes a tape position (§66.12.6 rule 3), and `" + at + "` is `" + typeName(t) + "`, not a tape", st)
-                steps = steps.concat([LStep.LIndex(ix, loc)])
-                lastTape = t
-                tapeViaField = viaField
-                lastField = not
-                sawIndex = true
-                t = el
-                at = at + "[…]"
-            } else {
-                const sy: Sym | not = namedOf(t)
-                const fs: FieldDef[] | not = structFieldsOfType(env, t)
-                // a named type with no struct fields here (a declaration's value, an
-                // enum): not a write Core has — refused, never approximated
-                if (sy is given && fs is not) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` writes `." + s.field + "` of `" + at + "`, a `" + sy.hint + "` — a part write of a value of this type (a declaration's value or an enum) is not in the bootstrap yet", st)
-                if (sy is not || fs is not) return partRefused(env, value, target.span, "E-ASSIGN-TARGET", "`." + s.field + "` is not a field of a struct here — `" + at + "` is `" + typeName(t) + "`", st)
-                let k: int = -1
-                let i: int = 0
-                for (const fd of fs) {
-                    if (fd.sym.hint == s.field) k = i
-                    i = i + 1
-                }
-                if (k < 0) return partRefused(env, value, target.span, "E-SCOPE-001", "`" + sy.hint + "` has no field `" + s.field + "`", st)
-                steps = steps.concat([LStep.LField({ owner: sy, idx: k }, s.field)])
-                lastField = fs[k]
-                lastTape = not
-                fieldInTape = sawIndex
-                viaField = true
-                t = fs[k].ty
-                at = at + "." + s.field
-            }
-        }
+        const pw: PartWalk = walkLocalPart(env, l, lt, ps, label + " = …", "writes", env.file + ":" + lineOf(env.g, env.file, e.span.start))
+        if (pw.code != "") return partRefused(env, value, target.span, pw.code, pw.msg, st)
+        const t: Type = pw.t
+        const steps: LStep[] = pw.steps
+        const lastField: FieldDef | not = pw.lastField
+        const lastTape: Type | not = pw.lastTape
+        const fieldInTape: boolean = pw.fieldInTape
+        const tapeViaField: boolean = pw.tapeViaField
         st = resolveExpr(env, value, t, st).st
         const key: string = placeKey(target)
         const tape: Type | not = lastTape
@@ -13344,7 +13770,7 @@ ${
     fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(env, e, st))
+            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(withEvalPre(env, e), e, st))
             .Local(name: n, mutable: m, ty: y, init: i) :> resolveLocal(env, s, n, m, y, i, st)
             .Return(e: e) :> keepEnv(env, resolveReturnExpr(env, e, st))
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
@@ -15213,7 +15639,7 @@ ${
     }
 
     fn armExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st: AS) -> AS {
-        if (cx.stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
+        if (cx.stmt) return resolveStmtExpr(withEvalPre(withWhole(env, x.nid), x), x, st)
         return armValueExpr(env, a, x, cx, st)
     }
 
@@ -16638,7 +17064,7 @@ ${
         if (e is not) return st
         // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
         // anywhere else a `return` operand is a value position
-        let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
+        let renv: Env = withPre(withWholeAt(env, e.nid, "a `return` operand"), e.nid)
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
         // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
         // type is the enclosing function's declared return type — §18.5 reads an object
@@ -16707,7 +17133,7 @@ ${
         if (fi is given) {
             ri = resolveForeignAt(env, init, fi, false, st)      // s473: `const x = _={ … }=` (§23.2.4)
         } else {
-            ri = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
+            ri = resolveExpr(withPre(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init.nid), init, annot, st)
         }
         const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
@@ -19212,8 +19638,7 @@ ${
             return resolveUse(env, e, d, st)
         }
         // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
-        const sd: ADecl | not = singleProgramField(env, e.tag)
-        if (sd is given) return singleInstantiated(env, e, st)
+        if (singleProgramField(env, e.tag)) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
         // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
@@ -20845,15 +21270,25 @@ ${
         return ""
     }
 
-    // s442: the program's cell `name` when it was declared `single` (§66.13.3).
-    fn singleProgramField(env: Env, name: string) -> ADecl | not {
-        if (programInfo(env) is not) return not
-        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
-        if (ps is not) return not
-        for (const d of fieldDecls(ps)) {
-            if (d.name == name && hasFlag(d.mods, "single")) return d
+    // s442: is the program's cell `name` declared `single` (§66.13.3)?
+    fn singleProgramField(env: Env, name: string) -> boolean {
+        if (programInfo(env) is not) return false
+        return env.g.singles.indexOf(name) >= 0
+    }
+
+    // s477 (s477-boot-compile-perf): the names of the program's cells declared `single`,
+    // once (Globals.singles) — singleProgramField re-read every program cell per element.
+    fn singleCells(decls: DeclSrc[], program: Sym) -> string[] {
+        let ps: DeclSrc | not = not
+        for (const d of decls) {
+            if (ps is not && d.info.sym.id == program.id) ps = d
         }
-        return not
+        if (ps is not) return []
+        let out: string[] = []
+        for (const d of fieldDecls(ps)) {
+            if (hasFlag(d.mods, "single")) out = out.concat([d.name])
+        }
+        return out
     }
 
     fn singleInstantiated(env: Env, e: AElem, st: AS) -> AS {
@@ -21946,7 +22381,8 @@ ${
 
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
-                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs }
+                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
+                 singles: g.singles, hostImps: g.hostImps }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -22208,7 +22644,7 @@ ${
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr }
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1 }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift }
             const fte: TypeEnv = teAt(g.te, fs.info.file)
             for (const p of fs.f.params) {
@@ -22487,12 +22923,13 @@ ${
 
     // The `from` of an import in `file` that brings `name` into its scope — a
     // plain `import` whose target (a user OR a stdlib file) exports it — else "".
-    fn importBringing(files: FileAst[], lk: Linkage, file: string, name: string) -> string {
-        const paths: string[] = filePaths(files)
-        for (const f of files) {
-            if (f.path == file) {
-                for (const imp of importsOfItems(f.items)) {
-                    const target: string = importTarget(f.path, imp.from, paths)
+    // s477 (s477-boot-compile-perf): `imps` — importsByFile of the files, `paths` their
+    // filePaths, both read once by the caller (this is asked per file-scope name).
+    fn importBringing(imps: FileImports[], paths: string[], lk: Linkage, file: string, name: string) -> string {
+        for (const f of imps) {
+            if (f.file == file) {
+                for (const imp of f.imps) {
+                    const target: string = importTarget(f.file, imp.from, paths)
                     if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
@@ -22536,12 +22973,20 @@ ${
         return false
     }
 
+    fn importsByFile(files: FileAst[]) -> FileImports[] {
+        let out: FileImports[] = []
+        for (const f of files) { out = out.concat([{ file: f.path, imps: importsOfItems(f.items) }]) }
+        return out
+    }
+
     fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         const ns: FileName[] = fileNames(t, lk)
+        const imps: FileImports[] = importsByFile(files)
+        const paths: string[] = filePaths(files)
         let out: Diag[] = []
         for (const n of ns) {
             if (!reportedElsewhereAt(files, lk, t, ns, n)) {
-                const imported: string = importBringing(files, lk, n.file, n.name)
+                const imported: string = importBringing(imps, paths, lk, n.file, n.name)
                 // linkage reports a known kind beside an import of its name, at the import
                 if (n.kind == "cell" || imported == "") {
                     // the first earlier binding `n` clashes with, in a pair no other pass reports
@@ -22992,6 +23437,16 @@ ${
             if (b.nid == nid) return b
         }
         return not
+    }
+
+    // s477 — the node an EDIT METHOD's run-time length check is keyed on: the call's callee
+    // (`xs.append` of `xs.append(v)`), never the call itself — the call node's own bound, when
+    // there is one, is its VALUE's (a removal used as a value, `const v: T[1..=2] = g.pop()`),
+    // and the two must not share a key (boundChecks keeps one per node).
+    export fn editBoundNid(e: AExpr) -> int {
+        const c: AExpr | not = calleeOfCall(e)
+        if (c is given) return c.nid
+        return e.nid
     }
 
     // s477 — the typer's run-time length checks, each located "file:line" (one per node).
@@ -23669,6 +24124,37 @@ ${
         return out
     }
 
+    // s477 (s477-boot-compile-perf): fnwIn(ws, lk, file) for each file a function with a call
+    // key (`()…`) is declared in — what one fixpoint pass of fnWrites reads.
+    type FnWScope:struct = { file: string, ws: FnW[] }
+
+    fn fnwScopes(ws: FnW[], lk: Linkage) -> FnWScope[] {
+        let out: FnWScope[] = []
+        let files: string[] = []
+        for (const w of ws) {
+            if (files.indexOf(w.file) < 0 && hasCallKey(w.keys)) {
+                files = files.concat([w.file])
+                out = out.concat([{ file: w.file, ws: fnwIn(ws, lk, w.file) }])
+            }
+        }
+        return out
+    }
+
+    fn hasCallKey(keys: string[]) -> boolean {
+        for (const k of keys) {
+            if (k.indexOf("()") == 0) return true
+        }
+        return false
+    }
+
+    // fnwIn(ws, lk, file), read from `scoped` when it holds `file`
+    fn fnwScoped(scoped: FnWScope[], ws: FnW[], lk: Linkage, file: string) -> FnW[] {
+        for (const s of scoped) {
+            if (s.file == file) return s.ws
+        }
+        return fnwIn(ws, lk, file)
+    }
+
     export fn callKeys(ws: FnW[], name: string) -> string[] {
         if (!hasFnNamed(ws, name)) return ["*"]
         return fnKeysNamed(ws, name)
@@ -23761,13 +24247,16 @@ ${
         while (changed && pass < ws.length + 2) {
             changed = false
             let next: FnW[] = []
+            // s477 (s477-boot-compile-perf): `ws` is fixed for the whole pass, so the write sets in
+            // scope in a file are read once per pass and file (fnwIn was re-run per call key)
+            const scoped: FnWScope[] = fnwScopes(ws, lk)
             for (const w of ws) {
                 let keys: string[] = w.keys
                 for (const k of w.keys) {
                     if (k.indexOf("()") == 0) {
                         // the callee's own `()` keys name functions in ITS file's scope — they reach
                         // this set already resolved (the callee's closure), never re-read here
-                        for (const c of callKeys(fnwIn(ws, lk, w.file), k.substring(2))) {
+                        for (const c of callKeys(fnwScoped(scoped, ws, lk, w.file), k.substring(2))) {
                             if (keys.indexOf(c) < 0 && c.indexOf("()") != 0) {
                                 keys = keys.concat([c])
                                 changed = true
@@ -23908,7 +24397,51 @@ ${
                 if (db.min >= b.min && db.max <= b.max) return out
             }
         }
+        // s477 (merge of s477-boot-tape-forms × s477-boot-tape-bounds) — a SPREAD literal
+        // (`[x, ...a, ...b]`, a whole write of #1834's spread form): its length lies between
+        // the plain elements' count plus each operand's DECLARED minimum, and — when every
+        // operand's declared type bounds it — that count plus their maxima. Wholly outside
+        // the target's bound: provably broken (E-WRITE-INVARIANT); wholly inside: proven;
+        // else checked at run time, as any computed value.
+        const sr: BoundRange | not = spreadLengthRange(env, x, out)
+        if (sr is given) {
+            if (sr.min > b.max || (sr.max >= 0 && sr.max < b.min)) {
+                let most: string = "at least " + sr.min
+                if (sr.max >= 0 && sr.max < b.min) most = "at most " + sr.max
+                return report(out, env, x.span, "E-WRITE-INVARIANT", what + " is a tape of length " + most + " (its plain elements and the declared lengths of its spread operands), and its type bounds the length to `" + b.min + "..=" + b.max + "` — the write provably breaks the length invariant (§66.11.2, §66.12.2)")
+            }
+            if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return out
+        }
         return recordBound(out, env, x, b)
+    }
+
+    // An array literal holding a spread: the range of lengths it can have — `max` -1 when
+    // some operand's declared type gives no upper bound. `not`: not a spread literal.
+    fn spreadLengthRange(env: TEnv, x: AExpr, ts: TypeState) -> BoundRange | not {
+        if (!isArrayLit(x)) return not
+        let lo: int = 0
+        let hi: int = 0
+        let spread: boolean = false
+        for (const e of arrayElems(x)) {
+            const inner: AExpr | not = spreadInner(e)
+            if (inner is given) {
+                spread = true
+                let ob: BoundRange | not = not
+                const dt: Type | not = declaredTapeType(env, inner, ts)
+                if (dt is given) ob = boundOfType(dt)
+                if (ob is given) {
+                    lo = lo + ob.min
+                    if (hi >= 0) hi = hi + ob.max
+                } else {
+                    hi = -1
+                }
+            } else {
+                lo = lo + 1
+                if (hi >= 0) hi = hi + 1
+            }
+        }
+        if (!spread) return not
+        return { min: lo, max: hi }
     }
 
     fn recordBound(ts: TypeState, env: TEnv, x: AExpr, b: BoundRange) -> TypeState {
@@ -25385,7 +25918,7 @@ ${
         // s475: a tape's `includes(x)` — the argument against the receiver's element type
         // s475 r1 (#1812 review F4): a receiver whose type the typer cannot name fails closed — the
         // argument is never compared unchecked
-        if (op == PrimOp.TapeIncludes) {
+        if (op == PrimOp.TapeIncludes || op == PrimOp.TapeConcat) {
             sig = []
             const cl: AExpr | not = calleeOf(e.k)
             if (cl is given) {
@@ -25403,7 +25936,11 @@ ${
             if (i < sig.length) {
                 const vt: VType = exprType0(ts, a.nid)
                 const what: string = "argument " + (i + 1) + " of `." + methodName(op) + "(…)`"
-                if (knownOf(vt) is not && !isAbsentVT(vt)) {
+                if (isArrayLit(a) && knownOf(vt) is not && seqElem(sig[i]) is given) {
+                    // s477: a tape literal argument (`.concat([])`, `.concat([1, x])`) takes
+                    // its type from the parameter — each element checked against it
+                    ts = checkNotElems(env, a, sig[i], ts)
+                } else if (knownOf(vt) is not && !isAbsentVT(vt)) {
                     if (!hasErrIn(env.errs, a.span)) ts = report(ts, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", what + " has a type the compiler cannot resolve — a built-in method's argument must be a `" + typeName(sig[i]) + "` the compiler can see; annotate it")
                 } else {
                     ts = checkValue(env, vt, sig[i], a.span, what + " (a `" + typeName(sig[i]) + "`)", ts)
@@ -26609,6 +27146,11 @@ ${
         return report(ts, env, s.span, "E-TEXT-NON-PRIMITIVE", "a template slot is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§14.13.2). Interpolate a field (`p.name`), a `scrml:format` call, or show it with `log()`")
     }
 
+    fn maybeSpreadHint(t: Type) -> string {
+        if (maybeInner(t) is given) return " — it may be `not`; narrow it first (`if (x is given) { … }`)"
+        return ""
+    }
+
     fn typeArray(env: TEnv, es: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = ts0
         let elem: VType = VType.Unknown
@@ -26626,6 +27168,9 @@ ${
                 if (it is given) {
                     const iel: Type | not = seqElem(it)
                     if (iel is given) ev = known(iel)
+                    // s477: a spread of a value that is not a tape (a string, a struct, a
+                    // `T | not` that may be `not`) has no elements to run — refused
+                    if (iel is not && !hasErrIn(env.errs, inner.span)) ts = report(ts, env, inner.span, "E-TYPE-031", "a spread `...` in a tape value needs a tape, and this operand is `" + typeName(it) + "` (§66.12.1: one sequence kind, the tape)" + maybeSpreadHint(it))
                 }
             }
             if (first) {
@@ -26655,6 +27200,30 @@ ${
     // defaulted — is honoured by never guessing). Checked only when the
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
+        // s477 (s477-boot-tape-forms): a removal used as a VALUE (resolveRemovalValue) —
+        // the edit judged as in statement position, the value `T | not` (§66.12.6 rule 3)
+        const rf: EffectFact | not = effectFact(env.t.effects, e.nid)
+        const rle: LocalEditFact | not = localEditOf(rf)
+        if (rle is given) {
+            if (rle.taken) {
+                const lts: TypeState = typeLocalEdit(env, e, callee, rle, ts0)
+                const lel: Type | not = rle.elem
+                if (lel is given) return rvt(known(Type.Maybe(lel)), lts)
+                return rvt(VType.Unknown, lts)
+            }
+        }
+        const rmc: Sym | not = removedCellCap(rf)
+        if (rmc is given) {
+            const cts: TypeState = typePlace(env, callee, VType.Unknown, ts0)
+            const cf: FieldInfo | not = fieldOfCap(env.t, rmc)
+            if (cf is given) {
+                if (cf.trusted) {
+                    const cel: Type | not = seqElem(cf.ty)
+                    if (cel is given) return rvt(known(Type.Maybe(cel)), cts)
+                }
+            }
+            return rvt(VType.Unknown, cts)
+        }
         let ts: TypeState = typeExprs(env, args, ts0)
         // s472 — a payload-variant construction (resolveConstruct): each argument
         // against its declared field's type, as a `fail`'s payload (typeFail); its
@@ -26812,7 +27381,16 @@ ${
         let out: TypeState = ts
         for (const x of es) {
             const xv: VType = exprType0(out, x.nid)
-            if (isNotLit(x)) {
+            // s477: a spread element is a run of its operand's elements — each a value
+            // of the target's element type (a non-tape operand: typeArray refused it)
+            const sp: AExpr | not = spreadInner(x)
+            if (sp is given) {
+                const st0: Type | not = knownOf(exprType0(out, sp.nid))
+                if (st0 is given) {
+                    const sel: Type | not = seqElem(st0)
+                    if (sel is given) out = checkValue(env, known(sel), te, sp.span, "an element of `" + typeName(target) + "` (spread from `" + typeName(st0) + "`)", out)
+                }
+            } else if (isNotLit(x)) {
                 out = checkAbsent(env, te, x.span, "an element of `" + typeName(target) + "`", out)
             } else if (knownOf(xv) is given || oneOfMembers(xv).length > 0 || isPartialVT(xv)) {
                 // s475 (#1777 review r1 F1): a Partial element's proven members are
@@ -27998,11 +28576,11 @@ ${
     // written type, else its inferred type, which carries NO grant (§66.12.6 rule 1:
     // "Inference never invents a grant"; O63: a local `let` gives the tape nothing).
     // The element is checked against the element type; `remove`'s position is an `int`.
-    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, index: AExpr | not }
+    type LocalEditFact:struct = { sym: Sym, op: LocalEdit, arg: AExpr | not, elem: Type | not, path: LStep[], taken: boolean, index: AExpr | not, tape: Type | not }
 
     fn localEditOf(f: EffectFact | not) -> LocalEditFact | not {
         return match f {
-            .ELocalEdit(sym: s, op: op, arg: a, elem: el, index: ix) :> localEditFact(s, op, a, el, ix)
+            .ELocalEdit(sym: s, op: op, arg: a, elem: el, path: pa, taken: tk, index: ix, tape: tt) :> localEditFact(s, op, a, el, pa, tk is given, ix, tt)
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
@@ -28015,11 +28593,12 @@ ${
         }
     }
 
-    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, ix: AExpr | not) -> LocalEditFact {
-        return { sym: s, op: op, arg: a, elem: el, index: ix }
+    fn localEditFact(s: Sym, op: LocalEdit, a: AExpr | not, el: Type | not, pa: LStep[], tk: boolean, ix: AExpr | not, tt: Type | not) -> LocalEditFact {
+        return { sym: s, op: op, arg: a, elem: el, path: pa, taken: tk, index: ix, tape: tt }
     }
 
     fn typeLocalEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
+        if (le.path.length > 0) return typeLocalPartEdit(env, e, callee, le, ts0)
         let ts: TypeState = ts0
         const obj: AExpr | not = memberObj(callee)
         if (obj is given) ts = typeExpr(env, obj, ts).ts
@@ -28063,7 +28642,7 @@ ${
         if (lb is given) {
             const verdict: string = boundEditVerdict(lb, growsEdit)
             if (verdict == "violates") return record(report(ts, env, e.span, "E-WRITE-INVARIANT", boundEditMessage(name, localEditCall(le.op), lb, growsEdit)), e.nid, VType.Unknown)
-            if (verdict == "runtime") ts = recordBound(ts, env, e, lb)
+            if (verdict == "runtime") ts = recordBound(ts, env, callee, lb)     // keyed on the callee (editBoundNid)
         }
         if (ixe is given) {
             // s477 — the position: an `int`; past every length the bound admits, provably past the end
@@ -28080,6 +28659,88 @@ ${
             }
         }
         return record(ts, e.nid, VType.Unknown)
+    }
+
+    // A cell removal whose VALUE is used (`const v = @xs.pop()`): its write capability.
+    fn removedCellCap(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .ERemove(w: w, taken: sn) :> takenCap(w, sn)
+            .EWrite(w: x) :> not
+            .ESpread(ws: x) :> not
+            .EReset(w: x) :> not
+            .EAssignLocal(sym: x) :> not
+            .EEdits(w: x) :> not
+            .EElemAt(cap: x) :> not
+            .EPosition(cap: x) :> not
+            .ELocalEdit(sym: x) :> not
+            not :> not
+        }
+    }
+
+    fn takenCap(w: WriteFact, sn: SeqSnap | not) -> Sym | not {
+        if (sn is not) return not
+        return w.cap
+    }
+
+    // s477 (s477-boot-tape-forms) — an edit of a PART of a local: the resolver
+    // judged the grants (resolveLocalPartEdit, by the part's own tape type); here each
+    // index is an `int` (in order), and the argument is checked as `typeLocalEdit`
+    // checks it — the element against the part's element type, `remove`'s position
+    // an `int`. The receiver is typed as a part write's target is: its root is an
+    // appearance of the local (the resolver's name fact), not a read of a value.
+    // s477 (s477-boot-tape-bounds; O36 RULED S477) — and the PART's length bound (§66.12.2,
+    // `le.tape`: the part's tape type the resolver judged the grants by) on the edit, exactly
+    // as typeLocalEdit judges a local's: provably broken → E-WRITE-INVARIANT; unprovable →
+    // checked at run time (BoundAt at the callee → lower's LengthCheck around the part's
+    // edited tape, before the Assign — a trap writes nothing). `insert(i, x)`'s position is
+    // an `int`, and a literal one past the bound's max is provably past the end.
+    fn typeLocalPartEdit(env: TEnv, e: AExpr, callee: AExpr, le: LocalEditFact, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const st of le.path) {
+            for (const ix of lstepIndex(st)) {
+                const ri: RVT = typeExpr(env, ix, ts)
+                ts = checkIndex(env, ri.vt, ix.span, ri.ts)
+            }
+        }
+        const label: string = placeLabel(memberObjOr(callee))
+        const ixe: AExpr | not = le.index
+        if (ixe is given) {
+            const rix: RVT = typeExpr(env, ixe, ts)      // `insert(i, x)`'s position, before the value
+            ts = checkIndex(env, rix.vt, ixe.span, rix.ts)
+        }
+        const a: AExpr | not = le.arg
+        if (a is given) {
+            const ra: RVT = typeExpr(env, a, ts)
+            ts = ra.ts
+            if (le.op == LocalEdit.LRemoveAt) {
+                ts = checkIndex(env, ra.vt, a.span, ts)
+            } else {
+                const el: Type | not = le.elem
+                if (el is given) ts = boundValue(env, a, el, "an element of " + label, checkNotElems(env, a, el, checkLitFields(env, a, checkValue(env, ra.vt, el, a.span, "an element of " + label, ts))))
+            }
+        }
+        const pt: Type | not = le.tape
+        let lb: BoundRange | not = not
+        if (pt is given) lb = boundOfType(unMaybe(pt))
+        if (lb is given) {
+            const growsEdit: boolean = le.op == LocalEdit.LAppend || le.op == LocalEdit.LPrepend || le.op == LocalEdit.LInsert
+            const verdict: string = boundEditVerdict(lb, growsEdit)
+            if (verdict == "violates") return record(report(ts, env, e.span, "E-WRITE-INVARIANT", boundEditMessage(label, localEditCall(le.op), lb, growsEdit)), e.nid, VType.Unknown)
+            if (verdict == "runtime") ts = recordBound(ts, env, callee, lb)     // keyed on the callee (editBoundNid)
+            if (ixe is given) {
+                const li: int = intLit(ixe)
+                if (li > lb.max) return record(report(ts, env, ixe.span, "E-WRITE-INVARIANT", "`" + label + ".insert(" + li + ", …)` inserts at position " + li + ", and `" + label + "`'s type bounds its length to at most " + lb.max + " — the position is provably past the end, which would leave a position holding no value (§66.12.6 rule 3; scrml has no `undefined`, §42.1)"), e.nid, VType.Unknown)
+            }
+        }
+        const obj: AExpr | not = memberObj(callee)
+        if (obj is given) ts = record(ts, obj.nid, VType.Unknown)
+        return record(record(ts, callee.nid, VType.Unknown), e.nid, VType.Unknown)
+    }
+
+    fn memberObjOr(callee: AExpr) -> AExpr {
+        const o: AExpr | not = memberObj(callee)
+        if (o is given) return o
+        return callee
     }
 
     // The type recorded for a node this pass already typed.
@@ -30615,9 +31276,9 @@ ${
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(t, ps, fd, "@" + fd.name, ds.file, true, false)) }
+                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(g, t, ps, fd, "@" + fd.name, ds.file, true, false)) }
             } else if (d is given) {
-                out = out.concat(declInits(t, ps, d, "@" + d.name, ds.file, false, true))
+                out = out.concat(declInits(g, t, ps, d, "@" + d.name, ds.file, false, true))
             }
             for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
         }
@@ -30633,13 +31294,13 @@ ${
     // `outside` (s475 S4 r1 L1): `d` is a file-scope declaration (a module's, or one
     // outside the `<program>` body) — a `(not to T)` one whose initializer waits would be
     // a pending cell the bootstrap does not build there (initPos `pendWhy`).
-    fn declInits(t: Tables, ps: PlaceFact[], d: ADecl, path: string, file: string, cell: boolean, outside: boolean) -> ValuePos[] {
+    fn declInits(g: Globals, t: Tables, ps: PlaceFact[], d: ADecl, path: string, file: string, cell: boolean, outside: boolean) -> ValuePos[] {
         let out: ValuePos[] = []
-        if (computedValue(d.own)) out = out.concat([initPos(t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside)])
+        if (computedValue(d.own)) out = out.concat([initPos(g, t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside)])
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false)])
+            if (computedValue(a.dflt)) out = out.concat([initPos(g, t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false)])
         }
-        for (const c of childFields(d.body)) { out = out.concat(declInits(t, ps, c, path + "." + c.name, file, false, false)) }
+        for (const c of childFields(d.body)) { out = out.concat(declInits(g, t, ps, c, path + "." + c.name, file, false, false)) }
         return out
     }
 
@@ -30670,37 +31331,52 @@ ${
     // the base rule valueReads applies): a client function may read cells the initializer
     // does not show — `cur()` reading `@userId` — so "locked + reads is derived and stays
     // refused (E-VALUE-SERVER-CALL)" (ruling S475 item 1) holds through it (lifeDerived).
-    fn initPos(t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
-        const derived: boolean = life ? lifeDerived(t, file, v, ps) : valueReads(v).length > 0
+    fn initPos(g: Globals, t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
+        const rc: CellReach = lifeReach(g, t, v, ps, life)
+        const derived: boolean = life ? lifeDerived(t, file, v, ps, rc) : valueReads(v).length > 0
         if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }
         let why: string = ""
         let oc: string = ""
+        let self: string = ""
         if (life && outside) {
             why = pendOutsideWhy()
-        } else if (life && isLet) {
-            oc = opaqueCall(t, file, v, ps)
-            if (oc != "") why = pendOpaqueWhy(path, "but its initializer also calls `" + oc + "`, which", oc)
+        } else if (life && rc.open != "") {
+            // s477: `let` or locked — a call whose cell reads the bootstrap cannot take as dependencies
+            oc = rc.call
+            const lead: string = oc != "" ? "its initializer also calls `" + oc + "`" : "its initializer"
+            why = pendOpaqueWhy(path, lead, rc.open)
+            // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
+            self = pendOpaqueWhy(path, "it calls `" + oc + "`", rc.open)
         }
-        // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
-        let self: string = ""
-        if (oc != "") self = pendOpaqueWhy(path, "but `" + oc + "`", oc)
         return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why, pendCall: oc, pendSelf: self }
     }
 
-    // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked: it reads a
-    // cell (`@`), or it calls something other than a server function (opaqueCall) — the
-    // conservative rule: a call may read cells. Only a server function's call is known to
-    // read none on the client (§12.4: a server function reaches no client state, E-ROUTE-002).
-    fn lifeDerived(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[]) -> boolean {
+    // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked and it reads a
+    // cell (§66.9 rule 3; ruling S475 item 1 "locked + reads is derived and stays refused").
+    // s477 (s477-boot-pending-rest; g-boot-pending-cell-opaque-call-s475): §13.9.1 S475 "it "reads
+    // cells" when it reads a cell directly or through a called function (§13.9.2's deps)" — so
+    // through a call it is derived exactly when the called functions READ a cell (callReach),
+    // no longer whenever it calls a non-server function: a cell-free client helper
+    // (`loadName(one())`) leaves a locked cell a load-once pending cell. Placement unknown
+    // (`ps` = [], the effect pass): every non-server call still counts (opaqueCall), as before.
+    fn lifeDerived(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[], rc: CellReach) -> boolean {
         if (cellReads(v)) return true
-        return opaqueCall(t, file, v, ps) != ""
+        if (ps.length == 0) return opaqueCall(t, file, v, ps) != ""
+        return rc.reads
+    }
+
+    // The reach of a `(not to T)` cell initializer's calls (`life`), when placement is known.
+    fn lifeReach(g: Globals, t: Tables, v: AAttrValue, ps: PlaceFact[], life: boolean) -> CellReach {
+        if (!life || ps.length == 0) return noReach()
+        const e: AExpr | not = pendingInit(v)
+        if (e is not) return noReach()
+        return callReach(g, t.names, e, ps)
     }
 
     // The first call (or function value) in `v` that is not a server function's, named for a
     // message — "" when every call is a server function's. A call the scan cannot resolve
-    // counts (fail closed). Placement unknown (`ps` = []): every function counts.
-    // INTERIM (r1 F1): over-refuses a cell-free client function; the capable form is a
-    // transitive cell-read summary of each function (g-boot-pending-cell-opaque-call-s475).
+    // counts (fail closed). Used where placement is not known yet (`ps` = []): every function
+    // counts. (s477: with placement known, callReach decides.)
     fn opaqueCall(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[]) -> string {
         const scan: BodyScan = scanValue({ t: t, file: file }, v, emptyScan())
         for (const r of scan.refs) {
@@ -30711,8 +31387,220 @@ ${
         return ""
     }
 
-    fn pendOpaqueWhy(path: string, but: string, call: string) -> string {
-        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — " + but + " is not a server function, and the bootstrap cannot see which cells a called function reads, so it cannot infer the load's dependencies (§13.9.2 \"deps are inferred from the initializer's `@` reads\"); the load would never re-run. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
+    // s477 (s477-boot-pending-rest; g-boot-pending-cell-opaque-call-s475) — THE CELLS A PENDING
+    // INITIALIZER READS THROUGH ITS CALLS. §13.9.1 S475: the initializer "reads cells" when it
+    // reads a cell directly or through a called function, and §13.9.2: the deps are its reads.
+    // A walk of the scrml functions the initializer names (called or handed on), transitively
+    // through every function their bodies name: each `@` read of a PROGRAM cell is a read
+    // (`reads`); a mutable one is a dependency (`cells`, program field indexes); a locked one
+    // never changes, so it is a read but no dependency (reqDepField's rule). Provable-or-refuse:
+    // a read the request machine cannot take as a dependency (a derived cell, a declaration
+    // instance's field, a whole instance, a validity surface, a `<request>`'s state), a call
+    // through a name that is not a declared function, or a named function whose body the
+    // compiler does not have, makes the reach OPEN — `open` says why, `call` names the
+    // initializer's call it was found through — and the cell is refused by name (INTERIM).
+    // A server function is not walked: it reaches no client state (§12.4); nor a `<host>`-backed
+    // one (its body is host code, which cannot name a cell).
+    type CellReach:struct = { reads: boolean, cells: int[], open: string, call: string }
+    type ReadReach:struct = { reads: boolean, idx: int, open: string }
+
+    fn noReach() -> CellReach { return { reads: false, cells: [], open: "", call: "" } }
+
+    fn callReach(g: Globals, names: NameTable, e: AExpr, ps: PlaceFact[]) -> CellReach {
+        const direct: string = callThroughValue(names, e)
+        if (direct != "") return { reads: false, cells: [], open: "it " + direct, call: "" }
+        let reads = false
+        let cells: int[] = []
+        for (const s of fnSymsIn(names, e)) {
+            const r: CellReach = fnReach(g, names, s, ps)
+            if (r.open != "") return r
+            if (r.reads) reads = true
+            for (const c of r.cells) {
+                if (cells.indexOf(c) < 0) cells = cells.concat([c])
+            }
+        }
+        return { reads: reads, cells: cells, open: "", call: "" }
+    }
+
+    fn fnReach(g: Globals, names: NameTable, root: int, ps: PlaceFact[]) -> CellReach {
+        const rootFs: FnSrc | not = fnSrcById(g, root)
+        if (rootFs is not) return noReach()          // reported where it is named (E-SCOPE-001)
+        if (reachSkips(rootFs, ps)) return noReach()
+        const call: string = rootFs.info.name + "()"
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        let todo: int[] = [root]
+        let seen: int[] = []
+        let reads = false
+        let cells: int[] = []
+        while (todo.length > 0) {
+            const s: int = todo[0]
+            todo = todo.slice(1)
+            if (seen.indexOf(s) < 0) {
+                seen = seen.concat([s])
+                const fs: FnSrc | not = fnSrcById(g, s)
+                if (fs is not) return { reads: false, cells: [], open: "`" + call + "` reaches a function whose body the compiler does not have", call: call }
+                if (!reachSkips(fs, ps)) {
+                    const lab: string = "`" + fs.info.name + "()`"
+                    const u: string = callThroughValueBlock(names, fs.f.body)
+                    if (u != "") return { reads: false, cells: [], open: lab + " " + u, call: call }
+                    for (const at of readNodesInBlock(fs.f.body, true)) {
+                        const rr: ReadReach = readReach(g, prog, names, at)
+                        if (rr.open != "") return { reads: rr.reads, cells: [], open: lab + " " + rr.open, call: call }
+                        if (rr.reads) reads = true
+                        if (rr.idx >= 0 && cells.indexOf(rr.idx) < 0) cells = cells.concat([rr.idx])
+                    }
+                    todo = todo.concat(fnSymsInBlock(names, fs.f.body))
+                }
+            }
+        }
+        return { reads: reads, cells: cells, open: "", call: call }
+    }
+
+    fn reachSkips(fs: FnSrc, ps: PlaceFact[]) -> boolean {
+        if (fs.info.serverOwn || fs.f.server) return true
+        if (fs.info.host is given) return true
+        return ps.length > 0 && placeOf(ps, fs.info.sym.id) == PlaceK.Server
+    }
+
+    fn fnSrcById(g: Globals, id: int) -> FnSrc | not {
+        for (const fs of g.fns) {
+            if (fs.info.sym.id == id) return fs
+        }
+        return not
+    }
+
+    // One read node of a called function's body (an `@name`, or a `<#id>.prop` member).
+    fn readReach(g: Globals, prog: DeclSrc | not, names: NameTable, at: AExpr) -> ReadReach {
+        const f: NameFact | not = nameFact(names, at.nid)
+        const shown: string = atName(at) != "" ? "`@" + atName(at) + "`" : "a `<request>`'s state"
+        return match f {
+            .NField(decl: d, idx: i) :> programFieldReach(g, prog, d, i, shown)
+            .NInst(decl: d) :> rread(true, -1, "reads " + shown + ", a whole declaration instance — not a cell the load can depend on")
+            .NSurface(of: x) :> rread(true, -1, "reads the validity surface " + shown + " — not a cell the load can depend on")
+            .NReq(id: rq0) :> rread(true, -1, "reads " + shown + " — not a cell the load can depend on")
+            .NLocal(sym: x) :> rread(false, -1, "")
+            .NStruct(owner: x) :> rread(false, -1, "")
+            .NFn(sym: x) :> rread(false, -1, "")
+            .NLength :> rread(false, -1, "")
+            .NConst(sym: x) :> rread(false, -1, "")
+            not :> rread(false, -1, "")
+        }
+    }
+
+    fn rread(reads: boolean, idx: int, open: string) -> ReadReach { return { reads: reads, idx: idx, open: open } }
+
+    fn programFieldReach(g: Globals, prog: DeclSrc | not, d: Sym, i: int, shown: string) -> ReadReach {
+        if (prog is not || d.id != g.program.id) return { reads: true, idx: -1, open: "reads " + shown + ", a field of a declaration instance — not a program cell the load can depend on" }
+        if (i < 0 || i >= prog.info.fields.length) return { reads: true, idx: -1, open: "reads " + shown + ", which the compiler cannot place" }
+        const fi: FieldInfo = prog.info.fields[i]
+        const w: Sym | not = fi.wcap
+        if (w is given) return { reads: true, idx: i, open: "" }
+        if (fi.mode == FieldMode.Locked) return { reads: true, idx: -1, open: "" }
+        return { reads: true, idx: -1, open: "reads the derived cell " + shown + ", and a derived cell is no `<request>` dependency in the bootstrap (it has no change event of its own in Core)" }
+    }
+
+    // The Sym ids of every scrml function an expression names — called or handed on (at any depth).
+    fn fnSymsIn(names: NameTable, e: AExpr) -> int[] {
+        let out: int[] = []
+        const s: Sym | not = fnSymOf(nameFact(names, e.nid))
+        if (s is given) out = [s.id]
+        for (const k of exprKids(e)) { out = out.concat(fnSymsIn(names, k)) }
+        for (const b of exprBlocks(e)) { out = out.concat(fnSymsInBlock(names, b)) }
+        return out
+    }
+
+    fn fnSymsInBlock(names: NameTable, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const st of b.stmts) {
+            for (const x of stmtExprs(st)) { out = out.concat(fnSymsIn(names, x)) }
+            for (const nb of stmtKidBlocks(st)) { out = out.concat(fnSymsInBlock(names, nb)) }
+        }
+        return out
+    }
+
+    // A call through a NAME that resolves to something other than a declared function (a local
+    // or a parameter holding one): the walk cannot follow it — "" when there is none.
+    fn callThroughValue(names: NameTable, e: AExpr) -> string {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is given && exprName(c) != "") {
+            const f: NameFact | not = nameFact(names, c.nid)
+            if (f is given && fnSymOf(f) is not && !isReqName(f)) return "calls through `" + exprName(c) + "`, which is not a declared function"
+        }
+        for (const k of exprKids(e)) {
+            const u: string = callThroughValue(names, k)
+            if (u != "") return u
+        }
+        for (const b of exprBlocks(e)) {
+            const u: string = callThroughValueBlock(names, b)
+            if (u != "") return u
+        }
+        return ""
+    }
+
+    fn callThroughValueBlock(names: NameTable, b: ABlock) -> string {
+        for (const st of b.stmts) {
+            for (const x of stmtExprs(st)) {
+                const u: string = callThroughValue(names, x)
+                if (u != "") return u
+            }
+            for (const nb of stmtKidBlocks(st)) {
+                const u: string = callThroughValueBlock(names, nb)
+                if (u != "") return u
+            }
+        }
+        return ""
+    }
+
+    fn isReqName(f: NameFact) -> boolean {
+        return match f {
+            .NReq(id: rq0) :> true
+            .NLocal(sym: x) :> false
+            .NField(decl: x) :> false
+            .NInst(decl: x) :> false
+            .NStruct(owner: x) :> false
+            .NFn(sym: x) :> false
+            .NLength :> false
+            .NSurface(of: x) :> false
+            .NConst(sym: x) :> false
+        }
+    }
+
+    // s477: a pending cell's load also depends on the cells its called functions read (§13.9.2
+    // "deps are inferred from the initializer's `@` reads, as `<request>` infers them"; §13.9.1
+    // S475 "directly or through a called function"). Runs over the bound name facts (every
+    // function body resolved), before the tables are built, so requestCycles, the write-SQL rule
+    // and the lowering see the added deps. The first run (pendingCells, initPos) refused every
+    // initializer whose reach is open, so only `cells` is read here; the target is never a dep.
+    fn pendCallDeps(g: Globals, names: NameTable, reqs: ReqFact[]) -> ReqFact[] {
+        let out: ReqFact[] = []
+        for (const rq of reqs) {
+            const ti: int = pendTargetIdx(rq)
+            if (ti < 0) {
+                out = out.concat([rq])
+            } else {
+                const rc: CellReach = callReach(g, names, rq.value, [])
+                let deps: NameFact[] = rq.deps
+                for (const idx of rc.cells) {
+                    const f: NameFact = withFieldIdx(rq.target, idx)
+                    if (idx != ti && !hasFieldDep(deps, f)) deps = deps.concat([f])
+                }
+                out = out.concat([{ nid: rq.nid, id: rq.id, file: rq.file, span: rq.span, target: rq.target, targetName: rq.targetName, deps: deps,
+                                    explicit: rq.explicit, signals: rq.signals, wcaps: rq.wcaps, handle: rq.handle, load: rq.load, rhs: rq.rhs,
+                                    dataTy: rq.dataTy, errTy: rq.errTy, err: rq.err, lins: rq.lins, req: rq.req, value: rq.value, pend: rq.pend }])
+            }
+        }
+        return out
+    }
+
+    fn hasFieldDep(ds: NameFact[], f: NameFact) -> boolean {
+        for (const d of ds) {
+            if (sameField(d, f)) return true
+        }
+        return false
+    }
+
+    fn pendOpaqueWhy(path: string, lead: string, open: string) -> string {
+        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — but " + lead + ", and " + open + ". A pending cell's load re-runs on the cells its initializer reads, directly or through a called function (§13.9.1 S475 rule 1; §13.9.2 \"deps are inferred from the initializer's `@` reads\"), so the bootstrap cannot infer the load's dependencies here. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
     }
 
     fn pendOutsideWhy() -> string {
@@ -30743,21 +31631,22 @@ ${
             const p: AProgram | not = ds.p
             if (p is given) {
                 for (const fd of fieldDecls(ds)) {
-                    if (pendingCell(t, ds.file, fd, ps, sum)) out = out.concat([fd.nid])
+                    if (pendingCell(g, t, ds.file, fd, ps, sum)) out = out.concat([fd.nid])
                 }
             }
         }
         return out
     }
 
-    fn pendingCell(t: Tables, file: string, d: ADecl, ps: PlaceFact[], sum: Summary) -> boolean {
+    fn pendingCell(g: Globals, t: Tables, file: string, d: ADecl, ps: PlaceFact[], sum: Summary) -> boolean {
         if (d.body.length > 0 || !presenceDecl(d)) return false
         if (pendingInit(d.own) is not) return false
-        // r1 F1: a locked initializer that reads a cell or calls a non-server function is derived
-        // (ruling S475 item 1: stays refused); a `let` one calling a non-server function is
-        // refused by name — its dependencies cannot be inferred (initPos pendWhy, INTERIM)
-        if (!d.isLet && lifeDerived(t, file, d.own, ps)) return false
-        if (d.isLet && opaqueCall(t, file, d.own, ps) != "") return false
+        // r1 F1 / s477: a locked initializer that reads a cell, directly or through a called
+        // function, is derived (ruling S475 item 1: stays refused); one whose called functions'
+        // reads cannot be followed is refused by name (initPos pendWhy, INTERIM)
+        const rc: CellReach = lifeReach(g, t, d.own, ps, true)
+        if (!d.isLet && lifeDerived(t, file, d.own, ps, rc)) return false
+        if (rc.open != "") return false
         if (sqlsInValue(d.own).length > 0) return false
         return initWaits(t, file, d.own, ps, sum)
     }
@@ -31011,8 +31900,17 @@ ${
         }
         const f: FieldInfo = prog.info.fields[target]
         const gr: TransitionGraph | not = f.graph
-        // s475 (slice S4): as `reset(@x)` (resolveReset) — INTERIM
-        if (isPendingDecl(g, d.nid)) return { e: not, st: addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset-on=` on `@" + d.name + "`", d.name)) }
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4): §6.8.4 rule 1 — "the runtime
+        // SHALL perform `reset(@self)`" — and §13.9.2 "A reset of a pending cell (§6.8) is the
+        // request's re-run": on a pending cell the rule re-runs its load when an entry changes, which
+        // is exactly a dependency of the hidden request (pendResetDeps adds the entries to its deps,
+        // so the request-ring, write-SQL and plan rules see them). The load's write is the
+        // compiler's (§13.9.1 S475 rule 5): no `replace` grant is needed, and a pending cell has no
+        // `rule=` graph.
+        if (isPendingDecl(g, d.nid)) {
+            if (!ok) return { e: not, st: st }
+            return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+        }
         if (gr is given) {
             const refused: string = engineRefusals(g, gr, f.init)
             if (refused != "") {
@@ -31044,8 +31942,74 @@ ${
         return pendingDeclNids(p.items).indexOf(nid) >= 0
     }
 
-    fn pendResetMsg(what: string, n: string) -> string {
-        return what + " resets a pending cell, and §13.9.2 makes that a re-run of its load (\"A reset of a pending cell (§6.8) is the request's re-run\" — never its initializer again, never back to `not`). Re-running the hidden request from here is not in the bootstrap yet; to reload on demand, declare `@" + n + "` `=not` and load it with a `<request>` written by hand (§6.7.7)"
+    // s477 (s477-boot-pending-rest) — §6.8.4 rule 1 on a pending cell is its load's re-run
+    // (§13.9.2), so an accepted `reset-on=` rule whose target is a pending cell adds its entries to
+    // the hidden request's deps (its re-run on change), and leaves the plain reset rules (lower
+    // resetOnViews would write the desugared initializer, `not` — §13.9.2 "SHALL NOT reset the cell
+    // by re-running the initializer outside the request"). Runs before the tables are built, so
+    // requestCycles, the write-SQL rule and lowering all see the added deps.
+    type RPendResets:struct = { reqs: ReqFact[], infos: ResetOnInfo[] }
+
+    fn pendResetDeps(reqs: ReqFact[], infos: ResetOnInfo[]) -> RPendResets {
+        let outR: ReqFact[] = []
+        let taken: int[] = []
+        for (const rq of reqs) {
+            const ti: int = pendTargetIdx(rq)
+            if (ti < 0) {
+                outR = outR.concat([rq])
+            } else {
+                let deps: NameFact[] = rq.deps
+                for (const inf of infos) {
+                    if (inf.target == ti) {
+                        taken = taken.concat([ti])
+                        for (const tr of inf.triggers) {
+                            const f: NameFact = withFieldIdx(rq.target, tr)
+                            if (!hasDepFact(deps, f)) deps = deps.concat([f])
+                        }
+                    }
+                }
+                outR = outR.concat([{ nid: rq.nid, id: rq.id, file: rq.file, span: rq.span, target: rq.target, targetName: rq.targetName, deps: deps,
+                                      explicit: rq.explicit, signals: rq.signals, wcaps: rq.wcaps, handle: rq.handle, load: rq.load, rhs: rq.rhs,
+                                      dataTy: rq.dataTy, errTy: rq.errTy, err: rq.err, lins: rq.lins, req: rq.req, value: rq.value, pend: rq.pend }])
+            }
+        }
+        let outI: ResetOnInfo[] = []
+        for (const inf of infos) {
+            if (taken.indexOf(inf.target) < 0) outI = outI.concat([inf])
+        }
+        return { reqs: outR, infos: outI }
+    }
+
+    // A pending cell's request: the program field it loads (-1 for an author `<request>`).
+    fn pendTargetIdx(rq: ReqFact) -> int {
+        if (rq.pend < 0) return -1
+        const t: NameFact = rq.target
+        return match t {
+            .NField(idx: i) :> i
+            .NLocal(sym: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: rq0) :> -1
+        }
+    }
+
+    // Another field of the same declaration instance as `f` (an NField).
+    fn withFieldIdx(f: NameFact, idx: int) -> NameFact {
+        return match f {
+            .NField(decl: d, inst: i) :> NameFact.NField(d, i, idx)
+            .NLocal(sym: x) :> f
+            .NInst(decl: x) :> f
+            .NStruct(owner: x) :> f
+            .NFn(sym: x) :> f
+            .NLength :> f
+            .NSurface(of: x) :> f
+            .NConst(sym: x) :> f
+            .NReq(id: rq0) :> f
+        }
     }
 
     fn resetEntries(v: AAttrValue) -> AExpr[] | not {
@@ -37260,11 +38224,19 @@ ${
         for (const a of handledArms(h)) {
             const b: AArmBody = a.body
             for (const x of armExprOf(b)) { ps = planExpr(cx, x, armPos, ps).ps }
-            for (const blk of armBlockOf(b)) {
-                for (const s of blk.stmts) {
-                    for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
-                }
-            }
+            for (const blk of armBlockOf(b)) { ps = planArmBlock(cx, blk, armPos, ps) }
+        }
+        return ps
+    }
+
+    // s477 (s477-boot-pending-rest; g-boot-plan-arms-nested-wait-s475) — an arm block's statements
+    // at EVERY depth: a wait inside an `if`, a loop (its head and a counted loop's init too) or an
+    // inner block of the arm gets the arm refusal here, not only Core C-S3 / C-S8s.
+    fn planArmBlock(cx: PCx, blk: ABlock, armPos: Pos, ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const s of blk.stmts) {
+            for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
+            for (const nb of stmtKidBlocks(s)) { ps = planArmBlock(cx, nb, armPos, ps) }
         }
         return ps
     }
@@ -38834,6 +39806,9 @@ ${
         st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
+        // s477: a `reset-on=` on a pending cell re-runs its load (§13.9.2) — the entries join its deps
+        const prr: RPendResets = pendResetDeps(st.reqs, rr.infos)
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs }
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
@@ -38846,10 +39821,12 @@ ${
         // pass (redeclarations) and the typer (value types). Each returns new
         // values; the final Tables carries the typer's own table.
         const fs: NodeFacts = indexed(st.facts)
+        // s477: a pending cell's load depends on the cells its called functions read too (§13.9.2)
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: pendCallDeps(ra.g, fs.names, st.reqs) }
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)

@@ -323,3 +323,164 @@ describe("G — every position into a bounded slot is checked (review of #1830, 
     expect($("#o").textContent).toBe("");
   });
 });
+
+// ---------------------------------------------------------------------------
+// H — the merge with s477-boot-tape-forms (#1834): every edit path that PR added is
+// judged against the length bound exactly as a whole-local edit is (§66.11.2: "checked
+// on EVERY write, however it is spelled"; O36 RULED S477) — compile E-WRITE-INVARIANT
+// where provable, the E-WRITE-INVARIANT-RT trap otherwise, the check BEFORE the write.
+const P = `    type P:struct = { n: int, xs: int[1..=2, append, prepend, pop, shift, remove, insert] }`;
+const P1 = `    type Q:struct = { xs: int[2..=2, append, pop] }`;
+const P0 = `    type Z:struct = { xs: int[0..=2, pop, shift, remove] }`;
+const OR = "    fn txtOr(v: int | not) -> string {\n        if (v is given) return `${v}`;\n        return \"not\";\n    }";
+// a program with a second button `see` that shows the cell `@c` after a trapped `go`
+const prog2 = (decls, body) =>
+  `<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    function see() {\n        @shown = ${txt("@c")};\n    }\n    <main>\n        <button onclick=go()>go</button>\n        <button onclick=see()>see</button>\n        <p id="o">\${@shown}</p>\n    </main>\n</program>\n`;
+// the Assigns of a local WITH a path whose value is a LengthCheck of a tape edit
+const checkedPartAssigns = (core) => find(core.fns, (n) => n.variant === "Assign" && n.data.path && n.data.path.length > 0 && n.data.value && n.data.value.variant === "Prim" && opName(n.data.value.data.op) === "LengthCheck");
+
+describe("H1 — a PART edit on a bounded tape (`b.xs.append(v)`, `g[i].pop()`) is bound-checked", () => {
+  test("a field part: provable violations are E-WRITE-INVARIANT (a one-length bound, grow and shrink)", () => {
+    expect(codes(prog(P1, `        let b: Q = { xs: [1, 2] };\n        b.xs.append(3);`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(P1, `        let b: Q = { xs: [1, 2] };\n        b.xs.pop();`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("a field part: a shrink of a bound starting at 0 is proven — no run-time check", () => {
+    const r = clean(prog(P0, `        let b: Z = { xs: [1, 2] };\n        b.xs.pop();\n        b.xs.shift();\n${show("b.xs")}`));
+    expect(lengthChecks(r.core).length).toBe(0);
+  });
+
+  test("a field part: an unprovable grow is checked BEFORE the Assign (LengthCheck is its value) and traps past the max", async () => {
+    const src = prog(P, `        let b: P = { n: 0, xs: [1] };\n        b.xs.append(2);\n${show("b.xs")}\n        b.xs.append(3);\n        @shown = "unreached";`);
+    const r = clean(src);
+    const as = checkedPartAssigns(r.core);
+    expect(as.length).toBe(2);
+    expect(as.map((a) => opName(a.data.value.data.args[0].data.op))).toEqual(["TapeAppend", "TapeAppend"]);
+    await load(src);
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect(e[0].detail).toEqual({ length: 3, min: 1, max: 2, at: "t.scrml:8" });
+    expect($("#o").textContent).toBe("1,2");
+  });
+
+  test("a field part: an unprovable shrink below the min traps (prepend / shift / remove run in range)", async () => {
+    await load(prog(P, `        let b: P = { n: 0, xs: [1, 2] };\n        b.xs.shift();\n        b.xs.prepend(7);\n        b.xs.remove(0);\n${show("b.xs")}\n        b.xs.pop();\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect(e[0].detail.length).toBe(0);
+    expect($("#o").textContent).toBe("2");
+  });
+
+  test("a POSITION part of a tape-of-bounded-tapes (`g[i].append(v)`): checked, traps; the in-range edit runs", async () => {
+    expect(codes(prog("", `        let g: int[2..=2, append][write] = [[1, 2]];\n        g[0].append(3);`))).toEqual(["E-WRITE-INVARIANT"]);
+    await load(prog("", `        let g: int[1..=2, append, pop][write] = [[1], [5]];\n        g[1].append(6);\n        const a: int[] = g[1];\n${show("a")}\n        g[0].append(2);\n        g[0].append(3);\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect(e[0].detail.length).toBe(3);
+    expect($("#o").textContent).toBe("5,6");
+  });
+
+  test("a part of a tape ELEMENT (`bs[i].xs.append(v)`) and of a PARAMETER: checked against the field's bound", async () => {
+    await load(prog(`${P}\n    fn grow(b: P) -> P {\n        b.xs.append(9);\n        return b;\n    }`, `        const ok: P = grow({ n: 0, xs: [1] });\n${show("ok.xs")}\n        let bs: P[] = [{ n: 0, xs: [1, 2] }];\n        bs[0].xs.append(3);\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("1,9");
+  });
+
+  test("`insert(i, x)` on a part: the bound (a literal position past the max is E-WRITE-INVARIANT; past the max at run time traps)", async () => {
+    expect(codes(prog(P, `        let b: P = { n: 0, xs: [1] };\n        b.xs.insert(3, 5);`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(`    type Q:struct = { xs: int[2..=2, insert] }`, `        let b: Q = { xs: [1, 2] };\n        b.xs.insert(0, 5);`))).toEqual(["E-WRITE-INVARIANT"]);
+    await load(prog(P, `        let b: P = { n: 0, xs: [1] };\n        b.xs.insert(0, 0);\n${show("b.xs")}\n        b.xs.insert(1, 5);\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("0,1");
+  });
+
+  test("`insert(i, x)` on a part: a position past the end at run time is E-INDEX-OUT-OF-RANGE-RT, nothing written", async () => {
+    await load(prog(`    type W:struct = { xs: int[free, insert] }\n    <i:int=5/>`, `        let b: W = { xs: [1] };\n        b.xs.insert(@i, 2);\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect($("#o").textContent).toBe("");
+  });
+});
+
+describe("H2 — a removal used as a VALUE on a bounded tape is bound-checked (local, part, cell)", () => {
+  test("provable: a one-length bound's removal value is E-WRITE-INVARIANT (local, part, cell)", () => {
+    expect(codes(prog("", `        let xs: int[2..=2, pop] = [1, 2];\n        const v: int | not = xs.pop();`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(P1, `        let b: Q = { xs: [1, 2] };\n        const v: int | not = b.xs.pop();`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog("    <c:int[2..=2, pop]=([1, 2])/>", `        const v: int | not = @c.pop();`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("a local: the value is the removed element (the check wraps the EDIT, never the value); below the min it traps", async () => {
+    const src = prog(OR, `        let xs: int[1..=3, pop, shift, remove] = [1, 2, 3];\n        const a: int | not = xs.pop();\n        const b: int | not = xs.shift();\n        @shown = txtOr(a) + "," + txtOr(b) + "|" + ${txt("xs")};\n        const c: int | not = xs.remove(0);\n        @shown = "unreached";`);
+    const r = clean(src);
+    const lc = lengthChecks(r.core);
+    expect(lc.map((p) => opName(p.data.args[0].data.op))).toEqual(["TapeDropEnd", "TapeDropFront", "TapeRemoveAt"]);
+    await load(src);
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect(e[0].detail.length).toBe(0);
+    expect($("#o").textContent).toBe("3,1|2");
+  });
+
+  test("a local whose bound starts at 0: proven — no check, `not` once empty", async () => {
+    const src = prog(OR, `        let xs: int[0..=2, pop] = [7];\n        const a: int | not = xs.pop();\n        const b: int | not = xs.pop();\n        @shown = txtOr(a) + "," + txtOr(b);`);
+    expect(lengthChecks(clean(src).core).length).toBe(0);
+    await load(src);
+    click(btn("go"));
+    expect($("#o").textContent).toBe("7,not");
+  });
+
+  test("a part (`let v = b.xs.pop()`), a `return`, an assignment: checked, traps below the min", async () => {
+    await load(prog(`${OR}\n${P}\n    fn top(xs: int[1..=2, pop]) -> int | not {\n        return xs.pop();\n    }`, `        const t: int | not = top([4, 5]);\n        let b: P = { n: 0, xs: [1, 2] };\n        let v: int | not = b.xs.pop();\n        @shown = txtOr(t) + "," + txtOr(v) + "|" + ${txt("b.xs")};\n        v = b.xs.pop();\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("5,2|1");
+  });
+
+  test("a cell (`const v = @c.pop()`): checked; on the trap the cell keeps its value (nothing written)", async () => {
+    await load(prog2(`${OR}\n    <c:int[1..=2, pop, shift]=([1, 2])/>`, `        const a: int | not = @c.shift();\n        @shown = txtOr(a);\n        const b: int | not = @c.pop();\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("1");
+    click(btn("see"));
+    expect($("#o").textContent).toBe("2");
+  });
+});
+
+describe("H3 — a spread / concat WHOLE write into a bounded slot is bound-checked", () => {
+  test("provable from the literal and the operands' declared bounds: E-WRITE-INVARIANT", () => {
+    expect(codes(prog("", `        const a: int[] = [1];\n        const b: int[0..=2] = [1, 2, 3, ...a];`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog("", `        const a: int[2..=3] = [1, 2];\n        const b: int[0..=3] = [9, 9, ...a];`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog("", `        const a: int[0..=1] = [];\n        const b: int[3..=5] = [...a, 1];`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("proven from the operands' declared bounds: no run-time check", () => {
+    const r = clean(prog("", `        const a: int[1..=2] = [1];\n        const b: int[2..=3] = [...a, 9];\n${show("b")}`));
+    expect(lengthChecks(r.core).length).toBe(0);
+  });
+
+  const SP = (m) => `    <c:int[1..=2, replace]=([1])/>\n    fn two(xs: int[]) -> int[1..=2] {\n        return [...xs, 0];\n    }\n    fn len(xs: int[1..=2]) -> int { return xs.length; }\n    <m:int=${m}/>`;
+  const SPB = `        const s: int[] = [1, 2];\n        const e: int[] = [];\n        if (@m == 0) { const a: int[1..=2] = [...s, 3]; }\n        if (@m == 1) { let b: int[1..=2, replace] = [1]; b = [...s, ...s]; }\n        if (@m == 2) { const r: int[] = two(s); }\n        if (@m == 3) { @shown = \`\${len([...s, 4])}\`; }\n        if (@m == 4) { @c = [...s, ...s]; }\n        if (@m == 5) { const ok: int[1..=2] = [...e, 1]; @c = [...e, 7]; @shown = \`ok \${ok.length} \${@c.length}\`; }`;
+  for (const m of [0, 1, 2, 3, 4]) {
+    test(`a spread past the max traps at run time — position ${["a const", "a local rebind", "a return", "an argument", "a cell write"][m]}`, async () => {
+      await load(prog(SP(m), SPB));
+      const e = clickTrap(btn("go"));
+      expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+      expect(e[0].detail.length).toBeGreaterThan(2);
+    });
+  }
+  test("a spread inside the bound runs (a const, a cell write)", async () => {
+    await load(prog(SP(5), SPB));
+    click(btn("go"));
+    expect($("#o").textContent).toBe("ok 1 1");
+  });
+
+  test("`a.concat(b)` into a bounded const / argument: checked, trapping; in range runs", async () => {
+    await load(prog("    fn len(xs: int[1..=2]) -> int { return xs.length; }", `        const a: int[] = [1];\n        const ok: int[1..=2] = a.concat([2]);\n        @shown = \`\${ok.length},\${len(a.concat([]))}\`;\n        const bad: int[1..=2] = ok.concat(a);\n        @shown = "unreached";`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect(e[0].detail.length).toBe(3);
+    expect($("#o").textContent).toBe("2,1");
+  });
+});
