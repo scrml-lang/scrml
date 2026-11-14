@@ -27213,6 +27213,15 @@ ${
             }
         }
         const rmc: Sym | not = removedCellCap(rf)
+        // s477 FIX ROUND 2 (fail-open): an edit standing in an EXPRESSION position that is not a
+        // removal value — the one expression of a statement `match` arm or a `!{}` handler arm
+        // (`.A :> xs.append(3),`) — is the same write as in statement position and is typed by
+        // the same path (typeCallStmt: a local / part edit → typeLocalEdit, its bound, grant and
+        // element type; a cell edit → checkWrite of its element). §66.11.2: "checked on EVERY
+        // write, however it is spelled"; §66.12.6 rule 3. Its value is the edit's unit.
+        if (rmc is not) {
+            if (isStmtWriteCall(rf, rle)) return rvt(VType.Unknown, typeCallStmt(env, e, callee, args, ts0))
+        }
         if (rmc is given) {
             const cts: TypeState = typePlace(env, callee, VType.Unknown, ts0)
             const cf: FieldInfo | not = fieldOfCap(env.t, rmc)
@@ -28548,6 +28557,16 @@ ${
             .HashRef(id: hr0) :> not
             .Foreign(f: fb0) :> not
         }
+    }
+
+    // s477 FIX ROUND 2: a call whose effect is a write typed by typeCallStmt — a local / part
+    // edit that is not a removal value, a cell edit (a write of the call's argument), or a
+    // `reset(@x)`. typeCall routes one standing in an expression position here (never a removal
+    // value: typeCall handles a taken local removal and a removed cell before asking).
+    fn isStmtWriteCall(f: EffectFact | not, le: LocalEditFact | not) -> boolean {
+        if (le is given) return !le.taken
+        if (isReset(f)) return true
+        return effectWrites(f).length > 0
     }
 
     // A write whose value is the call's single argument: `@xs.push(v)`.
