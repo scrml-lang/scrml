@@ -11444,13 +11444,20 @@ ${
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `<db>` cell is not in the bootstrap — its initializer is its server load, evaluated per request (§8.1.3), and whether a reset re-applies the loaded value or loads again is not built. Write the value you want with a function declared in its `<db>` body")
         }
-        // s475 (slice S4) — §13.9.2: "A reset of a pending cell (§6.8) is the request's re-run" and
-        // "The compiler SHALL NOT reset the cell by re-running the initializer outside the request".
-        // After the desugar the cell's initializer is `not`, so the plain reset would write `not` —
-        // neither. Refused by name, INTERIM: the capable form re-runs the hidden request through the
-        // program-level request route `<#id>.refetch()` uses (slice S3b, Core Expr.Refetch).
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4) — §13.9.2: "A reset of a
+        // pending cell (§6.8) is the request's re-run" and "The compiler SHALL NOT reset the cell by
+        // re-running the initializer outside the request". So the reset writes nothing itself: it
+        // starts the hidden request again (lower resetStmt: Core Refetch of the request's handle),
+        // and the cell keeps its value until that load settles (§13.9.4 "the request writes the cell
+        // only when a load settles"). The load's write is the compiler's, exempt from the cell's
+        // grant checks (§13.9.1 S475 rule 5) — so a LOCKED pending cell may be reset too, and the
+        // lifecycle / `replace` refusals below do not apply. It stays an EReset: a write of the
+        // cell for every write rule (§6.7.4 counts a re-run request's settle as a write of its
+        // target), and the typer ends the cell's narrowing at it (conservative: the re-run may
+        // settle `not`, §13.9.5).
         if (p.decl.sym.id == env.g.program.id && isPendingDecl(env.g, f.nid)) {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset(@" + f.sym.hint + ")`", f.sym.hint))
+            if (cap is not) return st                       // resolvePending reported it
+            return addEffect(st, e.nid, EffectFact.EReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
         }
         // s475 (s475-boot-lifecycle-reads): a LOCKED `(not to T)` cell's write grant is its
         // lifecycle (fieldOf rides it on `replace`), and a reset writes the pre-state `not`
@@ -30738,9 +30745,9 @@ ${
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(t, ps, fd, "@" + fd.name, ds.file, true, false)) }
+                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(g, t, ps, fd, "@" + fd.name, ds.file, true, false)) }
             } else if (d is given) {
-                out = out.concat(declInits(t, ps, d, "@" + d.name, ds.file, false, true))
+                out = out.concat(declInits(g, t, ps, d, "@" + d.name, ds.file, false, true))
             }
             for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
         }
@@ -30756,13 +30763,13 @@ ${
     // `outside` (s475 S4 r1 L1): `d` is a file-scope declaration (a module's, or one
     // outside the `<program>` body) — a `(not to T)` one whose initializer waits would be
     // a pending cell the bootstrap does not build there (initPos `pendWhy`).
-    fn declInits(t: Tables, ps: PlaceFact[], d: ADecl, path: string, file: string, cell: boolean, outside: boolean) -> ValuePos[] {
+    fn declInits(g: Globals, t: Tables, ps: PlaceFact[], d: ADecl, path: string, file: string, cell: boolean, outside: boolean) -> ValuePos[] {
         let out: ValuePos[] = []
-        if (computedValue(d.own)) out = out.concat([initPos(t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside)])
+        if (computedValue(d.own)) out = out.concat([initPos(g, t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside)])
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false)])
+            if (computedValue(a.dflt)) out = out.concat([initPos(g, t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false)])
         }
-        for (const c of childFields(d.body)) { out = out.concat(declInits(t, ps, c, path + "." + c.name, file, false, false)) }
+        for (const c of childFields(d.body)) { out = out.concat(declInits(g, t, ps, c, path + "." + c.name, file, false, false)) }
         return out
     }
 
@@ -30793,37 +30800,52 @@ ${
     // the base rule valueReads applies): a client function may read cells the initializer
     // does not show — `cur()` reading `@userId` — so "locked + reads is derived and stays
     // refused (E-VALUE-SERVER-CALL)" (ruling S475 item 1) holds through it (lifeDerived).
-    fn initPos(t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
-        const derived: boolean = life ? lifeDerived(t, file, v, ps) : valueReads(v).length > 0
+    fn initPos(g: Globals, t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
+        const rc: CellReach = lifeReach(g, t, v, ps, life)
+        const derived: boolean = life ? lifeDerived(t, file, v, ps, rc) : valueReads(v).length > 0
         if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }
         let why: string = ""
         let oc: string = ""
+        let self: string = ""
         if (life && outside) {
             why = pendOutsideWhy()
-        } else if (life && isLet) {
-            oc = opaqueCall(t, file, v, ps)
-            if (oc != "") why = pendOpaqueWhy(path, "but its initializer also calls `" + oc + "`, which", oc)
+        } else if (life && rc.open != "") {
+            // s477: `let` or locked — a call whose cell reads the bootstrap cannot take as dependencies
+            oc = rc.call
+            const lead: string = oc != "" ? "its initializer also calls `" + oc + "`" : "its initializer"
+            why = pendOpaqueWhy(path, lead, rc.open)
+            // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
+            self = pendOpaqueWhy(path, "it calls `" + oc + "`", rc.open)
         }
-        // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
-        let self: string = ""
-        if (oc != "") self = pendOpaqueWhy(path, "but `" + oc + "`", oc)
         return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why, pendCall: oc, pendSelf: self }
     }
 
-    // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked: it reads a
-    // cell (`@`), or it calls something other than a server function (opaqueCall) — the
-    // conservative rule: a call may read cells. Only a server function's call is known to
-    // read none on the client (§12.4: a server function reaches no client state, E-ROUTE-002).
-    fn lifeDerived(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[]) -> boolean {
+    // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked and it reads a
+    // cell (§66.9 rule 3; ruling S475 item 1 "locked + reads is derived and stays refused").
+    // s477 (s477-boot-pending-rest; g-boot-pending-cell-opaque-call-s475): §13.9.1 S475 "it "reads
+    // cells" when it reads a cell directly or through a called function (§13.9.2's deps)" — so
+    // through a call it is derived exactly when the called functions READ a cell (callReach),
+    // no longer whenever it calls a non-server function: a cell-free client helper
+    // (`loadName(one())`) leaves a locked cell a load-once pending cell. Placement unknown
+    // (`ps` = [], the effect pass): every non-server call still counts (opaqueCall), as before.
+    fn lifeDerived(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[], rc: CellReach) -> boolean {
         if (cellReads(v)) return true
-        return opaqueCall(t, file, v, ps) != ""
+        if (ps.length == 0) return opaqueCall(t, file, v, ps) != ""
+        return rc.reads
+    }
+
+    // The reach of a `(not to T)` cell initializer's calls (`life`), when placement is known.
+    fn lifeReach(g: Globals, t: Tables, v: AAttrValue, ps: PlaceFact[], life: boolean) -> CellReach {
+        if (!life || ps.length == 0) return noReach()
+        const e: AExpr | not = pendingInit(v)
+        if (e is not) return noReach()
+        return callReach(g, t.names, e, ps)
     }
 
     // The first call (or function value) in `v` that is not a server function's, named for a
     // message — "" when every call is a server function's. A call the scan cannot resolve
-    // counts (fail closed). Placement unknown (`ps` = []): every function counts.
-    // INTERIM (r1 F1): over-refuses a cell-free client function; the capable form is a
-    // transitive cell-read summary of each function (g-boot-pending-cell-opaque-call-s475).
+    // counts (fail closed). Used where placement is not known yet (`ps` = []): every function
+    // counts. (s477: with placement known, callReach decides.)
     fn opaqueCall(t: Tables, file: string, v: AAttrValue, ps: PlaceFact[]) -> string {
         const scan: BodyScan = scanValue({ t: t, file: file }, v, emptyScan())
         for (const r of scan.refs) {
@@ -30834,8 +30856,220 @@ ${
         return ""
     }
 
-    fn pendOpaqueWhy(path: string, but: string, call: string) -> string {
-        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — " + but + " is not a server function, and the bootstrap cannot see which cells a called function reads, so it cannot infer the load's dependencies (§13.9.2 \"deps are inferred from the initializer's `@` reads\"); the load would never re-run. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
+    // s477 (s477-boot-pending-rest; g-boot-pending-cell-opaque-call-s475) — THE CELLS A PENDING
+    // INITIALIZER READS THROUGH ITS CALLS. §13.9.1 S475: the initializer "reads cells" when it
+    // reads a cell directly or through a called function, and §13.9.2: the deps are its reads.
+    // A walk of the scrml functions the initializer names (called or handed on), transitively
+    // through every function their bodies name: each `@` read of a PROGRAM cell is a read
+    // (`reads`); a mutable one is a dependency (`cells`, program field indexes); a locked one
+    // never changes, so it is a read but no dependency (reqDepField's rule). Provable-or-refuse:
+    // a read the request machine cannot take as a dependency (a derived cell, a declaration
+    // instance's field, a whole instance, a validity surface, a `<request>`'s state), a call
+    // through a name that is not a declared function, or a named function whose body the
+    // compiler does not have, makes the reach OPEN — `open` says why, `call` names the
+    // initializer's call it was found through — and the cell is refused by name (INTERIM).
+    // A server function is not walked: it reaches no client state (§12.4); nor a `<host>`-backed
+    // one (its body is host code, which cannot name a cell).
+    type CellReach:struct = { reads: boolean, cells: int[], open: string, call: string }
+    type ReadReach:struct = { reads: boolean, idx: int, open: string }
+
+    fn noReach() -> CellReach { return { reads: false, cells: [], open: "", call: "" } }
+
+    fn callReach(g: Globals, names: NameTable, e: AExpr, ps: PlaceFact[]) -> CellReach {
+        const direct: string = callThroughValue(names, e)
+        if (direct != "") return { reads: false, cells: [], open: "it " + direct, call: "" }
+        let reads = false
+        let cells: int[] = []
+        for (const s of fnSymsIn(names, e)) {
+            const r: CellReach = fnReach(g, names, s, ps)
+            if (r.open != "") return r
+            if (r.reads) reads = true
+            for (const c of r.cells) {
+                if (cells.indexOf(c) < 0) cells = cells.concat([c])
+            }
+        }
+        return { reads: reads, cells: cells, open: "", call: "" }
+    }
+
+    fn fnReach(g: Globals, names: NameTable, root: int, ps: PlaceFact[]) -> CellReach {
+        const rootFs: FnSrc | not = fnSrcById(g, root)
+        if (rootFs is not) return noReach()          // reported where it is named (E-SCOPE-001)
+        if (reachSkips(rootFs, ps)) return noReach()
+        const call: string = rootFs.info.name + "()"
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        let todo: int[] = [root]
+        let seen: int[] = []
+        let reads = false
+        let cells: int[] = []
+        while (todo.length > 0) {
+            const s: int = todo[0]
+            todo = todo.slice(1)
+            if (seen.indexOf(s) < 0) {
+                seen = seen.concat([s])
+                const fs: FnSrc | not = fnSrcById(g, s)
+                if (fs is not) return { reads: false, cells: [], open: "`" + call + "` reaches a function whose body the compiler does not have", call: call }
+                if (!reachSkips(fs, ps)) {
+                    const lab: string = "`" + fs.info.name + "()`"
+                    const u: string = callThroughValueBlock(names, fs.f.body)
+                    if (u != "") return { reads: false, cells: [], open: lab + " " + u, call: call }
+                    for (const at of readNodesInBlock(fs.f.body, true)) {
+                        const rr: ReadReach = readReach(g, prog, names, at)
+                        if (rr.open != "") return { reads: rr.reads, cells: [], open: lab + " " + rr.open, call: call }
+                        if (rr.reads) reads = true
+                        if (rr.idx >= 0 && cells.indexOf(rr.idx) < 0) cells = cells.concat([rr.idx])
+                    }
+                    todo = todo.concat(fnSymsInBlock(names, fs.f.body))
+                }
+            }
+        }
+        return { reads: reads, cells: cells, open: "", call: call }
+    }
+
+    fn reachSkips(fs: FnSrc, ps: PlaceFact[]) -> boolean {
+        if (fs.info.serverOwn || fs.f.server) return true
+        if (fs.info.host is given) return true
+        return ps.length > 0 && placeOf(ps, fs.info.sym.id) == PlaceK.Server
+    }
+
+    fn fnSrcById(g: Globals, id: int) -> FnSrc | not {
+        for (const fs of g.fns) {
+            if (fs.info.sym.id == id) return fs
+        }
+        return not
+    }
+
+    // One read node of a called function's body (an `@name`, or a `<#id>.prop` member).
+    fn readReach(g: Globals, prog: DeclSrc | not, names: NameTable, at: AExpr) -> ReadReach {
+        const f: NameFact | not = nameFact(names, at.nid)
+        const shown: string = atName(at) != "" ? "`@" + atName(at) + "`" : "a `<request>`'s state"
+        return match f {
+            .NField(decl: d, idx: i) :> programFieldReach(g, prog, d, i, shown)
+            .NInst(decl: d) :> rread(true, -1, "reads " + shown + ", a whole declaration instance — not a cell the load can depend on")
+            .NSurface(of: x) :> rread(true, -1, "reads the validity surface " + shown + " — not a cell the load can depend on")
+            .NReq(id: rq0) :> rread(true, -1, "reads " + shown + " — not a cell the load can depend on")
+            .NLocal(sym: x) :> rread(false, -1, "")
+            .NStruct(owner: x) :> rread(false, -1, "")
+            .NFn(sym: x) :> rread(false, -1, "")
+            .NLength :> rread(false, -1, "")
+            .NConst(sym: x) :> rread(false, -1, "")
+            not :> rread(false, -1, "")
+        }
+    }
+
+    fn rread(reads: boolean, idx: int, open: string) -> ReadReach { return { reads: reads, idx: idx, open: open } }
+
+    fn programFieldReach(g: Globals, prog: DeclSrc | not, d: Sym, i: int, shown: string) -> ReadReach {
+        if (prog is not || d.id != g.program.id) return { reads: true, idx: -1, open: "reads " + shown + ", a field of a declaration instance — not a program cell the load can depend on" }
+        if (i < 0 || i >= prog.info.fields.length) return { reads: true, idx: -1, open: "reads " + shown + ", which the compiler cannot place" }
+        const fi: FieldInfo = prog.info.fields[i]
+        const w: Sym | not = fi.wcap
+        if (w is given) return { reads: true, idx: i, open: "" }
+        if (fi.mode == FieldMode.Locked) return { reads: true, idx: -1, open: "" }
+        return { reads: true, idx: -1, open: "reads the derived cell " + shown + ", and a derived cell is no `<request>` dependency in the bootstrap (it has no change event of its own in Core)" }
+    }
+
+    // The Sym ids of every scrml function an expression names — called or handed on (at any depth).
+    fn fnSymsIn(names: NameTable, e: AExpr) -> int[] {
+        let out: int[] = []
+        const s: Sym | not = fnSymOf(nameFact(names, e.nid))
+        if (s is given) out = [s.id]
+        for (const k of exprKids(e)) { out = out.concat(fnSymsIn(names, k)) }
+        for (const b of exprBlocks(e)) { out = out.concat(fnSymsInBlock(names, b)) }
+        return out
+    }
+
+    fn fnSymsInBlock(names: NameTable, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const st of b.stmts) {
+            for (const x of stmtExprs(st)) { out = out.concat(fnSymsIn(names, x)) }
+            for (const nb of stmtKidBlocks(st)) { out = out.concat(fnSymsInBlock(names, nb)) }
+        }
+        return out
+    }
+
+    // A call through a NAME that resolves to something other than a declared function (a local
+    // or a parameter holding one): the walk cannot follow it — "" when there is none.
+    fn callThroughValue(names: NameTable, e: AExpr) -> string {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is given && exprName(c) != "") {
+            const f: NameFact | not = nameFact(names, c.nid)
+            if (f is given && fnSymOf(f) is not && !isReqName(f)) return "calls through `" + exprName(c) + "`, which is not a declared function"
+        }
+        for (const k of exprKids(e)) {
+            const u: string = callThroughValue(names, k)
+            if (u != "") return u
+        }
+        for (const b of exprBlocks(e)) {
+            const u: string = callThroughValueBlock(names, b)
+            if (u != "") return u
+        }
+        return ""
+    }
+
+    fn callThroughValueBlock(names: NameTable, b: ABlock) -> string {
+        for (const st of b.stmts) {
+            for (const x of stmtExprs(st)) {
+                const u: string = callThroughValue(names, x)
+                if (u != "") return u
+            }
+            for (const nb of stmtKidBlocks(st)) {
+                const u: string = callThroughValueBlock(names, nb)
+                if (u != "") return u
+            }
+        }
+        return ""
+    }
+
+    fn isReqName(f: NameFact) -> boolean {
+        return match f {
+            .NReq(id: rq0) :> true
+            .NLocal(sym: x) :> false
+            .NField(decl: x) :> false
+            .NInst(decl: x) :> false
+            .NStruct(owner: x) :> false
+            .NFn(sym: x) :> false
+            .NLength :> false
+            .NSurface(of: x) :> false
+            .NConst(sym: x) :> false
+        }
+    }
+
+    // s477: a pending cell's load also depends on the cells its called functions read (§13.9.2
+    // "deps are inferred from the initializer's `@` reads, as `<request>` infers them"; §13.9.1
+    // S475 "directly or through a called function"). Runs over the bound name facts (every
+    // function body resolved), before the tables are built, so requestCycles, the write-SQL rule
+    // and the lowering see the added deps. The first run (pendingCells, initPos) refused every
+    // initializer whose reach is open, so only `cells` is read here; the target is never a dep.
+    fn pendCallDeps(g: Globals, names: NameTable, reqs: ReqFact[]) -> ReqFact[] {
+        let out: ReqFact[] = []
+        for (const rq of reqs) {
+            const ti: int = pendTargetIdx(rq)
+            if (ti < 0) {
+                out = out.concat([rq])
+            } else {
+                const rc: CellReach = callReach(g, names, rq.value, [])
+                let deps: NameFact[] = rq.deps
+                for (const idx of rc.cells) {
+                    const f: NameFact = withFieldIdx(rq.target, idx)
+                    if (idx != ti && !hasFieldDep(deps, f)) deps = deps.concat([f])
+                }
+                out = out.concat([{ nid: rq.nid, id: rq.id, file: rq.file, span: rq.span, target: rq.target, targetName: rq.targetName, deps: deps,
+                                    explicit: rq.explicit, signals: rq.signals, wcaps: rq.wcaps, handle: rq.handle, load: rq.load, rhs: rq.rhs,
+                                    dataTy: rq.dataTy, errTy: rq.errTy, err: rq.err, lins: rq.lins, req: rq.req, value: rq.value, pend: rq.pend }])
+            }
+        }
+        return out
+    }
+
+    fn hasFieldDep(ds: NameFact[], f: NameFact) -> boolean {
+        for (const d of ds) {
+            if (sameField(d, f)) return true
+        }
+        return false
+    }
+
+    fn pendOpaqueWhy(path: string, lead: string, open: string) -> string {
+        return ", so `" + path + "` would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — but " + lead + ", and " + open + ". A pending cell's load re-runs on the cells its initializer reads, directly or through a called function (§13.9.1 S475 rule 1; §13.9.2 \"deps are inferred from the initializer's `@` reads\"), so the bootstrap cannot infer the load's dependencies here. Not in the bootstrap yet (INTERIM, g-boot-pending-cell-opaque-call-s475): read the cells in the initializer itself and pass them in, `=(load(@a) !{ _ :> not })`, or declare the cell `=not` and load it with a `<request>` (§6.7.7)"
     }
 
     fn pendOutsideWhy() -> string {
@@ -30866,21 +31100,22 @@ ${
             const p: AProgram | not = ds.p
             if (p is given) {
                 for (const fd of fieldDecls(ds)) {
-                    if (pendingCell(t, ds.file, fd, ps, sum)) out = out.concat([fd.nid])
+                    if (pendingCell(g, t, ds.file, fd, ps, sum)) out = out.concat([fd.nid])
                 }
             }
         }
         return out
     }
 
-    fn pendingCell(t: Tables, file: string, d: ADecl, ps: PlaceFact[], sum: Summary) -> boolean {
+    fn pendingCell(g: Globals, t: Tables, file: string, d: ADecl, ps: PlaceFact[], sum: Summary) -> boolean {
         if (d.body.length > 0 || !presenceDecl(d)) return false
         if (pendingInit(d.own) is not) return false
-        // r1 F1: a locked initializer that reads a cell or calls a non-server function is derived
-        // (ruling S475 item 1: stays refused); a `let` one calling a non-server function is
-        // refused by name — its dependencies cannot be inferred (initPos pendWhy, INTERIM)
-        if (!d.isLet && lifeDerived(t, file, d.own, ps)) return false
-        if (d.isLet && opaqueCall(t, file, d.own, ps) != "") return false
+        // r1 F1 / s477: a locked initializer that reads a cell, directly or through a called
+        // function, is derived (ruling S475 item 1: stays refused); one whose called functions'
+        // reads cannot be followed is refused by name (initPos pendWhy, INTERIM)
+        const rc: CellReach = lifeReach(g, t, d.own, ps, true)
+        if (!d.isLet && lifeDerived(t, file, d.own, ps, rc)) return false
+        if (rc.open != "") return false
         if (sqlsInValue(d.own).length > 0) return false
         return initWaits(t, file, d.own, ps, sum)
     }
@@ -31134,8 +31369,17 @@ ${
         }
         const f: FieldInfo = prog.info.fields[target]
         const gr: TransitionGraph | not = f.graph
-        // s475 (slice S4): as `reset(@x)` (resolveReset) — INTERIM
-        if (isPendingDecl(g, d.nid)) return { e: not, st: addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", pendResetMsg("`reset-on=` on `@" + d.name + "`", d.name)) }
+        // s477 (s477-boot-pending-rest; was refused by name in s475 S4): §6.8.4 rule 1 — "the runtime
+        // SHALL perform `reset(@self)`" — and §13.9.2 "A reset of a pending cell (§6.8) is the
+        // request's re-run": on a pending cell the rule re-runs its load when an entry changes, which
+        // is exactly a dependency of the hidden request (pendResetDeps adds the entries to its deps,
+        // so the request-ring, write-SQL and plan rules see them). The load's write is the
+        // compiler's (§13.9.1 S475 rule 5): no `replace` grant is needed, and a pending cell has no
+        // `rule=` graph.
+        if (isPendingDecl(g, d.nid)) {
+            if (!ok) return { e: not, st: st }
+            return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+        }
         if (gr is given) {
             const refused: string = engineRefusals(g, gr, f.init)
             if (refused != "") {
@@ -31167,8 +31411,74 @@ ${
         return pendingDeclNids(p.items).indexOf(nid) >= 0
     }
 
-    fn pendResetMsg(what: string, n: string) -> string {
-        return what + " resets a pending cell, and §13.9.2 makes that a re-run of its load (\"A reset of a pending cell (§6.8) is the request's re-run\" — never its initializer again, never back to `not`). Re-running the hidden request from here is not in the bootstrap yet; to reload on demand, declare `@" + n + "` `=not` and load it with a `<request>` written by hand (§6.7.7)"
+    // s477 (s477-boot-pending-rest) — §6.8.4 rule 1 on a pending cell is its load's re-run
+    // (§13.9.2), so an accepted `reset-on=` rule whose target is a pending cell adds its entries to
+    // the hidden request's deps (its re-run on change), and leaves the plain reset rules (lower
+    // resetOnViews would write the desugared initializer, `not` — §13.9.2 "SHALL NOT reset the cell
+    // by re-running the initializer outside the request"). Runs before the tables are built, so
+    // requestCycles, the write-SQL rule and lowering all see the added deps.
+    type RPendResets:struct = { reqs: ReqFact[], infos: ResetOnInfo[] }
+
+    fn pendResetDeps(reqs: ReqFact[], infos: ResetOnInfo[]) -> RPendResets {
+        let outR: ReqFact[] = []
+        let taken: int[] = []
+        for (const rq of reqs) {
+            const ti: int = pendTargetIdx(rq)
+            if (ti < 0) {
+                outR = outR.concat([rq])
+            } else {
+                let deps: NameFact[] = rq.deps
+                for (const inf of infos) {
+                    if (inf.target == ti) {
+                        taken = taken.concat([ti])
+                        for (const tr of inf.triggers) {
+                            const f: NameFact = withFieldIdx(rq.target, tr)
+                            if (!hasDepFact(deps, f)) deps = deps.concat([f])
+                        }
+                    }
+                }
+                outR = outR.concat([{ nid: rq.nid, id: rq.id, file: rq.file, span: rq.span, target: rq.target, targetName: rq.targetName, deps: deps,
+                                      explicit: rq.explicit, signals: rq.signals, wcaps: rq.wcaps, handle: rq.handle, load: rq.load, rhs: rq.rhs,
+                                      dataTy: rq.dataTy, errTy: rq.errTy, err: rq.err, lins: rq.lins, req: rq.req, value: rq.value, pend: rq.pend }])
+            }
+        }
+        let outI: ResetOnInfo[] = []
+        for (const inf of infos) {
+            if (taken.indexOf(inf.target) < 0) outI = outI.concat([inf])
+        }
+        return { reqs: outR, infos: outI }
+    }
+
+    // A pending cell's request: the program field it loads (-1 for an author `<request>`).
+    fn pendTargetIdx(rq: ReqFact) -> int {
+        if (rq.pend < 0) return -1
+        const t: NameFact = rq.target
+        return match t {
+            .NField(idx: i) :> i
+            .NLocal(sym: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NConst(sym: x) :> -1
+            .NReq(id: rq0) :> -1
+        }
+    }
+
+    // Another field of the same declaration instance as `f` (an NField).
+    fn withFieldIdx(f: NameFact, idx: int) -> NameFact {
+        return match f {
+            .NField(decl: d, inst: i) :> NameFact.NField(d, i, idx)
+            .NLocal(sym: x) :> f
+            .NInst(decl: x) :> f
+            .NStruct(owner: x) :> f
+            .NFn(sym: x) :> f
+            .NLength :> f
+            .NSurface(of: x) :> f
+            .NConst(sym: x) :> f
+            .NReq(id: rq0) :> f
+        }
     }
 
     fn resetEntries(v: AAttrValue) -> AExpr[] | not {
@@ -37383,11 +37693,19 @@ ${
         for (const a of handledArms(h)) {
             const b: AArmBody = a.body
             for (const x of armExprOf(b)) { ps = planExpr(cx, x, armPos, ps).ps }
-            for (const blk of armBlockOf(b)) {
-                for (const s of blk.stmts) {
-                    for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
-                }
-            }
+            for (const blk of armBlockOf(b)) { ps = planArmBlock(cx, blk, armPos, ps) }
+        }
+        return ps
+    }
+
+    // s477 (s477-boot-pending-rest; g-boot-plan-arms-nested-wait-s475) — an arm block's statements
+    // at EVERY depth: a wait inside an `if`, a loop (its head and a counted loop's init too) or an
+    // inner block of the arm gets the arm refusal here, not only Core C-S3 / C-S8s.
+    fn planArmBlock(cx: PCx, blk: ABlock, armPos: Pos, ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const s of blk.stmts) {
+            for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
+            for (const nb of stmtKidBlocks(s)) { ps = planArmBlock(cx, nb, armPos, ps) }
         }
         return ps
     }
@@ -38957,6 +39275,9 @@ ${
         st = hostCellDiags(ra.g, hostTypeDataDiags(ra.g.types, st))
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
+        // s477: a `reset-on=` on a pending cell re-runs its load (§13.9.2) — the entries join its deps
+        const prr: RPendResets = pendResetDeps(st.reqs, rr.infos)
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs }
         const rp: RPersists = persistPass(ra.g, files, st)
         st = programNoValue(ra.g, rp.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
@@ -38969,10 +39290,12 @@ ${
         // pass (redeclarations) and the typer (value types). Each returns new
         // values; the final Tables carries the typer's own table.
         const fs: NodeFacts = indexed(st.facts)
+        // s477: a pending cell's load depends on the cells its called functions read too (§13.9.2)
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: pendCallDeps(ra.g, fs.names, st.reqs) }
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)

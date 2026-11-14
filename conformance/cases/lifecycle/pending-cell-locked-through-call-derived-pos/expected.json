@@ -1,0 +1,26 @@
+{
+  "id": "lifecycle-pending-cell-locked-through-call-derived-pos",
+  "description": "§13.9.1 S475 rule 3: a locked pending cell whose initializer reads cells is a derived cell and stays E-VALUE-SERVER-CALL — and it reads a cell when a called function does (`cur()` reads `@userId`).",
+  "language-version": "1.0",
+  "spec": "§13.9.1",
+  "rationale": "§13.9.1 rule 3: \"locked + an initializer that reads cells is a derived cell (§66.9 rule 3) and stays refused, E-VALUE-SERVER-CALL\"; the initializer \"reads cells\" when it reads a cell directly or through a called function. ruling:user-voice-scrml.md S475 \"⭐ RULED — S475 owner questions, PA recs adopted wholesale\" items 1 and 7.",
+  "expect": {
+    "codes": [
+      "E-VALUE-SERVER-CALL"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-TYPE-045=1",
+          "missing:E-VALUE-SERVER-CALL"
+        ]
+      }
+    }
+  }
+}
