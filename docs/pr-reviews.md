@@ -2710,3 +2710,6 @@ Each `probe=` names the reviewed head of every round and the report path. Where 
 <!-- @review pr=1819 verdict=carve-out by=S477-PA date=2026-11-10 probe=docs-only(S476 records: docs/known-gaps.md, docs/pr-reviews.md, handOffs/incoming/read lotto-analyzer inbox, 3 files; no code path) -->
 <!-- @review pr=1820 verdict=carve-out by=S477-PA date=2026-11-10 probe=docs-only(S476 maps: .claude/maps/* project-mapper refresh, 14 files; no code path) -->
 <!-- @review pr=1822 verdict=carve-out by=S477-PA date=2026-11-10 probe=bot post-merge regen of generated blocks (1 file: docs/generated/gap-counts.md) -->
+<!-- @review pr=1823 verdict=finding by=S477-PA date=2026-11-14 probe=#1823 LAND-W-F/U, 4 LOW msgs/labels; no miscompile (follow-ups g-boot-nested-literal-receiver-message-false-s477, g-boot-literal-member-length-generic-message-s477, g-boot-untyped-callee-hint-string-s477, g-boot-proven-return-loop-source-s477, g-boot-qualified-enum-literal-receiver-s477) -->
+<!-- @review pr=1824 verdict=finding by=S477-PA date=2026-11-14 probe=#1824 LAND-W-F/U, ownership proof unbroken; 2 hardening follow-ups (g-boot-ownseq-op-allowlist-s477, g-boot-ownedlocals-kids-blind-spots-s477) -->
+<!-- @review pr=1825 verdict=carve-out by=S477-PA date=2026-11-14 probe=bot post-merge regen of generated blocks (1 file: docs/bootstrap-conformance.md) -->
