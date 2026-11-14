@@ -2,6 +2,20 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S476 + S477 — 2026-11-08 → 11-14 (bryan · theRog) — 13 code/records PRs: bootstrap `<page>`, `kind="tool"`, nested functions, bounded tapes + `insert`, tape forms, pending-cell residue; bootstrap compile near-linear (2,720-line app 16.6 s → 1.0 s)
+
+- **Bootstrap language:** `<page>` inside `<program>` (#1821); call and literal loop sources keep their element type (#1823); `<program kind="tool">` per §64 (#1828); nested function declarations, §7.3.1 (#1831); `): T` return named as E-PARSE-FN (#1841, in queue at wrap).
+- **Tapes:** a local tape is edited in place when nothing else can see it (#1824); part edits, removal values, spread values, concat (#1834); bounded-length tapes + `insert` with O36's split: provable violation = E-WRITE-INVARIANT, unprovable = E-WRITE-INVARIANT-RT trap (#1830).
+- **Pending cells:** `reset`, opaque calls, nested arm waits (#1826).
+- **Performance:** whole-program walks per item removed; output byte-identical over 3,189 inputs (#1835). The lotto-analyzer "dev-server leak" was not reproduced (#1827, closed); this was the real cause.
+- **SPEC:** §64 tool `main` return spelled `->`; 38 legacy cases migrated (#1839 → #1841).
+- **Records:** #1819 #1820 (S476), #1829 #1838 (S477); 22 review follow-ups filed as gaps.
+- **Rulings (user-voice §S477):** bootstrap only, maximum throughput; O36; §64 `->`; E-WRITE-INVARIANT-RT ratified; negative literal `insert` position is a compile error.
+- **Gap rollup:** impl#1-owed HIGH 273 · MED 768 · LOW 751; bootstrap-carried HIGH 6 · MED 13 · LOW 4. Conformance PASS 336 / FAIL 260 (S475: 302 / 243).
+- **Lessons:** main has a merge queue: use `gh pr merge --auto`; GitHub cannot run the `known-gaps.md` merge driver, so PRs touching it go DIRTY after any sibling merge (merge main locally and push). Merge-time compositions of parallel lanes broke three times; each new Core variant needs an arm in every exhaustive match.
+
+## S475 — 2026-11-05 → 11-08 (bryan · theRog) — 40 PRs: Postgres envelopes, literal §19.9.5 transport, pending cells, request refs, grant-checked local tape edits (block written at the S477 wrap; detail in `handOffs/hand-off-475.md` §1)
+
 ## S474 — 2026-10-30 → 11-03 (bryan · theRog) — 29 PRs: generated blocks go to a post-merge bot; every `!` server body runs in the transaction envelope (bootstrap U1e, impl#1, SPEC), and streaming `!` commits per `yield`; capability over limitation (INTERIM/PERMANENT tags + capability ledger + FORK RULE row C); review debt drained
 
 - **Generated-file bot:** post-merge regen (#1696); blocks moved to `docs/generated/` (#1707); the bot-owned guard diffs against the merge ref (#1719); the merge driver never loses hand text (#1726).

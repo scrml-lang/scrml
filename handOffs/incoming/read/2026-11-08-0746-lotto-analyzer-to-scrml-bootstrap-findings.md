@@ -96,3 +96,12 @@ The file grew during that time, but a fresh one-shot `compile` of the final, lar
 Around the same time: 15 minutes after the last rebuild (11:39 → 11:54), systemd-oomd killed the terminal scope that held this process tree. The scope had 32 GB RAM and 43.7 GB swap in use. The dev server was the only long-lived compiler process in that tree, but it was not isolated, so this is circumstantial, not proven.
 
 Repro: run `dev` on a large file, touch it 15–20 times, and log RSS and rebuild time after each rebuild.
+
+## 8. MED (perf) — one-shot compile time of a ~2,600-line program: 14 s → 19–48 s (added 2026-11-10)
+
+Fresh `scrml-boot compile` (bundle cached, `-v`) of `analyzer.scrml`, measured at successive commits:
+- 2,312 lines (tabs commit `ab587a4`): 13.9 s
+- about 2,500 lines (stepper `9788e4e`): 21.4 s
+- about 2,650 lines (now): 18.9 s with `-v`; 38–48 s on runs taken while the machine was swapping
+
+It is not the size of the data: an imported 51 KB string literal compiles in 0.5 s on its own, and swapping it for a 2-row string barely changes the full compile. The growth looks super-linear in program size (the per-construct passes?). It is not blocking, but every edit-and-check loop now costs about 20 s. Repro: compile `~/projects/lotto-analyzer/analyzer.scrml` with `-v`.
