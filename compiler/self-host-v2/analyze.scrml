@@ -26586,6 +26586,9 @@ ${
                 ts = checkNotElems(env, args[i], pt, ts)
                 ts = checkArgTape(env, args[i], pt, what, ts)
                 ts = boundValue(env, args[i], pt, what, ts)
+                // s477 r1 F2: a struct literal's FIELD values against their declared fields
+                // (type and length bound), as every other write position does (§66.11.2, §66.1 rule 5)
+                ts = checkLitFields(env, args[i], ts)
             }
             i = i + 1
         }
@@ -26620,7 +26623,9 @@ ${
         // §42.3.3 / §17.6 E-TYPE-043 (the more specific code), not the general E-TYPE-041.
         if (isAbsentVT(v) && maybeInner(rt) is not) return report(ts1, env, e.span, "E-TYPE-043", "this function is declared `-> " + typeName(rt) + "` and returns `not` here — a non-optional return type never holds the absence sentinel (§42.3.3). Declare `-> " + typeName(rt) + " | not`, or return a `" + typeName(rt) + "` value")
         // r7 A: full assignability for EVERY return type (§7.5.1 position 4)
-        return boundValue(env, e, rt, "the return value", checkValue(env, v, rt, e.span, "the return value", ts1))
+        // s477 r1 F2: a struct literal's FIELD values against their declared fields (type and
+        // length bound), as every other write position does (§66.11.2, §66.1 rule 5)
+        return checkLitFields(env, e, boundValue(env, e, rt, "the return value", checkValue(env, v, rt, e.span, "the return value", ts1)))
     }
 
     // A non-literal initializer into an `int`-bearing annotation (a literal is
@@ -27108,6 +27113,11 @@ ${
         for (const a of f.args) {
             if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) {
                 ts = checkValue(env, exprType0(ts, a.nid), fs[i].ty, a.span, "payload value " + (i + 1) + " of this `fail`", ts)
+                // s477 r1 F1: a `fail` payload is a construction (§19.3.3), so its length
+                // bound is checked as a construction's is (§66.11.2 "checked on EVERY write,
+                // however it is spelled"; §66.12.6 rule 1) — and a struct literal's fields too
+                ts = boundValue(env, a, fs[i].ty, "payload value " + (i + 1) + " of this `fail`", ts)
+                ts = checkNotElems(env, a, fs[i].ty, checkLitFields(env, a, ts))
             }
             i = i + 1
         }
@@ -28070,7 +28080,7 @@ ${
             .Index(obj: o) :> ts
             .Lambda(params: ps2) :> ts
             .Sql(q: q) :> ts
-            .Handled(h: x) :> ts
+            .Handled(h: x) :> checkLitList(env, handledArmValueExprs(x), ts)     // s477 r1: a `match` / `!{}` arm's value is written too
             .Template(quasis: qs) :> ts
             .HashRef(id: hr0) :> ts
             .Foreign(f: fb0) :> ts
@@ -28091,6 +28101,34 @@ ${
             .Binary(op: o) :> ts
             .Assign(target: x) :> ts
         }
+    }
+
+    // s477 r1 (review of #1830, F2 audit) — the value expressions a handling form's arms
+    // yield (`match e { … }` / `e !{ … }`): an arm's one expression (`e` / `{ e }`, not a
+    // write), or what a block arm `lift`s (§18.5) — the same values armValues types. Each
+    // is written into the position the whole form is written into, so a struct literal
+    // there is checked field by field (type and length bound) exactly as a ternary's
+    // branches are (§66.11.2 "checked on EVERY write, however it is spelled").
+    fn handledArmValueExprs(h: AHandled) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const a of handledArms(h)) {
+            const body: AArmBody = a.body
+            const one: AExpr | not = plainOneExpr(body)
+            if (one is given) {
+                if (assignValue(one) is not && !isWriteExpr(one)) out = out.concat([one])
+            } else if (a.lifted) {
+                for (const b of armBlockOf(body)) {
+                    const n: int = b.stmts.length
+                    if (n > 0 && !blockDiverges(b)) {
+                        const last: AExpr | not = evalOf(b.stmts[n - 1])
+                        if (last is given) {
+                            if (assignValue(last) is not && !isWriteExpr(last)) out = out.concat([last])
+                        }
+                    }
+                }
+            }
+        }
+        return out
     }
 
     fn checkLitList(env: TEnv, es: AExpr[], ts0: TypeState) -> TypeState {

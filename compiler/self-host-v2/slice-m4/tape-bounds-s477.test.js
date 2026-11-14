@@ -261,10 +261,65 @@ describe("F — value semantics hold through the checked edits (§66.10)", () =>
   });
 
   // s477 r-merge: composes with the in-place edits of an OWNED local (#1824, print.scrml ownedLocals):
-  // a checked edit (LengthCheck) is not an in-place self-edit, so it copies; `insert` builds a new tape
+  // a CHECKED edit (one carrying a LengthCheck) is not an in-place self-edit, so it copies; a PROVEN
+  // edit of a bounded local (a shrink of a bound whose min is 0) carries no LengthCheck and so takes
+  // #1824's in-place path, as an unbounded local's does; `insert` builds a new tape
   test("an owned local edited in place, then inserted into and bound-checked, in a loop — values exact, alias untouched", async () => {
     await load(prog("", `        let xs: int[0..=6, append, insert] = [];\n        let ys: int[free, append, insert] = [];\n        for (i of 0..3) {\n            xs.append(i);\n            ys.append(i);\n            ys.insert(0, 9);\n        }\n        const a: int[] = ys;\n        ys.append(7);\n        xs.insert(1, 5);\n        @shown = ${txt("xs")} + "|" + ${txt("ys")} + "|" + ${txt("a")};`));
     click(btn("go"));
     expect($("#o").textContent).toBe("0,5,1,2|9,9,9,0,1,2,7|9,9,9,0,1,2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s477 FIX ROUND 1 (review of #1830): positions a value flows into a bounded slot that were
+// unchecked — a `fail` payload (F1), a struct literal's field as a call argument or a return
+// value (F2), and a `match` arm's struct literal (the F2 audit). §66.11.2: "Invariants — length
+// bounds … — are checked on EVERY write, however it is spelled"; §66.12.6 rule 1.
+const B2 = `    type B:struct = { xs: int[1..=2] }\n`;
+describe("G — every position into a bounded slot is checked (review of #1830, F1 / F2)", () => {
+  test("F1: a `fail` payload's literal past the bound is E-WRITE-INVARIANT", () => {
+    const decl = `    type Er:enum = { Big(xs: int[1..=2]) }\n    function bad()! Er {\n        fail Er.Big([1, 2, 3, 4, 5]);\n        return 0;\n    }`;
+    expect(codes(prog(decl, `        const n: int = match bad() { .Big(xs) :> xs.length, else :> 0 };\n        @shown = \`\${n}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("F1: a computed `fail` payload past the bound traps (E-WRITE-INVARIANT-RT); in range it is delivered", async () => {
+    const decl = `    type Er:enum = { Big(xs: int[1..=2]) }\n    function bad(ys: int[])! Er {\n        fail Er.Big(ys);\n        return 0;\n    }`;
+    await load(prog(decl, `        const n: int = match bad([1, 2]) { .Big(xs) :> xs.length, else :> 0 };\n        @shown = \`\${n}\`;\n        const m: int = match bad([1, 2, 3, 4]) { .Big(xs) :> xs.length, else :> 0 };\n        @shown = \`\${m}\`;`));
+    const e = clickTrap(btn("go"));
+    expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("2");
+  });
+
+  test("F2: a struct literal's bounded field as a return value / a call argument — a literal past it is E-WRITE-INVARIANT", () => {
+    expect(codes(prog(B2 + `    fn mk() -> B { return { xs: [1, 2, 3, 4, 5] }; }`, `        const b: B = mk();\n        @shown = \`\${b.xs.length}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(B2 + `    fn n(b: B) -> int { return b.xs.length; }`, `        @shown = \`\${n({ xs: [1, 2, 3, 4, 5] })}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(B2 + `    fn n(bs: B[]) -> int { return bs.length; }`, `        @shown = \`\${n([{ xs: [1, 2, 3, 4, 5] }])}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(B2 + `    <c:bool=(true)/>\n    fn mk() -> B { return @c ? { xs: [1, 2, 3, 4, 5] } : { xs: [1] }; }`, `        const b: B = mk();\n        @shown = \`\${b.xs.length}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+  });
+
+  test("F2: the same positions close the field-TYPE hole (`{ xs: \"s\" }` into `{ xs: int[] }`, §66.1 rule 5)", () => {
+    const T = `    type B:struct = { xs: int[] }\n`;
+    expect(codes(prog(T + `    fn mk() -> B { return { xs: "s" }; }`, `        const b: B = mk();\n        @shown = "ran";`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog(T + `    fn n(b: B) -> int { return 1; }`, `        @shown = \`\${n({ xs: "s" })}\`;`))).toEqual(["E-TYPE-031"]);
+  });
+
+  test("F2: a computed field value past the bound traps at the return / the argument; in range runs", async () => {
+    await load(prog(B2 + `    fn mk(ys: int[]) -> B { return { xs: ys }; }\n    fn n(b: B) -> int { return b.xs.length; }`, `        const ok: B = mk([1, 2]);\n        @shown = \`\${ok.xs.length + n({ xs: [7] })}\`;\n        const b: B = mk([1, 2, 3]);\n        @shown = "unreached";`));
+    expect(clickTrap(btn("go")).map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("3");
+    await load(prog(B2 + `    fn n(b: B) -> int { return b.xs.length; }`, `        const ys: int[] = [1, 2, 3];\n        @shown = \`\${n({ xs: ys })}\`;`));
+    expect(clickTrap(btn("go")).map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("");
+  });
+
+  test("audit: a `match` arm's struct literal is checked field by field (bound and type)", async () => {
+    const K = `    type K:enum = { A, C }\n    <k:K=(K.A)/>`;
+    expect(codes(prog(B2 + K, `        const b: B = match @k { .A :> { xs: [1, 2, 3, 4, 5] }, else :> { xs: [1] } };\n        @shown = \`\${b.xs.length}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(B2 + K + `\n    fn mk() -> B { return match @k { .A :> { xs: [1, 2, 3, 4, 5] }, else :> { xs: [1] } }; }`, `        const b: B = mk();\n        @shown = \`\${b.xs.length}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(`    type B:struct = { xs: int[] }\n` + K, `        const b: B = match @k { .A :> { xs: "s" }, else :> { xs: [1] } };\n        @shown = "ran";`))).toEqual(["E-TYPE-031"]);
+    await load(prog(B2 + K, `        const ys: int[] = [1, 2, 3];\n        const b: B = match @k { .A :> { xs: ys }, else :> { xs: [1] } };\n        @shown = \`\${b.xs.length}\`;`));
+    expect(clickTrap(btn("go")).map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+    expect($("#o").textContent).toBe("");
   });
 });
