@@ -1,0 +1,65 @@
+{
+  "id": "lifecycle-pending-cell-through-call-reloads-rt",
+  "description": "§13.9.1 S475 rule 1 + §13.9.2: a `let` pending cell whose initializer reads cells re-runs on a dependency change, and it \"reads cells\" through a called function too. `cur()` reads `@userId`, so `@userId` is the load's dependency: the mount load settles \"a\", and writing `@userId = 2` re-runs it to \"b\". RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.2",
+  "rationale": "§13.9.1 \"The spelling decides the load (S475, PERMANENT)\": \"The rule reads the initializer exactly as §66.9 rules 3–4 read any initializer: it \"reads cells\" when it reads a cell directly or through a called function (§13.9.2's deps).\" Rule 1: \"`let` + an initializer that reads cells re-runs on a dependency change.\" ruling:user-voice-scrml.md S475 \"⭐ RULED — S475 owner questions, PA recs adopted wholesale\" item 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#u2"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "userId": 2,
+      "who": "b"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "b"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+<program>
+${
+    type Bag:struct = { xs: int[free, append, pop] }
+}
+<n> = 0
+function grow() {
+    const b: Bag = { xs: [1] };
+    const before: int[] = b.xs;
+    b.xs.append(2);
+    b.xs.append(3);
+    b.xs.pop();
+    @n = b.xs.length * 10 + before.length;
+}
+<button id="go" onclick=grow()>go</button>
+<p id="n">${@n}</p>
+</program>

@@ -76,7 +76,10 @@ describe("A — §64 `kind=` and the tool body", () => {
   test("E-TOOL-003: markup in a tool body, and a §66 declaration (reactive state) in one", () => {
     expect(codes(tool(MAIN + '\n    <p>"x"</p>'))).toEqual(["E-TOOL-003"]);
     expect(codes(tool(MAIN + "\n    let <n:int=0/>"))).toContain("E-TOOL-003");
-    expect(codes(tool(MAIN + '\n    <page path="/">"x"</page>'))).toContain("E-TOOL-003");
+    // s477 rebase (#1821 built `<page>`, §40.8): a page is refused in a tool whether its body
+    // is markup or code only — the page itself, not just its body's items (toolPageDiags)
+    expect(codes(tool(MAIN + "\n    <page>\n        <p>x</p>\n    </page>"))).toContain("E-TOOL-003");
+    expect(codes(tool(MAIN + "\n    <page>\n        function helper() -> number {\n            return 0;\n        }\n    </page>"))).toEqual(["E-TOOL-003"]);
   });
 
   for (const v of [`kind="cli"`, `kind="Tool"`, `kind=""`, `kind`, `kind=@k`]) {

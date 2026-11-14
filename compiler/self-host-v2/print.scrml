@@ -67,6 +67,8 @@ ${
     // the code being printed. A value, extended by copy — never mutated.
     export type Ctx:struct = {
         p: CoreProgram,
+        // s477 (s477-boot-compile-perf): facts about `p` read in one walk (printIx)
+        pix: PrintIx,
         names: NameTable,
         lexical: JsExpr[],
         handles: HandleLoc[],
@@ -888,7 +890,7 @@ ${
     }
 
     fn withCycle(ctx: Ctx, c: CycleJs) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0,
                  cycles: ctx.cycles.concat([c]), ns: ctx.ns, owned: ctx.owned }
     }
@@ -1193,12 +1195,12 @@ ${
     }
 
     fn withTier0(ctx: Ctx, t: Tier0Rows | not) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: t, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
     fn withNs(ctx: Ctx, ns: string) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ns, owned: ctx.owned }
     }
 
@@ -2000,7 +2002,7 @@ ${
     }
 
     fn withOwned(ctx: Ctx, owned: OwnedLocal[]) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: owned }
     }
 
@@ -2596,7 +2598,7 @@ ${
     // A nested region (a conditional arm, an <each> row, slot content) creates
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
@@ -2734,7 +2736,7 @@ ${
 
     // s474 — a keyed row's snapshot locals are CELLS in its markup (`x.get()`).
     fn withRowCells(ctx: Ctx, ids: int[]) -> Ctx {
-        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows.concat(ids), slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned }
     }
 
@@ -3126,7 +3128,7 @@ ${
             decls = decls.concat([JsStmt.SConst(symName(ctx, h), rtCall(ctx, "handle", []))])
         }
         const rowCtx: Ctx = {
-            p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
+            p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
             shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: [],
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
@@ -3190,50 +3192,121 @@ ${
     // A field the factory takes a parameter for: every ATTRIBUTE (use-site
     // construction, §66.14 rule 4), and a CHILD field some use constructs (the
     // ratified O60 example `<dropdown open=(@x)/>`; ⚑ O43). Decided from Core.
-    fn isParam(p: CoreProgram, d: Decl, idx: int, f: Field) -> boolean {
+    fn isParam(ix: PrintIx, d: Decl, idx: int, f: Field) -> boolean {
         if (isAttribute(f)) return true
+        return ix.constructed.indexOf(fieldKey(d.sym, idx)) >= 0
+    }
+
+    // s477 (s477-boot-compile-perf): what isParam and reinitUsed ask of the whole
+    // program, read in ONE walk when the print context is made — each walked the
+    // whole program per declared field (O(fields × program)). `constructed`: the
+    // field of every attribute some View.Instance gives (constructsField);
+    // `reinits`: the field of every InitOf (isInitOf). Keys are fieldKey's.
+    type PrintIx:struct = { constructed: string[], reinits: string[] }
+
+    fn fieldKey(d: Sym, idx: int) -> string {
+        return d.id + ":" + idx
+    }
+
+    fn printIx(p: CoreProgram) -> PrintIx {
+        let constructed: string[] = []
+        let reinits: string[] = []
         for (const n of allNodes(Node.NProgram(p))) {
-            if (constructsField(n, d.sym, idx)) return true
+            constructed = constructed.concat(nodeConstructs(n))
+            reinits = reinits.concat(nodeInitOfs(n))
         }
-        return false
+        return { constructed: constructed, reinits: reinits }
     }
 
-    fn constructsField(n: Node, ds: Sym, idx: int) -> boolean {
+    fn nodeConstructs(n: Node) -> string[] {
         return match n {
-            .NView(v: v) :> viewConstructs(v, ds, idx)
-            .NProgram(p: q) :> false
-            .NDecl(d: d) :> false
-            .NField(f: f) :> false
-            .NFn(f: f) :> false
-            .NServerFn(f: f) :> false
-            .NBlock(b: b) :> false
-            .NStmt(s: s) :> false
-            .NExpr(e: e) :> false
-            .NPlace(pl: pl) :> false
-            .NInst(i: i) :> false
-            .NPattern(pat: pat) :> false
-            .NEdit(k: k) :> false
-            .NAttr(a: a) :> false
+            .NView(v: v) :> viewConstructKeys(v)
+            .NProgram(p: q) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NStmt(s: s) :> []
+            .NExpr(e: e) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
+            .NAttr(a: a) :> []
         }
     }
 
-    fn viewConstructs(v: View, ds: Sym, idx: int) -> boolean {
+    fn viewConstructKeys(v: View) -> string[] {
         return match v {
-            .Instance(decl: d, attrs: attrs) :> d.id == ds.id && constructValue(attrs, idx) is given
-            .El(tag: t) :> false
-            .Text(text: t) :> false
-            .RawText(text: t) :> false
-            .Dyn(e: e) :> false
-            .Cond(arms: a) :> false
-            .Each(src: s) :> false
-            .Slot :> false
-            .Star(decl: d) :> false
-            .Effect(deps: ds) :> false
-            .Request(deps: ds) :> false
-            .ResetOn(triggers: ds) :> false
-            .Errors(of: x) :> false
-            .Reach(fields: fs) :> false
-            .Gather(g: x) :> false
+            .Instance(decl: d, attrs: attrs) :> constructKeys(d, attrs)
+            .El(tag: t) :> []
+            .Text(text: t) :> []
+            .RawText(text: t) :> []
+            .Dyn(e: e) :> []
+            .Cond(arms: a) :> []
+            .Each(src: s) :> []
+            .Slot :> []
+            .Star(decl: d) :> []
+            .Effect(deps: ds) :> []
+            .Request(deps: ds) :> []
+            .ResetOn(triggers: ds) :> []
+            .Errors(of: x) :> []
+            .Reach(fields: fs) :> []
+            .Gather(g: x) :> []
+        }
+    }
+
+    // the fields `attrs` constructs: viewConstructs' test, per attribute
+    fn constructKeys(d: Sym, attrs: ConstructAttr[]) -> string[] {
+        let out: string[] = []
+        for (const a of attrs) {
+            if (constructValue(attrs, a.field) is given) out = out.concat([fieldKey(d, a.field)])
+        }
+        return out
+    }
+
+    fn nodeInitOfs(n: Node) -> string[] {
+        return match n {
+            .NExpr(e: e) :> exprInitOfKeys(e)
+            .NProgram(p: q) :> []
+            .NDecl(d: x) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NStmt(s: s) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
+            .NView(v: v) :> []
+            .NAttr(a: a) :> []
+        }
+    }
+
+    fn exprInitOfKeys(e: Expr) -> string[] {
+        return match e {
+            .InitOf(decl: s, idx: x) :> [fieldKey(s, x)]
+            .Lit(lit: l) :> []
+            .Local(sym: s) :> []
+            .Read(place: pl) :> []
+            .Call(callee: c) :> []
+            .Prim(op: o) :> []
+            .Match(scrut: s) :> []
+            .ArrayOf(elems: es) :> []
+            .StructOf(ty: t) :> []
+            .VariantOf(enumSym: t) :> []
+            .Handle(inst: i) :> []
+            .Assigned(local: x) :> []
+            .Host(call: c) :> []
+            .Lambda(params: ps) :> []
+            .SeqCall(op: o) :> []
+            .Refetch(req: rf0) :> []
+            .Validity(of: x) :> []
+            .ServerCall(fn: x) :> []
+            .Query(q: x) :> []
+            .Foreign(slice: fsl0) :> []
         }
     }
 
@@ -3244,7 +3317,7 @@ ${
         let args: JsExpr[] = [rtCall(ctx, "instance", [jid(nameOf(ctx.names, NameKey.DeclInfo(d.sym.id))), scope])]
         let k = 0
         for (const f of d.fields) {
-            if (isParam(ctx.p, d, k, f)) {
+            if (isParam(ctx.pix, d, k, f)) {
                 const v: Expr | not = constructValue(attrs, k)
                 if (v is given) {
                     args = args.concat([jthunk(exprJs(ctx, v))])
@@ -3304,7 +3377,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
+        return { p: p, pix: printIx(p), names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -3314,7 +3387,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns, owned: [] }
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false, tier0: not, cycles: [], ns: ctx.ns, owned: [] }
     }
 
     // s474: `uses` — the contexts each declaration is used in (declNsUses); its
@@ -3471,14 +3544,14 @@ ${
         let i = 0
         for (const f of d.fields) {
             let init: JsExpr = defaultThunk(fctx, d, f)
-            if (isParam(ctx.p, d, i, f)) {
+            if (isParam(ctx.pix, d, i, f)) {
                 const pn: string = f.sym.hint.replaceAll("$", "_") + "$"
                 params = params.concat([pn])
                 init = JsExpr.JBin(JsOp.Nullish, jid(pn), init)
             }
             // D15: an initializer something re-evaluates (`InitOf`, a reset) is
             // kept on the record, so the instance's OWN initializer is re-run.
-            if (reinitUsed(ctx.p, d.sym, i)) {
+            if (reinitUsed(ctx.pix, d.sym, i)) {
                 const slot: JsExpr = JsExpr.JIndex(jmember(jid("inst$"), "inits"), JsExpr.JAnnot(jnum(i), fieldHint(d, i)))
                 body = body.concat([JsStmt.SAssign(slot, init)])
                 init = slot
@@ -3497,55 +3570,8 @@ ${
     }
 
     // Does any `InitOf(d, _, idx)` appear in the program?
-    fn reinitUsed(p: CoreProgram, d: Sym, idx: int) -> boolean {
-        for (const n of allNodes(Node.NProgram(p))) {
-            if (isInitOf(n, d, idx)) return true
-        }
-        return false
-    }
-
-    fn isInitOf(n: Node, d: Sym, idx: int) -> boolean {
-        return match n {
-            .NExpr(e: e) :> exprIsInitOf(e, d, idx)
-            .NProgram(p: q) :> false
-            .NDecl(d: x) :> false
-            .NField(f: f) :> false
-            .NFn(f: f) :> false
-            .NServerFn(f: f) :> false
-            .NBlock(b: b) :> false
-            .NStmt(s: s) :> false
-            .NPlace(pl: pl) :> false
-            .NInst(i: i) :> false
-            .NPattern(pat: pat) :> false
-            .NEdit(k: k) :> false
-            .NView(v: v) :> false
-            .NAttr(a: a) :> false
-        }
-    }
-
-    fn exprIsInitOf(e: Expr, d: Sym, idx: int) -> boolean {
-        return match e {
-            .InitOf(decl: s, idx: x) :> s.id == d.id && x == idx
-            .Lit(lit: l) :> false
-            .Local(sym: s) :> false
-            .Read(place: pl) :> false
-            .Call(callee: c) :> false
-            .Prim(op: o) :> false
-            .Match(scrut: s) :> false
-            .ArrayOf(elems: es) :> false
-            .StructOf(ty: t) :> false
-            .VariantOf(enumSym: t) :> false
-            .Handle(inst: i) :> false
-            .Assigned(local: x) :> false
-            .Host(call: c) :> false
-            .Lambda(params: ps) :> false
-            .SeqCall(op: o) :> false
-            .Refetch(req: rf0) :> false
-            .Validity(of: x) :> false
-            .ServerCall(fn: x) :> false
-            .Query(q: x) :> false
-            .Foreign(slice: fsl0) :> false
-        }
+    fn reinitUsed(ix: PrintIx, d: Sym, idx: int) -> boolean {
+        return ix.reinits.indexOf(fieldKey(d, idx)) >= 0
     }
 
     // L12 (b): the instances d's renders mounts unconditionally are created
@@ -3909,7 +3935,7 @@ ${
         // locals' edits are made in place; a waiting one's body is continuations (copies, as before)
         let owned: OwnedLocal[] = []
         if (!f.waits) owned = ownedLocals(f.body)
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns, owned: owned }
+        const fctx: Ctx = { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false, tier0: not, cycles: [], ns: ctx.ns, owned: owned }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -3935,7 +3961,7 @@ ${
     export fn serverCtx(p: CoreProgram) -> Ctx {
         let names: NameTable = planNames(p)
         for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
+        return { p: p, pix: printIx(p), names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true, tier0: not, cycles: [], ns: htmlNs(), owned: [] }
     }
 
     export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {

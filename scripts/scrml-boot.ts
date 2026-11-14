@@ -271,6 +271,17 @@ export function keyBaseOf(sourceRoot: string): string {
   return r.split(sep).join("/");
 }
 
+/**
+ * s477 fix round 1 (F3) — `routeBase` for the front end: the source root's ABSOLUTE path, "/"-separated.
+ * With no `<program>` in the build no build root is inferred, and SPEC §40.8 reads route files off the
+ * whole path: "Zero or several candidates infer no build root: route files are then the files with a
+ * `pages/` or `routes/` component anywhere in their path". (keyBaseOf is the root under the PROJECT
+ * root — "" with no `scrml.toml` / `.git` marker, which hid a lone `pages/about.scrml`'s `pages/`.)
+ */
+export function routeBaseOf(sourceRoot: string): string {
+  return sourceRoot.split(sep).join("/").replace(/\/+$/, "");
+}
+
 function commonDir(files: string[]): string {
   let d = dirname(files[0]);
   while (!files.every((f) => f === d || f.startsWith(d.endsWith(sep) ? d : d + sep))) d = dirname(d);
@@ -584,7 +595,7 @@ export async function compileSource(
   }
   // s474 r1 (review F1): the per-file output keys hash from the PROJECT root (keyBaseOf); the file
   // names the front end reports (and diagnostics show) stay relative to the source root
-  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot, importFroms: readFroms, keyBase: keyBaseOf(root) });
+  const fe = frontEndStdlib(boot.mods, files, toRel(entryAbs), { stdlibRoot: opts.stdlibRoot, importFroms: readFroms, keyBase: keyBaseOf(root), routeBase: routeBaseOf(root) });
   const withdrawn: Diagnostic[] = [];
   for (const r of fe.stdlib.refused as Array<{ module: string; direct: boolean; diags: any[]; sources: Array<{ path: string; src: string; abs: string }> }>) {
     // a module only another stdlib module imports is reported through that one (its import there is the first error)

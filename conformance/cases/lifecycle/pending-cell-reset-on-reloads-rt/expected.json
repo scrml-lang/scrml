@@ -1,0 +1,62 @@
+{
+  "id": "lifecycle-pending-cell-reset-on-reloads-rt",
+  "description": "§6.8.4 rule 1 on a pending cell (§13.9.2): `reset-on=[@tick]` performs `reset(@self)` when `@tick` changes, and a reset of a pending cell is its load's re-run. The locked cell reads no cell, so without the rule it would load once (\"a\"); the handler renames the row on the server and then writes `@tick`, which re-runs the load and settles the new name (\"z\"). RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.2",
+  "rationale": "§6.8.4 rule 1: \"When any listed cell changes … the runtime SHALL perform `reset(@self)`\". §13.9.2: \"A reset of a pending cell (§6.8) is the request's re-run.\" §13.9.1 S475 rule 5: \"The compiler-written load writes are exempt from grant checks.\" ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells\" (the modifier) and S475 \"⭐ RULED — S475 owner questions\" item 1 (the pending-cell spelling).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#rename"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "done": 1,
+      "tick": 1,
+      "who": "z"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "z"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=3",
+          "emitted:E-STATE-UNDECLARED=5",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}
