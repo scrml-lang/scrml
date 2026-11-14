@@ -2321,7 +2321,7 @@ ${
     fn commitLengthJs(ctx: Ctx, ws: Stmt[], k: int) -> JsStmt[] {
         const w: Stmt = ws[k]
         return match w {
-            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> lengthGuardJs(ctx, cap, inst, commitDelta(ws, k, cap), ck)
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> lengthGuardJs(ctx, cap, inst, commitDelta(ws, k, cap, inst), ck)
             .Commit :> []
             .Let :> []
             .Assign :> []
@@ -2344,19 +2344,22 @@ ${
         }
     }
 
-    fn commitDelta(ws: Stmt[], k: int, cap: Sym) -> int {
+    // s477 r1 (review S1): the delta counts the writes to the same capability ON THE SAME
+    // instance only — a Commit's writes all name one instance today (lower's editStmts /
+    // spreadStmts), but two instances' fields are two tapes, so the sum keys on both.
+    fn commitDelta(ws: Stmt[], k: int, cap: Sym, inst: InstRef) -> int {
         let d: int = 0
         let i: int = 0
         while (i <= k) {
-            d = d + writeDeltaFor(ws[i], cap)
+            d = d + writeDeltaFor(ws[i], cap, inst)
             i = i + 1
         }
         return d
     }
 
-    fn writeDeltaFor(s: Stmt, cap: Sym) -> int {
+    fn writeDeltaFor(s: Stmt, cap: Sym, inst: InstRef) -> int {
         return match s {
-            .Write(cap: c, edit: edit, value: v) :> capDelta(c, cap, edit, v)
+            .Write(cap: c, inst: i, edit: edit, value: v) :> capDelta(c, cap, i, inst, edit, v)
             .Commit :> 0
             .Let :> 0
             .Assign :> 0
@@ -2379,9 +2382,23 @@ ${
         }
     }
 
-    fn capDelta(c: Sym, cap: Sym, edit: EditKind, v: Expr) -> int {
+    fn capDelta(c: Sym, cap: Sym, i: InstRef, inst: InstRef, edit: EditKind, v: Expr) -> int {
         if (c.id != cap.id) return 0
+        if (commitInstKey(i) != commitInstKey(inst)) return 0
         return editDelta(edit, v)
+    }
+
+    // Two instance references name the same instance iff they are spelled the same
+    // (lower.scrml instKey's reading).
+    fn commitInstKey(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: d) :> "S" + d.id
+            .Lexical(depth: k) :> "L" + k
+            .Alias(sym: s) :> "A" + s.id
+            .Narrowed(sym: s) :> "N" + s.id
+            .Kid(of: o, idx: k) :> "K(" + commitInstKey(o) + "," + k + ")"
+            .HandleOf(of: o, sym: s) :> "H(" + commitInstKey(o) + "," + s.id + ")"
+        }
     }
 
     fn commitWriteJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
