@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1850 of 1850 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1855 of 1855 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 327 | 17.7% |
+| PASS | 332 | 17.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 261 | 14.1% |
+| FAIL | 260 | 14.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 624 | 33.7% |
-| UNSUPPORTED | 638 | 34.5% |
+| NOT-TWINNED | 624 | 33.6% |
+| UNSUPPORTED | 639 | 34.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 588; of those, 327 hold (55.6%). Runtime half executed on the bootstrap for 119 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 592; of those, 332 hold (56.1%). Runtime half executed on the bootstrap for 121 case(s).
 
-- **Vacuous** passes: 17 of 327 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **310**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 76 of 261; the other 185 are implemented checks that answered wrong.
+- **Vacuous** passes: 17 of 332 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **315**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 260; the other 185 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 638.
+UNSUPPORTED by reason: bootstrap-unsupported 639.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **865** — PASS 193 · FAIL 212 · UNSUPPORTED 460. Twin holds 193 (non-vacuous 180). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **870** — PASS 198 · FAIL 211 · UNSUPPORTED 461. Twin holds 198 (non-vacuous 185). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -121,7 +121,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | error | 78 | 37 | · | 12 | · | 5 | 24 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
-| fn | 19 | 6 | · | 5 | · | 1 | 7 | · | · |
+| fn | 24 | 11 | · | 5 | · | 1 | 7 | · | · |
 | foreign | 16 | 1 | · | 7 | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
@@ -151,7 +151,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
 | reactive | 121 | 35 | · | 14 | · | 44 | 28 | · | · |
-| refinement | 57 | · | · | 12 | · | 23 | 22 | · | · |
+| refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
@@ -165,7 +165,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 2 | 23 | · | · |
 
-### FAIL (261)
+### FAIL (260)
 
 - `attr-executable-sink/srcdoc-data-forms-neg` (twin · parse-reject)
   - E-PARSE-TRAILING: unexpected `{` after the expression
@@ -404,16 +404,14 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `;``. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `defer/control-flow-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-TYPE-001
-- `defer/duplicate-function-neg` (twin · parse-reject; not in the bootstrap: E-DEFER-DUPLICATE-FUNCTION)
-  - missing E-DEFER-DUPLICATE-FUNCTION
-  - count: E-DEFER-DUPLICATE-FUNCTION fired 0 time(s), expected exactly 1
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `defer/duplicate-function-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `2`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/duplicate-function-no-defer-ok` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `2`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/function-hoist-across-defer` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `";"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -431,7 +429,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 - `defer/stack-fn-calls-fn-before-defer-twin` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `s`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"1"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `defer/unbraced-arm-neg` (twin · parse-reject)
   - E-PARSE-EXPECTED: a `for` body is a block — expected `{`, found `defer` (§49.2.1 `loop-body ::= '{' loop-statement* '}'`)
 - `defer/unsupported-site-neg` (twin · parse-reject)
@@ -605,11 +603,10 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 - `fn/reactive-write-reject` (twin · parse-reject)
   - E-PARSE-ITEM: unexpected text at program level
 - `fn/scope-redeclare-fn-over-param-ok` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `7`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-PARSE-EXPECTED: expected `:`, found `7`
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `8`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `fn/scope-redeclare-neg` (twin · parse-reject)
-  - count: E-SCOPE-REDECLARE fired 2 time(s), expected exactly 3
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"inner"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `x`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -984,10 +981,6 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
   - E-PARSE-TAG: unexpected `(` in the tag `<amount`
   - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
   - E-PARSE-CLOSER: `</program>` closes `<amount>`
-- `refinement/nested-fn-param-reject-rt` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `function`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-PARSE-EXPECTED: expected `)`, found `:`
-  - E-PARSE-EXPR: expected an expression, found `:`
 - `refinement/string-shape-literal-violation-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-001)
   - missing E-CONTRACT-001
   - severity: E-CONTRACT-001 did not fire (expected error)
@@ -1183,7 +1176,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (327)
+### PASS / CODES-ONLY (332)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1339,6 +1332,11 @@ none
 - `fn/async-decl-reject` — PASS · TWIN
 - `fn/deterministic-call-clean` — PASS · TWIN
 - `fn/dom-mutation-pure-value-clean` — PASS · TWIN · VACUOUS
+- `fn/nested-closure-mutates-outer-let-rt` — PASS · TWIN
+- `fn/nested-fn-mutates-outer-reject` — PASS · TWIN
+- `fn/nested-mutual-recursion-rt` — PASS · TWIN
+- `fn/nested-not-visible-outside-neg` — PASS · TWIN
+- `fn/nested-redeclare-local-neg` — PASS · TWIN
 - `fn/scope-redeclare-nested-ok` — PASS · TWIN
 - `fn/sync-decl-clean` — PASS · TWIN
 - `foreign/foreign-lang-in-program-neg` — PASS
@@ -1513,7 +1511,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (638)
+### UNSUPPORTED (639)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1630,8 +1628,8 @@ none
 - `defer/deferred-server-call-completes` — twin · bootstrap-unsupported: a client call of the server function `ping` (§19.9.10) stands in a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)
 - `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
-- `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a nested `function inner` inside a block of the function body (an `if`, a loop, a `match` arm, a `given` or `defer` body) — the bootstrap builds a nested function only at the TOP LEVEL of a function b
+- `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a failable nested function `function inner(…)!` — the language allows it (§7.3.1, §19.4); the bootstrap does not build a nested `!` function yet (INTERIM — its failures, `?` propagation and transactio
 - `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `o.a = …` writes a part of `o`, whose type is not known here — annotate it (`let o: T = …`)
 - `defer/server-block-nested-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/server-callee-error-total-handler` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -2015,6 +2013,7 @@ none
 - `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/local-write-forms-reject-rt` — twin · bootstrap-unsupported: `--` is not in bootstrap slice M2 — write `x = x - 1`
 - `refinement/malformed-predicate-param-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/nested-fn-param-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/reassign-cell-accept-neg` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/reassign-cell-reject-rt` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/reassign-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
@@ -2062,9 +2061,9 @@ none
 - `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `.preventDefault(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.r
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
 - `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
-- `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
+- `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: a call of `inner`, which waits for the server (§13.2: it calls a server function), stands in a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §1
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
-- `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: the predicate of `.some(…)` returns a value whose type the compiler cannot resolve — it must return a `bool`
+- `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: a call of `inner`, which waits for the server (§13.2: it calls a server function), stands in a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §1
 - `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: `on mount { }` (§6.7.1a) is not in the bootstrap yet; it is refused here by name rather than misread — write `<onMount>${ … }</>` (§6.7.1a, S449)
 - `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
