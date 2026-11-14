@@ -1525,13 +1525,24 @@ ${
     }
     export type LexRun:struct = { tokens: Token[], end: int }
 
-    // The cursor at offset `pos` of `src`, with its line/col.
+    // The cursor at offset `pos` of `src` (clamped to the source), with its line/col —
+    // the cursor advance1 reaches from makeCursor: line 1 + the line feeds before it,
+    // col 1 + the code units since the last one. s477 (s477-boot-compile-perf): read
+    // from the line feeds, not by advancing one code unit (a new Cursor) at a time —
+    // every lexed region did that from offset 0 (O(regions × file)).
     fn cursorAt(src: string, pos: int) -> Cursor {
-        let c: Cursor = makeCursor(src)
-        while (c.pos < pos && !isEof(c)) {
-            c = advance1(c)
+        let end: int = pos
+        if (end > src.length) end = src.length
+        if (end <= 0) return makeCursor(src)
+        let line: int = 1
+        let last: int = -1
+        let k: int = src.indexOf("\n")
+        while (k >= 0 && k < end) {
+            line = line + 1
+            last = k
+            k = src.indexOf("\n", k + 1)
         }
-        return c
+        return { source: src, pos: end, line: line, col: end - last }
     }
 
     fn atDepthZero(st: LexState) -> boolean {

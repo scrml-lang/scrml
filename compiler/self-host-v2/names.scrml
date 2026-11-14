@@ -26,8 +26,11 @@ ${
         Runtime,
     }
 
-    export type NameEntry:struct = { key: string, name: string }
-    export type NameTable:struct = { entries: NameEntry[] }
+    // `names[i]` is the name minted for `keys[i]` (keyText), in minting order. s477
+    // (s477-boot-compile-perf): two parallel tapes, searched by indexOf — a tape of
+    // { key, name } entries was walked entry by entry on every mint and lookup.
+    // `nexts[j]`: where mint resumes its candidate search for the hint `bases[j]` (see mint).
+    export type NameTable:struct = { keys: string[], names: string[], bases: string[], nexts: int[] }
 
     // A total, injective encoding of a key (compared as a string).
     export fn keyText(k: NameKey) -> string {
@@ -42,7 +45,7 @@ ${
         }
     }
 
-    export fn emptyNames() -> NameTable { return { entries: [] } }
+    export fn emptyNames() -> NameTable { return { keys: [], names: [], bases: [], nexts: [] } }
 
     // JavaScript reserved words + the globals emitted code references.
     export fn isReserved(n: string) -> boolean {
@@ -117,40 +120,48 @@ ${
     }
 
     fn taken(t: NameTable, n: string) -> boolean {
-        for (const e of t.entries) {
-            if (e.name == n) return true
-        }
-        return false
+        return t.names.indexOf(n) >= 0
     }
 
     fn hasKey(t: NameTable, k: string) -> boolean {
-        for (const e of t.entries) {
-            if (e.key == k) return true
-        }
-        return false
+        return t.keys.indexOf(k) >= 0
     }
 
-    // Mint a name for `key` from `hint` (idempotent per key).
+    // Mint a name for `key` from `hint` (idempotent per key): the first of `base`,
+    // `base_1`, `base_2`, … that is neither reserved nor taken.
+    // s477 (s477-boot-compile-perf): a table only grows, so every candidate a previous
+    // mint of the same base passed over (or took) stays reserved or taken — the search
+    // resumes where that one stopped (`nexts`) instead of re-testing them all (k mints of
+    // one hint, e.g. a local name every function uses, were O(k²) candidates).
     export fn mint(t: NameTable, key: NameKey, hint: string) -> NameTable {
         const k: string = keyText(key)
         if (hasKey(t, k)) return t
         const base: string = sanitize(hint)
+        const bi: int = t.bases.indexOf(base)
         let cand: string = base
         let n = 1
+        if (bi >= 0) {
+            n = t.nexts[bi]
+            cand = base + "_" + n
+            n = n + 1
+        }
         while (isReserved(cand) || taken(t, cand)) {
             cand = base + "_" + n
             n = n + 1
         }
-        return { entries: t.entries.concat([{ key: k, name: cand }]) }
+        if (bi >= 0) {
+            return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases,
+                     nexts: t.nexts.slice(0, bi).concat([n]).concat(t.nexts.slice(bi + 1)) }
+        }
+        return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases.concat([base]), nexts: t.nexts.concat([n]) }
     }
 
     // The minted name for `key`. An unminted key is a printer bug; it prints as
     // a name that cannot be a minted one and will fail loudly when run.
     export fn nameOf(t: NameTable, key: NameKey) -> string {
         const k: string = keyText(key)
-        for (const e of t.entries) {
-            if (e.key == k) return e.name
-        }
+        const i: int = t.keys.indexOf(k)
+        if (i >= 0) return t.names[i]
         return "unminted$" + k.replaceAll(":", "_").replaceAll(".", "_")
     }
 }

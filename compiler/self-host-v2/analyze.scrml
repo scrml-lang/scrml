@@ -828,7 +828,15 @@ ${
         hostSites: HostSite[],  // s472 (boot-math-port): every wrapper-shaped host call, judged (hostWrappers)
         consts: ConstInfo[],    // s472: the file-scope constants, in link order then source order (constPass)
         succs: FnSucc[],        // s475: each failable function's INFERRED success type, where proven (failableSuccs)
+        // s477 (s477-boot-compile-perf): facts the resolver asked per element / per name and
+        // re-derived from the whole file each time, read once here
+        singles: string[],      // the program's cells declared `single` (singleCells)
+        hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
     }
+
+    // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
+    // imports), read once for a pass that asks per name
+    type FileImports:struct = { file: string, imps: AImport[] }
 
     // s475 (s475-boot-handled-landing-check) — a failable function's success type,
     // inferred from its returns (§19.4.1: no success-type slot). The resolver reads it
@@ -988,7 +996,12 @@ ${
     // Every TypeItem of a file, the program's included.
     fn typeItems(items: AItem[]) -> ATypeDecl[] {
         let out: ATypeDecl[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(typeItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(typeItemOf(it))   // s451: a second top-level program is E-PROGRAM-002, not read
+            i = i + 1
+        }
         return out
     }
 
@@ -1883,11 +1896,14 @@ ${
         let st: AS = st0
         let out: DeclStub[] = []
         for (const f of files) {
+            const later: boolean[] = laterPrograms(f.items)
+            let i = 0
             for (const it of f.items) {
                 const k: AItemK = it.k
-                const r: RDeclStubs = isLaterProgram(f.items, it) ? noStubs(st) : declStubOf(k, f.path, entry, st)
+                const r: RDeclStubs = later[i] ? noStubs(st) : declStubOf(k, f.path, entry, st)
                 out = out.concat(r.ds)
                 st = r.st
+                i = i + 1
             }
         }
         return { ds: out, st: st }
@@ -2002,17 +2018,26 @@ ${
     // it. The governing sentences are quoted in
     // docs/changes/s451-boot-program-shape/progress.md.
 
-    // Is this item the second (or later) top-level `<program>` of its file?
+    // For each item of `items`: is it the second (or later) top-level `<program>` of its file?
     // §40.8: "A second (or later) top-level `<program>` in the SAME file …
     // SHALL be `E-PROGRAM-002`" — it is reported (programShapeDiags), and no
     // stub is minted for it, so its body is not analyzed as the program.
-    fn isLaterProgram(items: AItem[], it: AItem) -> boolean {
+    // s477 (s477-boot-compile-perf): one pass over `items` for all of them (a per-item
+    // question scanned the items before it: O(items²) per file). `at[j]`: items[j] is a
+    // program item after another one; an item answers for the FIRST item of its nid.
+    fn laterPrograms(items: AItem[]) -> boolean[] {
+        let nids: int[] = []
+        let at: boolean[] = []
         let seen = 0
         for (const x of items) {
-            if (x.nid == it.nid) return seen > 0 && programOfItem(x) is given
-            if (programOfItem(x) is given) seen = seen + 1
+            const isProgram: boolean = programOfItem(x) is given
+            nids = nids.concat([x.nid])
+            at = at.concat([seen > 0 && isProgram])
+            if (isProgram) seen = seen + 1
         }
-        return false
+        let out: boolean[] = []
+        for (const it of items) { out = out.concat([at[nids.indexOf(it.nid)]]) }
+        return out
     }
 
     fn programOfItem(it: AItem) -> AProgram | not {
@@ -5593,6 +5618,28 @@ ${
 
     // The `import:<tag>` declaration of `file` that binds `local` — the LAST
     // one (§41.7: a later import of a name wins); `not` when none does.
+    // s477 (s477-boot-compile-perf): hostImportBinding(g.files, file, local) from the host
+    // imports read once per file (Globals.hostImps) — the resolver asks it per name.
+    fn hostBinding(g: Globals, file: string, local: string) -> AImport | not {
+        let found: AImport | not = not
+        for (const f of g.hostImps) {
+            if (f.file == file) {
+                for (const h of f.imps) {
+                    for (const n of h.names) {
+                        if (n.name == local) found = h
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    fn hostImportsByFile(files: FileAst[]) -> FileImports[] {
+        let out: FileImports[] = []
+        for (const f of files) { out = out.concat([{ file: f.path, imps: hostImportsOfItems(f.items) }]) }
+        return out
+    }
+
     fn hostImportBinding(files: FileAst[], file: string, local: string) -> AImport | not {
         let found: AImport | not = not
         for (const f of files) {
@@ -5893,7 +5940,12 @@ ${
 
     fn fnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(fnItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(fnItemOf(it))   // s451: a second top-level program is E-PROGRAM-002, not read
+            i = i + 1
+        }
         return out
     }
 
@@ -5913,7 +5965,12 @@ ${
     // s472 — the file-scope constants of `items` (a `<program>`'s `${ }` included), in source order.
     fn constItems(items: AItem[]) -> AConst[] {
         let out: AConst[] = []
-        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(constItemOf(it)) }
+        const later: boolean[] = laterPrograms(items)
+        let i = 0
+        for (const it of items) {
+            if (!later[i]) out = out.concat(constItemOf(it))
+            i = i + 1
+        }
         return out
     }
 
@@ -6310,7 +6367,7 @@ ${
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
-                             succs: failableSuccs(icx, rf.fs, ownTab) }
+                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files) }
         return { g: g, st: st }
     }
 
@@ -7092,7 +7149,7 @@ ${
             return plain(l.ty, st2)
         }
         // s472 (boot-math-port): an `import:host` binding of this file (§21.3.1)
-        const hb: AImport | not = hostImportBinding(env.g.files, env.file, name)
+        const hb: AImport | not = hostBinding(env.g, env.file, name)
         if (hb is given) return resolveHostBinding(env, e, name, hb, st)
         // §66.5.2: inside a declaration's renders / initializers, its fields are
         // bare read-only projections of the current instance.
@@ -7152,7 +7209,7 @@ ${
     // (a local or parameter, a host binding, the current declaration's prop or field).
     fn nsShadowed(env: Env, n: string) -> boolean {
         if (lookupLocal(env, n) is given) return true
-        if (hostImportBinding(env.g.files, env.file, n) is given) return true
+        if (hostBinding(env.g, env.file, n) is given) return true
         const d: DeclSrc | not = ctxDecl(env)
         if (d is given) {
             if (!d.isProgram && fieldIndex(d.info, n) >= 0) return true
@@ -8024,10 +8081,12 @@ ${
     // function has no success-type slot (§19.4.1): not judged here.
     fn fallOffPass(g: Globals, t: Tables) -> Diag[] {
         let out: Diag[] = []
+        // s477 (s477-boot-compile-perf): the functions in scope in each file, read once (hasValueReturn)
+        const scoped: FileFns[] = fnsInScopes(g.fns, g.te.link)
         for (const fs of g.fns) {
             // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
             // s473: a `<host>` binding has no scrml body (§21.3.3 — its target is the function)
-            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !isHostBindFn(g.files, fs)) out = out.concat(fallOffDiags(g, t, fs))
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !isHostBindFn(g.files, fs)) out = out.concat(fallOffDiags(g, t, scoped, fs))
         }
         return out
     }
@@ -8036,7 +8095,7 @@ ${
     // a declared-return function (`-> T | not` included) `return`s on every path — `return not;`
     // written out; a function with no return type returns nothing, and if any path of it returns
     // a value, every path must.
-    fn fallOffDiags(g: Globals, t: Tables, fs: FnSrc) -> Diag[] {
+    fn fallOffDiags(g: Globals, t: Tables, scoped: FileFns[], fs: FnSrc) -> Diag[] {
         const b: ABlock = fs.f.body
         const r: AType | not = fs.f.ret
         const file: string = fs.info.file
@@ -8045,7 +8104,7 @@ ${
         // returns a value, every path returns one (or fails) — a bare `return` included
         // (in a `!` function it is a SUCCESS carrying nothing: `.Ok(v)` would take it)
         if (fs.info.failable || r is not) {
-            if (hasValueReturn(g, file, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
+            if (hasValueReturn(g, scoped, file, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
             return []
         }
         if (fs.info.ret is not || declaresVoid(r)) return []
@@ -8109,13 +8168,16 @@ ${
                 v = v.concat([f.info.sym.id])
             }
         }
+        // s477 (s477-boot-compile-perf): `fs` and `lk` are fixed — the functions in scope in each
+        // file are read once, not once per function per round
+        const scoped: FileFns[] = fnsInScopes(fs, lk)
         let changed = true
         while (changed) {
             changed = false
             let next: int[] = []
             for (const f of fs) {
                 if (v.indexOf(f.info.sym.id) >= 0) {
-                    if (fnDeclaredVoid(f) || !valueReturnIn(fnsInScope(fs, lk, f.info.file), v, f.f.body)) {
+                    if (fnDeclaredVoid(f) || !valueReturnIn(fnsInScopeOf(scoped, fs, lk, f.info.file), v, f.f.body)) {
                         next = next.concat([f.info.sym.id])
                     } else {
                         changed = true
@@ -8140,8 +8202,8 @@ ${
 
     // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included) — a `return`
     // whose operand is not `void` (`return f()` of a void `f` passes `void` on)?
-    fn hasValueReturn(g: Globals, file: string, b: ABlock) -> boolean {
-        return valueReturnIn(fnsInScope(g.fns, g.te.link, file), g.voids, b)
+    fn hasValueReturn(g: Globals, scoped: FileFns[], file: string, b: ABlock) -> boolean {
+        return valueReturnIn(fnsInScopeOf(scoped, g.fns, g.te.link, file), g.voids, b)
     }
 
     // s472: the functions whose names are in scope in `file` — one per name, so
@@ -8157,6 +8219,31 @@ ${
             for (const local of boundAs(lk, file, NameKind.KFn, f.info.name, f.info.file)) { out = out.concat([{ local: local, id: f.info.sym.id }]) }
         }
         return out
+    }
+
+    // s477 (s477-boot-compile-perf): fnsInScope(fs, lk, file) for every file a function of `fs`
+    // is declared in, each read once — the per-function callers re-read it per function
+    // (O(functions² × names)).
+    type FileFns:struct = { file: string, fns: ScopedFn[] }
+
+    fn fnsInScopes(fs: FnSrc[], lk: Linkage) -> FileFns[] {
+        let out: FileFns[] = []
+        let files: string[] = []
+        for (const f of fs) {
+            if (files.indexOf(f.info.file) < 0) {
+                files = files.concat([f.info.file])
+                out = out.concat([{ file: f.info.file, fns: fnsInScope(fs, lk, f.info.file) }])
+            }
+        }
+        return out
+    }
+
+    // fnsInScope(fs, lk, file), read from `scoped` when it holds `file`
+    fn fnsInScopeOf(scoped: FileFns[], fs: FnSrc[], lk: Linkage, file: string) -> ScopedFn[] {
+        for (const s of scoped) {
+            if (s.file == file) return s.fns
+        }
+        return fnsInScope(fs, lk, file)
     }
 
     fn valueReturnIn(fs: ScopedFn[], v: int[], b: ABlock) -> boolean {
@@ -18923,8 +19010,7 @@ ${
             return resolveUse(env, e, d, st)
         }
         // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
-        const sd: ADecl | not = singleProgramField(env, e.tag)
-        if (sd is given) return singleInstantiated(env, e, st)
+        if (singleProgramField(env, e.tag)) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
         // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
@@ -20543,15 +20629,25 @@ ${
         return ""
     }
 
-    // s442: the program's cell `name` when it was declared `single` (§66.13.3).
-    fn singleProgramField(env: Env, name: string) -> ADecl | not {
-        if (programInfo(env) is not) return not
-        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
-        if (ps is not) return not
-        for (const d of fieldDecls(ps)) {
-            if (d.name == name && hasFlag(d.mods, "single")) return d
+    // s442: is the program's cell `name` declared `single` (§66.13.3)?
+    fn singleProgramField(env: Env, name: string) -> boolean {
+        if (programInfo(env) is not) return false
+        return env.g.singles.indexOf(name) >= 0
+    }
+
+    // s477 (s477-boot-compile-perf): the names of the program's cells declared `single`,
+    // once (Globals.singles) — singleProgramField re-read every program cell per element.
+    fn singleCells(decls: DeclSrc[], program: Sym) -> string[] {
+        let ps: DeclSrc | not = not
+        for (const d of decls) {
+            if (ps is not && d.info.sym.id == program.id) ps = d
         }
-        return not
+        if (ps is not) return []
+        let out: string[] = []
+        for (const d of fieldDecls(ps)) {
+            if (hasFlag(d.mods, "single")) out = out.concat([d.name])
+        }
+        return out
     }
 
     fn singleInstantiated(env: Env, e: AElem, st: AS) -> AS {
@@ -21644,7 +21740,8 @@ ${
 
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
-                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs }
+                 errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
+                 singles: g.singles, hostImps: g.hostImps }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -22185,12 +22282,13 @@ ${
 
     // The `from` of an import in `file` that brings `name` into its scope — a
     // plain `import` whose target (a user OR a stdlib file) exports it — else "".
-    fn importBringing(files: FileAst[], lk: Linkage, file: string, name: string) -> string {
-        const paths: string[] = filePaths(files)
-        for (const f of files) {
-            if (f.path == file) {
-                for (const imp of importsOfItems(f.items)) {
-                    const target: string = importTarget(f.path, imp.from, paths)
+    // s477 (s477-boot-compile-perf): `imps` — importsByFile of the files, `paths` their
+    // filePaths, both read once by the caller (this is asked per file-scope name).
+    fn importBringing(imps: FileImports[], paths: string[], lk: Linkage, file: string, name: string) -> string {
+        for (const f of imps) {
+            if (f.file == file) {
+                for (const imp of f.imps) {
+                    const target: string = importTarget(f.file, imp.from, paths)
                     if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
@@ -22234,12 +22332,20 @@ ${
         return false
     }
 
+    fn importsByFile(files: FileAst[]) -> FileImports[] {
+        let out: FileImports[] = []
+        for (const f of files) { out = out.concat([{ file: f.path, imps: importsOfItems(f.items) }]) }
+        return out
+    }
+
     fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
         const ns: FileName[] = fileNames(t, lk)
+        const imps: FileImports[] = importsByFile(files)
+        const paths: string[] = filePaths(files)
         let out: Diag[] = []
         for (const n of ns) {
             if (!reportedElsewhereAt(files, lk, t, ns, n)) {
-                const imported: string = importBringing(files, lk, n.file, n.name)
+                const imported: string = importBringing(imps, paths, lk, n.file, n.name)
                 // linkage reports a known kind beside an import of its name, at the import
                 if (n.kind == "cell" || imported == "") {
                     // the first earlier binding `n` clashes with, in a pair no other pass reports
@@ -23329,6 +23435,37 @@ ${
         return out
     }
 
+    // s477 (s477-boot-compile-perf): fnwIn(ws, lk, file) for each file a function with a call
+    // key (`()…`) is declared in — what one fixpoint pass of fnWrites reads.
+    type FnWScope:struct = { file: string, ws: FnW[] }
+
+    fn fnwScopes(ws: FnW[], lk: Linkage) -> FnWScope[] {
+        let out: FnWScope[] = []
+        let files: string[] = []
+        for (const w of ws) {
+            if (files.indexOf(w.file) < 0 && hasCallKey(w.keys)) {
+                files = files.concat([w.file])
+                out = out.concat([{ file: w.file, ws: fnwIn(ws, lk, w.file) }])
+            }
+        }
+        return out
+    }
+
+    fn hasCallKey(keys: string[]) -> boolean {
+        for (const k of keys) {
+            if (k.indexOf("()") == 0) return true
+        }
+        return false
+    }
+
+    // fnwIn(ws, lk, file), read from `scoped` when it holds `file`
+    fn fnwScoped(scoped: FnWScope[], ws: FnW[], lk: Linkage, file: string) -> FnW[] {
+        for (const s of scoped) {
+            if (s.file == file) return s.ws
+        }
+        return fnwIn(ws, lk, file)
+    }
+
     export fn callKeys(ws: FnW[], name: string) -> string[] {
         if (!hasFnNamed(ws, name)) return ["*"]
         return fnKeysNamed(ws, name)
@@ -23421,13 +23558,16 @@ ${
         while (changed && pass < ws.length + 2) {
             changed = false
             let next: FnW[] = []
+            // s477 (s477-boot-compile-perf): `ws` is fixed for the whole pass, so the write sets in
+            // scope in a file are read once per pass and file (fnwIn was re-run per call key)
+            const scoped: FnWScope[] = fnwScopes(ws, lk)
             for (const w of ws) {
                 let keys: string[] = w.keys
                 for (const k of w.keys) {
                     if (k.indexOf("()") == 0) {
                         // the callee's own `()` keys name functions in ITS file's scope — they reach
                         // this set already resolved (the callee's closure), never re-read here
-                        for (const c of callKeys(fnwIn(ws, lk, w.file), k.substring(2))) {
+                        for (const c of callKeys(fnwScoped(scoped, ws, lk, w.file), k.substring(2))) {
                             if (keys.indexOf(c) < 0 && c.indexOf("()") != 0) {
                                 keys = keys.concat([c])
                                 changed = true
