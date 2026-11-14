@@ -96,6 +96,9 @@
 [esm] conformance/cases/reactive/no-write-own-init-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/reactive/no-write-unproven-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/reactive/s437-r5-template-cell-read-function-body/case.scrml  # emit-client-esm: Unexpected character '@'
+[esm] conformance/cases/reactive/tape-bound-append-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
+[esm] conformance/cases/reactive/tape-bound-append-trap-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
+[esm] conformance/cases/reactive/tape-insert-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
 [esm] conformance/cases/server-db/sql-delete-reflects-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
 [esm] conformance/cases/server-db/sql-get-single-row-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
 [esm] samples/compilation-tests/error-004-in-logic.scrml  # emit-client-esm: The keyword 'let' is reserved
