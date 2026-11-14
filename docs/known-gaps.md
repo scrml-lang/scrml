@@ -31036,6 +31036,7 @@ scripts/bootstrap-conformance.ts reports a case expecting E-CTX-003 / E-CTX-001 
 
 ### g-impl1-bootstrap-build-rewrites-string-literals-s473 — impl#1, compiling `compiler/self-host-v2/*.scrml`, rewrites `fn` → `function`, `X.y` → `X_y` and `is .V` inside string literals — `NEW S473; MED; open`
 Found by lane `s473-boot-named-refusals` (#1691): its refusal table had to build the words `fn`, `X.y` and `is .V` from pieces (`FN` / `DOT` / `IS`) because impl#1 rewrote them inside the bootstrap's own string literals. It also text-scans `fn` bodies for `T =`. Same root as g-match-arm-string-literal-fn-rewritten-to-function and g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant (text-level rewrites, not literal-aware), but this one corrupts the bootstrap build itself: any message, table or test string in the bootstrap source holding those words is silently changed. Workaround in tree: `refusals.scrml` piece-built words.
+**Recurred S477 (lane `s477-boot-nested-fn`, fix round F3, PR #1831):** the text "`fn`" in a match-arm string in `analyze.scrml` `resolveHost` came out as "`function`" in the compiled bootstrap bundle. Worked around by building the text outside the match (`clockInPureText`). Policy: impl#1 gets no work (S471 / S475), so this stays carried; the workaround pattern is what new bootstrap code should use.
 <!-- @gap id=g-impl1-bootstrap-build-rewrites-string-literals-s473 sev=MED status=open locus=compiler/src/codegen/rewrite.ts(rewriteFnKeyword ~2003 + rewriteEnumVariantAccess ~2247 + the is-predicate pass) prov=dispatch:s473-boot-named-refusals(pr.md) -->
 
 ### g-boot-named-refusal-drops-unrelated-generic-errors-s473 — when a named-refusal row fires, generic errors elsewhere in the file are dropped too, not only the construct's cascade — `NEW S473; LOW; open`
@@ -31688,3 +31689,70 @@ The refusal itself is an unbuilt case, not a ruling, so the message should say w
 
 <!-- @gap id=g-boot-ownedlocals-kids-blind-spots-s477 sev=LOW status=open locus=compiler/self-host-v2/walk.scrml(kids ~:97 — skips FSettled, Suspend.bind, Attempt.result) prov=review:s477-1824 -->
 ### g-boot-ownedlocals-kids-blind-spots-s477 — `walk.kids` does not descend into `FSettled`, `Suspend.bind` or `Attempt.result`, so the owned-locals scan built on it cannot see a use of a local there; no escape found by the #1824 review, but the scan's soundness rests on those nodes never carrying an alias — `NEW S477; LOW; open (hardening)`
+
+## §S477 review follow-ups (round 2) — LOW items from the #1826 / #1828 / #1830 / #1831 / #1835 reviews and fix rounds, and S477 tooling lanes
+
+Loci inside a PR that was still open when this was filed (#1828, #1830, #1831) are named with that PR; the symbol is the same once it merges. The impl#1 string-literal item from the #1831 fix round (`fn` printed as `function` inside a match-arm string in `resolveHost`) is a recurrence of `g-impl1-bootstrap-build-rewrites-string-literals-s473` and is recorded there, not filed again.
+
+<!-- @gap id=g-hook-single-shard-test-pollution-s477 sev=LOW status=open locus=scripts/test-sharded.ts+scripts/git-hooks/pre-commit(hook shard runner) prov=lane:s477-boot-nested-fn -->
+### g-hook-single-shard-test-pollution-s477 — the pre-commit hook with `SCRML_HOOK_SHARDS=1` fails `compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js` every time (test-order pollution; it passes alone), and the default shard count hits the 3072 MB per-shard ceiling under parallel lanes — `NEW S477; LOW; open`
+
+Workaround in use: `SCRML_HOOK_SHARD_MEM_MB=4608`. Who pays: every lane that commits while other lanes run. It must either raise the ceiling by hand or fall back to one shard, and one shard fails on an unrelated test.
+
+<!-- @gap id=g-test-import-host-js-decorators-timeout-flake-s477 sev=LOW status=open locus=compiler/tests/integration/import-host.test.js("decorators and JSX in a .js host" ~:652) prov=lane:s477(pre-push) -->
+### g-test-import-host-js-decorators-timeout-flake-s477 — pre-push timing flake: "a .js host module is parsed the way Bun loads it > decorators and JSX in a .js host" timed out at 5005 ms under load — `NEW S477; LOW; open`
+
+The test is not wrong; it runs too close to the default 5 s timeout when lanes run in parallel. Fix: give the test its own timeout, or make the host parse it measures cheaper.
+
+<!-- @gap id=g-boot-pending-write-reset-on-message-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(pendResetDeps ~:30865 / write-request refusal) prov=review:s477-1826(F1) -->
+### g-boot-pending-write-reset-on-message-s477 — `reset-on=` on a locked WRITE-class pending cell is refused with a message saying it "re-runs whenever a cell it reads changes", which is false (its deps come from `reset-on=`), and the message has no INTERIM tag or gap; `reset(@who)` on the same cell is accepted, which is asymmetric with §6.8.4 rule 1 — `NEW S477; LOW; open`
+
+<!-- @gap id=g-spec-pending-reset-then-write-order-s477 sev=LOW status=open locus=compiler/SPEC.md(§13.9.4 rules 2–3) prov=review:s477-1826(S1) -->
+### g-spec-pending-reset-then-write-order-s477 — a SPEC reading is owed: in `reset(@who); @who = "z";` in one handler, the load wins (the refetch is queued to the end of the batch), and §13.9.4 rules 2–3 do not say when a run triggered by a reset starts — `NEW S477; LOW; open (reading owed)`
+
+Today's behaviour is a choice the implementation made, not one the SPEC made. A PA reading, or an owner ruling, should say whether the author's later write or the reset's reload wins.
+
+<!-- @gap id=g-boot-pendcalldeps-open-drops-deps-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(pendCallDeps ~:30486 → callReach ~:30321) prov=review:s477-1826(S2) -->
+### g-boot-pendcalldeps-open-drops-deps-s477 — `pendCallDeps` calls `callReach` with no placement facts; `callReach` returns `cells: []` when one call's reach is open, which throws away the deps it already collected, and `pendCallDeps` never checks `open` — `NEW S477; LOW; open (hardening)`
+
+Unreachable today. If it becomes reachable, a pending cell would track too few cells and show stale data, so `pendCallDeps` should refuse, or treat the cell as tracking everything, when the reach is open.
+
+<!-- @gap id=g-boot-defer-tdz-overrefusal-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(nestedTdz ~:22618; PR #1831) prov=review:s477-1831(F4) -->
+### g-boot-defer-tdz-overrefusal-s477 — `defer @hits = early();` written before `let k` is refused as a TDZ error, though it is safe when no exit comes before the binding; the check needs an "exit before the binding" rule — `NEW S477; LOW; open`
+
+It fails closed (an over-refusal, not a hole). Who pays: an author who has to move the `defer` below the binding for no reason.
+
+<!-- @gap id=g-boot-bound-branch-literal-static-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(boundValue ~:23893; PR #1830) prov=lane:s477-boot-tape-bounds(fix1) -->
+### g-boot-bound-branch-literal-static-s477 — `const xs: int[1..=2] = @c ? [1,2,3,4,5] : [1]` (and match arms whose values are array literals) traps at run time (E-WRITE-INVARIANT-RT) instead of being a compile error, though each branch could be judged statically — `NEW S477; LOW; open`
+
+It fails closed: the trap fires before the bad value is stored. Judging each branch's literal length at compile time would move the error to compile time.
+
+<!-- @gap id=g-boot-bound-channel-cells-unprobed-s477 sev=LOW status=open locus=searched:compiler/self-host-v2/analyze.scrml(boundChecks / boundValue on PR #1830 — no channel-cell case found) prov=lane:s477-boot-tape-bounds(fix1) -->
+### g-boot-bound-channel-cells-unprobed-s477 — a bounded tape held in a CHANNEL cell has not been probed for the length check — `NEW S477; LOW; open (unprobed)`
+
+Not known to be broken. A probe should write an over-long value into a bounded channel cell, both from the server and from a peer, and confirm the write is refused or traps.
+
+<!-- @gap id=g-boot-scaling-test-margin-s477 sev=LOW status=open locus=compiler/self-host-v2/slice-m4/compile-scaling-s477.test.js(header + bound 3.0) prov=review:s477-1835(F2) -->
+### g-boot-scaling-test-margin-s477 — the compile-scaling test's bound is 3.0 against a measured 2.48–2.57 on head (about a 17% margin), and its header does not record the 2.5× floor or the super-linear terms that remain — `NEW S477; LOW; open`
+
+The terms to record: `sccOrder`, the `cursorAt` LF count, the `fnErr` / `capOwner` lookups, and the `OnceBinds` / `laterPrograms` list building. Who pays: whoever next sees the test go red under load, or sees it stay green while one of those terms grows.
+
+<!-- @gap id=g-boot-dev-bench-restore-on-kill-s477 sev=LOW status=open locus=scripts/boot-dev-rebuild-bench.ts(benchDevRebuilds) prov=review:s477-1835(F1) -->
+### g-boot-dev-bench-restore-on-kill-s477 — `scripts/boot-dev-rebuild-bench.ts` rewrites the user's file in place and restores it only at the end, so a killed run leaves a trailing comment in the file; its header also says a regression test drives `benchDevRebuilds`, but no such test exists — `NEW S477; LOW; open`
+
+Fix: work on a copy, or restore in a `finally` / signal handler. Then either write the test or drop that sentence from the header.
+
+<!-- @gap id=g-boot-deep-expr-stack-depth-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(planExpr ~:37108 / planKids ~:37156 / planBinary ~:37212) prov=review:s477-1835(S3) -->
+### g-boot-deep-expr-stack-depth-s477 — a `+` chain of about 7,200–7,700 terms overflows the stack in `planExpr` / `planKids` / `planBinary`, on base and head alike — `NEW S477; LOW; open`
+
+Pre-existing (not caused by #1835). No real program is that deep, but the compiler crashes instead of reporting an error. A depth limit with a named error, or an iterative walk over left-leaning binary chains, would close it.
+
+<!-- @gap id=g-boot-tool-lib-foreign-message-s477 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(foreign-in-server-function refusal text ~:9720; PR #1828) prov=lane:s477-kind-tool-fix(F2) -->
+### g-boot-tool-lib-foreign-message-s477 — a `kind="tool"` program that imports a library holding a `<foreign lang>` block also gets "a foreign code block in a web application's server function", which is the wrong wording for a tool — `NEW S477; LOW; open`
+
+The file is refused anyway (fails closed), so only the message is wrong. It points the author at web-app server artifacts, not at the tool's library import.
+
+<!-- @gap id=g-hook-sharded-prepush-exit-s477 sev=LOW status=open locus=scripts/test-sharded.ts+scripts/git-hooks/pre-push(sharded runner exit status) prov=lane:s477-kind-tool-fix -->
+### g-hook-sharded-prepush-exit-s477 — the sharded pre-push runner exited non-zero with 0 failures (and once printed no counts at all); `SCRML_HOOK_SHARDS=1` passed — `NEW S477; LOW; open`
+
+Who pays: the lane, which cannot tell a real failure from a runner fault and re-runs on one shard. That run then meets `g-hook-single-shard-test-pollution-s477`.
