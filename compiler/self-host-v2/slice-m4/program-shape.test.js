@@ -137,20 +137,24 @@ describe("(A) §4.12.2 — a `<program>` in a program body is NESTED", () => {
   });
   test("the conformance shape: top-level auth refused, nested auth one E-PROGRAM-NESTED-AUTH", () => {
     const c = codes(`<program auth="required">\n<program name="w" auth="Bogus">\n<p>w</p>\n</program>\n<p>home</p>\n</program>\n`);
-    expect(c.sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-AUTH"]);
+    // (s478: the nested program's §4.12.2 error is its one diagnostic — no refusal beside it)
+    expect(c.sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-AUTH"]);
   });
   test("cookie attributes → E-PROGRAM-NESTED-SESSION each; documentary → W-PROGRAM-TITLE-NESTED; app-level → E-PROGRAM-NESTED-ATTR; unknown → W-ATTR-001", () => {
     const c = codes(nested(`sessionExpiry="1h" session-secure="false" title="t" cors="*" ratelimit="1/min" zap="1"`));
-    expect(c).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-SESSION", "E-PROGRAM-NESTED-SESSION", "W-PROGRAM-TITLE-NESTED",
+    expect(c).toEqual(["E-PROGRAM-NESTED-SESSION", "E-PROGRAM-NESTED-SESSION", "W-PROGRAM-TITLE-NESTED",
                        "E-PROGRAM-NESTED-ATTR", "E-PROGRAM-NESTED-ATTR", "W-ATTR-001"]);
   });
   test("the §4.12.2 table's attributes add nothing beyond the refusal; `capabilities=` is still vocabulary-checked", () => {
     expect(codes(nested(`lang="go" db="./x.db" build="make" port="9" autostart="false"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(nested(`capabilities=[teleport]`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-FOREIGN-CAPABILITY-UNKNOWN"]);
+    expect(codes(nested(`capabilities=[teleport]`))).toEqual(["E-FOREIGN-CAPABILITY-UNKNOWN"]);
+  });
+  test("s478 — a nested program with only a WARNING attribute is still refused", () => {
+    expect(codes(nested(`title="t"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "W-PROGRAM-TITLE-NESTED"]);
   });
   test("a program nested two deep is walked too", () => {
     const c = codes(`<program>\n<program name="a">\n<program name="b" auth="none"></program>\n</program>\n</program>\n`);
-    expect(c).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-AUTH"]);
+    expect(c).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-AUTH"]);
   });
 });
 
@@ -284,6 +288,6 @@ describe("(A) §65.3.4 — `<program reset=…>` switches the built-in reset lay
     });
   }
   test("`reset=` on a NESTED program is application-level → E-PROGRAM-NESTED-ATTR (§4.12.2 lists it)", () => {
-    expect(codes(`<program>\n<program name="w" reset="none"></program>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-ATTR"]);
+    expect(codes(`<program>\n<program name="w" reset="none"></program>\n</program>\n`)).toEqual(["E-PROGRAM-NESTED-ATTR"]);
   });
 });
