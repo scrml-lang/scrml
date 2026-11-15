@@ -1605,8 +1605,25 @@ ${
         if (c0 == 47 && peekCode(st.cur, 1) == 62) return true
         if (c0 == 62) return peekCode(st.cur, 1) != 61 && !closesHashRef(st.cur)
         if (!isTrivia(c0)) return false
-        if (lastNeedsOperand(st)) return false
-        return !continuesValue(skipTriviaAhead(st.cur), openTernary(st))
+        const ahead: Cursor = skipTriviaAhead(st.cur)
+        // s478 (attr-operator-residue) — an operator still owed its right
+        // operand does not read on past the TAG's end: a lone `>` / `/>` after
+        // whitespace ends the tag (a `>` at depth 0 "closes the tag"), never
+        // an operand — no expression begins with `>`. The value ends there,
+        // incomplete, and the parser refuses it once (E-ATTR-UNQUOTED-OPERATOR,
+        // operandlessValue); reading on would swallow the rest of the file.
+        if (lastNeedsOperand(st)) return endsTagAt(ahead)
+        return !continuesValue(ahead, openTernary(st))
+    }
+
+    // A lone `>` (not `>=`, not a `<#id>` closer) or `/>` at `c`: the tag's end.
+    // NOTE: a regex literal beginning with `>` after a spaced operator
+    // (`@ok = /> /.test(s)`) would end the tag here — revisit when the bootstrap
+    // lexes regex literals in attribute values.
+    fn endsTagAt(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        if (c0 == 47) return peekCode(c, 1) == 62
+        return c0 == 62 && peekCode(c, 1) != 61
     }
 
     // A ternary `?` read at depth 0 whose `:` is still to come — only then does a

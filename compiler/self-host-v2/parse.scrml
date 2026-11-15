@@ -5975,6 +5975,13 @@ ${
             return { v: AAttrValue.NoValue, mp: d }
         }
         const r3: RExpr = parseAssign(tp3)
+        // s478 r1 — the operand-owed refusal applies only to a value that does
+        // not parse whole: a complete postfix form (`bad()?`, §19.5.4
+        // propagation) is an expression and keeps its own diagnostics.
+        if (r3.tp.diags.length > tp3.diags.length || !atEnd(r3.tp)) {
+            const owed: string = operandlessEnd(tp3)
+            if (owed != "") return operandlessValue(mp, tp3, handler, name, owed)
+        }
         // §5.2.3 / §5.2.4: a `;` ending an unquoted value is reported by scanAttr
         // (bareSequence), which reads the rest of the sequence
         if (isP(r3.tp, ";")) return { v: AAttrValue.Bare(r3.e), mp: mAt(backToMarkup(mp, r3.tp), cur(r3.tp).start) }
@@ -6019,6 +6026,39 @@ ${
             md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted event-handler value is read whole, and it ends in `" + w + "` with no right operand (§5.2). Complete the expression, write the handler as an inline block — `" + name + "={ … }` — or, if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
         } else {
             md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator, and `" + w + "` after it continues it as one (§5.1, §5.2). Parenthesize the expression — `" + name + "=(…)` — or quote it; if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
+        }
+        return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md }
+    }
+
+    // s478 (attr-operator-residue) — the bare value's last token is a punctuation
+    // operator still owed its right operand (`title=@last + >`): the reader
+    // stopped at the tag's `>` / `/>` (lex.scrml bareValueEnds — the tag's end
+    // is never an operand). Returns the operator, or "" when the value ends
+    // complete. Word operators (`in` / `is` / …) are trailingWordOperator's.
+    fn operandlessEnd(tp: TP) -> string {
+        if (tp.toks.length < 2) return ""
+        const t: PTok = tp.toks[tp.toks.length - 2]
+        if (t.cls == TC.Str) return ""
+        for (const op of ["=", "==", "===", "!=", "!==", "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "&&", "||", "??", "&", "|", "!", "?", ":", ".", "?.", "=>", "+=", "-=", "*=", "/=", "%=", "??=", "&&=", "||="]) {
+            if (tk(t, op)) return op
+        }
+        return ""
+    }
+
+    // §5.2 "An unquoted value is read WHOLE (S457)": "A value that cannot be read
+    // whole is REFUSED, once per attribute, never truncated"; "any other
+    // attribute followed by an operator (`title=@a + "x"`, …) is
+    // `E-ATTR-UNQUOTED-OPERATOR`", and an event-handler expression before a
+    // spaced `>` is `E-ATTR-UNQUOTED-OPERATOR` too. The value is recovered whole
+    // and the tag's `>` left in place, so the rest of the file parses normally.
+    fn operandlessValue(mp: MP, tp: TP, handler: boolean, name: string, op: string) -> RValue {
+        const m: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), mp.diags)
+        const text: string = mp.src.substring(mp.pos, m.pos).trim()
+        let md: MP = m
+        if (handler) {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted event-handler value is read whole, and it ends in `" + op + "` with no right operand (§5.2). Complete the expression, or write the handler as an inline block — `" + name + "={ … }`", mp.pos, m.pos)
+        } else {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2), and this one ends in `" + op + "` with no right operand. Parenthesize the expression — `" + name + "=(…)` — or quote it", mp.pos, m.pos)
         }
         return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md }
     }
@@ -7800,7 +7840,7 @@ ${
             .Variant(name: n) :> false
             .Member(obj: o) :> false
             .Call(callee: c) :> false
-            .Unary(op: o) :> false
+            .Unary(op: o) :> o == UnOp.IsGiven || o == UnOp.IsNot   // `is given` / `is not` / `is some` (§5.2: `is` continues the value)
             .ArrayLit(elems: es) :> false
             .ObjectLit(props: ps) :> false
             .Spread(e: s) :> false
