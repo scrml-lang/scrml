@@ -3,7 +3,7 @@
   "description": "§55.1 (D-FORM-6) — the passing side of predicate-applicability. `<age min(18)>: number` (number predicate on a number cell) and `<label length(>=2)>: string` (length on a string cell) are both correctly-typed applications → NO E-TYPE-031. Guards against a false type-mismatch fire on valid predicate/cell pairings.",
   "language-version": "1.0",
   "spec": "§55.1",
-  "rationale": "§55.1 predicate-applicability: `min` applies to `number` cells and `length` applies to `string`-or-`array` cells. With explicit annotations pinning the types, both applications are well-typed and must compile clean. The applicability check only fires on a CONFIDENT mismatch, never on a correct pairing.",
+  "rationale": "§55.1 predicate-applicability: `min` applies to `number` cells and `length` applies to `string`-or-`array` cells. With explicit annotations pinning the types, both applications are well-typed and must compile clean. The applicability check only fires on a CONFIDENT mismatch, never on a correct pairing. S478 (boot-false-positives): both cells are now written (`@label` by a `bind:value`, `@age` by `older()`). As first written nothing wrote them, so their §66 twin is LOCKED (§66.21 row 1, S449 dialect ruling 2: locked \"only when the cell is never written\") — and validators on a value nothing can change are E-VALIDATOR-DEAD (§55.5.2: \"Validators on a value are dead … only when nothing can ever change the value\"), an error unrelated to applicability. The pairings under test are unchanged.",
   "expect": {
     "codes": [],
     "notCodes": ["E-TYPE-031"]

@@ -2,6 +2,9 @@
 ${
     <age min(18)>: number = 25
     <label length(>=2)>: string = "hello"
+    function older() { @age = @age + 1; }
 }
+<input bind:value=@label/>
+<button onclick=older()>older</button>
 <p>${ @age } ${ @label }</p>
 </program>
