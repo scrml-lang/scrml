@@ -8,10 +8,10 @@ ${
 
     function bare() {
         {
-            defer D("x;")
-            D("b;")
+            defer D("x;");
+            D("b;");
         }
-        D("after;")
+        D("after;");
     }
 
     function arm(m: Mode) {
