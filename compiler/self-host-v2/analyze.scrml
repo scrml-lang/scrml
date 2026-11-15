@@ -49,7 +49,7 @@ ${
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
-             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
@@ -59,7 +59,7 @@ ${
     import { isIdentifierText } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
+    import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
     import { PNs, Parsed, parseFileNs, nsOfItems } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
@@ -1071,7 +1071,254 @@ ${
     // s475: `nss` — every namespace import (`import * as ns from "…"`) of every file: `target`
     // the file it resolves to, "" when none (its refusal is checkImports').
     type NsBind:struct = { file: string, ns: string, from: string, target: string }
-    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[] }
+    // s478: `exps` — every file's EXPORT TABLE (exportTables): what an import of the file binds.
+    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[], exps: ExpTable[] }
+
+    // ---- s478 (s478-boot-modules): a file's exports — its own and its re-exports ----
+    // SPEC §21.4 (ruling:user-voice-scrml.md S458 "ratify 21.4"):
+    //   "A re-export (named, renamed `export { a as b } from`, or `export * from`) SHALL link
+    //    its source module exactly as an `import` of that specifier does (§21.3). The name it
+    //    binds is the same binding the source module exports: it resolves to the module that
+    //    DECLARES it."
+    //   "`export * from './m.scrml'` SHALL re-export every name `./m.scrml` exports by name …
+    //    including names `./m.scrml` itself re-exports. It SHALL NOT re-export `default`."
+    //   "A name the file exports explicitly — a local export, or a named re-export of that
+    //    name — SHALL take precedence over every `export *` of the file; the stars are not
+    //    consulted for it."
+    //   "A name that two or more `export *` sources of one file resolve to DIFFERENT
+    //    declarations is ambiguous: that file SHALL NOT export it (the ES module rule). …
+    //    The SAME declaration reached through two or more paths (a diamond) is not ambiguous."
+    //   "An `export *` from a module outside the compilation — a stdlib `scrml:` module, a
+    //    `vendor:` module, a plain `.js` file — SHALL NOT be expanded: it exports no names
+    //    from the re-exporting file."
+    // An ExpTable is one file's export namespace, every entry resolved to the DECLARING file:
+    //   `ents` — the names it exports, one entry per exported declaration (a type and a
+    //            function of one name are two, as in OwnName); `from` / `orig` the declaring
+    //            file and the declaration's name there;
+    //   `amb`  — the names its stars bind to different declarations (not exported; an import
+    //            of one by name is E-IMPORT-004 "ambiguous", naming the stars);
+    //   `unexp` — the `from` of every unexpanded star it reaches (outside the compilation);
+    //   `dead` — the names a named re-export of it exports that resolve to nothing: their
+    //            fault is reported at that re-export (E-IMPORT-004 / E-IMPORT-006 / the cycle's
+    //            E-IMPORT-002), so an import of one is not reported again;
+    //   `open` — a star of it reaches a module that resolves to nothing (E-IMPORT-006) or a
+    //            re-export cycle (E-IMPORT-002): a name it lacks may be one only that module
+    //            could supply — §21.4: "A name only that missing module could supply SHALL NOT
+    //            be reported again as E-IMPORT-004 at an importer."
+    type ExpEnt:struct = { name: string, kind: NameKind, from: string, orig: string }
+    type ExpAmb:struct = { name: string, stars: string[] }
+    type ExpTable:struct = { file: string, ents: ExpEnt[], amb: ExpAmb[], unexp: string[], dead: string[], open: boolean }
+    type StarCand:struct = { ent: ExpEnt, star: string }
+
+    // A star re-export's source is outside the compilation (§21.4: not expanded).
+    fn starOutside(from: string) -> boolean {
+        return from.startsWith("scrml:") || from.startsWith("vendor:") || from.endsWith(".js") || from.endsWith(".mjs")
+    }
+
+    fn tableOf(exps: ExpTable[], file: string) -> ExpTable | not {
+        for (const t of exps) {
+            if (t.file == file) return t
+        }
+        return not
+    }
+
+    // The table of `target` among the `done` ones — `not` when it resolves to no file, is the
+    // file itself, or is not read yet (a re-export cycle).
+    fn readyTable(done: ExpTable[], target: string, self: string) -> ExpTable | not {
+        if (target == "" || target == self) return not
+        return tableOf(done, target)
+    }
+
+    // Does `file` export `name`?
+    fn tableHas(exps: ExpTable[], file: string, name: string) -> boolean {
+        const t: ExpTable | not = tableOf(exps, file)
+        if (t is not) return false
+        for (const e of t.ents) {
+            if (e.name == name) return true
+        }
+        return false
+    }
+
+    // The scope entries an import of `name` from `file` brings, bound under `local`: one per
+    // exported declaration of that name — the DECLARING file's (§21.4).
+    fn tableEntries(exps: ExpTable[], file: string, name: string, local: string) -> ScopeName[] {
+        let out: ScopeName[] = []
+        const t: ExpTable | not = tableOf(exps, file)
+        if (t is not) return out
+        for (const e of t.ents) {
+            if (e.name == name) out = out.concat([{ name: local, kind: e.kind, from: e.from, orig: e.orig }])
+        }
+        return out
+    }
+
+    // Every file's table. A file is read once the files its re-exports name are read; a
+    // re-export cycle (reported E-IMPORT-002) is cut at its first file, whose re-exports of a
+    // file not read yet are `dead` / `open` (the cycle is the one error).
+    fn exportTables(files: FileAst[], own: OwnName[], paths: string[]) -> ExpTable[] {
+        let done: ExpTable[] = []
+        let left: FileAst[] = files
+        while (left.length > 0) {
+            let rest: FileAst[] = []
+            let moved = false
+            for (const f of left) {
+                if (reexportsReady(f, paths, done)) {
+                    done = done.concat([exportTable(f, own, paths, done)])
+                    moved = true
+                } else {
+                    rest = rest.concat([f])
+                }
+            }
+            if (!moved) {
+                done = done.concat([exportTable(rest[0], own, paths, done)])
+                rest = rest.slice(1)
+            }
+            left = rest
+        }
+        return done
+    }
+
+    fn reexportsReady(f: FileAst, paths: string[], done: ExpTable[]) -> boolean {
+        for (const r of reexportsOfItems(f.items)) {
+            if (!(r.re == ALink.ReexportAll && starOutside(r.from))) {
+                const target: string = importTarget(f.path, r.from, paths)
+                if (target != "" && (target == f.path || tableOf(done, target) is not)) return false
+            }
+        }
+        return true
+    }
+
+    fn exportTable(f: FileAst, own: OwnName[], paths: string[], done: ExpTable[]) -> ExpTable {
+        let ents: ExpEnt[] = []
+        for (const o of own) {
+            if (o.file == f.path && o.exported) ents = ents.concat([{ name: o.name, kind: o.kind, from: f.path, orig: o.name }])
+        }
+        let explicit: string[] = []
+        for (const e of ents) {
+            if (explicit.indexOf(e.name) < 0) explicit = explicit.concat([e.name])
+        }
+        let dead: string[] = []
+        // the named re-exports: each name resolves to what its source exports under `orig`
+        for (const r of reexportsOfItems(f.items)) {
+            if (r.re == ALink.Reexport) {
+                const src: ExpTable | not = readyTable(done, importTarget(f.path, r.from, paths), f.path)
+                for (const n of r.names) {
+                    let hit = false
+                    if (src is given) {
+                        for (const e of src.ents) {
+                            if (e.name == n.orig) {
+                                ents = ents.concat([{ name: n.name, kind: e.kind, from: e.from, orig: e.orig }])
+                                hit = true
+                            }
+                        }
+                    }
+                    if (!hit && dead.indexOf(n.name) < 0) dead = dead.concat([n.name])
+                    if (explicit.indexOf(n.name) < 0) explicit = explicit.concat([n.name])
+                }
+            }
+        }
+        // the stars: every name their sources export, but an explicit one
+        let cands: StarCand[] = []
+        let amb: ExpAmb[] = []
+        let unexp: string[] = []
+        let open = false
+        for (const r of reexportsOfItems(f.items)) {
+            if (r.re == ALink.ReexportAll) {
+                if (starOutside(r.from)) {
+                    if (unexp.indexOf(r.from) < 0) unexp = unexp.concat([r.from])
+                } else {
+                    const src: ExpTable | not = readyTable(done, importTarget(f.path, r.from, paths), f.path)
+                    if (src is not) {
+                        open = true
+                    } else {
+                        for (const e of src.ents) {
+                            if (explicit.indexOf(e.name) < 0) cands = cands.concat([{ ent: e, star: r.from }])
+                        }
+                        // an ambiguous name of the source is ambiguous here too (ES ResolveExport)
+                        for (const a of src.amb) {
+                            if (explicit.indexOf(a.name) < 0 && !ambHas(amb, a.name)) amb = amb.concat([a])
+                        }
+                        for (const d of src.dead) {
+                            if (explicit.indexOf(d) < 0 && dead.indexOf(d) < 0) dead = dead.concat([d])
+                        }
+                        for (const u of src.unexp) {
+                            if (unexp.indexOf(u) < 0) unexp = unexp.concat([u])
+                        }
+                        if (src.open) open = true
+                    }
+                }
+            }
+        }
+        let seen: string[] = []
+        for (const c of cands) {
+            const nm: string = c.ent.name
+            if (seen.indexOf(nm) < 0 && !ambHas(amb, nm)) {
+                seen = seen.concat([nm])
+                let picked: ExpEnt[] = []
+                let stars: string[] = []
+                let clash = false
+                for (const c2 of cands) {
+                    if (c2.ent.name == nm) {
+                        if (stars.indexOf(c2.star) < 0) stars = stars.concat([c2.star])
+                        if (picked.length > 0 && (picked[0].from != c2.ent.from || picked[0].orig != c2.ent.orig)) clash = true
+                        if (!entHas(picked, c2.ent)) picked = picked.concat([c2.ent])
+                    }
+                }
+                if (clash) {
+                    amb = amb.concat([{ name: nm, stars: stars }])
+                } else {
+                    ents = ents.concat(picked)
+                }
+            }
+        }
+        return { file: f.path, ents: ents, amb: amb, unexp: unexp, dead: dead, open: open }
+    }
+
+    fn ambHas(amb: ExpAmb[], name: string) -> boolean {
+        for (const a of amb) {
+            if (a.name == name) return true
+        }
+        return false
+    }
+
+    fn entHas(es: ExpEnt[], e: ExpEnt) -> boolean {
+        for (const x of es) {
+            if (x.kind == e.kind && x.from == e.from && x.orig == e.orig) return true
+        }
+        return false
+    }
+
+    // Why an import (or a named re-export) of `orig` from `from` — resolving to the file
+    // `target` — binds nothing (§21.3, §21.4). Code "" when it binds, or when another report
+    // owns the failure (a dead name, a module only a missing / cyclic star could supply).
+    fn exportMiss(exps: ExpTable[], from: string, target: string, orig: string) -> NsMiss {
+        const t: ExpTable | not = tableOf(exps, target)
+        if (t is not) return { code: "", why: "" }
+        for (const e of t.ents) {
+            if (e.name == orig) return { code: "", why: "" }
+        }
+        for (const a of t.amb) {
+            if (a.name == orig) {
+                return { code: "E-IMPORT-004", why: "`" + orig + "` is ambiguous in `" + from + "`: its stars " + starList(a.stars) + " bind it to different declarations, so `" + from + "` does not export it (§21.4, the ES module rule) — re-export the one you mean by name there (`export { " + orig + " } from \"" + a.stars[0] + "\";` — an explicit export wins over the stars), or import it from its source directly" }
+            }
+        }
+        if (t.dead.indexOf(orig) >= 0 || t.open) return { code: "", why: "" }
+        if (t.unexp.length > 0) {
+            return { code: "E-IMPORT-004", why: "`" + orig + "` is not exported by `" + from + "` — a name it could reach only through " + starList(t.unexp) + " is not exported: an `export *` from a module outside the compilation is not expanded (§21.4); re-export the name explicitly (`export { " + orig + " } from \"" + t.unexp[0] + "\";`) or import it from the source directly" }
+        }
+        return { code: "E-IMPORT-004", why: "`" + orig + "` is not exported by `" + from + "`" }
+    }
+
+    fn starList(froms: string[]) -> string {
+        let out: string = ""
+        let i = 0
+        for (const s of froms) {
+            if (i > 0 && i == froms.length - 1) out = out + " and "
+            if (i > 0 && i < froms.length - 1) out = out + ", "
+            out = out + "`export * from \"" + s + "\"`"
+            i = i + 1
+        }
+        return out
+    }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
@@ -1148,13 +1395,6 @@ ${
         return boundAs(lk, file, k, name, declFile).length > 0
     }
 
-    fn exportsName(own: OwnName[], file: string, name: string) -> boolean {
-        for (const o of own) {
-            if (o.file == file && o.name == name && o.exported) return true
-        }
-        return false
-    }
-
     // Every declared name of every file: its types, its functions (a
     // `<program>`'s included — typeItems / fnItems), its user declarations
     // (the decl stubs — the program itself is not a name).
@@ -1193,6 +1433,8 @@ ${
     fn linkage(files: FileAst[], own: OwnName[], st0: AS) -> RLinkage {
         let st: AS = st0
         const paths: string[] = filePaths(files)
+        // s478: what each file exports, its re-exports resolved (exportTables, §21.4)
+        const exps: ExpTable[] = exportTables(files, own, paths)
         let scopes: FileScope[] = []
         let nss: NsBind[] = []
         for (const f of files) {
@@ -1241,8 +1483,10 @@ ${
                         importedOrig = importedOrig.concat(["*"])
                     }
                     if (target != "" && !(at0 >= 0 && importedFrom[at0] == target && importedOrig[at0] == "*")) {
-                        for (const o of own) {
-                            if (o.file == target && o.exported) names = names.concat([{ name: nsn + "." + o.name, kind: o.kind, from: target, orig: o.name }])
+                        // s478: its members are its exports, re-exports included (§21.3 rule 1, §21.4)
+                        const tt: ExpTable | not = tableOf(exps, target)
+                        if (tt is given) {
+                            for (const e of tt.ents) { names = names.concat([{ name: nsn + "." + e.name, kind: e.kind, from: e.from, orig: e.orig }]) }
                         }
                     }
                 }
@@ -1251,7 +1495,7 @@ ${
                     // a reserved `_scrml_` / `__scrml_` one is refused at the import (§47.1.1),
                     // as a declaration's is, not only at a use
                     if (n.name != n.orig) st = reservedName(st, f.path, n.span, n.name)
-                    if (target != "" && exportsName(own, target, n.orig)) {
+                    if (target != "" && tableHas(exps, target, n.orig)) {
                         if (mine.indexOf(n.name) >= 0) {
                             st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, drop the import, or import it under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`)")
                         } else {
@@ -1276,16 +1520,16 @@ ${
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
                                     st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (" + importedShown(importedOrig[at], earlier) + "), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
-                                    names = names.concat(exportedEntries(own, target, n.orig, n.name))
+                                    names = names.concat(tableEntries(exps, target, n.orig, n.name))
                                 } else {
                                     st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — the same declaration imported twice; this later import wins (§41.7); remove the duplicate")
-                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.orig, n.name))
+                                    names = unbound(names, n.name).concat(tableEntries(exps, target, n.orig, n.name))
                                 }
                             } else {
                                 imported = imported.concat([n.name])
                                 importedFrom = importedFrom.concat([target])
                                 importedOrig = importedOrig.concat([n.orig])
-                                names = names.concat(exportedEntries(own, target, n.orig, n.name))
+                                names = names.concat(tableEntries(exps, target, n.orig, n.name))
                             }
                         }
                     }
@@ -1293,7 +1537,7 @@ ${
             }
             scopes = scopes.concat([{ file: f.path, names: names }])
         }
-        return { lk: { own: own, scopes: scopes, nss: nss }, st: st }
+        return { lk: { own: own, scopes: scopes, nss: nss, exps: exps }, st: st }
     }
 
     // s475 — how an earlier import that bound a local name is shown: `orig` from `from`, or (orig
@@ -1340,19 +1584,13 @@ ${
         const h: NsHit = nsMember(lk, file, name)
         if (h.ns == "") return { code: "", why: "" }
         if (h.target == "") return { code: "-", why: "" }
-        if (exportsName(lk.own, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        if (tableHas(lk.exps, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        // s478: an ambiguous star name is no member either (§21.3 rule 6); a name only a missing /
+        // cyclic module could supply is that re-export's report
+        const em: NsMiss = exportMiss(lk.exps, h.from, h.target, h.member)
+        if (em.code == "") return { code: "-", why: "" }
+        if (em.why.indexOf("is ambiguous") >= 0) return { code: em.code, why: em.why + " — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3 rule 6)" }
         return { code: "E-IMPORT-004", why: "`" + h.member + "` is not exported by `" + h.from + "` — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3)" }
-    }
-
-    // The scope entries an import of `name` from `target` brings: one per
-    // EXPORTED declaration of that name there (never a private one).
-    // s474: bound under the LOCAL name `local` (an alias, or `name` itself).
-    fn exportedEntries(own: OwnName[], target: string, name: string, local: string) -> ScopeName[] {
-        let out: ScopeName[] = []
-        for (const o of own) {
-            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: local, kind: o.kind, from: target, orig: name }])
-        }
-        return out
     }
 
     fn unbound(names: ScopeName[], name: string) -> ScopeName[] {
@@ -23945,7 +24183,7 @@ ${
                     if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
-                            if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
+                            if (x.name == name && tableHas(lk.exps, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
                         }
                     }
                 }
@@ -42188,15 +42426,139 @@ ${
                 } else {
                     for (const n of imp.names) {
                         // s474: an aliased import (`{ a as b }`) names the export `a`
-                        if (!exportedBy(g, target, n.orig)) {
-                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.orig + "` is not exported by `" + imp.from + "`")
+                        // s478: judged against the target's export table — its re-exports
+                        // included, an ambiguous star name named (§21.4)
+                        const miss: NsMiss = exportMiss(g.te.link.exps, imp.from, target, n.orig)
+                        if (miss.code != "") st = addDiag(st, f.path, n.span, miss.code, miss.why)
+                    }
+                }
+            }
+            st = checkReexports(f, paths, g, st)
+            st = checkLocalExports(f, g, st)
+            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(g, st, f.path, h) }
+        }
+        st = checkExportClashes(g.te.link.exps, files, st)
+        // s478 — §21.3: "Circular imports SHALL be a compile error (E-IMPORT-002). The compiler
+        // SHALL detect cycles in the import graph before any stage runs and report all files in
+        // the cycle." One report per file on a cycle (link.scrml importCycles), at its statement
+        // that closes it; re-export edges are edges of the graph (§21.4).
+        for (const c of importCycles(files)) {
+            st = addDiag(st, c.file, c.at, "E-IMPORT-002", cycleWhy(c))
+        }
+        return st
+    }
+
+    fn cycleWhy(c: ImportCycle) -> string {
+        if (c.cycle.length <= 2) return "circular import: `" + c.file + "` imports itself (§21.3: circular imports are a compile error; a re-export is an import edge, §21.4) — remove the self-import"
+        let shown: string = ""
+        let i = 0
+        for (const p of c.cycle) {
+            if (i > 0) shown = shown + " → "
+            shown = shown + "`" + p + "`"
+            i = i + 1
+        }
+        return "circular import: " + shown + " — every file in the cycle imports (or re-exports from) the next (§21.3: circular imports are a compile error; re-export edges are import edges, §21.4). Break the cycle: move what these files share into a file that imports none of them"
+    }
+
+    // s478 (s478-boot-modules) — a file's RE-EXPORTS (§21.4), each linked as an import of
+    // its source is (§21.3): "A relative re-export (named or `export *`, other than of a
+    // `.js` file) whose target file cannot be found SHALL be a compile error (E-IMPORT-006),
+    // reported at the re-export"; "A named re-export of a name its source module does not
+    // export SHALL be a compile error (E-IMPORT-004), reported at the re-export"; "A named
+    // re-export from a `scrml:` module SHALL be checked against that module's exports". A
+    // source the bootstrap does not import (a server-only or unsupplied stdlib module, a
+    // `.js` / `vendor:` module) is refused by name, as an `import` of it is.
+    fn checkReexports(f: FileAst, paths: string[], g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const r of reexportsOfItems(f.items)) {
+            const target: string = importTarget(f.path, r.from, paths)
+            if (isServerOnlyStdlib(r.from)) {
+                st = addDiag(st, f.path, r.span, "E-BOOTSTRAP-UNSUPPORTED", serverOnlyWhy(r.from))
+            } else if (target == "") {
+                const why: ImportRefusal = importRefusal(r.from)
+                st = addDiag(st, f.path, r.span, why.code, why.why)
+            } else if (r.re == ALink.Reexport) {
+                for (const n of r.names) {
+                    const miss: NsMiss = exportMiss(g.te.link.exps, r.from, target, n.orig)
+                    if (miss.code != "") st = addDiag(st, f.path, n.span, miss.code, miss.why + " — a named re-export binds a name its source exports (§21.4)")
+                }
+            }
+        }
+        return st
+    }
+
+    // s478 — a local export list (`export { a, b };`, no `from`). §21.2: "A reactive state cell
+    // SHALL NOT be exported … an `export` referencing it (`export { count }` in a `${ }` block
+    // …) … is `E-EXPORT-001`" (the S473 D15 carve-out is the §66.2.5 form `export let <x/>`
+    // only). Any other name: the list is not built yet — INTERIM, refused by name; the capable
+    // form is `export` before the declaration (§21.2 Form 2, §66.2.5).
+    fn checkLocalExports(f: FileAst, g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const le of localExportsOfItems(f.items)) {
+            let other: string[] = []
+            for (const n of le.names) {
+                if (programCellIn(g, f.path, n.orig)) {
+                    st = addDiag(st, f.path, n.span, "E-EXPORT-001", "`" + n.orig + "` is a reactive cell (`@" + n.orig + "`) — a cell is not in the exportable set (`type` / `function` / `fn` / `const` / `let`, §21.2): it holds per-instance state and has no cross-file meaning. Export a function that returns its value, or export the declaration itself where §66 allows it (`export let <" + n.orig + " …/>`, §66.2.5)")
+                } else {
+                    other = other.concat([n.orig])
+                }
+            }
+            if (other.length > 0) {
+                st = addDiag(st, f.path, le.span, "E-BOOTSTRAP-UNSUPPORTED", "a local export list (`export { " + other.join(", ") + " };`) is not in the bootstrap yet — write `export` before each declaration instead (`export fn …`, `export type …`, `export const …`, `export <decl …>`, §21.2 / §66.2.5)")
+            }
+        }
+        return st
+    }
+
+    // `name` is a cell of the `<program>` of `file`.
+    fn programCellIn(g: Globals, file: string, name: string) -> boolean {
+        for (const d of g.decls) {
+            if (d.isProgram && d.file == file) {
+                for (const fi of d.info.fields) {
+                    if (fi.sym.hint == name) return true
+                }
+            }
+        }
+        return false
+    }
+
+    // s478 — one exported name naming two DIFFERENT declarations in one file (a local export
+    // and a named re-export of the name, or two named re-exports): every import of it would
+    // bind one of them by position. §21.4 orders an explicit export over the stars, but names
+    // no order between two explicit ones; ES makes the duplicate a SyntaxError. Refused
+    // (PA reading — the import rule "one local name cannot bind two declarations", S474,
+    // applied to the file's export namespace), at the file.
+    fn checkExportClashes(exps: ExpTable[], files: FileAst[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const t of exps) {
+            let seen: string[] = []
+            for (const e of t.ents) {
+                if (seen.indexOf(e.name) < 0) {
+                    seen = seen.concat([e.name])
+                    for (const e2 of t.ents) {
+                        if (e2.name == e.name && (e2.from != e.from || e2.orig != e.orig) && seen.indexOf("!" + e.name) < 0) {
+                            seen = seen.concat(["!" + e.name])
+                            st = addDiag(st, t.file, exportSpan(files, t.file, e.name), "E-SCOPE-010", "`" + e.name + "` is exported twice by `" + t.file + "`, naming two declarations (`" + e.orig + "` of `" + e.from + "` and `" + e2.orig + "` of `" + e2.from + "`) — one exported name names one declaration; rename one export (`export { " + e2.orig + " as other } from …`)")
                         }
                     }
                 }
             }
-            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(g, st, f.path, h) }
         }
         return st
+    }
+
+    // The span of a named re-export of `name` in `file` (else the file's start).
+    fn exportSpan(files: FileAst[], file: string, name: string) -> ASpan {
+        for (const f of files) {
+            if (f.path == file) {
+                for (const r of reexportsOfItems(f.items)) {
+                    for (const n of r.names) {
+                        if (n.name == name) return n.span
+                    }
+                }
+            }
+        }
+        return { start: 0, end: 0 }
     }
 
     // s472 — an `import:<tag> { … } from "…"` declaration (§21.3.1), judged in
@@ -42376,24 +42738,10 @@ ${
         return { code: "E-IMPORT-005", why: "`" + from + "` is not a module scrml can import: a source begins with `./`, `../`, `scrml:`, `vendor:`, `bun:` or `node:` — a bare npm-style name is never valid (§41.4)" }
     }
 
-    // `name` is an exported type / declaration / function of the file `path`.
+    // `name` is exported by the file `path` — an exported type / declaration / function /
+    // constant of it, or (s478) a name it re-exports (its export table, §21.4).
     fn exportedBy(g: Globals, path: string, name: string) -> boolean {
-        for (const t of g.types) {
-            if (t.file == path && t.name == name && t.exported) return true
-        }
-        for (const d of g.decls) {
-            const ad: ADecl | not = d.d
-            if (ad is given) {
-                if (d.file == path && ad.name == name && ad.exported) return true
-            }
-        }
-        for (const f of g.fns) {
-            if (f.info.file == path && f.info.name == name && f.info.exported) return true
-        }
-        for (const c of g.consts) {
-            if (c.file == path && c.name == name && c.exported) return true
-        }
-        return false
+        return tableHas(g.te.link.exps, path, name)
     }
 
     // s471 — `name` is named by an import in `file` that analyze REFUSES (it
