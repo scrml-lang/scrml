@@ -52870,6 +52870,23 @@ at run time and traps with `E-WRITE-INVARIANT-RT` (O36 RULED S477, §66.11.7). *
 the length axis has ONE value, so `free` beside a bound, or two bounds, is `E-GRANT-UNKNOWN`; an empty range
 (`3..=1`, `2..2`) is `E-GRANT-UNKNOWN`.)*
 
+**A choice is judged branch by branch (S478).** When the value written into a bounded position is a choice — a
+ternary, a value-form `if`, a value `match`, the arms of a `!{}` guard, at any nesting — each branch that yields a
+value is judged on its own, the way a branch's type is (`E-TYPE-031`). ANY branch whose value provably has a length
+outside the bound (a literal, or a spread literal whose possible lengths all lie outside it) makes the write
+`E-WRITE-INVARIANT`, reported at that branch, whether or not the other branches fit:
+`const xs: int[1..=2] = @c ? [1, 2, 3, 4, 5] : [1]` is refused. A branch whose length cannot be proven is checked at
+run time as above (`E-WRITE-INVARIANT-RT`); an arm that diverges (`return`, `fail`) yields no value and is not
+judged. *(PA reading, from "the way types already are": the condition is not folded — a branch counts whether
+or not a constant condition can select it, as a branch's type does; and a `!{}` guard's in-bound arms never prove
+the write, since its value may also be the subject's success value.)* The same
+judgement applies to a choice written as an element of a tape whose element type is bounded. **Direction of
+change:** newly-rejecting (the bootstrap previously refused only a choice whose EVERY branch was outside, and
+trapped at run time on the rest; 0 corpus files newly rejected); and, in the bootstrap only, newly-accepting for
+a choice into an element-bounded type whose every branch is proven (it was refused whole, the INTERIM
+`E-BOOTSTRAP-UNSUPPORTED`; 0 corpus files).
+> **Provenance:** ruling:user-voice-scrml.md S478 (Option A) — *"ANY branch whose literal provably breaks a tape's bound is a compile error (E-WRITE-INVARIANT), judged per branch the way types already are (E-TYPE-031, `checkLitFields`). `const xs: int[1..=2] = @c ? [1,2,3,4,5] : [1]` is refused. … A branch whose length cannot be proven still traps at run time (O36)."* The bootstrap builds it (s478-boot-bound-any-branch: `compiler/self-host-v2/analyze.scrml` `boundValue` / `choiceLengths` / `innerBoundValue` / `choiceLeaves`); Nominal on impl#1 (§34.0).
+
 **The grant vocabulary (O10, RULED S469).** A tape type's grants are a bracket list on the element type,
 `T[g, …]`, each token once (§66.12.3):
 

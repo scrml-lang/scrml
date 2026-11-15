@@ -1,0 +1,28 @@
+{
+  "id": "reactive-tape-bound-branch-mixed-neg",
+  "description": "S478 Option A: a choice `@flag ? [1, 2, 3, 4, 5] : [1]` into `int[1..=2, append]` — one branch a literal outside the length bound, one inside — is refused: E-WRITE-INVARIANT at compile time, at the outside branch.",
+  "language-version": "1.0",
+  "spec": "§66.12.2",
+  "provenance": "ruling:user-voice-scrml.md S478 (Option A) (\"ANY branch whose literal provably breaks a tape's bound is a compile error (E-WRITE-INVARIANT)\")",
+  "rationale": "§66.12.2 (S478): \"ANY branch whose value provably has a length outside the bound … makes the write `E-WRITE-INVARIANT`, reported at that branch, whether or not the other branches fit\". The true branch is a literal of length 5 and the bound is 1..=2.",
+  "expect": {
+    "codes": [
+      "E-WRITE-INVARIANT"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-bounds-unimplemented-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-WRITE-INVARIANT"
+        ]
+      }
+    }
+  }
+}
