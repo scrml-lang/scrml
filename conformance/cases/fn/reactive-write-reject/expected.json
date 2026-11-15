@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/gauntlet-s20/fn-purity-reactive.test.js",
   "spec": "§48.3.3",
-  "rationale": "§48.3.3: `fn` is a pure function and may not mutate reactive state; a `@cell = ...` write in a `fn` body is E-FN-003 (an outer-scope mutation — `@`-cells are always program-level). Move the write outside `fn`, or use `function` if the side effect is intentional.",
+  "rationale": "§48.3.3: `fn` is a pure function and may not mutate reactive state; a `@cell = ...` write in a `fn` body is E-FN-003 (an outer-scope mutation — `@`-cells are always program-level). Move the write outside `fn`, or use `function` if the side effect is intentional. S478 (bootstrap triage C12, twin defect): the legacy implicit cell `${ @x = v }` is now the legacy declaration `<x> = v`, which the `scrml fix` §66 rules twin. The §66 twin left `@x = v` as a body-top code line, i.e. a write to an undeclared cell (E-STATE-UNDECLARED, §6.1.1). The call moved from a render interpolation to an `onclick=` handler: §34 E-VALUE-WRITES-STATE refuses a state write reached from \"a render expression (a markup `${ … }` interpolation …)\", while \"Not value positions: `on*=` handlers\" — so only E-FN-003, the code under test, fires.",
   "expect": {
     "codes": ["E-FN-003"]
   }

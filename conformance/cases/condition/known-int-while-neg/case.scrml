@@ -1,12 +1,12 @@
-// §49.2.3 — an `int` `while` condition has no truthiness.
+// §49.2.3 — an `int` loop condition (`for (cond)`, the S469 successor of `while`) has no truthiness.
 <program>
     function count(k: int) -> int {
         let n: int = 0;
-        while (k) {
+        for (k) {
             n = n + 1;
             break;
         }
-        return n
+        return n;
     }
     <main><p>x</p></main>
 </program>

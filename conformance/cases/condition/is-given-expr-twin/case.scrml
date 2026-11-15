@@ -7,16 +7,16 @@ type U:struct = { name: string }
 <label> = "init"
 ${
     function check() {
-        const present: bool = @user is given
+        const present: bool = @user is given;
         if (@user is given && @n > 0) {
-            @label = "both"
+            @label = "both";
         } else {
-            @label = present ? "present" : "absent"
+            @label = present ? "present" : "absent";
         }
     }
     function login() {
-        @user = { name: "Ada" }
-        check()
+        @user = { name: "Ada" };
+        check();
     }
 }
 <button id="go" onclick=login()>go</button>

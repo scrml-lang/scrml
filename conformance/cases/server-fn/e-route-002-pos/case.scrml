@@ -1,10 +1,11 @@
+<program db="./app.db">
 ${
     // Server-classified: the ?{} SQL context escalates this fn to the server
     // (§12.2 Trigger 1). It then calls flashTitle() — a function route analysis
     // pins to the client (it touches the browser-only `document` global). A
     // server fn calling a client-only fn is the §12.4 violation: E-ROUTE-002.
     function auditAndFlash(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run();
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run() !{ _ :> { return; } };
         flashTitle(name);
     }
 
@@ -15,3 +16,4 @@ ${
     }
 }
 <button id="go" onclick={ auditAndFlash("hi") !{ .Transport(_) :> return }; }>Go</button>
+</program>

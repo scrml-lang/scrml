@@ -4,9 +4,9 @@
             const plan = _={ in: { args }
                 const n = args.length +;
                 return n;
-            }=
-            println(plan)
+            }=;
+            println(plan);
         }
-        return 0
+        return 0;
     }
 </program>

@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 316 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 324 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -84,6 +84,7 @@ ${
             "W-GIVEN-PRESENCE-DEPRECATED" :> Severity.Info
             "W-IS-SOME-DEPRECATED" :> Severity.Info
             "W-MATCH-ARROW-LEGACY" :> Severity.Info
+            "W-STYLE-CONFLICT-POSSIBLE" :> Severity.Info
             // §34 Severity: Error
             "E-ARM-TAIL-VALUE" :> Severity.Error
             "E-ASSIGN-004" :> Severity.Error
@@ -150,6 +151,9 @@ ${
             "E-EFFECT-NO-DEPS" :> Severity.Error
             "E-EFFECT-WRITE-UNPROVEN" :> Severity.Error
             "E-EFFECT-WRITES-STATE" :> Severity.Error
+            "E-ENGINE-MOUNT-NOT-ENGINE" :> Severity.Error
+            "E-ENGINE-STATE-CHILD-MISSING" :> Severity.Error
+            "E-ENUM-VARIANT-CASE" :> Severity.Error
             "E-EQ-001" :> Severity.Error
             "E-EQ-002" :> Severity.Error
             "E-EQ-003" :> Severity.Error
@@ -167,6 +171,7 @@ ${
             "E-ERROR-015" :> Severity.Error
             "E-ERRORS-001" :> Severity.Error
             "E-ERRORS-002" :> Severity.Error
+            "E-EXPORT-001" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
             "E-FN-005" :> Severity.Error
@@ -206,6 +211,7 @@ ${
             "E-HTML-FOREIGN-BREAKOUT" :> Severity.Error
             "E-HTML-OPTGROUP-NESTED" :> Severity.Error
             "E-HTML-PARSER-REPAIR" :> Severity.Error
+            "E-IMPORT-002" :> Severity.Error
             "E-IMPORT-003" :> Severity.Error
             "E-IMPORT-004" :> Severity.Error
             "E-IMPORT-005" :> Severity.Error
@@ -298,6 +304,7 @@ ${
             "E-RANGE-BOUND-NOT-INT" :> Severity.Error
             "E-RANGE-OUTSIDE-LOOP-HEAD" :> Severity.Error
             "E-REACTIVE-003" :> Severity.Error
+            "E-RESERVED-IDENTIFIER" :> Severity.Error
             "E-RESET-ON-CYCLE" :> Severity.Error
             "E-RESET-ON-ENGINE-REFUSED" :> Severity.Error
             "E-RESET-ON-INVALID-ENTRY" :> Severity.Error
@@ -327,6 +334,7 @@ ${
             "E-STMT-MISSING-SEMICOLON" :> Severity.Error
             "E-STMT-NO-EFFECT" :> Severity.Error
             "E-STMT-SPLIT-CONTINUATION" :> Severity.Error
+            "E-STMT-UNEXPECTED-TOKEN" :> Severity.Error
             "E-STRING-METHOD-UNKNOWN" :> Severity.Error
             "E-STRUCT-DUPLICATE-KEY" :> Severity.Error
             "E-STRUCT-FUNCTION-FIELD" :> Severity.Error

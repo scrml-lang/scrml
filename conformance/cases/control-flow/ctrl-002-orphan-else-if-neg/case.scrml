@@ -1,5 +1,5 @@
 <program>
-  <wizard { step: int }
+  <step>: int = 1
 
   <div class="wizard">
     <span if=@step.eq(1)>Step one</>

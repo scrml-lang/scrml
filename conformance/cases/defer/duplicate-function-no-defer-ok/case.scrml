@@ -3,12 +3,12 @@ ${
 
     function f() {
         function g() {
-            return 1
+            return 1;
         }
         function g() {
-            return 2
+            return 2;
         }
-        return g()
+        return g();
     }
 
     function go() {

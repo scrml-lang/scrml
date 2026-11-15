@@ -3,7 +3,7 @@
   "description": "§19.4.3 `!{}` handler SUCCESS passthrough: loadItem('ok') returns the id (no fail), no arm fires, the success value flows to `result`, and the handler lifts it to Phase.Loaded(result). Proves `!{}` catches ONLY error variants; the success value passes through unwrapped.",
   "language-version": "1.0",
   "spec": "§19.4.3",
-  "rationale": "Success passthrough: loadItem('ok') returns the id (no fail), so no `!{}` arm fires and the success value flows to `result`; the handler then lifts it to Phase.Loaded(result). Proves the `!{}` handler catches ONLY error variants and passes the success value through.",
+  "rationale": "Success passthrough: loadItem('ok') returns the id (no fail), so no `!{}` arm fires and the success value flows to `result`; the handler then lifts it to Phase.Loaded(result). Proves the `!{}` handler catches ONLY error variants and passes the success value through. S478 (bootstrap triage C12): `Phase` has payload variants, and §14.13.2 refuses one in a text sink — \"**Refused:** a struct, a tape, a tuple, a map or set, a payload enum value, … In markup text, a quoted attribute or a logic template this SHALL be compile error **`E-TEXT-NON-PRIMITIVE`**\". `#out` now renders `label(@phase)`, a `string`; the state assertion is unchanged.",
   "expect": {
     "codes": [],
     "notCodes": [],
