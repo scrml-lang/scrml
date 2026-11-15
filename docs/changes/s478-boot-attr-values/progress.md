@@ -121,3 +121,58 @@ stopped at the first whitespace), not the parser.
 - E-EVENT-UNBOUND (§5.2) — not emitted; stays on g-bootstrap-unimplemented-construct-reported-as-generic-code.
 - §5.2.4 quoted condition `if="f(); @x"` — not touched.
 - C2b (event object, braced arrow, E-EVENT-CONTROL-AFTER-AWAIT) — g-bootstrap-function-values-slice-s451.
+
+## Fix round 1 (S239 review of 4cbbe0a51, PR #1865)
+
+### F1 — keyword-word attributes after an unquoted value (LOW, false rejection)
+
+Cause CONFIRMED: `lex.scrml` `wordTestAt` checked only `isIdentCont` after the word, and `-` is not one,
+so `in-view` read as `in -view` and the value continued; the parser then stopped at `in` (the bootstrap
+expression parser has no `in` / `instanceof` / `and` / `or` binary operator) → E-PARSE-TRAILING.
+
+SPEC reading (§5.2 "An unquoted value is read WHOLE (S457)", verbatim): an event-handler value "is ONE
+expression and continues across whitespace wherever the expression does: … before an infix operator, …
+or the keyword tests `is` / `instanceof` / `in`"; "any other attribute followed by an operator … is
+`E-ATTR-UNQUOTED-OPERATOR`"; "A value that cannot be read whole is REFUSED, once per attribute, never
+truncated". §45.9: "`or` and `and` SHALL be valid word-form aliases for `||` and `&&` respectively in
+all expression positions (… attribute values …)". So an EXACT keyword word after an unquoted value
+continues the value — it is an operator, not a boolean attribute — and the refusal is the named code.
+A word TOUCHING `-` + a name character is not that operator: it is one hyphenated HTML attribute name.
+
+- `lex.scrml` `wordTestAt`: a word followed by `-` and an identifier character is an attribute name.
+- `parse.scrml` `parseAttrValue` → `trailingWordOperator`: a bare value whose expression stops at
+  `in` / `is` / `instanceof` / `and` / `or` is refused once, the value recovered whole:
+  non-handler → E-ATTR-UNQUOTED-OPERATOR ("parenthesize … or quote it; if `w` is a separate attribute,
+  parenthesize the value before it: `title=(…) in`"); handler with no right operand →
+  E-ATTR-UNQUOTED-OPERATOR; handler `and` / `or` with an operand (legal §45.9) → E-BOOTSTRAP-UNSUPPORTED
+  by name (the refusals.scrml §45.9 row's text); handler `in` / `instanceof` with an operand keeps the
+  expression parser's own report.
+- `scanAttr`: a value `unquotedOperatorDiag` refuses is recovered whole, so `title=@last -x` is
+  E-ATTR-UNQUOTED-OPERATOR alone (was + E-SCOPE-001 on `x`). `-x` (leading hyphen) stays an error: it is
+  the infix `-`.
+
+### F2 — the vacuous `in:fade` test (LOW)
+
+Deleted. `<p if=@ok in:fade out:fly>` errors with E-PARSE-DECL-BODY / E-TYPE-UNKNOWN `fade` either way:
+the opener reads `in:fade` as a typed declaration attribute (`name:Type`), so `in:` / `out:` directives
+do not parse in the bootstrap and the `wordTestAt` `in:` exclusion is UNREACHABLE until they do (no shape
+exercises it: `title=@last in:x` is the same declaration reading).
+
+### Tests / gates
+
+- attr-forms-s478.test.js: 31 pass (29 − 1 vacuous + 3 F1: hyphenated names compile + render on plain
+  and handler attributes, the click still runs; exact words named, never E-PARSE-TRAILING, fix text,
+  `title=(@last) in` clean; `-x` / `in -x` named alone).
+- The 12 attribute / markup / sink slice files the reviewer listed + attr-forms: 937 pass, 0 fail.
+- hook: 54785 pass, 0 fail, 238 skip.
+- Corpus (same 3,146-file method; base = merge-base 20b76334e, since origin/main's parse.scrml no longer
+  loads against this branch's ast.scrml): base → r1 **0 newly rejecting, 0 newly accepting**, 235 diag
+  sets changed (same as round 0); PR head 4cbbe0a51 → r1: 0 changed (no corpus file has an F1 shape).
+
+### Surfaced, not fixed (out of scope)
+
+- `title=@last is given` compiles clean: a non-handler `is given` test is not caught by
+  `unquotedOperatorDiag` (§5.2 lists `is` among the operators that continue the value).
+- A trailing operator before a spaced `>` on a non-handler value (`title=@last + >`, `title=@last - >`,
+  `title=@last in- >`) reads past the tag's `>` to the end of the file: `lastNeedsOperand` keeps the
+  reader going, and `>` is then an operand position. Probed; same on round 0 for `+` / `-`.
