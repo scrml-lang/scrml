@@ -5,8 +5,9 @@ ${
 
     <n> = 0
 
-    function risky()! -> E {
-        fail E.Bad;
+    function risky(k: int)! -> E {
+        if (k < 0) { fail E.Bad; }
+        return k;
     }
 
     function a() {
@@ -20,7 +21,7 @@ ${
 
     function c()! -> E {
         defer {
-            let v = risky()?;
+            let v = risky(1)?;
             @n = v;
         }
         @n = 2;

@@ -84,3 +84,60 @@ impl#1 effect: unchanged except `lifecycle/effect-nested-pos` (xfail signature r
   function (§19.4.3) … An unhandled one SHALL be **E-ERROR-002**." Failure set (S454 F1): "`f`'s declared
   variants plus ONE wrapper variant `Transport(t: ServerCallError)`".
 - Fix: a `.Transport(_)` arm added (corpus form `.Transport(_) :> return`; a value arm in the recovery case).
+
+### Payload enum rendered as text (4 cases)
+`error/failable-handler-lift{,-success,-timeout}`, `error/propagate-success-unwrap`.
+- Governing: §14.13.2 — "**Refused:** a struct, a tape, a tuple, a map or set, a payload enum value, …
+  In markup text, a quoted attribute or a logic template this SHALL be compile error
+  **`E-TEXT-NON-PRIMITIVE`**".
+- Fix: `#out` renders `label(@phase)` (a `match` to `string`); the `state` assertion is unchanged.
+  propagate-success-unwrap also gets its `return }` -> `return; }` (§7.2.2 rules 1, 8).
+
+### Unbraced loop body (1 case)
+`defer/unbraced-arm-neg`.
+- Governing: §49.2.1 (S469) `loop-body ::= '{' loop-statement* '}'` — a braceless `for` body is a parse
+  error before it is a defer site. The loop probe is braced (a legal block-body defer) and the
+  E-DEFER-UNSUPPORTED-SITE count is 3 -> 2 (the if / else probes kept).
+- SPEC text owed (not edited, SPEC is out of scope): §19.16.2 still says "the whole UNBRACED body of an
+  `if` / `else` / `for` / `while` / `do` arm" — the `for` / `while` / `do` limbs are dead under §49.2.1 /
+  §49.4.1.
+
+### `risky()?` on a call that returns nothing (1 case)
+`defer/control-flow-neg`.
+- Governing: §4.14 — "a call of a function that returns nothing is not a value (§48 "The return rule",
+  rule 3; E-TYPE-001 in a value position)". `risky` now returns a value on success.
+
+### Unhandled `?{}` with no `db=` (4 cases)
+`server-fn/e-route-{002,005}-{neg,pos}`.
+- Governing: §19.8.3 (S451 R11) — a `?{}` query is failable; outside a `!` function it must be handled at
+  the site (E-ERROR-002); §8.1.1 / §34 E-SQL-004 — "`?{}` block has no database scope — no
+  `<program db=>` …". Fix: `<program db="./app.db">` root + `.run() !{ _ :> { return; } }`.
+- Still FAILS on the bootstrap for 3 of 4: `document.title = name` is E-SCOPE-001 "`document` is not a
+  writable local" — a bootstrap host-DOM gap (SPEC §12.4 treats `document` as the client-only DOM
+  global), so the case is left as is there.
+
+### Object literal with no struct context (1 case)
+`fn/plain-arrow-clean` — returns the tape `d` instead of `{ d: d }` (§66 struct-literal rule,
+E-TYPE-STRUCT-CONTEXT); the arrow under test is unchanged.
+
+### Render loop that lifts nothing (1 case)
+`control-flow/ctrl-010-else-on-for-without-lift-neg` — the no-`lift`, no-`else` loop is now an
+ordinary iteration statement in a function body (the case's own description: "an ordinary iteration
+statement"). Governing: §34 E-VALUE-WRITES-STATE — "a render expression (a markup `${ … }` interpolation
+incl. a multi-statement or Tier-0 `for/lift` block …)"; §49.6 E-LOOP-007.
+
+### Twin defects (2 cases)
+`fn/reactive-read-clean`, `fn/reactive-write-reject` — `${ @x = v }` (legacy implicit cell, which the
+§66 rules leave as an undeclared write, E-STATE-UNDECLARED §6.1.1) -> the legacy declaration `<x> = v`,
+which twins. reactive-write-reject's call moved from `<p>${badWrite(1)}</>` to `onclick=` (§34
+E-VALUE-WRITES-STATE: "Not value positions: `on*=` handlers"), so only E-FN-003 fires.
+
+### Left as is — the bootstrap (or the triage) is wrong, not the case
+- `linear/must-use-unread-{pos,neg}` — `unusedThing = 42;` is NOT an undeclared assignment: §50.8.5 "the
+  keywordless bare naming statement (`x = 1`) … declares `x` exactly as `const x = 1` does" (retirement is
+  O13, OPEN). The bootstrap's E-SCOPE-001 contradicts §50.8.5. Also: §35 has no E-MU-001 text; the §34
+  row says "Must-use: return value of `!` function not captured", which is not what impl#1 / these cases
+  implement (an unread keywordless binding) — a SPEC question, surfaced.
+- `module/e-export-003-attr-{conflict-reject,distinct-clean}` — §21.2 calls Form 1 "canonical,
+  top-level", and SPEC permits a file with no `<program>` (library files). The bootstrap's
+  E-PROGRAM-MISSING has no §34 row (`compiler/self-host-v2/severity.scrml`: "no §34 row"). Not stale.

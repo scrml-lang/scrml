@@ -16,6 +16,15 @@ ${
         if (id == "slow") fail LoadError.Timeout;
         return id;
     }
+
+    function label(p: Phase) -> string {
+        return match p {
+            .Idle :> "idle",
+            .Missing(id) :> "missing " + id,
+            .TimedOut :> "timed out",
+            .Loaded(data) :> "loaded " + data
+        };
+    }
 }
 
 <phase> = Phase.Idle
@@ -45,4 +54,4 @@ ${
 <button id="btn-missing" onclick=handleMissing()>missing</>
 <button id="btn-slow" onclick=handleSlow()>slow</>
 <button id="btn-ok" onclick=handleOk()>ok</>
-<div id="out">${@phase}</>
+<div id="out">${label(@phase)}</>

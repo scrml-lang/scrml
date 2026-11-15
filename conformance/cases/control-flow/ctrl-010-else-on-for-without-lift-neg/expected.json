@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§17.4a, §17.2",
   "source-test": "compiler/src/ast-builder.js",
-  "rationale": "§17.4a: 'The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).' The prohibition targets the `else` block specifically — a plain `for` loop without any `else` is fully valid (§17.4/§49). The detector fires only when an `else` bare-expr immediately follows a no-lift for-stmt; with no `else` present the condition is unmet and E-CTRL-010 SHALL stay silent.",
+  "rationale": "§17.4a: 'The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).' The prohibition targets the `else` block specifically — a plain `for` loop without any `else` is fully valid (§17.4/§49). The detector fires only when an `else` bare-expr immediately follows a no-lift for-stmt; with no `else` present the condition is unmet and E-CTRL-010 SHALL stay silent. S478 (bootstrap triage C12): the no-`lift`, no-`else` loop is now an ordinary iteration STATEMENT in a function body. In a render position it was refused for reasons unrelated to E-CTRL-010: §34 E-VALUE-WRITES-STATE — \"Evaluating a **value position** writes a reactive cell … a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block …)\" — and §49.6 E-LOOP-007 (a loop used as a value that lifts nothing).",
   "expect": {
     "codes": [],
     "notCodes": ["E-CTRL-010"]
