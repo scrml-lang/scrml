@@ -853,6 +853,7 @@ ${
         // re-derived from the whole file each time, read once here
         singles: string[],      // the program's cells declared `single` (singleCells)
         hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
+        printCalls: int[],      // s478 r1: the calls the print pre-scan read as the §20.7 built-in (printScans)
     }
 
     // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
@@ -5825,6 +5826,179 @@ ${
         }
     }
 
+    // =========================================================================
+    // s478-boot-print-builtins r1 (#1900 review HIGH-2) — the PRINT PRE-SCAN. §20.7.3: "a `function`
+    // that calls `print` / `println` is **server-placed** by Route Inference (§12), exactly like a
+    // function that touches `?{}` SQL". A `?{}` places its function by syntax, so FnInfo.serverOwn —
+    // what makes a CLIENT call of it a remote call (§19.9.10: E-ERROR-002 unhandled, `.Transport(t)`
+    // in its handler, the wire lowering) — is known in phase A, before any body is bound (design §2.5).
+    // A `print` call is the built-in only when no user binding of the name is in scope (§20.7.5: "A
+    // user-declared in-scope binding named `print` / `println` wins"), which the binder decides
+    // (builtinFree). This scan decides it the same way BEFORE binding: a file-scope binding of the name
+    // (a function, a constant, an import, a namespace import), a parameter, a local declared earlier in
+    // the block or an enclosing one, a `given` name, a nested function of an enclosing block. It
+    // records every call it reads as the built-in (`calls`, by node id) and every function whose body
+    // holds one (`fns`). The binder is the truth: resolvePrint builds a built-in call only when the scan
+    // counted it, and refuses a user-bound call the scan counted (a binder the scan does not model — a
+    // loop variable, a lambda parameter, an arm binding named `print`), so a function the scan did not
+    // place is never handed a Print, nor one it placed a user call it misread (fail closed, INTERIM).
+    // =========================================================================
+    type PrintScan:struct = { calls: int[], fns: int[] }
+
+    fn noPrintScan() -> PrintScan { return { calls: [], fns: [] } }
+
+    fn isPrintName(n: string) -> boolean { return n == "print" || n == "println" }
+
+    // `name` is bound at file scope in `f` (the file-scope half of builtinFree).
+    fn printNameFileBound(lk: Linkage, f: FileAst, name: string) -> boolean {
+        if (scopeFrom(lk, f.path, NameKind.KFn, name) != "") return true
+        if (scopeFrom(lk, f.path, NameKind.KConst, name) != "") return true
+        if (isNsBinding(lk, f.path, name)) return true
+        for (const h of hostImportsOfItems(f.items)) {
+            for (const hn of h.names) {
+                if (hn.name == name) return true
+            }
+        }
+        for (const imp of importsOfItems(f.items)) {
+            for (const n of imp.names) {
+                if (n.name == name) return true
+            }
+        }
+        return false
+    }
+
+    fn printFileBound(lk: Linkage, f: FileAst) -> string[] {
+        let out: string[] = []
+        if (printNameFileBound(lk, f, "print")) out = out.concat(["print"])
+        if (printNameFileBound(lk, f, "println")) out = out.concat(["println"])
+        return out
+    }
+
+    fn printBind(bound: string[], n: string) -> string[] {
+        if (isPrintName(n)) return bound.concat([n])
+        return bound
+    }
+
+    fn printBindParams(bound0: string[], ps: AParam[]) -> string[] {
+        let bound: string[] = bound0
+        for (const p of ps) { bound = printBind(bound, p.name) }
+        return bound
+    }
+
+    // The scan of a function item `af` of file `f` (its nested functions included).
+    fn printScanFn(lk: Linkage, f: FileAst, af: AFn) -> PrintScan {
+        const r: PrintScan = psBlock(af.body, printBindParams(printFileBound(lk, f), af.params), noPrintScan())
+        if (r.calls.length == 0) return r
+        return { calls: r.calls, fns: r.fns.concat([af.nid]) }
+    }
+
+    fn printScans(files: FileAst[], lk: Linkage) -> PrintScan {
+        let acc: PrintScan = noPrintScan()
+        for (const f of files) {
+            for (const af of fnItems(f.items)) {
+                const r: PrintScan = printScanFn(lk, f, af)
+                acc = { calls: acc.calls.concat(r.calls), fns: acc.fns.concat(r.fns) }
+            }
+        }
+        return acc
+    }
+
+    // The name a statement declares for the statements after it in its block ("" none).
+    fn stmtLocalName(s: AStmt) -> string {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n) :> n
+            // no-default-arm: one question of the statement — the local it declares
+            _ :> ""
+        }
+    }
+
+    fn psBlock(b: ABlock, bound0: string[], acc0: PrintScan) -> PrintScan {
+        let bound: string[] = bound0
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) bound = printBind(bound, lf.name)        // bindLocalFns: the whole block
+        }
+        let acc: PrintScan = acc0
+        for (const s of b.stmts) {
+            acc = psStmt(s, bound, acc)
+            bound = printBind(bound, stmtLocalName(s))
+        }
+        return acc
+    }
+
+    fn psStmt(s: AStmt, bound: string[], acc: PrintScan) -> PrintScan {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> psExpr(e, bound, acc)
+            .Local(name: n, init: i) :> psExpr(i, bound, acc)
+            .Return(e: e) :> psMaybe(e, bound, acc)
+            .If(cond: c, thenB: tb, elseB: eb) :> psMaybeBlock(eb, bound, psBlock(tb, bound, psExpr(c, bound, acc)))
+            .Given(name: n, subject: x, body: b) :> psBlock(b, printBind(bound, n), psExpr(x, bound, acc))
+            .For(f: lf) :> psBlock(lf.body, bound, psExprs(forExprs(lf), bound, acc))
+            .Break(label: x) :> acc
+            .Continue(label: x) :> acc
+            .Lift(what: w) :> psExprs(liftExprs(w), bound, acc)
+            .LocalFn(f: f) :> psLocalFn(f, bound, acc)
+            .EffectStmt(w: w) :> psBlock(w.body, bound, acc)
+            .Defer(body: b) :> psBlock(b, bound, acc)
+            .Fail(f: f) :> psExprs(failExprs(f), bound, acc)
+        }
+    }
+
+    // A nested function: its calls are its enclosing function's too (textually in that body, as
+    // sqlsInBlock reads it), and it is a function that holds them itself.
+    fn psLocalFn(f: AFn, bound: string[], acc: PrintScan) -> PrintScan {
+        const r: PrintScan = psBlock(f.body, printBindParams(bound, f.params), noPrintScan())
+        if (r.calls.length == 0) return acc
+        return { calls: acc.calls.concat(r.calls), fns: acc.fns.concat(r.fns).concat([f.nid]) }
+    }
+
+    fn psMaybe(e: AExpr | not, bound: string[], acc: PrintScan) -> PrintScan {
+        if (e is not) return acc
+        return psExpr(e, bound, acc)
+    }
+
+    fn psMaybeBlock(b: ABlock | not, bound: string[], acc: PrintScan) -> PrintScan {
+        if (b is not) return acc
+        return psBlock(b, bound, acc)
+    }
+
+    fn psExpr(e: AExpr, bound: string[], acc0: PrintScan) -> PrintScan {
+        let acc: PrintScan = acc0
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is given) {
+            const n: string = exprName(c)
+            if (isPrintName(n) && bound.indexOf(n) < 0) acc = { calls: acc.calls.concat([e.nid]), fns: acc.fns }
+        }
+        for (const x of exprKids(e)) { acc = psExpr(x, bound, acc) }
+        for (const b of exprBlocks(e)) { acc = psBlock(b, bound, acc) }
+        return acc
+    }
+
+    fn psExprs(es: AExpr[], bound: string[], acc0: PrintScan) -> PrintScan {
+        let acc: PrintScan = acc0
+        for (const x of es) { acc = psExpr(x, bound, acc) }
+        return acc
+    }
+
+    // Each function the scan places (not a pure `fn` — resolvePrint refuses a print there — nor a
+    // host-backed one) gets serverOwn, as a `?{}` in its body would give it.
+    fn withPrintOwners(fs: FnSrc[], ps: PrintScan) -> FnSrc[] {
+        let out: FnSrc[] = []
+        for (const f of fs) {
+            if (!f.info.serverOwn && !f.info.pure && f.info.host is not && ps.fns.indexOf(f.info.nid) >= 0) {
+                const i: FnInfo = f.info
+                out = out.concat([{ info: { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
+                                            pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
+                                            serverOwn: true, rerr: i.rerr, host: i.host, derr: i.derr, outer: i.outer }, f: f.f }])
+            } else {
+                out = out.concat([f])
+            }
+        }
+        return out
+    }
+
     // Every function the binder mints, its nested declarations included (s477).
     fn allFnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
@@ -7428,7 +7602,9 @@ ${
         // s473 (boot-host-block-f3): the `<host>` bindings (DRAFT §21.3.3)
         const rhb: RFns = hostBindings(files, te0, rt.ts, rh.fs, st)
         st = rhb.st
-        const rf0: RFns = { fs: rhb.fs, st: st }
+        // s478 r1: a function that calls the `print` / `println` built-in is server-triggered (§20.7.3)
+        const pscan: PrintScan = printScans(files, lk)
+        const rf0: RFns = { fs: withPrintOwners(rhb.fs, pscan), st: st }
         // s454 (U1b): the failure enum of a client call of each server-triggered function
         const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), carriers, st)
         st = rr.st
@@ -7484,7 +7660,8 @@ ${
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
-                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files) }
+                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
+                             printCalls: pscan.calls }
         return { g: g, st: st }
     }
 
@@ -7816,7 +7993,7 @@ ${
     // initializers, markup, `if=` / `in=` values — not in the bootstrap (HostNo).
     type HostCtx:enum = { HostNo, HostOk, HostPure }
 
-    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean, via: string }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment); s476 `via`: why a loop binder has no type ("" = no reason recorded — srcWhy)
+    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean, via: string, foreign: boolean }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment); s476 `via`: why a loop binder has no type ("" = no reason recorded — srcWhy)
     type RowB:struct = { bind: Sym, ty: Type | not, via: string }
     // `@name` narrowed by an enclosing `given c = @name :> { … }` (§66.7.5, O56
     // RULED S435: "A direct `@handle.field = …` inside the narrowed block is
@@ -8033,7 +8210,7 @@ ${
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
-        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: row.via }
+        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: row.via, foreign: false }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
                  handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
@@ -8591,6 +8768,16 @@ ${
         if (env.fx.stmtCall != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` used as a value — §20.7.1 makes it a statement (\"Statement-position; no usable return value\"), and the bootstrap builds it only as a statement of its own (INTERIM). Call it on its own line", resolveExprs(env, args, not, st0))
         if (env.host == HostCtx.HostPure) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, a server-only resource (§20.7.3), and the SPEC does not say whether a pure `fn` (§48.3) may call it; the bootstrap does not build it there (INTERIM). Call it from a `function`", resolveExprs(env, args, not, st0))
         if (!env.fx.inFn || env.fx.fnSym < 0 || env.inEffect || env.host != HostCtx.HostOk) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` outside a `function` body — §20.7.3 places it by the function that calls it (\"a `function` that calls `print` / `println` is server-placed\"), and the bootstrap builds it only in a `function` body (INTERIM: an event handler, a body-top statement or an initializer is not one). Move it into a `function`", resolveExprs(env, args, not, st0))
+        // s478 r1: the placement pre-scan (printScans) is what server-placed this function; a call it
+        // did not read as the built-in has no server body to stand in (fail closed, INTERIM)
+        if (env.g.printCalls.indexOf(e.nid) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(w, "the built-in", "a user binding"), resolveExprs(env, args, not, st0))
+        // s478 r1 (#1900 review MED) — an UNANNOTATED foreign value (`asIs`, §23.2.4a) as an argument: the
+        // SPEC disagrees with itself on it (g-boot-print-asis-arg-s478, owner question) — §20.7.2's allow-list
+        // and §14.13.2 ("a value whose type the compiler cannot resolve") refuse it, the §34
+        // E-PRINT-NON-PRIMITIVE row leaves "`asIs` … unflagged". Until the owner rules, it is refused BY
+        // NAME (INTERIM), never with a code the SPEC may not mean here.
+        const fa: string = printForeignArg(env, args)
+        if (fa != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(" + fa + ")` — `" + fa + "` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's allow-list and §14.13.2 refuse it; the §34 `E-PRINT-NON-PRIMITIVE` row leaves `asIs` unflagged — owner question g-boot-print-asis-arg-s478). The bootstrap does not build it (INTERIM). State its type at the binding (`const " + fa + ": string = _={ … }=`, the §23.2.4a call-site annotation)", resolveExprs(env, args, not, st0))
         let st: AS = st0
         let text: boolean[] = []
         for (const a of args) {
@@ -8599,6 +8786,25 @@ ${
             st = r.st
         }
         return plain(not, addValue(st, e.nid, ValueFact.VPrint(text, nl)))
+    }
+
+    // s478 r1 — the first argument that is a local bound, unannotated, to a foreign block's value ("" none).
+    fn printForeignArg(env: Env, args: AExpr[]) -> string {
+        for (const a of args) {
+            const n: string = exprName(a)
+            if (n != "") {
+                const l: LocalB | not = lookupLocal(env, n)
+                if (l is given) {
+                    if (l.foreign) return n
+                }
+            }
+        }
+        return ""
+    }
+
+    // s478 r1 — the placement pre-scan and the binder read one `print` call differently (printScans).
+    fn printScanWhy(w: string, binder: string, scan: string) -> string {
+        return "`" + w + "(…)` here calls " + binder + ", but the bootstrap places a function that calls the §20.7 built-in BEFORE it binds names (§20.7.3: \"server-placed by Route Inference (§12), exactly like a function that touches `?{}` SQL\"), and that placement read this call as " + scan + " — the bootstrap's pre-scan models a file-scope binding, a parameter, a local, a `given` name and a nested function named `" + w + "`, not this one (INTERIM). Rename the binding named `" + w + "`"
     }
 
     // §20.7.5: "A user-declared in-scope binding named `print` / `println` wins; the built-in steps aside
@@ -9302,6 +9508,7 @@ ${
         // s478-boot-print-builtins (§20.7) — the clean-stdout built-ins, unless a user binding of
         // the name wins (§20.7.5, builtinFree) — then the call is the user's, and W-PRINT-SHADOWED
         if ((n == "print" || n == "println") && builtinFree(env, n)) return resolvePrint(env, e, n == "println", args, st0)
+        if ((n == "print" || n == "println") && env.g.printCalls.indexOf(e.nid) >= 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(n, "a user binding of the name (§20.7.5)", "the built-in"), resolveExprs(env, args, not, st0))
         const st1: AS = (n == "print" || n == "println") ? printShadowed(env, e, n, st0) : st0
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
@@ -10657,7 +10864,7 @@ ${
             st = rs.st
             syms = syms.concat([rs.s])
             if (ty is given) st = addAnnot(st, rs.s, ty)
-            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
         }
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
         const b: AExpr | not = lambdaBody(lam)
@@ -16995,7 +17202,7 @@ ${
         const rb: RSym = mint(reservedName(st0, env.file, b.span, b.name), b.name)
         const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         if (b.name == "_") return { env: env, st: st }
-        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" }), st: st }
+        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }), st: st }
     }
 
     // §18.2's message at a failable site (a `!{}` arm, a `match` on a failable result).
@@ -17072,7 +17279,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let ty: Type | not = not
             if (i < fs.length) ty = fs[i].ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
             i = i + 1
         }
         return { env: env, st: st }
@@ -17088,7 +17295,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let t: Type | not = not
             if (i == 0) t = ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
             i = i + 1
         }
         return { env: env, st: st }
@@ -18745,7 +18952,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "", foreign: fi is given && annot is not }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -18768,7 +18975,7 @@ ${
         const rs: RSym = mint(reservedName(st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
-        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false, via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false, via: "", foreign: false }
         let inner: Env = withLocal(env, l)
         // the subject handle itself is narrowed inside the block too (§66.7.5)
         const hn: string = atName(subject)
@@ -18859,7 +19066,7 @@ ${
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
-        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
+        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -19332,7 +19539,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -19391,7 +19598,7 @@ ${
         let via: string = ""
         const ix: AExpr | not = iterOfExpr(src)
         if (rx.x.ty is not && ix is given) via = srcWhy(env, ix, st)
-        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: via }
+        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: via, foreign: false }
         const benv: Env = withLocal(env, l)
         // s474 — the header `key` (§17.4b): read in the body's scope (it reads
         // the binder), once per iteration — into a local minted HERE (lower
@@ -24233,7 +24440,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps }
+                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -24554,7 +24761,7 @@ ${
             // placeholder is not a type the sink judgment may trust (fail closed)
             let lty: Type | not = not
             if (proven) lty = pty
-            env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
         }
         st = resolveBlock(env, fs.f.body, st)
         st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
@@ -26804,7 +27011,7 @@ ${
             // function that calls it (the fixpoint below), ends every cell narrowing.
             for (const af of fnItems(f.items)) {
                 let own: string[] = blockEffects(af.body, [])
-                if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
+                if (af.server || sqlsInBlock(af.body).length > 0 || (!af.pure && printScanFn(lk, f, af).calls.length > 0)) own = own.concat(["*"])   // serverOwn (§12.2 T1; s478 r1: a print, §20.7.3), as the binder decides it
                 ws = ws.concat([{ name: af.name, nid: af.nid, file: f.path, keys: own, params: paramNids(af.params) }])
             }
         }
