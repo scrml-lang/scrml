@@ -1567,7 +1567,7 @@ ${
         if (!atDepthZero(st)) return false
         const c0: int = peekCode(st.cur, 0)
         return match stop {
-            .BareValue :> isTrivia(c0) || (c0 == 62 && !closesHashRef(st.cur)) || (c0 == 47 && peekCode(st.cur, 1) == 62)
+            .BareValue :> bareValueEnds(st, c0)
             .Line      :> lineEndsAt(skipBlanks(st.cur))
             .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
             .CodeBody  :> startsMarkup(skipTriviaAhead(st.cur))
@@ -1587,6 +1587,124 @@ ${
             .Shorthand :> false
             .CodeBody  :> false
         }
+    }
+
+    // s478 — SPEC §5.2 "An unquoted value is read WHOLE (S457)": "An unquoted
+    // (undelimited) attribute value is read to its end — never cut short with its
+    // tail dropped or turned into further attributes." One reader for every
+    // attribute (S458): at depth 0 the value ends at `/>`, at a `>` that is not
+    // `>=` (a `>` at depth 0 closes the tag; a `>=` "reads as the operator"), and
+    // at whitespace "only where the expression is complete and the text after it
+    // cannot continue it" — the value continues "after an operator that needs a
+    // right operand (`=`, `+`, `&&`, `?`, `:`, …), or before an infix operator, an
+    // assignment or compound assignment, `.name` / `?.`, a ternary `?` / `:`, or
+    // the keyword tests `is` / `instanceof` / `in`". A non-handler value read
+    // whole across an operator is then refused by the parser
+    // (E-ATTR-UNQUOTED-OPERATOR, unquotedOperatorDiag) — never truncated.
+    fn bareValueEnds(st: LexState, c0: int) -> boolean {
+        if (c0 == 47 && peekCode(st.cur, 1) == 62) return true
+        if (c0 == 62) return peekCode(st.cur, 1) != 61 && !closesHashRef(st.cur)
+        if (!isTrivia(c0)) return false
+        if (lastNeedsOperand(st)) return false
+        return !continuesValue(skipTriviaAhead(st.cur), openTernary(st))
+    }
+
+    // A ternary `?` read at depth 0 whose `:` is still to come — only then does a
+    // `:` after whitespace continue the value (otherwise it begins the opener's
+    // `:`-shorthand body, §4.14: `<button onclick=go() : "Go">`).
+    fn openTernary(st: LexState) -> boolean {
+        let depth: int = 0
+        let open: int = 0
+        for (const t of st.tokens) {
+            const k: TokenKind = t.kind
+            if (k is .LParen || k is .LBracket || k is .LBrace || k is .TemplateInterpStart) {
+                depth = depth + 1
+            } else if (k is .RParen || k is .RBracket || k is .RBrace || k is .TemplateInterpEnd) {
+                depth = depth - 1
+            } else if (depth == 0 && k is .Question) {
+                open = open + 1
+            } else if (depth == 0 && k is .Colon && open > 0) {
+                open = open - 1
+            }
+        }
+        return open > 0
+    }
+
+    // The last token is an operator that needs a right operand.
+    fn lastNeedsOperand(st: LexState) -> boolean {
+        if (st.tokens.length == 0) return false
+        const t: Token = st.tokens[st.tokens.length - 1]
+        const k: TokenKind = t.kind
+        if (k is .Keyword) return t.text == "is" || t.text == "in" || t.text == "instanceof" || t.text == "typeof" || t.text == "new" || t.text == "await"
+        if (k is .Ident) return t.text == "and" || t.text == "or"
+        if (k is .StringLit || k is .TemplateChunk || k is .RegexLit || k is .NumberLit || k is .BareVariant || k is .Foreign) return false
+        return match t.text {
+            "=" :> true
+            "==" :> true
+            "===" :> true
+            "!=" :> true
+            "!==" :> true
+            "+" :> true
+            "-" :> true
+            "*" :> true
+            "/" :> true
+            "%" :> true
+            "<" :> true
+            "<=" :> true
+            ">" :> true
+            ">=" :> true
+            "&&" :> true
+            "||" :> true
+            "??" :> true
+            "&" :> true
+            "|" :> true
+            "!" :> true
+            "?" :> true
+            ":" :> true
+            "." :> true
+            "?." :> true
+            "=>" :> true
+            "+=" :> true
+            "-=" :> true
+            "*=" :> true
+            "/=" :> true
+            "%=" :> true
+            "??=" :> true
+            "&&=" :> true
+            "||=" :> true
+            _ :> false
+        }
+    }
+
+    // The text at `c` (past whitespace) continues an expression: an infix /
+    // assignment operator, `.name` / `?.`, a ternary `?` / `:`, a `!{ … }`
+    // handler, or one of the keyword tests followed by a non-name character
+    // (never `name=`, which begins an attribute). `/>` and a lone `>` end the tag.
+    fn continuesValue(c: Cursor, ternary: boolean) -> boolean {
+        const c0: int = peekCode(c, 0)
+        const c1: int = peekCode(c, 1)
+        if (c0 == 61) return true                                   // = == =>
+        if (c0 == 43 || c0 == 45 || c0 == 42 || c0 == 37) return true   // + - * %
+        if (c0 == 38 || c0 == 124) return true                      // & && | ||
+        if (c0 == 63 || c0 == 46) return true                       // ? ?. ?? .
+        if (c0 == 58) return ternary                                // the `:` of an open `? :`
+        if (c0 == 60) return true                                   // < <=
+        if (c0 == 47) return c1 != 62                               // / (not `/>`)
+        if (c0 == 62) return c1 == 61                               // >= (a lone `>` ends the tag)
+        if (c0 == 33) return c1 == 61 || c1 == 123                  // != !{
+        return wordTestAt(c, "instanceof") || wordTestAt(c, "is") || wordTestAt(c, "in") || wordTestAt(c, "and") || wordTestAt(c, "or")
+    }
+
+    fn wordTestAt(c: Cursor, w: string) -> boolean {
+        let i: int = 0
+        while (i < w.length) {
+            if (peekCode(c, i) != w.charCodeAt(i)) return false
+            i = i + 1
+        }
+        const after: int = peekCode(c, w.length)
+        if (isIdentCont(after)) return false
+        if (after == 61 && peekCode(c, w.length + 1) != 61) return false   // `in=…` is an attribute
+        return true
     }
 
     // s475 r1 (#1788 F5) — is the `>` at `c` the closer of a `<#id>` reference
