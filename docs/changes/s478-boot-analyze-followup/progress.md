@@ -45,3 +45,21 @@ lane, in a scratch copy, gives E-STMT-UNEXPECTED-TOKEN for all three forms:
 
 So no parse.scrml change was made for this item. Tests cover the braced handler forms, which
 main parses. The `${…}` forms need #1865 (on main, `onclick=${…}` is still E-PARSE-TRAILING).
+
+The handler-block test file has a self-enabling case for the `${…}` forms. It returns early
+while a clean `onclick=${ … }` is still refused on main, and starts asserting once #1865 lands.
+It was verified against the merged scratch copy.
+
+## Gates
+- `slice-m4/analyze-checks-followup-s478.test.js`: 16 tests. `analyze-checks-s478.test.js`:
+  25/25, so the C13 tests still hold.
+- Bootstrap conformance, `bun scripts/bootstrap-conformance.ts --json`, per-case diff of
+  bucket and emitted codes:
+  - Before (origin/main cc0b2a78e): PASS 366 · FAIL 239 · NOT-TWINNED 624 · UNSUPPORTED 639.
+  - After: identical, with 0 cases changed (no PASS→FAIL).
+- severity.scrml: no code set changed; `gen-bootstrap-severity.ts --check` reports it is current.
+- Newly rejecting, by construction: none.
+  - F1 adds an E-TYPE-031 only beside an existing E-TYPE-020 / E-MATCH-012 Error.
+  - F3 re-codes a tag that was already E-COMPONENT-035.
+  - F4 removes reports.
+- Slices: m1 167, m2 619, lowered m1 167, m3 60, m4 6191, codec 166, e2e-render-map 259, all with 0 failures. The pre-commit hook passed: 54,908 pass, 0 fail.
