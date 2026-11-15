@@ -1,6 +1,6 @@
 {
   "id": "reactive-s437-r5-template-cell-read-value-attr",
-  "description": "PINNED XFAIL on impl#1 (g-client-template-interpolation-lowering-needs-a-structural-emitter, carried): this case states the CORRECT behaviour. S437 round 5's client template lowering was reverted before landing because it silently miscompiled other templates; the structural fix is its own arc. S437 round 5 F2: a reactive value attribute written as a template literal reading a cell (`style=(`color: ${@c}`)`) is emitted and re-renders on change. Before the root fix the client emitter left `${@c}` raw, so the attribute was DROPPED (W-CG-VALUE-ATTR-UNLOWERABLE, a fail-closed workaround) and absent at runtime.",
+  "description": "PINNED XFAIL on impl#1 (g-client-template-interpolation-lowering-needs-a-structural-emitter, carried): this case states the CORRECT behaviour. S437 round 5's client template lowering was reverted before landing because it silently miscompiled other templates; the structural fix is its own arc. S437 round 5 F2: a reactive value attribute written as a template literal reading a cell (`title=(`color: ${@c}`)`; S478: was `style=`, which §65.4.2 refuses from data — E-STYLE-VALUE-NOT-STYLE — so the case now uses a plain value attribute) is emitted and re-renders on change. Before the root fix the client emitter left `${@c}` raw, so the attribute was DROPPED (W-CG-VALUE-ATTR-UNLOWERABLE, a fail-closed workaround) and absent at runtime.",
   "language-version": "1.0",
   "spec": "§5.2",
   "source-test": "compiler/src/codegen/emit-expr.ts",
@@ -23,7 +23,7 @@
       {
         "selector": "#box",
         "attr": {
-          "style": "color: blue"
+          "title": "color: blue"
         }
       }
     ]
