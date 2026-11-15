@@ -4,7 +4,7 @@
 
 ${
     function clearColor() {
-        given c = @color :> { @color = "" }
+        given c = @color :> { @color = ""; }
     }
 }
 <p>ok</p>

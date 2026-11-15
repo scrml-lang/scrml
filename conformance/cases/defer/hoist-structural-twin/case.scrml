@@ -12,7 +12,7 @@ ${
         if (true) {
             const { a } = { a: "INNER" }
             function show() {
-                return a
+                return a;
             }
             add(show())
             add("D1")
@@ -23,27 +23,27 @@ ${
         const [p, q] = [1, 2]
         add("sum" + sum())
         function sum() {
-            return p + q
+            return p + q;
         }
         add("D2")
     }
 
     function shadowed() {
-        add(helper())
-        let kind = "tail"
-        add(kind)
+        add(helper());
+        let kind = "tail";
+        add(kind);
         function helper() {
-            let kind = "local"
-            let o = { kind: 1 }
-            return kind + o.kind + "kind"
+            let kind = "local";
+            let o = { kind: 1 };
+            return kind + o.kind + "kind";
         }
-        add("D3")
+        add("D3");
     }
 
     function go() {
-        destructObj()
-        destructArr()
-        shadowed()
+        destructObj();
+        destructArr();
+        shadowed();
     }
 }
 <program>

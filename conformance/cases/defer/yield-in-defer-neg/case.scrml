@@ -1,7 +1,7 @@
 ${
     function* gen() {
-        defer yield 99
-        yield 1
+        defer yield 99;
+        yield 1;
     }
 }
 <program>
