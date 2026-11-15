@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 458 | 24.5% |
-| CODES-ONLY | 4 | 0.2% |
-| FAIL | 93 | 5.0% |
+| PASS | 462 | 24.7% |
+| CODES-ONLY | 5 | 0.3% |
+| FAIL | 88 | 4.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
 | UNSUPPORTED | 678 | 36.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 555; of those, 462 hold (83.2%). Runtime half executed on the bootstrap for 159 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 555; of those, 467 hold (84.1%). Runtime half executed on the bootstrap for 159 case(s).
 
-- **Vacuous** passes: 10 of 462 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **452**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 23 of 93; the other 70 are implemented checks that answered wrong.
+- **Vacuous** passes: 10 of 467 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **457**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 21 of 88; the other 67 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 678.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 295 · FAIL 84 · UNSUPPORTED 496. Twin holds 295 (non-vacuous 289). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 298 · FAIL 80 · UNSUPPORTED 496. Twin holds 298 (non-vacuous 292). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -115,7 +115,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | defer | 51 | 24 | · | 2 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
-| element-refusal | 39 | 20 | · | 2 | · | 11 | 6 | · | · |
+| element-refusal | 39 | 22 | · | · | · | 11 | 6 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
 | engine | 92 | 18 | · | 2 | · | 50 | 22 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
@@ -124,7 +124,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 15 | · | 2 | · | 1 | 7 | · | · |
-| foreign | 16 | 1 | 3 | 4 | · | 7 | 1 | · | · |
+| foreign | 16 | 2 | 4 | 2 | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 14 | · | 2 | · | 49 | 1 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
@@ -138,7 +138,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | match-codes | 25 | 5 | · | 9 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 16 | · | 3 | · | 12 | 15 | · | · |
-| md | 18 | · | · | 1 | · | 3 | 14 | · | · |
+| md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 45 | 21 | · | 5 | · | 8 | 11 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (93)
+### FAIL (88)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `when` (other statements at logic-block level are not in the bootstrap)
@@ -212,20 +212,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-EXPECTED: expected `:`, found `D`
   - E-PARSE-EXPECTED: expected `}`, found `D`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `D` (other statements at logic-block level are not in the bootstrap)
-- `element-refusal/fn-return-script-pos` (twin · parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-EXPR: expected an expression, found `<`
-  - E-PARSE-EXPR: expected an expression, found `/script> } `
-  - E-PARSE-EXPECTED: expected `:`, found `(`
-- `element-refusal/interp-markup-value-style-pos` (twin · parse-reject)
-  - missing E-STYLE-001
-  - severity: E-STYLE-001 did not fire (expected error)
-  - count: E-STYLE-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-EXPR: expected an expression, found `<`
-  - E-PARSE-EXPECTED: expected `:`, found `style`
-  - E-PARSE-EXPECTED: expected `}`, found `{`
 - `engine/rule-violation-pos` (twin · codes)
   - missing E-ENGINE-INVALID-TRANSITION
   - severity: E-ENGINE-INVALID-TRANSITION did not fire (expected error)
@@ -253,11 +239,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `foreign/foreign-crossing-shadow-in-block-neg` (codes; not in the bootstrap: E-FOREIGN-006)
   - missing E-FOREIGN-006
   - severity: E-FOREIGN-006 did not fire (expected error)
-- `foreign/foreign-inline-no-lang-neg` (twin · codes)
-  - missing E-FOREIGN-003
-  - severity: E-FOREIGN-003 did not fire (expected error)
-- `foreign/foreign-slice-no-free-capture-neg` (parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"MODULE"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `foreign/foreign-slice-unparseable-in-block-neg` (codes)
   - missing E-FOREIGN-007
   - severity: E-FOREIGN-007 did not fire (expected error)
@@ -313,8 +294,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-EXPECTED: expected `:`, found `}`
   - E-PARSE-TYPE: expected a type, found `}`
   - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-codes/e-match-arm-markup-in-value-pos` (twin · parse-reject; not in the bootstrap: E-MATCH-ARM-MARKUP-IN-VALUE)
-  - missing E-MATCH-ARM-MARKUP-IN-VALUE
+- `match-codes/e-match-arm-markup-in-value-pos` (twin · parse-reject)
   - E-PARSE-EXPECTED: expected `:`, found `}`
   - E-PARSE-TYPE: expected a type, found `}`
   - E-PARSE-EXPECTED: expected `}`, found ``
@@ -356,13 +336,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
-- `md/in-logic-markup-refused` (twin · parse-reject; not in the bootstrap: E-MD-IN-LOGIC-NOMINAL)
-  - missing E-MD-IN-LOGIC-NOMINAL
-  - severity: E-MD-IN-LOGIC-NOMINAL did not fire (expected error)
-  - count: E-MD-IN-LOGIC-NOMINAL fired 0 time(s), expected exactly 1
-  - E-DECL-ILLEGAL-FIELD-NAME: `on` cannot name a declaration or field — it is reserved for namespaced attributes (`on:…`, §66.2.3)
-  - E-PARSE-EXPR: expected an expression, found `<`
-  - E-PARSE-EXPECTED: expected `:`, found `div`
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
@@ -496,7 +469,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (462)
+### PASS / CODES-ONLY (467)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -632,7 +605,9 @@ none
 - `defer/unhandled-failable-neg` — PASS · TWIN
 - `defer/value-arm-site-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
+- `element-refusal/fn-return-script-pos` — PASS · TWIN
 - `element-refusal/implied-lift-arm-script-pos` — PASS · TWIN
+- `element-refusal/interp-markup-value-style-pos` — PASS · TWIN
 - `element-refusal/lift-script-body-pos` — PASS · TWIN
 - `element-refusal/lift-script-src-pos` — PASS · TWIN
 - `element-refusal/lift-script-uppercase-pos` — PASS
@@ -730,9 +705,11 @@ none
 - `fn/return-colon-spelling-neg` — PASS
 - `fn/scope-redeclare-nested-ok` — PASS · TWIN
 - `fn/sync-decl-clean` — PASS · TWIN
+- `foreign/foreign-inline-no-lang-neg` — PASS
 - `foreign/foreign-lang-in-program-neg` — PASS
 - `foreign/foreign-slice-await-regex-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
 - `foreign/foreign-slice-lexing-regex-quote-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
+- `foreign/foreign-slice-no-free-capture-neg` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
 - `foreign/foreign-slice-sealed-crossings-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN
@@ -827,6 +804,7 @@ none
 - `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — PASS · TWIN
+- `md/in-logic-markup-refused` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
 - `module/e-export-001-export-const-clean` — PASS · TWIN
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
