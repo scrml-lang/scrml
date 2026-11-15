@@ -5764,9 +5764,14 @@ ${
             const d: MP = mDiag(mp, "E-PARSE-ATTR", "expected an attribute value after `=`", mp.pos, mp.pos + 1)
             return { v: AAttrValue.NoValue, mp: d }
         }
-        const owed: string = operandlessEnd(tp3)
-        if (owed != "") return operandlessValue(mp, tp3, handler, name, owed)
         const r3: RExpr = parseAssign(tp3)
+        // s478 r1 — the operand-owed refusal applies only to a value that does
+        // not parse whole: a complete postfix form (`bad()?`, §19.5.4
+        // propagation) is an expression and keeps its own diagnostics.
+        if (r3.tp.diags.length > tp3.diags.length || !atEnd(r3.tp)) {
+            const owed: string = operandlessEnd(tp3)
+            if (owed != "") return operandlessValue(mp, tp3, handler, name, owed)
+        }
         // §5.2.3 / §5.2.4: a `;` ending an unquoted value is reported by scanAttr
         // (bareSequence), which reads the rest of the sequence
         if (isP(r3.tp, ";")) return { v: AAttrValue.Bare(r3.e), mp: mAt(backToMarkup(mp, r3.tp), cur(r3.tp).start) }

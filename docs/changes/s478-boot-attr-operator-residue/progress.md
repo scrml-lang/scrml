@@ -43,3 +43,10 @@ attr-forms-s478.test.js: +2 tests (33 pass); both FAIL on base (lex/parse from o
 
 - `title=@last is not given` reads `is not` as the test and `given` as a boolean attribute (refused once,
   on `title=@last is not`). `is not given` is not a scrml form (§42 has `is given` / `is not`).
+
+## Fix round 1 (#1873 review)
+- MED: parse.scrml parseAttrValue — operandlessEnd is consulted only when the bare value does not parse whole (parse diags grew or tokens remain). A complete postfix `?` (§19.5.4) keeps its own diagnostics (E-ERROR-003, as on base); spaced `bad()? >` no longer cascades; ternary `@ok ? >` still refused.
+- LOW: lex.scrml endsTagAt — note on `/> /` regex literals.
+- LOW (item 3, `calculate()>=</>` naming `>=`): skipped — the value reader consumes the closer, not a trivial message tweak.
+- Tests: attr-forms-s478 "postfix `?`" (red on 5473226783); 8 attr/markup slice files 330/330.
+- Conformance vs origin/main 97278e7f9: identical (PASS 422/1868). Corpus 2860 files: 0 newly rejecting / 0 newly accepting.
