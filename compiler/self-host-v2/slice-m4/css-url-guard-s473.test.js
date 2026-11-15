@@ -25,6 +25,7 @@
 import { describe, test, expect, beforeAll, afterEach, spyOn } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -292,14 +293,15 @@ describe("end to end — a compiled program's bound `fill=` / `filter=` / `<set 
 // ---------------------------------------------------------------------------
 // 2. `<link rel="stylesheet" href=(data)>` — RULED S472: REFUSED.
 // ---------------------------------------------------------------------------
-const LINK = (tag, extra = "") => `<program>
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names
+const LINK = (tag, extra = "") => dropUnnamedScaffold(`<program>
     let <u:string="https://evil.example/x.css"/>
     let <r:string="stylesheet"/>
 ${extra}    <main>
         ${tag}
     </main>
 </program>
-`;
+`, [`    let <u:string="https://evil.example/x.css"/>`, `    let <r:string="stylesheet"/>`]);
 
 describe("compile — a data-bound `href` on a stylesheet `<link>` is E-ATTR-STYLESHEET-HREF", () => {
   const refused = (tag, extra) => expect(codes(LINK(tag, extra))).toEqual(["E-ATTR-STYLESHEET-HREF"]);

@@ -41,12 +41,10 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const hidden = (sel) => $(sel) !== null && $(sel).style.display === "none";
 const visible = (sel) => $(sel) !== null && $(sel).style.display !== "none";
 
+// s478 (E-DG-002): a cell and its setter are declared only when the case reads the cell
+const names = (cell, src) => new RegExp(`@${cell}\\b`).test(src);
 const prog = (body, extra = "") => `<program>
-    let <step:number=1/>
-    let <label:string="alpha"/>
-    function go(n: number) { @step = n; }
-    function relabel(s: string) { @label = s; }
-${extra}
+${names("step", body + extra) ? "    let <step:number=1/>\n    function go(n: number) { @step = n; }\n" : ""}${names("label", body + extra) ? "    let <label:string=\"alpha\"/>\n    function relabel(s: string) { @label = s; }\n" : ""}${extra}
     <main>
 ${body}
     </main>

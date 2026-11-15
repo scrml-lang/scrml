@@ -38,9 +38,9 @@ const clean = (src, files) => {
 // a payload / field tape TYPE's SeqGrants in Core, by field name
 const tapeTypeGrants = (core, name) => find(core.types, (n) => n.sym && n.sym.hint === name && n.ty && n.ty.data && n.ty.data.grants)[0].ty.data.grants;
 
-const ENUM = (t, extra = "") => `    type E:enum = { Dot, A(xs: ${t}) }\n    let <e:E=.Dot${extra}/>\n    function mk()! E {\n        fail .A([1, 2, 3]);\n    }\n`;
-const TRANS = (t) => `    type E:enum = { Dot, A(xs: ${t}) }\n    <e:E=.Dot>\n        <Dot rule=.A/>\n        <A rule=.Dot/>\n    </>\n    function mk()! E {\n        fail .A([1]);\n    }\n`;
-const ENUM_IN_STRUCT =(t) => `    type Box:struct = { xs: ${t} }\n    type E:enum = { Dot, A(b: Box) }\n    let <e:E=.Dot/>\n`;
+const ENUM = (t, extra = "") => `    type E:enum = { Dot, A(xs: ${t}) }\n    let <_e:E=.Dot${extra}/>\n    function mk()! E {\n        fail .A([1, 2, 3]);\n    }\n`;
+const TRANS = (t) => `    type E:enum = { Dot, A(xs: ${t}) }\n    <_e:E=.Dot>\n        <Dot rule=.A/>\n        <A rule=.Dot/>\n    </>\n    function mk()! E {\n        fail .A([1]);\n    }\n`;
+const ENUM_IN_STRUCT =(t) => `    type Box:struct = { xs: ${t} }\n    type E:enum = { Dot, A(b: Box) }\n    let <_e:E=.Dot/>\n`;
 
 // RULED S469 (bryan, on Q8 of this lane): "Not a tape position". An enum payload
 // is a VALUE: grants do not apply inside it, and a whole write of such an enum
@@ -52,14 +52,14 @@ describe("RULED S469 — an enum payload is a value, not a tape position (§66.1
   const UNGRANTED = "int[free, append]";
   // [form, decls, body]
   const FORMS = [
-    ["a `fail` payload written whole (`!{ _ x :> @e = x }`)", ENUM(UNGRANTED), "mk() !{ _ x :> @e = x };"],
-    ["a variant switch to a payload-free variant (`@e = .Dot`)", ENUM(UNGRANTED), "@e = .Dot;"],
-    ["`reset(@e)`", ENUM(UNGRANTED), "reset(@e);"],
-    ["a `rule=` transition", TRANS(UNGRANTED), "@e = .Dot;"],
-    ["a `rule=` transition to the payload variant", TRANS(UNGRANTED), "mk() !{ _ x :> @e = x };"],
-    ["a payload STRUCT's tape (`@e = .Dot`)", ENUM_IN_STRUCT(UNGRANTED), "@e = .Dot;"],
-    ["a struct field holding the enum, written whole", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, let e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w.e = .Dot;"],
-    ["a genuine replace of a struct whose enum field is rewritten", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, e: E }\n    let <w:W=({ title: "t", e: .Dot })/>\n`, "@w = { title: \"u\", e: .Dot };"],
+    ["a `fail` payload written whole (`!{ _ x :> @_e = x }`)", ENUM(UNGRANTED), "mk() !{ _ x :> @_e = x };"],
+    ["a variant switch to a payload-free variant (`@_e = .Dot`)", ENUM(UNGRANTED), "@_e = .Dot;"],
+    ["`reset(@_e)`", ENUM(UNGRANTED), "reset(@_e);"],
+    ["a `rule=` transition", TRANS(UNGRANTED), "@_e = .Dot;"],
+    ["a `rule=` transition to the payload variant", TRANS(UNGRANTED), "mk() !{ _ x :> @_e = x };"],
+    ["a payload STRUCT's tape (`@_e = .Dot`)", ENUM_IN_STRUCT(UNGRANTED), "@_e = .Dot;"],
+    ["a struct field holding the enum, written whole", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, let e: E }\n    let <_w:W=({ title: "t", e: .Dot })/>\n`, "@_w.e = .Dot;"],
+    ["a genuine replace of a struct whose enum field is rewritten", `    type E:enum = { Dot, A(xs: ${UNGRANTED}) }\n    type W:struct = { title: string, e: E }\n    let <_w:W=({ title: "t", e: .Dot })/>\n`, "@_w = { title: \"u\", e: .Dot };"],
   ];
   for (const [form, decls, body] of FORMS) {
     test(`${form} — an ungranted payload tape: clean (analyzer and Core)`, () => {
@@ -68,7 +68,7 @@ describe("RULED S469 — an enum payload is a value, not a tape position (§66.1
   }
   test("`persist=\"local\"` (a cross-tab value is a whole enum write): clean, payload tape or payload struct", () => {
     clean(P(ENUM(UNGRANTED, ` persist="local" key="r3.e"`), ""));
-    clean(P(ENUM_IN_STRUCT(UNGRANTED).replace("let <e:E=.Dot/>", "let <e:E=.Dot persist=\"local\" key=\"r3.s\"/>"), ""));
+    clean(P(ENUM_IN_STRUCT(UNGRANTED).replace("let <_e:E=.Dot/>", "let <_e:E=.Dot persist=\"local\" key=\"r3.s\"/>"), ""));
   });
   test("`reset-on=`: clean", () => {
     clean(P(`    let <n:int=0/>\n` + ENUM(UNGRANTED, " reset-on=[@n]"), ""));

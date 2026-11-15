@@ -39,16 +39,16 @@ const boxApp = (use) => ({
 describe("writes are type-checked against the target (§66.1 rule 5)", () => {
   const W = [
     { name: "`not` into an `int` cell → E-TYPE-041 (§42.3.1)", want: ["E-TYPE-041"],
-      bad: ["    let <x:int=0/>\n    function f() { @x = not; }"], ok: ["    let <x:int=0/>\n    function f() { @x = 1; }"] },
+      bad: ["    let <_x:int=0/>\n    function f() { @_x = not; }"], ok: ["    let <_x:int=0/>\n    function f() { @_x = 1; }"] },
     { name: "an end-append of the wrong element type", want: ["E-TYPE-031"],
-      bad: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(5); }"],
-      ok: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(\"x\"); }"] },
+      bad: ["    <_audit:string[free, append]=([])/>\n    function f() { @_audit.append(5); }"],
+      ok: ["    <_audit:string[free, append]=([])/>\n    function f() { @_audit.append(\"x\"); }"] },
     { name: "a spread override of a struct cell (O58 (b) field edit)", want: ["E-TYPE-031"],
-      bad: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt = { ...@pt, y: \"s\" }; }"],
-      ok: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt = { ...@pt, y: 5 }; }"] },
-    { name: "a field-at write `@pt.y = …`", want: ["E-TYPE-031"],
-      bad: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt.y = true; }"],
-      ok: ["    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n    function f() { @pt.y = 3; }"] },
+      bad: ["    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n    function f() { @_pt = { ...@_pt, y: \"s\" }; }"],
+      ok: ["    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n    function f() { @_pt = { ...@_pt, y: 5 }; }"] },
+    { name: "a field-at write `@_pt.y = …`", want: ["E-TYPE-031"],
+      bad: ["    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n    function f() { @_pt.y = true; }"],
+      ok: ["    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n    function f() { @_pt.y = 3; }"] },
     { name: "a spread override of an INSTANCE", want: ["E-TYPE-031"],
       bad: ["    function f() { @country = { ...@country, value: 5 }; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>"],
       ok: ["    function f() { @country = { ...@country, value: \"CA\" }; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>"] },
@@ -59,14 +59,14 @@ describe("writes are type-checked against the target (§66.1 rule 5)", () => {
       bad: ["    let <show:bool=false/>\n    function f() { given c = @color :> { c.value = 5; } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
       ok: ["    let <show:bool=false/>\n    function f() { given c = @color :> { c.value = \"\"; } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"] },
     { name: "a call's declared return type", want: ["E-TYPE-031"],
-      bad: ["    let <x:int=0/>\n    function h() -> string { return \"a\"; }\n    function f() { @x = h(); }"],
-      ok: ["    let <x:int=0/>\n    function h() -> int { return 1; }\n    function f() { @x = h(); }"] },
+      bad: ["    let <_x:int=0/>\n    function h() -> string { return \"a\"; }\n    function f() { @_x = h(); }"],
+      ok: ["    let <_x:int=0/>\n    function h() -> int { return 1; }\n    function f() { @_x = h(); }"] },
     { name: "a handler write", want: ["E-TYPE-031"],
-      bad: ["    let <x:int=0/>", "<button onclick=(@x = \"s\")>x</button>"],
-      ok: ["    let <x:int=0/>", "<button onclick=(@x = @x + 1)>x</button>"] },
+      bad: ["    let <_x:int=0/>", "<button onclick=(@_x = \"s\")>x</button>"],
+      ok: ["    let <_x:int=0/>", "<button onclick=(@_x = @_x + 1)>x</button>"] },
     { name: "a write inside an inline handler block", want: ["E-TYPE-031"],
-      bad: ["    let <x:int=0/>", "<button onclick={ let a = \"s\"; @x = a; }>x</button>"],
-      ok: ["    let <x:int=0/>", "<button onclick={ let a = 2; @x = a; }>x</button>"] },
+      bad: ["    let <_x:int=0/>", "<button onclick={ let a = \"s\"; @_x = a; }>x</button>"],
+      ok: ["    let <_x:int=0/>", "<button onclick={ let a = 2; @_x = a; }>x</button>"] },
   ];
   for (const w of W) {
     test(`${w.want.join(", ")} — ${w.name}`, () => { expect(inApp(...w.bad)).toEqual(w.want); });
@@ -80,10 +80,10 @@ describe("writes are type-checked against the target (§66.1 rule 5)", () => {
 // ---------------------------------------------------------------------------
 describe("initializers — §7.5.1 position 2, exactly", () => {
   test("E-TYPE-031 — a `string` cell's own value is a number literal", () => {
-    expect(inApp("    let <s:string=5/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_s:string=5/>")).toEqual(["E-TYPE-031"]);
   });
   test("twin silent — the same cell with a string literal", () => {
-    expect(inApp("    let <s:string=\"5\"/>")).toEqual([]);
+    expect(inApp("    let <_s:string=\"5\"/>")).toEqual([]);
   });
   test("E-TYPE-031 — a quoted use-site value for a `bool` attribute", () => {
     expect(codes([boxLib("export <box ok:bool=false/>\nrenders <p>x</p>\n"), boxApp("<box ok=\"yes\"/>")])).toEqual(["E-TYPE-031"]);
@@ -100,14 +100,14 @@ describe("initializers — §7.5.1 position 2, exactly", () => {
   // RULED S440 (JS-WAT 7(a), "enforce `int`"; PA note "§7.5.1's provable domain widens to `int` with it"):
   // supersedes SPEC §7.5.1's "`int` is deliberately OUTSIDE" (SPEC pass 2 owes the text).
   test("E-TYPE-031 (int enforced, S440) — an `int` annotation given a string literal", () => {
-    expect(inApp("    let <n:int=\"s\"/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_n:int=\"s\"/>")).toEqual(["E-TYPE-031"]);
     expect(codes([boxLib("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxApp("<box n=(\"s\")/>")])).toEqual(["E-TYPE-031"]);
   });
   // s472 r1 F2 (PA-directed widening, review of #1608 — as r7 A widened arguments and returns):
   // a NON-literal initializer is checked against the annotation too; SPEC §7.5.1 text owes the widening.
   test("a NON-literal use-site value of the wrong type is E-TYPE-031 (s472 widening; was silent, SPEC position 2 is literal-only)", () => {
-    expect(inApp("    <n:int=3/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual(["E-TYPE-031"]);
-    expect(inApp("    <n:string=\"3\"/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual([]);
+    expect(inApp("    <_n:int=3/>", "<dropdown label=(@_n) options=([\"a\"])/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <_n:string=\"3\"/>", "<dropdown label=(@_n) options=([\"a\"])/>")).toEqual([]);
   });
 });
 
@@ -123,17 +123,17 @@ describe("a scope binds each name once", () => {
     expect(inApp("    function g(a: int) { let a = 1; }")).toEqual(["E-SCOPE-REDECLARE"]);
   });
   test("legal — shadowing in a NESTED block (§7.3.3: \"legal and unaffected\")", () => {
-    expect(inApp("    let <n:int=0/>\n    function f() { let a = 1;\n if (@n > 0) { let a = 2; } }")).toEqual([]);
-    expect(inApp("    let <n:int=0/>\n    function g(a: int) { if (@n > 0) { let a = 2; } else { let a = 3; } }")).toEqual([]);
+    expect(inApp("    let <_n:int=0/>\n    function f() { let a = 1;\n if (@_n > 0) { let a = 2; } }")).toEqual([]);
+    expect(inApp("    let <_n:int=0/>\n    function g(a: int) { if (@_n > 0) { let a = 2; } else { let a = 3; } }")).toEqual([]);
   });
   test("legal — the same local name in two functions", () => {
     expect(inApp("    function f() { let a = 1; }\n    function g() { let a = 2; }")).toEqual([]);
   });
   test("E-BOOTSTRAP-REDECLARE — `let a` twice in an inline handler block (§7.3.3 names function bodies only)", () => {
-    expect(inApp("    let <n:int=0/>", "<button onclick={ let a = 1; let a = 2; @n = a; }>x</button>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(inApp("    let <_n:int=0/>", "<button onclick={ let a = 1; let a = 2; @_n = a; }>x</button>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
   });
   test("twin silent — one `let` per handler block", () => {
-    expect(inApp("    let <n:int=0/>", "<button onclick={ let a = 1; @n = a; }>x</button>")).toEqual([]);
+    expect(inApp("    let <_n:int=0/>", "<button onclick={ let a = 1; @_n = a; }>x</button>")).toEqual([]);
   });
   test("E-HANDLE-REDECLARE (ruled S442) — a handle named like a declaration (`@dropdown` is its shared instance)", () => {
     expect(inApp("", "<dropdown as=dropdown label=\"1\" options=([\"a\"])/>")).toEqual(["E-HANDLE-REDECLARE"]);
@@ -186,8 +186,8 @@ describe("calls and `<each in=…>`", () => {
     expect(inApp("    function h() -> Nope { return 1; }")).toEqual(["E-TYPE-UNKNOWN"]);
   });
   test("E-EACH-NOT-SEQUENCE — a string, a struct", () => {
-    expect(inApp("    <s=\"abc\"/>", "<each in=@s as c><p>${c}</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
-    expect(inApp("    type P:struct = { x: int }\n    <pt:P=({ x: 1 })/>", "<each in=@pt as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("    <_s=\"abc\"/>", "<each in=@_s as c><p>${c}</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("    type P:struct = { x: int }\n    <_pt:P=({ x: 1 })/>", "<each in=@_pt as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
   });
   test("twin silent — a sequence field read bare inside a declaration's renders (the library's `<each in=options>`)", () => {
     expect(codes([LIB(), app("", "<dropdown label=\"1\" options=([\"a\"])/>")])).toEqual([]);
@@ -198,25 +198,25 @@ describe("calls and `<each in=…>`", () => {
 // The adversarial self-probe: shapes adjacent to the checks that must NOT
 // fire. (Function-typed attributes, O8, are not parseable by the slice's front
 // end — `<cb:fn()…>` is E-PARSE-TAG — so they have no control yet. s469: a
-// `T | not` cell opener, `<x:string|not=…/>`, parses now — arms-union-s469.test.js.)
+// `T | not` cell opener, `<_x:string|not=…/>`, parses now — arms-union-s469.test.js.)
 // S442: three S439 controls moved OUT of this list because S440 RULED them
-// errors — `@s || "x"` on strings (Gotcha Q2), a truthy `if=@label` on a string
+// errors — `@_s || "x"` on strings (Gotcha Q2), a truthy `if=@label` on a string
 // (truthiness (c)), a `number` into an `int` cell (JS-WAT 7(a)); each is now a
 // positive test in typer-s440.test.js.
 // ---------------------------------------------------------------------------
 describe("adversarial controls — adjacent shapes stay silent", () => {
   const C = [
-    ["a ternary of ints into an int cell, with a bool test", "    let <b:bool=false/>\n    let <x:int=0/>\n    function f() { @x = @b ? 1 : 2; }"],
-    ["an int into a `number` cell", "    let <r:number=0.5/>\n    function f() { @r = 2; }"],
-    ["`not` and a value into a `T | not` struct field", "    type O:struct = { let v: string | not }\n    let <o:O=({ v: not })/>\n    function f() { @o.v = not;\n @o.v = \"a\"; }"],
+    ["a ternary of ints into an int cell, with a bool test", "    let <b:bool=false/>\n    let <_x:int=0/>\n    function f() { @_x = @b ? 1 : 2; }"],
+    ["an int into a `number` cell", "    let <_r:number=0.5/>\n    function f() { @_r = 2; }"],
+    ["`not` and a value into a `T | not` struct field", "    type O:struct = { let v: string | not }\n    let <_o:O=({ v: not })/>\n    function f() { @_o.v = not;\n @_o.v = \"a\"; }"],
     // (s442 r6: the S439 control "a `T | not` parameter into a `T` cell — unproven, not wrong" moved OUT — RULED an
     // error for all types (user-voice S442 "`T | not` into `T` is an error for all types"); now a positive test in typer-s440.test.js)
-    ["an enum variant into an enum cell", "    let <o:Openness=.Closed/>\n    function f() { @o = .Opened; }"],
+    ["an enum variant into an enum cell", "    let <_o:Openness=.Closed/>\n    function f() { @_o = .Opened; }"],
     ["a seeded `let` (reactive initializer) and a use-site live value", "    let <src:string=\"a\"/>\n    let <draft:string=@src/>", "<dropdown label=(@src) options=([\"a\"]) value=(@draft)/>"],
-    ["a sequence's `.length` into an int cell", "    <audit:string[free, append]=([])/>\n    let <n:int=0/>\n    function f() { @audit.append(\"x\");\n @n = @audit.length; }"],
-    ["a read through a `given` narrowing", "    let <show:bool=false/>\n    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value; } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
+    ["a sequence's `.length` into an int cell", "    <_audit:string[free, append]=([])/>\n    let <_n:int=0/>\n    function f() { @_audit.append(\"x\");\n @_n = @_audit.length; }"],
+    ["a read through a `given` narrowing", "    let <show:bool=false/>\n    let <_seen:string=\"\"/>\n    function f() { given c = @color :> { @_seen = c.value; } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
     ["a row alias and `@.` inside `<each>`", "    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>", "<each in=@lines key=@.id as line><p>${line.name} ${@.id}</p><dropdown label=line.name options=([\"a\"])/></each>"],
-    ["`reset(@x)` of a `let` cell", "    let <x:int=0/>\n    function f() { reset(@x); }"],
+    ["`reset(@_x)` of a `let` cell", "    let <_x:int=0/>\n    function f() { reset(@_x); }"],
     ["a local rebinding (§66.11.5 is out of the write contracts)", "    function f() { let a = 1;\n a = 2; }"],
   ];
   for (const [name, decls, markup] of C) {
@@ -313,13 +313,13 @@ const BASE_66_19 = [
   // by any file"); the bootstrap now spells §21.6's E-IMPORT-004 for a name the resolved file does not export.
   // s473: `@country.open = …` (`country` names no handle in scope — its cross-file `as=` is unresolved) is
   // E-STATE-UNDECLARED (§6.1.1); it was mislabeled "writing a whole instance".
-  // s473 D29: an `@x` READ naming nothing in scope is E-STATE-UNDECLARED too (three were E-SCOPE-001).
+  // s473 D29: an `@_x` READ naming nothing in scope is E-STATE-UNDECLARED too (three were E-SCOPE-001).
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-006", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED", "E-TYPE-VARIANT"],
   // s451: + one E-BOOTSTRAP-UNSUPPORTED — `style="background:${hex}"` (a §5.5.3 quoted-value template) used to be
   // emitted as literal text; it is refused now (parse.scrml quotedInterpDiags).
   // s451 (Ue): - two E-PARSE-EXPECTED, two E-PARSE-TRAILING — the theme's `match @mode { .Light :> …  .Dark :> … }`
   // tokens parse now (parse.scrml parseMatch); its theme refusal stands.
-  // s473 D29: one `@x` read naming nothing in scope is E-STATE-UNDECLARED (was E-SCOPE-001).
+  // s473 D29: one `@_x` read naming nothing in scope is E-STATE-UNDECLARED (was E-SCOPE-001).
   // s475-boot-small-gaps2: + one E-BOOTSTRAP-UNSUPPORTED — `toggleMode`'s `@mode` read is the own value of a
   // file-scope declaration (`export let <mode:Mode=.Light/>`, outside `<program>`), which the bootstrap does not
   // build; it read the instance instead (g-boot-file-scope-own-value-read-unbuilt-s475), now refused by name.
@@ -330,10 +330,10 @@ const BASE_66_19 = [
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
   // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
   // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
-  // s473 D29: both are `@x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).
+  // s473 D29: both are `@_x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).
   ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-006", "E-STATE-UNDECLARED", "E-STATE-UNDECLARED"],
   // §66.19.5: s444 Phase A — the host call and the bind are Core now: the program compiles clean.
-  // s469-tape-followups (#1472): the SPEC log now appends with `@audit.append(…)` (S469 "tape methods are named
+  // s469-tape-followups (#1472): the SPEC log now appends with `@_audit.append(…)` (S469 "tape methods are named
   // after their grants", §66.12.6 rule 3). The bootstrap's method allowlist still knows only `push`/`unshift`, so
   // the call is E-BOOTSTRAP-UNSUPPORTED. Owed follow-up: rename the allowlist (analyze.scrml) — then back to [].
   // s469-boot-strings-1: the allowlist is renamed (`append` / `prepend`; JS names are E-TAPE-JS-METHOD): clean again.
@@ -367,65 +367,65 @@ describe("the §66.19 programs and the M2 fixtures — no typer / scope code; ev
 // Fix round 1 (adversarial review of the first cut).
 // ---------------------------------------------------------------------------
 describe("A — a local's type: its annotation, else the join of everything it is given", () => {
-  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; the write of `\"x\"` narrows `a` — s442 r2 F3 — so the read is a `string`)", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { let a = not;\n a = \"x\";\n @s = a; }")).toEqual([]);
+  test("legal — `let a = not; a = \"x\"` then `@_s = a` (§42.3.1: infer `T | not`; the write of `\"x\"` narrows `a` — s442 r2 F3 — so the read is a `string`)", () => {
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { let a = not;\n a = \"x\";\n @_s = a; }")).toEqual([]);
   });
   // FLIPPED (s442 r6) — provenance: ruling:user-voice-scrml.md S442 "`T | not` into `T` is an error for all types" ("A `T | not` isn't a `T`"; bryan: "if the lifecycle says T | not then it can only end as not"). Was: legal (S439 "unproven").
-  test("E-TYPE-031 (ruled S442) — the annotated form `let a: string | not = not` then `@s = a`", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { let a: string | not = not;\n @s = a; }")).toEqual(["E-TYPE-031"]);
+  test("E-TYPE-031 (ruled S442) — the annotated form `let a: string | not = not` then `@_s = a`", () => {
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { let a: string | not = not;\n @_s = a; }")).toEqual(["E-TYPE-031"]);
   });
   test("legal — the same shape in an inline handler block, and through `.push`", () => {
-    expect(inApp("    <audit:string[free, append]=([])/>\n    function f() { let a = not;\n a = \"x\";\n @audit.append(a); }",
-      "<button onclick={ let b = not; b = \"y\"; @audit.append(b); }>x</button>")).toEqual([]);
+    expect(inApp("    <_audit:string[free, append]=([])/>\n    function f() { let a = not;\n a = \"x\";\n @_audit.append(a); }",
+      "<button onclick={ let b = not; b = \"y\"; @_audit.append(b); }>x</button>")).toEqual([]);
   });
-  test("silent — `let a = \"s\"; a = 1` then `@x = a` into int: the join is unprovable (was a false E-TYPE-031)", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { let a = \"s\";\n a = 1;\n @x = a; }")).toEqual([]);
+  test("silent — `let a = \"s\"; a = 1` then `@_x = a` into int: the join is unprovable (was a false E-TYPE-031)", () => {
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a = \"s\";\n a = 1;\n @_x = a; }")).toEqual([]);
   });
-  test("silent — `let a = 1; a = \"s\"` then `@x = a`: same join, same answer (flow-insensitive; not provable either way)", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { let a = 1;\n a = \"s\";\n @x = a; }")).toEqual([]);
+  test("silent — `let a = 1; a = \"s\"` then `@_x = a`: same join, same answer (flow-insensitive; not provable either way)", () => {
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a = 1;\n a = \"s\";\n @_x = a; }")).toEqual([]);
   });
   test("E-TYPE-031 — the join is still a TYPE: `let a = not; a = \"x\"` (`string | not`) into an int cell", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { let a = not;\n a = \"x\";\n @x = a; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a = not;\n a = \"x\";\n @_x = a; }")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — an annotated local is its annotation (`let a: string = \"x\"` into an int cell)", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { let a: string = \"x\";\n @x = a; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a: string = \"x\";\n @_x = a; }")).toEqual(["E-TYPE-031"]);
   });
   test("twin silent — `let a: int = 1` into an int cell; a rebound local read BEFORE its reassignment is typed from the join", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { let a: int = 1;\n @x = a; }")).toEqual([]);
-    expect(inApp("    let <x:int=0/>\n    function f() { let a = 1;\n @x = a;\n a = 2; }")).toEqual([]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a: int = 1;\n @_x = a; }")).toEqual([]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { let a = 1;\n @_x = a;\n a = 2; }")).toEqual([]);
   });
 });
 
 describe("B — a whole-struct replace by a literal checks every field (spelling-independent, §66.1 rule 5)", () => {
-  const P = "    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n";
-  test("E-TYPE-031 — `@pt = { x: 1, y: \"s\" }`", () => {
-    expect(inApp(P + "    function f() { @pt = { x: 1, y: \"s\" }; }")).toEqual(["E-TYPE-031"]);
+  const P = "    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n";
+  test("E-TYPE-031 — `@_pt = { x: 1, y: \"s\" }`", () => {
+    expect(inApp(P + "    function f() { @_pt = { x: 1, y: \"s\" }; }")).toEqual(["E-TYPE-031"]);
   });
-  test("E-TYPE-041 — `@pt = { x: 1, y: not }`", () => {
-    expect(inApp(P + "    function f() { @pt = { x: 1, y: not }; }")).toEqual(["E-TYPE-041"]);
+  test("E-TYPE-041 — `@_pt = { x: 1, y: not }`", () => {
+    expect(inApp(P + "    function f() { @_pt = { x: 1, y: not }; }")).toEqual(["E-TYPE-041"]);
   });
-  test("twin silent — `@pt = { x: 1, y: 2 }`", () => {
-    expect(inApp(P + "    function f() { @pt = { x: 1, y: 2 }; }")).toEqual([]);
+  test("twin silent — `@_pt = { x: 1, y: 2 }`", () => {
+    expect(inApp(P + "    function f() { @_pt = { x: 1, y: 2 }; }")).toEqual([]);
   });
   test("E-TYPE-031 — a struct literal inside an appended element", () => {
-    const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, append]=([])/>\n";
-    expect(inApp(L + "    function f() { @ls.append({ id: 1, name: 5 }); }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(L + "    function f() { @ls.append({ id: 1, name: \"a\" }); }")).toEqual([]);
+    const L = "    type L:struct = { id: int, name: string }\n    <_ls:L[free, append]=([])/>\n";
+    expect(inApp(L + "    function f() { @_ls.append({ id: 1, name: 5 }); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(L + "    function f() { @_ls.append({ id: 1, name: \"a\" }); }")).toEqual([]);
   });
 });
 
 describe("C — no check against what failed to parse", () => {
-  test("`@s = #` — only the parse error (the recovery node is not `not`)", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = # }")).toEqual(["E-PARSE-EXPR"]);
+  test("`@_s = #` — only the parse error (the recovery node is not `not`)", () => {
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { @_s = # }")).toEqual(["E-PARSE-EXPR"]);
   });
   // s469: logic backtick templates parse (§14.13.3) — a REFUSED one (a legacy octal escape) is the parse error alone
   test("a refused back-tick template — only the parse error", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t\\1` }")).toEqual(["E-PARSE-TEMPLATE"]);
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t`; }")).toEqual([]);
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { @_s = `t\\1` }")).toEqual(["E-PARSE-TEMPLATE"]);
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { @_s = `t`; }")).toEqual([]);
   });
   // s469: `T | not` in an opener parses now (S451) — an unreadable continuation (`int&not`) is the opener type the slice cannot read
-  test("`let <x:int&not=0/>` then `@x = not` — only the parse error (the cell's type did not parse)", () => {
-    expect(inApp("    let <x:int&not=0/>\n    function f() { @x = not; }")).toEqual(["E-PARSE-TAG"]);
+  test("`let <_x:int&not=0/>` then `@_x = not` — only the parse error (the cell's type did not parse)", () => {
+    expect(inApp("    let <_x:int&not=0/>\n    function f() { @_x = not; }")).toEqual(["E-PARSE-TAG"]);
   });
   test("`<box n:string&not=\"\"/>` used as `<box n=(not)/>` — only the parse error", () => {
     expect(codes([boxLib("export <box n:string&not=\"\"/>\nrenders <p>x</p>\n"), boxApp("<box n=(not)/>")])).toEqual(["E-PARSE-TAG"]);
@@ -445,7 +445,7 @@ describe("C — no check against what failed to parse", () => {
 describe("D / E — names are scoped to what a file can see", () => {
   const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
   test("legal — a program cell named like a declaration that is NOT visible here (not declared, not imported)", () => {
-    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>${@card}</p></main>\n</program>\n" }])).toEqual([]);
   });
   test("legal — an `as=` handle named like a declaration that is NOT visible here", () => {
     expect(codes([other, boxLib("export <box n:int=0/>\nrenders <p>x</p>\n"), boxApp("<box as=card/>")])).toEqual([]);
@@ -506,12 +506,12 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
   });
   // FLIPPED (s472) — g-boot-mixed-arm-type-unresolved-fail-open-s472: the arms are KNOWN (`int`,
   // `string`), so the ternary is a choice of both, and each arm must fit the write (§66.1 rule 5) —
-  // the `"s"` arm does not. Was: silent ("unprovable"), and `@x` held a string at run time.
+  // the `"s"` arm does not. Was: silent ("unprovable"), and `@_x` held a string at run time.
   test("E-TYPE-031 (s472) — a mixed-arm ternary (`@b ? 1 : \"s\"`) into an int cell: the `string` arm does not fit", () => {
-    expect(inApp("    let <b:bool=false/>\n    let <x:int=0/>\n    function f() { @x = @b ? 1 : \"s\"; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <b:bool=false/>\n    let <_x:int=0/>\n    function f() { @_x = @b ? 1 : \"s\"; }")).toEqual(["E-TYPE-031"]);
   });
   test("twin (s472) — a ternary whose arms share a type (`@b ? 1 : 2.5`, `number`) into a number cell is silent", () => {
-    expect(inApp("    let <b:bool=false/>\n    let <x:number=0/>\n    function f() { @x = @b ? 1 : 2.5; }")).toEqual([]);
+    expect(inApp("    let <b:bool=false/>\n    let <_x:number=0/>\n    function f() { @_x = @b ? 1 : 2.5; }")).toEqual([]);
   });
 });
 
@@ -539,7 +539,7 @@ describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
 const f2 = (path, src) => ({ path, src });
 const BOXC = f2("lib/box.scrml", "export <box:struct> export let <c:int=0/> </>\nrenders <p>${c}</p>\n");
 const MID = (v) => f2("lib/mid.scrml", "${ import { box } from \"./box.scrml\"; }\nexport <card t:string=\"\"/>\nrenders <button onclick=(@box.c = " + v + ")>x</button>\n");
-const APP_BOXCELL = (cell) => f2("app.scrml", "${ import { card } from \"./lib/mid.scrml\"; }\n<program>\n" + cell + "\n    <main>\n<card/>\n    </main>\n</program>\n");
+const APP_BOXCELL = (cell, read = "") => f2("app.scrml", "${ import { card } from \"./lib/mid.scrml\"; }\n<program>\n" + cell + "\n    <main>\n<card/>" + read + "\n    </main>\n</program>\n");
 
 describe("R2-1 — a program cell is visible only in the program's own file (§7.6.1 \"in the same file\")", () => {
   const CELL = "    type B:struct = { let c: string }\n    let <box:B=({ c: \"\" })/>";
@@ -547,9 +547,9 @@ describe("R2-1 — a program cell is visible only in the program's own file (§7
     expect(codes([BOXC, MID("\"s\""), APP_BOXCELL(CELL)])).toEqual(["E-TYPE-031"]);
   });
   test("twin silent — `@box.c = 2` (right for `<box>`, wrong for the app's cell)", () => {
-    expect(codes([BOXC, MID("2"), APP_BOXCELL(CELL)])).toEqual([]);
+    expect(codes([BOXC, MID("2"), APP_BOXCELL(CELL, "<p>${@box.c}</p>")])).toEqual([]);
   });
-  // s473 D29: an `@x` READ that names nothing in scope is §6.1.1 E-STATE-UNDECLARED (was E-SCOPE-001).
+  // s473 D29: an `@_x` READ that names nothing in scope is §6.1.1 E-STATE-UNDECLARED (was E-SCOPE-001).
   test("E-STATE-UNDECLARED — a library's renders reading `@q` does not see the app's cell `q`", () => {
     const lib = f2("lib/b2.scrml", "export <b2 n:int=0/>\nrenders <p>${@q}</p>\n");
     const main = f2("app.scrml", "${ import { b2 } from \"./lib/b2.scrml\"; }\n<program>\n    let <q:string=\"c\"/>\n    <main><b2/></main>\n</program>\n");
@@ -560,7 +560,7 @@ describe("R2-1 — a program cell is visible only in the program's own file (§7
   });
   test("E-STATE-UNDECLARED — `@card` names a declaration the file neither declares nor imports", () => {
     const other = f2("lib/other.scrml", "export <card title:string=\"\"/>\nrenders <p>x</p>\n");
-    expect(codes([other, f2("app.scrml", "<program>\n    let <s:string=\"\"/>\n    function f() { @s = @card.title; }\n    <main><p>x</p></main>\n</program>\n")]))
+    expect(codes([other, f2("app.scrml", "<program>\n    let <_s:string=\"\"/>\n    function f() { @_s = @card.title; }\n    <main><p>x</p></main>\n</program>\n")]))
       .toContain("E-STATE-UNDECLARED");
   });
 });
@@ -579,7 +579,7 @@ describe("R2-2 — (PA interim S439, RULED S440 #5 (ii) + #7) an `as=` handle ma
   });
   test("legal — a LIBRARY declaration's handle `q` while the app has a cell `q` (not visible there)", () => {
     const lib = f2("lib/box2.scrml", "${ import { dropdown } from \"./dropdown.scrml\"; }\nexport <box2 n:int=0/>\nrenders <div><dropdown as=q label=\"L\" options=([\"a\"])/><p>${@q.value}</p></div>\n");
-    const main = f2("app.scrml", "${ import { box2 } from \"./lib/box2.scrml\"; }\n<program>\n    let <q:string=\"c\"/>\n    <main><box2/></main>\n</program>\n");
+    const main = f2("app.scrml", "${ import { box2 } from \"./lib/box2.scrml\"; }\n<program>\n    let <q:string=\"c\"/>\n    <main><box2/><p>${@q}</p></main>\n</program>\n");
     expect(codes([LIB(), lib, main])).toEqual([]);
   });
 });
@@ -597,7 +597,7 @@ describe("R2-3 — `<each key=…>` is resolved OUTSIDE the row's template (§66
 });
 
 describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer", () => {
-  const F = (body) => "    let <s:string=\"\"/>\n    function f() { " + body + " }";
+  const F = (body) => "    let <_s:string=\"\"/>\n    function f() { " + body + " }";
   for (const [body, want] of [
     ["let a: string = 5;", ["E-TYPE-031"]],
     ["let a: bool = \"s\";", ["E-TYPE-031"]],
@@ -605,7 +605,7 @@ describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer"
     ["const a: string = true;", ["E-TYPE-031"]],
     ["let a: number = \"s\";", ["E-TYPE-031"]],
     ["let a: string = not;", ["E-TYPE-041"]],
-    ["let x: string = 1;\n @s = x;", ["E-TYPE-031"]],
+    ["let x: string = 1;\n @_s = x;", ["E-TYPE-031"]],
   ]) {
     test(`${want.join(", ")} — \`${body.replace(/\n/g, "; ")}\``, () => { expect(inApp(F(body))).toEqual(want); });
   }
@@ -638,22 +638,22 @@ describe("R2-5 — Rule C: only a component's OWN type expression failing to par
     expect(inApp("    let <z:int = 0/>\n    function g() { @z = \"s\"; }")).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-TYPE-031"]);
   });
   test("E-TYPE-031 kept — `-> string` stays trusted when a PARAMETER's type fails to parse", () => {
-    expect(inApp("    let <x:int=0/>\n    function h(a: [int]) -> string { return \"a\"; }\n    function g() { @x = h(1); }")).toContain("E-TYPE-031");
+    expect(inApp("    let <_x:int=0/>\n    function h(a: [int]) -> string { return \"a\"; }\n    function g() { @_x = h(1); }")).toContain("E-TYPE-031");
   });
   test("still untrusted — the component whose own type failed (`n:string&not` given `(not)`)", () => {
     expect(box("export <box n:string&not=\"\"/>", "<box n=(not)/>")).toEqual(["E-PARSE-TAG"]);
   });
-  test("an untyped parameter is unproven, never a placeholder type (`function h(a) { @x = a }`)", () => {
-    expect(inApp("    let <x:int=0/>\n    function h(a) { @x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
+  test("an untyped parameter is unproven, never a placeholder type (`function h(a) { @_x = a }`)", () => {
+    expect(inApp("    let <_x:int=0/>\n    function h(a) { @_x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
 });
 
 describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
   const chain = (n, cell) => {
-    let s = "    let <x:" + cell + "/>\n    function f() {";
+    let s = "    let <_x:" + cell + "/>\n    function f() {";
     for (let i = 1; i <= n; i++) s += " let a" + i + " = \"s\";\n";
     for (let i = 1; i < n; i++) s += " a" + i + " = a" + (i + 1) + ";\n";
-    return s + " a" + n + " = not;\n @x = a1; }";
+    return s + " a" + n + " = not;\n @_x = a1; }";
   };
   test("E-TYPE-031 — a chain of 8 rebound locals settles (`string | not` reaches `a1`) into an int cell", () => {
     expect(inApp(chain(8, "int=0"))).toEqual(["E-TYPE-031"]);
@@ -666,11 +666,11 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
     const src = chain(8, "int=0").replace(" a8 = not;\n", " a8 = 1;\n");
     expect(inApp(src)).toEqual([]);
   });
-  test("`@s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@s = 1`)", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s += 1; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("`@_s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@_s = 1`)", () => {
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { @_s += 1; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("twin — `@s = @s + \"1\"` is silent", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = @s + \"1\"; }")).toEqual([]);
+  test("twin — `@_s = @_s + \"1\"` is silent", () => {
+    expect(inApp("    let <_s:string=\"\"/>\n    function f() { @_s = @_s + \"1\"; }")).toEqual([]);
   });
 });
 
@@ -688,15 +688,15 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
 describe("R3-H1 — a field write through a local is not a write of the whole local", () => {
   const O = "    type O:struct = { let v: string | not, let n: int }\n    let <o:O=({ v: not, n: 0 })/>\n";
   for (const [name, body, markup] of [
-    ["`a.n = 2` on `let a: O`", "    function f() { let a: O = { v: \"x\", n: 1 };\n a.n = 2;\n @o = a; }"],
-    ["`a.v = not` on `let a: O` (`v: string | not`)", "    function f() { let a: O = { v: \"x\", n: 1 };\n a.v = not;\n @o = a; }"],
+    ["`a.n = 2` on `let a: O`", "    function f() { let a: O = { v: \"x\", n: 1 };\n a.n = 2;\n @o = a; }", "<p>${@o.n}</p>"],
+    ["`a.v = not` on `let a: O` (`v: string | not`)", "    function f() { let a: O = { v: \"x\", n: 1 };\n a.v = not;\n @o = a; }", "<p>${@o.n}</p>"],
     ["`a.v = \"q\"` on `let a: O = @o`", "    function f() { let a: O = @o;\n a.v = \"q\"; }"],
     ["the inline handler block form", "", "<button onclick={ let a: O = @o; a.n = 2; @o = a; }>x</button>"],
   ]) {
     test(`compiles (s472) — ${name}`, () => { expect(inApp(O + body, markup ?? "<p>x</p>")).toEqual([]); });
   }
   test("s472 — the Core is an Assign of the local WITH a path, never `a = <the field's value>`", () => {
-    const r = frontEnd(mods, [LIB(), app(O + "    function f() { let a: O = { v: \"x\", n: 1 };\n a.n = 2;\n @o = a; }", "<p>x</p>")]);
+    const r = frontEnd(mods, [LIB(), app(O + "    function f() { let a: O = { v: \"x\", n: 1 };\n a.n = 2;\n @o = a; }", "<p>${@o.n}</p>")]);
     const found = [];
     const walk = (n) => { if (n && typeof n === "object") { if (n.variant === "Assign") found.push(n); for (const v of Object.values(n)) walk(v); } };
     walk(r.core.fns);
@@ -714,6 +714,6 @@ describe("R3-H1 — a field write through a local is not a write of the whole lo
     expect(inApp(O + "    function f() { let a: O = @o;\n a = \"s\"; }")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — an unannotated `let a = @o` keeps type `O` after `a.n = 2` (the field write does not join `int` in)", () => {
-    expect(inApp(O + "    let <x:int=0/>\n    function f() { let a = @o;\n a.n = 2;\n @x = a; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    let <_x:int=0/>\n    function f() { let a = @o;\n a.n = 2;\n @_x = a; }")).toEqual(["E-TYPE-031"]);
   });
 });

@@ -892,7 +892,7 @@ describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", 
   });
 
   test("a narrowed read (`given c = @color :> { … c.value … }`) is accepted", () => {
-    const r = run([LIB(), prog("<p>x</p>", "    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value; } }")]);
+    const r = run([LIB(), prog("<p>x</p>", "    let <_seen:string=\"\"/>\n    function f() { given c = @color :> { @_seen = c.value; } }")]);
     expect(codes(r)).toEqual([]);
   });
 
@@ -915,11 +915,11 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
   const cond = `<div if=@show><dropdown as=color label="C" options=(["red", "blue"])/></div>
         <dropdown as=country label="K" options=(["US", "CA"]) value="US"/>`;
   const prog = (fns, show = "false", extra = "<p>x</p>") =>
-    appWith(`${cond}\n        ${extra}`, `    let <show:bool=${show}/>\n    let <seen:string=""/>\n${fns}`);
+    appWith(`${cond}\n        ${extra}`, `    let <show:bool=${show}/>\n    let <_seen:string=""/>\n${fns}`);
   const fnStmts = (r, name) => r.core.fns.find((f) => f.sym.hint === name).body.stmts;
 
   test("a direct READ `@color.value` inside the block is accepted", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @seen = @color.value; } }")]))).toEqual([]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @_seen = @color.value; } }")]))).toEqual([]);
   });
 
   test("a direct WRITE `@color.value = …` inside the block is accepted", () => {
@@ -951,23 +951,23 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
 
   // bite: the narrowing is scoped to the block and to the handle it names
   test("outside the block (after it) `@color` is still refused", () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value; }\n return @color.value; }")]);
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @_seen = c.value; }\n return @color.value; }")]);
     expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a write after the block is still refused", () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value; }\n @color.value = \"x\"; }")]);
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @_seen = c.value; }\n @color.value = \"x\"; }")]);
     expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a DIFFERENT handle's block does not narrow `@color` (read and write)", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @seen = @color.value; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @_seen = @color.value; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
     expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @color.value = \"x\"; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("nested: an outer narrowing holds inside an inner `given`; an inner one ends with its block", () => {
     expect(codes(run([LIB(), prog("    function f() { given c = @color :> { given d = @country :> { @color.value = @country.value; } } }")]))).toEqual([]);
-    expect(codes(run([LIB(), prog("    function f() { given d = @country :> { given c = @color :> { @seen = @color.value; }\n @color.value = \"x\"; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given d = @country :> { given c = @color :> { @_seen = @color.value; }\n @color.value = \"x\"; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a `given` over an UNconditional handle: a direct write inside is accepted and lands", async () => {

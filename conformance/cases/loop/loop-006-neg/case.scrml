@@ -3,7 +3,7 @@ ${
         let a = i;
     }
     inner: for (let j = 0; j < 10; j = j + 1) {
-        let b = j
+        let b = j;
     }
 }
 <p>x</>

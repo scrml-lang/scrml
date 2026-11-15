@@ -21,6 +21,7 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, check, realDb, serve, bridge } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 300000 });
 const realFetch = globalThis.fetch;
@@ -407,7 +408,9 @@ ${LOAD}    <request id="userReq" deps=[]>${D} @userName = loadName(1); }</reques
 // plus `<#id>.refetch()`, directly or through a called function. RED on 536f284e0: every
 // "narrows" row was E-TYPE-031 / E-OPERAND-NOT-NARROWED.
 describe("r1 F1 — `.data` / `.error` narrow like a cell", () => {
-  const P = (body, markup = "", extra = "") => `<program>
+  // s478 (E-DG-002): the reference cell `@m` is declared only when the shape names it (`both` also
+  // compiles each shape over `<#r>.data`, which does not)
+  const P = (body, markup = "", extra = "") => dropUnnamedScaffold(`<program>
     let <a:int=1/>
     let <m:int | not=not/>
     let <x:int=0/>
@@ -416,7 +419,7 @@ describe("r1 F1 — `.data` / `.error` narrow like a cell", () => {
 ${extra}    <request id="r">${D} @x = f(@a); }</request>
 ${body}    <main><p>${D}@x}${D}@b}</p>${markup}</main>
 </program>
-`;
+`, ["    let <m:int | not=not/>"]);
   const r = H("r");
   // each shape twice: over the cell `@m` (the reference) and over `<#r>.data`
   const both = (shape) => [errCodes(shape("@m")), errCodes(shape(r + ".data"))];
@@ -517,11 +520,12 @@ ${LOAD}    <request id="profile">${D} @userName = loadName(@userId); }</request>
 // enclosing markup"): `<#id>.data` IS the target's last loaded value, so a markup read of it is
 // a read of the target. RED on 536f284e0: W-LIFECYCLE-011 fired for a `.data`-only read.
 describe("r1 F2 — a markup `<#id>.data` read counts as a read of the target", () => {
+  // s478: the request body's landing cell is read by nothing here (the request read is the point) — `_`-named (§34 E-DG-002)
   const W = (markup) => `<program>
     let <a:int=1/>
-    let <x:int=0/>
+    let <_x:int=0/>
     fn f(n: int) -> int { return n + 1; }
-    <request id="r">${D} @x = f(@a); }</request>
+    <request id="r">${D} @_x = f(@a); }</request>
     <main>${markup}</main>
 </program>
 `;

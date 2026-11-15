@@ -197,11 +197,18 @@ export class Cell {
     this.pending = null;
     // s475 r3 (N2): a PENDING cell's supersede record (§13.9.2; set by its Request) — null otherwise
     this.pend = null;
+    // s478: a `debounced=` / `throttled=` cell's timing record (§6.13; `timed`) — null otherwise
+    this.timing = null;
   }
   get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    if (this.timing !== null) { timedWrite(this, v); return; }
+    this.write(v);
+  }
+  /** The write past any timing rule (a timed cell's commit). */
+  write(v) {
     if (this.pend !== null) {                       // s475 r3/r4: a pending cell's write (pendWrite)
       const w = pendWrite(this, v);
       if (w === PEND_STALE) return;
@@ -227,6 +234,72 @@ export class Cell {
     if (init === SEEDING) throw new Error("a `let` initializer reads itself while the program is being constructed (a seeding cycle)");
     this.pending = SEEDING;
     try { this.value = untrack(init); } finally { if (this.pending === SEEDING) this.pending = null; }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// s478 — `debounced=DURATION` / `throttled=DURATION` (SPEC §6.13). The compiler
+// emits `timed(inst$.scope, <cell>, "debounce" | "throttle", ms)` for a timed
+// program cell; every LOCAL write (`Cell.set`) then passes through the rule, and
+// the value COMMITS through `Cell.write` — the ordinary write path, so
+// subscribers, derived values, the DOM and validity see the committed value
+// (§6.13.6 "the timing rule is a wrapper around the same write path"). The
+// commit never re-enters the wrapper (it calls `write`, not `set`).
+//   debounce (§6.13.1) — "Each new write within the window restarts the timer;
+//     the cell's value updates exactly once, after the window of silence":
+//     the latest requested value commits `ms` after the most recent request.
+//   throttle (§6.13.2) — "The first write in any window emits immediately;
+//     subsequent writes within DURATION of the last emit are suppressed but the
+//     most recent suppressed value is held. At the end of the window a single
+//     trailing write emits with the held value." `last` starts at 0, so the
+//     first write ever is a leading emit.
+// The compiler refuses every composition whose rule this does not build
+// (analyze timingPass: a server-origin writer, `persist=`, a reset) — so no
+// write here is server-origin, and no reset reaches a pending timer.
+// Reads see the committed value (§6.13.4). The timer is owned by `scope`.
+// ---------------------------------------------------------------------------
+export function timed(scope, c, kind, ms) {
+  requireScope(scope, "a timed cell");
+  if (kind !== "debounce" && kind !== "throttle") throw new Error(`timed: unknown timing rule ${JSON.stringify(kind)} (§6.13)`);
+  const t = { kind, ms, timer: null, held: undefined, last: 0, disposed: false };
+  c.timing = t;
+  scope.own(() => {
+    t.disposed = true;
+    if (t.timer !== null) clearTimeout(t.timer);
+    t.timer = null;
+  });
+  return c;
+}
+
+function timedWrite(c, v) {
+  const t = c.timing;
+  if (t.disposed) return;
+  if (t.kind === "debounce") {
+    if (t.timer !== null) clearTimeout(t.timer);
+    t.held = v;
+    t.timer = setTimeout(() => {
+      t.timer = null;
+      const h = t.held;
+      t.held = undefined;
+      if (!t.disposed) c.write(h);
+    }, t.ms);
+    return;
+  }
+  const now = Date.now();
+  if (t.timer === null && now - t.last >= t.ms) {
+    t.last = now;                                   // leading emit
+    c.write(v);
+    return;
+  }
+  t.held = v;                                       // suppressed: the latest is held
+  if (t.timer === null) {
+    t.timer = setTimeout(() => {
+      t.timer = null;
+      const h = t.held;
+      t.held = undefined;
+      t.last = Date.now();                          // the trailing emit opens the next window
+      if (!t.disposed) c.write(h);
+    }, Math.max(0, t.ms - (now - t.last)));
   }
 }
 
@@ -1540,6 +1613,57 @@ function variantTag(v) {
 export function transition(target, table, to) {
   checkEdge(target, table, to);
   target.set(to);
+}
+
+// ---------------------------------------------------------------------------
+// s478 — `<onIdle after=DURATION to=.Variant/>` (SPEC §51.0.R), the engine-wide
+// event-timeout watchdog of a graph field. The compiler emits
+// `idleWatch(inst$.scope, <cell>, <edges>, ms, "<to tag>")` with the record.
+//   1. "Armed at module-init alongside the engine variant cell … the timer arms
+//      with the full duration remaining" — armed here, at construction.
+//   2. "Reset on every successful transition (clear + re-arm)" — the watchdog
+//      observes the cell: every COMMITTED change re-arms it. A self-write is a
+//      no-op that changes nothing (§51.0.F.1), so it does not reset.
+//   3. "rule=-honoring fire … The destination variant's `rule=` validation
+//      applies … If the current state's `rule=` does not permit `to=.Variant`,
+//      `E-ENGINE-INVALID-TRANSITION` fires at runtime" — the fire is the
+//      ordinary graph write (`transition`: the edge check, then `set`); a
+//      refused edge is reported (never thrown into a timer frame) and the
+//      watchdog stays disarmed until the next transition.
+// A watchdog-induced write is a write like any other: it notifies, so it
+// re-arms the watchdog (its own transition) as rule 2 says. Owned by `scope`.
+// ---------------------------------------------------------------------------
+export function idleWatch(scope, c, table, ms, to) {
+  requireScope(scope, "an idle watchdog");
+  const w = {
+    timer: null,
+    disposed: false,
+    arm() {
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.fire(), ms);
+    },
+    fire() {
+      this.timer = null;
+      if (this.disposed) return;
+      try {
+        batch(() => transition(c, table, to));
+      } catch (err) {
+        reportLater(err);
+      }
+    },
+    markStale() {
+      if (!this.disposed) this.arm();
+    },
+  };
+  c.observers.add(w);
+  scope.own(() => {
+    w.disposed = true;
+    c.observers.delete(w);
+    if (w.timer !== null) clearTimeout(w.timer);
+    w.timer = null;
+  });
+  w.arm();
+  return w;
 }
 
 /** An end-append edit: a new array one longer (O(n) copy — dpa-051 §6.1). */
@@ -3743,6 +3867,25 @@ class HandlerTasks {
   cancelAll() {
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
+  }
+}
+
+/**
+ * s478 — body-top statements (Core View.Run, SPEC §40.8 S441: a statement at a
+ * `<program>` / `<page>` body top "runs once at mount in source order"): run
+ * `body` now, once, in a task the scope owns — a suspension in it (a server
+ * call) is cancelled when the scope is destroyed, as a handler's is.
+ */
+export function run(scope, body) {
+  requireScope(scope, "a body-top statement");
+  const owner = new HandlerTasks();
+  const task = new Task(owner);
+  owner.tasks.add(task);
+  scope.own(() => owner.cancelAll());
+  try {
+    batch(() => body(task));
+  } finally {
+    owner.settled(task);
   }
 }
 

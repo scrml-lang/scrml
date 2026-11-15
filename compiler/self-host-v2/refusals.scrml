@@ -167,8 +167,12 @@ ${
     // codes, and the line-local statement codes a misread construct produces.
     fn symptomCode(c: string) -> boolean {
         if (cascadeCode(c)) return true
+        // s478: E-UNQUOTED-DISPLAY-TEXT — a construct at a `<program>` body top that the
+        // statement reader cannot parse is read as undeclared display text (parse.scrml
+        // bodyTopRun); a row naming the construct on that line is the real report
         return ["E-STMT-MISSING-SEMICOLON", "E-MATCH-ARM-SEPARATOR", "E-STMT-NO-EFFECT", "E-ASSIGN-POSITION",
-                "E-FOR-UNPARENTHESIZED-HEAD", "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "E-STATE-UNDECLARED"].indexOf(c) >= 0
+                "E-FOR-UNPARENTHESIZED-HEAD", "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "E-STATE-UNDECLARED",
+                "E-UNQUOTED-DISPLAY-TEXT"].indexOf(c) >= 0
     }
 
     // ---- the matcher ----------------------------------------------------------

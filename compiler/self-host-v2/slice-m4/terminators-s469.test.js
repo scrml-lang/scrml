@@ -4,7 +4,7 @@
 //
 //   F1 (a)  `;` terminates a statement; a newline ends nothing.
 //   F3 (i)  `;` after every non-block-like statement, the last one before a `}`
-//           included (`onclick={ @n = @n + 1; }`); block-like statements and
+//           included (`onclick={ @_n = @_n + 1; }`); block-like statements and
 //           closer-delimited items take none.
 //   F2      arms are a comma list — a `,` between every pair of arms, block arms
 //           included, the trailing one optional.
@@ -18,6 +18,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -34,7 +35,8 @@ const at = (src) => semis(src).map((d) => {
 
 const TYPES = `    type E:enum = { A, B }\n    type L:enum = { NotFound(id: string), Timeout }`;
 const LOAD = `    function load(id: string)! L {\n        if (id == "x") fail L.NotFound(id);\n        return id;\n    }`;
-const P = (decls, main = "        <p>x</p>") => `<program>\n    let <n:int=0/>\n    let <s:string=""/>\n${TYPES}\n${LOAD}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names
+const P = (decls, main = "        <p>x</p>") => dropUnnamedScaffold(`<program>\n    let <_n:int=0/>\n    let <_s:string=""/>\n${TYPES}\n${LOAD}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, ["    let <_n:int=0/>", "    let <_s:string=\"\"/>"]);
 const fn = (body) => `    function f(k: E) -> int {\n${body}\n    }`;
 
 let k = 0;
@@ -48,8 +50,8 @@ describe("F1 / F3 — every non-block-like statement ends with `;`", () => {
       ["const", `        const a = 1\n        return a;`, ["const a = 1"]],
       ["let", `        let a = 1\n        return a;`, ["let a = 1"]],
       ["an assignment", `        let a = 1;\n        a = 2\n        return a;`, ["a = 2"]],
-      ["a cell write", `        @n = 2\n        return 1;`, ["@n = 2"]],
-      ["a call", `        load("y") !{ _ :> 0 };\n        @s = "a"\n        return 1;`, ["@s = \"a\""]],
+      ["a cell write", `        @_n = 2\n        return 1;`, ["@_n = 2"]],
+      ["a call", `        load("y") !{ _ :> 0 };\n        @_s = "a"\n        return 1;`, ["@_s = \"a\""]],
       ["return (the last statement before `}`)", `        return 1`, ["return 1"]],
     ];
     for (const [what, body, want] of cases) {
@@ -62,25 +64,25 @@ describe("F1 / F3 — every non-block-like statement ends with `;`", () => {
     expect(at(src)).toEqual(["fail L.Timeout", "if (x == 1) { continue", "break"]);
   });
 
-  test("the last statement before a `}` included — a handler body (`onclick={ @n = @n + 1; }`)", () => {
-    expect(at(P("", `        <button onclick={ @n = @n + 1 }>b</button>`))).toEqual(["<button onclick={ @n = @n + 1"]);
-    expect(codes(P("", `        <button onclick={ @n = @n + 1; }>b</button>`))).toEqual([]);
+  test("the last statement before a `}` included — a handler body (`onclick={ @_n = @_n + 1; }`)", () => {
+    expect(at(P("", `        <button onclick={ @_n = @_n + 1 }>b</button>`))).toEqual(["<button onclick={ @_n = @_n + 1"]);
+    expect(codes(P("", `        <button onclick={ @_n = @_n + 1; }>b</button>`))).toEqual([]);
   });
 
   test("block-like statements take none: `if` / `else`, `for`, a statement `match`, `given`, `<effect>` / `when`, `defer { }`", () => {
     const body = [
-      `        if (k == .A) { @n = 1; } else { @n = 2; }`,
-      `        for (const x of [1, 2]) { @n = x; }`,
-      `        match k { .A :> @n = 3, .B :> @n = 4 }`,
-      `        defer { @n = 5; }`,
+      `        if (k == .A) { @_n = 1; } else { @_n = 2; }`,
+      `        for (const x of [1, 2]) { @_n = x; }`,
+      `        match k { .A :> @_n = 3, .B :> @_n = 4 }`,
+      `        defer { @_n = 5; }`,
       `        return 0;`,
     ].join("\n");
     expect(codes(P(fn(body)))).toEqual([]);
   });
 
   test("a braceless body takes its own `;` (`if (c) x = 1;`), and a stray `;` after a block is an empty statement", () => {
-    expect(codes(P(fn(`        if (k == .A) @n = 1;\n        if (k == .B) { @n = 2; };\n        return 0;`)))).toEqual([]);
-    expect(at(P(fn(`        if (k == .A) @n = 1\n        return 0;`)))).toEqual(["if (k == .A) @n = 1"]);
+    expect(codes(P(fn(`        if (k == .A) @_n = 1;\n        if (k == .B) { @_n = 2; };\n        return 0;`)))).toEqual([]);
+    expect(at(P(fn(`        if (k == .A) @_n = 1\n        return 0;`)))).toEqual(["if (k == .A) @_n = 1"]);
   });
 
   test("a `match` as a VALUE is not block-like: `const v = match … { … };` takes the `;`", () => {
@@ -94,18 +96,18 @@ describe("F1 / F3 — every non-block-like statement ends with `;`", () => {
 
   test("an `import` is a statement (`;`); `type` and `function` declarations are closer-delimited items (none)", () => {
     const lib = { path: "lib.scrml", src: `\${\n    export type C:enum = { R, G }\n    export fn one() -> int { return 1; }\n}\n` };
-    const ok = frontEnd(mods, [lib, { path: "app.scrml", src: `\${ import { C, one } from "./lib.scrml"; }\n<program>\n    let <c:C=.R/>\n    <main><p>\${one()}</p></main>\n</program>\n` }]);
+    const ok = frontEnd(mods, [lib, { path: "app.scrml", src: `\${ import { C, one } from "./lib.scrml"; }\n<program>\n    let <_c:C=.R/>\n    <main><p>\${one()}</p></main>\n</program>\n` }]);
     expect(ok.diags.map((d) => d.code)).toEqual([]);
-    const src = `\${ import { C, one } from "./lib.scrml" }\n<program>\n    let <c:C=.R/>\n    <main><p>\${one()}</p></main>\n</program>\n`;
+    const src = `\${ import { C, one } from "./lib.scrml" }\n<program>\n    let <_c:C=.R/>\n    <main><p>\${one()}</p></main>\n</program>\n`;
     const bad = frontEnd(mods, [lib, { path: "app.scrml", src }]);
     expect(bad.diags.map((d) => d.code)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
     expect(src.slice(0, bad.diags[0].span.start).endsWith(`"./lib.scrml"`)).toBe(true);
   });
 
   test("`lift <expr>` (the last statement of an arm block) takes its `;`", () => {
-    const src = (lift) => P(`    function g(id: string) -> string {\n        const v = load(id) !{ .NotFound(m) :> { @n = 1; ${lift} }, .Timeout :> "t" };\n        return v;\n    }`);
+    const src = (lift) => P(`    function g(id: string) -> string {\n        const v = load(id) !{ .NotFound(m) :> { @_n = 1; ${lift} }, .Timeout :> "t" };\n        return v;\n    }`);
     expect(codes(src("lift m;"))).toEqual([]);
-    expect(at(src("lift m"))).toEqual(["const v = load(id) !{ .NotFound(m) :> { @n = 1; lift m"]);
+    expect(at(src("lift m"))).toEqual(["const v = load(id) !{ .NotFound(m) :> { @_n = 1; lift m"]);
   });
 
   test("a newline ends nothing: an expression continues across lines in both directions", () => {
@@ -118,7 +120,7 @@ describe("F1 / F3 — every non-block-like statement ends with `;`", () => {
   });
 
   test("the fix-it: writing a `;` at every report's span makes the program clean, and it RUNS", async () => {
-    const src = P(`    function bump() {\n        @n = @n + 1\n        @s = "b"\n    }`, `        <button onclick=bump()>go</button>\n        <p id="n">\${@n}</p>`);
+    const src = P(`    function bump() {\n        @_n = @_n + 1\n        @_s = "b"\n    }`, `        <button onclick=bump()>go</button>\n        <p id="n">\${@_n}</p>`);
     const ds = semis(src);
     expect(ds.length).toBe(2);
     let fixed = src;
@@ -131,17 +133,17 @@ describe("F1 / F3 — every non-block-like statement ends with `;`", () => {
   });
 
   test("cascade guard: once a block has a (non-terminator) error, its later statements are not also reported for their `;`", () => {
-    const c = codes(P(fn(`        @n = (1 + \n        @s = "a"\n        return 0`)));
+    const c = codes(P(fn(`        @_n = (1 + \n        @_s = "a"\n        return 0`)));
     expect(c).not.toContain("E-STMT-MISSING-SEMICOLON");
     expect(c.length).toBeGreaterThan(0);
   });
 
   test("one missing `;` does not hide the next (each is reported)", () => {
-    expect(at(P(fn(`        @n = 1\n        @n = 2\n        return 0`)))).toEqual(["@n = 1", "@n = 2", "return 0"]);
+    expect(at(P(fn(`        @_n = 1\n        @_n = 2\n        return 0`)))).toEqual(["@_n = 1", "@_n = 2", "return 0"]);
   });
 
   test("PA reading (S469, fail closed): `return` followed by a line break is refused — the fix-it is the legacy `return;`, the message names the other repair", () => {
-    const src = P(`    function g() {\n        return\n        @n = 1;\n    }`);
+    const src = P(`    function g() {\n        return\n        @_n = 1;\n    }`);
     const ds = semis(src);
     expect(ds.length).toBe(1);
     expect(src.slice(0, ds[0].span.start).endsWith("return")).toBe(true);
@@ -166,14 +168,14 @@ describe("F2 — arms are a comma list (E-MATCH-ARM-SEPARATOR at every missing `
   });
 
   test("block arms included — no Rust block-arm exemption (F2 (i))", () => {
-    const src = P(fn(`        match k {\n            .A :> { @n = 1; }\n            .B :> { @n = 2; }\n        }\n        return 0;`));
+    const src = P(fn(`        match k {\n            .A :> { @_n = 1; }\n            .B :> { @_n = 2; }\n        }\n        return 0;`));
     expect(seps(src).length).toBe(1);
-    expect(codes(P(fn(`        match k {\n            .A :> { @n = 1; },\n            .B :> { @n = 2; },\n        }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k {\n            .A :> { @_n = 1; },\n            .B :> { @_n = 2; },\n        }\n        return 0;`)))).toEqual([]);
   });
 
   test("a newline does not end an arm (F1): a body continues onto the next line, in both directions", async () => {
-    const src = P(`    function g(id: string) -> string {\n        const v = load(id) !{\n            .NotFound(m) :> "nf:"\n                + m,\n            .Timeout :> "t",\n        };\n        return v;\n    }\n    function go() {\n        @s = g("x");\n    }`,
-      `        <button onclick=go()>go</button>\n        <p id="s">\${@s}</p>`);
+    const src = P(`    function g(id: string) -> string {\n        const v = load(id) !{\n            .NotFound(m) :> "nf:"\n                + m,\n            .Timeout :> "t",\n        };\n        return v;\n    }\n    function go() {\n        @_s = g("x");\n    }`,
+      `        <button onclick=go()>go</button>\n        <p id="s">\${@_s}</p>`);
     const r = run(src);
     expect(r.diags).toEqual([]);
     await loadProgram(r.core, "term-" + k++);
@@ -202,7 +204,7 @@ describe("F2 — arms are a comma list (E-MATCH-ARM-SEPARATOR at every missing `
 
 describe("r2 — `lift` followed by a line break is refused, like `return` (fail closed)", () => {
   test("`lift⏎expr;` is E-STMT-MISSING-SEMICOLON right after `lift`; `lift expr;` is clean", () => {
-    const src = (body) => P(`    function g(id: string) -> string {\n        const v = load(id) !{ .NotFound(m) :> { @n = 1; ${body} }, .Timeout :> "t" };\n        return v;\n    }`);
+    const src = (body) => P(`    function g(id: string) -> string {\n        const v = load(id) !{ .NotFound(m) :> { @_n = 1; ${body} }, .Timeout :> "t" };\n        return v;\n    }`);
     const s1 = src("lift\n            m;");
     const ds = semis(s1);
     expect(ds.length).toBe(1);
@@ -219,8 +221,8 @@ describe("r3 — a `match` that starts a statement ends at its `}` (F3 (i): bloc
     const f = r.asts[0].items.flatMap((i) => i.k?.data?.p?.items ?? [i]).find((i) => i.k?.variant === "FnItem" && i.k.data.f.name === "f");
     return { codes: r.diags.map((d) => d.code), kinds: f.k.data.f.body.stmts.map((s) => s.k.variant + (s.k.variant === "Eval" ? ":" + s.k.data.e.k.variant : "")) };
   };
-  const M = `        match k { .A :> @n = 1, .B :> @n = 2 }`;
-  for (const [what, next] of [["-1", "-1;"], [".A", ".A;"], ["(x)", "(@n);"], ["[1]", "[1];"], ["a template", "`t`;"]]) {
+  const M = `        match k { .A :> @_n = 1, .B :> @_n = 2 }`;
+  for (const [what, next] of [["-1", "-1;"], [".A", ".A;"], ["(x)", "(@_n);"], ["[1]", "[1];"], ["a template", "`t`;"]]) {
     test(`\`match k { … }⏎${what}\` is two statements — the match, then \`${next}\` — never one glued expression`, () => {
       const r = kinds(`${M}\n        ${next}\n        return 0;`);
       expect(r.kinds[0]).toBe("Eval:Handled");
@@ -241,11 +243,11 @@ describe("r3 — a `match` that starts a statement ends at its `}` (F3 (i): bloc
   });
   test("a statement match needs no `;`, and a following statement on the same line needs none either (the `}` ends it)", () => {
     expect(kinds(`${M}\n        return 0;`).codes).toEqual([]);
-    expect(kinds(`${M} @n = 3;\n        return 0;`).codes).toEqual([]);
+    expect(kinds(`${M} @_n = 3;\n        return 0;`).codes).toEqual([]);
   });
   test("a VALUE match keeps needing its `;` — and keeps reading the next line as its continuation (`const v = match …`)", () => {
     expect(kinds(`        const v = match k { .A :> 1, .B :> 2 }\n        return v;`).codes).toEqual(["E-STMT-MISSING-SEMICOLON"]);
     expect(kinds(`        const v = match k { .A :> 1, .B :> 2 }\n            + 1;\n        return v;`).codes).toEqual([]);
-    expect(kinds(`        @n = match k { .A :> 1, .B :> 2 } + 1;\n        return 0;`).codes).toEqual([]);
+    expect(kinds(`        @_n = match k { .A :> 1, .B :> 2 } + 1;\n        return 0;`).codes).toEqual([]);
   });
 });

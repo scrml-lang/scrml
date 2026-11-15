@@ -30,7 +30,7 @@
       }
     ],
     "state": {
-      "done": 1,
+      "_done": 1,
       "who": "z"
     },
     "domAnchored": [
@@ -45,9 +45,9 @@
       "gap": "g-impl1-pending-cells-unbuilt-s477",
       "fails": {
         "codes": [
-          "emitted:E-MARKUP-001=2",
+          "emitted:E-MARKUP-001=1",
           "emitted:E-SCOPE-001=2",
-          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-STATE-UNDECLARED=2",
           "emitted:E-TYPE-045=1",
           "prefix:E-MARKUP-001 (matches forbidden E-*)",
           "prefix:E-SCOPE-001 (matches forbidden E-*)",

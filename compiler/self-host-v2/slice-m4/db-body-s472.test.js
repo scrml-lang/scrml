@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { mods, compile, codes, check, artifacts, realDb, serve, bridge } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 
@@ -37,7 +38,8 @@ const IV = "$" + "{";
 const run = (src) => frontEnd(mods(), [{ path: "app.scrml", src }]);
 const msgOf = (src, code) => (run(src).diags.find((d) => d.code === code) || { message: "" }).message;
 // a `<program>` whose ONLY direct child `<db src>` holds `body`
-const DB = (body, rest = "    <main><p id=\"m\">x</p></main>") => `<program>\n    let <n:int=0/>\n    <db src="./app.db">\n${body}\n    </db>\n${rest}\n</program>\n`;
+// s478 (E-DG-002): the scaffold cell `@n` is declared only when the case names it
+const DB = (body, rest = "    <main><p id=\"m\">x</p></main>") => dropUnnamedScaffold(`<program>\n    let <n:int=0/>\n    <db src="./app.db">\n${body}\n    </db>\n${rest}\n</program>\n`, ["    let <n:int=0/>"]);
 const COUNT = `        function count() -> int {\n            const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM secret_rows\`}.get() !{ _ :> { return -1; } };\n            return r.n;\n        }`;
 const CNT = "        type Cnt:struct = { n: int }";
 const queryOf = (fn) => fn.body.stmts.find((x) => x.variant === "Suspend" && x.data.on.variant === "Query").data.on.data.q;
@@ -192,7 +194,8 @@ describe("loose prose in a `<db>` body is E-UNQUOTED-DISPLAY-TEXT — one report
 // per-request server cell; only the built shape `[let] <name:Type=value/>` compiles, every other
 // shape (here `export`) is refused by name.
 describe("a declaration in a `<db>` body is a server cell (Lane B, s473); a shape outside the built set is refused by name", () => {
-  for (const decl of ["let <hits:int=0/>", "<hits:int=0/>"]) {
+  // s478: nothing reads the `<db>` cell here (its shape is the point) — `_`-named (§34 E-DG-002)
+  for (const decl of ["let <_hits:int=0/>", "<_hits:int=0/>"]) {
     test(`\`${decl}\` → compiles clean (a \`<db>\` cell)`, () => {
       const r = run(DB(`        ${decl}`));
       expect(r.diags.map((d) => d.code)).toEqual([]);

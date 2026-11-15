@@ -242,8 +242,8 @@ describe("r2 R1 — text nodes are part of the shape (hole paths count them)", (
   // s474 r3 (re-review of b381f208d, S1 / S2; PA: match HTML and base): the printer STRIPS the one line
   // ending the parser drops after `<pre>` / `<listing>` / `<textarea>` — LF, CRLF or a lone CR — so the
   // page holds exactly what the browser builds (r2's doubling kept a blank first line / a "\nq" value).
-  const printedOf = (markup) => {
-    const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(markup) }]);
+  const printedOf = (markup, top = "") => {
+    const r = frontEnd(mods, [{ path: "app.scrml", src: gateProgram(markup, top) }]);
     expect(r.diags.filter((d) => d.code.startsWith("E-")).map((d) => d.code)).toEqual([]);
     return mods.print.printProgram(r.core, "app.client.js", "scrml-runtime.js").html;
   };
@@ -257,9 +257,11 @@ describe("r2 R1 — text nodes are part of the shape (hole paths count them)", (
       expect(printedOf(`<${t}>\n\nq</${t}>`)).toContain(`<${t}>\n\nq</${t}>`);
     }
     expect(printedOf(`<pre>\nline1\nline2</pre>`)).toContain(`<pre>line1\nline2</pre>`);
-    // a `<pre>` body is raw content in scrml (§4.17): `${…}` there is display text, so the review's hole cases are literal
-    expect(printedOf(`<pre>\${@pw}\nx</pre>`)).toContain(`<pre>\${@pw}\nx</pre>`);
-    expect(printedOf(`<pre>\n\${@pw}x</pre>`)).toContain(`<pre>\${@pw}x</pre>`);
+    // a `<pre>` body is raw content in scrml (§4.17): `${…}` there is display text, so the review's hole cases are literal.
+    // s478: the cell named there is declared, and nothing reads it (the text is literal), so it is `_`-named (§34 E-DG-002)
+    const lit = `    let <_pw:string=""/>`;
+    expect(printedOf(`<pre>\${@_pw}\nx</pre>`, lit)).toContain(`<pre>\${@_pw}\nx</pre>`);
+    expect(printedOf(`<pre>\n\${@_pw}x</pre>`, lit)).toContain(`<pre>\${@_pw}x</pre>`);
     expect(printedOf(`<div>\nq</div>`)).toContain(`<div>\nq</div>`);                 // other elements: untouched
   });
   test("the stripped body's shape matches what the runtime hashes (no text node when the body was only a line ending)", () => {

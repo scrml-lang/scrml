@@ -247,7 +247,8 @@ describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
   });
 
   test("twin: the server function returns the value; the caller is not refused for E-RI-002 (mirror: …-neg)", () => {
-    const src = P("", `    let <count:int=0/>\n    server function loadCount() -> int {\n        return 1;\n    }`);
+    // s478: the twin's program renders its cell (the program reads every cell it declares, §34 E-DG-002)
+    const src = P("", `    let <count:int=0/>\n    server function loadCount() -> int {\n        return 1;\n    }`, `        <p>\${@count}</p>`);
     expect(codes(src)).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 });
@@ -349,7 +350,7 @@ describe("§13.7 (S451 R1) — a value position that would wait is E-VALUE-SERVE
   });
 
   test("twin: a pure function in the same positions is clean", () => {
-    expect(codes(P("", `    let <n:int=0/>\n    fn three() -> int { return 3; }\n    let <m:int=(three())/>`, `        <p>\${three()}</p>`))).toEqual([]);
+    expect(codes(P("", `    let <n:int=0/>\n    fn three() -> int { return 3; }\n    let <m:int=(three())/>`, `        <p>\${three()} \${@n} \${@m}</p>`))).toEqual([]);
   });
 });
 
@@ -557,7 +558,7 @@ describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a
 });
 
 describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
-  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function cli() {\n        @n = 2;\n    }`)));
+  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function cli() {\n        @n = 2;\n    }`, `        <p>\${@n}</p>`)));
   const issues = (core, tag) => mods.check.checkCore(core).filter((s) => s.startsWith(tag));
 
   test("the lowered program is well-formed", () => {

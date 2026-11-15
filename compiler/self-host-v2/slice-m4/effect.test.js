@@ -13,6 +13,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -37,7 +38,10 @@ const clean = (src) => {
   return r;
 };
 const coreOf = (src) => clean(src).core;
-const P = (decls, main) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the shared-scaffold cells (the describes' `D`) it names
+const SCAFFOLD = ["    let <n:int=0/>", "    let <m:int=0/>", "    <step=1/>", "    <dbl:int=(@n * 2)/>",
+  "    let <query:string=\"\"/>", "    let <page:int=1/>", "    let <hits:int=0/>", "    <xs:int[free, append]=[]/>"];
+const P = (decls, main) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, SCAFFOLD);
 const $ = (sel) => document.querySelector(sel);
 const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -251,7 +255,7 @@ describe("§6.7.4 the retiring keyword form — `when … changes { }` parses id
   });
 
   test("`when` stays an ordinary name where it is not a `when … changes` statement", () => {
-    expect(codes(P(`    let <m:int=0/>\n    fn when(x: int) -> int { return x; }\n    function g() { @m = when(1); }`, ""))).toEqual([]);
+    expect(codes(P(`    let <_m:int=0/>\n    fn when(x: int) -> int { return x; }\n    function g() { @_m = when(1); }`, ""))).toEqual([]);
   });
 });
 
@@ -268,7 +272,9 @@ describe("§6.7.4 — codes", () => {
 
   test("E-LIFECYCLE-007 — an entry that is not a declared mutable cell: undeclared, non-`@`, locked, derived", () => {
     expect(codes(P(`${D}\n    <effect deps=[@nope]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
-    expect(codes(P(`${D}\n    <effect deps=[n]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
+    // a DECLARED cell named without `@` (s478 review LOW-1: the main reads `@n`, so the scaffold keeps `let <n>`)
+    expect(codes(P(`${D}\n    <effect deps=[n]${body}`, `        <p>\${@n}</p>`))).toEqual(["E-LIFECYCLE-007"]);
+    expect(P(`${D}\n    <effect deps=[n]${body}`, `        <p>\${@n}</p>`)).toContain("let <n:int=0/>");
     expect(codes(P(`${D}\n    <effect deps=[@step]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
     expect(codes(P(`${D}\n    <effect deps=[@dbl]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
     expect(codes(P(`${D}\n    <effect deps=[@n, @dbl]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
@@ -489,7 +495,7 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
   });
 
   // `<slot>` FALLBACK content has no Core form and SPEC §66.15.2 rules only `<slot/>`.
-  const fallbackProg = (fallback) => `<program>\n${D}\n    <card title:string/>\n    renders <div><slot>${fallback}</slot></div>\n    <main>\n        <card title="a"></card>\n    </main>\n</program>\n`;
+  const fallbackProg = (fallback) => dropUnnamedScaffold(`<program>\n${D}\n    <card title:string/>\n    renders <div><slot>${fallback}</slot></div>\n    <main>\n        <card title="a"></card>\n    </main>\n</program>\n`, SCAFFOLD);
 
   test("slot fallback content — an effect, an unresolved read, plain markup — is refused; an empty slot is a slot", () => {
     // mutation RED: resolveElem returning MSlot for `slot` without resolveSlot

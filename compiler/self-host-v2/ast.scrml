@@ -311,6 +311,7 @@ ${
         EnumBody(variants: AVariant[]),
         StructBody(fields: ATypeField[]),
         HostBody,       // s473: `type Name:host` inside a `<host>` (DRAFT §21.3.3 rule 15) — a closed, opaque host handle type
+        AliasBody(ty: AType),   // s478: `type Name = T` — a type alias; `Name` is `T` wherever it is written (§14.1.2 "type-alias right-hand sides (`type A = Type`)")
     }
     export type ATypeDecl:struct = { nid: int, span: ASpan, exported: boolean, name: string, body: ATypeBody }
 
@@ -371,6 +372,10 @@ ${
         Bare(e: AExpr),          // an unquoted value: a literal, a name, @ref, a call, a member path
         Paren(e: AExpr),         // ( expr )
         Braced(b: ABlock),       // { stmts }
+        // s478 — a DURATION (§6.13.3, §51.12.3): the value of `debounced=` /
+        // `throttled=` / `after=` written as a number with a unit (`300ms`) or
+        // `${expr}<unit>`, as its text — judged by the analyzer (durationOf)
+        Dur(text: string),
     }
     // `name` includes a namespace when written (`bind:value`, `class:active`).
     export type AAttr:struct = { nid: int, span: ASpan, name: string, value: AAttrValue }
@@ -403,6 +408,15 @@ ${
         // value form whose lifts are the rendered rows. Its `lift`s hold their
         // markup (ALift.LiftNode).
         Gather(f: AFor),
+        // s478 — a run of STATEMENTS where an item stands: a bare run at a
+        // `<program>` / `<page>` body top (§40.8 S441: "A bare run … is code.
+        // It SHALL be parsed and checked as logic at its position"), or the
+        // statements at the top level of a `${ … }` logic block there (§17.3
+        // S449: "A `${ … }` at a `<program>` / `<page>` / `<channel>` body top
+        // is a statement list, evaluated, not rendered"). §40.8: "it runs once
+        // at mount in source order, like any other body-top statement". Owned,
+        // like an effect, by the scope it stands in; renders nothing.
+        Run(b: ABlock),
     }
 
     // -------------------------------------------------------------------------
@@ -448,6 +462,10 @@ ${
     export type ADeclChild:enum = {
         ChildField(d: ADecl),
         StateChild(s: AStateChild),
+        // s478 — `<onIdle after=DURATION to=.Variant/>` (§51.0.R) at the value's
+        // root, a sibling of its state-children: the engine-wide watchdog (its
+        // attributes; a body is refused). Not a state-child: it names no variant.
+        Idle(s: AStateChild),
     }
 
     // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4

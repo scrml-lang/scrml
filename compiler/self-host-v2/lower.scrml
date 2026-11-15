@@ -30,7 +30,7 @@
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist, Timing,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
@@ -816,6 +816,7 @@ ${
     fn lowerValue(c: LC, v: AAttrValue) -> Expr | not {
         return match v {
             .Quoted(v: s) :> litStr(s)
+            .Dur(text: s) :> litStr(s)
             .Bare(e: e) :> lowerExpr(c, e)
             .Paren(e: e) :> lowerExpr(c, e)
             .NoValue :> not
@@ -1713,6 +1714,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
             .Gather(f: x) :> not
         }
@@ -1727,6 +1729,7 @@ ${
             .DeclNode(d: d) :> false
             .Css(c: c) :> true
             .Effect(w: w) :> false
+            .Run(b: rb0) :> false
             .Request(r: r) :> false
             .Gather(f: x) :> false
         }
@@ -1840,6 +1843,7 @@ ${
                 .DeclNode(d: d) :> lowerNode(c, n)
                 .Css(c: c) :> lowerNode(c, n)
                 .Effect(w: w) :> lowerNode(c, n)
+                .Run(b: rb0) :> lowerNode(c, n)
                 .Request(r: r) :> lowerNode(c, n)
                 .Gather(f: x) :> lowerNode(c, n)
             }
@@ -1866,6 +1870,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
+            .Run(b: b) :> [View.Run(cpsBody(lowerBlock(c, b), []))]   // s478 (§40.8): explicit continuations, as a handler's
             .Request(r: r) :> [requestView(c, r)]
             .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         }
@@ -2102,7 +2107,7 @@ ${
             let init: Expr = Expr.Lit(Literal.Absent)
             if (j == 0 || j == 3) init = Expr.Lit(Literal.Bool(false))
             out = out.concat([{ sym: s, ty: tys[j], init: init, mode: FieldMode.Let, role: FieldRole.Child,
-                                grants: { replace: true, edits: [] }, graph: not, exported: false, wcap: rq.wcaps[j], vals: [], persist: not }])
+                                grants: { replace: true, edits: [] }, graph: not, exported: false, wcap: rq.wcaps[j], vals: [], persist: not, timing: not }])
             j = j + 1
         }
         return out
@@ -2308,6 +2313,7 @@ ${
     fn quotedText(v: AAttrValue) -> string {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> ""
             .Bare(e: e) :> ""
             .Paren(e: e) :> ""
@@ -2328,6 +2334,7 @@ ${
             .Paren(e: e) :> block(handlerStmt(c, e))
             .Braced(b: b) :> bracedHandlerBlock(c, b)
             .Quoted(v: s) :> block([])
+            .Dur(text: s) :> block([])
             .NoValue :> block([])
         }
         return cpsBody(b0, [])     // s454 (U1b): a handler that suspends — explicit continuations
@@ -2463,7 +2470,7 @@ ${
         return {
             sym: f.sym, ty: f.ty, init: init, mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
-            persist: persistOf(c.t, f.sym),
+            persist: persistOf(c.t, f.sym), timing: timingOf(c.t, f.sym),
         }
     }
 
@@ -2471,6 +2478,14 @@ ${
     fn persistOf(t: Tables, s: Sym) -> Persist | not {
         for (const p of t.persists) {
             if (p.sym.id == s.id) return p.persist
+        }
+        return not
+    }
+
+    // s478 — the field's accepted `debounced=` / `throttled=` (§6.13; analyze timingPass).
+    fn timingOf(t: Tables, s: Sym) -> Timing | not {
+        for (const x of t.timings) {
+            if (x.sym.id == s.id) return x.timing
         }
         return not
     }
@@ -2709,6 +2724,7 @@ ${
             .Slot :> v
             .Star(decl: dd) :> v
             .Effect(deps: ds) :> v
+            .Run(body: x) :> v
             .Request(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
@@ -4148,6 +4164,7 @@ ${
                 const v: AAttrValue = a.value
                 return match v {
                     .Quoted(v: s) :> s
+                    .Dur(text: s) :> s
                     .NoValue :> ""
                     .Bare(e: x) :> ""
                     .Paren(e: x) :> ""
@@ -4173,6 +4190,7 @@ ${
                 .Interp(e: x) :> false
                 .DeclNode(d: d) :> false
                 .Effect(w: w) :> false
+                .Run(b: rb0) :> false
                 .Request(r: r) :> false
                 .Css(c: c) :> false
                 .Gather(f: g) :> false
@@ -4355,6 +4373,7 @@ ${
             .Slot :> v
             .Star(decl: x) :> v
             .Effect(deps: x) :> v
+            .Run(body: x) :> v
             .Request(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
@@ -4447,6 +4466,7 @@ ${
             .Dyn(e: x) :> []
             .Slot :> []
             .Effect(deps: x) :> []
+            .Run(body: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -4510,6 +4530,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .Run :> []
             .Request :> []
             .ResetOn :> []
             .Errors :> []
@@ -4584,6 +4605,7 @@ ${
             .Slot :> []
             .Star(decl: x) :> []
             .Effect(deps: x) :> []
+            .Run(body: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -4634,6 +4656,7 @@ ${
             .Slot :> 0
             .Star(decl: x) :> 0
             .Effect(deps: x) :> 0
+            .Run(body: x) :> 0
             .Request(deps: x) :> 0
             .ResetOn(triggers: x) :> 0
             .Errors(of: x) :> 0

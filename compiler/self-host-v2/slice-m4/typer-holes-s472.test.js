@@ -77,7 +77,7 @@ describe("F1 — a literal initializer is checked against every annotation type 
     expect(d[0].message).toContain("§7.5.1");
   });
   test("legal twins — each annotation given a literal that fits compiles and runs", async () => {
-    await shows(prog(`    type C:enum = { A, B }\n    type P:struct = { n: int }\n    let <a:int | not=5/>\n    let <b:number | not=5/>\n    let <c:C | not=.A/>\n    let <d:int | not=not/>\n    let <pt:P=({ n: 1 })/>\n    let <s:string | not="hi"/>\n    fn g() -> string {\n        let y: int | not = 3;\n        const z: C = .B;\n        if (@a is given) { return \`a\${@a}\`; }\n        return "none";\n    }`,
+    await shows(prog(`    type C:enum = { A, B }\n    type P:struct = { n: int }\n    let <a:int | not=5/>\n    let <_b:number | not=5/>\n    let <_c:C | not=.A/>\n    let <_d:int | not=not/>\n    let <_pt:P=({ n: 1 })/>\n    let <_s:string | not="hi"/>\n    fn g() -> string {\n        let y: int | not = 3;\n        const z: C = .B;\n        if (@a is given) { return \`a\${@a}\`; }\n        return "none";\n    }`,
       `<p id="o">\${g()}</p>`), "a5");
   });
   test("legal twin — the ADMIN shape with a bool literal renders the value it was given", async () => {
@@ -149,7 +149,7 @@ describe("F2 — a ternary whose arms disagree is a choice; every typed position
     await shows(prog(`${B}\n    fn g() -> number { return @b ? 1 : 2.5; }`, `<p id="o">\${g()}</p>`), "1");
   });
   test("flow-insensitive local joins stay unprovable (`let a = \"s\"; a = 1` is not a choice)", () => {
-    expect(codes(prog(`    let <x:int=0/>\n    function f() { let a = "s"; a = 1; @x = a; }`))).toEqual([]);
+    expect(codes(prog(`    let <_x:int=0/>\n    function f() { let a = "s"; a = 1; @_x = a; }`))).toEqual([]);
   });
 });
 

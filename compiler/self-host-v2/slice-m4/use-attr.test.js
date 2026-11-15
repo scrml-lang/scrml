@@ -19,6 +19,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -30,8 +31,9 @@ const CARD = `    <card title:string="t">
     </>
     renders <div class="card">\${title}</div>
 `;
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names
 const prog = (markup, decl = CARD) =>
-  `<program>\n    let <n:int=0/>\n    let <b:bool=true/>\n    let <s:string=""/>\n${decl}    <main>\n        ${markup}\n    </main>\n</program>\n`;
+  dropUnnamedScaffold(`<program>\n    let <n:int=0/>\n    let <b:bool=true/>\n    let <s:string=""/>\n${decl}    <main>\n        ${markup}\n    </main>\n</program>\n`, ["    let <n:int=0/>", "    let <b:bool=true/>", "    let <s:string=\"\"/>"]);
 
 // Every kind of undeclared attribute the ruling names (dpa-069 §1, §3 pole R), plus the
 // forms that are not plain names.

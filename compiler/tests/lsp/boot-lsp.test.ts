@@ -245,7 +245,7 @@ describe("lsp-boot over stdio", () => {
     const a = join(dir, "never-saved-a.scrml");
     const b = join(dir, "never-saved-b.scrml");
     const aUri = pathToFileURL(a).href, bUri = pathToFileURL(b).href;
-    const A = `\${\n    import { Color } from "./never-saved-b.scrml";\n}\n<program>\n    let <c:Color=.Red/>\n    <main><p>hi</p></main>\n</program>\n`;
+    const A = `\${\n    import { Color } from "./never-saved-b.scrml";\n}\n<program>\n    let <_c:Color=.Red/>\n    <main><p>hi</p></main>\n</program>\n`;
     const B_OK = `\${\n    export type Color:enum = { Red, Blue }\n}\n`;
     const B_BAD = `\${\n    export type Color:enum = { Red, Blue }\n    export fn f() -> int { return nope; }\n}\n`;
     const c = client();

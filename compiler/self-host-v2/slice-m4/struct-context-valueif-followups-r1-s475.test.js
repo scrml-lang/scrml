@@ -23,6 +23,7 @@
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -33,14 +34,15 @@ const codes = (src) => run(src).diags.map((d) => d.code).filter((c) => c !== WDS
 const count = (cs, c) => cs.filter((x) => x === c).length;
 
 const DECLS = [
-  "    let <n:int=0/>",
+  "    let <_n:int=0/>",
   "    type K:enum = { A, B, C }",
   "    type S:struct = { a: int, b: int }",
   "    type R:struct = { a: int, c: int }",
   "    function one() -> int { return 1; }",
   "    server function srv() -> S { const s: S = { a: 1, b: 2 }; return s; }",
 ].join("\n");
-const P = (decls) => `<program>\n${DECLS}\n${decls}\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+// s478 (E-DG-002): the DECLS cell is only ever a landing (`_`-named), declared only when the case names it
+const P = (decls) => dropUnnamedScaffold(`<program>\n${DECLS}\n${decls}\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`, DECLS);
 const errs = (src) => codes(src).filter((c) => !c.startsWith("W-"));
 const compiles = (src) => {
   const r = run(src);
@@ -118,16 +120,16 @@ describe("F2 — a statement-position value-`if` arm brace reports its soft diag
 
 describe("F3 — a `match` as the last of several statements in a value-position block arm is a statement", () => {
   test("E-ARM-TAIL-VALUE alone (no E-ASSIGN-POSITION from a value-`if` reading of its arm)", () => {
-    expect(codes(P(`    function h(k: K, j: K, c: bool) -> int { const v: int = match k { .A :> { one(); match j { .B :> { if (c) { @n = 1; } else { @n = 2; } }, else :> { } } }, else :> 0 }; return v; }`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(codes(P(`    function h(k: K, j: K, c: bool) -> int { const v: int = match k { .A :> { one(); match j { .B :> { if (c) { @_n = 1; } else { @_n = 2; } }, else :> { } } }, else :> 0 }; return v; }`))).toEqual(["E-ARM-TAIL-VALUE"]);
   });
   test("with `lift` after it, the bootstrap's one refusal of a statement-holding value arm, no cascade", () => {
-    expect(codes(P(`    function h(k: K, j: K, c: bool) -> int { const v: int = match k { .A :> { one(); match j { .B :> { if (c) { @n = 1; } else { @n = 2; } }, else :> { } } lift 3; }, else :> 0 }; return v; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    function h(k: K, j: K, c: bool) -> int { const v: int = match k { .A :> { one(); match j { .B :> { if (c) { @_n = 1; } else { @_n = 2; } }, else :> { } } lift 3; }, else :> 0 }; return v; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("in a statement-position arm, its statement `if` branches owe their `;` once each", () => {
     expect(codes(P(`    function h(k: K, j: K, c: bool) { match k { .A :> { one(); match j { .B :> { if (c) { one() } else { one() } }, else :> { } } }, else :> { } } }`))).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON"]);
   });
   test("in a statement-position arm, a well-formed nested statement `match` compiles", () => {
-    compiles(P(`    function h(k: K, j: K, c: bool) { match k { .A :> { one(); match j { .B :> { if (c) { @n = 1; } else { @n = 2; } }, else :> { } } }, else :> { } } }`));
+    compiles(P(`    function h(k: K, j: K, c: bool) { match k { .A :> { one(); match j { .B :> { if (c) { @_n = 1; } else { @_n = 2; } }, else :> { } } }, else :> { } } }`));
   });
   test("a lone `match` arm body stays the arm's value (one expression)", () => {
     compiles(P(`    function h(k: K, j: K, c: bool) -> int { return match k { .A :> { match j { .B :> { if (c) { 1 } else { 2 } }, else :> 3 } }, else :> 0 }; }`));

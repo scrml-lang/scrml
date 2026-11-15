@@ -36,6 +36,7 @@ import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import * as guard from "../../src/runtime-url-guard.js";
 import { classifyStaticExecutableAttr, STATIC_NAV_LOAD_URL_ATTRS, IMAGE_LINK_REL_TOKENS } from "../../src/attr-injection-sink.ts";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -50,14 +51,16 @@ const clean = (src) => {
   return r.core;
 };
 const SE = "E-ATTR-STATIC-EXECUTABLE";
-const P = (main, decls = "", before = "") => `${before}<program>
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names (`@an`, the braced
+// describe's `@doc`)
+const P = (main, decls = "", before = "") => dropUnnamedScaffold(`${before}<program>
     let <an:string="href"/>
 ${decls}
     <main>
 ${main}
     </main>
 </program>
-`;
+`, [`    let <an:string="href"/>`, `    let <doc:string="<p>x</p>"/>`]);
 const $ = (sel) => document.querySelector(sel);
 
 const URL_TEXTS = [

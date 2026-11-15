@@ -355,8 +355,8 @@ describe("review round 3 (s469-boot-loops-1 delta review)", () => {
   // s472: the part write compiles now (Core Assign with a path); a contract-free field of a local
   // that CANNOT be rebound is fixed — E-WRITE-NOT-GRANTED, the advice still naming a `let` copy
   test("L2 (s472): a fixed field of a local that cannot be rebound is refused, the advice naming a `let` copy", () => {
-    const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
-    const binder = diag(prog(P, `        <button onclick={ for (p of @ps) { p.name = "z"; } }>b</button>`), "E-WRITE-NOT-GRANTED");
+    const P = `    type P:struct = { name: string }\n    <_ps:P[]=([{ name: "a" }])/>`;
+    const binder = diag(prog(P, `        <button onclick={ for (p of @_ps) { p.name = "z"; } }>b</button>`), "E-WRITE-NOT-GRANTED");
     expect(binder.message).toContain("cannot be rebound");
     expect(binder.message).not.toContain("rebind it (`p = …`)");
     const param = diag(prog(P + `\n    function g(q: P) { q.name = "z"; }`, `        <p>x</p>`), "E-WRITE-NOT-GRANTED");

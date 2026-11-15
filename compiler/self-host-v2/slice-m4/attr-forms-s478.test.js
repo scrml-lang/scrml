@@ -218,6 +218,48 @@ describe("3 — the named codes", () => {
     expect(codes(prog(`<p title=@last -x>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
     expect(codes(prog(`<p title=@last in -x>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
   });
+  // s478-boot-attr-operator-residue — §5.2 lists `is` among the operators that continue a value, and
+  // "any other attribute followed by an operator … is `E-ATTR-UNQUOTED-OPERATOR`"; §42.4 item 9: "A bare
+  // unquoted condition attribute is atomic-only (§5.2) … the explicit forms are parenthesized —
+  // `<div if=(@x is given)>`". A handler value is ONE expression, so a handler's `is given` stays legal.
+  test("a presence test `is given` / `is not` / `is some` after a non-handler unquoted value is refused once", () => {
+    for (const t of [`is given`, `is not`, `is some`]) {
+      const e = errs(prog(`<p title=@last ${t}>x</p>`));
+      expect(e.map((d) => d.code)).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+      expect(e[0].message).toContain("`title=@last " + t + "`");
+      expect(e[0].message).toContain("Parenthesize");
+    }
+    expect(codes(prog(`<p if=@last is given>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    // the escapes stay clean: parenthesized, and a handler's one expression
+    expect(codes(prog(`<p title=(@last is given) if=(@last is not)>x</p>`))).toEqual([]);
+    expect(codes(prog(`<button onclick=@ok = @last is given>x</button>`))).toEqual([]);
+  });
+  test("a trailing operator before the tag's `>` / `/>` stops at the tag: refused once, the rest of the file parses", async () => {
+    for (const v of [`@last +`, `@last -`, `@last in-`, `@last in`, `@last is`, `@ok ?`, `@last+`]) {
+      const e = errs(prog(`<p title=${v} >x</p>\n<p id="after" class=@last>y</p>`));
+      expect(e.map((d) => d.code)).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+      expect(e[0].message).toContain("`title=" + v + "`");
+    }
+    expect(codes(prog(`<input title=@last + />\n<p>y</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    expect(codes(prog(`<button onclick=@count = @count + >x</button>\n<p>y</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    // a complete value before a spaced `>` is untouched
+    await load(prog(`<p id="e" title=@last >a</p>\n<p id="f">b</p>`));
+    expect($("#f").textContent).toBe("b");
+  });
+  // s478 r1 (#1873) — postfix `?` (§19.5.4 propagation) completes an expression: a value ending in it is
+  // read whole and keeps its own diagnostics (E-ERROR-003 — propagation outside a failable function),
+  // never E-ATTR-UNQUOTED-OPERATOR. A ternary `?` still owed its operand stays refused (above).
+  test("a value ending in postfix `?` propagation is not an operator owed an operand", () => {
+    const fprog = (body) => `<program>\n    type E:enum = { Bad }\nlet <n:int=0/>\n    function bad()! E { fail .Bad; }\n    function ok2()! E { return 1; }\n${body}\n</program>\n`;
+    for (const v of [`<button onclick=bad()?>x</button>`, `<button onclick=@n = ok2()?>x</button>`, `<button onclick=bad()? >x</button>`]) {
+      expect(codes(fprog(v))).toEqual(["E-ERROR-003"]);
+    }
+    // a non-handler value: the propagation's own reports (as on base), no operator refusal
+    const t = codes(fprog(`<p title=ok2()?>x</p>`));
+    expect(t).toContain("E-ERROR-003");
+    expect(t).not.toContain("E-ATTR-UNQUOTED-OPERATOR");
+    expect(codes(prog(`<p title=@ok ? >x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+  });
   test("the `:`-shorthand body after an unquoted value is not read into it", () => {
     expect(codes(prog(`<p title=@last : "hi">`))).toEqual([]);
   });

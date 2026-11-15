@@ -8,5 +8,6 @@
     <main>
         <p>${@d}</p>
         <button onclick=(@n = @n + 1)>+</button>
+        <p>${@hits}</p>
     </main>
 </program>
