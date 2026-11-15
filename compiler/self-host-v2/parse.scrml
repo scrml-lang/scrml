@@ -3753,7 +3753,17 @@ ${
         // is: a lifecycle element (`<timer>`, `<poll>`) names its own refusal; and a keyword
         // `when … changes { … }` there is parseInterp's effect, s449)
         const t: TP = adv(tp)
+        // s478 r1 (LOW-7): `type` opens a declaration only in a type-declaration shape —
+        // `type Name =` / `type Name:kind` / `type Name<…>`; `${ type }` / `${ type + 1 }`
+        // read a binding named `type` (an `<each … as="type">` row binder) as before
+        if (isWord(t, "type")) return typeDeclShapeAhead(adv(t))
         return logicItemAhead(t) && !whenAhead(t)
+    }
+
+    fn typeDeclShapeAhead(t: TP) -> boolean {
+        if (!isNameTok(cur(t))) return false
+        const n: TP = adv(t)
+        return isP(n, "=") || isP(n, ":") || isP(n, "<")
     }
 
     fn parseNestedLogic(mp: MP) -> RNodeOne {
@@ -8270,8 +8280,13 @@ ${
             } else if (atInterp(m) && nestedLogicAhead(m)) {
                 // s478 (C10): a logic block of declarations renders nothing where it
                 // stands — like a `#{…}` block (above), it does not split the text
-                // around it (the template paths count one text node)
-                m = parseNestedLogic(m).mp
+                // around it (the template paths count one text node). s478 r1 (H2): its
+                // empty placeholder (renders nothing — lower textViews) stays in the tree,
+                // spanning the block, so analyze can see WHERE the hoisted items stood
+                // (nestedHoistCheck: never out of a binder scope)
+                const rl: RNodeOne = parseNestedLogic(m)
+                out = out.concat([rl.n])
+                m = rl.mp
             } else if (atInterp(m)) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])

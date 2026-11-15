@@ -80,3 +80,11 @@ Conformance vs 47d1250cb: PASS 422→437, FAIL 142→118, UNSUPPORTED 665→674.
   g-boot-body-top-tilde-exemption-s478, g-boot-run-before-dom-insertion-s478.
 - `;` migrated in error/async-not-in-scrml, fn/async-decl-reject, loop/loop-006-neg (impl#1 `bun conformance/run.ts`
   result lines identical before/after).
+
+## Fix round 1 — nested-logic (#1880)
+- H2: the nested `${ … }` block's empty Text placeholder stays in the tree (spanning the block; renders nothing);
+  analyze `nestedHoistCheck` refuses by name every hoisted `fn` / `function` / `const` inside it when the block
+  stands in a binder scope (nameScopeHere: `<each>` row, loop / arm binders, renders / state-child fields) — never
+  re-bound to a same-named file-scope name. Gap g-boot-nested-logic-statements-s478 text corrected.
+- LOW-7: `${ type … }` is a declaration only in a type-declaration shape (`type Name =` / `:` / `<`); a binding
+  named `type` interpolates again.
