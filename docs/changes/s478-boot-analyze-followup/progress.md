@@ -55,7 +55,8 @@ It was verified against the merged scratch copy.
   25/25, so the C13 tests still hold.
 - Bootstrap conformance, `bun scripts/bootstrap-conformance.ts --json`, per-case diff of
   bucket and emitted codes:
-  - Before (origin/main cc0b2a78e): PASS 366 · FAIL 239 · NOT-TWINNED 624 · UNSUPPORTED 639.
+  - Before (origin/main 621b9c01b, after the rebase): PASS 406 · CODES-ONLY 4 · FAIL 183 · NOT-TWINNED 635 · UNSUPPORTED 640 · CRASH 0.
+  - On the first base, cc0b2a78e, the counts were PASS 366 · FAIL 239 · NOT-TWINNED 624 · UNSUPPORTED 639, also with 0 cases changed.
   - After: identical, with 0 cases changed (no PASS→FAIL).
 - severity.scrml: no code set changed; `gen-bootstrap-severity.ts --check` reports it is current.
 - Newly rejecting, by construction: none.
