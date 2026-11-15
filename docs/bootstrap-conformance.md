@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 422 | 22.6% |
+| PASS | 431 | 23.1% |
 | CODES-ONLY | 4 | 0.2% |
-| FAIL | 142 | 7.6% |
+| FAIL | 133 | 7.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
 | UNSUPPORTED | 665 | 35.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 426 hold (75.0%). Runtime half executed on the bootstrap for 151 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 435 hold (76.6%). Runtime half executed on the bootstrap for 154 case(s).
 
-- **Vacuous** passes: 12 of 426 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **414**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 30 of 142; the other 112 are implemented checks that answered wrong.
+- **Vacuous** passes: 12 of 435 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **423**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 26 of 133; the other 107 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 665.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 269 · FAIL 116 · UNSUPPORTED 490. Twin holds 269 (non-vacuous 262). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 278 · FAIL 107 · UNSUPPORTED 490. Twin holds 278 (non-vacuous 271). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 13 | · | 11 | · | 11 | 4 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
-| engine | 92 | 14 | · | 6 | · | 50 | 22 | · | · |
+| engine | 92 | 18 | · | 3 | · | 50 | 21 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
 | error | 78 | 43 | · | 5 | · | 5 | 25 | · | · |
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | print | 1 | · | 1 | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 127 | 42 | · | 14 | · | 44 | 27 | · | · |
+| reactive | 127 | 47 | · | 8 | · | 44 | 28 | · | · |
 | refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 6 | 19 | · | · |
 
-### FAIL (142)
+### FAIL (133)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - missing E-PROGRAM-NESTED-ATTR
@@ -388,17 +388,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-EXPECTED: expected `}`, found ``
-- `engine/onidle-duplicate-pos` (twin · parse-reject; not in the bootstrap: E-IDLE-DUPLICATE)
-  - missing E-IDLE-DUPLICATE
-  - severity: E-IDLE-DUPLICATE did not fire (expected error)
-  - E-PARSE-TRAILING: unexpected `m` after the expression
-  - E-PARSE-TRAILING: unexpected `m` after the expression
-- `engine/onidle-invalid-variant-pos` (twin · parse-reject; not in the bootstrap: E-IDLE-INVALID-VARIANT)
-  - missing E-IDLE-INVALID-VARIANT
-  - severity: E-IDLE-INVALID-VARIANT did not fire (expected error)
-  - E-PARSE-TRAILING: unexpected `m` after the expression
-- `engine/onidle-legal-neg` (twin · parse-reject)
-  - E-PARSE-TRAILING: unexpected `m` after the expression
 - `engine/ontimeout-misplaced-pos` (twin · parse-reject)
   - missing E-STRUCTURAL-ELEMENT-MISPLACED
   - severity: E-STRUCTURAL-ELEMENT-MISPLACED did not fire (expected error)
@@ -594,14 +583,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-ITEM: unexpected text at program level
 - `module/e-import-003-import-inside-fn-reject` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `'./m.scrml'`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `reactive/debounce-on-server` (twin · parse-reject; not in the bootstrap: E-DEBOUNCED-WITH-SERVER)
-  - missing E-DEBOUNCED-WITH-SERVER
-  - severity: E-DEBOUNCED-WITH-SERVER did not fire (expected error)
-  - E-PARSE-TRAILING: unexpected `ms` after the expression
-- `reactive/debounce-trailing-commit` (twin · parse-reject)
-  - E-PARSE-TRAILING: unexpected `s` after the expression
-- `reactive/debounce-valid-neg` (twin · parse-reject)
-  - E-PARSE-TRAILING: unexpected `ms` after the expression
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
@@ -610,11 +591,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - severity: E-DG-002 did not fire (expected warning)
 - `reactive/hoist-forward-ref-neg` (twin · parse-reject)
   - E-PARSE-ITEM: unexpected text at program level
-- `reactive/reactivity-attr-conflict` (twin · parse-reject; not in the bootstrap: E-REACTIVITY-ATTR-CONFLICT)
-  - missing E-REACTIVITY-ATTR-CONFLICT
-  - severity: E-REACTIVITY-ATTR-CONFLICT did not fire (expected error)
-  - E-PARSE-TRAILING: unexpected `ms` after the expression
-  - E-PARSE-TRAILING: unexpected `ms` after the expression
 - `reactive/reset-init-after-assignment-rt` (twin · parse-reject)
   - E-PARSE-ITEM: unexpected text at program level
 - `reactive/s437-r5-template-cell-read-value-attr` (twin · runtime)
@@ -622,10 +598,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `reactive/server-fn-rawvar-read-error` (twin · codes)
   - missing E-REACTIVE-003
   - severity: E-REACTIVE-003 did not fire (expected error)
-- `reactive/throttle-leading` (twin · parse-reject)
-  - E-PARSE-TRAILING: unexpected `s` after the expression
-- `reactive/throttle-trailing-commit` (twin · parse-reject)
-  - E-PARSE-TRAILING: unexpected `s` after the expression
 - `reactive/write-not-in-logic-context-neg` (twin · parse-reject)
   - E-PARSE-ITEM: unexpected text at program level
 - `reactive/write-not-in-logic-context-pos` (twin · parse-reject)
@@ -740,7 +712,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (426)
+### PASS / CODES-ONLY (435)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -878,6 +850,10 @@ none
 - `engine/initial-invalid-variant-neg` — PASS · TWIN
 - `engine/initial-invalid-variant-pos` — PASS · TWIN
 - `engine/mount-not-engine-pos` — PASS · TWIN
+- `engine/onidle-duplicate-pos` — PASS · TWIN
+- `engine/onidle-invalid-variant-pos` — PASS · TWIN
+- `engine/onidle-legal-neg` — PASS · TWIN
+- `engine/onidle-misplaced-pos` — PASS · TWIN
 - `engine/phase-advance` — PASS · TWIN
 - `engine/rule-invalid-variant-neg` — PASS · TWIN
 - `engine/rule-invalid-variant-pos` — PASS · TWIN
@@ -1088,6 +1064,8 @@ none
 - `raw-content/nested-code-with-attribute-is-text` — PASS
 - `raw-content/pre-code-wrapper-stays-element` — PASS
 - `reactive/counter-increment` — PASS · TWIN
+- `reactive/debounce-trailing-commit` — PASS · TWIN
+- `reactive/debounce-valid-neg` — PASS · TWIN
 - `reactive/decl-needs-initializer-neg` — PASS · TWIN
 - `reactive/dg-001-cyclic-neg` — PASS · VACUOUS
 - `reactive/dg-002-no-readers-neg` — PASS · TWIN · VACUOUS
@@ -1111,6 +1089,7 @@ none
 - `reactive/no-write-interp-pos` — PASS
 - `reactive/no-write-own-init-neg` — PASS
 - `reactive/no-write-own-init-pos` — PASS
+- `reactive/reactivity-attr-conflict` — PASS · TWIN
 - `reactive/reserved-prefix-declaration-pos` — PASS · TWIN
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
@@ -1128,6 +1107,8 @@ none
 - `reactive/tape-spread-non-tape-neg` — PASS · TWIN
 - `reactive/tape-spread-value-rt` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
+- `reactive/throttle-leading` — PASS · TWIN
+- `reactive/throttle-trailing-commit` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
 - `server-db/sql-aggregate-group-rt-twin` — PASS
 - `server-db/sql-all-array-shape-rt-twin` — PASS
@@ -1327,7 +1308,6 @@ none
 - `engine/msg-without-accepts-pos` — twin · bootstrap-unsupported: engine message arms (`.Msg :> …` in a `<Closed>` state-child body, §51.0.S.2.3) are not in the bootstrap
 - `engine/on-timeout` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/on-timeout-no-advance` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `engine/onidle-misplaced-pos` — twin · bootstrap-unsupported: `<onIdle>` is a scrml structural element (§51.0.R), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-invalid-target-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-legal-neg` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-misplaced-markup-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1643,6 +1623,7 @@ none
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `raw-content/match-arm-raw-body-displays-as-text` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/narrowing-ends-at-server-call-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-callee-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `noop` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `noop(…)`
