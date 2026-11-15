@@ -141,3 +141,57 @@ E-VALUE-WRITES-STATE: "Not value positions: `on*=` handlers"), so only E-FN-003 
 - `module/e-export-003-attr-{conflict-reject,distinct-clean}` — §21.2 calls Form 1 "canonical,
   top-level", and SPEC permits a file with no `<program>` (library files). The bootstrap's
   E-PROGRAM-MISSING has no §34 row (`compiler/self-host-v2/severity.scrml`: "no §34 row"). Not stale.
+
+## F2 — C7 legacy state-object openers (9 cases)
+
+- Governing: §4.2 — "A space (or tab, or newline) between `<` and the identifier is the **deprecated**
+  opener form: it still compiles but emits W-WHITESPACE-001 (§15.15.5)". The bootstrap does not parse it
+  (E-PARSE-TAG), and no `scrml fix` §66 rule rewrites it, so the harness graded the unchanged legacy text
+  as a §66 twin.
+- Harness (INTERIM): `scripts/bootstrap-conformance.ts` `LEGACY_MARKERS` += `spaced-state-opener`
+  (`^[ \t]*<[ \t]+name`, line-anchored so `a < b` is not one) and `inline-typed-state-opener`
+  (`^[ \t]*<name {`). A marker alone only makes a case a twin CANDIDATE, so a twin would still be graded;
+  `NO_FIX_RULE_MARKERS` + `unrewrittenMarkerBlockers` make a twin that still carries one a blocker
+  (NOT-TWINNED, "all-or-nothing: a half-migrated file is never graded"). Unit-tested in
+  `compiler/tests/integration/bootstrap-conformance-counter/bootstrap-conformance-counter.test.js`.
+- Marker reach measured over the whole corpus: 36 cases. Besides the 3 ctrl-004 cases: 4 `auth/auth-00{3,4}-*`
+  and 4 `type-state-codes/e-state-*` go UNSUPPORTED -> NOT-TWINNED (they carry `< Todo` / `< Submission`
+  spaced openers); the rest (engine/*, ssr/*, ctrl-018..020) were already NOT-TWINNED (one more reason).
+- Migrated so a §66 twin is generated (the opener only declared the cells the chain reads; a §66 twin is
+  meaningful): ctrl-001, ctrl-002, ctrl-003-neg, ctrl-003-pos, ctrl-005-neg, ctrl-005-pos —
+  `<session { loggedIn: bool }` -> `<loggedIn>: bool = false` etc., the legacy declaration the `scrml fix`
+  §66 rules twin (§66.21 row 1). First tried the direct §66 `let <loggedIn:bool=false/>`: impl#1's ESM
+  client emit then THROWS ("The keyword 'let' is reserved", host-global-scan), so the twinnable legacy
+  declaration was chosen to keep impl#1's artifacts checked. impl#1: PASS unchanged (and its old
+  E-SCOPE-001 / E-MARKUP-001 cascade from the inline-typed opener is gone). Bootstrap: 5 PASS, ctrl-002
+  UNSUPPORTED (`@step.eq(…)` refused by name).
+- Kept legacy (NOT-TWINNED, INTERIM): ctrl-004-else-on-state-opener-{neg,pos},
+  ctrl-004-orphan-else-on-state-opener-pos — they pin E-CTRL-004 (`else` on a state-object opener,
+  §17.1.1), which needs the opener itself.
+- Gap filed: `g-boot-spaced-state-opener-s478` (LOW, `compiler/self-host-v2/parse.scrml`,
+  prov=pa:s478-triage-F2).
+
+## F4 — `type X : error = { … }` (2 cases: `error/error-008-{message-pos,neg}`)
+
+Searched §14 and §19. No sentence retires `:error`, and none defines it:
+- §14.2: "`:kind` — the kind annotation. Defined kinds: `:struct`, `:enum`. Additional kinds TBD."
+- §19.1: "Error types are enum types (§14.4). Error variants are enum variants."
+- §34 E-ERROR-008: "Error type **variant** uses reserved field name" (a variant, i.e. an enum).
+- The only `:error` mention is incidental: §14.1.2 "Loci … named `:struct` / `:error` / `:enum` /
+  `:tuple` declaration bodies" (describing impl#1's resolver loci).
+Not retired by any sentence, so per the brief the cases are LEFT and this is reported, not migrated.
+Recommendation for PA: rule it. The SPEC reads as if `:error` was never a language kind (§14.2 / §19.1),
+so the likely ruling is "not a kind" — then the cases migrate to `type MyError:enum = { Bad(message:
+string) }` (E-ERROR-008 on a variant's reserved field). Until ruled it is a SPEC gap more than a
+bootstrap gap.
+
+## impl#1 compile throws (host-global-scan)
+
+`bun scripts/host-global-scan.ts --check --roots conformance`: rc=0 after pinning (sorted) the two
+`for (cond)` cases — impl#1 does not build the condition head (E-IMPL1-RULED-FORM-UNSUPPORTED) and its ESM
+emit throws "Unexpected token":
+- `[esm] conformance/cases/condition/known-int-while-neg/case.scrml`
+- `[esm] conformance/cases/condition/presence-bare-optional-while-pos/case.scrml`
+Pre-existing, not touched (reported as "fixed — no longer throw", outside this lane, 3 of them in the
+off-limits markup-handler dir): body-top/template-cell-renders, markup-handler/s437-r5-template-cell-read-
+{first-multiline,second}, reactive/s437-r5-template-cell-read-function-body.

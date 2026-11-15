@@ -17,7 +17,9 @@
 [esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/components/callback-prop-narrowing-ends-on-assign-reject/case.scrml  # emit-client-esm: Assigning to rvalue (an expect-reject case: E-TYPE-031 + E-COMPONENT-PROP-WRITE; the substituted `onGo = not` is the refused write, S462)
 [esm] conformance/cases/condition/known-int-markup-if-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/condition/known-int-while-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/condition/presence-bare-optional-markup-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/condition/presence-bare-optional-while-pos/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/control-flow/ctrl-001-orphan-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/control-flow/ctrl-002-orphan-else-if-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/control-flow/ctrl-003-extend-past-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved

@@ -1,5 +1,5 @@
 <program>
-  <session { isAdmin: bool }
+  <isAdmin>: bool = false
 
   <div class="nav">
     <span if=@isAdmin>Admin panel</>
