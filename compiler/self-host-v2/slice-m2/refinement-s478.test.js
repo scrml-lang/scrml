@@ -92,6 +92,10 @@ describe("validator words after a struct field's type (§53.6.1, §55.1)", () =>
   test("`req` on an enum / int / bool field holds for every value — read, no check", () => {
     expect(errs(prog("role: Role req, n: int req, b: bool req"))).toEqual([]);
   });
+  test("a returned match over a struct is E-TYPE-024 once — its value is not also `string | not` (E-TYPE-031)", () => {
+    const src = "${\n    type Role:enum = { Admin, Editor }\n    type P:struct = { role: Role req }\n    fn label(p: P) -> string {\n        return match p {\n            .Admin :> \"admin\"\n        };\n    }\n}\n<program><p>x</p></program>\n";
+    expect(errs(src)).toEqual(["E-TYPE-024"]);
+  });
   test("`req` on a string field, and an enum subset, need a construction check — refused (INTERIM)", () => {
     expect(errs(prog("name: string req"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(errs(prog("role: Role oneOf([.Admin]) req"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

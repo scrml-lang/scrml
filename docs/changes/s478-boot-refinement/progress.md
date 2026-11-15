@@ -21,10 +21,17 @@ Branch `s478-boot-refinement` (from main 6ea07d203). Bootstrap only (`compiler/s
   - struct/variant field validator words (`role: Role req`, `oneOf([…])`) are read (`parseTypeFields`).
 - **Analyze** (`analyze.scrml`): `resolveRefine` (base type; reported → unresolved); `fieldValsWhy`
   (`req` on enum/struct/host/int/number/bool holds for every value → read, no check; anything else
-  refused INTERIM); `plainMatch`: a refused subject (E-TYPE-024 …) leaves the match untyped (no
-  E-TYPE-031 cascade).
+  refused INTERIM); `plainMatch`: a refused subject (E-TYPE-024 …) marks the match's coverage refused, so the
+  typer does not widen it by `not` (no E-TYPE-031 cascade).
 - **Cases**: 9 match cases gained `return … ;` on their tail `match` (§48 return rule / E-TYPE-043,
   S469 "always explicit"); `refinement/malformed-predicate-param-pos` gained `;`. impl#1 still passes all.
 
 ## Status
-- [x] implementation · [x] slice test `slice-m2/refinement-s478.test.js` · [ ] hook · [ ] PR
+- [x] implementation · [x] slice tests (7362 pass) · [x] hook · [ ] PR
+- merged main 2a4e95bf4 (body-top #1876, nested-logic #1880): severity.scrml regenerated.
+
+## Measurements (base main 2a4e95bf4 vs head)
+- bootstrap conformance: PASS 456 → 473, FAIL 97 → 76, UNSUPPORTED 676 → 680; 0 PASS→FAIL.
+- corpus (4035 inputs: samples, examples, conformance cases + twins, bootstrap acceptance):
+  0 newly-rejecting, 10 newly-accepting (the edited match cases), 148 already-rejecting inputs
+  changed error set (parse cascades replaced by E-CONTRACT-* / named refusals).

@@ -15905,13 +15905,12 @@ ${
         }
         const r1: RSym = mint(st, "subject")
         const r2: RSym = mint(r1.st, "arm")
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused,
+        // s478 (s478-boot-refinement) — a refused SUBJECT (E-TYPE-024, E-TYPE-VARIANT, …:
+        // `sk.code`) refuses the match's coverage too: it was never judged, so the typer does
+        // not widen the value by `not` (typePlain coverageRefused — one report per construct;
+        // before, `return match p { … }` over a struct `p` was also E-TYPE-031 `string | not`).
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused || sk.code != "",
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
-        // s478 (s478-boot-refinement) — a refused subject (E-TYPE-024, E-TYPE-VARIANT, …:
-        // `sk.code`) leaves the match's value untyped: its coverage was never judged, so it
-        // is not read as `T | not` against the use (one report per construct — before, a
-        // `return match p { … }` over a struct `p` was also E-TYPE-031 `string | not`).
-        if (sk.code != "") return plain(not, st)
         if (!exh && result is given) result = Type.Maybe(unMaybe(result))
         return plain(result, st)
     }
