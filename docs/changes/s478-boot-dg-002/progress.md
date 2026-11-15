@@ -100,6 +100,12 @@ Before (origin/main cc0b2a78e): PASS 366 · FAIL 239 · NOT-TWINNED 624 · UNSUP
 After: **PASS 367 · FAIL 238** · NOT-TWINNED 624 · UNSUPPORTED 639. FAIL → PASS: `reactive/dg-002-no-readers-pos`.
 No PASS → FAIL.
 
+Re-measured after rebasing onto origin/main af7fe4bab (#1865 / #1866 / #1869 landed): before PASS 422 ·
+CODES-ONLY 4 · FAIL 142 · NOT-TWINNED 635 · UNSUPPORTED 665; after **PASS 423 · FAIL 141** (the same single
+FAIL → PASS, no PASS → FAIL). impl#1 (`bun conformance/run.ts`) on the rebased tree: 1750/1868 pass, 118 xfail,
+0 FAIL, 0 XPASS. Corpus re-measured on af7fe4bab: the same 3,149 files, the same 28 sites / 25 files, 0 newly
+rejecting. Slices on the rebased tree: 7332 tests, 0 fail.
+
 ## Residual
 501 E-DG-002 sites remain in slice tests that do not assert a clean diagnostic list (they pass); not
 touched (the brief's scope is the failing fixtures).
