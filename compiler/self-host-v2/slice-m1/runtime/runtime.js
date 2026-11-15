@@ -496,7 +496,9 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 //    load alone).
 //  - the load's own settle never reloads: a write that would beat it cancelled its task, so a load
 //    whose continuation runs is the newest start (`settling` lets its write through, after the same
-//    `pendOlder` test as a write — s478 r1: a backstop, since stamps only rise).
+//    `pendOlder` test as a write — a backstop, since stamps only rise).
+//  - s478 r2: a `reset(@x)` starts its run when the reset executes — a fresh stamp, never skipped
+//    (Request.resetRun); a write later in the reset's own continuation is dated at the reset.
 // Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
 // author write does not supersede its fetch).
 let pendSeq = 0;
@@ -506,7 +508,7 @@ const PEND_STALE = 0;              // discarded: a newer load started, or a newe
 const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
 const PEND_RELOAD = 2;             // lands `not`, then the cell's load re-runs (r4 D)
 
-// THE one supersede test (s475 r3; s478 r1 reuses it for a reset and a load's own settle): a start
+// THE one supersede test (s475 r3; s478 reuses it for a load's own settle): a start
 // dated `s` is the OLDER start under §13.9.4 rule 1 when a load started after it or a write started
 // after it has already landed. Ties are not older (the later-running of the two wins, see below).
 // Stamps only rise: `p.load` / `p.wrote` are only ever set from a start that passed this test.
@@ -519,12 +521,16 @@ function pendWrite(cell, v) {
   // the load's own settle never reloads; s478 r1 (F2): it lands only while its start is still the
   // newest — a run whose start a landed write has passed is superseded (never lands over it)
   if (p.settling) return pendOlder(p, p.load) ? PEND_STALE : PEND_LAND;
-  const s = curStamp !== 0 ? curStamp : ++pendSeq;
+  let s = curStamp !== 0 ? curStamp : ++pendSeq;
+  // s478 r2 (§13.9.4 rule 3 ⚑): a write later in the SAME continuation as a reset is the later start
+  // — dated no earlier than the reset's run (a tie, which the write wins below). Writes from other
+  // continuations keep their wait's stamp (rule 2).
+  if (curStamp !== 0 && p.resetCont === curStamp && p.resetAt > s) s = p.resetAt;
   if (pendOlder(p, s)) return PEND_STALE;             // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
   // r4 F-A: every winning write, a no-op included. s478: `<=` — a tie is a reset's run and a write
-  // in the SAME continuation (resetRun dates the run as a write is dated); the write runs after it
-  // there, so it is the later start and wins (`reset(@x); @x = v;`, RULED S478 item 2).
+  // after it in the SAME continuation (dated at the reset, above); the write runs after it there, so
+  // it is the later start and wins (`reset(@x); @x = v;`, RULED S478 item 2).
   if (p.load <= s) p.req.supersede();
   return v === null || v === undefined ? PEND_RELOAD : PEND_LAND;
 }
@@ -540,7 +546,7 @@ class Request {
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
     // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
-    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
+    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false, resetAt: 0, resetCont: 0 };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -556,21 +562,25 @@ class Request {
   }
   /**
    * s478 (RULED S478 item 2; SPEC §13.9.4 rule 3) — `reset(@x)` of a pending cell: the run it
-   * triggers STARTS AT THE RESET, so it runs now (not at the end of the batch, as a dependency
-   * change's run does) and its start is dated as a write's is (rule 2): the running continuation's
-   * wait stamp, or a fresh one in a handler's synchronous part. An author write after the reset is
-   * therefore the later start and supersedes it when it lands (`reset(@who); @who = "z";` keeps
-   * "z"; a READ run's transport is aborted); a dependency change in the same batch still re-runs
-   * the load at the batch's end, the newest start (rule 3).
+   * triggers STARTS WHEN THE RESET EXECUTES ("the reset's load starts at the reset, so the later
+   * write wins (most recently started)"). So it runs now (not at the end of the batch, as a
+   * dependency change's run does) with a FRESH stamp: it is always the most recent start, and
+   * supersedes every earlier load and write under the S475 rules (`run` cancels the older run's
+   * task — a READ's transport is aborted, a WRITE's call completes and is discarded; a write
+   * started earlier that lands later is discarded by `pendOlder`). It is never skipped: a reset
+   * after a save (`save(2); reset(@who)`) or a retry after a failed load always reloads.
+   * Ruling 2 inside a continuation: the continuation that issued the reset is recorded
+   * (`resetCont`), and an author write later in that same continuation is dated at the reset
+   * (pendWrite) — the `<=` tie there lets it supersede the reset's load (`reset(@who); @who = "z";`
+   * keeps "z"). A dependency change in the same batch still re-runs the load at the batch's end,
+   * the newest start (rule 3). Stamps only rise: `++pendSeq` exceeds every stamp already issued.
    */
   resetRun() {
     if (this.disposed) return;
-    const s = curStamp !== 0 ? curStamp : ++pendSeq;
-    // s478 r1 (F1/F2; §13.9.4 rule 3 ⚑ companion): a reset dated before a load already started or
-    // a write already landed is the OLDER start (rule 1) and is superseded — it neither cancels the
-    // newer run nor lowers `p.load` (stamps stay monotonic), and its load would never land over the
-    // newer start anyway, so it is not issued.
-    if (pendOlder(this.target.pend, s)) return;
+    const p = this.target.pend;
+    const s = ++pendSeq;
+    p.resetAt = s;
+    p.resetCont = curStamp;          // 0 in a handler's synchronous part: a later write there is fresh anyway
     this.run(s);
   }
   run(start = 0) {
