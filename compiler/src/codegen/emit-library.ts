@@ -8,6 +8,7 @@ import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator, rewriteVariantTagReads } from "./rewrite.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
+import { replaceInCode } from "./code-segments.ts";
 import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
@@ -1907,8 +1908,10 @@ export function generateLibraryJs(
           // `export`, so no dangling `export` is left); enum runtime reps are
           // emitted up top by emitEnumRuntimeReps, struct/alias are pure types.
           blockText = stripScrmlTypeDecls(blockText);
-          // Convert fn → function
-          blockText = blockText.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          // Convert fn → function — in CODE only (S478 fix round 1, `replaceInCode`): `fn` in a
+          // string or template text is the author's text, and a `// … fn` line comment's `\s+`
+          // must not reach across the newline and comment out the next line's declaration.
+          blockText = replaceInCode(blockText, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip scrml type annotations from the emitted fn signatures.
           blockText = cleanFnSignatures(blockText);
           // Strip inline ^{} meta
@@ -1937,11 +1940,14 @@ export function generateLibraryJs(
           blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
           blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
           blockText = blockText.trim();
-          // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
-          // Apply per-line, skipping comment lines to avoid mangling English text
-          blockText = blockText.split("\n").map(line =>
-            line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
-          ).join("\n");
+          // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents.
+          // S478 (review F1) — over the WHOLE text, not per line, like rewriteVariantTagReads
+          // below. Both passes fence strings, template text, regex bodies and comments
+          // themselves (rewriteCodeSegments / replaceInCode), so a comment's English is never
+          // touched; read one line at a time, the line that CLOSES a multi-line template literal
+          // or block comment had its closer read as an opener, and the rest of that line was
+          // left unlowered (`is .V` / `is not` / `is some` reached the output raw).
+          blockText = rewriteIsOperator(rewriteNotKeyword(blockText));
           // S470 (review F5) — over the WHOLE text, not per line: a multi-line template
           // literal's content is masked as a literal only when the reader sees its backticks.
           blockText = rewriteVariantTagReads(blockText);
@@ -2124,20 +2130,21 @@ export function generateLibraryJs(
           // §21.2/§21.5 — remove scrml `type` decls incl. any leading `export`.
           text = stripScrmlTypeDecls(text);
           // Convert `fn name` to `function name` for complete fn declarations in gaps
-          text = text.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          // S478 fix round 1 — code only (`replaceInCode`), as the verbatim-block path above.
+          text = replaceInCode(text, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip bare `fn` keywords that are fragments (fn keyword without a name —
           // the name is in the next node's span). These are artifacts of span splitting.
-          text = text.replace(/\bfn\s*$/gm, "");
+          text = replaceInCode(text, /\bfn\s*$/gm, "");
           text = text.trim();
           if (!text) continue;
         }
 
         // For non-gap regions, also convert fn keyword
         if (!region.isGap) {
-          text = text.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          text = replaceInCode(text, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip trailing bare `fn` (artifact of overlapping AST spans —
           // the fn keyword for the next declaration leaks into this node's span)
-          text = text.replace(/\bfn\s*$/g, "").trimEnd();
+          text = replaceInCode(text, /\bfn\s*$/g, "").trimEnd();
         }
 
         // Strip scrml type annotations from emitted fn signatures (gap + non-gap).
@@ -2147,11 +2154,10 @@ export function generateLibraryJs(
         // Must handle nested braces: ^{ JSON.stringify({ a, b }) } → JSON.stringify({ a, b })
         text = stripInlineMeta(text);
 
-        // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
-        // Apply per-line, skipping comment lines to avoid mangling English text
-        text = text.split("\n").map(line =>
-          line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
-        ).join("\n");
+        // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents.
+        // S478 (review F1) — whole text, not per line (see the verbatim-block path above):
+        // the passes fence comments and literals themselves.
+        text = rewriteIsOperator(rewriteNotKeyword(text));
         // S470 (review F5) — whole text (a multi-line template literal stays a literal).
         text = rewriteVariantTagReads(text);
 

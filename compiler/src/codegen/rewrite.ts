@@ -13,7 +13,7 @@ import { ScrmlParser } from "../scrml-acorn.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
-import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup } from "./code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, classifyBraceGroup, replaceInCode, matchAllInCode, codeOnlyView, NON_CODE } from "./code-segments.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText, lowerVariantTagRead, lowerVariantCheck, IS_OP_IIFE_LOCAL } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
@@ -965,7 +965,8 @@ function _navBalanceArgs(str: string, openIdx: number): { closeIdx: number; args
  */
 export function rewriteTransitionCalls(expr: string): string {
   if (!expr || typeof expr !== "string" || !expr.includes("transition")) return expr;
-  return expr.replace(/\btransition\s*\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\)\s*;?/g, "");
+  // S478 — code only (`replaceInCode`): `transition(x)` in a string is text, not a call.
+  return replaceInCode(expr, /\btransition\s*\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\)\s*;?/g, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -994,11 +995,14 @@ export function rewriteTransitionCalls(expr: string): string {
 export function rewriteReplayCalls(expr: string): string {
   if (!expr || typeof expr !== "string" || !expr.includes("replay")) return expr;
   // Prefix pattern: `replay(@target, @log` with optional whitespace.
+  // S478 — matched and paren-balanced on the CODE-ONLY view (`codeOnlyView`): `replay(@a, @b)`
+  // in a string is text, and a `(` / `)` in a string argument cannot unbalance the call.
+  const view = codeOnlyView(expr);
   const prefixRe = /\breplay\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*@([A-Za-z_$][A-Za-z0-9_$]*)\s*/g;
   const out: string[] = [];
   let lastIdx = 0;
   let m: RegExpExecArray | null;
-  while ((m = prefixRe.exec(expr)) !== null) {
+  while ((m = prefixRe.exec(view)) !== null) {
     const matchStart = m.index;
     const matchEnd = prefixRe.lastIndex;
     const targetName = m[1];
@@ -1009,18 +1013,18 @@ export function rewriteReplayCalls(expr: string): string {
     let i = matchEnd;
     if (i >= expr.length) break;
     let replayBody = "";
-    if (expr[i] === ")") {
+    if (view[i] === ")") {
       // Two-arg form: replay(@X, @Y)
       replayBody = `_scrml_replay("${targetName}", _scrml_reactive_get("${logName}"))`;
       i++;
-    } else if (expr[i] === ",") {
+    } else if (view[i] === ",") {
       // Three-arg form: skip the comma, find the matching `)`.
       i++;
       const exprStart = i;
       let depth = 1;  // we're inside the replay( call, one level deep
       let found = -1;
       while (i < expr.length) {
-        const ch = expr[i];
+        const ch = view[i];
         if (ch === "(") depth++;
         else if (ch === ")") {
           depth--;
@@ -1144,11 +1148,12 @@ export function rewriteWorkerRefs(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   // <#name>.send(expr) → _scrml_worker_name.send(expr)
   // Handle both compact form (<#name>) and tokenizer-spaced form (< # name >)
+  // S478 — code only (`replaceInCode`): `<#name>` in a string is the author's text.
   if (expr.includes("<#")) {
-    expr = expr.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, '_scrml_worker_$1.send(');
+    expr = replaceInCode(expr, /<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, '_scrml_worker_$1.send(');
   }
   if (expr.includes("< #")) {
-    expr = expr.replace(/<\s*#\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*>\s*\.\s*send\s*\(/g, '_scrml_worker_$1.send(');
+    expr = replaceInCode(expr, /<\s*#\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*>\s*\.\s*send\s*\(/g, '_scrml_worker_$1.send(');
   }
   return expr;
 }
@@ -1164,7 +1169,9 @@ export function rewriteWorkerRefs(expr: string): string {
 export function rewriteRequestRefs(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   if (!expr.includes("<#")) return expr;
-  return expr.replace(
+  // S478 — code only (`replaceInCode`).
+  return replaceInCode(
+    expr,
     /<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*(loading|data|error|stale|refetch)/g,
     "_scrml_request_$1.$2"
   );
@@ -1208,12 +1215,14 @@ export function rewriteRequestRefs(expr: string): string {
 export function rewriteInputStateRefs(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   // Form 1: literal <#id> sigil.
-  let out = expr.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, '_scrml_input_state_registry.get("$1")');
+  // S478 — both forms act in code only (`replaceInCode`): either spelling inside a string is text.
+  let out = replaceInCode(expr, /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, '_scrml_input_state_registry.get("$1")');
   // Form 2: already-lowered bare `_scrml_input_<id>_` (TAB preprocessWorkerAndStateRefs).
   // Negative lookahead excludes runtime helpers (…_create / …_destroy / …_registry
   // and the `mouse|keyboard|gamepad|state` infixes that precede them).
   if (out.includes("_scrml_input_")) {
-    out = out.replace(
+    out = replaceInCode(
+      out,
       /_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*?)_(?![A-Za-z0-9_$])/g,
       '_scrml_input_state_registry.get("$1")'
     );
@@ -1257,8 +1266,10 @@ export function rewriteIsOperator(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
   // `is null` / `is undefined` — after rewriteNotKeyword converts `not` → `null`,
   // `x is not` becomes `x is null`. Rewrite to strict equality check.
-  expr = expr.replace(/\bis\s+null\b/g, '=== null');
-  expr = expr.replace(/\bis\s+undefined\b/g, '=== undefined');
+  // S478 — every pattern in this pass acts in CODE only (`replaceInCode`): `is .V` in a string
+  // or a template literal's text is the author's text (g-impl1-bootstrap-build-rewrites-string-literals-s473).
+  expr = replaceInCode(expr, /\bis\s+null\b/g, '=== null');
+  expr = replaceInCode(expr, /\bis\s+undefined\b/g, '=== undefined');
   // S470 (s470-unit-variant-tag-read) — `<operand> is .V` / `is T.V` with a readable
   // operand lowers to the tag-normalized test (`lowerVariantCheck`, the structured
   // path's form): a payload variant is `{ variant, data }`, so the bare `=== "V"`
@@ -1267,8 +1278,8 @@ export function rewriteIsOperator(expr: string): string {
   expr = rewriteIsVariantWithOperand(expr);
   // Allow optional whitespace between '.' and variant name: block-splitter may emit
   // "is . Small" (space after dot). The \s* handles both "is .Small" and "is . Small".
-  expr = expr.replace(/\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
-  expr = expr.replace(/\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
+  expr = replaceInCode(expr, /\bis\s+[A-Z][A-Za-z0-9_]*\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
+  expr = replaceInCode(expr, /\bis\s+\.\s*([A-Z][A-Za-z0-9_]*)\b/g, '=== "$1"');
   return expr;
 }
 
@@ -1279,12 +1290,20 @@ export function rewriteIsOperator(expr: string): string {
  */
 function rewriteIsVariantWithOperand(expr: string): string {
   if (!/\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*[A-Z]/.test(expr)) return expr;
-  // Review F7 — a comment is whitespace: blanked first, so `x /* c */ is .V` reads its
-  // operand instead of falling to the bare `=== "V"` regexes below.
-  let out = blankComments(expr);
+  // Review F7 — a comment is whitespace: read on a comment-BLANKED copy, so `x /* c */ is .V`
+  // reads its operand instead of falling to the bare `=== "V"` regexes below.
+  // S478 (review F1) — only the READ is blanked: `blankComments` keeps every offset, so the
+  // operand is taken from the blanked copy (a comment inside it is whitespace, as before) and
+  // the splice is made into the ORIGINAL text. A comment anywhere else survives — the library
+  // emitter now hands this pass a whole block, whose doc comments must reach the output.
+  // The two are kept in step: each splice writes the same `text` (comment-free — it is built
+  // from the blanked operand) into both.
+  let out = expr;
+  let read = blankComments(expr);
+  if (read.length !== out.length) return expr;
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
-    const masked = maskNonCode(out);
+    const masked = maskNonCode(read);
     if (masked === null) return out;
     const re = /\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g;
     re.lastIndex = cursor;
@@ -1305,11 +1324,12 @@ function rewriteIsVariantWithOperand(expr: string): string {
         while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
         if (b >= 0 && masked.slice(w + 1, b + 1) === "new") opStart = w + 1;
       }
-      const operand = out.slice(opStart, end + 1).trim();
+      const operand = read.slice(opStart, end + 1).trim();
       // A keyword is not an operand (`return is .V` is not this construct).
       if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand) && PAREN_PRECEDING_KEYWORDS.has(operand)) continue;
       const text = lowerVariantCheck(operand, JSON.stringify(m[1]));
       out = out.slice(0, opStart) + text + out.slice(m.index + m[0].length);
+      read = read.slice(0, opStart) + text + read.slice(m.index + m[0].length);
       cursor = opStart + text.length;
       changed = true;
       break;
@@ -1976,12 +1996,22 @@ function refuseInlineMatch(armsStr: string): string {
  */
 export function rewriteMatchExpr(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
-  const matchIdx = expr.indexOf("match ");
+  if (expr.indexOf("match ") === -1) return expr;
+  // S478 — the `match` keyword and its braces are found on the CODE-ONLY view (`codeOnlyView`):
+  // the word `match` in a string is text, and a `{` / `}` in a string is not the arm list's.
+  // The subject and the arm list are read back from the ORIGINAL text by the groups' indices.
+  const view = codeOnlyView(expr);
+  const matchIdx = view.indexOf("match ");
   if (matchIdx === -1) return expr;
 
-  const matchRegex = /\bmatch\s+([\s\S]*?)\s*\{([\s\S]*)\}\s*$/;
-  const m = expr.match(matchRegex);
-  if (!m) return expr;
+  const matchRegex = /\bmatch\s+([\s\S]*?)\s*\{([\s\S]*)\}\s*$/d;
+  const vm = matchRegex.exec(view);
+  if (!vm || !vm.indices || !vm.indices[1] || !vm.indices[2]) return expr;
+  const m = [
+    expr.slice(vm.indices[0][0], vm.indices[0][1]),
+    expr.slice(vm.indices[1][0], vm.indices[1][1]),
+    expr.slice(vm.indices[2][0], vm.indices[2][1]),
+  ];
 
   // Strip leading "partial " keyword from prefix (§18.18 partial match)
   const prefix = expr.slice(0, matchIdx).replace(/\bpartial\s+$/, "");
@@ -1995,8 +2025,9 @@ export function rewriteMatchExpr(expr: string): string {
   // split so the splitter recognizes qualified arm starts AND the parser
   // matches them (see stripInlineMatchArmLhsQualifiers). Without this a
   // `derived=match @src { Src.A :> … }` mis-lowers (dropped/invalid-JS).
+  // S478 — the `- >` repair acts in code only (`replaceInCode`): `"a - > b"` in an arm string is text.
   const armsStr = stripInlineMatchArmLhsQualifiers(
-    m[2].trim().replace(/-\s*>/g, "->"),
+    replaceInCode(m[2].trim(), /-\s*>/g, "->"),
   );
 
   // S469 r7 — ONE reader: the arm list is read by the same token-based reader every client
@@ -2090,11 +2121,14 @@ export function rewriteMatchExpr(expr: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Rewrite scrml `fn` shorthand to `function` keyword.
+ * Rewrite scrml `fn` shorthand to `function` keyword — in CODE only (`replaceInCode`): the word
+ * `fn` inside a string, a template literal's text or a comment is the author's text, not the
+ * keyword (g-impl1-bootstrap-build-rewrites-string-literals-s473,
+ * g-match-arm-string-literal-fn-rewritten-to-function). A template's `${ … }` is code.
  */
 export function rewriteFnKeyword(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
-  return expr.replace(/\bfn\b/g, "function");
+  return replaceInCode(expr, /\bfn\b/g, "function");
 }
 
 // ---------------------------------------------------------------------------
@@ -2170,11 +2204,15 @@ function fixBlockBody(body: string): string {
  */
 export function rewriteInlineFunctionBodies(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
+  if (!expr.includes("function")) return expr;
   const result: string[] = [];
   let i = 0;
+  // S478 — a `function (…) {` head is recognised in CODE only (`codeOnlyView`): the same
+  // words inside a string are text, and their "body" must not get semicolons inserted.
+  const view = codeOnlyView(expr);
 
   while (i < expr.length) {
-    const funcMatch = expr.slice(i).match(/^(function\s*\([^)]*\)\s*)\{/);
+    const funcMatch = view[i] === "f" ? view.slice(i).match(/^(function\s*\([^)]*\)\s*)\{/) : null;
     if (funcMatch) {
       result.push(expr.slice(i, i + funcMatch[1].length));
       i += funcMatch[1].length;
@@ -2219,13 +2257,17 @@ export function rewriteInlineFunctionBodies(expr: string): string {
  */
 export function rewriteEnumToEnum(expr: string): string {
   if (!expr || typeof expr !== "string") return expr;
+  // S478 — both forms act in code only (`replaceInCode`); a string ARGUMENT
+  // (`Status.toEnum("x")`) is spanned and kept byte for byte.
   // Method form: Status.toEnum(rawValue)
-  expr = expr.replace(
+  expr = replaceInCode(
+    expr,
     /\b([A-Z][A-Za-z0-9_]*)\s*\.\s*toEnum\s*\(\s*([^)]+)\s*\)/g,
-    (_, typeName: string, arg: string) => `(${typeName}_toEnum[${arg.trim()}] ?? null)`,
+    (_: string, typeName: string, arg: string) => `(${typeName}_toEnum[${arg.trim()}] ?? null)`,
   );
   // Function form: toEnum(Status, rawValue)
-  expr = expr.replace(
+  expr = replaceInCode(
+    expr,
     /\btoEnum\s*\(\s*([A-Z][A-Za-z0-9_]*)\s*,\s*([^)]+)\s*\)/g,
     (_, typeName: string, arg: string) => `(${typeName}_toEnum[${arg.trim()}] ?? null)`,
   );
@@ -2248,18 +2290,22 @@ export function rewriteEnumToEnum(expr: string): string {
  * These are parsed by the type system but must not appear in JS output.
  */
 function stripTransitionsBlock(expr: string): string {
-  const idx = expr.indexOf("transitions");
+  if (!expr || expr.indexOf("transitions") < 0) return expr;
+  // S478 — located and brace-matched on the CODE-ONLY view (`codeOnlyView`): the word in a
+  // string is text, and a brace inside a string in the block cannot end it early.
+  const view = codeOnlyView(expr);
+  const idx = view.indexOf("transitions");
   if (idx < 0) return expr;
   // Check that "transitions" is followed by whitespace+brace (not a variable name)
-  const afterTransitions = expr.slice(idx + "transitions".length);
+  const afterTransitions = view.slice(idx + "transitions".length);
   if (!/^\s*\{/.test(afterTransitions)) return expr;
-  const braceStart = expr.indexOf("{", idx + "transitions".length);
+  const braceStart = view.indexOf("{", idx + "transitions".length);
   if (braceStart < 0) return expr;
   let depth = 0;
   let i = braceStart;
-  while (i < expr.length) {
-    if (expr[i] === "{") depth++;
-    else if (expr[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+  while (i < view.length) {
+    if (view[i] === "{") depth++;
+    else if (view[i] === "}") { depth--; if (depth === 0) { i++; break; } }
     i++;
   }
   // Remove the transitions keyword + braced block
@@ -2299,10 +2345,16 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // so the negative lookbehind below can correctly distinguish member access (e.g.
   // `Color . Red` → `Color.Red`, kept as-is) from standalone `.VariantName`.
   // Only collapse when the property starts uppercase to avoid touching `todo . completed`.
-  expr = expr.replace(/([A-Za-z0-9_$])\s+\.\s+([A-Z][A-Za-z0-9_$]*)/g, "$1.$2");
+  //
+  // S478 — every pattern from here on acts in CODE only (`replaceInCode`): `.Variant`, `X.y`
+  // and `T::V` inside a string, a template literal's text or a comment are the author's text
+  // (g-impl1-bootstrap-build-rewrites-string-literals-s473,
+  // g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant). The placeholder
+  // unmask above stays whole-text: it restores a compiler placeholder, wherever it was put.
+  expr = replaceInCode(expr, /([A-Za-z0-9_$])\s+\.\s+([A-Z][A-Za-z0-9_$]*)/g, "$1.$2");
 
   // §14.4.2 — EnumType.variants → EnumType_variants (PascalCase identifiers only)
-  expr = expr.replace(/\b([A-Z][A-Za-z0-9_]*)\s*\.\s*variants\b/g, "$1_variants");
+  expr = replaceInCode(expr, /\b([A-Z][A-Za-z0-9_]*)\s*\.\s*variants\b/g, "$1_variants");
 
   // §14.5 — Payload variant construction is now handled by the emitted enum
   // constructor function (see emit-client.ts:emitEnumVariantObjects).
@@ -2338,15 +2390,15 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // Standalone .VariantName (unit variant — NOT followed by `(`) → "VariantName".
   // The `(?!\s*\()` negative lookahead excludes any payload-variant constructor
   // call form (now handled by `_rewritePayloadVariantConstructorCalls` above).
-  expr = expr.replace(/(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
   // Qualified unit-variant READ (`Enum::Variant` / `::Variant`, NOT a call) → the
   // bare string tag. The `(?!\s*\()` negative lookahead is load-bearing: a
   // qualified payload-bearing CONSTRUCTOR CALL (`LoadError::NotFound(id)`) must
   // NOT be stripped to `"NotFound"(id)` — a string invoked as a function (the
   // g-failable-arm-nested-constructor-crash runtime crash). The call form is
   // collapsed to a valid frozen-enum constructor call below instead.
-  expr = expr.replace(/\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
-  expr = expr.replace(/(?<![A-Za-z0-9_$])::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /\b[A-Z][A-Za-z0-9_]*\s*::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
+  expr = replaceInCode(expr, /(?<![A-Za-z0-9_$])::\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g, '"$1"');
   // A surviving qualified CONSTRUCTOR CALL (`Enum::Variant(args)` — the
   // `::`-strips above skipped it via the `(?!\s*\()` guard) collapses to the
   // standard member-access form `Enum.Variant(args)`, which invokes the frozen
@@ -2355,7 +2407,7 @@ export function rewriteEnumVariantAccess(expr: string): string {
   // byte-identical to how the structured-AST path lowers the same construct in a
   // plain `function` body (the control). Closes g-failable-arm-nested-
   // constructor-crash (S195/S196).
-  expr = expr.replace(/(\b[A-Z][A-Za-z0-9_]*)\s*::\s*([A-Z][A-Za-z0-9_]*)(\s*\()/g, '$1.$2$3');
+  expr = replaceInCode(expr, /(\b[A-Z][A-Za-z0-9_]*)\s*::\s*([A-Z][A-Za-z0-9_]*)(\s*\()/g, '$1.$2$3');
   return expr;
 }
 
@@ -2583,7 +2635,9 @@ export function rewriteStructConstruction(expr: string): string {
   // Quick exit: no PascalCase identifier candidates
   if (!/[A-Z]/.test(expr)) return expr;
 
-  return expr.replace(
+  // S478 — code only (`replaceInCode`): `"Hello {name}"` is text, not `Hello { … }`.
+  return replaceInCode(
+    expr,
     /(?<![.A-Za-z0-9_$])([A-Z][A-Za-z0-9_]*)\s*\{/g,
     (match: string, name: string, offset: number) => {
       // Don't rewrite class declarations: `class Foo {` or `extends Foo {`
@@ -3087,12 +3141,12 @@ export function rewriteRenderKeyword(expr: string, errors?: any[]): string {
   if (!expr.includes("render")) return expr;
 
   if (errors) {
+    // S478 — code only (`matchAllInCode`): `render x(` in a string is text, not the keyword.
     const renderRe = /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-    let match;
-    while ((match = renderRe.exec(expr)) !== null) {
+    for (const match of matchAllInCode(expr, renderRe)) {
       errors.push({
         code: "E-TYPE-071",
-        message: `E-TYPE-071: \`render ${match[1]}(...)\` is only valid inside a component body. ` +
+        message: `E-TYPE-071: \`render ${match.groups[0]}(...)\` is only valid inside a component body. ` +
           `The \`render\` keyword invokes snippet-typed props and must appear inside a component ` +
           `that declares the snippet prop. Move this into a component body or remove it (§16.8).`,
       });
@@ -3121,7 +3175,8 @@ export function rewriteTildeRef(expr: string, tildeVar: string): string {
   if (!expr || !tildeVar || !expr.includes("~")) return expr;
   // Replace `~` not preceded/followed by identifier chars.
   // Uses negative lookbehind/lookahead to avoid replacing inside identifiers.
-  return expr.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, tildeVar);
+  // S478 — code only (`replaceInCode`): a `~` in a string (`"~/notes"`) is text.
+  return replaceInCode(expr, /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, () => tildeVar);
 }
 
 // ---------------------------------------------------------------------------
