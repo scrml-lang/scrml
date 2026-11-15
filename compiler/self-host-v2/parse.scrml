@@ -5385,6 +5385,22 @@ ${
             } else {
                 if (!tk(n, ",")) t = diagAt(t, "E-PARSE-TYPE", "expected a variant name, found `" + n.text + "`", n)
                 t = adv(t)
+                // s478 (#1867 review F4) — the rest of a variant whose name failed to parse
+                // (`Étoile`: the lexer stops at `É`, leaving `toile` touching it) is part of
+                // that failed variant, not a variant of its own: it is skipped, so no second
+                // report (E-ENUM-VARIANT-CASE "rename it `Toile`") is made on the leftover.
+                if (!tk(n, ",")) {
+                    let last: PTok = n
+                    while (!atEnd(t) && !isP(t, "}") && !isP(t, ",") && !isP(t, "(") && cur(t).start == last.end) {
+                        last = cur(t)
+                        t = adv(t)
+                    }
+                    // and so is its payload, `Étoile(r: int)` — parsed for its own faults, dropped
+                    if (isP(t, "(") && cur(t).start == last.end) {
+                        const rf: RFields = parseTypeFields(adv(t), ")")
+                        t = expectP(rf.tp, ")")
+                    }
+                }
             }
         }
         return { vs: vs, tp: expectP(t, "}") }
