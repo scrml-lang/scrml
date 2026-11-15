@@ -80,9 +80,12 @@ and §18.9 now says the word is markup text. Whether the bootstrap's wider refus
 reading. It fails closed: no text that looks like control flow ships raw.
 
 ## C13 — cascades
-- E-TYPE-031 after E-MATCH-012: the typer gives a `match` the binder refused for coverage
-  (E-TYPE-020 / E-MATCH-012, `coverageRefused`) the value Unknown, as it does for an arm conflict.
-  A W-MATCH-002 literal match is still widened by `not`.
+- E-TYPE-031 after E-MATCH-012: the binder records `PlainMatch.refused` exactly when it reported
+  E-TYPE-020 or E-MATCH-012 for the match. The typer then gives that match the value Unknown, as it
+  does for an arm conflict (`coverageRefused`). A W-MATCH-002 literal match is still widened by
+  `not`. A first cut keyed on the match's shape (any non-exhaustive enum match) also hid 9
+  E-TYPE-031s in `examples/23-trucking-dispatch`, where the binder had reported no coverage error.
+  The flag replaced it, and the corpus now shows exactly one E-TYPE-031 removed: the case's.
 - E-DEFER-LATER-SHADOW beside E-SCOPE-REDECLARE: `laterLocals` skips a later local that
   redeclares a name its block already binds (a parameter, for the function body).
 
@@ -90,7 +93,60 @@ reading. It fails closed: no text that looks like control flow ships raw.
 parse.scrml `orphanElse` (the only parse.scrml edit, in parseStmt's statement dispatch).
 
 ## Corpus (newly-rejecting measure)
-(see the report; filled in at the end)
+Method: the bound-any-branch method (`docs/changes/s478-boot-bound-any-branch/progress.md`).
+- A throwaway script (`.tmp/corpus.ts`, deleted) ran the bootstrap `frontEnd` (slice-m4 harness
+  `loadM2` + `frontEnd`) over every `.scrml` in `git ls-files -- conformance/cases samples examples
+  compiler/self-host-v2/acceptance`: **3,146 files** (main gained 4 since 3,142), 0 crashed.
+- It ran once on this lane's analyze / parse / severity and once on origin/main's
+  (`git checkout origin/main -- …`, then `git checkout HEAD -- …`), comparing per-file
+  `code|severity|span.start` sets.
+
+Result: **0 newly rejecting, 0 newly accepting**. 20 files' diagnostic sets changed, every one of
+them a file that already failed.
+
+| code | sites | files | where |
+|---|---:|---:|---|
+| E-ENUM-VARIANT-CASE | 43 | 5 | conformance `enum/variant-name-lowercase-reject`; legacy `examples/06-kanban-board`, `samples/gauntlet-r19/svelte-dev`, `samples/multi-step-form`, `samples/todo-list` (all already failing) |
+| E-RESERVED-IDENTIFIER | 2 | 2 | conformance `reactive/reset-reserved-identifier`; acceptance `db-body/neg-statement` (its fixture's `function reset()` — STATUS row updated) |
+| E-ENGINE-STATE-CHILD-MISSING | 0 | 0 | (the case is twinned, so its as-written legacy form does not reach it) |
+| E-ENGINE-MOUNT-NOT-ENGINE | 0 | 0 | (multi-file case; the measure compiles each file alone) |
+| W-STYLE-CONFLICT-POSSIBLE | 5 | 5 | conformance `style/program-scope-overlap-soft` and 4 legacy `const Card = <…>` style cases, NOT-TWINNED (the legacy component's sheet reads as program-level as written) |
+| E-STMT-UNEXPECTED-TOKEN | 6 | 6 | 4 conformance dangling-else cases; 2 legacy samples (`gauntlet-r10-odin-filebrowser`, `gauntlet-s19-phase4/nested-comments`) where an earlier refusal inside the `if` body ends the `if` early. The `else` was E-SCOPE-001 + E-STMT-MISSING-SEMICOLON there before |
+| removed | | | E-SCOPE-001 ×24 (`else` "not declared"), E-STMT-MISSING-SEMICOLON ×8, E-TYPE-031 ×1, E-DEFER-LATER-SHADOW ×1, E-STATE-UNDECLARED ×2, E-TYPE-STRUCT-CONTEXT ×3 |
+
+E-DG-002, measured before it was withheld and before its no-Error gate: 61 sites in 53 files.
+
+## Bootstrap conformance (`bun scripts/bootstrap-conformance.ts --json`)
+Before (origin/main 20b76334e): PASS 343 · FAIL 260 · NOT-TWINNED 624 · UNSUPPORTED 638.
+After: **PASS 354 · FAIL 249** · NOT-TWINNED 624 · UNSUPPORTED 638 (+11 PASS, no case regressed;
+only this lane's cases changed).
+
+Per case:
+- FAIL → PASS:
+  - engine/initial-invalid-variant-pos (map row: E-TYPE-VARIANT)
+  - engine/rule-invalid-variant-pos (map row: E-DECL-STATE-CHILD)
+  - engine/state-child-invalid-variant-pos (map row: E-DECL-STATE-CHILD)
+  - engine/state-child-missing-pos
+  - engine/mount-not-engine-pos
+  - enum/variant-name-lowercase-reject
+  - reactive/reset-reserved-identifier
+  - style/program-scope-overlap-soft
+  - match-codes/e-match-012-tnot-missing-not-arm-pos
+  - defer/scope-redeclare-with-defer-neg
+  - control-flow/s462-else-without-if-pos
+- still FAIL, on C1 (`;`) only: markup-handler/s437-r4-dangling-else-{top,engine,function-body}-neg.
+  Each now has E-STMT-UNEXPECTED-TOKEN at the `else`; what remains is a missing `;` elsewhere in the
+  twin.
+- still FAIL, not built (SPEC / ruling — see C11b):
+  - reactive/dg-001-cyclic-pos
+  - reactive/dg-002-no-readers-pos (withheld)
+  - match-codes/e-type-026-match-in-markup-pos
+  - reactive/server-fn-rawvar-read-error
+  - match-leave/argument-match-arm-labelled-break-outer-neg
+- out of brief: lifecycle/cleanup-error-non-function (E-LIFECYCLE-004, `g-bootstrap-onmount-owed`).
 
 ## Tests
-`compiler/self-host-v2/slice-m4/analyze-checks-s478.test.js`
+- `compiler/self-host-v2/slice-m4/analyze-checks-s478.test.js` (25 tests): C11a, C11b, C13, C14.
+- `slice-m2/front.test.js` O58 fixture: `<Archived/>` added, because a graph must name every variant.
+- `slice-m4/acceptance.test.js` STATUS: `db-body/neg-statement` gains E-RESERVED-IDENTIFIER.
+- Slices (lints, m1, m2, lowered m1, m3, m4, codec, e2e-render-map): green.

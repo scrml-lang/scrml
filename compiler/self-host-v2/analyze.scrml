@@ -419,7 +419,9 @@ ${
     //     once, and the index of the arm it takes; `arms` — per arm, the inner
     //     binders the statement form reads a payload through.
     export type PlainArm:struct = { nid: int, inner: Sym[] }
-    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean,
+    // s478: `refused` — the binder reported an Error for this match's coverage (E-TYPE-020 /
+    // E-MATCH-012); the typer then gives its value no type to check (coverageRefused, triage C13).
+    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean, refused: boolean,
                                       stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
 
@@ -15391,6 +15393,7 @@ ${
         const maybe: boolean = sk.maybe || notSeen
         const absentDone: boolean = !maybe || notSeen || wild
         let exh: boolean = wild
+        let covRefused = false     // s478: an Error here for the match's coverage (E-TYPE-020 / E-MATCH-012)
         if (sk.code == "") {
             if (sk.kind == 0) {
                 let missing: string[] = []
@@ -15401,6 +15404,7 @@ ${
                 }
                 let en: string = "the enum"
                 if (es0 is given) en = "`" + es0.hint + "`"
+                if (!wild && missing.length > 0) covRefused = true
                 if (!wild && missing.length > 0) st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over " + en + " is not exhaustive: it does not cover " + missing.join(", ") + " — add those arms, or end with `else :>` (§18.8.1)")
                 if (missing.length == 0 && absentDone) exh = true
                 if (wild && missing.length == 0 && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
@@ -15412,11 +15416,12 @@ ${
                 if (!wild && !both) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over a bool does not cover both `true` and `false` — a value with no arm gives `not`; add the other arm, or an `else` arm (§18.16.2)")
             }
             if ((sk.kind == 1 || sk.kind == 2) && !wild) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over " + kindLabel(sk.kind) + " has no `else` arm — a value with no arm gives `not`; consider adding `else :>` (§18.16.2)")
+            if (maybe && !notSeen && !wild) covRefused = true
             if (maybe && !notSeen && !wild) st = addDiag(st, env.file, e.span, "E-MATCH-012", "this `match` is over a `T | not` value but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
         }
         const r1: RSym = mint(st, "subject")
         const r2: RSym = mint(r1.st, "arm")
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen,
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused,
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
         if (!exh && result is given) result = Type.Maybe(unMaybe(result))
         return plain(result, st)
@@ -29205,14 +29210,11 @@ ${
         return evalOf(b.stmts[0])
     }
 
-    // s478 — did the binder refuse this non-exhaustive `match` (resolveMatch's coverage
-    // reports): an enum match with no wildcard that is not exhaustive (E-TYPE-020 for a
-    // missing variant, or E-MATCH-012), or a `T | not` subject with neither a `not` arm
-    // nor a wildcard (E-MATCH-012)?
+    // s478 — did the binder refuse this `match` for its coverage (resolveMatch reported
+    // E-TYPE-020 for a missing variant, or E-MATCH-012 for a `T | not` subject with neither a
+    // `not` arm nor a wildcard)?
     fn coverageRefused(m: PlainMatch) -> boolean {
-        if (m.wild) return false
-        if (m.kind == 0) return true
-        return m.maybe && !m.notArm
+        return m.refused
     }
 
     export fn plainFactOf(f: FailFact | not) -> PlainMatch | not {
