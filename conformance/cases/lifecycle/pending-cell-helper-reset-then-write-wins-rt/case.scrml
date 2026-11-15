@@ -1,0 +1,20 @@
+// §13.9.4 rule 3 (⚑ PA reading, S478 follow-up) — a reset inside an awaited waiting helper comes before
+// the caller's continuation after the call, so the caller's later write wins, as the inline form does.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function loadName(id: int) -> string {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function inner() -> int {
+        const n = loadName(1) !{ _ :> "?" };
+        reset(@who);
+        return 1;
+    }
+    let <who:(not to string)=(loadName(1) !{ _ :> not })/>
+    <main>
+        <button id="go" onclick={ const r = inner(); @who = "z"; }>go</button>
+        <p id="who" if=@who>${@who}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

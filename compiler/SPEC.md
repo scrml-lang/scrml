@@ -12371,14 +12371,44 @@ than one of them is in flight, they are ordered as follows.
    write that started before it, including ones started after the last wait in the reset's own continuation.
    A load in flight is superseded (a READ load has its transport aborted; a WRITE load runs to completion and
    its result is discarded, §6.7.7.1), and a write that started before the reset is discarded when it lands.
-   A write in any other continuation keeps the start rule 2 gives it. A `reset-on=` entry's change (§6.8.4) is
-   a write that triggers the load, so its run starts when that write's batch ends.
-4. **A winning write of `not` re-runs the load.** When a winning write's value is `not`, the write SHALL supersede
-   the load in flight and then start the cell's load again. This includes a host `null` or `undefined`, which is
-   `not` at the interop boundary (§42.9). This is the reset rule of §13.9.2 ("A reset of a pending cell (§6.8) is the
-   request's re-run"), read with §13.9.5 (`not` "returns the cell to its pre-state"): a pending cell's pre-state is
-   `not` with its load running. When the load itself settles to `not` (a handled failure arm, §13.9.5), it SHALL NOT
-   re-run. §66.11.6 decides which author writes may carry `not` at all.
+   A write in any other continuation keeps the start rule 2 gives it, with one exception: the continuation that
+   resumes after awaiting a waiting call. A reset issued anywhere inside that call (its body, its continuations,
+   or a call it awaits) comes before that continuation in program order. So a write of the same cell in that
+   continuation is dated no earlier than the reset, and it is the later start and wins: in
+   `const r = inner(); @who = "z";`, where `inner` resets `@who` after a wait, `"z"` wins, as it does in the
+   inline `reset(@who); @who = "z";`. Only the caller that awaits the call is moved, and only for the cells the
+   call reset (or restarted under rule 4). A write of another cell, and a write in any other continuation, keep
+   the start rule 2 gives them.
+
+   **`reset-on=` (RULED S478).** A `reset-on=` entry's change (§6.8.4) is a write that triggers the load, so its
+   run starts when that write's batch ends.
+
+   > **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — bounded branch literals; rule 4 reload start;
+   > `reset-on=` timing" item 3 — *"**`reset-on=` timing kept:** a `reset-on=` entry's change is a write that
+   > triggers the load, so its run starts when that write's batch ends (the ⚑ PA reading under rule 3 is
+   > ratified)."* · **supersedes:** nothing (the ⚑ marker on this sentence is removed; the text is unchanged).
+   > **Direction of change: inert.**
+4. **A winning write of `not` re-runs the load, and that run starts at the write.** When a winning write's value
+   is `not`, the write SHALL supersede the load in flight and then start the cell's load again. That run SHALL
+   start at the write, as a reset's run starts at the reset (rule 3), not when the write's batch ends. So a later
+   write in the same continuation is the later start and wins (rule 1): the restarted load is superseded, its
+   result is discarded, and a load classified READ has its transport aborted. The same holds for a write in the
+   continuation that resumes after awaiting a call in which the `not` was written (rule 3). A dependency change in
+   the same batch still re-runs the load when the batch ends, after both, and that run wins. This includes a host
+   `null` or `undefined`, which is `not` at the interop boundary (§42.9). This is the reset rule of §13.9.2 ("A
+   reset of a pending cell (§6.8) is the request's re-run"), read with §13.9.5 (`not` "returns the cell to its
+   pre-state"): a pending cell's pre-state is `not` with its load running. When the load itself settles to `not`
+   (a handled failure arm, §13.9.5), it SHALL NOT re-run. §66.11.6 decides which author writes may carry `not` at
+   all.
+
+   > **Provenance:** ruling:user-voice-scrml.md S478 (rule 4) — "⭐ RULED — bounded branch literals; rule 4 reload
+   > start; `reset-on=` timing" item 2: *"**§13.9.4 rule 4: the reload a winning write of `not` triggers starts AT
+   > THE WRITE**, the same as a reset's reload (S478 ruling 2), not at the end of the batch. A later write in the
+   > same continuation still wins."* · **supersedes:** nothing written (rule 4 did not say when the re-run
+   > starts; the bootstrap had queued it to the end of the batch). **Direction of change:**
+   > **semantics-changed** for a winning `not` followed by a write of the same cell in the same continuation (the
+   > write now wins; the reload won before). Nominal on impl#1, which does not implement §13.9. The bootstrap
+   > builds it in s478-boot-pending-followup.
 5. **A same-value write is still a winning write.** A write of the value the cell already holds counts as a write
    under rules 1–4: it starts, lands and supersedes like any other. The only difference is that it sends no change
    notification to the cell's readers.
@@ -12422,7 +12452,9 @@ Under the `<request>` rule, an older load would overwrite the author's newer val
 <button onclick={ reset(@members); @members = 0; }>Zero</button>  // rule 3: the reset's reload starts at the reset, so the 0 wins
 <button onclick={ @members = teamCount("ops") !{ _ :> not }; }>Ops</button>
 // rule 2: the write starts at its wait. If @team changes before it lands, the newer reload wins and this write
-// is discarded. If it wins and its arm yields `not`, the load re-runs (rule 4).
+// is discarded. If it wins and its arm yields `not`, the load re-runs (rule 4), starting at that write.
+<button onclick={ @members = teamCount("ops") !{ _ :> not }; @members = 0; }>Ops0</button>
+// rule 4: if the call fails, its `not` restarts the load at the write; the 0 after it is later and wins.
 ```
 
 #### 13.9.5 Failure is handled at the declaration
@@ -12565,7 +12597,9 @@ ${
   The compiler-written load writes SHALL NOT be judged by the cell's grant checks.
 - *(S478.)* A whole-cell author write into a pending tape SHALL need `replace` in the tape's grants; without it the
   write SHALL be E-WRITE-NOT-GRANTED, for a `let` and a locked pending tape alike. A load triggered by `reset(@x)`
-  SHALL start at the reset (§13.9.4 rule 3), so a write of `@x` after the reset wins over that load.
+  SHALL start at the reset (§13.9.4 rule 3), so a write of `@x` after the reset wins over that load. The load a
+  winning write of `not` re-runs SHALL start at that write (§13.9.4 rule 4), so a later write of the cell in the
+  same continuation wins over it. A `reset-on=` entry's change SHALL start its run when that write's batch ends.
 - A failable pending initializer SHALL be handled in the declaration (`!{}`). Unhandled, it SHALL be E-ERROR-002.
   The desugared request SHALL NOT handle it, and no implicit `.error` surface exists.
 - An async-colored function SHALL be bound only by a `function` declaration. A binding that holds one SHALL be
