@@ -9026,26 +9026,16 @@ ${
     // of a `fn` body — so the spelling is never written whole in one here.)
     fn dateNowText() -> string { return "`Date" + ".now()`" }
 
-    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` names the `fn` that makes the body pure:
-    // the function itself, or — in a nested function — the enclosing `fn` (§48.3: "anywhere
-    // inside a `fn` body, including inside nested closures"), never "a `function` body".
-    // (Built outside resolveHost's match: impl#1 printed this text's "`fn`" as "`function`"
-    // when it stood inline in the match arm.)
-    fn clockInPureText(env: Env) -> string {
-        const tail: string = " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter"
-        const outer: string = env.nest.pureFn
-        if (outer != "" && outer != env.fx.fnName) {
-            return dateNowText() + " is non-deterministic — the nested function `" + env.fx.fnName + "` is inside `fn " + outer + "`, which is pure (nested functions included, §48.3) and cannot call it" + tail
-        }
-        return dateNowText() + " is non-deterministic — `fn " + env.fx.fnName + "` is pure and cannot call it" + tail
-    }
-
+    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` (the `.HostPure` arm below) names the `fn`
+    // that makes the body pure: the function itself, or — in a nested function — the enclosing
+    // `fn` (§48.3: "anywhere inside a `fn` body, including inside nested closures"), never "a
+    // `function` body".
     fn resolveHost(env: Env, e: AExpr, args: AExpr[], st: AS) -> RX {
         if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " takes no argument", st)
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", clockInPureText(env), st)
+            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
