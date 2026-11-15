@@ -21,5 +21,5 @@ rejecting them for E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR. Case-side o
 - [x] edits applied and reviewed
 - [x] impl#1 `bun conformance/run.ts`: 1750/1868 pass, 118 xfail — identical per-case to base
 - [x] bootstrap: PASS 422 → 428, FAIL 142 → 136, 0 PASS→FAIL
-- [ ] commits by directory batch
+- [x] commits by directory batch (4 batches, hook green each)
 - [ ] PR

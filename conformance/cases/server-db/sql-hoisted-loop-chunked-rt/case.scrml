@@ -16,20 +16,20 @@
     // runs in chunks of at most 2 keys and the results are merged; `.get()` keeps the
     // first row per key, `.all()` the per-key group, as each per-iteration query does.
     function getAll() {
-        let out = []
+        let out = [];
         for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
             out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function allAll() {
-        let out = []
+        let out = [];
         for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
             const rows = ?{`SELECT name FROM tags WHERE note = ${it.id} ORDER BY name`}.all();
             out.push(rows.map((t) => t.name).join("+"));
         }
-        return out.join(",")
+        return out.join(",");
     }
     function go() {
         @firstRows = getAll() !{ _ :> "err" };

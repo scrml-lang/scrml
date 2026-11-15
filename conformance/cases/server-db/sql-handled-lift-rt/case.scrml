@@ -20,13 +20,13 @@
     // IS the function's result, so the handled query's value — the rows on
     // success, the arm's value on failure — is what the caller receives.
     function liftHit() {
-        lift ?{`SELECT id FROM notes`}.all() !{ _ :> [] }
+        lift ?{`SELECT id FROM notes`}.all() !{ _ :> [] };
     }
     function liftMiss() {
-        lift ?{`SELECT id FROM empties`}.all() !{ _ :> [] }
+        lift ?{`SELECT id FROM empties`}.all() !{ _ :> [] };
     }
     function liftFailed() {
-        lift ?{`SELECT id FROM gone`}.all() !{ _ :> [] }
+        lift ?{`SELECT id FROM gone`}.all() !{ _ :> [] };
     }
     function go() {
         const a = liftHit() !{ .Transport(_) :> return };

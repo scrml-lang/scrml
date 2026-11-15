@@ -20,21 +20,21 @@
     // value (§19.4.3 value position), so the handled query is an ordinary operand.
     function hasNotes() {
         if (?{`SELECT id FROM notes`}.get() !{ _ :> not }) {
-            return "found"
+            return "found";
         }
-        return "absent"
+        return "absent";
     }
     function hasEmpties() {
         if (?{`SELECT id FROM empties`}.get() !{ _ :> not }) {
-            return "found"
+            return "found";
         }
-        return "absent"
+        return "absent";
     }
     function hasGone() {
         if (?{`SELECT id FROM gone`}.get() !{ _ :> not }) {
-            return "found"
+            return "found";
         }
-        return "absent"
+        return "absent";
     }
     function go() {
         @hit = hasNotes() !{ .Transport(_) :> return };
