@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 432 | 23.1% |
+| PASS | 456 | 24.4% |
 | CODES-ONLY | 4 | 0.2% |
-| FAIL | 132 | 7.1% |
+| FAIL | 99 | 5.3% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 665 | 35.6% |
+| UNSUPPORTED | 674 | 36.1% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 436 hold (76.8%). Runtime half executed on the bootstrap for 154 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 559; of those, 460 hold (82.3%). Runtime half executed on the bootstrap for 159 case(s).
 
-- **Vacuous** passes: 10 of 436 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **426**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 25 of 132; the other 107 are implemented checks that answered wrong.
+- **Vacuous** passes: 10 of 460 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **450**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 25 of 99; the other 74 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 665.
+UNSUPPORTED by reason: bootstrap-unsupported 674.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 279 · FAIL 106 · UNSUPPORTED 490. Twin holds 279 (non-vacuous 273). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 294 · FAIL 86 · UNSUPPORTED 495. Twin holds 294 (non-vacuous 288). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -105,19 +105,19 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | attr-executable-sink | 23 | 7 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 9 | · | 3 | · | 15 | 38 | · | · |
 | block-grammar | 14 | 10 | · | 1 | · | 1 | 2 | · | · |
-| body-top | 27 | 6 | · | 19 | · | 1 | 1 | · | · |
+| body-top | 27 | 14 | · | 6 | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
-| codegen | 4 | · | · | 1 | · | 3 | · | · | · |
+| codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 23 | · | 2 | · | 2 | 9 | · | · |
-| control-flow | 76 | 31 | · | 6 | · | 24 | 15 | · | · |
+| control-flow | 76 | 36 | · | 1 | · | 24 | 15 | · | · |
 | defer | 51 | 24 | · | 2 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
-| element-refusal | 39 | 13 | · | 11 | · | 11 | 4 | · | · |
+| element-refusal | 39 | 20 | · | 2 | · | 11 | 6 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
-| engine | 92 | 18 | · | 3 | · | 50 | 21 | · | · |
+| engine | 92 | 18 | · | 2 | · | 50 | 22 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
 | error | 78 | 43 | · | 5 | · | 5 | 25 | · | · |
@@ -126,12 +126,12 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | fn | 25 | 15 | · | 2 | · | 1 | 7 | · | · |
 | foreign | 16 | 1 | 3 | 4 | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
-| forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
+| forms | 66 | 14 | · | 2 | · | 49 | 1 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 68 | 27 | · | 3 | · | 22 | 16 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
-| loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
+| loop | 8 | 1 | · | 1 | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 25 | · | 5 | · | 40 | 19 | · | · |
 | match-block | 22 | 4 | · | 3 | · | 6 | 9 | · | · |
@@ -141,7 +141,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | md | 18 | · | · | 1 | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 20 | · | 6 | · | 8 | 11 | · | · |
+| module | 45 | 21 | · | 5 | · | 8 | 11 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -165,9 +165,9 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | tool | 11 | 11 | · | · | · | · | · | · | · |
-| type-state-codes | 32 | 5 | · | 2 | · | 6 | 19 | · | · |
+| type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (132)
+### FAIL (99)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - missing E-PROGRAM-NESTED-ATTR
@@ -184,89 +184,30 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `block-grammar/block-047-closed-brace-neg` (twin · parse-reject)
   - E-PARSE-EXPECTED: expected `}`, found `x`
   - E-PARSE-TRAILING: unexpected `x` after the expression
-- `body-top/bare-expression-evaluates-not-renders` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
 - `body-top/bare-write-is-legal` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `body-top/code-line-after-declaration-runs` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - missing E-UNQUOTED-DISPLAY-TEXT
   - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 2
   - E-PARSE-EXPECTED: expected `:`, found `=`
   - E-PARSE-EXPECTED: expected `=`, found `number`
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:=`
-- `body-top/declared-prose-renders` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/label-on-non-loop-rejected` (twin · parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/line-after-declaration-rejected` (twin · parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
 - `body-top/lone-identifier-is-code` (parse-reject)
   - missing E-STMT-NO-EFFECT
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/loose-prose-rejected` (parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `Counter`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `body-top/no-effect-statement-rejected` (twin · parse-reject)
   - missing E-STMT-NO-EFFECT
   - count: E-STMT-NO-EFFECT fired 0 time(s), expected exactly 2
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/page-prose-rejected` (twin · parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/prose-after-declaration-rejected` (twin · parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/prose-before-code-line-rejected` (parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/prose-in-declaration-run-rejected` (twin · parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 2
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/semicolon-is-formatting` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/sql-statement-not-shipped` (parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/template-cell-renders` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - forbidden family E-* fired: E-SCOPE-001
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `count`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `body-top/template-const-renders` (parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - forbidden family E-* fired: E-SCOPE-001
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `body-top/unknown-characters-rejected` (parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-- `codegen/cg-export-enum-library-rep` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `=`
-  - E-PARSE-EXPECTED: expected `=`, found `int`
-  - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:=`
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `3`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after ` units``. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `condition/given-head-bool-refused-markup` (twin · parse-reject)
   - missing E-SYNTAX-044
   - severity: E-SYNTAX-044 did not fire (expected error)
@@ -288,25 +229,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2).
 - `control-flow/ctrl-003-extend-past-else-pos` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-CTRL-001
-- `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` (parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - forbidden family E-* fired: E-PARSE-EXPECTED
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `control-flow/ctrl-012-default-logic-multiline-prose-neg` (parse-reject)
-  - missing E-UNQUOTED-DISPLAY-TEXT
-  - count: E-UNQUOTED-DISPLAY-TEXT fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: unexpected text at program level
-- `control-flow/ctrl-012-default-logic-non-leading-residual-neg` (parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
-- `control-flow/ctrl-012-default-logic-prose-neg` (parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
-  - E-PARSE-ITEM: unexpected text at program level
-- `control-flow/s437-r5-braced-else-line-comment-top-logic` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `else` (other statements at logic-block level are not in the bootstrap)
 - `defer/control-flow-inner-loop-ok` (twin · parse-reject)
   - forbidden family E-DEFER-* fired: E-DEFER-CONTROL-FLOW
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -325,13 +247,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-EXPR: expected an expression, found `<`
   - E-PARSE-EXPR: expected an expression, found `/script> } `
   - E-PARSE-EXPECTED: expected `:`, found `(`
-- `element-refusal/implied-lift-arm-script-pos` (twin · parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
 - `element-refusal/interp-markup-value-style-pos` (twin · parse-reject)
   - missing E-STYLE-001
   - severity: E-STYLE-001 did not fire (expected error)
@@ -339,60 +254,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-EXPR: expected an expression, found `<`
   - E-PARSE-EXPECTED: expected `:`, found `style`
   - E-PARSE-EXPECTED: expected `}`, found `{`
-- `element-refusal/lift-script-body-pos` (twin · parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/lift-script-src-pos` (twin · parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/lift-script-uppercase-pos` (parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/lift-style-body-pos` (twin · parse-reject)
-  - missing E-STYLE-001
-  - severity: E-STYLE-001 did not fire (expected error)
-  - count: E-STYLE-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/lift-svg-script-pos` (parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/logic-bare-markup-script-pos` (parse-reject)
-  - missing E-SCRIPT-001
-  - severity: E-SCRIPT-001 did not fire (expected error)
-  - count: E-SCRIPT-001 fired 0 time(s), expected exactly 1
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `element-refusal/near-names-neg` (parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `$` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-- `element-refusal/style-attr-and-css-neg` (parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lift` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `engine/ontimeout-misplaced-pos` (twin · parse-reject)
-  - missing E-STRUCTURAL-ELEMENT-MISPLACED
-  - severity: E-STRUCTURAL-ELEMENT-MISPLACED did not fire (expected error)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
 - `engine/rule-violation-pos` (twin · codes)
   - missing E-ENGINE-INVALID-TRANSITION
   - severity: E-ENGINE-INVALID-TRANSITION did not fire (expected error)
@@ -424,7 +285,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - missing E-FOREIGN-003
   - severity: E-FOREIGN-003 did not fire (expected error)
 - `foreign/foreign-slice-no-free-capture-neg` (parse-reject)
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"MODULE"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `foreign/foreign-slice-unparseable-in-block-neg` (codes)
   - missing E-FOREIGN-007
   - severity: E-FOREIGN-007 did not fire (expected error)
@@ -432,16 +293,8 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-TAG: unexpected `(` in the tag `<doubled`
   - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
   - E-PARSE-CLOSER: `</program>` closes `<doubled>`
-- `forms/validator-applies-min-on-string-reject` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `forms/validator-applies-pattern-on-number-reject` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `forms/validator-applies-typed-clean` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `@` (other statements at logic-block level are not in the bootstrap)
+- `forms/validator-applies-typed-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-VALIDATOR-DEAD
 - `lifecycle/cleanup-error-call-expression` (parse-reject; not in the bootstrap: E-LIFECYCLE-002)
   - missing E-LIFECYCLE-002
   - E-PARSE-EXPECTED: expected `}`, found `closeConnection`
@@ -452,23 +305,19 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-EXPECTED: expected `}`, found `teardown`
   - E-PARSE-TRAILING: unexpected `teardown` after the expression
 - `linear/lin-001-never-consumed-neg` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lin` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `authenticate` (other statements at logic-block level are not in the bootstrap)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `linear/lin-002-double-use-pos` (twin · parse-reject)
-  - missing E-LIN-002
-  - severity: E-LIN-002 did not fire (expected error)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `lin` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `authenticate` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `refresh` (other statements at logic-block level are not in the bootstrap)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `linear/must-use-unread-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
 - `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
 - `loop/loop-002-continue-outside` (twin · parse-reject)
-  - missing E-LOOP-002
-  - severity: E-LOOP-002 did not fire (expected error)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `continue` (other statements at logic-block level are not in the bootstrap)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `continue`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `9`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -565,41 +414,33 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-DECL-ILLEGAL-FIELD-NAME: `on` cannot name a declaration or field — it is reserved for namespaced attributes (`on:…`, §66.2.3)
   - E-PARSE-EXPR: expected an expression, found `<`
   - E-PARSE-EXPECTED: expected `:`, found `div`
-- `module/e-export-001-export-const-clean` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-CLOSER: a closer with nothing open
-  - E-PARSE-ITEM: unexpected text at program level
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
 - `module/e-import-001-export-inside-logic-clean` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `$`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-CLOSER: a closer with nothing open
-- `module/e-import-002-circular-import-reject` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-CLOSER: a closer with nothing open
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"hi"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `module/e-import-002-circular-import-reject` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-SCOPE-001
 - `module/e-import-003-import-inside-fn-reject` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `'./m.scrml'`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
 - `reactive/hoist-forward-ref-neg` (twin · parse-reject)
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/reset-init-after-assignment-rt` (twin · parse-reject)
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/s437-r5-template-cell-read-value-attr` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-STYLE-VALUE-NOT-STYLE)
 - `reactive/server-fn-rawvar-read-error` (twin · codes)
   - missing E-REACTIVE-003
   - severity: E-REACTIVE-003 did not fire (expected error)
 - `reactive/write-not-in-logic-context-neg` (twin · parse-reject)
-  - E-PARSE-ITEM: unexpected text at program level
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/write-not-in-logic-context-pos` (twin · parse-reject)
-  - forbidden family E-* fired: E-PARSE-ITEM
-  - E-PARSE-ITEM: unexpected text at program level
+  - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `refinement/base-type-literal-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-001)
   - missing E-CONTRACT-001
   - severity: E-CONTRACT-001 did not fire (expected error)
@@ -690,16 +531,12 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
   - E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL
-- `type-state-codes/e-type-045-prefix-not-negation-neg` (twin · parse-reject)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
 - `type-state-codes/e-type-045-prefix-not-negation-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-045)
   - missing E-TYPE-045
   - severity: E-TYPE-045 did not fire (expected error)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `if` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `<` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-EXPECTED: expected `}`, found ``
+  - E-PARSE-EXPECTED: expected `)`, found `@`
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `ready`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-PARSE-EXPR: expected an expression, found `)`
 
 ### CRASH (0)
 
@@ -709,7 +546,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (436)
+### PASS / CODES-ONLY (460)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -737,12 +574,20 @@ none
 - `block-grammar/script-001-svg-namespace-pos` — PASS
 - `block-grammar/script-style-exact-name-neg` — PASS
 - `block-grammar/style-001-interp-body-pos` — PASS
+- `body-top/declared-prose-renders` — PASS · TWIN
 - `body-top/js-construct-await` — PASS
 - `body-top/js-construct-class` — PASS
 - `body-top/js-construct-dynamic-import` — PASS
 - `body-top/js-construct-throw` — PASS
 - `body-top/js-construct-try-brace-on-next-line` — PASS
+- `body-top/label-on-non-loop-rejected` — PASS · TWIN
+- `body-top/line-after-declaration-rejected` — PASS · TWIN
+- `body-top/loose-prose-rejected` — PASS
+- `body-top/page-prose-rejected` — PASS · TWIN
+- `body-top/prose-after-declaration-rejected` — PASS · TWIN
+- `body-top/semicolon-is-formatting` — PASS · TWIN
 - `body-top/template-const-renders-explicit-logic` — PASS
+- `body-top/unknown-characters-rejected` — PASS
 - `capability/all-tokens-valid` — PASS
 - `capability/arg-union-repeated-token` — PASS
 - `capability/argless-caps-empty-allowlist` — PASS
@@ -785,7 +630,11 @@ none
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — PASS · TWIN
 - `control-flow/ctrl-005-else-and-if-same-element-program-pos` — PASS
 - `control-flow/ctrl-010-else-on-for-without-lift-neg` — PASS · TWIN · VACUOUS
+- `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — PASS
 - `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — PASS · TWIN
+- `control-flow/ctrl-012-default-logic-multiline-prose-neg` — PASS
+- `control-flow/ctrl-012-default-logic-non-leading-residual-neg` — PASS
+- `control-flow/ctrl-012-default-logic-prose-neg` — PASS
 - `control-flow/ctrl-013-braceless-for-of-head-neg` — PASS · TWIN
 - `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — PASS · TWIN
 - `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — PASS · TWIN
@@ -800,6 +649,7 @@ none
 - `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
+- `control-flow/s437-r5-braced-else-line-comment-top-logic` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-value-form-if-else-line-comment` — PASS · TWIN
 - `control-flow/s462-braceless-else-if-chain-dangling` — PASS · TWIN
@@ -830,6 +680,13 @@ none
 - `defer/unhandled-failable-neg` — PASS · TWIN
 - `defer/value-arm-site-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
+- `element-refusal/implied-lift-arm-script-pos` — PASS · TWIN
+- `element-refusal/lift-script-body-pos` — PASS · TWIN
+- `element-refusal/lift-script-src-pos` — PASS · TWIN
+- `element-refusal/lift-script-uppercase-pos` — PASS
+- `element-refusal/lift-style-body-pos` — PASS · TWIN
+- `element-refusal/lift-svg-script-pos` — PASS
+- `element-refusal/logic-bare-markup-script-pos` — PASS
 - `element-refusal/pre-raw-script-pos` — PASS
 - `element-refusal/raw-comment-script-pos` — PASS
 - `element-refusal/raw-content-display-neg` — PASS
@@ -935,6 +792,8 @@ none
 - `forms/gate-valid-submits` — PASS
 - `forms/surface-top-level-no-validators-pos` — PASS
 - `forms/surface-top-level-validated-neg` — PASS
+- `forms/validator-applies-min-on-string-reject` — PASS · TWIN
+- `forms/validator-applies-pattern-on-number-reject` — PASS · TWIN
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
 - `hostmethod/substring-match-typed` — PASS · TWIN
@@ -965,6 +824,7 @@ none
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-pos` — PASS · TWIN
 - `lifecycle/when-effect-writes-state-pos` — PASS · TWIN
+- `loop/loop-006-neg` — PASS · TWIN
 - `markup-handler/inline-block-handler-assign-led-order` — PASS · TWIN
 - `markup-handler/inline-block-handler-call-first` — PASS · TWIN
 - `markup-handler/inline-block-handler-in-engine-state-child` — PASS · TWIN
@@ -1016,6 +876,7 @@ none
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
+- `module/e-export-001-export-const-clean` — PASS · TWIN
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
 - `module/e-import-002-acyclic-import-clean` — PASS · TWIN
 - `module/e-import-002-reexport-cycle-named-reject` — PASS · TWIN
@@ -1148,7 +1009,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (665)
+### UNSUPPORTED (674)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1212,7 +1073,12 @@ none
 - `auth/w-auth-redirect-loop-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `block-grammar/block-015-bare-slash-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `block-grammar/block-047-unclosed-brace-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `body-top/bare-expression-evaluates-not-renders` — twin · bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `body-top/prose-before-code-line-rejected` — bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse(
+- `body-top/prose-in-declaration-run-rejected` — twin · bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
+- `body-top/sql-statement-not-shipped` — bootstrap-unsupported: this body-top statement runs a `?{}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function
+- `body-top/template-cell-renders` — twin · bootstrap-unsupported: the initializer of the file-scope constant `msg` holds a cell read (`@total`) — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other cons
 - `capability/inheritance-closest-wins-no-union` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
 - `capability/inheritance-inherit-covers` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
 - `capability/inline-block-covered` — bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
@@ -1230,6 +1096,7 @@ none
 - `channel/watches-no-consumer` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-no-pk` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `codegen/cg-export-enum-library-rep` — twin · bootstrap-unsupported: an `<effect>` / `<request>` / logic-block statement outside `<program>` — no element scope owns it, so nothing would run it (§6.7.4, §6.7.7, §40.8); move it into the program
 - `components/invalid-prop-decl-syntax-clean` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `components/invalid-prop-decl-syntax-reject` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `condition/given-cell-guard-multi-all-or-nothing-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -1249,8 +1116,8 @@ none
 - `control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
 - `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `control-flow/ctrl-switch-forbidden-fn-body-pos` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `x` holds a cell read (`@cond`) — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constan
@@ -1282,6 +1149,8 @@ none
 - `element-refusal/match-arm-raw-body-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/match-arm-script-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
+- `element-refusal/near-names-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
+- `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
 - `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-struct` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1309,6 +1178,7 @@ none
 - `engine/ontimeout-invalid-target-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-legal-neg` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-misplaced-markup-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontimeout-misplaced-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `engine/ontransition-no-target-neg` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontransition-no-target-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/payload-arity-mismatch-pos` — twin · bootstrap-unsupported: `id` on the state-child `<Dragging>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
@@ -1360,7 +1230,7 @@ none
 - `error/transaction-nested-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/transaction-non-failable-fn-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/transaction-stmt-match-arm-fail-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-top-level-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/transaction-top-level-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `fn/dom-mutation-reject` — twin · bootstrap-unsupported: `.createElement(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.re
 - `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
 - `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
@@ -1418,7 +1288,6 @@ none
 - `loop/loop-001-break-outside` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
-- `loop/loop-006-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `markup-handler/s437-r4-arrow-block-seq-dollar-match-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
@@ -1449,12 +1318,12 @@ none
 - `match-block/wildcard` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-on-required-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-ontransition-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `match-codes/e-match-on-required-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `match-codes/e-match-ontransition-forbidden-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
+- `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `match-codes/e-type-006-multi-scrutinee-exhaustive-neg` — twin · bootstrap-unsupported: `multi-scrutinee match` (§18.19) is not in the bootstrap yet; it is refused here by name rather than misread — match one value, and nest a second `match` in its arms
 - `match-codes/e-type-006-multi-scrutinee-union-pos` — twin · bootstrap-unsupported: `multi-scrutinee match` (§18.19) is not in the bootstrap yet; it is refused here by name rather than misread — match one value, and nest a second `match` in its arms
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
@@ -1699,7 +1568,7 @@ none
 - `schema/w-schema-001-warn` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/async-call-then-in-handler-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `server-db/async-fn-escapes-as-value-handler-neg` — twin · bootstrap-unsupported: `isOk` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `isOk(…)`
-- `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · bootstrap-unsupported: `isOk` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `isOk(…)`
+- `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
@@ -1803,6 +1672,7 @@ none
 - `type-state-codes/e-type-022-engine-named-binding-pos` — twin · bootstrap-unsupported: `bogus` on the state-child `<Loaded>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `type-state-codes/e-type-041-not-assign-mismatch-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-041-not-assign-mismatch-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `type-state-codes/e-type-045-prefix-not-negation-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `type-state-codes/e-type-062-is-non-enum-lhs-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-062-is-non-enum-lhs-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `type-state-codes/e-type-081-partial-match-render-pos` — twin · bootstrap-unsupported: `partial match` (§18.18) is not in the bootstrap yet; it is refused here by name rather than misread — write a full `match` with an `else :>` arm
