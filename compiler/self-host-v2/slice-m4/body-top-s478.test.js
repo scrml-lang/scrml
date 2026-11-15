@@ -210,3 +210,17 @@ describe("§4.18.7 / §40.8 — a display-text run ends where its statement does
     expect(codes(run(P(`"a"; @nope = 5;\n<p>x</p>`)))).toEqual(["E-UNQUOTED-DISPLAY-TEXT", "E-STATE-UNDECLARED"]);
   });
 });
+
+// s478 r1 (owner ruling 4) — §4.18.7 (S445): "a lone identifier or cell read standing as a statement has
+// no effect, so at a `<program>` / `<page>` / `<channel>` body top it is `E-STMT-NO-EFFECT` (§40.8), whose
+// message names the declared forms". RED before: `Counter;` was E-SCOPE-001 only.
+describe("§4.18.7 S445 — a lone name at the body top is E-STMT-NO-EFFECT naming the declared forms", () => {
+  test("an undeclared lone name: E-STMT-NO-EFFECT beside E-SCOPE-001", () => {
+    const r = run(P(`Counter;\n<p>x</p>`));
+    expect(codes(r)).toEqual(["E-STMT-NO-EFFECT", "E-SCOPE-001"]);
+    expect(errs(r)[0].message).toContain("<p>…</p>");
+  });
+  test("elsewhere the scope error stays the one report (a function body)", () => {
+    expect(codes(run(P(`function f() { y; }\n<p>x</p>`)))).toEqual(["E-SCOPE-001"]);
+  });
+});

@@ -10,12 +10,20 @@
     "notCodePrefixes": [
       "E-"
     ],
-    "dom": "<p id=\"a\">Welcome to the dashboard.</p> Items ship on Friday. Count is 3 now. a < b & c",
+    "dom": "<p id=\"a\">Welcome to the dashboard.</p>Items ship on Friday.Count is 3 now.a < b & c",
     "domAnchored": [
       {
         "selector": "#a",
         "text": "Welcome to the dashboard."
       }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-body-top-display-literal-formatting-whitespace-s478",
+      "fails": {
+        "runtime": "sha256:050f47382d5d2c5b"
+      }
+    }
   }
 }

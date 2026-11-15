@@ -66,3 +66,14 @@ while still rejecting (E-PARSE-ITEM −822 → the real diagnostics behind it).
   g-boot-body-top-tilde-exemption-s478, g-boot-run-before-dom-insertion-s478.
 - `;` migrated in error/async-not-in-scrml, fn/async-decl-reject, loop/loop-006-neg (impl#1 `bun conformance/run.ts`
   result lines identical before/after).
+
+## Owner rulings S478 (body-top owner questions) — on s478-boot-body-top
+- Ruling 1: the INTERIM own-line display-literal test is kept as-is.
+- Ruling 3 (cases, not compiler): declared-prose-renders + ctrl-012-default-logic-prose-neg `dom` re-pinned to §4.18.5
+  (no formatting whitespace between display literals) — impl#1 PASS→XFAIL on both, carried gap
+  g-impl1-body-top-display-literal-formatting-whitespace-s478 (signatures recorded); both ctrl-012 `if (1)` cases →
+  `if (true)` (keeps each case's point; impl#1 still PASS); forms/validator-applies-* reads moved into `<p>${…}</p>`
+  (impl#1 still PASS). Bootstrap: all PASS except forms/validator-applies-typed-clean, now twin-extra-error
+  E-VALIDATOR-DEAD (validators on cells no form input binds) — a separate question, not the no-effect one.
+- Ruling 4: `Counter;` at a bare-run body top is E-STMT-NO-EFFECT (message names the declared forms) + E-SCOPE-001;
+  elsewhere withoutRefusedNoEffect still drops it (g-boot-body-top-lone-name-no-effect-s478 resolved).

@@ -6247,7 +6247,7 @@ ${
         let out: Diag[] = []
         for (const d of parsed) {
             let keep = true
-            if (d.code == "E-STMT-NO-EFFECT") {
+            if (d.code == "E-STMT-NO-EFFECT" && d.message.indexOf(bodyTopForms()) < 0) {
                 for (const a of later) {
                     const refusal: boolean = a.code == "E-BOOTSTRAP-UNSUPPORTED" || a.code.substring(0, 8) == "E-SCOPE-"
                     if (refusal && a.file == d.file && a.span.start >= d.span.start && a.span.end <= d.span.end) keep = false
@@ -10065,7 +10065,7 @@ ${
                     badEnd = last
                     chainLine = -1
                 } else {
-                    t = r.tp
+                    t = bodyTopNoEffect(r.tp, before.diags.length, ctx)
                     if (runStart < 0) runStart = tok.start
                     stmts = stmts.concat([r.s])
                     // a statement that ended with its `;` (or is block-like) closes the
@@ -10084,6 +10084,31 @@ ${
         const back: MP = backToMarkup(mp, fb2)
         if (resume >= 0) return { items: items.concat(fr2.items), mp: mAt(back, resume) }
         return { items: items.concat(fr2.items), mp: mAt(back, cur(fb2).start) }
+    }
+
+    // s478 r1 (owner ruling 4) — §4.18.7 (S445): "a lone identifier or cell read
+    // standing as a statement has no effect, so at a `<program>` / `<page>` /
+    // `<channel>` body top it is `E-STMT-NO-EFFECT` (§40.8), whose message names
+    // the declared forms". A body-top E-STMT-NO-EFFECT names them, and is kept
+    // beside a later scope refusal (withoutRefusedNoEffect keeps one carrying
+    // bodyTopForms()): `Counter;` is E-STMT-NO-EFFECT + E-SCOPE-001 there only.
+    fn bodyTopForms() -> string {
+        return " At a body top, displayed text is declared: a markup element (`<p>…</p>`) or a quoted display-text literal (`\"…\"`) (§4.18.7, §40.8)."
+    }
+
+    fn bodyTopNoEffect(tp: TP, from: int, ctx: string) -> TP {
+        let ds: Diag[] = tp.diags.slice(0, from)
+        let i: int = from
+        while (i < tp.diags.length) {
+            const d: Diag = tp.diags[i]
+            if (d.code == "E-STMT-NO-EFFECT" && d.message.indexOf(bodyTopForms()) < 0) {
+                ds = ds.concat([newDiag(d.code, d.message + bodyTopForms(), d.file, d.span)])
+            } else {
+                ds = ds.concat([d])
+            }
+            i = i + 1
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
     }
 
     // s478 r1 — the statement just read is literal-only (§40.8), parsed with no
