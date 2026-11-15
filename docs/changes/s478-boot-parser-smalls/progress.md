@@ -4,6 +4,22 @@ Lane: S478 bootstrap parser small clusters (triage C6, C8 alias, C15, C13, C19).
 Branch `s478-boot-parser-smalls` from origin/main af7fe4bab. Base conformance JSON:
 `~/.cache/scrml/review/s478-parser-smalls/base-cases.json` (PASS 422 · FAIL 142 · UNSUPPORTED 665).
 
+## Results (head = merge of origin/main 47d1250cb)
+
+- Bootstrap conformance, base 47d1250cb → head: PASS 422 → 424, FAIL 142 → 137, UNSUPPORTED 665 → 668;
+  PASS→FAIL 0. FAIL→PASS: auth/program-nested-auth-through-div-pos, condition/given-head-bool-refused-markup.
+  FAIL→UNSUPPORTED (named refusals): auth/program-nested-lifecycle-attr-neg,
+  match-leave/given-arm-in-expression-position-match, match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error.
+- Six more cases now fail ONLY on case dialect (newline-terminated statements / newline-separated arms, the
+  C1 / case-migration work): condition/given-presence-deprecated-arm, match-leave/given-arm-body-lowered,
+  match-leave/given-arm-legacy-arrow-keeps-body, match-leave/given-arm-malformed-heads-in-assignment-match-neg,
+  codegen/cg-export-enum-library-rep. With terminators written in, the four `given` cases PASS (runtime too).
+- Corpus (git ls-files conformance/cases samples examples compiler/self-host-v2/acceptance, 3,149 `.scrml`,
+  bootstrap frontEnd, Error `code|start` sets, base af7fe4bab vs head): 0 newly rejecting, 0 newly accepting,
+  0 crashed; 38 files' error sets changed while still rejecting.
+- Gates: gen-bootstrap-severity --check current; snippet-gate 113/0/16 spec-ahead; claim-gate 0 failed.
+- Red on base: all four new test files fail on base sources (33 of 37 new tests + 5 program-shape pins).
+
 ## Items
 
 - [x] C6 `given` arm + markup guard (§42.2.3) — parse.scrml `givenArmHead` / `givenArms` /
