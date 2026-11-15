@@ -43449,6 +43449,15 @@ ${
     }
 
     fn linLocal(cx: LinCx, st: AStmt, name: string, init: AExpr, isLin: boolean, s0: LinSt) -> LinR {
+        // s478-boot-destructuring — a destructuring declaration's value temp (parse.scrml
+        // parseDestructDecl) holding a `lin` binding: §35.3 rule 1 makes the read ONE
+        // consumption, but whether the bound names inherit `lin` (as §18.7's payload
+        // bindings do: "all of its destructured bindings are also `lin`") is unruled for a
+        // struct pattern — refused by name (INTERIM), never read as a plain copy
+        if (name.indexOf("destructured#") == 0 && linIndex(cx, init, s0) >= 0) {
+            const rr: LinR = linExpr(cx, init, s0)
+            return linGo(linDiag(cx, rr.st, "E-BOOTSTRAP-UNSUPPORTED", init.span, "destructuring a `lin` value is not in the bootstrap yet — whether its bound names are each `lin` (as a `match` payload's are, §18.7) is unruled; bind it to a plain local first (`const v = x;`, one consumption, §35.3 rule 1) and destructure that"))
+        }
         const r: LinR = linExpr(cx, init, s0)
         let s: LinSt = r.st
         if (r.ends) return r
