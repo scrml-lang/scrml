@@ -420,7 +420,7 @@ ${
     //     binders the statement form reads a payload through.
     export type PlainArm:struct = { nid: int, inner: Sym[] }
     // s478: `refused` — the binder reported an Error for this match's coverage (E-TYPE-020 /
-    // E-MATCH-012); the typer then gives its value no type to check (coverageRefused, triage C13).
+    // E-MATCH-012); the typer then does not widen its value by `not` (coverageRefused, triage C13).
     export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean, refused: boolean,
                                       stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
@@ -517,11 +517,6 @@ ${
     // write, split across the boundary — refused until U1d).
     export type SqlInfo:struct = { nid: int, db: Sym, kind: SqlKind, reads: SqlTables, writes: SqlTables, columns: SqlColumns }
     export type PlaceK:enum = { Ambient, Client, Server, Split }
-
-    // The SQL sigil for messages, in two pieces: impl#1 (which compiles this
-    // file) rewrites a literal sigil inside a string literal into its own SQL
-    // placeholder (parse.scrml sqlSigil).
-    fn sqlSigil() -> string { return "?" + "{" }
     export type PlaceFact:struct = { sym: int, name: string, place: PlaceK }
     // s454 (U1b): `inherited` — the functions server-placed by inheritance
     // (§12.2 Trigger 5): their calls of server functions are made in place;
@@ -3454,7 +3449,7 @@ ${
             .Spread(e: x) :> exprReads(x)
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
-            .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
+            .Sql(q: q) :> ["?{}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Handled(h: h) :> listReads(handledKids(h)).concat(blocksReads(exprBlocks(e)))      // s451 (Ue): the subject and the arms' values; r2 (N1): the arm blocks
             .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
             .HashRef(id: hr0) :> []
@@ -8900,7 +8895,7 @@ ${
                 const su: RX | not = unknownStrMethod(env, e, m, args, st0)
                 if (su is given) return su
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
@@ -9026,7 +9021,7 @@ ${
         if (cf.pure) return st
         if (isRandomModuleFile(cf.file)) return addDiag(st, env.file, e.span, "E-FN-004", "a `fn` body calls `" + cf.name + "` from `scrml:random`, which is non-deterministic — a `fn` is pure and cannot call it (§48.3.4, §41.20); call it in a `function` (or an event handler) and pass the value in as a parameter")
         return addPending(st, PendRule.PureCall(cf.sym.id, fnCallsFunctionDiag(env, e, cf, ""),
-            newDiag("E-FN-004", "a `fn` body calls `" + cf.name + "`, which reads the clock (" + dateNowText() + ", directly or through a function it calls) — a non-deterministic call, so a `fn` cannot make it (§48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", env.file, e.span)))
+            newDiag("E-FN-004", "a `fn` body calls `" + cf.name + "`, which reads the clock (`Date.now()`, directly or through a function it calls) — a non-deterministic call, so a `fn` cannot make it (§48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", env.file, e.span)))
     }
 
     // A file of the stdlib's `scrml:random` module (the prefixed stdlib path, link.scrml).
@@ -9382,7 +9377,7 @@ ${
     }
 
     fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
-        return addPending(st, PendRule.IfClock(cf.sym.id, newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler", env.file, e.span)))
+        return addPending(st, PendRule.IfClock(cf.sym.id, newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler", env.file, e.span)))
     }
 
     // s444 — THE HOST-CALL SURFACE (progress.md "host call surface"): exactly
@@ -9394,22 +9389,17 @@ ${
     // outside the bootstrap: those positions evaluate on a schedule (lazy
     // shared instances, reactive re-runs) the SPEC's one-shot rule (§6.x
     // "one-shot evaluation at module initialization") does not describe.
-    // The clock call's spelling, for messages. (impl#1 workaround F-NEW-s444:
-    // impl#1's E-FN-004 scan matches the call's TEXT inside a string literal
-    // of a `fn` body — so the spelling is never written whole in one here.)
-    fn dateNowText() -> string { return "`Date" + ".now()`" }
-
     // s477 fix r1 (F3) — E-FN-004 for `Date.now()` (the `.HostPure` arm below) names the `fn`
     // that makes the body pure: the function itself, or — in a nested function — the enclosing
     // `fn` (§48.3: "anywhere inside a `fn` body, including inside nested closures"), never "a
     // `function` body".
     fn resolveHost(env: Env, e: AExpr, args: AExpr[], st: AS) -> RX {
-        if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " takes no argument", st)
+        if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`Date.now()` takes no argument", st)
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
-            .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
+            .HostPure :> diagX(env, e, "E-FN-004", "`Date.now()` is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
+            .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`Date.now()` here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
 
@@ -15094,7 +15084,7 @@ ${
             const n: string = exprName(c)
             if (n != "") return n + "(…)"
         }
-        if (sqlOfK(e.k) is given) return "the `" + sqlSigil() + "}` query"
+        if (sqlOfK(e.k) is given) return "the `?{}` query"
         return "this expression"
     }
 
@@ -15197,7 +15187,7 @@ ${
     }
 
     fn e004Msg(subj: AExpr) -> string {
-        return "'?' applied to " + subjectName(subj) + ", which is not a call of a failable function. Only '!' functions (and `" + sqlSigil() + "}` queries) can be propagated with '?' (§19.5.4)"
+        return "'?' applied to " + subjectName(subj) + ", which is not a call of a failable function. Only '!' functions (and `?{}` queries) can be propagated with '?' (§19.5.4)"
     }
 
     fn e003Msg(env: Env) -> string {
@@ -15320,7 +15310,7 @@ ${
         if (!failable) {
             if (isMatch) st = plainMatchBinderDiags(env, arms, st)
             if (!isMatch) st = deadHandlerBinderDiags(env, arms, st)
-            if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `" + sqlSigil() + "}` query, §19.7.1)")
+            if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` query, §19.7.1)")
             return deadHandler(env, e, subj, st)
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
@@ -16795,7 +16785,7 @@ ${
         if (n != "") {
             return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.", env.file, a.span)
         }
-        return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.", env.file, a.span)
+        return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `?{}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.", env.file, a.span)
     }
 
     fn maybeCallee(e: AExpr) -> AExpr {
@@ -16876,9 +16866,9 @@ ${
     fn resolveSql(env: Env, e: AExpr, q: ASql, stmt: boolean, st0: AS) -> RX {
         const st: AS = resolveExprs(env, q.params, not, st0)
         if (!env.fx.inFn || q.handled) return plain(not, st)
-        if (env.fx.defer) return plain(not, addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "this `" + sqlSigil() + "}` query is failable and stands in a deferred statement — handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3); an enclosing `!` does not cover it"))
-        if (!env.fx.failable) return plain(not, addDiag(st, env.file, e.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). (\"No row\" is not a failure: `.get()` returns `not`, `.all()` `[]`.)"))
-        if (!stmt && env.fx.whole != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` query that a `!` function propagates implicitly (§19.8.2) " + ue2Reason()))
+        if (env.fx.defer) return plain(not, addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "this `?{}` query is failable and stands in a deferred statement — handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3); an enclosing `!` does not cover it"))
+        if (!env.fx.failable) return plain(not, addDiag(st, env.file, e.span, "E-ERROR-002", "this `?{}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). (\"No row\" is not a failure: `.get()` returns `not`, `.all()` `[]`.)"))
+        if (!stmt && env.fx.whole != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `?{}` query that a `!` function propagates implicitly (§19.8.2) " + ue2Reason()))
         return plain(not, propagationFact(env, e, env.g.sqlErrorSym, stmt, st))
     }
 
@@ -17196,12 +17186,6 @@ ${
         return out
     }
 
-    // `<#id>` spelled for a message. Written as one literal, impl#1 (which compiles this file)
-    // reads it as an input-state reference and prints `_scrml_input_id_` into the message (s475 r1).
-    fn hashId() -> string {
-        return "<" + "#id>"
-    }
-
     // =========================================================================
     // s475 (slice S3b) — `<#id>`: a request's properties (SPEC §6.7.7 Properties):
     //   `<#id>.loading` `boolean` "`true` while fetch is in flight"
@@ -17265,8 +17249,8 @@ ${
         }
     }
 
-    // `<#id>` spelled for a message (in two pieces — see hashId).
-    fn hashRefText(id: string) -> string { return "<" + "#" + id + ">" }
+    // `<#name>` spelled for a message, for a request named `id`.
+    fn hashRefText(id: string) -> string { return "<#" + id + ">" }
 
     fn reqSigName(s: ReqSig) -> string {
         return match s {
@@ -17370,13 +17354,13 @@ ${
     fn hashRefMiss(env: Env, e: AExpr, id: string, what: string, st: AS) -> RX | not {
         const tag: string = hashTargetTag(env, id)
         if (tag == "request") return not
-        if (tag != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "` names the `<" + tag + " id=\"" + id + "\">` — a `" + hashId() + "` reference is in the bootstrap only for a `<request>` (§6.7.7); the `<" + tag + ">` state it would read is not built", st)
+        if (tag != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "` names the `<" + tag + " id=\"" + id + "\">` — a `<#id>` reference is in the bootstrap only for a `<request>` (§6.7.7); the `<" + tag + ">` state it would read is not built", st)
         return diagX(env, e, "E-SCOPE-001", "`" + hashRefText(id) + "` names no `<request>` of this program — " + what + " reaches a request by its `id=` (§6.7.7: `<request id=\"" + id + "\">`)", st)
     }
 
     // A bare `<#id>`: no value of its own (§6.7.7 gives it only its properties).
     fn resolveHashRef(env: Env, e: AExpr, id: string, st: AS) -> RX {
-        const miss: RX | not = hashRefMiss(env, e, id, "a `" + hashId() + "` reference", st)
+        const miss: RX | not = hashRefMiss(env, e, id, "a `<#id>` reference", st)
         if (miss is given) return miss
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + hashRefText(id) + "` is read through one of its properties — `.loading`, `.data`, `.error`, `.stale` — or called, `.refetch()` (§6.7.7 Properties); the request itself is no value in the bootstrap", st)
     }
@@ -17452,11 +17436,11 @@ ${
         }
         // INTERIM (capable form: per-instance request cells, owned by the instance that renders it)
         if (!inProgramCtx(env) || env.own != "") {
-            return reqUnsupported(env, r.opener, "a `<request>` inside a declaration's `renders` is not in the bootstrap — its `" + hashId() + "` state (loading, data, error, stale) would live on each instance, and per-instance request state is not built (§6.7.7); write it in the program's markup", st)
+            return reqUnsupported(env, r.opener, "a `<request>` inside a declaration's `renders` is not in the bootstrap — its `<#id>` state (loading, data, error, stale) would live on each instance, and per-instance request state is not built (§6.7.7); write it in the program's markup", st)
         }
         // INTERIM (capable form: per-row request cells — §6.7.7 EC-6 "One instance per item", with W-LIFECYCLE-014)
         if (env.rows.length > 0 || !isNoLift(env.lift)) {
-            return reqUnsupported(env, r.opener, "a `<request>` inside an `<each>` / `for` row is not in the bootstrap — §6.7.7 EC-6 makes it one request per row (W-LIFECYCLE-014), and per-row `" + hashId() + "` state is not built; write it outside the row", st)
+            return reqUnsupported(env, r.opener, "a `<request>` inside an `<each>` / `for` row is not in the bootstrap — §6.7.7 EC-6 makes it one request per row (W-LIFECYCLE-014), and per-row `<#id>` state is not built; write it outside the row", st)
         }
         // ---- the attributes ----
         let id: string = ""
@@ -17472,9 +17456,9 @@ ${
                     // identifier can never be named by `<#id>` (`state-ref ::= '<#' identifier '>'`, §15.11.2).
                     // "The compiler SHALL report W-REQUEST-ID-UNREFERENCEABLE at the `id` attribute and SHALL still
                     // compile the request" — `id=""` included (was E-LIFECYCLE-018 for an empty id).
-                    if (!isIdentifierText(t)) st = addDiag(st, env.file, a.span, "W-REQUEST-ID-UNREFERENCEABLE", "this `<request>`'s `id=\"" + t + "\"` is not an identifier, so no `" + hashId() + "` can name it: `" + hashId() + "` takes an identifier (§6.7.7, §15.11.2 `state-ref ::= '<#' identifier '>'`), and the request's `.loading`, `.data`, `.error`, `.stale` and `.refetch()` cannot be used. It still runs and assigns its `@variable`. Use an identifier for the `id` (`id=\"userList\"`)")
+                    if (!isIdentifierText(t)) st = addDiag(st, env.file, a.span, "W-REQUEST-ID-UNREFERENCEABLE", "this `<request>`'s `id=\"" + t + "\"` is not an identifier, so no `<#id>` can name it: `<#id>` takes an identifier (§6.7.7, §15.11.2 `state-ref ::= '<#' identifier '>'`), and the request's `.loading`, `.data`, `.error`, `.stale` and `.refetch()` cannot be used. It still runs and assigns its `@variable`. Use an identifier for the `id` (`id=\"userList\"`)")
                 } else {
-                    st = addDiag(st, env.file, a.span, "E-LIFECYCLE-018", "a `<request>`'s `id=` is a string literal naming it, `id=\"profile\"` (§6.7.7 grammar `id-attr ::= 'id=' string-literal`) — its `" + hashId() + "` state is reached by that name")
+                    st = addDiag(st, env.file, a.span, "E-LIFECYCLE-018", "a `<request>`'s `id=` is a string literal naming it, `id=\"profile\"` (§6.7.7 grammar `id-attr ::= 'id=' string-literal`) — its `<#id>` state is reached by that name")
                     hasId = true
                 }
             } else if (a.name == "deps") {
@@ -17489,7 +17473,7 @@ ${
                 st = reqUnsupported(env, a.span, "`" + a.name + "=` is not an attribute of `<request>` — it takes `id=`, `deps=[…]` and `cache` (§6.7.7 grammar)", st)
             }
         }
-        if (!hasId) st = addDiag(st, env.file, r.opener, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state (`.loading`, `.data`, `.error`, `.stale`, `.refetch()`); add `id=\"…\"`")
+        if (!hasId) st = addDiag(st, env.file, r.opener, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `<#id>` state (`.loading`, `.data`, `.error`, `.stale`, `.refetch()`); add `id=\"…\"`")
         if (hasId) {
             for (const q of st.reqs) {
                 // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
@@ -17541,7 +17525,7 @@ ${
                 // s475 (S4): the cell's own declaration loads it (§13.9.2) — INTERIM as above
                 st = reqUnsupported(env, tgt.span, "`@" + tname + "` is a pending cell — its declaration already loads it (§13.9.2: a `(not to T)` cell whose initializer waits means a cell plus a compiler-written `<request>`), and a cell written by two requests is not in the bootstrap; load into another cell, or declare `@" + tname + "` `=not` and keep only this request", st)
             } else if (q.targetName == tname) {
-                st = reqUnsupported(env, tgt.span, "`@" + tname + "` is already the target of `<request id=\"" + q.id + "\">` — a cell written by two requests is not in the bootstrap: each settle would leave the other's `" + hashId() + ".data` disagreeing with `@" + tname + "` (§6.7.7 \"`" + hashId() + ".data` → resolved value\"); load into separate cells, or derive one from the other", st)
+                st = reqUnsupported(env, tgt.span, "`@" + tname + "` is already the target of `<request id=\"" + q.id + "\">` — a cell written by two requests is not in the bootstrap: each settle would leave the other's `<#id>.data` disagreeing with `@" + tname + "` (§6.7.7 \"`<#id>.data` → resolved value\"); load into separate cells, or derive one from the other", st)
             }
         }
         // ---- the explicit deps (syntax) ----
@@ -17566,7 +17550,7 @@ ${
         // (a handling form there is refused — the request handles it; INTERIM: the author's own
         // handler and the request's error would both claim the failure, not ruled)
         if (handledOf(rhs.k) is given) {
-            st = reqUnsupported(env, rhs.span, "a handling form (`!{ … }` / `match`) on a `<request>`'s right-hand side is not in the bootstrap — the request handles its call itself (§6.7.7: its failure sets `" + hashId() + ".error` and keeps `@" + tname + "`); remove the handler", st)
+            st = reqUnsupported(env, rhs.span, "a handling form (`!{ … }` / `match`) on a `<request>`'s right-hand side is not in the bootstrap — the request handles its call itself (§6.7.7: its failure sets `<#id>.error` and keeps `@" + tname + "`); remove the handler", st)
         }
         let benv: Env = requestBodyEnv(env)
         let lins: int[] = []
@@ -17723,7 +17707,7 @@ ${
             const nm: string = u is given ? "url" : "api"
             return reqUnsupported(env, e.span, "`" + nm + "=` on a `<request>` (§60) is not in the bootstrap — write the fetch as a body, `<request id=\"…\">" + interpOpen() + " @x = load(…); }</request>`, calling a server function", st)
         }
-        if (attrNamed(e.attrs, "id") is not) st = addDiag(st, env.file, e.span, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `" + hashId() + "` state; add `id=\"…\"`")
+        if (attrNamed(e.attrs, "id") is not) st = addDiag(st, env.file, e.span, "E-LIFECYCLE-018", "this `<request>` has no `id` — the `id` attribute is required (§6.7.7): it names the request's `<#id>` state; add `id=\"…\"`")
         let blank = true
         for (const k of e.kids) {
             if (!blankNode(k)) blank = false
@@ -20601,6 +20585,11 @@ ${
         // without one, as an undeclared component (E-COMPONENT-035). Its attributes
         // are not judged again (one report per fault). A field tag / parser-refused /
         // unresolved-import tag keeps its own report (below).
+        // s478 (#1867 review F3) — a capitalised tag naming an IMPORTED non-declaration (`import
+        // { Helper }` of a function, `import { Kind }` of a type) is §34's `<EngineName/>` form
+        // itself: E-ENGINE-MOUNT-NOT-ENGINE (unknownElement), not E-COMPONENT-035. A tag with
+        // a §52 state-type attribute keeps its own refusal (capitalTagCode).
+        if (isCapitalTag(e.tag) && !namesOwnField(env, e.tag) && !unknownExcused(env, e) && mountsImportedNonDecl(env, e) && stateTypeAttr(e) == "") return unknownElement(env, e, st)
         if (isCapitalTag(e.tag) && !namesOwnField(env, e.tag) && !unknownExcused(env, e)) return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, capitalTagCode(e), capitalTagWhy(e))
         if (!markupElementName(e.tag) && !namesOwnField(env, e.tag)) {
             if (unknownExcused(env, e)) return resolveHtml(env, e, st)
@@ -21345,6 +21334,15 @@ ${
         return ""
     }
 
+    // s478 — does this kid-less, non-`*` tag name an IMPORTED non-declaration (importedNonDecl)?
+    // That is E-ENGINE-MOUNT-NOT-ENGINE's case, lowercase (`<helper/>`) or capitalised
+    // (`<Helper/>`, §34's own `<EngineName/>` form; #1867 review F3). The message names the tag
+    // by its opener, `<helper>`, because the AST does not record whether it was written
+    // `<helper/>` or `<helper></helper>` (#1867 review F3).
+    fn mountsImportedNonDecl(env: Env, e: AElem) -> boolean {
+        return !e.star && e.kids.length == 0 && importedNonDecl(env, e.tag) != ""
+    }
+
     // s473 — an element name that resolves to nothing (§4.1, §24.1). §34's
     // retired E-STATE-001 row: "a PascalCase name surfaces as E-COMPONENT-035,
     // a lowercase-HTML name as E-MARKUP-001". Its attributes and children are
@@ -21353,7 +21351,7 @@ ${
         const first: string = e.tag.substring(0, 1)
         let st: AS = st0
         const imported: string = importedNonDecl(env, e.tag)
-        if (!e.star && e.kids.length == 0 && imported != "") {
+        if (mountsImportedNonDecl(env, e)) {
             // s478 (triage C11a, F3) — §34 E-ENGINE-MOUNT-NOT-ENGINE (§51.0.D, §21.8): "A
             // self-closing tag `<EngineName/>` mounts an imported binding whose source export
             // is NOT an engine (e.g., a component, channel, type, function, or arbitrary
@@ -21362,7 +21360,7 @@ ${
             // (§66.13.3), both mounted by tag — so the code fires when the self-closing tag
             // names an IMPORTED binding that is no declaration at all (a function, a constant,
             // a type), the one limb that is not already some other code here.
-            st = addDiag(st, env.file, e.span, "E-ENGINE-MOUNT-NOT-ENGINE", "`<" + e.tag + "/>` mounts the imported `" + e.tag + "`, which is " + imported + ", not a declaration — a tag mounts a declaration (a `single` engine or a component, §66.13.3, §51.0.D). Import a declaration, or use `" + e.tag + "` where a value stands (an interpolation, a handler)")
+            st = addDiag(st, env.file, e.span, "E-ENGINE-MOUNT-NOT-ENGINE", "`<" + e.tag + ">` mounts the imported `" + e.tag + "`, which is " + imported + ", not a declaration — a tag mounts a declaration (a `single` engine or a component, §66.13.3, §51.0.D). Import a declaration, or use `" + e.tag + "` where a value stands (an interpolation, a handler)")
             return resolveHtml(env, e, st)
         }
         if (first != first.toLowerCase()) {
@@ -23464,7 +23462,7 @@ ${
             .Spread(e: x) :> "a spread"
             .Index(obj: o) :> "an index read"
             .Lambda(params: x) :> "a function value"
-            .Sql(q: x) :> "a query (`" + sqlSigil() + " … }`)"
+            .Sql(q: x) :> "a query (`?{ … }`)"
             .Handled(h: x) :> "a `match` or a handling form"
             .Binary(op: o) :> "a pipe (`|>`, a call)"
             .Name(name: n) :> "`" + n + "`"
@@ -23714,7 +23712,7 @@ ${
         }
         if (f.server) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the `server` modifier on a nested `" + kw + " " + f.name + "` — a nested function runs where the function that declares it runs (it closes over that function's bindings, §7.3.1), so it is no route of its own; the modifier is deprecated (§52.10) and the bootstrap refuses it here (INTERIM; ruling owed: what `server` on a nested declaration means). Remove `server`")
         if (f.failable) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a failable nested function `" + kw + " " + f.name + "(…)!` — the language allows it (§7.3.1, §19.4); the bootstrap does not build a nested `!` function yet (INTERIM — its failures, `?` propagation and transaction envelope are not wired through a nested declaration). Declare `" + f.name + "` at file level")
-        if (sqlsInBlock(f.body).length > 0) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested function `" + f.name + "` that runs a `" + sqlSigil() + "}` query — the language allows it (§7.3.1; a query is a wait, §13.8); the bootstrap does not build a nested function that waits yet (INTERIM). Run the query in a file-level server function and call it")
+        if (sqlsInBlock(f.body).length > 0) st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested function `" + f.name + "` that runs a `?{}` query — the language allows it (§7.3.1; a query is a wait, §13.8); the bootstrap does not build a nested function that waits yet (INTERIM). Run the query in a file-level server function and call it")
         // §7.6 (S473 D14) rules a LOCAL named like a cell E-NAME-COLLIDES-STATE and says "nested
         // `function` declarations are not decided by this ruling" — refused by name, INTERIM
         const pi: DeclInfo | not = programInfo(env)
@@ -29516,12 +29514,14 @@ ${
         if (m.stmt) return rvt(VType.Unknown, ts)
         if (conflict) return rvt(VType.Unknown, ts)
         // s478 (triage C13): a `match` the binder REFUSED for its coverage — E-TYPE-020 (an
-        // enum case with no arm) or E-MATCH-012 (a `T | not` subject with no `not` arm) — has
-        // no value type to check against: that error accounts for it, as for the arm
-        // conflict above (one report per fault; its `| not` widening would draw a second,
-        // E-TYPE-031 "this value is `T | not`", for the same missing arm). A literal-kind
-        // match without `else` (W-MATCH-002, a warning) does give `not` and is widened.
-        if (!m.exhaustive && coverageRefused(m)) return rvt(VType.Unknown, ts)
+        // enum case with no arm) or E-MATCH-012 (a `T | not` subject with no `not` arm) — is
+        // not widened by `not`: that error accounts for the missing arm (one report per fault;
+        // the `| not` widening would draw a second, E-TYPE-031 "this value is `T | not`", for
+        // the same missing arm). Its arms' own type is kept (s478 #1867 review F1): an arm
+        // that is itself `T | not` is a separate fault, and its E-TYPE-031 still fires. A
+        // literal-kind match without `else` (W-MATCH-002, a warning) does give `not` and is
+        // widened.
+        if (!m.exhaustive && coverageRefused(m)) return rvt(vt, ts)
         if (!m.exhaustive) vt = joinVT(vt, VType.Absent)
         return rvt(vt, ts)
     }
@@ -35464,7 +35464,7 @@ ${
         const v: string | not = quotedValue(a.value)
         if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` must be a literal connection string (`" + a.name + "=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
         const why: string = dbRefusal(v)
-        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=` (" + dbKind(v) + "): " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
+        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=` (" + dbKind(v) + "): " + why + " (§8.1.1, §44.2). A `?{}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
         const r: RSym = mint(st, "db")
         return { db: { sym: r.s, driver: dbDriver(v), target: dbTarget(v), file: file, owner: false }, st: r.st }
     }
@@ -35508,7 +35508,7 @@ ${
             if (v.indexOf("://") != scheme.length) return "a `" + scheme + ":` connection string is a URL (`" + scheme + "://…`)"
             return ""
         }
-        if (scheme == "mongo" || scheme == "mongodb") return "MongoDB is not a `" + sqlSigil() + "}` database — use a `^{}` meta context"
+        if (scheme == "mongo" || scheme == "mongodb") return "MongoDB is not a `?{}` database — use a `^{}` meta context"
         if (scheme == "file") return "a `file:` URI is not a path — write the path itself or `sqlite:<path>`"
         return "its prefix is not a recognized database connection prefix"
     }
@@ -35662,12 +35662,12 @@ ${
         for (const f of all) {
             if (nestedSym(g, f.sym)) continue     // s477: placed with, and printed inside, the function that declares it (nestedPlaces)
             const pk: PlaceK = placeOf(places, f.sym)
-            if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
+            if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `?{}` in its body places it on the server)")
             if (f.doms.length > 0 && serverTriggered(f)) {
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
             } else if (pk == PlaceK.Split) {
-                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `" + sqlSigil() + "}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
+                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `?{}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
                 st = serverBodyDiags(cx, f, all, places, sum, st)
@@ -35815,7 +35815,7 @@ ${
     }
 
     fn serverTrigger(f: FnFacts) -> string {
-        if (f.sqls.length > 0) return "a `" + sqlSigil() + "}` query"
+        if (f.sqls.length > 0) return "a `?{}` query"
         if (f.foreigns.length > 0) return "a `_={ … }=` foreign code block"
         // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
         if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
@@ -35990,7 +35990,7 @@ ${
         // (s451 Ue: the §19.8.3 failable rule — E-ERROR-002 — is the binder's, resolveSql)
         let st: AS = st0
         if (file != g.entry) {
-            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
+            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `?{}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
             return { info: not, creates: false, st: st }
         }
         if (scope < 0) {
@@ -36007,7 +36007,7 @@ ${
         const sq: SlotQuote = slotInLiteral(s.q.chunks)
         if (sq.slot >= 0) {
             // s473 (ruled refusals): the S468 code, §8.1 / §34 (was E-BOOTSTRAP-UNSUPPORTED)
-            st = addDiag(st, file, s.span, "E-SQL-SLOT-IN-LITERAL", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
+            st = addDiag(st, file, s.span, "E-SQL-SLOT-IN-LITERAL", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `?{}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
             return { info: not, creates: false, st: st }
         }
         st = statementDiags(file, s, st)
@@ -36030,25 +36030,26 @@ ${
         if (ms.multi) {
             let why: string = ""
             if (ms.plain) why = " (Found by reading every `;` in the query text as a statement boundary: this query holds a comment or a quoting form the compiler cannot read exactly on every database, so a `;` inside a comment or a string counts too. Drop the comment, or bind the text as a value with `" + slotSigil() + "…}`.)"
-            return addDiag(st, file, s.span, "E-SQL-MULTIPLE-STATEMENTS", "this `" + sqlSigil() + "}` holds more than one SQL statement — a `;` followed by more SQL begins a second one, and a program-body query SHALL hold exactly one (§8.1.2): on SQLite every statement after the first runs. Write one `" + sqlSigil() + "}` per statement; statements that must succeed or fail together go in a `transaction { }` block (§8.5.3, §19.10)." + why)
+            return addDiag(st, file, s.span, "E-SQL-MULTIPLE-STATEMENTS", "this `?{}` holds more than one SQL statement — a `;` followed by more SQL begins a second one, and a program-body query SHALL hold exactly one (§8.1.2): on SQLite every statement after the first runs. Write one `?{}` per statement; statements that must succeed or fail together go in a `transaction { }` block (§8.5.3, §19.10)." + why)
         }
         const v: StmtVerdict = programStatement(s.q.chunks)
         if (v.code == "E-TENANT-UNDECLARED") {
             let rel: string = "a relation"
             if (v.why != "") rel = "`" + v.why + "`"
-            return addDiag(st, file, s.span, "E-TENANT-UNDECLARED", "this `" + sqlSigil() + "}` gives " + rel + " a `tenant_id` column, and " + rel + " is not in the compilation's tenant set (§14.8.10 item (1), S456): the tenant floor would not scope it, so every tenant's rows would reach every request. Declare it in `<schema>` so the floor scopes it — `<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty — or, when its rows are not tenant data, rename the column")
+            return addDiag(st, file, s.span, "E-TENANT-UNDECLARED", "this `?{}` gives " + rel + " a `tenant_id` column, and " + rel + " is not in the compilation's tenant set (§14.8.10 item (1), S456): the tenant floor would not scope it, so every tenant's rows would reach every request. Declare it in `<schema>` so the floor scopes it — `<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty — or, when its rows are not tenant data, rename the column")
         }
         if (v.code != "") {
-            return addDiag(st, file, s.span, v.code, "this `" + sqlSigil() + "}` is not on the program-body allow-list (§14.8.10 item (1), S456): " + v.why + ". A program-body query is DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`), a spelled `CREATE [TEMP] TABLE name (…)`, one `ALTER TABLE … ADD [COLUMN]`, an fts5 `CREATE VIRTUAL TABLE`, transaction control, `CREATE [UNIQUE] INDEX`, or an admitted `PRAGMA`. Declare anything else in `<schema>`")
+            return addDiag(st, file, s.span, v.code, "this `?{}` is not on the program-body allow-list (§14.8.10 item (1), S456): " + v.why + ". A program-body query is DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`), a spelled `CREATE [TEMP] TABLE name (…)`, one `ALTER TABLE … ADD [COLUMN]`, an fts5 `CREATE VIRTUAL TABLE`, transaction control, `CREATE [UNIQUE] INDEX`, or an admitted `PRAGMA`. Declare anything else in `<schema>`")
         }
         return st
     }
 
-    // the `${` of a SQL value slot, for messages, in two pieces (as sqlSigil)
+    // the `${` of a SQL value slot, for messages, in two pieces (written whole
+    // in a string literal, `${` opens an interpolation — progress.md F9)
     fn slotSigil() -> string { return "$" + "{" }
 
     fn sql004Text() -> string {
-        return "this `" + sqlSigil() + "}` has no database scope (§8.1.1): no `<program db=…>`, no `<program>` whose single direct-child `<db src=…>` supplies its database, and no `<db src=…>` encloses it — whatever the number of databases in the file. Put `db=` on the enclosing `<program>` (`<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL), or move the query inside the `<db>` it means"
+        return "this `?{}` has no database scope (§8.1.1): no `<program db=…>`, no `<program>` whose single direct-child `<db src=…>` supplies its database, and no `<db src=…>` encloses it — whatever the number of databases in the file. Put `db=` on the enclosing `<program>` (`<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL), or move the query inside the `<db>` it means"
     }
 
 
@@ -36057,7 +36058,7 @@ ${
     // reports it — resolveSql — where the enclosing `!` and `defer` are known.)
     fn errorTwo(file: string, s: SqlSite, failable: boolean, st: AS) -> AS {
         if (failable || s.q.handled) return st
-        return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.)")
+        return addDiag(st, file, s.span, "E-ERROR-002", "this `?{}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.)")
     }
 
     // s452 — §19.10.4 (S451): manual transaction control (`?{BEGIN}`,
@@ -38497,7 +38498,7 @@ ${
     // How a query of the set is reached, for a message: "its own `?{}`" or "`f() → g()`".
     fn sqlPathOf(sum: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string {
         const ch: string[] = fxChain(sum, dim, i, a)
-        if (ch.length <= 1) return "its own `" + sqlSigil() + "}`"
+        if (ch.length <= 1) return "its own `?{}`"
         return "`" + ch.join(" → ") + "`"
     }
 
@@ -38584,7 +38585,7 @@ ${
             let w: string = ""
             if (c.kind == CallableK.KFn) {
                 for (const s of c.f.sqls) {
-                    if (w == "" && !s.q.nobatch && inRepeat(c.f.repeats, s.span)) w = "a `" + sqlSigil() + "}` inside a loop (or a lambda) in `" + c.label + "`"
+                    if (w == "" && !s.q.nobatch && inRepeat(c.f.repeats, s.span)) w = "a `?{}` inside a loop (or a lambda) in `" + c.label + "`"
                 }
                 for (const r of c.f.scan.refs) {
                     const j: int = nodeIdx(nodes, r.sym)
@@ -38768,7 +38769,7 @@ ${
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, s, st)
-                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server", "and " + waitFix(p), true, "")
+                st = waitDiag(st, p, p.file, s.span, p.what + " runs a `?{}` query — the query runs on the server", "and " + waitFix(p), true, "")
             }
             // s475 (S4): a pending initializer's query is its one refusal (waitDiag)
             if (!p.pending || sqls.length == 0) {
@@ -38811,7 +38812,7 @@ ${
         const st: AS = dropUe2At(st0, p)
         if (p.pendWhy != "" && callee != "" && callee == p.pendCall) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + p.pendSelf)
         if (p.pendWhy != "") return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + p.pendWhy)
-        if (sql) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) whose load is a `" + sqlSigil() + "}` written in its declaration — not in the bootstrap. Put the query in a function and initialize the cell with a handled call of it, `=(load() !{ _ :> not })` (§13.9.5)")
+        if (sql) return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell would be a pending cell (§13.9: a `(not to T)` cell whose initializer waits) whose load is a `?{}` written in its declaration — not in the bootstrap. Put the query in a function and initialize the cell with a handled call of it, `=(load() !{ _ :> not })` (§13.9.5)")
         return addDiag(st, file, span, "E-BOOTSTRAP-UNSUPPORTED", head + ", so the cell is a pending cell (§13.9: a `(not to T)` cell whose initializer waits) — the bootstrap builds one from an expression initializer, `=(load() !{ _ :> not })` (§13.9.5), in a linked build; write the initializer that way")
     }
 
@@ -38861,7 +38862,7 @@ ${
                 st = errorTwo(a.file, s, false, st)
                 st = manualTxDiag(a.file, s, a.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, a.file, s, st)
-                st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
+                st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `?{}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }
         }
         // s475 r1 (F1) — a `?{}` written directly in a `<request>` body (its right-hand side, a
@@ -38876,7 +38877,7 @@ ${
                 if (s.nid != rq.rhs) st = errorTwo(rq.file, s, false, st)
                 st = manualTxDiag(rq.file, s, "a `<request>` body, which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, rq.file, s, st)
-                st = addDiag(st, rq.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<request id=\"" + rq.id + "\">` body runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d (a request whose load is itself a query is not built). Until then: put the query in a server function and load that, `@" + rq.targetName + " = load(…)`")
+                st = addDiag(st, rq.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<request id=\"" + rq.id + "\">` body runs a `?{}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d (a request whose load is itself a query is not built). Until then: put the query in a server function and load that, `@" + rq.targetName + " = load(…)`")
             }
         }
         return st
@@ -40462,9 +40463,9 @@ ${
         return match k {
             .SRemote(callee: f) :> "a client call of the server function `" + f.hint + "` (§19.9.10) stands"
             .SWaits(callee: f) :> "a call of `" + f.hint + "`, which waits for the server (§13.2: it calls a server function), stands"
-            .SQuery :> "a `" + sqlSigil() + "}` query — a waiting value (§13.8 item 2) — stands"
+            .SQuery :> "a `?{}` query — a waiting value (§13.8 item 2) — stands"
             .SForeign :> "a foreign code block — a value awaited at the host boundary (§23.2.4a) — stands"
-            .SLocal(callee: f) :> "a call of `" + f.hint + "`, which waits on the server (§13.8: it runs a `" + sqlSigil() + "}` query, directly or through a call), stands"
+            .SLocal(callee: f) :> "a call of `" + f.hint + "`, which waits on the server (§13.8: it runs a `?{}` query, directly or through a call), stands"
         }
     }
 
@@ -40950,7 +40951,7 @@ ${
                 if (prop != "") {
                     const el: StyleEl | not = sharedElement(rules[i].r, rules[j].r, els)
                     if (el is given) {
-                        out = out.concat([mkDiag(file, rules[j].r.span, "W-STYLE-CONFLICT-POSSIBLE", "`" + selText(rules[j].r.sel) + "` and `" + selText(rules[i].r.sel) + "` (at " + placeIn(files, file, rules[i].r.span.start) + ") both set `" + prop + "` on " + elText(el) + " (at " + placeIn(files, file, el.span.start) + ") — program-level `#" + "{}` rules are global, with no scope to order them, so which value wins is decided by source order alone (§65.2.4 R3, §65.2.1). Disambiguate: merge the two rules, narrow one selector, or drop one of the declarations")])
+                        out = out.concat([mkDiag(file, rules[j].r.span, "W-STYLE-CONFLICT-POSSIBLE", "`" + selText(rules[j].r.sel) + "` and `" + selText(rules[i].r.sel) + "` (at " + placeIn(files, file, rules[i].r.span.start) + ") both set `" + prop + "` on " + elText(el) + " (at " + placeIn(files, file, el.span.start) + ") — " + styleWinner(rules[i].r.sel, rules[j].r.sel, el) + " (§65.2.4 R3, §65.2.1, §65.8). Disambiguate: merge the two rules, narrow one selector, or drop one of the declarations")])
                     }
                 }
                 i = i + 1
@@ -40958,6 +40959,71 @@ ${
             j = j + 1
         }
         return out
+    }
+
+    // s478 (#1867 review F2) — which of the pair wins, as the message says it. §65.2 (amended
+    // S473 D20): specificity-flatness is a COMPONENT scope's; program-global rules are emitted
+    // un-wrapped (inside `@layer global`, §65.8), so the ordinary cascade decides between two
+    // of them — the higher-specificity selector wins, and source order only breaks a tie.
+    // `first` is the earlier rule's selector, `later` the later one's.
+    fn styleWinner(first: ComplexSel[], later: ComplexSel[], el: StyleEl) -> string {
+        const a: int[] = armSpecificity(first, el)
+        const b: int[] = armSpecificity(later, el)
+        const c: int = specCompare(a, b)
+        const sa: string = "`" + selText(first) + "` (" + specText(a) + ")"
+        const sb: string = "`" + selText(later) + "` (" + specText(b) + ")"
+        if (c == 0) return "program-level `#" + "{}` rules are global and un-wrapped, and these two have equal " + specText(a) + ", so which value wins is decided by source order alone: the later rule, `" + selText(later) + "`"
+        if (c > 0) return "program-level `#" + "{}` rules are global and un-wrapped, so the cascade decides by specificity: the higher-specificity selector, " + sa + ", wins over " + sb + " although it comes first"
+        return "program-level `#" + "{}` rules are global and un-wrapped, so the cascade decides by specificity: the higher-specificity selector, " + sb + ", wins over " + sa
+    }
+
+    // The specificity (ids, classes, tags) of the most specific arm of `sel` that matches
+    // `el` (selMatches: an arm of tag / `.class` / `#id` parts, with no combinator).
+    fn armSpecificity(sel: ComplexSel[], el: StyleEl) -> int[] {
+        let best: int[] = [0, 0, 0]
+        for (const c of sel) {
+            if (c.links.length == 0 && compoundMatches(c.head, el)) {
+                const s: int[] = compoundSpecificity(c.head)
+                if (specCompare(s, best) > 0) best = s
+            }
+        }
+        return best
+    }
+
+    fn compoundSpecificity(c: Compound) -> int[] {
+        let ids = 0
+        let cls = 0
+        let tags = 0
+        for (const p of c.parts) {
+            const k: SimpleSel = p
+            const w: int = match k {
+                .IdSel(name: n) :> 0
+                .ClassSel(name: n) :> 1
+                .AttrSel(test: x) :> 1
+                .PseudoClass(name: n) :> 1
+                .TagSel(name: n) :> 2
+                .PseudoElement(name: n) :> 2
+                .Universal :> 3
+            }
+            if (w == 0) ids = ids + 1
+            if (w == 1) cls = cls + 1
+            if (w == 2) tags = tags + 1
+        }
+        return [ids, cls, tags]
+    }
+
+    fn specCompare(a: int[], b: int[]) -> int {
+        let i = 0
+        while (i < 3) {
+            if (a[i] > b[i]) return 1
+            if (a[i] < b[i]) return -1
+            i = i + 1
+        }
+        return 0
+    }
+
+    fn specText(s: int[]) -> string {
+        return "specificity " + s[0] + "," + s[1] + "," + s[2]
     }
 
     fn sharedProp(a: string[], b: string[]) -> string {
@@ -41822,7 +41888,7 @@ ${
     fn linSql(cx: LinCx, e: AExpr, q: ASql, s0: LinSt) -> LinR {
         const r: LinR = linExprs(cx, q.params, s0)
         if (r.ends) return r
-        if (cx.failable && !q.handled) return linGo(linFrom(r.st, linExit(cx, r.st, 0, e.span, "this `" + sqlSigil() + "}` (in a `!` function, its failure returns from the function, §19.8.2)")))
+        if (cx.failable && !q.handled) return linGo(linFrom(r.st, linExit(cx, r.st, 0, e.span, "this `?{}` (in a `!` function, its failure returns from the function, §19.8.2)")))
         return r
     }
 
