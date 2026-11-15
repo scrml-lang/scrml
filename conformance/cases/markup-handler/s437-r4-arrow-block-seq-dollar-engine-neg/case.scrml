@@ -6,7 +6,7 @@ type Phase:enum = { Idle, Busy }
 ${ function h() { @r2 = 9; } }
 <engine for=Phase initial=.Idle>
   <Idle>
-    <button onclick=${ (e) => { @r = 1 }; @r2 = 2 }>x</button>
+    <button onclick=${ (e) => { @r = 1; }; @r2 = 2 }>x</button>
   </>
   <Busy><p>b</p></>
 </>

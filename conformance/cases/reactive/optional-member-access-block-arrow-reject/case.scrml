@@ -4,7 +4,7 @@ type User:struct = { name: string }
 <out> = ""
 ${
     function show() {
-        const r = () => { @out = @user.name }
+        const r = () => { @out = @user.name; }
         r()
     }
 }

@@ -3,7 +3,7 @@ type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
 ${
-    function signOut() { @user = not }
+    function signOut() { @user = not; }
 }
 <button id="clear" onclick=signOut()>sign out</button>
 <div if=@user>

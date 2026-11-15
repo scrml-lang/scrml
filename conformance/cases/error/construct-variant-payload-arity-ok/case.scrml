@@ -5,7 +5,7 @@ ${
         fail MyError.NotFound("x");
     }
 
-    let a = MyError.Timeout
-    let b = MyError.NotFound("y")
+    let a = MyError.Timeout;
+    let b = MyError.NotFound("y");
 }
 <p>x</>

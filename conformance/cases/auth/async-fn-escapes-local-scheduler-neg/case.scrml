@@ -4,12 +4,12 @@ ${
 }
 <verdict> = "unset"
 server function check(pw: string, hash: string) {
-  function matches(h: string) { return verifyPassword(pw, h) }
-  function setTimeout(f) { return f(hash) }
-  return setTimeout(matches) ? "accepted" : "rejected"
+  function matches(h: string) { return verifyPassword(pw, h); }
+  function setTimeout(f) { return f(hash); }
+  return setTimeout(matches) ? "accepted" : "rejected";
 }
 function go() {
-  @verdict = check("wrong", "not-a-hash") !{ .Transport(_) :> return }
+  @verdict = check("wrong", "not-a-hash") !{ .Transport(_) :> return };
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

@@ -2,5 +2,5 @@
 <verdict> = "unset"
 server function isOk(n: int) { return n > 100; }
 <p id="out">${@verdict}</p>
-<button id="go" onclick=${ isOk(1).then((r) => { @verdict = r ? "accepted" : "rejected" }) }>go</button>
+<button id="go" onclick=${ isOk(1).then((r) => { @verdict = r ? "accepted" : "rejected"; }) }>go</button>
 </program>

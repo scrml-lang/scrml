@@ -15,11 +15,11 @@ ${
     function liftLiteralInArm() {
         step1(40);
         const label = if (@n > 0) {
-            lift 41
+            lift 41;
         } else {
-            lift 0
-        }
-        return label
+            lift 0;
+        };
+        return label;
     }
 
     function bindlessRecoveryInArm() {
@@ -27,9 +27,9 @@ ${
             load("ok") !{
                 .NotFound(mid) :> console.warn("not found", mid)
             };
-            lift "found"
+            lift "found";
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }

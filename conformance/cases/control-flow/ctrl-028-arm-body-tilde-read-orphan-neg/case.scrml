@@ -10,7 +10,7 @@ ${
             record(~)
             lift "ok"
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }
@@ -18,7 +18,7 @@ ${
     function tildeReadInElseArm() {
         step1(6);
         const label = if (@n < 0) {
-            lift "pos"
+            lift "pos";
         } else {
             record(~)
             lift "else-ok"
@@ -31,7 +31,7 @@ ${
         const label = if (@n > 0) {
             lift ~
         } else {
-            lift 0
+            lift 0;
         }
         return label
     }

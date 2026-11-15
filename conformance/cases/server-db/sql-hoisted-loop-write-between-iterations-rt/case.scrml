@@ -15,38 +15,38 @@
         ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run();
     }
     function bumpTwice(id: int) {
-        bump(id)
-        bump(id)
+        bump(id);
+        bump(id);
     }
     function viaCall() {
-        let out = []
+        let out = [];
         for (const it of [{ id: 7 }, { id: 7 }]) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
             bump(it.id);
         }
-        return out.join(",")
+        return out.join(",");
     }
     // the write is two calls deep
     function viaNested() {
-        let out = []
+        let out = [];
         for (const it of [{ id: 9 }, { id: 9 }]) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
             bumpTwice(it.id);
         }
-        return out.join(",")
+        return out.join(",");
     }
     // the writer is passed as a value and called by a built-in method
     function viaCallback() {
-        let out = []
+        let out = [];
         for (const it of [{ id: 11 }, { id: 11 }]) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
             const ids = [it.id];
             ids.forEach(bump);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function go() {
         @viaCall = viaCall() !{ _ :> "err" };

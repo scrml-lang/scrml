@@ -12,7 +12,7 @@ ${
             defer add("D1");
             const { a } = { a: "INNER" }
             function show() {
-                return a
+                return a;
             }
             add(show())
         }
@@ -20,11 +20,11 @@ ${
 
     // H2 — an array-destructured pair after the defer.
     function destructArr() {
-        defer add("D2")
+        defer add("D2");
         const [p, q] = [1, 2]
         add("sum" + sum())
         function sum() {
-            return p + q
+            return p + q;
         }
     }
 
@@ -32,21 +32,21 @@ ${
     // SHADOWING local; it does not reference the tail's `kind`, so it stays
     // callable BEFORE the defer.
     function shadowed() {
-        add(helper())
-        defer add("D3")
-        let kind = "tail"
-        add(kind)
+        add(helper());
+        defer add("D3");
+        let kind = "tail";
+        add(kind);
         function helper() {
-            let kind = "local"
-            let o = { kind: 1 }
-            return kind + o.kind + "kind"
+            let kind = "local";
+            let o = { kind: 1 };
+            return kind + o.kind + "kind";
         }
     }
 
     function go() {
-        destructObj()
-        destructArr()
-        shadowed()
+        destructObj();
+        destructArr();
+        shadowed();
     }
 }
 <program>
