@@ -1,0 +1,26 @@
+{
+  "id": "fn-return-colon-spelling-neg",
+  "description": "§7: a function's return type is written `-> T`; a colon-spelled return `(…) : T` is the compile error E-PARSE-FN (a malformed function declaration), reported once — the written type is never silently dropped and the body does not cascade.",
+  "language-version": "1.0",
+  "spec": "§7",
+  "rationale": "§7 Normative Statements: \"`->` is the sole return-type annotation syntax for `function` and `fn` declarations.\" Provenance: ruling:user-voice-scrml.md S477 \"⭐ RULED — tool main return type spelled ->\" (a return type is written `->`; `): T` is newly rejected).",
+  "expect": {
+    "codes": [
+      "E-PARSE-FN"
+    ],
+    "codeCounts": {
+      "E-PARSE-FN": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-colon-return-accepted-s477",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-PARSE-FN' fired 0 time(s), expected exactly 1",
+          "missing:E-PARSE-FN"
+        ]
+      }
+    }
+  }
+}

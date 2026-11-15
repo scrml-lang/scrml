@@ -2733,3 +2733,4 @@ Each `probe=` names the reviewed head of every round and the report path. Where 
 <!-- @review pr=1842 verdict=carve-out by=S477-PA date=2026-11-14 probe=bot post-merge regen of generated blocks -->
 <!-- @review pr=1843 verdict=carve-out by=S477-PA date=2026-11-14 probe=bot post-merge regen of generated blocks -->
 <!-- @review pr=1844 verdict=carve-out by=S477-PA date=2026-11-14 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1850 verdict=clean by=S478-PA date=2026-11-14 probe=S239 adversarial on frozen 5c9a1b73e: ~60 bootstrap probes (DOM + tool mode) — no fail-open (mixed/nested/spread/wider-read/param/struct/index/foreign branches all trap), no false E-WRITE-INVARIANT, non-choice path unchanged; 130+136 tests pass; LOW: gap title retitled to the every-branch case; diverging-arm path unreachable today (refused upstream), sound by reading; any-branch question → g-boot-bound-branch-any-literal-ruling-s478 (owner) -->

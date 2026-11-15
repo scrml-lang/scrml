@@ -4,10 +4,10 @@ ${
     type Post:struct = { id: number, title: string }
     <users> : User[] = []
     <posts> : Post[] = []
-    function loadUsers() : User[] {
+    function loadUsers() -> User[] {
         return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
     }
-    function loadPosts() : Post[] {
+    function loadPosts() -> Post[] {
         return ?{`SELECT id, title FROM posts`}.all() !{ _ :> [] }
     }
 }

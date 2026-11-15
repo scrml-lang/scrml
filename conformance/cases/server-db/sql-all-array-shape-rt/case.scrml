@@ -2,7 +2,7 @@
 ${
     type Widget:struct = { id: number, label: string }
     <rows> : Widget[] = []
-    function loadAll() : Widget[] {
+    function loadAll() -> Widget[] {
         return ?{`SELECT id, label FROM widgets`}.all() !{ _ :> [] }
     }
 }
