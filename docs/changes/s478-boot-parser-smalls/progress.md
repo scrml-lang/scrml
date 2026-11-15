@@ -23,5 +23,11 @@ Branch `s478-boot-parser-smalls` from origin/main af7fe4bab. Base conformance JS
   pins updated. `program-nested-auth-through-div-pos` PASS; `program-nested-lifecycle-attr-neg`
   UNSUPPORTED (workers unbuilt, honest); `program-nested-app-attr-pos` still FAIL on the worker body
   `when message(d) { … }` → E-PARSE-ITEM (parseLogicItem — body-top lane / §43 workers; not touched).
-- [ ] C13 cascades
-- [ ] C19 misc
+- [x] C13 cascades — NOT fixed (no SPEC sentence makes either pair one root cause): E-DEFER-LATER-SHADOW
+  beside E-SCOPE-REDECLARE are two rules that both apply (§19.16.2 / §7.6); E-TYPE-031 after
+  E-MATCH-012 — no SPEC text types a non-exhaustive match's value. Reported.
+- [x] C19 — `.A :> defer D()` → E-DEFER-UNSUPPORTED-SITE (parseArmBody); slice-m4/defer-arm-site-s478.test.js.
+  Not fixed: bare `{ }` block statement (no AST form; statement reader), `function(v) {…}` values
+  (C2b function-values slice), and `fn/scope-redeclare-fn-over-param-ok`, whose remaining
+  diagnostic is the correct S440 `string + int` E-OPERATOR-OPERAND-TYPE (case-stale: the shadowing
+  itself works).

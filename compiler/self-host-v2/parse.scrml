@@ -1343,6 +1343,16 @@ ${
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
             return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file, ns: tp.ns } }
         }
+        // s478 — §19.16.2: "`defer` in … a single-statement (unbraced) `match` /
+        // `!{}` arm … — not a stage-1 defer site" (E-DEFER-UNSUPPORTED-SITE): the
+        // arm has no written block for the deferred statement to belong to. One
+        // report; the rest of the arm is skipped (read as nothing). (`defer` is a
+        // keyword where a statement starts — deferAhead, §19.16.1.)
+        if (deferAhead(sub)) {
+            const dt: TP = diagAt(sub, "E-DEFER-UNSUPPORTED-SITE", "a `defer` that is the whole unbraced body of an arm has no written block to belong to (§19.16.2) — brace the arm (`.V :> { defer …; }`) or move the `defer` to the enclosing block", cur(sub))
+            const rd: RExpr = mkE(dt, cur(sub).start, AExprK.Recovered)
+            return { body: AArmBody.ArmExpr(rd.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rd.tp.nid, diags: rd.tp.diags, file: tp.file, ns: tp.ns } }
+        }
         // `break` / `continue` are leave statements too (§18.2), but the bootstrap
         // has no loops for them to leave.
         if (isWord(sub, "break") || isWord(sub, "continue")) {
