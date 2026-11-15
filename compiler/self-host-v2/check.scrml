@@ -106,10 +106,6 @@ ${
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
-    // s451: the SQL sigil for messages, in two pieces (impl#1 rewrites a
-    // literal sigil inside a string — parse.scrml sqlSigil).
-    fn sqlSigil() -> string { return "?" + "{" }
-
     export fn checkCore(p: CoreProgram) -> string[] {
         let out: string[] = []
         const ob: OnceBinds = onceBinds(p)
@@ -1053,7 +1049,7 @@ ${
     fn clientSide(p: CoreProgram, root: Node, where: string) -> string[] {
         let out: string[] = []
         for (const n of allNodes(root)) {
-            if (nodeIsSql(n)) out = out.concat(["C-S2: a `" + sqlSigil() + "}` query in client code (" + where + ") — a query stands only in a server function"])
+            if (nodeIsSql(n)) out = out.concat(["C-S2: a `?{}` query in client code (" + where + ") — a query stands only in a server function"])
             // s477 (C-F1): a foreign slice runs server-side only (§23.2.4: "the opaque slice is emitted server-side ONLY")
             if (nodeForeign(n) is given) out = out.concat(["C-F1: a foreign slice in client code (" + where + ") — a foreign slice stands only in a server-side body"])
             // (s454: C-S3's plain-call rule is checkClientCalls' — a Fn only client
@@ -1910,7 +1906,7 @@ ${
                     .ROther :> not
                 }
                 if (t is not) {
-                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<" + "#id>.data` is NOT cleared\")"])
+                    out = out.concat(["C-R1: a Request body does not end in a Suspend — the load is its one suspension, and the target is written only when it settles (§6.7.7 \"`<#id>.data` is NOT cleared\")"])
                 } else {
                     if (suspendCount(t) > 0) out = out.concat(["C-R1: a Request's continuation suspends again — a request has ONE suspension, its load (§6.7.7 \"single-shot\")"])
                 }
@@ -2229,7 +2225,7 @@ ${
             const k: string = depKey(sg)
             const nm: string = names[i]
             if (dk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal is one of its dependencies — every run writes it, so it would re-run forever"])
-            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<" + "#id>` signal"])
+            if (k == tk) out = out.concat(["C-R1: a Request's `" + nm + "` signal is its target — one cell cannot be both the loaded value and a `<#id>` signal"])
             if (sk.indexOf(k) >= 0) out = out.concat(["C-R1: a Request's `" + nm + "` signal shares its cell with another signal"])
             sk = sk.concat([k])
             i = i + 1
