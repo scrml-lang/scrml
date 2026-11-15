@@ -46,7 +46,7 @@ ${
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool,
-             CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
+             CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -419,7 +419,9 @@ ${
     //     once, and the index of the arm it takes; `arms` — per arm, the inner
     //     binders the statement form reads a payload through.
     export type PlainArm:struct = { nid: int, inner: Sym[] }
-    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean,
+    // s478: `refused` — the binder reported an Error for this match's coverage (E-TYPE-020 /
+    // E-MATCH-012); the typer then gives its value no type to check (coverageRefused, triage C13).
+    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean, refused: boolean,
                                       stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
 
@@ -1968,12 +1970,31 @@ ${
         let out: VariantDef[] = []
         let i = 0
         for (const v of vs) {
+            // s478 — §14.4: "Enum variant names SHALL begin with an uppercase letter";
+            // §34 E-ENUM-VARIANT-CASE: "once per offending variant. Only the variant NAME is
+            // checked; payload FIELD names … are NOT flagged" (the built-in enums are exempt:
+            // they are the compiler's, and all start uppercase)
+            if (s.file != builtinFile() && !upperInitial(v.name)) {
+                st = addDiag(st, te.file, v.span, "E-ENUM-VARIANT-CASE", "the variant `" + v.name + "` of `" + s.name + "` does not begin with an uppercase letter — enum variant names SHALL begin with one (§14.4); rename it `" + capitalized(v.name) + "`")
+            }
             const r: RFieldDefs = fieldDefsOf(te, v.fields, [], st, true)
             st = r.st
             out = out.concat([{ sym: s.members[i], fields: r.fs }])
             i = i + 1
         }
         return { def: TypeDef.EnumDef(s.sym, out), st: st }
+    }
+
+    // s478 — does `name` begin with an uppercase letter (§14.4)? A letter that has a
+    // lowercase form and is its own uppercase (`A`–`Z`, and `É`, `Ω` …); `_`, a digit
+    // or a lowercase letter is not.
+    fn upperInitial(name: string) -> boolean {
+        const c: string = name.substring(0, 1)
+        return c != "" && c == c.toUpperCase() && c != c.toLowerCase()
+    }
+
+    fn capitalized(name: string) -> string {
+        return name.substring(0, 1).toUpperCase() + name.substring(1)
     }
 
     fn structDefOf(te: TypeEnv, s: TypeStub, fs: ATypeField[], st0: AS) -> RTypeDef {
@@ -4546,7 +4567,7 @@ ${
         if (isLet && seqElem(unMaybe(ty)) is given && !pend) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
         }
-        const rg: RGraph = graphOf(te, g, ty, body, st)
+        const rg: RGraph = graphOf(te, g, ty, body, name, span, st)
         st = rg.st
         const reads: string[] = valueReads(init)
         // s478 (s478-boot-pending-tape-grants) — a PENDING tape's edit grants are its post-type's
@@ -4984,7 +5005,9 @@ ${
 
     // L18 / §66.13.2: state-children with `rule=` make the field's value a graph
     // (O52 ruled: a state-child names a variant of the field's enum).
-    fn graphOf(te: TypeEnv, g: TypeInfo[], ty: Type, body: ADeclChild[], st0: AS) -> RGraph {
+    // s478 — `name` / `span`: the field's (or the declaration's own value's) name and
+    // opener, where a variant with no state-child is reported (E-ENGINE-STATE-CHILD-MISSING).
+    fn graphOf(te: TypeEnv, g: TypeInfo[], ty: Type, body: ADeclChild[], name: string, span: ASpan, st0: AS) -> RGraph {
         let st: AS = st0
         let children: AStateChild[] = []
         for (const c of body) { children = children.concat(stateChildOf(c)) }
@@ -5024,6 +5047,22 @@ ${
                     }
                 }
                 edges = edges.concat([{ origin: origin, targets: targets }])
+            }
+        }
+        // s478 (triage C11a, F3) — exhaustiveness over the enum. §66.13.2: "'Exhaustive' (Q1's
+        // *"if possible"*) applies to enum-typed fields: the graph's coverage of the enum and
+        // its edges are checkable"; §51.0.F / §34 E-ENGINE-STATE-CHILD-MISSING: "A variant of
+        // the engine's `for=Type` has no matching state-child tag in the engine body … every
+        // variant must have a corresponding state-child" — a §51.0 code §66.20 neither
+        // retires nor supersedes (the S451 table maps only the invalid-variant limbs to
+        // E-DECL-STATE-CHILD), so it is retained and fires for the §66 graph. Once per
+        // variant with no state-child, at the field's opener.
+        const ti: TypeInfo | not = typeInfoOf(g, es)
+        if (ti is given) {
+            let vi = 0
+            for (const v of enumVariants(ti.def)) {
+                if (seen.indexOf(vi) < 0) st = addDiag(st, te.file, span, "E-ENGINE-STATE-CHILD-MISSING", "`" + name + "`'s transition graph has no state-child for `." + v.sym.hint + "` — a value that carries a transition graph names every variant of `" + es.hint + "` (§66.13.2, §51.0.F): a state with no state-child has no edges and no markup. Add `<" + v.sym.hint + " rule=…/>`")
+                vi = vi + 1
             }
         }
         return { graph: { enumSym: es, edges: edges }, st: st }
@@ -14606,28 +14645,42 @@ ${
     // block or in any enclosing block of the same function ("a `let` / `const`
     // / `lin` declaration written AFTER the `defer` — in its own block or in
     // any enclosing block of the same function").
-    fn deferChecks(file: string, body: ABlock, st: AS) -> AS {
-        return deferChecksIn(file, body, [], st)
+    // s478 (triage C13): `params` — the function's parameter names. A later declaration
+    // that REDECLARES a name its own block already binds (an earlier local of the block, or
+    // a parameter in the function body's block) is E-SCOPE-REDECLARE (blockRedeclares) —
+    // the one fault; it is not also reported as the later binding a `defer` would read
+    // (E-DEFER-LATER-SHADOW), which presumes the declaration is legal.
+    fn deferChecks(file: string, params: AParam[], body: ABlock, st: AS) -> AS {
+        let ps: string[] = []
+        for (const p of params) { ps = ps.concat([p.name]) }
+        return deferChecksTop(file, body, [], ps, st)
     }
 
     fn deferChecksIn(file: string, b: ABlock, outer: DeferLater[], st0: AS) -> AS {
+        return deferChecksTop(file, b, outer, [], st0)
+    }
+
+    fn deferChecksTop(file: string, b: ABlock, outer: DeferLater[], pre: string[], st0: AS) -> AS {
         let st: AS = st0
         let i = 0
         for (const s of b.stmts) {
-            st = deferChecksStmt(file, s, outer.concat(laterLocals(b, i + 1)), st)
+            st = deferChecksStmt(file, s, outer.concat(laterLocals(b, i + 1, pre)), st)
             i = i + 1
         }
         return st
     }
 
-    fn laterLocals(b: ABlock, from: int) -> DeferLater[] {
+    // `pre`: the names bound before the block's first statement (the parameters, for a
+    // function body) — a local of one of them, or of a name bound earlier in the block,
+    // is a redeclaration, not a later binding (s478).
+    fn laterLocals(b: ABlock, from: int, pre: string[]) -> DeferLater[] {
         let out: DeferLater[] = []
+        let seen: string[] = pre
         let i = 0
         for (const s of b.stmts) {
-            if (i >= from) {
-                const n: string = localNameOf(s)
-                if (n != "") out = out.concat([{ name: n, span: s.span }])
-            }
+            const n: string = localNameOf(s)
+            if (i >= from && n != "" && seen.indexOf(n) < 0) out = out.concat([{ name: n, span: s.span }])
+            if (n != "") seen = seen.concat([n])
             i = i + 1
         }
         return out
@@ -15618,6 +15671,7 @@ ${
         const maybe: boolean = sk.maybe || notSeen
         const absentDone: boolean = !maybe || notSeen || wild
         let exh: boolean = wild
+        let covRefused = false     // s478: an Error here for the match's coverage (E-TYPE-020 / E-MATCH-012)
         if (sk.code == "") {
             if (sk.kind == 0) {
                 let missing: string[] = []
@@ -15628,6 +15682,7 @@ ${
                 }
                 let en: string = "the enum"
                 if (es0 is given) en = "`" + es0.hint + "`"
+                if (!wild && missing.length > 0) covRefused = true
                 if (!wild && missing.length > 0) st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over " + en + " is not exhaustive: it does not cover " + missing.join(", ") + " — add those arms, or end with `else :>` (§18.8.1)")
                 if (missing.length == 0 && absentDone) exh = true
                 if (wild && missing.length == 0 && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
@@ -15639,11 +15694,12 @@ ${
                 if (!wild && !both) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over a bool does not cover both `true` and `false` — a value with no arm gives `not`; add the other arm, or an `else` arm (§18.16.2)")
             }
             if ((sk.kind == 1 || sk.kind == 2) && !wild) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over " + kindLabel(sk.kind) + " has no `else` arm — a value with no arm gives `not`; consider adding `else :>` (§18.16.2)")
+            if (maybe && !notSeen && !wild) covRefused = true
             if (maybe && !notSeen && !wild) st = addDiag(st, env.file, e.span, "E-MATCH-012", "this `match` is over a `T | not` value but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
         }
         const r1: RSym = mint(st, "subject")
         const r2: RSym = mint(r1.st, "arm")
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen,
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused,
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
         if (!exh && result is given) result = Type.Maybe(unMaybe(result))
         return plain(result, st)
@@ -21198,6 +21254,20 @@ ${
         return !cd.isProgram || !markupElementName(tag)
     }
 
+    // s478 — what `name` is when this file IMPORTS it as something other than a
+    // declaration: "a function" / "a constant" / "a type" ("" when it is not so imported —
+    // not imported, imported as a declaration, or declared in this file).
+    fn importedNonDecl(env: Env, name: string) -> string {
+        const lk: Linkage = env.g.te.link
+        const ff: string = scopeFrom(lk, env.file, NameKind.KFn, name)
+        if (ff != "" && ff != env.file) return "a function"
+        const fc: string = scopeFrom(lk, env.file, NameKind.KConst, name)
+        if (fc != "" && fc != env.file) return "a constant"
+        const ft: string = scopeFrom(lk, env.file, NameKind.KType, name)
+        if (ft != "" && ft != env.file) return "a type"
+        return ""
+    }
+
     // s473 — an element name that resolves to nothing (§4.1, §24.1). §34's
     // retired E-STATE-001 row: "a PascalCase name surfaces as E-COMPONENT-035,
     // a lowercase-HTML name as E-MARKUP-001". Its attributes and children are
@@ -21205,6 +21275,19 @@ ${
     fn unknownElement(env: Env, e: AElem, st0: AS) -> AS {
         const first: string = e.tag.substring(0, 1)
         let st: AS = st0
+        const imported: string = importedNonDecl(env, e.tag)
+        if (!e.star && e.kids.length == 0 && imported != "") {
+            // s478 (triage C11a, F3) — §34 E-ENGINE-MOUNT-NOT-ENGINE (§51.0.D, §21.8): "A
+            // self-closing tag `<EngineName/>` mounts an imported binding whose source export
+            // is NOT an engine (e.g., a component, channel, type, function, or arbitrary
+            // const)". §66.20 neither retires nor supersedes it. ⚑ PA reading (for veto): under
+            // §66 an engine is a `single` declaration and a component is a declaration
+            // (§66.13.3), both mounted by tag — so the code fires when the self-closing tag
+            // names an IMPORTED binding that is no declaration at all (a function, a constant,
+            // a type), the one limb that is not already some other code here.
+            st = addDiag(st, env.file, e.span, "E-ENGINE-MOUNT-NOT-ENGINE", "`<" + e.tag + "/>` mounts the imported `" + e.tag + "`, which is " + imported + ", not a declaration — a tag mounts a declaration (a `single` engine or a component, §66.13.3, §51.0.D). Import a declaration, or use `" + e.tag + "` where a value stands (an interpolation, a handler)")
+            return resolveHtml(env, e, st)
+        }
         if (first != first.toLowerCase()) {
             st = addDiag(st, env.file, e.span, "E-COMPONENT-035", "`<" + e.tag + ">` names no declaration in scope — nothing of that name is declared or imported here, so it would be emitted as an inert, unknown element (§15.14, §4.1). Declare it (`<" + e.tag + " …/>` with a `renders` clause) or import it")
         } else {
@@ -23469,7 +23552,7 @@ ${
         }
         st = resolveBlock(env, fs.f.body, st)
         st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
-        st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
+        st = deferChecks(fs.info.file, fs.f.params, fs.f.body, st)    // s451: §19.16 block-chain rules
         return st
     }
 
@@ -23990,7 +24073,7 @@ ${
     }
 
     fn checkScopes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t, lk)).concat(builtinRedeclares(t)).concat(fileNameClashes(files, t, lk)).concat(dupFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(files, t))
+        let out: Diag[] = dupFields(files, t, lk).concat(dupDecls(files, t, lk)).concat(builtinRedeclares(t)).concat(fileNameClashes(files, t, lk)).concat(dupFns(t)).concat(reservedFns(t)).concat(dupHandles(files, t, lk)).concat(dupConsts(files, t))
         for (const f of files) {
             for (const af of allFnItems(f.items)) {      // s477: a nested function's body too
                 out = out.concat(dupParams(f.path, af.params))
@@ -24371,6 +24454,25 @@ ${
                 }
             }
             j = j + 1
+        }
+        return out
+    }
+
+    // s478 — §6.8.2: "`reset` is a RESERVED IDENTIFIER — declaring a local function
+    // `function reset() { ... }` or `fn reset { ... }` is E-RESERVED-IDENTIFIER (compile
+    // error; see §34)"; §34: "Local identifier shadows a reserved language keyword.
+    // Specific case: `function reset() {...}` or `fn reset {...}`". Every function the
+    // program declares — file-scope or nested (§7.3.1) — in a user or stdlib file.
+    // (`match` is not reserved as a function name: §18.2 lists `function match(a, b)` as
+    // the identifier; `render` / `log` / `print` are shadowable built-ins, W-*-SHADOWED.)
+    fn reservedFns(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const f of t.fns) {
+            if (f.name == "reset" && f.file != builtinFile()) {
+                let kw: string = "function"
+                if (f.pure) kw = "fn"
+                out = out.concat([mkDiag(f.file, f.span, "E-RESERVED-IDENTIFIER", "`" + kw + " reset` — `reset` is a reserved identifier: `reset(@cell)` is a language keyword (§6.8.2), and a function of that name would shadow it. Rename the function (`resetAll`, `clearForm`, …)")])
+            }
         }
         return out
     }
@@ -29336,6 +29438,13 @@ ${
         }
         if (m.stmt) return rvt(VType.Unknown, ts)
         if (conflict) return rvt(VType.Unknown, ts)
+        // s478 (triage C13): a `match` the binder REFUSED for its coverage — E-TYPE-020 (an
+        // enum case with no arm) or E-MATCH-012 (a `T | not` subject with no `not` arm) — has
+        // no value type to check against: that error accounts for it, as for the arm
+        // conflict above (one report per fault; its `| not` widening would draw a second,
+        // E-TYPE-031 "this value is `T | not`", for the same missing arm). A literal-kind
+        // match without `else` (W-MATCH-002, a warning) does give `not` and is widened.
+        if (!m.exhaustive && coverageRefused(m)) return rvt(VType.Unknown, ts)
         if (!m.exhaustive) vt = joinVT(vt, VType.Absent)
         return rvt(vt, ts)
     }
@@ -29401,6 +29510,13 @@ ${
     fn oneEvalOf(b: ABlock) -> AExpr | not {
         if (b.stmts.length != 1) return not
         return evalOf(b.stmts[0])
+    }
+
+    // s478 — did the binder refuse this `match` for its coverage (resolveMatch reported
+    // E-TYPE-020 for a missing variant, or E-MATCH-012 for a `T | not` subject with neither a
+    // `not` arm nor a wildcard)?
+    fn coverageRefused(m: PlainMatch) -> boolean {
+        return m.refused
     }
 
     export fn plainFactOf(f: FailFact | not) -> PlainMatch | not {
@@ -40694,6 +40810,269 @@ ${
         return a
     }
 
+    // =========================================================================
+    // s478 (triage C11b) — W-STYLE-CONFLICT-POSSIBLE for PROGRAM-LEVEL `#{}` rules
+    // (§65.2.4 R3; §34 Severity: Info). §65.2.4: program-level global `#{}` is in the
+    // "Fail-closed — soft" list ("no donut → unbounded element set → not enumerable");
+    // R3: "Program-level global `#{}` resolves against the **file's own enumerable markup**
+    // … the checker fires `W-STYLE-CONFLICT-POSSIBLE` ONLY on a provable **local**
+    // (same-file) overlap, NOT on every same-property program-rule pair." §65.2.1: the
+    // overlap is "an UNCONDITIONAL same-property overlap on a provably-shared element".
+    //
+    // BUILT: two program-level rules of one file that set the same property, where an
+    // element of that file's program markup provably matches an arm of each — an arm a
+    // compound of tag / `.class` / `#id` parts, matched against the element's tag and its
+    // literal `class="…"` / `id="…"` (the decidable `tag × tag`, `class × class`,
+    // `tag × class`, `id × *` of §65.2.4). Not judged, so never reported: an arm with a
+    // pseudo-class / pseudo-element / attribute part (a CONDITIONAL layer, §65.2.2, or not
+    // unconditional), and an arm with a combinator (decidable over static markup, §65.2.4 —
+    // not built here; INTERIM, gap g-bootstrap-css-conflict-checker-unbuilt-s473) — so the
+    // warning under-reports, never over-reports. R1: an arm holding `*`, `html` or `body`
+    // is an author-reset floor, a lower layer, never a conflict. The component-scope
+    // checker (E-STYLE-CONFLICT, the R2 soft limb) is not built (same gap).
+    // =========================================================================
+    type StyleEl:struct = { tag: string, classes: string[], id: string, span: ASpan }
+    type StyleRuleAt:struct = { r: ACssRule, props: string[] }
+
+    fn styleOverlaps(g: Globals) -> Diag[] {
+        let out: Diag[] = []
+        for (const f of g.files) {
+            let ns: ANode[] = []
+            let hasProgram = false
+            for (const it of f.items) {
+                if (programOfItem(it) is given) hasProgram = true
+            }
+            if (hasProgram && f.path == g.entry) {
+                for (const it of f.items) {
+                    const n: ANode | not = markupOfItem(it)
+                    if (n is given) ns = ns.concat([n])
+                }
+            }
+            for (const ds of g.decls) {
+                if (ds.isProgram && ds.file == f.path) {
+                    const p: AProgram | not = ds.p
+                    if (p is given) ns = ns.concat(markupNodes(p.items))
+                }
+            }
+            const rules: StyleRuleAt[] = styleRulesIn(ns)
+            if (rules.length > 1) {
+                const els: StyleEl[] = styleElsIn(ns)
+                out = out.concat(styleOverlapPairs(g.files, f.path, rules, els))
+            }
+        }
+        return out
+    }
+
+    fn styleOverlapPairs(files: FileAst[], file: string, rules: StyleRuleAt[], els: StyleEl[]) -> Diag[] {
+        let out: Diag[] = []
+        let j = 1
+        while (j < rules.length) {
+            let i = 0
+            while (i < j) {
+                const prop: string = sharedProp(rules[i].props, rules[j].props)
+                if (prop != "") {
+                    const el: StyleEl | not = sharedElement(rules[i].r, rules[j].r, els)
+                    if (el is given) {
+                        out = out.concat([mkDiag(file, rules[j].r.span, "W-STYLE-CONFLICT-POSSIBLE", "`" + selText(rules[j].r.sel) + "` and `" + selText(rules[i].r.sel) + "` (at " + placeIn(files, file, rules[i].r.span.start) + ") both set `" + prop + "` on " + elText(el) + " (at " + placeIn(files, file, el.span.start) + ") — program-level `#" + "{}` rules are global, with no scope to order them, so which value wins is decided by source order alone (§65.2.4 R3, §65.2.1). Disambiguate: merge the two rules, narrow one selector, or drop one of the declarations")])
+                    }
+                }
+                i = i + 1
+            }
+            j = j + 1
+        }
+        return out
+    }
+
+    fn sharedProp(a: string[], b: string[]) -> string {
+        for (const p of a) {
+            if (b.indexOf(p) >= 0) return p
+        }
+        return ""
+    }
+
+    fn sharedElement(r1: ACssRule, r2: ACssRule, els: StyleEl[]) -> StyleEl | not {
+        if (hasResetFloor(r1.sel) || hasResetFloor(r2.sel)) return not      // R1
+        for (const el of els) {
+            if (selMatches(r1.sel, el) && selMatches(r2.sel, el)) return el
+        }
+        return not
+    }
+
+    // R1 — an arm naming `*`, `html` or `body` anywhere.
+    fn hasResetFloor(sel: ComplexSel[]) -> boolean {
+        for (const c of sel) {
+            for (const p of c.head.parts) {
+                const k: SimpleSel = p
+                const floor: boolean = match k {
+                    .Universal :> true
+                    .TagSel(name: n) :> n.toLowerCase() == "html" || n.toLowerCase() == "body"
+                    .ClassSel(name: n) :> false
+                    .IdSel(name: n) :> false
+                    .AttrSel(test: x) :> false
+                    .PseudoClass(name: n) :> false
+                    .PseudoElement(name: n) :> false
+                }
+                if (floor) return true
+            }
+        }
+        return false
+    }
+
+    // Does some arm of the list provably match `el`, unconditionally? (An arm with a
+    // combinator or a part this checker does not decide matches nothing here.)
+    fn selMatches(sel: ComplexSel[], el: StyleEl) -> boolean {
+        for (const c of sel) {
+            if (c.links.length == 0 && compoundMatches(c.head, el)) return true
+        }
+        return false
+    }
+
+    fn compoundMatches(c: Compound, el: StyleEl) -> boolean {
+        if (c.parts.length == 0) return false
+        for (const p of c.parts) {
+            const k: SimpleSel = p
+            const ok: boolean = match k {
+                .TagSel(name: n) :> n.toLowerCase() == el.tag.toLowerCase()
+                .ClassSel(name: n) :> el.classes.indexOf(n) >= 0
+                .IdSel(name: n) :> el.id != "" && el.id == n
+                .Universal :> false
+                .AttrSel(test: x) :> false
+                .PseudoClass(name: n) :> false
+                .PseudoElement(name: n) :> false
+            }
+            if (!ok) return false
+        }
+        return true
+    }
+
+    fn selText(sel: ComplexSel[]) -> string {
+        let arms: string[] = []
+        for (const c of sel) {
+            let s: string = compoundText(c.head)
+            for (const l of c.links) {
+                const ck: Combinator = l.comb
+                const sep: string = match ck {
+                    .Descendant :> " "
+                    .DirectChild :> " > "
+                    .NextSibling :> " + "
+                    .LaterSibling :> " ~ "
+                }
+                s = s + sep + compoundText(l.target)
+            }
+            arms = arms.concat([s])
+        }
+        return arms.join(", ")
+    }
+
+    fn compoundText(c: Compound) -> string {
+        let s: string = ""
+        for (const p of c.parts) {
+            const k: SimpleSel = p
+            const t: string = match k {
+                .Universal :> "*"
+                .TagSel(name: n) :> n
+                .ClassSel(name: n) :> "." + n
+                .IdSel(name: n) :> "#" + n
+                .AttrSel(test: x) :> "[" + x + "]"
+                .PseudoClass(name: n) :> ":" + n
+                .PseudoElement(name: n) :> "::" + n
+            }
+            s = s + t
+        }
+        return s
+    }
+
+    fn elText(el: StyleEl) -> string {
+        let s: string = "`<" + el.tag
+        if (el.id != "") s = s + " id=\"" + el.id + "\""
+        if (el.classes.length > 0) s = s + " class=\"" + el.classes.join(" ") + "\""
+        return s + ">`"
+    }
+
+    // The program-level rules of these nodes, in source order — the `#{}` blocks of the
+    // program body and of every element in it (cssNodes' global placement), not inside a
+    // declaration (a component's sheet is scoped).
+    fn styleRulesIn(ns: ANode[]) -> StyleRuleAt[] {
+        let out: StyleRuleAt[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const c: ACss | not = match k {
+                .Css(c: c) :> c
+                .Gather(f: x) :> not
+                .Elem(e: e) :> not
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Effect(w: w) :> not
+                .Request(r: r) :> not
+            }
+            if (c is given) {
+                for (const it of c.items) {
+                    const ik: ACssItem = it
+                    const r: ACssRule | not = match ik {
+                        .CssRule(r: r) :> r
+                        .CssFlat(d: d) :> not
+                        .CssCharset(span: s, encoding: e) :> not
+                        .CssImport(span: s, url: u) :> not
+                    }
+                    if (r is given) {
+                        let props: string[] = []
+                        for (const d of r.decls) { props = props.concat([d.prop.toLowerCase()]) }
+                        out = out.concat([{ r: r, props: props }])
+                    }
+                }
+            }
+            const e: AElem | not = elemOfNodeK(k)
+            if (e is given) out = out.concat(styleRulesIn(e.kids))
+            const gf: AFor | not = gatherOfNode(k)
+            if (gf is given) out = out.concat(styleRulesIn(gatherRows(gf)))
+        }
+        return out
+    }
+
+    // The HTML elements of these nodes (a use of a declaration, `<*x>`, a structural
+    // element and an unknown name are not HTML elements and are skipped; their children
+    // are not — an `<each>` row's elements are the file's markup too).
+    fn styleElsIn(ns: ANode[]) -> StyleEl[] {
+        let out: StyleEl[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const e: AElem | not = elemOfNodeK(k)
+            if (e is given) {
+                if (!e.star && isHtmlElementName(e.tag)) out = out.concat([{ tag: e.tag, classes: staticClasses(e.attrs), id: staticAttrText(e.attrs, "id"), span: e.span }])
+                out = out.concat(styleElsIn(e.kids))
+            }
+            const gf: AFor | not = gatherOfNode(k)
+            if (gf is given) out = out.concat(styleElsIn(gatherRows(gf)))
+        }
+        return out
+    }
+
+    fn elemOfNodeK(k: ANodeK) -> AElem | not {
+        return match k {
+            .Elem(e: e) :> e
+            .Css(c: c) :> not
+            .Gather(f: x) :> not
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+            .Request(r: r) :> not
+        }
+    }
+
+    // The classes a literal `class="a b"` gives the element ([] when it has none or its
+    // value is not a literal — then no class is provable).
+    fn staticClasses(attrs: AAttr[]) -> string[] {
+        const t: string = staticAttrText(attrs, "class")
+        let out: string[] = []
+        for (const w of t.split(" ")) {
+            const c: string = w.trim()
+            if (c != "" && out.indexOf(c) < 0) out = out.concat([c])
+        }
+        return out
+    }
+
     fn gatherOfNode(k: ANodeK) -> AFor | not {
         return match k {
             .Gather(f: lf) :> lf
@@ -41635,7 +42014,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(css.diags)
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(css.diags).concat(styleOverlaps(ra.g))
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link)
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)

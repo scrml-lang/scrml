@@ -3046,6 +3046,7 @@ ${
         if (isWord(tp, "break")) return parseJump(tp, true)
         if (isWord(tp, "continue")) return parseJump(tp, false)
         if (isWord(tp, "if")) return parseIf(tp)
+        if (isWord(tp, "else")) return orphanElse(tp)    // s478 (§17.1.1, gap g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462)
         if (isWord(tp, "given")) return parseGiven(tp)
         if (whenAhead(tp)) {
             const rw: REffect = parseWhen(tp)
@@ -3076,6 +3077,40 @@ ${
         }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    // s478 (triage C14) — a statement that STARTS with `else`: an `else` no `if` claims
+    // (`@r = "a" else @r = "b"`, or `if (c) { … }; else …`, whose `;` ended the `if`).
+    // An `else` continues the `if` statement it follows (§17.1.1, §17.6); no statement
+    // begins with it — §34 E-STMT-UNEXPECTED-TOKEN "Unexpected token — no statement begins
+    // here". Before s478 the word fell through to an expression statement: E-SCOPE-001
+    // "`else` is not declared" plus E-STMT-MISSING-SEMICOLON after `else` (and before it).
+    // One report, at the `else`: the E-STMT-MISSING-SEMICOLON the previous statement just
+    // drew AT the `else`'s left edge (its fix-it, a `;`, would not make the `else` legal) is
+    // replaced by it. What follows the `else` (`if …`, a `{ … }` block, or one statement)
+    // is read — so its own syntax errors are reported — and dropped (a Recovered node):
+    // with the `else` refused, nothing downstream resolves or types it.
+    fn orphanElse(tp: TP) -> RStmt {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        let ds: Diag[] = tp.diags
+        if (ds.length > 0 && tp.i > 0) {
+            const prev: Diag = ds[ds.length - 1]
+            const before: PTok = tp.toks[tp.i - 1]
+            if (prev.code == "E-STMT-MISSING-SEMICOLON" && prev.span.start == before.end) ds = ds.slice(0, ds.length - 1)
+        }
+        const d: Diag = newDiag("E-STMT-UNEXPECTED-TOKEN", "`else` with no `if` before it — no statement begins with `else`: an `else` continues the `if` statement it follows, `if (c) { … } else { … }` (§17.1.1, §17.6). A `;` after the `if`'s `}` ends the `if`, so an `else` after it has none; remove that `;`, or write the missing `if (…)`", tp.file, mkSpan(t.start, t.end))
+        let rt: TP = adv({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds.concat([d]), file: tp.file, ns: tp.ns })
+        if (isWord(rt, "if")) {
+            rt = parseIf(rt).tp
+        } else if (isP(rt, "{")) {
+            rt = parseBlock(rt).tp
+        } else if (cur(rt).cls != TC.End && !isP(rt, "}")) {
+            rt = parseStmt(rt).tp
+            if (isP(rt, ";")) rt = adv(rt)
+        }
+        const re: RExpr = mkE(rt, start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
     }
 
     // s477 — does a nested function declaration start here (§7.3.1)?
