@@ -21,7 +21,7 @@ ${
     }
 
     function go() {
-        @out = p1("a") + p2() + p3();
+        @out = `${p1("a")}${p2()}${p3()}`;
     }
 }
 <program>

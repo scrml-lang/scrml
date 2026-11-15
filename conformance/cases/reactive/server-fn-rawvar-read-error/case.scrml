@@ -1,9 +1,12 @@
+<program db="./app.db">
 ${
     <price> = 10
     function saveOrder() -> number {
-        result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`};
-        return result;
+        const p = @price;
+        const row = ?{`INSERT INTO orders (amount) VALUES (${p}) RETURNING id`}.get() !{ _ :> { return 0; } };
+        return 1;
     }
 }
 <button id="save" onclick={ @price = saveOrder() !{ .Transport(_) :> return }; }>Save</>
 <p id="p">Price: ${@price}</>
+</program>

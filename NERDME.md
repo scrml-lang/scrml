@@ -414,7 +414,7 @@ A build story can be pinned per `<program>` — `<program story="…">`\* — an
 
 `navigate(path)` moves between routes. From client code it is a **soft** navigation: the runtime fetches the target route's server-rendered HTML, swaps it into the `<outlet>` of a persistent `<program>` shell, loads any client chunk that route needs, and hydrates it — no full reload, no router library, and shell state (navigation, sidebars, counters) survives. From server code it is a 302 redirect. `navigate(path, .Hard)` / `navigate(path, .Soft)` override the inference.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001(navigate)] — the bootstrap has no navigate() and no <outlet> element yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no navigate() and no <outlet> element yet -->
 <!-- snippet: docs/readme-snippets/nerdme/navigation.scrml -->
 ```scrml
 // NERDME.md "Client navigation" — the persistent shell. Ruled; spec-ahead on the bootstrap (no navigate(), no <outlet>).
