@@ -854,6 +854,9 @@ ${
         singles: string[],      // the program's cells declared `single` (singleCells)
         hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
         printCalls: int[],      // s478 r1: the calls the print pre-scan read as the §20.7 built-in (printScans)
+        // s478 (review-followups-2): the import graph's cycles (link.scrml importCycles — a
+        // function of the file set), computed once: onCommonCycle asks per read
+        cycles: ImportCycle[],
     }
 
     // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
@@ -5218,7 +5221,38 @@ ${
             } else {
                 let targets: int[] = []
                 for (const a of c.attrs) {
-                    if (a.name == "rule") {
+                    if (a.name == "rule" && !ruleIsExpr(a.value)) {
+                        // s478 fix r1 (#1894 L1) — §51.0.F: "Three accepted forms" — `rule=.NextVariant`,
+                        // `rule=(.A | .B | .C)`, `rule=*`; a quoted (or braced / bare-attribute) spelling is
+                        // none of them, and the SPEC defines no meaning for it. Before, `rule=".Loading"` was
+                        // read as NO rule (the state silently had no edges). INTERIM (gap
+                        // g-boot-rule-quoted-spelling-s478): refused by name. The state is then treated as
+                        // admitting every target, so no edge / reachability / literal-write report cascades
+                        // from the refused attribute — the refusal is the one report.
+                        st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is not a `rule=` form the bootstrap reads — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`, written unquoted; the attribute would be read as no rule at all")
+                        const tiq: TypeInfo | not = typeInfoOf(g, es)
+                        if (tiq is given) {
+                            let vq = 0
+                            for (const v of enumVariants(tiq.def)) {
+                                targets = targets.concat([vq])
+                                vq = vq + 1
+                            }
+                        }
+                    } else if (a.name == "rule" && ruleNames(a.value).length == 0 && !ruleValueless(a.value)) {
+                        // s478 fix r1 (#1894 L1) — an unquoted `rule=` that names no variant (`rule=Loading`,
+                        // or one the parser could not read): before it was read as no rule. Refused by name
+                        // unless the parser already reported it; either way the state admits every target,
+                        // so nothing cascades from it.
+                        if (!ruleHasRecovered(a.value)) st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this `rule=` on the state-child `<" + c.name + ">` names no variant — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`; the attribute would be read as no rule at all")
+                        const tin: TypeInfo | not = typeInfoOf(g, es)
+                        if (tin is given) {
+                            let vn = 0
+                            for (const v of enumVariants(tin.def)) {
+                                targets = targets.concat([vn])
+                                vn = vn + 1
+                            }
+                        }
+                    } else if (a.name == "rule") {
                         const names: string[] = ruleNames(a.value)
                         for (const n of names) {
                             const ti: int = variantIndex(g, es, n)
@@ -5378,6 +5412,61 @@ ${
     }
 
     // `rule=.X` or `rule=(.X | .Y)` → the variant names.
+    // s478 fix r1 (#1894 L1): a `rule=` written as an expression (`.V`, `(.A | .B)`, `*`).
+    // A valueless `rule` (also what the parser leaves of `<Done(rule) …>`, a reserved-name
+    // payload binder — §51.0.B.1) keeps its old reading: no edges, no refusal of its own.
+    fn ruleIsExpr(v: AAttrValue) -> boolean {
+        return match v {
+            .Bare(e: e) :> true
+            .Paren(e: e) :> true
+            .NoValue :> true
+            .Quoted(v: s) :> false
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    fn ruleValueless(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> true
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
+            .Quoted(v: s) :> false
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    fn ruleHasRecovered(v: AAttrValue) -> boolean {
+        return match v {
+            .Bare(e: e) :> exprHasRecovered(e)
+            .Paren(e: e) :> exprHasRecovered(e)
+            .NoValue :> false
+            .Quoted(v: s) :> false
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    fn exprHasRecovered(e: AExpr) -> boolean {
+        if (recoveredInit(e)) return true
+        for (const x of exprKids(e)) {
+            if (exprHasRecovered(x)) return true
+        }
+        return false
+    }
+
+    fn ruleSpelling(v: AAttrValue) -> string {
+        return match v {
+            .Quoted(v: s) :> "\"" + s + "\""
+            .Dur(text: s) :> s
+            .Braced(b: b) :> "{ … }"
+            .NoValue :> ""
+            .Bare(e: e) :> "…"
+            .Paren(e: e) :> "(…)"
+        }
+    }
+
     fn ruleNames(v: AAttrValue) -> string[] {
         return match v {
             .Bare(e: e) :> altNames(e)
@@ -7661,7 +7750,7 @@ ${
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
                              succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
-                             printCalls: pscan.calls }
+                             printCalls: pscan.calls, cycles: importCycles(files) }
         return { g: g, st: st }
     }
 
@@ -8593,7 +8682,7 @@ ${
             // (E-IMPORT-002)") reported at the cycle (checkImports). That report owns it: the
             // read itself is one the rule this message states allows ("in a file this one
             // imports"), so it is not reported again. The compile still fails (E-IMPORT-002).
-            if (!kc.ready && kc.file != env.file && onCommonCycle(env.g.files, env.file, kc.file)) return plain(kc.annot, st)
+            if (!kc.ready && kc.file != env.file && onCommonCycle(env.g.cycles, env.file, kc.file)) return plain(kc.annot, st)
             if (!kc.ready) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is read before it is initialized — a file-scope constant's initializer reads only the constants initialized before it (declared earlier in this file, or in a file this one imports)", st)
             return plain(kc.ty, addName(st, e.nid, NameFact.NConst(kc.sym)))
         }
@@ -11682,6 +11771,274 @@ ${
         return { check: Check.RuntimeEdge, st: st }
     }
 
+    // s478 (boot-missing-checks) — a literal-variant write `@f = .V` to a field with a
+    // `rule=` graph, judged against what the write SITE tells us about the from-state.
+    //   §51.0.F: "Inside a state-child body, the compiler knows `@marioState == .ThisVariant`
+    //   … Inside `<Small>`'s body the compiler knows the from-state; the rule= contract
+    //   gives the legal targets; any other target is rejected statically." → a target not
+    //   in the enclosing state-child's `rule=` is E-ENGINE-INVALID-TRANSITION (a state-child
+    //   with no `rule=` has no legal target).
+    //   §51.0.F.1: "A self-write to the current variant is a runtime NO-OP, NOT a `rule=`
+    //   violation. This holds REGARDLESS of whether the from-state's `rule=` lists the
+    //   current variant" — and the Info lint W-ENGINE-SELF-WRITE-DETECTED "Inside a
+    //   state-child body … fires when `@var = .CurrentVariant` … STRICT"; "Outside any
+    //   state-child body … fires CONSERVATIVELY when `@var = .Variant` … and `.Variant` is
+    //   one of the engine's declared variants". The site is "inside" when the write's span
+    //   lies in the body of one of THIS field's state-children (same file).
+    // `not` — the write is not a literal declared variant, or stands outside every state-child
+    // body of the field: transitionCheck decides alone. INTERIM (gap
+    // g-boot-engine-self-write-outside-lint-s478): the CONSERVATIVE outside-body Info lint is
+    // not emitted yet — it would fire on every literal engine write in a function body
+    // (§66.19.6's own `load()` / `finish()`); Info-level, so no program the SPEC rejects is accepted.
+    fn literalStateWrite(env: Env, p: WPlace, f: FieldInfo, g: TransitionGraph, value: AExpr, key: string, st: AS) -> RCheck | not {
+        const lit: string = variantLitName(value.k)
+        if (lit == "") return not
+        const to: int = variantIndex(env.g.types, g.enumSym, lit)
+        if (to < 0) return not
+        const sc: AStateChild | not = enclosingStateChild(env, p, f, value.span)
+        if (sc is not) return not
+        let wkey: string = key
+        if (wkey == "") wkey = "@" + f.sym.hint
+        if (!stateChildFromKnown(sc, value.span, wkey)) return not
+        const from: int = variantIndex(env.g.types, g.enumSym, sc.name)
+        if (from < 0) return not
+        if (to == from) {
+            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1). Informational: remove the write, or check its target if a state change was expected")
+            return { check: Check.RuntimeEdge, st: st2 }
+        }
+        let targets: int[] = []
+        for (const e of g.edges) {
+            if (e.origin == from) targets = targets.concat(e.targets)
+        }
+        if (targets.indexOf(to) >= 0) return { check: Check.RuntimeEdge, st: st }
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, g.enumSym)
+        let allowed: string = "no `rule=` — it has no outgoing edge"
+        if (ti is given) {
+            if (targets.length > 0) allowed = ruleText(enumVariants(ti.def), targets)
+        }
+        const st3: AS = addDiag(st, env.file, value.span, "E-ENGINE-INVALID-TRANSITION", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` is not a legal transition: from `." + sc.name + "` the contract is " + allowed + " (§51.0.F — inside a state-child body the from-state is known, so the write is checked here). Change the target, or add `." + lit + "` to `<" + sc.name + ">`'s `rule=`")
+        return { check: Check.RuntimeEdge, st: st3 }
+    }
+
+    // The state-child of field `f` (of the declaration `p` writes) whose source span holds `at`.
+    fn enclosingStateChild(env: Env, p: WPlace, f: FieldInfo, at: ASpan) -> AStateChild | not {
+        const ds: DeclSrc | not = findDeclSrc(env.g, p.decl.sym)
+        if (ds is not) return not
+        if (ds.file != env.file) return not
+        for (const sc of fieldStateChildren(ds, f.nid)) {
+            if (sc.span.start <= at.start && at.end <= sc.span.end) return sc
+        }
+        return not
+    }
+
+    // s478 fix r1 (#1894 H1) — is the from-state of the write whose value stands at `at`
+    // STATICALLY KNOWN inside the state-child `sc`? §51.0.F: "Compile-time validation when
+    // from-state is statically known. Inside a state-child body, the compiler knows
+    // `@marioState == .ThisVariant`" — "When the from-state is dynamic (write outside any
+    // state-child body, or after a chain of conditionals), the rule= is enforced at runtime".
+    // The body's knowledge holds only up to the first statement that could move the field:
+    // known iff, on the path from the body down to the write, no EARLIER statement of any
+    // enclosing statement list writes the field (`wkey`, placeKey spelling) or makes a call
+    // (a call may write it — conservative), no enclosing condition / subject does, and the
+    // write is not in a loop, a deferred body or a nested function (each runs at a point
+    // the body's state no longer fixes). An earlier `if` / `match` that writes the field in
+    // ANY branch makes it dynamic too (conservative: which branch ran is not known).
+    // Anything this walk does not locate is dynamic — the runtime check decides.
+    fn stateChildFromKnown(sc: AStateChild, at: ASpan, wkey: string) -> boolean {
+        return nodesFrom(sc.body, at, wkey) == 1
+    }
+
+    // 0 — `at` is not in these; 1 — in them, from-state known; 2 — in them, dynamic.
+    fn nodesFrom(ns: ANode[], at: ASpan, wkey: string) -> int {
+        for (const n of ns) {
+            if (spanIn(at, n.span)) return nodeFrom(n, at, wkey)
+        }
+        return 0
+    }
+
+    fn nodeFrom(n: ANode, at: ASpan, wkey: string) -> int {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: el) :> elemFrom(el, at, wkey)
+            .Interp(e: x) :> exprFrom(x, at, wkey)
+            .Effect(w: w) :> seqFrom(w.body.stmts, at, wkey)
+            .Request(r: r) :> seqFrom(r.body.stmts, at, wkey)
+            .Run(b: b) :> seqFrom(b.stmts, at, wkey)
+            .Text(text: t) :> 2
+            .DeclNode(d: d) :> 2
+            .Css(c: c) :> 2
+            .Gather(f: f) :> 2
+        }
+    }
+
+    fn elemFrom(el: AElem, at: ASpan, wkey: string) -> int {
+        for (const a of el.attrs) {
+            if (spanIn(at, a.span)) return attrFrom(a.value, at, wkey)
+        }
+        const r: int = nodesFrom(el.kids, at, wkey)
+        if (r == 0) return 2
+        return r
+    }
+
+    fn attrFrom(v: AAttrValue, at: ASpan, wkey: string) -> int {
+        const r: int = match v {
+            .Bare(e: e) :> exprFrom(e, at, wkey)
+            .Paren(e: e) :> exprFrom(e, at, wkey)
+            .Braced(b: b) :> seqFrom(b.stmts, at, wkey)
+            .NoValue :> 2
+            .Quoted(v: s) :> 2
+            .Dur(text: s) :> 2
+        }
+        if (r == 0) return 2
+        return r
+    }
+
+    // A statement list, run in order: the statement holding `at` decides, unless an
+    // earlier one could have moved the field (stmtMoves).
+    fn seqFrom(ss: AStmt[], at: ASpan, wkey: string) -> int {
+        let moved = false
+        for (const s of ss) {
+            if (spanIn(at, s.span)) {
+                const r: int = stmtFrom(s, at, wkey)
+                if (moved) return 2
+                if (r == 0) return 2
+                return r
+            }
+            if (stmtMoves(s, wkey)) moved = true
+        }
+        return 0
+    }
+
+    fn stmtFrom(s: AStmt, at: ASpan, wkey: string) -> int {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> exprFrom(e, at, wkey)
+            .If(cond: c, thenB: t, elseB: el) :> ifFrom(c, t, el, at, wkey)
+            .Given(name: n, subject: sub, body: b) :> guardedFrom(sub, b, at, wkey)
+            .Local(name: n) :> 2
+            .Return(e: x) :> 2
+            .For(f: lf) :> 2                  // a later iteration starts from what an earlier one wrote
+            .Break(label: x) :> 2
+            .Continue(label: x) :> 2
+            .Lift(what: w) :> 2
+            .LocalFn(f: x) :> 2               // runs wherever it is called
+            .EffectStmt(w: w) :> 2
+            .Defer(body: b) :> 2              // runs at the block's exit, after the rest of it
+            .Fail(f: x) :> 2
+        }
+    }
+
+    fn ifFrom(c: AExpr, t: ABlock, el: ABlock | not, at: ASpan, wkey: string) -> int {
+        if (exprMoves(c, wkey)) return 2
+        if (spanIn(at, t.span)) return seqFrom(t.stmts, at, wkey)
+        if (el is given) return seqFrom(el.stmts, at, wkey)
+        return 2
+    }
+
+    fn guardedFrom(sub: AExpr, b: ABlock, at: ASpan, wkey: string) -> int {
+        if (exprMoves(sub, wkey)) return 2
+        return seqFrom(b.stmts, at, wkey)
+    }
+
+    // The write itself (an assignment whose value is `at`), or a `match` / `!{}` whose arm
+    // holds it (the arms are exclusive: an earlier arm did not run). Any other expression
+    // holding the write is dynamic.
+    fn exprFrom(e: AExpr, at: ASpan, wkey: string) -> int {
+        const v: AExpr | not = assignedValue(e)
+        if (v is given) {
+            if (v.span.start == at.start && v.span.end == at.end) return 1
+            return 2
+        }
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return 2
+        if (exprMoves(h.subject, wkey)) return 2
+        for (const a of handledArms(h)) {
+            if (spanIn(at, a.span)) {
+                const body: AArmBody = a.body
+                for (const x of armExprOf(body)) { return exprFrom(x, at, wkey) }
+                for (const b of armBlockOf(body)) { return seqFrom(b.stmts, at, wkey) }
+            }
+        }
+        return 2
+    }
+
+    // Could running `s` change the field `wkey`? A write of it (or of a place holding it,
+    // or of a part of it), or any call.
+    fn stmtMoves(s: AStmt, wkey: string) -> boolean {
+        for (const key of stmtEffects(s, [])) {
+            if (keyMoves(key, wkey)) return true
+        }
+        return stmtCalls(s)
+    }
+
+    fn exprMoves(e: AExpr, wkey: string) -> boolean {
+        for (const key of exprEffects(e)) {
+            if (keyMoves(key, wkey)) return true
+        }
+        return exprCalls(e)
+    }
+
+    fn keyMoves(key: string, wkey: string) -> boolean {
+        if (key.startsWith("()")) return true
+        if (key == wkey) return true
+        return wkey.startsWith(key + ".") || key.startsWith(wkey + ".")
+    }
+
+    fn stmtCalls(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> exprCalls(e)
+            .Local(name: n, init: i) :> exprCalls(i)
+            .Return(e: e) :> maybeCalls(e)
+            .If(cond: c, thenB: t, elseB: el) :> exprCalls(c) || blockCalls(t) || maybeBlockCalls(el)
+            .Given(name: n, subject: sub, body: b) :> exprCalls(sub) || blockCalls(b)
+            .For(f: lf) :> exprsCalls(forExprs(lf)) || blockCalls(lf.body)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: w) :> exprsCalls(liftExprs(w))
+            .LocalFn(f: f) :> false              // declaring runs nothing
+            .EffectStmt(w: w) :> false
+            .Defer(body: b) :> blockCalls(b)
+            .Fail(f: f) :> exprsCalls(failExprs(f))
+        }
+    }
+
+    fn blockCalls(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtCalls(s)) return true
+        }
+        return false
+    }
+
+    fn maybeBlockCalls(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockCalls(b)
+    }
+
+    fn maybeCalls(e: AExpr | not) -> boolean {
+        if (e is not) return false
+        return exprCalls(e)
+    }
+
+    fn exprsCalls(es: AExpr[]) -> boolean {
+        for (const x of es) {
+            if (exprCalls(x)) return true
+        }
+        return false
+    }
+
+    fn exprCalls(e: AExpr) -> boolean {
+        if (calleeOf(e.k) is given) return true
+        if (sqlOfK(e.k) is given) return true
+        for (const x of exprKids(e)) {
+            if (exprCalls(x)) return true
+        }
+        for (const b of exprBlocks(e)) {
+            if (blockCalls(b)) return true
+        }
+        return false
+    }
+
     fn variantLitName(k: AExprK) -> string {
         return match k {
             .Variant(name: n) :> n
@@ -12559,6 +12916,8 @@ ${
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
+            const lw: RCheck | not = literalStateWrite(env, p, f, g, value, key, st)
+            if (lw is given) return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: lw.check }, st: lw.st }
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }
@@ -24440,7 +24799,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls }
+                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -24490,9 +24849,11 @@ ${
         if (ty is not) ty = ri.x.ty
         if (ty is not) {
             // (not when binding the initializer already failed — that report owns it: no cascade;
-            // s478: nor when the constant's file lies on an import cycle — a read of a constant
-            // the cycle left uninitialized has no type, and E-IMPORT-002 (§21.3) owns that)
-            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length && !onCommonCycle(g.files, c.file, c.file)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
+            // s478: nor when the initializer reads a constant the import cycle left uninitialized
+            // — that read has no type, and E-IMPORT-002 (§21.3) owns it: cycleUntypedRead, the
+            // same reader/declarer pair resolveName lets through, not "the file is on a cycle" —
+            // or a constant whose type is unknown already, whose own report owns it)
+            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length && !cycleUntypedRead(g, c.file, c.init)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
             return { c: constAs(c, not, true, false), st: st }
         }
         return { c: constAs(c, ty, true, true), st: st }
@@ -24657,11 +25018,62 @@ ${
     // file that exports it), else `not`.
     // s478: do `a` and `b` lie on one import cycle (link.scrml importCycles — the cycles
     // checkImports reports E-IMPORT-002 for)?
-    fn onCommonCycle(files: FileAst[], a: string, b: string) -> boolean {
-        for (const c of importCycles(files)) {
+    fn onCommonCycle(cycles: ImportCycle[], a: string, b: string) -> boolean {
+        for (const c of cycles) {
             if (c.cycle.indexOf(a) >= 0 && c.cycle.indexOf(b) >= 0) return true
         }
         return false
+    }
+
+    // s478 (review-followups-2): does the initializer `e` (read in `file`) owe its unknown type
+    // to a read another report owns — a constant of another file on a common import cycle
+    // that is not initialized yet (resolveName lets that read through: E-IMPORT-002, §21.3,
+    // owns it), or an initialized constant whose own type is unknown (constValue: its own
+    // refusal, its initializer's error, or that cycle owns it — always an Error, no cascade)?
+    // `e` is an initializer constBlocker passed: names, literals, members, operators.
+    fn cycleUntypedRead(g: Globals, file: string, e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> cycleUntypedName(g, file, n)
+            .Member(obj: o, name: n) :> cycleUntypedRead(g, file, o)
+            .Unary(op: o, e: x) :> cycleUntypedRead(g, file, x)
+            .Binary(op: o, l: l, r: r) :> cycleUntypedRead(g, file, l) || cycleUntypedRead(g, file, r)
+            .Ternary(test: t, yes: y, no: n) :> cycleUntypedRead(g, file, t) || cycleUntypedRead(g, file, y) || cycleUntypedRead(g, file, n)
+            .Template(quasis: q, slots: ss) :> cycleUntypedAny(g, file, ss)
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Call(callee: c) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    fn cycleUntypedAny(g: Globals, file: string, es: AExpr[]) -> boolean {
+        for (const x of es) {
+            if (cycleUntypedRead(g, file, x)) return true
+        }
+        return false
+    }
+
+    fn cycleUntypedName(g: Globals, file: string, name: string) -> boolean {
+        const kc: ConstInfo | not = constNamed(g, file, name)
+        if (kc is not) return false
+        if (!kc.ready) return kc.file != file && onCommonCycle(g.cycles, file, kc.file)
+        return kc.ty is not
     }
 
     fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
@@ -45340,7 +45752,7 @@ ${
         // SHALL detect cycles in the import graph before any stage runs and report all files in
         // the cycle." One report per file on a cycle (link.scrml importCycles), at its statement
         // that closes it; re-export edges are edges of the graph (§21.4).
-        for (const c of importCycles(files)) {
+        for (const c of g.cycles) {
             st = addDiag(st, c.file, c.at, "E-IMPORT-002", cycleWhy(c))
         }
         return st
