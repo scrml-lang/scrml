@@ -5608,7 +5608,7 @@ ${
             const b: RBlock = parseBlock(tp2)
             let t3: TP = expectRegionEnd(b.tp)
             // §5.2.4: two or more statements in a non-handler `{…}` value
-            if (!handler && !decl && b.b.stmts.length >= 2 && hardErrors(t3.diags) == hardErrors(tp2.diags)) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
+            if (!handler && !decl && isStatementList(tp2, b.b, t3)) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
             if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
             return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
         }
@@ -5714,11 +5714,26 @@ ${
             const m: MP = mDiag(md, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value is a literal or a plain `@ref` written bare, or any other expression PARENTHESIZED — `=(…)`, not `=" + dollarOpen() + "…}` (§66.2.4)", start, md.pos)
             return { v: AAttrValue.Paren(recoveredAt(m, start)), mp: mBump(m) }
         }
+        if (name == "effect") {
+            // §51.0.H: on an engine opener / state-child `effect=${…}` is a logic
+            // block that runs on entry; on any other element a plain attribute.
+            // The parser cannot tell the two apart and the bootstrap builds the
+            // engine block nowhere — refused by name rather than read as an attribute.
+            const me: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), mp.diags)
+            const m5: MP = mDiag(me, "E-BOOTSTRAP-UNSUPPORTED", "`effect=" + dollarOpen() + "…}` — an engine's `effect=` logic block (§51.0.H) is not in the bootstrap; on any other element `effect=` is a plain attribute, written `effect=(…)` (one expression, §5.2.4)", start, me.pos)
+            return { v: AAttrValue.Paren(recoveredAt(m5, start)), mp: mBump(m5) }
+        }
         // a handler value led by `if` / `match` is its statement (block-like, §7.2.2),
         // never a value-`if` / value `match` whose arms would be assignments
         const stmtLed: boolean = handler && (isWord(adv(tp), "if") || isWord(adv(tp), "match"))
         let one: RExpr | not = not
         if (!stmtLed) one = oneExprIn(tp)
+        if (one is not && !stmtLed && !parenHasStatements(tp) && !stmtKeywordAt(adv(tp))) {
+            // no statement separator and no statement keyword: the value is one
+            // expression that does not parse — its own report, never a
+            // statement-list reading (`${@s is .Busy}` is not two statements)
+            one = exprWithErrors(tp)
+        }
         if (one is not) {
             const n0: int = tp.diags.length
             const b: RBlock = parseBlock(tp)
@@ -5755,6 +5770,33 @@ ${
     }
 
     fn dollarOpen() -> string { return "$" + "{" }
+
+    // `{ expr }` read as one expression, its errors reported where they arise.
+    fn exprWithErrors(tp: TP) -> RExpr {
+        const t: TP = expectP(tp, "{")
+        const r: RExpr = parseAssign(t)
+        let t2: TP = r.tp
+        if (isP(t2, ";")) t2 = adv(t2)
+        t2 = expectRegionEnd(expectP(t2, "}"))
+        return { e: r.e, tp: t2 }
+    }
+
+    // A statement keyword — the value is a statement list, not an expression.
+    fn stmtKeywordAt(tp: TP) -> boolean {
+        for (const w of ["if", "for", "while", "do", "const", "let", "var", "return", "given", "lift", "fail", "function", "fn", "switch", "try", "throw", "break", "continue", "defer", "match"]) {
+            if (isWord(tp, w)) return true
+        }
+        return false
+    }
+
+    // §5.2.4 for a non-handler `{…}` value: two or more statements, parsed clean
+    // (no error beyond a terminator), written as a list — a statement-level `;`
+    // or a statement keyword — not one expression the parser could not read.
+    fn isStatementList(tp: TP, b: ABlock, after: TP) -> boolean {
+        if (b.stmts.length < 2) return false
+        if (hardErrors(after.diags) != hardErrors(tp.diags)) return false
+        return parenHasStatements(tp) || stmtKeywordAt(adv(tp))
+    }
 
     // `{ expr }` / `{ expr; }` — the whole region one expression, else `not`.
     // (A braced-arrow body is reported by parseLambda, and still one expression.)

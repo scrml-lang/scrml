@@ -156,6 +156,15 @@ describe("3 — the named codes", () => {
     expect(c).toContain("E-SWITCH-FORBIDDEN");
     expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
   });
+  test("one expression the bootstrap cannot parse is that expression's own report, never a statement-list reading", () => {
+    const c = codes(`type S:enum = { Busy, Idle }\n<program>\nlet <s:S=.Idle/>\n<button disabled=\${@s is .Busy}>x</button>\n</program>\n`);
+    expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
+    expect(c.length).toBeGreaterThan(0);
+  });
+  test("a namespaced attribute after an unquoted value is not read as `in` / `is`: `<p if=@ok in:fade out:fly>`", () => {
+    const c = codes(prog(`<p if=@ok in:fade out:fly>x</p>`));
+    expect(c).not.toContain("E-ATTR-UNQUOTED-OPERATOR");
+  });
   test("one expression is legal: a trailing `;`, a `;` in a string, an arrow body", () => {
     expect(codes(prog(`<p title=\${ @last; }>x</p>`))).toEqual([]);
     expect(codes(prog(`<p title=\${ "a;b" }>x</p>`))).toEqual([]);
@@ -198,6 +207,11 @@ describe("4 — refused by name, never silently accepted", () => {
   test("`${() => f}` — an arrow returning a function", () => {
     const e = errs(prog(`<button onclick=\${() => track}>go</>`));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("`effect=${…}` — the §51.0.H engine block / plain attribute the parser cannot tell apart", () => {
+    const e = errs(prog(`<div effect=\${ track("a") }>x</div>`));
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("§51.0.H");
   });
   test("a declaration's own value written `${…}` (§66.2.4: parenthesized)", () => {
     expect(codes(`<program>\nlet <n:int=\${1}/>\n<p>\${@n}</p>\n</program>\n`)).toEqual(["E-DECL-OPENER-EXPR-UNPARENTHESIZED"]);

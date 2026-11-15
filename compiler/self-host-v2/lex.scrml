@@ -1704,6 +1704,7 @@ ${
         const after: int = peekCode(c, w.length)
         if (isIdentCont(after)) return false
         if (after == 61 && peekCode(c, w.length + 1) != 61) return false   // `in=…` is an attribute
+        if (after == 58) return false                                        // `in:slide` is a namespaced attribute
         return true
     }
 
