@@ -11312,6 +11312,63 @@ ${
         return { check: Check.RuntimeEdge, st: st }
     }
 
+    // s478 (boot-missing-checks) — a literal-variant write `@f = .V` to a field with a
+    // `rule=` graph, judged against what the write SITE tells us about the from-state.
+    //   §51.0.F: "Inside a state-child body, the compiler knows `@marioState == .ThisVariant`
+    //   … Inside `<Small>`'s body the compiler knows the from-state; the rule= contract
+    //   gives the legal targets; any other target is rejected statically." → a target not
+    //   in the enclosing state-child's `rule=` is E-ENGINE-INVALID-TRANSITION (a state-child
+    //   with no `rule=` has no legal target).
+    //   §51.0.F.1: "A self-write to the current variant is a runtime NO-OP, NOT a `rule=`
+    //   violation. This holds REGARDLESS of whether the from-state's `rule=` lists the
+    //   current variant" — and the Info lint W-ENGINE-SELF-WRITE-DETECTED "Inside a
+    //   state-child body … fires when `@var = .CurrentVariant` … STRICT"; "Outside any
+    //   state-child body … fires CONSERVATIVELY when `@var = .Variant` … and `.Variant` is
+    //   one of the engine's declared variants". The site is "inside" when the write's span
+    //   lies in the body of one of THIS field's state-children (same file).
+    // `not` — the write is not a literal declared variant, or stands outside every state-child
+    // body of the field: transitionCheck decides alone. INTERIM (gap
+    // g-boot-engine-self-write-outside-lint-s478): the CONSERVATIVE outside-body Info lint is
+    // not emitted yet — it would fire on every literal engine write in a function body
+    // (§66.19.6's own `load()` / `finish()`); Info-level, so no program the SPEC rejects is accepted.
+    fn literalStateWrite(env: Env, p: WPlace, f: FieldInfo, g: TransitionGraph, value: AExpr, st: AS) -> RCheck | not {
+        const lit: string = variantLitName(value.k)
+        if (lit == "") return not
+        const to: int = variantIndex(env.g.types, g.enumSym, lit)
+        if (to < 0) return not
+        const sc: AStateChild | not = enclosingStateChild(env, p, f, value.span)
+        if (sc is not) return not
+        const from: int = variantIndex(env.g.types, g.enumSym, sc.name)
+        if (from < 0) return not
+        if (to == from) {
+            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1). Informational: remove the write, or check its target if a state change was expected")
+            return { check: Check.RuntimeEdge, st: st2 }
+        }
+        let targets: int[] = []
+        for (const e of g.edges) {
+            if (e.origin == from) targets = targets.concat(e.targets)
+        }
+        if (targets.indexOf(to) >= 0) return { check: Check.RuntimeEdge, st: st }
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, g.enumSym)
+        let allowed: string = "no `rule=` — it has no outgoing edge"
+        if (ti is given) {
+            if (targets.length > 0) allowed = ruleText(enumVariants(ti.def), targets)
+        }
+        const st3: AS = addDiag(st, env.file, value.span, "E-ENGINE-INVALID-TRANSITION", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` is not a legal transition: from `." + sc.name + "` the contract is " + allowed + " (§51.0.F — inside a state-child body the from-state is known, so the write is checked here). Change the target, or add `." + lit + "` to `<" + sc.name + ">`'s `rule=`")
+        return { check: Check.RuntimeEdge, st: st3 }
+    }
+
+    // The state-child of field `f` (of the declaration `p` writes) whose source span holds `at`.
+    fn enclosingStateChild(env: Env, p: WPlace, f: FieldInfo, at: ASpan) -> AStateChild | not {
+        const ds: DeclSrc | not = findDeclSrc(env.g, p.decl.sym)
+        if (ds is not) return not
+        if (ds.file != env.file) return not
+        for (const sc of fieldStateChildren(ds, f.nid)) {
+            if (sc.span.start <= at.start && at.end <= sc.span.end) return sc
+        }
+        return not
+    }
+
     fn variantLitName(k: AExprK) -> string {
         return match k {
             .Variant(name: n) :> n
@@ -12189,6 +12246,8 @@ ${
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
+            const lw: RCheck | not = literalStateWrite(env, p, f, g, value, st)
+            if (lw is given) return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: lw.check }, st: lw.st }
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }

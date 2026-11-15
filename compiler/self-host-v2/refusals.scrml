@@ -106,6 +106,18 @@ ${
             rowOn("reflect()", "§22.4", "E-META-008", ["reflect", "("], ["E-SCOPE-001"], true, "`reflect()` is a meta-context call (§22.4): it is valid only inside a `^{ }` meta block"),
             rowOn("x is <value>", "§45.5", "E-EQ-005", ["is", "$n|$s|true|false|@"], [], false, "`is` tests absence (`not`, `given`) or a variant, never a value (§45.5): compare a value with `==`"),
             rowOn("{ @x } shorthand", "§6.1.2", "E-OBJECT-SHORTHAND-CELL", ["!$", "{|,", "@", "$w", "}|,"], ["E-PARSE-OBJECT"], false, "an object-literal shorthand cannot take its key from a cell read (§6.1.2): write the key, `{ x: @x }`"),
+            // s478 (boot-missing-checks): a FUNCTION-typed parameter. Before these rows the
+            // struct-field rows below relabelled it E-STRUCT-FUNCTION-FIELD — a struct-field
+            // code on a parameter. On a `server function` the SPEC names the code, §12.5:
+            // "A parameter whose type is NOT JSON-serializable — … (function, markup … ) —
+            // SHALL be a compile error (**E-ROUTE-004**: non-serializable parameter type to
+            // server function)". On any other function a function-typed parameter is scrml
+            // (a function may be PASSED, §15.11.5) the bootstrap does not build: function
+            // types are not in its type grammar.
+            rowOn("server function parameter of function type", "§12.5", "E-ROUTE-004", ["server", "function", "$w", "(", "...", ":", "fn", "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a server function's arguments cross the client→server boundary as JSON (§12.3), and a function value cannot be serialized (§12.5): pass the data the function would work on, and keep the behaviour on the side that runs it"),
+            rowOn("server function parameter of function type", "§12.5", "E-ROUTE-004", ["server", "function", "$w", "(", "...", ":", "(", ")", "-|=>"], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a server function's arguments cross the client→server boundary as JSON (§12.3), and a function value cannot be serialized (§12.5): pass the data the function would work on, and keep the behaviour on the side that runs it"),
+            rowOn("function-typed parameter", "§15.11.5", U, ["fn|function", "$w", "(", "...", ":", "fn", "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "function types are not in the bootstrap's type grammar yet; call the function where it is defined instead of passing it"),
+            rowOn("function-typed parameter", "§15.11.5", U, ["fn|function", "$w", "(", "...", ":", "(", ")", "-|=>"], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "function types are not in the bootstrap's type grammar yet; call the function where it is defined instead of passing it"),
             rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", "fn", "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
             rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", "(", ")", "-|=>"], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
             // ---- retired by a ruling: named, with what replaces it ----
@@ -338,8 +350,11 @@ ${
         return ts[ts.length - 1].line
     }
 
-    fn refusalDiag(f: Firing, path: string) -> Diag {
+    fn refusalDiag(f: Firing, path: string, src: string) -> Diag {
         const r: Refusal = f.r
+        // s478: §12.5 — the E-ROUTE-004 "message SHALL identify the server function by name, the
+        // offending parameter … and the non-serializable kind": the matched source names both.
+        if (r.code == "E-ROUTE-004") return newDiag(r.code, "`" + src.substring(f.start, f.end) + "…` — a parameter of function type on a server function: " + r.hint, path, mkSpan(f.start, f.end))
         if (r.code == "E-BOOTSTRAP-UNSUPPORTED") {
             const tail: string = r.hint == "" ? "" : " — " + r.hint
             return newDiag(r.code, "`" + r.construct + "` (" + r.section + ") is not in the bootstrap yet; it is refused here by name rather than misread" + tail, path, mkSpan(f.start, f.end))
@@ -395,7 +410,7 @@ ${
                 const fs: Firing[] = firingsIn(f.src, mine)
                 if (fs.length > 0) {
                     const starts: int[] = refLineStarts(f.src)
-                    for (const x of fs) { named = named.concat([refusalDiag(x, f.path)]) }
+                    for (const x of fs) { named = named.concat([refusalDiag(x, f.path, f.src)]) }
                     p = refKeep(p, f.path, fs, starts)
                     l = refKeep(l, f.path, fs, starts)
                 }

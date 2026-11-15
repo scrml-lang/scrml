@@ -151,3 +151,47 @@ describe("§66.19.6 — negative lines", () => {
 function compileDiags(src) {
   return frontEnd(mods, [{ path: "after.scrml", src }]).diags;
 }
+
+// s478 (boot-missing-checks) — §51.0.F: "Inside a state-child body, the compiler knows
+// `@marioState == .ThisVariant` … the rule= contract gives the legal targets; any other target
+// is rejected statically." §51.0.F.1: a self-write to the current variant is a no-op, NOT a
+// rule= violation, and the Info lint W-ENGINE-SELF-WRITE-DETECTED surfaces it (STRICT inside).
+describe("§51.0.F / §51.0.F.1 — a literal write inside a state-child body", () => {
+  const prog = (idle, loading = "", done = "") => `<program>
+type Phase:enum = { Idle, Loading, Done }
+<phase:Phase=.Idle single>
+    <Idle rule=.Loading>
+        <button onclick=\${${idle}}>a</>
+    </>
+    <Loading rule=.Done>${loading}</>
+    <Done>${done}</>
+</>
+<*phase/>
+</program>
+`;
+  const diags = (src) => compileDiags(src).map((d) => [d.code, d.severity]);
+
+  test("a target in the state's rule= is legal — no diagnostic", () => {
+    expect(diags(prog("@phase = .Loading"))).toEqual([]);
+  });
+
+  test("a target NOT in the state's rule= → E-ENGINE-INVALID-TRANSITION (Error), naming the state and its contract", () => {
+    const d = compileDiags(prog("@phase = .Done"));
+    expect(d.map((x) => [x.code, x.severity])).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+    expect(d[0].message).toContain("<Idle>");
+    expect(d[0].message).toContain("`rule=.Loading`");
+  });
+
+  test("a state-child with no rule= has no legal target", () => {
+    const src = prog("@phase = .Loading", "", `<button onclick=\${@phase = .Idle}>b</>`);
+    expect(diags(src)).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+  });
+
+  test("a self-write is W-ENGINE-SELF-WRITE-DETECTED (Info), never E-ENGINE-INVALID-TRANSITION — even though .Idle is not in Idle's rule=", () => {
+    expect(diags(prog("@phase = .Idle"))).toEqual([["W-ENGINE-SELF-WRITE-DETECTED", "Info"]]);
+  });
+
+  test("a non-literal target is left to the runtime edge check", () => {
+    expect(diags(prog("@phase = @phase"))).toEqual([]);
+  });
+});
