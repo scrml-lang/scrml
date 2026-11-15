@@ -29,7 +29,13 @@ Lane: bootstrap conformance FAILs where a required check is missing.
 - [x] L1: quoted / braced / no-variant `rule=` refused by name; state admits every target (no cascade).
 - [x] gaps filed: payload literal write (L2), server-fn signature shapes (L5), refusal line-scope swallow (L6),
       rule= spellings + unparsed `rule=*` (L1).
-- [ ] conformance + corpus re-measure, CI checks, hook, push
+- [x] a valueless `rule` (what the parser leaves of `<Done(rule) …>`) keeps its old reading — no refusal
+      cascade on engine/payload-reserved-collision-pos.
+- [x] conformance vs base 367ddb3b6: 475→478 PASS, 63→60 FAIL, 0 PASS→FAIL (same 3 FAIL→PASS as c7e31c9cb)
+- [x] corpus (3150, as-written + twins) vs base: newly-rejecting 1 (engine/rule-violation-pos, target),
+      0 newly-accepting; vs c7e31c9cb: 0 changed
+- [x] CI checks-job gates green (types, snippet, claim, corpus-floor, md-shim, severity --check)
+- [ ] push
 
 ## Todo
 - [ ] CI checks, hook, PR

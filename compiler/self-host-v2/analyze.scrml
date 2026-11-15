@@ -5165,7 +5165,7 @@ ${
                                 vq = vq + 1
                             }
                         }
-                    } else if (a.name == "rule" && ruleNames(a.value).length == 0) {
+                    } else if (a.name == "rule" && ruleNames(a.value).length == 0 && !ruleValueless(a.value)) {
                         // s478 fix r1 (#1894 L1) — an unquoted `rule=` that names no variant (`rule=Loading`,
                         // or one the parser could not read): before it was read as no rule. Refused by name
                         // unless the parser already reported it; either way the state admits every target,
@@ -5340,11 +5340,24 @@ ${
 
     // `rule=.X` or `rule=(.X | .Y)` → the variant names.
     // s478 fix r1 (#1894 L1): a `rule=` written as an expression (`.V`, `(.A | .B)`, `*`).
+    // A valueless `rule` (also what the parser leaves of `<Done(rule) …>`, a reserved-name
+    // payload binder — §51.0.B.1) keeps its old reading: no edges, no refusal of its own.
     fn ruleIsExpr(v: AAttrValue) -> boolean {
         return match v {
             .Bare(e: e) :> true
             .Paren(e: e) :> true
-            .NoValue :> false
+            .NoValue :> true
+            .Quoted(v: s) :> false
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    fn ruleValueless(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> true
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
             .Quoted(v: s) :> false
             .Dur(text: s) :> false
             .Braced(b: b) :> false
