@@ -5608,7 +5608,7 @@ ${
             const b: RBlock = parseBlock(tp2)
             let t3: TP = expectRegionEnd(b.tp)
             // §5.2.4: two or more statements in a non-handler `{…}` value
-            if (!handler && !decl && b.b.stmts.length >= 2) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
+            if (!handler && !decl && b.b.stmts.length >= 2 && hardErrors(t3.diags) == hardErrors(tp2.diags)) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
             if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
             return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
         }
@@ -5714,16 +5714,25 @@ ${
             const m: MP = mDiag(md, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value is a literal or a plain `@ref` written bare, or any other expression PARENTHESIZED — `=(…)`, not `=" + dollarOpen() + "…}` (§66.2.4)", start, md.pos)
             return { v: AAttrValue.Paren(recoveredAt(m, start)), mp: mBump(m) }
         }
-        const one: RExpr | not = oneExprIn(tp)
+        // a handler value led by `if` / `match` is its statement (block-like, §7.2.2),
+        // never a value-`if` / value `match` whose arms would be assignments
+        const stmtLed: boolean = handler && (isWord(adv(tp), "if") || isWord(adv(tp), "match"))
+        let one: RExpr | not = not
+        if (!stmtLed) one = oneExprIn(tp)
         if (one is not) {
             const n0: int = tp.diags.length
             const b: RBlock = parseBlock(tp)
             let t: TP = expectRegionEnd(b.tp)
             if (!handler) {
-                if (b.b.stmts.length >= 2) return multiStatementValue(mp, backToMarkup(mp, t), name, dollarOpen() + "…}")
-                // one statement that is not an expression (`${ const x = 1 }`):
-                // what the block parse reported stands, plus the one-expression rule
+                // §5.2.4 "In a `${…}` / `{…}` value it detects ANY clean parse of two
+                // or more statements" — clean: no error beyond a statement's
+                // terminator (softError). A value whose statements do not parse
+                // keeps what the parse reported (`${switch …}` is E-SWITCH-FORBIDDEN).
+                const clean: boolean = hardErrors(t.diags) == hardErrors(tp.diags)
+                if (b.b.stmts.length >= 2 && clean) return multiStatementValue(mp, backToMarkup(mp, t), name, dollarOpen() + "…}")
                 const mb: MP = backToMarkup(mp, t)
+                if (!clean) return { v: AAttrValue.Paren(recoveredAt(mb, start)), mp: mBump(mb) }
+                // one statement that is not an expression (`${ const x = 1 }`)
                 const m2: MP = mDiag(mb, "E-PARSE-ATTR", "`" + name + "=" + dollarOpen() + "…}` is ONE expression on an attribute that is not an event handler (§5.2.4) — write the expression alone", start, mb.pos)
                 return { v: AAttrValue.Paren(recoveredAt(m2, start)), mp: mBump(m2) }
             }
@@ -7227,7 +7236,7 @@ ${
         if (handler && sp.pos > mp.pos && chAt(sp, 0) == ">" && chAt(sp, 1) != "=" && isOperatorForm(x)) {
             const text2: string = mp.src.substring(vStart, mp.pos)
             const m2: MP = mDiag(mp, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text2 + " >` — after an unquoted event-handler expression, a `>` after whitespace reads both as a comparison and as the end of the tag (§5.2). Write the handler as an inline block — `" + name + "={ " + text2 + " > … }` — or drop the space before the closing `>`", vStart, sp.pos + 1)
-            return { v: v, mp: m2, reported: true }
+            return { v: AAttrValue.Bare(recoveredAt(m2, vStart)), mp: mBump(m2), reported: true }
         }
         const at: MP = skipSpace(mp)
         if (at.pos > mp.pos && startsDelimitedValue(at)) {

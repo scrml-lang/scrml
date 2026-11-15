@@ -91,6 +91,11 @@ describe("1 — the forms compile and RUN (click a handler, check the effect)", 
     click($("#b"));
     expect($("#e").getAttribute("title")).toBe("hi");
   });
+  test("a handler `${ if (…) { … } else { … } }` is the `if` statement (not a value-`if` with assignment arms)", async () => {
+    await load(prog(`<button id="b" onclick=\${ if (@ok) { @last = "yes"; } else { @last = "no"; } }>go</>\n<p id="o">\${@last}</p>`));
+    click($("#b"));
+    expect($("#o").textContent).toBe("yes");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -146,6 +151,11 @@ describe("3 — the named codes", () => {
       expect(e[0].message).toContain("title=");
     }
   });
+  test("a non-handler statement list that does not parse keeps the parse's own report (no E-ATTR-MULTI-STATEMENT on top)", () => {
+    const c = codes(`type Phase:enum = { Idle, Busy }\n<program>\nlet <phase:Phase=.Idle/>\n<p if=\${switch (@phase) { case .Idle: true }}>Idle</>\n</program>\n`);
+    expect(c).toContain("E-SWITCH-FORBIDDEN");
+    expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
+  });
   test("one expression is legal: a trailing `;`, a `;` in a string, an arrow body", () => {
     expect(codes(prog(`<p title=\${ @last; }>x</p>`))).toEqual([]);
     expect(codes(prog(`<p title=\${ "a;b" }>x</p>`))).toEqual([]);
@@ -158,6 +168,8 @@ describe("3 — the named codes", () => {
   });
   test("E-ATTR-UNQUOTED-OPERATOR: a handler expression before a spaced `>`", () => {
     expect(codes(prog(`<button onclick=@count = @count + 1 > 1>go</>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    // the truncated reading (`@ok = @count`, a type clash) is refused whole, never judged
+    expect(codes(prog(`<button onclick=@ok = @count > 1>go</>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
     // a call is not an operator form, and an unspaced `>` closes the tag
     expect(codes(prog(`<button onclick=track("a") >go</>`))).toEqual([]);
     expect(codes(prog(`<button onclick=@count = @count + 1>go</>`))).toEqual([]);
