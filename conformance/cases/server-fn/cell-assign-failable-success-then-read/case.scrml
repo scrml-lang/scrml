@@ -10,7 +10,8 @@ ${
     }
     function load() {
         @out = risky(3) !{
-            .Boom(m) :> { @seen = "boom:" + m; return; }
+            .Boom(m) :> { @seen = "boom:" + m; return; },
+            .Transport(_) :> return
         };
         @seen = `loaded:${@out}`;
     }

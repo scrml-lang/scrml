@@ -9,8 +9,8 @@ ${
         return n;
     }
     function indep() {
-        @a = one(1);
-        @b = two(2);
+        @a = one(1) !{ .Transport(_) :> return };
+        @b = two(2) !{ .Transport(_) :> return };
         @seen = `indep:${@a},${@b}`;
     }
 }
