@@ -348,7 +348,18 @@ ${
     // (§21.3 "ES module `import` syntax"; ruling:user-voice-scrml.md S475 item 3);
     // "" for every other import. A namespace import has no `names`: its members
     // are the target's exports, bound by analyze's linkage as `ns.name`.
-    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string, host: string | not, top: boolean, ns: string }
+    // s478 (s478-boot-modules) — `re`: which statement this is (ALink): an `import`,
+    // or one of the EXPORT LISTS (§21.4, ruling:user-voice-scrml.md S458 "ratify 21.4").
+    // A re-export links its source as an import of it does (link.scrml
+    // `linkFromsOfItems`) but binds nothing in this file's scope; link.scrml
+    // `importsOfItems` returns imports only.
+    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string, host: string | not, top: boolean, ns: string, re: ALink }
+    //   Import      `import … from "…"` (§21.3), a host import included;
+    //   Reexport    `export { a, b as c } from "…"` — each name's `name` is the name
+    //               THIS file exports (`c`), `orig` the name in the source (`b`);
+    //   ReexportAll `export * from "…"` (no `names`);
+    //   ExportList  `export { a, b as c };` — a local export list (no `from`: "").
+    export type ALink:enum = { Import, Reexport, ReexportAll, ExportList }
 
     // -------------------------------------------------------------------------
     // Markup: attributes, elements, text, interpolation.

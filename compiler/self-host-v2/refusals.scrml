@@ -86,34 +86,27 @@ ${
     // is the one tried (`for await` before `await`, `use foreign:` before `use`).
     export fn refusalTable() -> Refusal[] {
         const U: string = "E-BOOTSTRAP-UNSUPPORTED"
-        // impl#1 workaround (as analyze.scrml dateNowText): impl#1 rewrites an `is` test it sees inside a
-        // string literal, so the word is never written next to its operand in one literal here.
-        const IS: string = "i" + "s"
-        const DOT: string = "."
-        // impl#1 likewise rewrites the word `fn` inside a string literal (to `function`), and a
-        // `Name.member` in one (to `Name_member`): both are built from pieces.
-        const FN: string = "f" + "n"
         return [
             // ---- not scrml: the SPEC's own code (§7.2.1 the E-*-NOT-IN-SCRML family) ----
             row("for await", "§19.9.8", "E-FOR-AWAIT-NOT-IN-SCRML", ["for", "await"], "`for await … of` is not scrml (§19.9.8): there is no `async` / `await`; a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             row("try", "§19.1", "E-TRY-NOT-IN-SCRML", ["try", "{"], "`try` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
             row("catch", "§19.1", "E-TRY-NOT-IN-SCRML", ["}", "catch|finally", "...", "{"], "`catch` / `finally` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
             row("throw", "§19.3", "E-THROW-NOT-IN-SCRML", ["throw"], "`throw` is not scrml (§19.3): signal a failure with `fail` and a variant, inside a `!` function"),
-            row("async " + FN, "§48.3.5", "E-FN-005", ["async", FN], "`async` on a `" + FN + "` is not scrml (§48.3.5, §19.9.8): a `" + FN + "` is pure and synchronous; make the server call in a `function`"),
+            row("async fn", "§48.3.5", "E-FN-005", ["async", "fn"], "`async` on a `fn` is not scrml (§48.3.5, §19.9.8): a `fn` is pure and synchronous; make the server call in a `function`"),
             row("async", "§19.9.8", "E-ASYNC-NOT-IN-SCRML", ["async"], "`async` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             row("await", "§19.9.8", "E-AWAIT-NOT-IN-SCRML", ["await"], "`await` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             rowG("class", "§7.2.1", "E-CLASS-NOT-IN-SCRML", ["class", "$w|{"], "lead", "`class` is not scrml (§7.2.1): declare data with `type T:struct` / `type T:enum` and behaviour with functions"),
             row("switch", "§17", "E-SWITCH-FORBIDDEN", ["switch", "("], "`switch` is not scrml (§17): branch with `match x { … }` (or `if` / `else`)"),
             rowG("import(…)", "§21.3.2", "E-DYNAMIC-IMPORT-NOT-IN-SCRML", ["import", "("], "tight", "a dynamic `import(…)` is not scrml (§21.3.2): write a static `import { … } from \"…\"`"),
             rowOn("any", "§14.1.1", "E-TYPE-ANY-FORBIDDEN", [":", "any"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE"], false, "`any` is not a scrml type (§14.1.1): write the type the value has (a union `A | B` when it can be several)"),
-            rowOn(FN + " … = expr", "§48.2", "E-FN-EQUALS-BODY", [FN + "|function", "$w", "(", "...", ")", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
-            rowOn(FN + " … -> R = expr", "§48.2", "E-FN-EQUALS-BODY", [FN + "|function", "$w", "(", "...", ")", "-", ">", "...", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
+            rowOn("fn … = expr", "§48.2", "E-FN-EQUALS-BODY", ["fn|function", "$w", "(", "...", ")", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
+            rowOn("fn … -> R = expr", "§48.2", "E-FN-EQUALS-BODY", ["fn|function", "$w", "(", "...", ")", "-", ">", "...", "="], [], false, "a function body is a `{ … }` block, never `= <expr>` (§48.2): write `{ return <expr>; }`"),
             rowOn("match-arm guard", "§18.10", "E-SYNTAX-011", ["$v|_", "if"], [], false, "a match arm has no guard clause in v1 (§18.10): match the variant, then branch inside the arm body"),
             rowOn("nested pattern", "§18.11", "E-SYNTAX-012", ["$v", "(", "$v"], ["E-PARSE-ARM", "E-PARSE-EXPECTED", "E-PARSE-EXPR"], false, "a nested pattern in a binding position is not supported in v1 (§18.11): bind the payload, then `match` it in the arm body"),
             rowOn("reflect()", "§22.4", "E-META-008", ["reflect", "("], ["E-SCOPE-001"], true, "`reflect()` is a meta-context call (§22.4): it is valid only inside a `^{ }` meta block"),
-            rowOn("x is <value>", "§45.5", "E-EQ-005", ["is", "$n|$s|true|false|@"], [], false, "`" + IS + "` tests absence (`not`, `given`) or a variant, never a value (§45.5): compare a value with `==`"),
+            rowOn("x is <value>", "§45.5", "E-EQ-005", ["is", "$n|$s|true|false|@"], [], false, "`is` tests absence (`not`, `given`) or a variant, never a value (§45.5): compare a value with `==`"),
             rowOn("{ @x } shorthand", "§6.1.2", "E-OBJECT-SHORTHAND-CELL", ["!$", "{|,", "@", "$w", "}|,"], ["E-PARSE-OBJECT"], false, "an object-literal shorthand cannot take its key from a cell read (§6.1.2): write the key, `{ x: @x }`"),
-            rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", FN, "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
+            rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", "fn", "("], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
             rowOn("struct field of function type", "§14.3", "E-STRUCT-FUNCTION-FIELD", [":", "(", ")", "-|=>"], ["E-PARSE-TYPE", "E-TYPE-UNKNOWN"], false, "a struct field cannot hold a function (§14.3): a function is not value data — keep the data in the struct and the behaviour in a function that takes it"),
             // ---- retired by a ruling: named, with what replaces it ----
             rowOn("flush()", "§6.6.5", "E-SCOPE-001", ["flush", "("], ["E-SCOPE-001"], true, "`flush()` is retired (§6.6.5, S473 D22): a derived value is recomputed when it is read (pull-on-read), so a read after a write already sees the new value — delete the call"),
@@ -121,14 +114,14 @@ ${
             row("partial match", "§18.18", U, ["partial", "match"], "write a full `match` with an `else :>` arm"),
             rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "*", ","], [], false, "match one value, and nest a second `match` in its arms"),
             rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "@", "$w", ","], [], false, "match one value, and nest a second `match` in its arms"),
-            rowOn("named payload binding", "§18.7", U, ["$v", "(", "$w", ":", "$w"], ["E-PARSE-ARM"], false, "bind the payload positionally, `" + DOT + "V(a, b)`, in declared field order"),
-            row(IS + " <variant>", "§18.17", U, ["is", "$v"], "test the variant with a `match` (an `else :>` arm for the rest)"),
-            rowG("pure function", "§48.9", U, ["pure", FN + "|function"], "lead", "`" + FN + "` is the pure form the bootstrap builds (§48); `pure function` is the deprecated spelling"),
-            rowG("pinned", "§7.6.1", U, ["pinned", FN + "|function|let|const|<"], "lead", ""),
+            rowOn("named payload binding", "§18.7", U, ["$v", "(", "$w", ":", "$w"], ["E-PARSE-ARM"], false, "bind the payload positionally, `.V(a, b)`, in declared field order"),
+            row("is <variant>", "§18.17", U, ["is", "$v"], "test the variant with a `match` (an `else :>` arm for the rest)"),
+            rowG("pure function", "§48.9", U, ["pure", "fn|function"], "lead", "`fn` is the pure form the bootstrap builds (§48); `pure function` is the deprecated spelling"),
+            rowG("pinned", "§7.6.1", U, ["pinned", "fn|function|let|const|<"], "lead", ""),
             row("animationFrame()", "§6.7.9", U, ["animationFrame", "("], ""),
-            rowOn("enum transitions block", "§14.4.0", U, ["transitions", "{"], [], false, "the engine form `<x:T" + "=" + DOT + "V single>` with state-children carries the transition graph in the bootstrap (§66.13)"),
-            rowOn("EnumType" + DOT + "variants", "§14.4.2", U, [".", "variants"], ["E-TYPE-VARIANT", "E-SCOPE-001"], false, ""),
-            rowOn("`::` in an expression", "§14.5", U, [":", ":", "!:"], ["E-PARSE-TRAILING", "E-PARSE-EXPR"], true, "write `.` (`Role" + DOT + "Admin`, `" + DOT + "Admin`); `::` is built in a match-arm pattern only"),
+            rowOn("enum transitions block", "§14.4.0", U, ["transitions", "{"], [], false, "the engine form `<x:T=.V single>` with state-children carries the transition graph in the bootstrap (§66.13)"),
+            rowOn("EnumType.variants", "§14.4.2", U, [".", "variants"], ["E-TYPE-VARIANT", "E-SCOPE-001"], false, ""),
+            rowOn("`::` in an expression", "§14.5", U, [":", ":", "!:"], ["E-PARSE-TRAILING", "E-PARSE-EXPR"], true, "write `.` (`Role.Admin`, `.Admin`); `::` is built in a match-arm pattern only"),
             rowOn("snippet type", "§14.9", U, ["snippet"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE", "E-SCOPE-001"], false, ""),
             row("render", "§16.3", U, ["render", "$w"], "named / parametric slots are OPEN O9 (§66.15.2)"),
             rowOn("renders on an enum variant", "§19.2", U, ["renders"], ["E-PARSE-TYPE"], false, "render the error in markup where it is handled (`!{}` / `match`)"),
@@ -141,14 +134,14 @@ ${
             rowG("use foreign:", "§23.4", U, ["use", "foreign"], "lead", ""),
             rowG("use", "§41.2", U, ["use", "$w"], "lead", "import the names you need: `import { … } from \"scrml:…\"` (§41.3)"),
             row("~ pipeline accumulator", "§32", U, ["~"], ""),
-            rowOn("?. optional chaining", "§42.3.6", U, ["?."], [], true, "test presence first: `if (x " + IS + " given) { … x.f … }` (§42.2)"),
+            rowOn("?. optional chaining", "§42.3.6", U, ["?."], [], true, "test presence first: `if (x is given) { … x.f … }` (§42.2)"),
             rowOn("word-form `or`", "§45.9", U, ["or"], ["E-SCOPE-001"], true, "write `||`"),
             rowOn("word-form `and`", "§45.9", U, ["and"], ["E-SCOPE-001"], true, "write `&&`"),
             rowG("map literal [:]", "§59", U, ["[", ":", "]"], "tight", "maps (§59, O44) are not in the bootstrap"),
             rowOn("map type [K: V]", "§59", U, ["[", "$w", ":", "$w", "]"], [], false, "maps (§59, O44) are not in the bootstrap"),
             rowOn("map literal [k: v]", "§59", U, ["[", "$s|$n", ":"], [], false, "maps (§59, O44) are not in the bootstrap"),
-            rowOn(FN + "(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", [FN, "(", "...", ")", "=>"], [], false, "an anonymous `" + FN + "` takes a block body, `" + FN + "(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
-            rowOn("anonymous " + FN + " expression", "§48.2.1", U, [FN, "("], [], false, "declare a named `" + FN + "` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
+            rowOn("fn(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", ["fn", "(", "...", ")", "=>"], [], false, "an anonymous `fn` takes a block body, `fn(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
+            rowOn("anonymous fn expression", "§48.2.1", U, ["fn", "("], [], false, "declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
             rowG("audit @log", "§51.11", U, ["audit", "@"], "lead", ""),
             rowOn("replay()", "§51.14", U, ["replay", "("], ["E-SCOPE-001"], true, ""),
             rowOn("transition()", "§14.12.6.3", U, ["transition", "("], ["E-SCOPE-001"], true, "the bootstrap builds only the presence lifecycle `(not to T)` on a program cell (§14.12.3), which a discrimination transitions — there is no variant lifecycle for `transition()` to advance yet"),

@@ -1,0 +1,14 @@
+// §13.9.1 rule 4 (RULED S478) — a pending tape's type carries its grants: `(not to User[free, append])`.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function load() -> User[] {
+        const rs: User[] = ?{`SELECT id, name FROM users ORDER BY id`}.all() !{ _ :> { return []; } };
+        return rs;
+    }
+    <users:(not to User[free, append])=(load() !{ _ :> not })/>
+    <main>
+        <button id="add" onclick={ if (@users is given) { const u: User = { id: 9, name: "z" }; @users.append(u); } }>add</button>
+        <div id="rows" if=@users><each in=@users><span>${@.name}</span></each></div>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

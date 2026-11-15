@@ -47,7 +47,7 @@ ${
     import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
-             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
@@ -4861,7 +4861,11 @@ ${
         if (arrow && !isNotType(fromT) && !variantAType(fromT)) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`). If `" + text + "` is meant as a function type, function types are not in the bootstrap either — declare a named function and pass its name"
         if (arrow) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`)"
         if (!isNotType(fromT) || variantAType(toT)) return "the lifecycle `" + text + "` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not built — for a variant graph, declare an engine (`<x:T=.A single>` with state-children, §66.13)"
-        if (grantedSeq(toT)) return "a granted sequence in a lifecycle type (`" + text + "`) is not in the bootstrap — its grants are not checked through the lifecycle (§14.12); declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)"
+        // s478 (s478-boot-pending-tape-grants): a granted tape as the second state,
+        // `(not to S[replace])`, is READ here — its grants ride the type (§13.9.1 rule 4,
+        // RULED S478: "needs `replace` in the tape's grants (`(not to S[replace])`)").
+        // Which cell may carry one is analyze's (fieldOf: a pending tape; a plain
+        // lifecycle cell's granted tape stays refused by name there, lifeTapeGrantsWhy).
         return ""
     }
 
@@ -4963,6 +4967,8 @@ ${
         if (isWord(t, "export")) {
             exported = true
             t = adv(t)
+            // s478: `export { … } [from "…"]` / `export * from "…"` — the export lists (§21.4)
+            if (isP(t, "{") || isP(t, "*")) return parseExportList(t, start, top)
         }
         if (isWord(t, "import")) return parseImport(t, start, top)
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
@@ -5168,7 +5174,7 @@ ${
                     if (isNs && ns != "") rt = diagAt(rt, "E-PARSE-IMPORT", "expected `from \"…\"` after `import * as " + ns + "`", h)
                     return { items: [], tp: rt }
                 }
-                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top, ns: ns }
+                const imp0: AImport = { nid: rt.nid, span: spanFrom(rt, start), names: [], from: from0, host: host, top: top, ns: ns, re: ALink.Import }
                 return mkItem(bumpId(rt), start, AItemK.ImportItem(imp0))
             }
         }
@@ -5234,8 +5240,98 @@ ${
         } else if (hardErrors(t.diags) == d0) {
             t = missingSemi(t)
         }
-        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v, host: host, top: top, ns: "" }
+        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v, host: host, top: top, ns: "", re: ALink.Import }
         return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
+    }
+
+    // s478 (s478-boot-modules) — the EXPORT LISTS, `tp` on the `{` or `*` after
+    // `export` (SPEC §21.4, ruling:user-voice-scrml.md S458 "ratify 21.4"):
+    //   - `export { a, b as c } from "…";` — a named (and renamed) re-export:
+    //     "Re-export follows standard ES module `export { name } from 'source'`
+    //     syntax" (AImport.re Reexport);
+    //   - `export * from "…";` — "A file MAY also re-export every name another
+    //     file exports" (re ReexportAll);
+    //   - `export { a, b as c };` — a local export list (§21.2 names it beside
+    //     E-EXPORT-001, "`export { count }` in a `${ }` block"; re ExportList,
+    //     `from` "").
+    // Each is a statement and takes its `;`, as an `import` does (dpa-073 F3 (i)).
+    // What the names resolve to is analyze's (checkImports, exportTables); a
+    // re-export binds nothing in this file's scope. `export * as ns from "…"`
+    // (ES2020) is not one of §21.4's forms: refused by name. Specifiers are
+    // comma-separated, as an import's are (§21.3, s474 r1 F9).
+    fn parseExportList(tp: TP, start: int, top: boolean) -> RItems {
+        const d0: int = hardErrors(tp.diags)
+        let t: TP = tp
+        let re: ALink = ALink.Reexport
+        let names: AImportName[] = []
+        if (isP(t, "*")) {
+            re = ALink.ReexportAll
+            t = adv(t)
+            if (isWord(t, "as")) {
+                const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`export * as name from \"…\"` is not one of the re-export forms §21.4 defines (`export { a, b as c } from \"…\"`, `export * from \"…\"`) — re-export the names, or import the namespace where it is used (`import * as name from \"…\"`, §21.3)", cur(t))
+                return { items: [], tp: skipToLineEnd(d) }
+            }
+        } else {
+            t = adv(t)
+            let needComma = false
+            while (!isP(t, "}") && !atEnd(t)) {
+                const n: PTok = cur(t)
+                if (tk(n, ",")) {
+                    if (!needComma) t = diagAt(t, "E-PARSE-EXPORT", "expected an exported name before `,`", n)
+                    needComma = false
+                    t = adv(t)
+                } else if (needComma) {
+                    t = diagAt(t, "E-PARSE-EXPORT", "expected `,` or `}` after an export specifier, found `" + n.text + "` — specifiers are separated by commas (`export { a, b as c } from \"…\"`, §21.4)", n)
+                    while (!atEnd(t) && !isP(t, ",") && !isP(t, "}")) { t = adv(t) }
+                } else if (n.cls == TC.Ident) {
+                    let bound: PTok = n
+                    let bind = true
+                    t = adv(t)
+                    // `name as other` exports `name` under `other` (§21.4: "renamed `export { a as b } from`")
+                    if (isWord(t, "as")) {
+                        const loc: PTok = cur(adv(t))
+                        if (loc.cls == TC.Ident) {
+                            bound = loc
+                            t = adv(adv(t))
+                        } else {
+                            // a keyword is no exported name here — `default` included (§21.4: a re-export
+                            // "SHALL NOT re-export `default`"; no scrml form has a default, §21.2)
+                            t = adv(adv(diagAt(t, "E-PARSE-EXPORT", "expected the exported name after `as`, found `" + loc.text + "` (`export { " + n.text + " as otherName } …`; a keyword is not an exported name)", loc)))
+                            bind = false
+                        }
+                    }
+                    if (bind) names = names.concat([{ nid: t.nid, span: mkSpan(n.start, bound.end), name: bound.v, orig: n.v }])
+                    t = bumpId(t)
+                    needComma = true
+                } else {
+                    t = adv(diagAt(t, "E-PARSE-EXPORT", "expected an exported name, found `" + n.text + "`", n))
+                }
+            }
+            t = expectP(t, "}")
+        }
+        let from: string = ""
+        if (isWord(t, "from")) {
+            t = adv(t)
+            const src: PTok = cur(t)
+            if (src.cls == TC.Str) {
+                from = src.v
+            } else {
+                t = diagAt(t, "E-PARSE-EXPORT", "expected the re-export source string after `from`", src)
+            }
+            t = adv(t)
+        } else if (re == ALink.ReexportAll) {
+            t = diagAt(t, "E-PARSE-EXPORT", "expected `from \"…\"` after `export *` — a star re-export names its source (`export * from \"./m.scrml\";`, §21.4)", cur(t))
+        } else {
+            re = ALink.ExportList
+        }
+        if (isP(t, ";")) {
+            t = adv(t)
+        } else if (hardErrors(t.diags) == d0) {
+            t = missingSemi(t)
+        }
+        if (re != ALink.ExportList && from == "") return { items: [], tp: t }
+        const ex: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: from, host: not, top: top, ns: "", re: re }
+        return mkItem(bumpId(t), start, AItemK.ImportItem(ex))
     }
 
     // `type Name:enum = { A, B(f: T) }` / `type Name:struct = { [let] f: T, … }`
@@ -9211,6 +9307,9 @@ ${
                 const after2: MP = skipTrivia(wl.mp)
                 if (chAt(after2, 0) == "<") return parseTagItem(after2, true, true, ctx)
             }
+            // s478: an export list (`export { … } [from "…"];`, `export * from "…";`, §21.4) is a
+            // statement like an `import`: its region ends at the line, not after its `}`
+            if (chAt(after, 0) == "{" || chAt(after, 0) == "*") return logicRegionItem(mp, LexStop.Line, fileTop)
             return logicRegionItem(mp, LexStop.Statement, false)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false)

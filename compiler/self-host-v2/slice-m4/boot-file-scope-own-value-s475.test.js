@@ -282,15 +282,18 @@ describe("(r1 F1) a cycle through file-scope own values is E-DERIVED-CIRCULAR-DE
     ["same file", [one("<a:int=(@b + 1)/>\n<b:int=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @b → @a"],
     ["itself", [one("<a:int=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @a"],
     ["untyped, same file (the cycle code, not E-DECL-TYPE-NOT-INFERABLE)", [one("<a=(@b + 1)/>\n<b=(@a + 1)/>", '<p id="c">${@a}</p>')], "app.scrml: `@a` is derived from itself: @a → @b → @a"],
-    ["across files, named imports", [AF('import { b } from "./b.scrml";\nexport <a:int=(@b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
-    ["across files, an aliased import", [AF('import { b as bb } from "./b.scrml";\nexport <a:int=(@bb + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
-    ["across files, a namespace import", [AF('import * as m from "./b.scrml";\nexport <a:int=(@m.b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a"],
+    ["across files, named imports", [AF('import { b } from "./b.scrml";\nexport <a:int=(@b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a", ["E-IMPORT-002@a.scrml: circular import: `a.scrml` → `b.scrml` → `a.scrml`", "E-IMPORT-002@b.scrml: circular import: `b.scrml` → `a.scrml` → `b.scrml`"]],
+    ["across files, an aliased import", [AF('import { b as bb } from "./b.scrml";\nexport <a:int=(@bb + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a", ["E-IMPORT-002@a.scrml: circular import: `a.scrml` → `b.scrml` → `a.scrml`", "E-IMPORT-002@b.scrml: circular import: `b.scrml` → `a.scrml` → `b.scrml`"]],
+    ["across files, a namespace import", [AF('import * as m from "./b.scrml";\nexport <a:int=(@m.b + 1)/>\n'), BF('import { a } from "./a.scrml";\nexport <b:int=(@a + 1)/>\n'), named0("a")], "a.scrml: `@a` is derived from itself: @a → @b (b.scrml) → @a", ["E-IMPORT-002@a.scrml: circular import: `a.scrml` → `b.scrml` → `a.scrml`", "E-IMPORT-002@b.scrml: circular import: `b.scrml` → `a.scrml` → `b.scrml`"]],
     ["through a program cell", [one("<a:int=(@q + 1)/>", '<q:int=(@a + 1)/>\n<p id="c">${@q}</p>')], "app.scrml: `@a` is derived from itself: @a → @q → @a"],
     ["file → program → file", [one("<a:int=(@q + 1)/>\n<b:int=(@a + 1)/>", '<q:int=(@b + 1)/>\n<p id="c">${@q}</p>')], "app.scrml: `@a` is derived from itself: @a → @q → @b → @a"],
   ];
-  for (const [label, files, want] of CYCLES) {
+  // s478 (s478-boot-modules): a cross-file cycle of own values needs an import cycle, and that is
+  // E-IMPORT-002 at each of its files (§21.3 "Circular imports SHALL be a compile error") — reported
+  // beside the value cycle
+  for (const [label, files, want, alsoImport = []] of CYCLES) {
     test(label, () => {
-      expect(cyc(files)).toEqual(["E-DERIVED-CIRCULAR-DEP@" + want]);
+      expect(cyc(files)).toEqual(["E-DERIVED-CIRCULAR-DEP@" + want, ...alsoImport]);
     });
   }
   // Near-misses: a chain that is not a cycle still compiles and renders.
