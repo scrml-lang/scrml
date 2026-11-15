@@ -3,7 +3,7 @@ type User:struct = { id: number, name: string }
 <userId> = 1
 <userData> : User | not = not
 
-function loadUser(id: number) : User | not {
+function loadUser(id: number) -> User | not {
     return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
 }
 

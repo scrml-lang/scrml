@@ -2,7 +2,7 @@
 ${
     type User:struct = { id: number, name: string }
     <current> = not
-    function loadOne() : User {
+    function loadOne() -> User {
         return ?{`SELECT id, name FROM users`}.get() !{ _ :> not }
     }
 }
