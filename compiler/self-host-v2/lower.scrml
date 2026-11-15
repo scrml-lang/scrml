@@ -1713,6 +1713,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
             .Gather(f: x) :> not
         }
@@ -1727,6 +1728,7 @@ ${
             .DeclNode(d: d) :> false
             .Css(c: c) :> true
             .Effect(w: w) :> false
+            .Run(b: rb0) :> false
             .Request(r: r) :> false
             .Gather(f: x) :> false
         }
@@ -1840,6 +1842,7 @@ ${
                 .DeclNode(d: d) :> lowerNode(c, n)
                 .Css(c: c) :> lowerNode(c, n)
                 .Effect(w: w) :> lowerNode(c, n)
+                .Run(b: rb0) :> lowerNode(c, n)
                 .Request(r: r) :> lowerNode(c, n)
                 .Gather(f: x) :> lowerNode(c, n)
             }
@@ -1866,6 +1869,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
+            .Run(b: b) :> [View.Run(cpsBody(lowerBlock(c, b), []))]   // s478 (§40.8): explicit continuations, as a handler's
             .Request(r: r) :> [requestView(c, r)]
             .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         }
@@ -2709,6 +2713,7 @@ ${
             .Slot :> v
             .Star(decl: dd) :> v
             .Effect(deps: ds) :> v
+            .Run(body: x) :> v
             .Request(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
@@ -4173,6 +4178,7 @@ ${
                 .Interp(e: x) :> false
                 .DeclNode(d: d) :> false
                 .Effect(w: w) :> false
+                .Run(b: rb0) :> false
                 .Request(r: r) :> false
                 .Css(c: c) :> false
                 .Gather(f: g) :> false
@@ -4355,6 +4361,7 @@ ${
             .Slot :> v
             .Star(decl: x) :> v
             .Effect(deps: x) :> v
+            .Run(body: x) :> v
             .Request(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
@@ -4447,6 +4454,7 @@ ${
             .Dyn(e: x) :> []
             .Slot :> []
             .Effect(deps: x) :> []
+            .Run(body: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -4510,6 +4518,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .Run :> []
             .Request :> []
             .ResetOn :> []
             .Errors :> []
@@ -4584,6 +4593,7 @@ ${
             .Slot :> []
             .Star(decl: x) :> []
             .Effect(deps: x) :> []
+            .Run(body: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -4634,6 +4644,7 @@ ${
             .Slot :> 0
             .Star(decl: x) :> 0
             .Effect(deps: x) :> 0
+            .Run(body: x) :> 0
             .Request(deps: x) :> 0
             .ResetOn(triggers: x) :> 0
             .Errors(of: x) :> 0

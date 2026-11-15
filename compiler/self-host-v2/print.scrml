@@ -1469,6 +1469,7 @@ ${
             .RawText :> []
             .Dyn :> []
             .Effect :> []
+            .Run :> []
             .Request :> []
             .ResetOn :> []
             .Errors :> []
@@ -2694,6 +2695,7 @@ ${
             .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v, ns)
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v, ns)
+            .Run :> hole(HNode.HComment("run"), path, v, ns)          // s478: body-top statements render no DOM
             // s475: a request renders no DOM either (its signals are read where the author reads them)
             .Request :> hole(HNode.HComment("request"), path, v, ns)
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v, ns)
@@ -2735,6 +2737,7 @@ ${
             .Slot :> ks
             .Star :> ks
             .Effect :> ks
+            .Run :> ks
             .Request :> ks
             .ResetOn :> ks
             .Errors :> ks
@@ -2845,6 +2848,7 @@ ${
             .Slot :> false
             .Star :> false
             .Effect :> false
+            .Run :> false
             .Request :> false
             .ResetOn :> false
             .Errors :> false
@@ -2857,6 +2861,7 @@ ${
     fn holeNeedsNode(v: View) -> boolean {
         return match v {
             .Effect(deps: ds) :> false
+            .Run(body: x) :> false
             .Request(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
             .El(tag: t) :> true
@@ -2891,6 +2896,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
+            .Run(body: b) :> runJs(ctx, b)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
@@ -3067,6 +3073,14 @@ ${
     // unregistered with that scope (teardown step 1). The dependencies are the
     // cells themselves — the effect subscribes to exactly those. `task$` is
     // bound only when the body suspends (C12).
+    // s478 — body-top statements (View.Run; §40.8: "it runs once at mount in
+    // source order"): `rt.run(scope$, (task$) => { … })` — run NOW, as the scope's
+    // holes are wired in document order, in a task the scope owns (a Suspend in
+    // the body is cancelled when the scope is destroyed), as a handler's body runs.
+    fn runJs(ctx: Ctx, body: Block) -> Rendered {
+        return only([sexpr(rtCall(ctx, "run", [scopeVar(), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))])
+    }
+
     fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
         let params: string[] = []
         if (suspends(body)) params = ["task$"]
@@ -3480,6 +3494,7 @@ ${
             .Slot :> []
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
+            .Run(body: x) :> []
             .Request(deps: ds) :> []
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
@@ -3833,6 +3848,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .Run :> []
             .Request :> []
             .ResetOn :> []
             .Errors :> []

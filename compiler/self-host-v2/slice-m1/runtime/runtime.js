@@ -3746,6 +3746,25 @@ class HandlerTasks {
   }
 }
 
+/**
+ * s478 — body-top statements (Core View.Run, SPEC §40.8 S441: a statement at a
+ * `<program>` / `<page>` body top "runs once at mount in source order"): run
+ * `body` now, once, in a task the scope owns — a suspension in it (a server
+ * call) is cancelled when the scope is destroyed, as a handler's is.
+ */
+export function run(scope, body) {
+  requireScope(scope, "a body-top statement");
+  const owner = new HandlerTasks();
+  const task = new Task(owner);
+  owner.tasks.add(task);
+  scope.own(() => owner.cancelAll());
+  try {
+    batch(() => body(task));
+  } finally {
+    owner.settled(task);
+  }
+}
+
 export function on(scope, el, event, handler) {
   requireScope(scope, "a listener");
   const owner = new HandlerTasks();
