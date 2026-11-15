@@ -1,6 +1,4 @@
-${
-  export fn compute() {
-    const out = _={ 1 + 1 }=;
-    return out;
-  }
-}
+<program>
+    import { compute } from './lib.scrml';
+    <p>"x"</p>
+</program>
