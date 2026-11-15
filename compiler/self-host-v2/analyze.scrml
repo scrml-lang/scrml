@@ -997,6 +997,17 @@ ${
         }
     }
 
+    // s478 r1 — is `td` a type alias (`type A = T`)?
+    fn aliasDecl(td: ATypeDecl) -> boolean {
+        const b: ATypeBody = td.body
+        return match b {
+            .AliasBody(ty: x) :> true
+            .EnumBody(variants: vs) :> false
+            .StructBody(fields: fs) :> false
+            .HostBody :> false
+        }
+    }
+
     // s478 — a type alias's right-hand side (`type A = T`), else not.
     fn aliasRhs(s: TypeStub) -> AType | not {
         const b: ATypeBody = s.src.body
@@ -9794,6 +9805,9 @@ ${
             if (lr != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on an array literal: " + lr, args, st)
             const vt: string = viaText(env, m.obj)
             if (vt != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on `" + exprName(m.obj) + "` — " + vt, args, st)
+            // s478 r1 (review LOW-2): a receiver holding a parse error (a refused `given` arm's
+            // match, …) is blamed on that report — "a refused head is the site's one diagnostic"
+            if (hasErrIn(envParseErrs(env), m.obj.span)) return plain(not, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
         }
         const fix: string = tapeJsFix(m.method)
@@ -24237,13 +24251,21 @@ ${
         return false
     }
 
-    fn fileNames(t: Tables, lk: Linkage) -> FileName[] {
+    fn fileNames(files: FileAst[], t: Tables, lk: Linkage) -> FileName[] {
         let out: FileName[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", kind: "decl", nid: d.nid, exported: declExported(lk, d.file, d.sym.hint) }])
         }
         for (const ti of t.types) {
             if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", kind: "type", nid: ti.nid, exported: ti.exported }])
+        }
+        // s478 r1 (review HIGH-1): a type alias (`type A = T`) builds no TypeInfo (typeInfos),
+        // yet it is a file-scope binding — §34 E-SCOPE-010: a file-scope name is bound once
+        // "whatever the two bindings name … a `type`" — so it is one more `type` binding here
+        for (const f of files) {
+            for (const td of typeItems(f.items)) {
+                if (aliasDecl(td)) out = out.concat([{ name: td.name, file: f.path, span: td.span, what: "the type `" + td.name + "`", kind: "type", nid: td.nid, exported: td.exported }])
+            }
         }
         for (const f of t.fns) {
             if (f.host is not && f.outer < 0) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])   // s477: a nested function is in no file scope
@@ -24388,7 +24410,7 @@ ${
     }
 
     fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        const ns: FileName[] = fileNames(t, lk)
+        const ns: FileName[] = fileNames(files, t, lk)
         const imps: FileImports[] = importsByFile(files)
         const paths: string[] = filePaths(files)
         let out: Diag[] = []

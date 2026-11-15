@@ -91,3 +91,32 @@ describe("§14.1.2 — `type A = T` is T wherever it is written", () => {
     expect(codes(L(`    type MyError : error = { message : string }`))).toContain("E-PARSE-TYPE");
   });
 });
+
+// s478 r1 (review HIGH-1) — §34 E-SCOPE-010: a file-scope name is bound once "whatever the two
+// bindings name … a `type`". An alias builds no TypeInfo, yet it is a file-scope type binding.
+describe("§7.6 / §34 E-SCOPE-010 — an alias is a file-scope binding", () => {
+  const scope = (logic, markup) => codes(L(logic, markup)).filter((c) => c === "E-SCOPE-010").length;
+
+  test("two aliases of one name", () => {
+    expect(scope(`    type A = int;\n    type A = string;`)).toBe(1);
+  });
+  test("an alias and a struct of one name", () => {
+    expect(scope(`    type A:struct = { a: int }\n    type A = string;`)).toBe(1);
+  });
+  test("an alias and a constant", () => {
+    expect(scope(`    type A = int;\n    const A = 3;`)).toBe(1);
+  });
+  test("an alias and a function", () => {
+    expect(scope(`    type f = int;\n    fn f() -> int {\n        return 1;\n    }`, `<p>\${f()}</p>`)).toBe(1);
+  });
+  test("an alias and a program cell", () => {
+    expect(scope(`    type A = int;`, `let <A:int=1/>\n    <p>\${@A}</p>`)).toBe(1);
+  });
+  test("an alias beside an import of its name: one E-SCOPE-010, at the import", () => {
+    const r = frontEnd(mods, [
+      { path: "t.scrml", src: `\${\n    import { Id } from "./ty.scrml";\n    type Id = string;\n    fn f(x: Id) -> Id {\n        return x;\n    }\n}\n<program>\n    <p>\${f("a")}</p>\n</program>\n` },
+      { path: "ty.scrml", src: `\${\n    export type Id = int;\n}\n` },
+    ], "t.scrml");
+    expect(r.diags.filter((d) => d.code === "E-SCOPE-010").length).toBe(1);
+  });
+});

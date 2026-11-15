@@ -1002,7 +1002,10 @@ ${
                 names = names.concat([w])
                 if (written != "") written = written + ", "
                 written = written + w
-                if (isP(t, ",") && peekAt(t, 1).line == gtok.line && peekAt(t, 1).cls == TC.Ident) {
+                // s478 r1 (review MED-1): a later name may be a cell (`, @b`), as the first may
+                const a1: PTok = peekAt(t, 1)
+                const a2: PTok = peekAt(t, 2)
+                if (isP(t, ",") && a1.line == gtok.line && (a1.cls == TC.Ident || (a1.cls == TC.At && touching(a1, a2) && (a2.cls == TC.Ident || a2.cls == TC.Keyword)))) {
                     t = adv(t)
                 } else {
                     going = false
@@ -1048,13 +1051,12 @@ ${
     // arm, with the W-code. Any other `given` arm is a presence GUARD between
     // patterns, which the bootstrap does not build: refused by name (INTERIM —
     // the capable form is a guard pattern carried through analyze, lower and
-    // the printer; gap g-boot-given-guard-arm-unbuilt-s478) — the refused
-    // match keeps only that arm, as the wildcard. A malformed arm is dropped
-    // from the list (kept, as the wildcard, when it is the last arm). Either
-    // way its one diagnostic is the site's only one.
+    // the printer; gap g-boot-given-guard-arm-unbuilt-s478). A refused or a
+    // malformed arm's match keeps only that arm, its body a placeholder
+    // (refusedArm), so its one diagnostic is the site's only one.
     fn givenArms(arms: AArm[], gheads: GHead[], subj: string, tp: TP) -> RArms {
         let t: TP = tp
-        let drop: int[] = []
+        let legacyOff: int[] = []
         for (const g of gheads) {
             let sawNot: boolean = false
             let j: int = 0
@@ -1064,32 +1066,51 @@ ${
             }
             const last: boolean = g.idx == arms.length - 1
             if (g.bad) {
-                if (!last) drop = drop.concat([g.idx])
+                // s478 r1 (review LOW-2): "A refused head is the site's one diagnostic" (§42.2.3) —
+                // the match keeps only this arm, as a placeholder (no coverage report, no typing
+                // of a body whose names the head never narrowed); its E-SYNTAX-044/045 stops the build
+                return refusedArm(arms[g.idx], t)
             } else if (last && sawNot && g.names.length == 1 && subj != "" && g.names[0] == subj) {
                 const msg: string = "the presence arm `given " + g.written + " :>` is deprecated (§42.2.3). Write `else :>` — after the `not :>` arm it takes the same present case and narrows `" + g.written + "` the same way. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
                 const d: Diag = newDiag("W-GIVEN-PRESENCE-DEPRECATED", msg, t.file, mkSpan(g.start, g.sepEnd))
                 t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                // s478 r1 (review LOW-1): the deprecation is the site's one diagnostic (§42.2.3, the
+                // W-GIVEN-ARROW-LEGACY row) — a `=>` / `->` head adds no W-MATCH-ARROW-LEGACY
+                legacyOff = legacyOff.concat([g.idx])
             } else {
                 const msg: string = "a `given " + g.written + " :>` arm other than the last arm after a `not :>` arm naming the subject itself is a presence guard between patterns, which is not in the bootstrap yet (§42.2.3). Test presence before the match (`if (" + g.names[0] + " is given) { … }`), or, over a `T | not` subject, write `not :>` then `else :>`."
                 const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", msg, t.file, mkSpan(g.start, g.sepEnd))
                 t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
-                // the refused match keeps one arm — this one's, as the wildcard —
-                // so no other arm's coverage (or its absence) reports anything
-                return { arms: [arms[g.idx]], tp: t }
+                // the refused match keeps one arm — this one's, as a placeholder —
+                // so no other arm's coverage (or its absence) reports anything, nor its body
+                return refusedArm(arms[g.idx], t)
             }
         }
-        if (drop.length == 0) return { arms: arms, tp: t }
+        if (legacyOff.length == 0) return { arms: arms, tp: t }
         let out: AArm[] = []
         let k: int = 0
         for (const a of arms) {
-            let keep: boolean = true
-            for (const x of drop) {
-                if (x == k) keep = false
+            let off: boolean = false
+            for (const x of legacyOff) {
+                if (x == k) off = true
             }
-            if (keep) out = out.concat([a])
+            if (off) {
+                out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: a.body, legacy: false, lifted: a.lifted, bare: a.bare }])
+            } else {
+                out = out.concat([a])
+            }
             k = k + 1
         }
         return { arms: out, tp: t }
+    }
+
+    // s478 r1 (review LOW-2) — the one arm a refused `given` arm's match keeps: its
+    // pattern, its body a parse placeholder (Recovered — nothing downstream types it;
+    // the refusal, an Error, stops the build), no legacy mark.
+    fn refusedArm(a: AArm, tp: TP) -> RArms {
+        const r: RExpr = mkE(tp, a.span.start, AExprK.Recovered)
+        const arm: AArm = { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmExpr(r.e), legacy: false, lifted: false, bare: false }
+        return { arms: [arm], tp: r.tp }
     }
 
     fn patIsNot(p: APat) -> boolean {

@@ -89,6 +89,14 @@ describe("§42.2.3 — the `given x :>` arm after `not :>`, naming the subject, 
     expect(cs.filter((c) => c === "W-GIVEN-PRESENCE-DEPRECATED").length).toBe(1);
   });
 
+  // s478 r1 (review LOW-1): the deprecation is the site's one diagnostic — no W-MATCH-ARROW-LEGACY
+  for (const sep of ["=>", "->"]) {
+    test(`\`given x ${sep}\` as the last arm: W-GIVEN-PRESENCE-DEPRECATED alone`, () => {
+      const src = P(`    function greet(name: string | not) -> string {\n        return match name {\n            not :> "nobody",\n            given name ${sep} "hello " + name\n        };\n    }`, `        <p>\${greet("x")}</p>`);
+      expect(codes(src)).toEqual(["W-GIVEN-PRESENCE-DEPRECATED"]);
+    });
+  }
+
   test("`given :>` is still a bare binder named `given`, not a presence arm", () => {
     const src = P(`    function f(k: K) -> int {\n        return match k {\n            .A :> 1,\n            given :> 2\n        };\n    }`, `        <p>\${f(.A)}</p>`);
     expect(codes(src)).not.toContain("W-GIVEN-PRESENCE-DEPRECATED");
@@ -105,6 +113,12 @@ describe("§42.2.3 — a malformed `given` arm head is E-SYNTAX-044 / E-SYNTAX-0
     });
   }
 
+  // s478 r1 (review LOW-2): "A refused head is the site's one diagnostic" — no coverage or type cascade
+  test("a malformed head over a `T | not` subject: E-SYNTAX-044 alone (no W-MATCH-002 / E-TYPE-031)", () => {
+    const src = P(`    function f(x: int | not) -> string {\n        return match x {\n            given (x) :> "some",\n            not :> "none"\n        };\n    }`, `        <p>\${f(1)}</p>`);
+    expect(codes(src)).toEqual(["E-SYNTAX-044"]);
+  });
+
   test("a head with no separator → E-SYNTAX-044 alone", () => {
     expect(codes(arm("given n").replace("given n :> 1", "given n { 1 }"))).toEqual(["E-SYNTAX-044"]);
   });
@@ -115,6 +129,16 @@ describe("a `given` arm the bootstrap does not build is refused by name (INTERIM
 
   test("a guard arm between patterns (first arm, not the subject)", () => {
     only(P(`    function go() {\n        let n: int | not = 5;\n        @v = match K.A {\n            given n :> 1,\n            .A :> 2,\n            .B :> 3\n        };\n    }`, `        <button onclick=go()>go</button>`));
+  });
+
+  // s478 r1 (review LOW-2): the refused arm's body (whose names the head never narrowed) is not typed
+  test("a refused guard arm's body reports nothing more (no E-OPERAND-NOT-NARROWED)", () => {
+    only(P(`    function f(x: int | not, y: int | not) -> int {\n        return match x {\n            not :> 0,\n            given y :> y + 1\n        };\n    }`, `        <p>\${f(1, 2)}</p>`));
+  });
+
+  // s478 r1 (review MED-1): a later head name may be a cell, as the first may
+  test("a multi-name arm head with a cell (`given x, @c :>`) is refused by name", () => {
+    only(P(`    function f(x: int | not) -> string {\n        return match x {\n            not :> "none",\n            given x, @c :> "some"\n        };\n    }`, `        <p>\${f(1)}</p>`));
   });
 
   test("the subject's arm with no `not :>` arm before it", () => {
@@ -141,6 +165,11 @@ describe("§42.2.3 — the markup-`${}` `given` guard", () => {
     const r = run(M(`\${ given @a :> { <p>"it's"</p> } }\n        <p id="after">\${@b}</p>`));
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("is given");
+  });
+
+  test("a multi-cell guard (`given @a, @b :>`) is refused by name, alone (review MED-1)", () => {
+    const r = run(M(`\${ given @a, @b :> { <p>x</p> } }`));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("`given` as a value (a call, a lone read) is untouched", () => {

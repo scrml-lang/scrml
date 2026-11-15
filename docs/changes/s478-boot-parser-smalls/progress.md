@@ -47,3 +47,11 @@ Branch `s478-boot-parser-smalls` from origin/main af7fe4bab. Base conformance JS
   (C2b function-values slice), and `fn/scope-redeclare-fn-over-param-ok`, whose remaining
   diagnostic is the correct S440 `string + int` E-OPERATOR-OPERAND-TYPE (case-stale: the shadowing
   itself works).
+
+## Fix round 1 (PR #1877 review)
+- HIGH-1: a type alias is a file-scope `type` binding in fileNames (analyze) → E-SCOPE-010 for alias+alias/struct/const/fn/cell; import-vs-alias stays linkage's one report.
+- MED-1: givenArmHead accepts `, @name` after the first name (arm + markup guard) → E-BOOTSTRAP-UNSUPPORTED alone.
+- LOW-1: the accepted `given x =>`/`->` arm drops its legacy mark (no W-MATCH-ARROW-LEGACY).
+- LOW-2: a refused/malformed given arm's match keeps one arm with a Recovered body (refusedArm); resolveMethod blames an unresolved receiver holding a parse error.
+- LOW-3/LOW-4: gaps g-boot-markup-program-refusal-span-s478, g-boot-markup-program-refused-body-read-s478.
+- Conformance vs main 807e5c467: PASS 422→424, FAIL 142→137, 0 PASS→FAIL. Corpus newly-rejecting vs main: 0.
