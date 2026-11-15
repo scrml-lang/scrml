@@ -196,7 +196,12 @@ ${
     //    analyzeSources re-parses a file (from the driver's source — the tree
     //    holds no text) with the offsets its first analysis found (parseFileNs).
     // =========================================================================
-    export type PNs:struct = { names: string[], at: int[] }
+    //  - `kw` (s478): the source offsets of the statements `x = e;` analysis proved
+    //    to be KEYWORDLESS DECLARATIONS (§50.8.5 — `x` names nothing in scope;
+    //    analyze.scrml resolveEvalStmt). At those offsets only, the statement is
+    //    parsed as `const x = e;` is (parseStmt). Everywhere else it is an
+    //    assignment.
+    export type PNs:struct = { names: string[], at: int[], kw: int[] }
 
     // The local names of the namespace imports among `items` (a `<program>`'s own
     // included — the items analyze's linkage binds, link.scrml importsOfItems).
@@ -3067,6 +3072,11 @@ ${
                 mt = rr.tp
             }
             return mkS(mt, start, AStmtK.Eval(rm.e))
+        }
+        // s478 — a keywordless declaration analysis proved (PNs.kw, §50.8.5): `x = e;` read as `const x = e;`
+        if (t.cls == TC.Ident && tp.ns.kw.indexOf(start) >= 0 && isP(adv(tp), "=")) {
+            const kinit: RExpr = parseAssign(adv(adv(tp)))
+            return mkS(kinit.tp, start, AStmtK.Local(t.v, false, not, kinit.e, false))
         }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
@@ -10061,10 +10071,10 @@ ${
     // (from the first read's import items, nsOfItems), so its dotted types, `fail` heads, qualified
     // arms and tags name module members. Its VALUE members are analysis's (PNs).
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
-        const p1: Parsed = parseFileNs(path, src, firstId, { names: [], at: [] })
+        const p1: Parsed = parseFileNs(path, src, firstId, { names: [], at: [], kw: [] })
         const names: string[] = nsOfItems(p1.ast.items)
         if (names.length == 0) return p1
-        return parseFileNs(path, src, firstId, { names: names, at: [] })
+        return parseFileNs(path, src, firstId, { names: names, at: [], kw: [] })
     }
 
     // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
