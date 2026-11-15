@@ -1,0 +1,14 @@
+// §66.12.2 + §13.9 (RULED S478 item 1) — a whole-cell author write into a pending tape needs `replace`.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <q:int=1/>
+    function load(n: int) -> User[] {
+        const rs: User[] = ?{`SELECT id, name FROM users WHERE id >= ${n}`}.all() !{ _ :> { return []; } };
+        return rs;
+    }
+    let <users:(not to User[])=(load(@q) !{ _ :> not })/>
+    <main>
+        <button id="clear" onclick={ @users = []; }>clear</button>
+        <div if=@users><each in=@users><p>${@.name}</p></each></div>
+    </main>
+</program>

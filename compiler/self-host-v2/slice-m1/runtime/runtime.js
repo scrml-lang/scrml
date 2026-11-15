@@ -494,8 +494,11 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 //  - nothing is superseded before a write actually lands (a wait whose continuation then writes
 //    nothing — an untaken `if`, a failure arm that skips the write, an early exit — leaves the
 //    load alone).
-//  - the load's own settle is never re-checked: a write that would beat it cancelled its task, so
-//    a load whose continuation runs is the newest start (`settling` lets its write through).
+//  - the load's own settle never reloads: a write that would beat it cancelled its task, so a load
+//    whose continuation runs is the newest start (`settling` lets its write through, after the same
+//    `pendOlder` test as a write — a backstop, since stamps only rise).
+//  - s478 r2: a `reset(@x)` starts its run when the reset executes — a fresh stamp, never skipped
+//    (Request.resetRun); a write later in the reset's own continuation is dated at the reset.
 // Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
 // author write does not supersede its fetch).
 let pendSeq = 0;
@@ -505,13 +508,30 @@ const PEND_STALE = 0;              // discarded: a newer load started, or a newe
 const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
 const PEND_RELOAD = 2;             // lands `not`, then the cell's load re-runs (r4 D)
 
+// THE one supersede test (s475 r3; s478 reuses it for a load's own settle): a start
+// dated `s` is the OLDER start under §13.9.4 rule 1 when a load started after it or a write started
+// after it has already landed. Ties are not older (the later-running of the two wins, see below).
+// Stamps only rise: `p.load` / `p.wrote` are only ever set from a start that passed this test.
+function pendOlder(p, s) {
+  return p.load > s || p.wrote > s;
+}
+
 function pendWrite(cell, v) {
   const p = cell.pend;
-  if (p.settling) return PEND_LAND;                   // the load's own settle (never re-checked, never reloads)
-  const s = curStamp !== 0 ? curStamp : ++pendSeq;
-  if (p.load > s || p.wrote > s) return PEND_STALE;   // a newer load started, or a newer write landed
+  // the load's own settle never reloads; s478 r1 (F2): it lands only while its start is still the
+  // newest — a run whose start a landed write has passed is superseded (never lands over it)
+  if (p.settling) return pendOlder(p, p.load) ? PEND_STALE : PEND_LAND;
+  let s = curStamp !== 0 ? curStamp : ++pendSeq;
+  // s478 r2 (§13.9.4 rule 3 ⚑): a write later in the SAME continuation as a reset is the later start
+  // — dated no earlier than the reset's run (a tie, which the write wins below). Writes from other
+  // continuations keep their wait's stamp (rule 2).
+  if (curStamp !== 0 && p.resetCont === curStamp && p.resetAt > s) s = p.resetAt;
+  if (pendOlder(p, s)) return PEND_STALE;             // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
-  if (p.load < s) p.req.supersede();                  // r4 F-A: every winning write, a no-op included
+  // r4 F-A: every winning write, a no-op included. s478: `<=` — a tie is a reset's run and a write
+  // after it in the SAME continuation (dated at the reset, above); the write runs after it there, so
+  // it is the later start and wins (`reset(@x); @x = v;`, RULED S478 item 2).
+  if (p.load <= s) p.req.supersede();
   return v === null || v === undefined ? PEND_RELOAD : PEND_LAND;
 }
 
@@ -526,7 +546,7 @@ class Request {
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
     // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
-    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
+    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false, resetAt: 0, resetCont: 0 };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -540,14 +560,39 @@ class Request {
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
   }
-  run() {
+  /**
+   * s478 (RULED S478 item 2; SPEC §13.9.4 rule 3) — `reset(@x)` of a pending cell: the run it
+   * triggers STARTS WHEN THE RESET EXECUTES ("the reset's load starts at the reset, so the later
+   * write wins (most recently started)"). So it runs now (not at the end of the batch, as a
+   * dependency change's run does) with a FRESH stamp: it is always the most recent start, and
+   * supersedes every earlier load and write under the S475 rules (`run` cancels the older run's
+   * task — a READ's transport is aborted, a WRITE's call completes and is discarded; a write
+   * started earlier that lands later is discarded by `pendOlder`). It is never skipped: a reset
+   * after a save (`save(2); reset(@who)`) or a retry after a failed load always reloads.
+   * Ruling 2 inside a continuation: the continuation that issued the reset is recorded
+   * (`resetCont`), and an author write later in that same continuation is dated at the reset
+   * (pendWrite) — the `<=` tie there lets it supersede the reset's load (`reset(@who); @who = "z";`
+   * keeps "z"). A dependency change in the same batch still re-runs the load at the batch's end,
+   * the newest start (rule 3). Stamps only rise: `++pendSeq` exceeds every stamp already issued.
+   */
+  resetRun() {
+    if (this.disposed) return;
+    const p = this.target.pend;
+    const s = ++pendSeq;
+    p.resetAt = s;
+    p.resetCont = curStamp;          // 0 in a handler's synchronous part: a later write there is fresh anyway
+    this.run(s);
+  }
+  run(start = 0) {
     if (this.disposed) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
     const p = this.target.pend;
-    if (p !== null && p.req === this) p.load = ++pendSeq;     // N2: this load's start stamp
+    // N2: this load's start stamp — a reset's (resetRun), else now (a mount / dependency-change run
+    // starts when it runs: the end of the batch that triggered it, §13.9.4 rule 3)
+    if (p !== null && p.req === this) p.load = start > 0 ? start : ++pendSeq;
     const st = this.state;
     try {
       if (st) {
@@ -699,7 +744,12 @@ export function requestSlot() {
  */
 export function refetch(slot) {
   const r = slot ? slot.request : null;
-  if (r) r.markStale();
+  if (!r) return;
+  // s478: a pending cell's hidden request is reached only by `reset(@x)` (§13.9.2: it has no
+  // `refetch()`), and the run a reset triggers starts at the reset (§13.9.4 rule 3, RULED S478)
+  const p = r.target.pend;
+  if (p !== null && p.req === r) r.resetRun();
+  else r.markStale();
 }
 
 /**
