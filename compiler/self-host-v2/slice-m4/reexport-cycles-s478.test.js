@@ -292,6 +292,22 @@ describe("§21.3 E-IMPORT-002: every import cycle is reported, at every file in 
       app(`import { A, B } from "./x.scrml";`, `<p>\${A + B}</p>`)]);
     expect(at(mixed)).toEqual([["E-IMPORT-002", "x.scrml"], ["E-IMPORT-002", "y.scrml"]]);
   });
+  // s478 (boot-false-positives; conformance module/e-import-002-circular-import-reject): a
+  // constant read across the cycle is one the link order could not initialize first. The read is
+  // legal by the rule E-SCOPE-001 states ("… or in a file this one imports"); E-IMPORT-002 owns it.
+  test("a constant read across the cycle: E-IMPORT-002 only — no E-SCOPE-001 'read before it is initialized', no untyped-constant refusal", () => {
+    const A2 = mod("a.scrml", `    import { fromEntry } from "./app.scrml";\n    export const fromA = fromEntry;`);
+    const E = { path: ENTRY, src: `\${\n    import { fromA } from "./a.scrml";\n    export const fromEntry = 1;\n}\n<program>\n    <main><p>\${fromA}</p></main>\n</program>\n` };
+    const r = prog([A2, E]);
+    expect(at(r)).toEqual([["E-IMPORT-002", "a.scrml"], ["E-IMPORT-002", ENTRY]]);
+  });
+  test("guard: inside a cyclic file, a SAME-file read before initialization is still E-SCOPE-001", () => {
+    const A2 = mod("a.scrml", `    import { fromEntry } from "./app.scrml";\n    export const fromA = later + 1;\n    const later = 2;`);
+    const E = { path: ENTRY, src: `\${\n    import { fromA } from "./a.scrml";\n    export const fromEntry = 1;\n}\n<program>\n    <main><p>\${fromA}</p></main>\n</program>\n` };
+    const r = prog([A2, E]);
+    expect(at(r)).toContainEqual(["E-SCOPE-001", "a.scrml"]);
+    expect(at(r)).toContainEqual(["E-IMPORT-002", "a.scrml"]);
+  });
   test("control: an acyclic diamond of imports is clean", () => {
     const BASE = mod("base.scrml", `    export const V = "v";`);
     const L = mod("l.scrml", `    import { V } from "./base.scrml";\n    export fn l() -> string {\n        return V;\n    }`);

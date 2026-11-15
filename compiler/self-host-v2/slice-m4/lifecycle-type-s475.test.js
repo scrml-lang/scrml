@@ -212,7 +212,9 @@ describe("the opener's paren matcher skips `[…]` and strings: a malformed life
     expect(cs).not.toContain("E-DECL-STATE-CHILD");
   });
   test("a `)` inside a string", () => {
-    expect(codes(P(`let <m:(not to string(=="a)"))=not/>\n<p>after</p>`))).toEqual([U]);
+    // s478 (s478-boot-refinement): the refinement is read now — `=="a)"` compares with a string,
+    // outside the §53.2.1 grammar (`comparison-op numeric-literal`), so it is E-CONTRACT-002, the one report
+    expect(codes(P(`let <m:(not to string(=="a)"))=not/>\n<p>after</p>`))).toEqual(["E-CONTRACT-002"]);
   });
   test("an unclosed `[` falls back to the plain paren count (no longer swallow)", () => {
     const cs = codes(P(`let <m:(not to int[)=not/>\n<p>after</p>`));

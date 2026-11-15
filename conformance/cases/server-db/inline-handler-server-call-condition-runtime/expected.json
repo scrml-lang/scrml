@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
   "spec": "§13.2",
-  "rationale": "§13.2: the compiler SHALL insert `await` at every call site where a server-generated fetch call is made — including an inline event-handler value (ruling S440 JS-WAT #11: handler bodies are subject to every rule).",
+  "rationale": "§13.2: the compiler SHALL insert `await` at every call site where a server-generated fetch call is made — including an inline event-handler value (ruling S440 JS-WAT #11: handler bodies are subject to every rule). S478 (boot-false-positives): the condition is now `isOk(1) !{ _ :> false }`. A client call of a server function is failable (§19.9.10; S451 \"your recs on all of them\" item 1), so the unhandled `if (isOk(1))` is E-ERROR-002 (§34; the SPEC's own §12 example was amended the same way, S451). The handler still tests the awaited call's value in the condition: an un-awaited call is a Promise, which `!{}` does not turn into `false`, so the always-\"accepted\" defect still fails the runtime half; a transport failure answers `false` (fail closed).",
   "expect": {
     "codes": [],
     "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK", "E-ASYNC-FN-ESCAPES-AS-VALUE"],

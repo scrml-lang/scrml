@@ -1,0 +1,8 @@
+{
+  "expect": {
+    "codes": ["E-CTRL-003", "E-CTRL-001"],
+    "notCodes": ["E-CTRL-005"],
+    "severity": { "E-CTRL-003": "error", "E-CTRL-001": "error" }
+  },
+  "reason": "S478 (boot-false-positives): the §66 twin is graded on every Error it emits (twin-extra-error), and the trailing `<span else>` fires E-CTRL-001 as well as E-CTRL-003 — on impl#1 too, as this case's own description records. E-CTRL-001 is the SPEC's own rule for that element: §17.1.1 \"An element carrying `else` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. The compiler SHALL reject any `else` attribute that does not satisfy this condition (E-CTRL-001)\" — the element is immediately preceded by an `else` element. The legacy contract (E-CTRL-003 only, a superset check) is unchanged; the twin's expectations assert both, as the sibling ctrl-003-extend-past-else-program-pos documents. (§17's Worked Example 5 prints only E-CTRL-003 — whether the co-fire should go is an owner question, see the PR.)"
+}
