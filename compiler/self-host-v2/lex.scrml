@@ -97,6 +97,13 @@ ${
         // end of input). The parser reports E-FOREIGN-002 (unclosed) and
         // E-FOREIGN-001 (`closer` != `level`).
         Foreign(level: int, body: string, closer: int),
+        // s478 — a markup element written as a VALUE in logic (`return <li>…</li>`,
+        // `@f ? <b>x</b> : <i>y</i>`, `.A :> <p>a</p>`; SPEC §1.4 / §7.4.1), ONE
+        // token: markup is text, not tokens, so its extent is read by characters
+        // (markupValueExtentAt) and the parser reads the element itself from the
+        // token's span (parse.scrml parseMarkupValue). Only a region lexer makes it
+        // (lexFromMode); the whole-file `lex` never does.
+        MarkupValue,
         // end of input
         Eof,
     }
@@ -208,6 +215,8 @@ ${
         if (last is .TemplateChunk) return false
         // s473: a foreign block (§23.2) is a value — `/` after it divides
         if (last is .Foreign) return false
+        // s478: a markup value is a value
+        if (last is .MarkupValue) return false
         // Unknown stands in for chars this lexer does not tokenize yet — several
         // (`@` the reactive/each sigil, `~`, `#`) are VALUE-producing in real
         // scrml, so a following `.`/`/` is member-access / division, NOT a bare
@@ -373,6 +382,7 @@ ${
             .Ident               :> ""
             .Unknown             :> ""
             .Foreign             :> ""
+            .MarkupValue         :> ""
         }
     }
 
@@ -1654,7 +1664,7 @@ ${
         const k: TokenKind = t.kind
         if (k is .Keyword) return t.text == "is" || t.text == "in" || t.text == "instanceof" || t.text == "typeof" || t.text == "new" || t.text == "await"
         if (k is .Ident) return t.text == "and" || t.text == "or"
-        if (k is .StringLit || k is .TemplateChunk || k is .RegexLit || k is .NumberLit || k is .BareVariant || k is .Foreign) return false
+        if (k is .StringLit || k is .TemplateChunk || k is .RegexLit || k is .NumberLit || k is .BareVariant || k is .Foreign || k is .MarkupValue) return false
         return match t.text {
             "=" :> true
             "==" :> true
@@ -1884,12 +1894,171 @@ ${
         while (!done && !isEof(st.cur)) {
             if (stopBefore(st, stop)) {
                 done = true
+            } else if (markupValueAhead(st)) {
+                st = scanMarkupValueStep(st)
+                if (stopAfter(st, stop)) done = true
             } else {
                 st = step(st)
                 if (stopAfter(st, stop)) done = true
             }
         }
         return { tokens: st.tokens.concat([makeEof(st.cur)]), end: st.cur.pos }
+    }
+
+    // =========================================================================
+    // s478 — MARKUP AS A VALUE in logic (SPEC §1.4 "markup is a first-class
+    // value"; §7.4.1 markup-as-expression). An element opener `<name` where the
+    // last token leaves an operand to be read — after `return`, `=`, `(`, `[`,
+    // `,`, `?`, `:`, `=>`, `&&`, `||`, `??`, `!`, or an arm's `:>` — is a markup
+    // value, never a less-than (a `<` operator has a left operand: after a name,
+    // a literal or a closer this predicate is false). A statement START (after
+    // `{`, `;`, `}`, or at a region's first token) is not judged here: a
+    // `<name>` there is the retired declaration spelling or bare markup, which
+    // other readers own; `lift <x>` is the Tier-0 reader's (lexTier0). Inside a
+    // template slot or a string nothing is judged.
+    //
+    // The value is ONE token whose extent is read by characters: markup is
+    // text, not tokens (SPEC §4.18.1 free-text body), so lexing it as code
+    // would misread its text (`</script>` as a regular expression, `p { … }`
+    // as a block). The parser reads the element itself from the token's span
+    // (parse.scrml parseMarkupValue) — the extent here only bounds it.
+    // =========================================================================
+    fn markupValueAhead(st: LexState) -> boolean {
+        if (st.tokens.length == 0) return false
+        if (st.interps.length != 0) return false
+        if (st.mode != LexMode.InCode) return false
+        if (!operandSlotAfter(st.tokens)) return false
+        const c: Cursor = skipTriviaAhead(st.cur)
+        return peekCode(c, 0) == 60 && isAsciiLetter(peekCode(c, 1))
+    }
+
+    fn isAsciiLetter(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) }
+
+    // Does the last token leave an operand to be read?
+    fn operandSlotAfter(ts: Token[]) -> boolean {
+        const t: Token = ts[ts.length - 1]
+        const k: TokenKind = t.kind
+        if (k is .Keyword) return t.text == "return"
+        if (k is .LParen || k is .LBracket || k is .Comma || k is .Assign || k is .Question || k is .Colon) return true
+        if (k is .Arrow || k is .LogicalAnd || k is .LogicalOr || k is .NullishCoalesce || k is .Bang) return true
+        if (k is .GreaterThan && ts.length >= 2) {
+            // an arm's `:>` (two tokens, touching)
+            const p: Token = ts[ts.length - 2]
+            const pk: TokenKind = p.kind
+            if (!(pk is .Colon)) return false
+            return p.span.end == t.span.start
+        }
+        return false
+    }
+
+    fn scanMarkupValueStep(st: LexState) -> LexState {
+        const c: Cursor = skipTriviaAhead(st.cur)
+        const end: int = markupValueExtentAt(c.source, c.pos)
+        const to: Cursor = advanceTo(c, end)
+        const tok: Token = mkTok(TokenKind.MarkupValue, sliceText(c, to), c, to)
+        return mkState(to, st.mode, st.tokens.concat([tok]), st.bracketStack, st.interps, st.display)
+    }
+
+    // The end of the element whose `<` is at `pos`: past its matching closer
+    // (`</name>` or `</>` — "Each closer closes exactly one open tag", §4.16),
+    // its `/>`, or a void element's `>`; the end of the input when it is never
+    // closed (the parser reports it). In a body, a `${ … }` is skipped whole (its
+    // extent is the code lexer's, a Balanced region); `<script>` / `<style>`
+    // bodies run to their own closer (scrml admits neither element, §4.17, and
+    // their text is not markup); `<pre>` / `<code>` are raw content to their
+    // closer (§4.17); `<!-- … -->` is a comment.
+    export fn markupValueExtentAt(src: string, pos: int) -> int {
+        let i: int = pos
+        let depth: int = 0
+        while (i < src.length) {
+            const c0: int = src.charCodeAt(i)
+            const c1: int = i + 1 < src.length ? src.charCodeAt(i + 1) : 0
+            if (c0 == 60 && isAsciiLetter(c1)) {
+                let k: int = i + 1
+                while (k < src.length && isTagNameCh(src.charCodeAt(k))) { k = k + 1 }
+                const name: string = src.substring(i + 1, k).toLowerCase()
+                const oe: int = openerEndAt(src, k)
+                const selfClosed: boolean = oe >= 2 && src.charCodeAt(oe - 2) == 47 && src.charCodeAt(oe - 1) == 62
+                i = oe
+                if (selfClosed || isVoidName(name)) {
+                    if (depth == 0) return i
+                } else if (isRawName(name)) {
+                    const close: int = rawNameCloseAt(src, i, name)
+                    if (close < 0) return src.length
+                    i = close + name.length + 3
+                    if (depth == 0) return i
+                } else {
+                    depth = depth + 1
+                }
+            } else if (c0 == 60 && c1 == 47) {
+                const gt: int = src.indexOf(">", i)
+                if (gt < 0) return src.length
+                i = gt + 1
+                depth = depth - 1
+                if (depth <= 0) return i
+            } else if (c0 == 60 && c1 == 33 && src.substring(i, i + 4) == "<!--") {
+                const ce: int = src.indexOf("-->", i + 4)
+                if (ce < 0) return src.length
+                i = ce + 3
+            } else if (c0 == 36 && c1 == 123) {
+                i = lexFrom(src, i + 1, LexStop.Balanced).end
+            } else {
+                i = i + 1
+            }
+        }
+        return src.length
+    }
+
+    fn isTagNameCh(c: int) -> boolean { return isIdentCont(c) || c == 45 || c == 46 || c == 58 }
+
+    // Past an opener's `>` / `/>` from offset `i` (just after its name): quoted
+    // values (a `${ … }` inside one skipped whole), and `${ … }` / `{ … }` /
+    // `( … )` / `[ … ]` values, skipped whole by the code lexer.
+    fn openerEndAt(src: string, from: int) -> int {
+        let i: int = from
+        while (i < src.length) {
+            const c0: int = src.charCodeAt(i)
+            const c1: int = i + 1 < src.length ? src.charCodeAt(i + 1) : 0
+            if (c0 == 62) return i + 1
+            if (c0 == 47 && c1 == 62) return i + 2
+            if (c0 == 34 || c0 == 39) {
+                i = i + 1
+                while (i < src.length && src.charCodeAt(i) != c0) {
+                    if (src.charCodeAt(i) == 36 && i + 1 < src.length && src.charCodeAt(i + 1) == 123) {
+                        i = lexFrom(src, i + 1, LexStop.Balanced).end
+                    } else {
+                        i = i + 1
+                    }
+                }
+                i = i + 1
+            } else if (c0 == 36 && c1 == 123) {
+                i = lexFrom(src, i + 1, LexStop.Balanced).end
+            } else if (c0 == 123 || c0 == 40 || c0 == 91) {
+                i = lexFrom(src, i, LexStop.Balanced).end
+            } else {
+                i = i + 1
+            }
+        }
+        return src.length
+    }
+
+    fn isVoidName(n: string) -> boolean {
+        return n == "input" || n == "br" || n == "hr" || n == "img" || n == "meta" || n == "link"
+    }
+
+    fn isRawName(n: string) -> boolean {
+        return n == "script" || n == "style" || n == "pre" || n == "code"
+    }
+
+    // The offset of `</name>` (the name matched case-insensitively) at or after `from`, else -1.
+    fn rawNameCloseAt(src: string, from: int, name: string) -> int {
+        let i: int = src.indexOf("</", from)
+        while (i >= 0) {
+            const after: int = i + 2 + name.length
+            if (src.substring(i + 2, after).toLowerCase() == name && src.substring(after, after + 1) == ">") return i
+            i = src.indexOf("</", i + 1)
+        }
+        return -1
     }
 }
 </program>
