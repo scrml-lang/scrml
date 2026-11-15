@@ -279,7 +279,8 @@ describe("pre-push suite-verdict block — no failure without its cause, no exit
   // Review F3 (S478 fix round 1): one log per run — the single machine-wide file let concurrent pushes overwrite
   // each other's log.
   const logPath = (out) => /Full output: (\S+)/.exec(out)?.[1];
-  test("the full output is kept on disk, in a per-run file, and its path printed", () => {
+  // git-bash on Windows prints the mktemp path in POSIX form (/c/...), which a Windows `join` cannot match.
+  test.skipIf(process.platform === "win32")("the full output is kept on disk, in a per-run file, and its path printed", () => {
     const a = verdict(1, 1, shardedUnhandled);
     const b = verdict(1, 1, shardedMemoryKill);
     const pa = logPath(a.out);
