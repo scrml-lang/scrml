@@ -1870,10 +1870,89 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
-            .Run(b: b) :> [View.Run(cpsBody(lowerBlock(c, b), []))]   // s478 (§40.8): explicit continuations, as a handler's
+            .Run(b: b) :> [runView(c, b)]   // s478 (§40.8): explicit continuations, as a handler's
             .Request(r: r) :> [requestView(c, r)]
             .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         }
+    }
+
+    // s478-boot-run-locals — a body-top run → View.Run. Owner ruling S478 (body-top question
+    // 2): a local "declared at a body-top run's top level is FILE-SCOPE per §7.6"; §35.2.2:
+    // "The compiler SHALL hoist the JS storage for such a `lin` variable to a single binding
+    // at the common ancestor scope of the declaration and the consumption". Each top-level
+    // Local's Sym is the run's `hoist` (declared by the printer in the scope's render), and
+    // its Let — at the body's top level or, after the continuation pass, in a continuation
+    // (a Suspend's `then`, a Join's body) — becomes an Assign of that binding. A Local of a
+    // nested block keeps its Let (block-scoped, §7.6 "Only top-level declarations").
+    fn runView(c: LC, b: ABlock) -> View {
+        let hoist: Sym[] = []
+        for (const s of b.stmts) {
+            if (isLocalStmt(s)) {
+                const sym: Sym | not = letSym(bindFact(c.t.binds, s.nid))
+                if (sym is given) hoist = hoist.concat([sym])
+            }
+        }
+        const body: Block = cpsBody(lowerBlock(c, b), [])
+        if (hoist.length == 0) return View.Run(body, [])
+        return View.Run(block(hoistedLets(body.stmts, hoist)), hoist)
+    }
+
+    fn isLocalStmt(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n) :> true
+            .Eval(e: x) :> false
+            .Return(e: x) :> false
+            .If(cond: x) :> false
+            .Given(name: x) :> false
+            .For(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn hoistedLets(ss: Stmt[], hoist: Sym[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const s of ss) { out = out.concat([hoistedLet(s, hoist)]) }
+        return out
+    }
+
+    fn hoistedLet(s: Stmt, hoist: Sym[]) -> Stmt {
+        return match s {
+            .Let(sym: sy, init: i) :> letOrAssign(sy, i, hoist)
+            .Suspend(bind: bd, on: on, then: t) :> Stmt.Suspend(bd, on, block(hoistedLets(t.stmts, hoist)))
+            .Join(k: k, body: jb) :> Stmt.Join(k, block(hoistedLets(jb.stmts, hoist)))
+            .Assign(local: x) :> s
+            .Write(cap: x) :> s
+            .Commit(writes: x) :> s
+            .If(cond: x) :> s
+            .Return(e: x) :> s
+            .Eval(e: x) :> s
+            .ResetSurface(of: x) :> s
+            .Defer(body: x) :> s
+            .Unpersist(decl: x) :> s
+            .Attempt(result: x) :> s
+            .Fail(err: x) :> s
+            .Jump(k: x) :> s
+            .Loop(label: x) :> s
+            .Break(target: x) :> s
+            .Continue(target: x) :> s
+            .Gather(g: x) :> s
+            .Lift(into: x) :> s
+            .LocalFn(f: x) :> s
+        }
+    }
+
+    fn letOrAssign(sy: Sym, init: Expr, hoist: Sym[]) -> Stmt {
+        for (const h of hoist) {
+            if (h.id == sy.id) return Stmt.Assign(sy, init, [])
+        }
+        return Stmt.Let(sy, init)
     }
 
     // s449 — an effect → View.Effect: each dependency's field fact (analyze

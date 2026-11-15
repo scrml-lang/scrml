@@ -168,15 +168,17 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
     expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" };`)))).toEqual(["E-PARSE-ARM"]);
   });
 
-  // review r1 (LOW, pinned, not built): armEnd's depth-0 `,` counts TOKEN brackets
-  // only, so a markup arm body's text `,` would end the arm. Markup arm bodies are
-  // not in the bootstrap — today this fails LOUDLY (no artifact). When they land,
-  // this pin breaks and the arm-boundary rule must learn markup depth.
-  test("PIN: a markup arm body with a `,` in its text fails loudly today (no artifact)", () => {
+  // review r1 (LOW, pinned): armEnd's depth-0 `,` counts TOKEN brackets only, so a
+  // markup arm body's text `,` would end the arm. s478 (markup-value-s478.test.js):
+  // a markup value is ONE token (lex.scrml markupValueExtentAt), so its text `,`
+  // is inside it and the arm ends at the `,` after `</b>`; a value-`match` arm
+  // whose body is markup is then the §18.0 steer, E-MATCH-ARM-MARKUP-IN-VALUE —
+  // the only diagnostic (no E-PARSE-UNCLOSED cascade), still no artifact.
+  test("PIN: a markup arm body with a `,` in its text is read whole: E-MATCH-ARM-MARKUP-IN-VALUE alone (no artifact)", () => {
     const src = P(fn("f", `        @out = match load("a") { .Ok(v) :> <b>ok, yes</b>, .NotFound(m) :> "nf", .Timeout :> "to", }`));
     const r = run(src);
     expect(r.core == null).toBe(true);
-    expect(r.diags.map((d) => d.code)).toContain("E-PARSE-UNCLOSED");
+    expect([...new Set(r.diags.filter((d) => d.severity === "Error").map((d) => d.code))]).toEqual(["E-MATCH-ARM-MARKUP-IN-VALUE"]);
   });
 
   test("engine message arms (§51.0.S.2.3) are not in the bootstrap: refused by name, comma or newline list — never read as display text", () => {

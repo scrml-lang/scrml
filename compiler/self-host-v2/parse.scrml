@@ -63,7 +63,7 @@ ${
     // s451 (U1a): the three template token kinds get their own classes — a
     // `?{}` SQL template is read from them (TChunk = a literal run, TIStart /
     // TIEnd = a `${` / its `}`); everywhere else they are still not an expression.
-    export type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd, Foreign }
+    export type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd, Foreign, Markup }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
     // s469 (templates): `bad` — a template chunk's malformed escape (lex.scrml
@@ -92,6 +92,7 @@ ${
             .Keyword(name: n) :> TC.Keyword
             .Unknown(ch: c) :> unknownClass(c)
             .Foreign(level: l) :> TC.Foreign
+            .MarkupValue :> TC.Markup
         }
     }
 
@@ -120,6 +121,7 @@ ${
             .RegexLit(pattern: p) :> p
             .TemplateChunk(cooked: c) :> c
             .Foreign(level: l, body: b) :> b
+            .MarkupValue :> ""
         }
     }
 
@@ -143,6 +145,7 @@ ${
             .Unknown(ch: c) :> ""
             .RegexLit(pattern: p) :> ""
             .Foreign(level: l, body: b, closer: k) :> foreignBad(l, k)
+            .MarkupValue :> ""
         }
     }
 
@@ -353,7 +356,7 @@ ${
 
     // Can token `t` begin an expression?
     fn exprStartTok(t: PTok) -> boolean {
-        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk || t.cls == TC.Foreign) return true
+        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk || t.cls == TC.Foreign || t.cls == TC.Markup) return true
         if (t.cls == TC.Keyword) return t.v == "true" || t.v == "false" || t.v == "not" || t.v == "match"
         if (t.cls != TC.Punct) return false
         return tk(t, "(") || tk(t, "[") || tk(t, "{") || tk(t, "!") || tk(t, "-")
@@ -915,7 +918,7 @@ ${
                     t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
                 }
                 if (isGiven) gheads = gheads.concat([gh])
-                const rb: RArmBody = parseArmBody(t)
+                const rb: RArmBody = parseArmBody(t, !guard)
                 t = rb.tp
                 const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted, bare: rb.bare }
                 arms = arms.concat([arm])
@@ -1306,7 +1309,9 @@ ${
     }
 
     // An arm's body: a `{ block }`, or one expression read up to `armEnd`.
-    fn parseArmBody(tp: TP) -> RArmBody {
+    // s478 — `inMatch`: a `match` arm (not a `!{}` handler arm, §19), whose body
+    // may not be a markup element (E-MATCH-ARM-MARKUP-IN-VALUE, §18.0).
+    fn parseArmBody(tp: TP, inMatch: boolean) -> RArmBody {
         if (isP(tp, "{")) {
             // s469 — §18.5 (ruling S469 "Compile error (Recommended)", extended to
             // every arm kind by dpa-072 F9): a brace body that is exactly ONE bare
@@ -1379,7 +1384,9 @@ ${
             const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
             return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: tp.ns } }
         }
-        const r: RExpr = parseAssign(sub)
+        // s478 — §18.0 / §34 E-MATCH-ARM-MARKUP-IN-VALUE: "A JS-style value-match
+        // arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element"
+        const r: RExpr = inMatch && cur(sub).cls == TC.Markup && peekAt(sub, 1).cls == TC.End ? parseMarkupValue(sub, true) : parseAssign(sub)
         let st: TP = r.tp
         if (!atEnd(st)) {
             const x: PTok = cur(st)
@@ -2088,6 +2095,7 @@ ${
         if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
         if (t.cls == TC.TChunk) return parseTemplate(tp)  // s469: a logic backtick template (§14.13.3)
         if (t.cls == TC.Foreign) return parseForeign(tp)  // s473: a `_={ … }=` foreign code block (§23.2)
+        if (t.cls == TC.Markup) return parseMarkupValue(tp, false)  // s478: markup as a value (§1.4, §7.4.1)
         if (hashRefAhead(tp)) return mkE(adv(adv(adv(adv(tp)))), start, AExprK.HashRef(peekAt(tp, 2).v))   // s475 (S3b)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
@@ -2155,7 +2163,9 @@ ${
     // unbuildable slice (§23.2.4a), named at the header. Where the block may
     // stand (§23.2.4) is judged by analyze, which knows the enclosing function.
     // =========================================================================
-    type FHeader:struct = { names: string[], starts: int[], bodyAt: int, ok: boolean }
+    // `why` (s478): why a header that is not ok cannot be built ("" — not the
+    // `in: { name, … }` shape at all).
+    type FHeader:struct = { names: string[], starts: int[], bodyAt: int, ok: boolean, why: string }
 
     fn parseForeign(tp: TP) -> RExpr {
         const t: PTok = cur(tp)
@@ -2173,6 +2183,10 @@ ${
         if (level == 0) tp1 = diagAt(tp1, "W-FOREIGN-001", "a level-0 `_{ … }` foreign block closes at the first unbalanced `}` — a `}` in a string or a comment in the foreign code ends it early; write `_={ … }=` (§23.2)", t)
         const bodyAt: int = start + level + 2
         const h: FHeader = foreignHeader(t.v)
+        if (!h.ok && h.why != "") {
+            const d3: TP = diagAt(tp1, "E-FOREIGN-007", h.why, t)
+            return mkE(d3, start, AExprK.Recovered)
+        }
         if (!h.ok) {
             const d2: TP = diagAt(tp1, "E-FOREIGN-007", "this foreign block's `in:` header is not `in: { name, name, … }` — the crossing header names bare identifiers only, separated by commas (§23.2.4a). Anything else leaves `in:` at the head of the slice, which is not JavaScript (`in` is a reserved word), so the slice cannot be built. Bind the value to a local first, then cross the local", t)
             return mkE(d2, start, AExprK.Recovered)
@@ -2191,6 +2205,104 @@ ${
         return mkE(tpn, start, AExprK.Foreign(f))
     }
 
+    // =========================================================================
+    // s478 — MARKUP AS A VALUE (SPEC §1.4 "markup is a first-class value"; §7.4.1
+    // markup-as-expression): an element written where logic reads an operand
+    // (`return <li>…</li>`, `@f ? <b>x</b> : <i>y</i>`, `.A :> <p>a</p>`). The
+    // lexer made it ONE token (lex.scrml markupValueExtentAt); the element is read
+    // HERE by the markup reader — parseMarkupNode, the reader every markup body
+    // uses — over the token's own span, so the refusals below are decided on the
+    // parsed element, never on text (§4.17, S462: "The decision is made on the
+    // parsed element (its node), never on source text").
+    //
+    // Built: the READ and these named diagnostics —
+    //   - `<script>` / `<style>` anywhere in it: E-SCRIPT-001 / E-STYLE-001 (§4.17
+    //     S462: rejected "with the same codes … at EVERY position markup is parsed
+    //     or built" — the markup reader reports them);
+    //   - an `<md>` in it: E-MD-IN-LOGIC-NOMINAL (§34 row: "An `<md>` inside `lift`
+    //     markup or a markup value in an expression (`const x = <div><md>…</md></div>`)
+    //     … the element is refused by name — never rendered as an unknown element");
+    //   - a value-form `match` arm whose body is the element (`arm`):
+    //     E-MATCH-ARM-MARKUP-IN-VALUE (§34 row, §18.0: "A JS-style value-match arm
+    //     (`match expr { .V :> ... }`) has an arm body that is a MARKUP element").
+    // NOT BUILT (INTERIM, fail closed): the value itself — its type, its lowering,
+    // its rendering. Any other markup value is E-BOOTSTRAP-UNSUPPORTED naming
+    // §1.4 / §7.4.1 (g-boot-markup-as-value-unbuilt-s473). Capable form: a markup
+    // value typed as markup and rendered where it is interpolated.
+    // The expression is AExprK.Recovered: nothing downstream types or checks it.
+    // =========================================================================
+    fn parseMarkupValue(tp: TP, arm: boolean) -> RExpr {
+        const t: PTok = cur(tp)
+        // the element's own reader, over the file's offsets (the span is padded to
+        // its offset, so every diagnostic it reports is at its place in the file)
+        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], ns: tp.ns }
+        const rn: RNodeOne = parseMarkupNode(m0)
+        let ds: Diag[] = rn.mp.diags
+        let named = false
+        for (const d of ds) {
+            if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") named = true
+        }
+        for (const md of mdElemsIn(rn.n)) {
+            ds = ds.concat([newDiag("E-MD-IN-LOGIC-NOMINAL", "an `<md>` in a markup value in logic is not read yet — it is refused by name rather than rendered as an unknown element (§67.2). A static `<md>` is read in a markup body: write it in the element's markup where it renders, not in a value", tp.file, mkSpan(md.start, md.end))])
+            named = true
+        }
+        if (arm) {
+            ds = ds.concat([newDiag("E-MATCH-ARM-MARKUP-IN-VALUE", "a value-form `match` arm returns a VALUE, and this arm's body is a markup element (§18.0). To render a UI tree per variant, use the block form `<match for=Type on=expr>` (§18.0.1); to compute a value per variant, have the arm return that value and interpolate it in markup", tp.file, mkSpan(t.start, t.end))])
+        } else if (!named) {
+            ds = ds.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", markupValueRefusal(), tp.file, mkSpan(t.start, t.end))])
+        }
+        const t2: TP = { toks: tp.toks, i: tp.i, nid: rn.mp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns }
+        return mkE(adv(t2), t.start, AExprK.Recovered)
+    }
+
+    // The message of the INTERIM markup-value refusal (also how parseFileNs finds it).
+    fn markupValueRefusal() -> string {
+        return "markup as a value in logic (a function's return, an operand, an argument, a binding — §1.4, §7.4.1) is not built in the bootstrap yet: the element is read and checked, but no value is made of it. Write the markup where it renders — in a markup body, choosing with `if=` / `else` (§17.1) or `<match for=… on=…>` (§18.0.1) — or compute a value (a string) in logic and interpolate it"
+    }
+
+    // A file's diagnostics, the INTERIM markup-value refusal dropped where the file
+    // already carries a NAMED markup refusal (E-SCRIPT-001, E-STYLE-001,
+    // E-MD-IN-LOGIC-NOMINAL, E-MATCH-ARM-MARKUP-IN-VALUE): `@f ? <style>…</style> :
+    // <b>b</b>` is the one error the author must act on, not that plus a bootstrap
+    // limit on its sibling (the named-refusal table's rule, refusals.scrml: "the
+    // named refusal is what the author must act on first"). Fail closed either way:
+    // the named refusal is an Error, so the file still fails.
+    fn markupValueDiags(ds: Diag[]) -> Diag[] {
+        let namedHere = false
+        for (const d of ds) {
+            if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001" || d.code == "E-MD-IN-LOGIC-NOMINAL" || d.code == "E-MATCH-ARM-MARKUP-IN-VALUE") namedHere = true
+        }
+        if (!namedHere) return ds
+        let out: Diag[] = []
+        for (const d of ds) {
+            if (!(d.code == "E-BOOTSTRAP-UNSUPPORTED" && d.message == markupValueRefusal())) out = out.concat([d])
+        }
+        return out
+    }
+
+    // The spans of the `<md>` elements in `n` (itself included).
+    fn mdElemsIn(n: ANode) -> ASpan[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> mdElemsOf(e)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: x) :> []
+            .Effect(w: x) :> []
+            .Request(r: x) :> []
+            .Css(c: x) :> []
+            .Gather(f: x) :> []
+            .Run(b: x) :> []
+        }
+    }
+
+    fn mdElemsOf(e: AElem) -> ASpan[] {
+        let out: ASpan[] = []
+        if (!e.star && e.tag.toLowerCase() == "md") out = [e.span]
+        for (const k of e.kids) { out = out.concat(mdElemsIn(k)) }
+        return out
+    }
+
     // The opener's `=` run, as written.
     fn foreignEq(text: string) -> string {
         let k: int = 1
@@ -2204,13 +2316,30 @@ ${
     // whitespace). No header (the body does not start with the word `in` then
     // `:`): no crossings, the body whole. `starts` are offsets into `body`;
     // `bodyAt` is where the slice begins.
+    // s478 (g-boot-foreign-header-checks-unbuilt-s473) — §23.2.4a: "A slice that is
+    // not valid JavaScript as the body of a strict-mode async function whose
+    // parameters are its crossings SHALL be a compile error (E-FOREIGN-007)". The
+    // crossings ARE those parameters ("The crossings are the parameters of the
+    // sealed slice"), so three headers make the slice unbuildable, refused here:
+    //   - a name crossed twice (`in: { a, a }`) — duplicate parameters are a
+    //     SyntaxError in strict mode;
+    //   - a reserved word, or `eval` / `arguments`, as a crossing (`in: { if }`,
+    //     `in: { await }`) — not a parameter name of a strict-mode async function;
+    //   - a comment before the header (`_={ /* c */ in: { a } … }=`) — the header
+    //     is declared "at the top of the block, inside the braces", so a comment
+    //     ahead of it leaves `in:` inside the slice text, and `in` is a reserved
+    //     word: not JavaScript.
     fn foreignHeader(body: string) -> FHeader {
-        const none: FHeader = { names: [], starts: [], bodyAt: 0, ok: true }
+        const none: FHeader = { names: [], starts: [], bodyAt: 0, ok: true, why: "" }
         const i: int = skipBlankChars(body, 0)
-        if (body.substring(i, i + 2) != "in" || isIdentCh(body.substring(i + 2, i + 3))) return none
+        if (body.substring(i, i + 2) != "in" || isIdentCh(body.substring(i + 2, i + 3))) {
+            const ci: int = skipBlankAndComments(body, 0)
+            if (ci > i && headerAt(body, ci)) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block's `in:` header follows a comment — the crossing header is declared \"at the top of the block, inside the braces\" (§23.2.4a), so after a comment it is not read as one: `in:` stays in the slice, which is then not JavaScript (`in` is a reserved word) and cannot be built (E-FOREIGN-007). Put the comment after the header, or before the block" }
+            return none
+        }
         let j: int = skipBlankChars(body, i + 2)
         if (body.substring(j, j + 1) != ":") return none
-        const bad: FHeader = { names: [], starts: [], bodyAt: 0, ok: false }
+        const bad: FHeader = { names: [], starts: [], bodyAt: 0, ok: false, why: "" }
         j = skipBlankChars(body, j + 1)
         if (body.substring(j, j + 1) != "{") return bad
         j = skipBlankChars(body, j + 1)
@@ -2239,7 +2368,50 @@ ${
             }
         }
         if (!ok) return bad
-        return { names: names, starts: starts, bodyAt: j + 1, ok: true }
+        let k: int = 0
+        while (k < names.length) {
+            const n: string = names[k]
+            if (names.indexOf(n) < k) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block crosses `" + n + "` twice in its `in:` header — a crossing is a parameter of the sealed slice (§23.2.4a), and a strict-mode function cannot take two parameters of one name, so the slice cannot be built (E-FOREIGN-007). Name each crossing once" }
+            if (isSliceReservedName(n)) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block crosses `" + n + "` in its `in:` header — a crossing is a parameter of the sealed slice, a strict-mode async function (§23.2.4a), and `" + n + "` cannot name one there, so the slice cannot be built (E-FOREIGN-007). Bind the value to a local of another name, then cross the local" }
+            k = k + 1
+        }
+        return { names: names, starts: starts, bodyAt: j + 1, ok: true, why: "" }
+    }
+
+    // `in` + blanks + `:` at offset `at`
+    fn headerAt(body: string, at: int) -> boolean {
+        if (body.substring(at, at + 2) != "in" || isIdentCh(body.substring(at + 2, at + 3))) return false
+        const j: int = skipBlankChars(body, at + 2)
+        return body.substring(j, j + 1) == ":"
+    }
+
+    // Past blanks and JavaScript comments (`// …` to the line end, `/* … */`).
+    fn skipBlankAndComments(s: string, from: int) -> int {
+        let i: int = skipBlankChars(s, from)
+        let going = true
+        while (going) {
+            if (s.substring(i, i + 2) == "//") {
+                const nl: int = s.indexOf("\n", i)
+                i = skipBlankChars(s, nl < 0 ? s.length : nl)
+            } else if (s.substring(i, i + 2) == "/*") {
+                const ce: int = s.indexOf("*/", i + 2)
+                i = skipBlankChars(s, ce < 0 ? s.length : ce + 2)
+            } else {
+                going = false
+            }
+        }
+        return i
+    }
+
+    // A name that cannot be a parameter of a strict-mode async function: a
+    // reserved word (ES2015+, strict mode included), `await` (async), `eval` /
+    // `arguments` (strict mode).
+    fn isSliceReservedName(n: string) -> boolean {
+        return ["break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+                "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
+                "instanceof", "new", "null", "return", "super", "switch", "this", "throw", "true", "try", "typeof",
+                "var", "void", "while", "with", "yield", "let", "static", "implements", "interface", "package",
+                "private", "protected", "public", "await", "eval", "arguments"].indexOf(n) >= 0
     }
 
     fn skipBlankChars(s: string, from: int) -> int {
@@ -5484,7 +5656,8 @@ ${
         // declaration, §66.15). Refused by name, as E-PARSE-ITEM refused them
         // before (and recovered the same way), not read as a malformed `const`.
         const derived: boolean = tk(peekAt(tp, 1), "<")
-        if (derived || (tk(peekAt(tp, 2), "=") && tk(peekAt(tp, 3), "<"))) {
+        // (s478: the markup after `=` is one markup-value token, lex.scrml markupValueAhead)
+        if (derived || (tk(peekAt(tp, 2), "=") && (tk(peekAt(tp, 3), "<") || peekAt(tp, 3).cls == TC.Markup))) {
             let what: string = "a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration"
             if (derived) what = "a derived cell written `const <name> = …` (§6.6) — §66 writes it `<name:T = expr/>` in the `<program>`"
             const dc: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", what + "; neither form is in the bootstrap at logic-block level", kw)
@@ -11038,7 +11211,8 @@ ${
     // offsets its first analysis proved, PNs.at).
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
         const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], ns: ns }
-        const r: RMItems = parseMarkupItems(m0, "")
+        const r0: RMItems = parseMarkupItems(m0, "")
+        const r: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags)) }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.

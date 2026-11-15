@@ -1,11 +1,15 @@
 {
   "id": "foreign-inline-no-lang-neg",
-  "description": "§23.2/§23.6 E-FOREIGN-003 — a library file (`export fn`s, NO `<program>`) with a bound inline value-returning `_={ 1 + 1 }=` foreign block but NO `<foreign lang=… />` declaration and no ancestor `<program lang=>` either. The admitted (value-returning) block has no `lang=` to resolve in any ancestor, so it fires E-FOREIGN-003 (type-system.ts checkForeignBlocks) per §23.2/§23.6.",
+  "description": "§23.2/§23.6 E-FOREIGN-003 — a library file (`lib.scrml`: an `export function`, NO `<program>`) with a bound inline value-returning `_={ 1 + 1 }=` foreign block but NO `<foreign lang=… />` declaration, imported by a `<program>` that has no `lang=` either. The admitted (value-returning, in a `function` body) block has no `lang=` to resolve, so it fires E-FOREIGN-003 (type-system.ts checkForeignBlocks) per §23.2.1/§23.6. S478: the library moved into an aux file imported by a `<program>` entry (an entry file holds a `<program>`), and `export fn` became `export function` (§23.2.4: the inline form is \"in a server `function` body\" — \"NOT `fn`/pure helpers\", the S471 correction of the §23.6 examples), so the case asserts the language rule alone.",
   "language-version": "1.0",
   "source-test": "compiler/SPEC.md §23.2",
   "expect": {
-    "codes": ["E-FOREIGN-003"],
+    "codes": [
+      "E-FOREIGN-003"
+    ],
     "notCodes": [],
-    "severity": { "E-FOREIGN-003": "error" }
+    "severity": {
+      "E-FOREIGN-003": "error"
+    }
   }
 }
