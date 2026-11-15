@@ -985,6 +985,7 @@ ${
             .EnumBody(variants: vs) :> true
             .StructBody(fields: fs) :> false
             .HostBody :> false
+            .AliasBody(ty: x) :> false
         }
     }
 
@@ -993,7 +994,56 @@ ${
             .EnumBody(variants: vs) :> variantNames(vs)
             .StructBody(fields: fs) :> typeFieldNames(fs)
             .HostBody :> []
+            .AliasBody(ty: x) :> []
         }
+    }
+
+    // s478 r1 — is `td` a type alias (`type A = T`)?
+    fn aliasDecl(td: ATypeDecl) -> boolean {
+        const b: ATypeBody = td.body
+        return match b {
+            .AliasBody(ty: x) :> true
+            .EnumBody(variants: vs) :> false
+            .StructBody(fields: fs) :> false
+            .HostBody :> false
+        }
+    }
+
+    // s478 — a type alias's right-hand side (`type A = T`), else not.
+    fn aliasRhs(s: TypeStub) -> AType | not {
+        const b: ATypeBody = s.src.body
+        return match b {
+            .AliasBody(ty: x) :> x
+            .EnumBody(variants: vs) :> not
+            .StructBody(fields: fs) :> not
+            .HostBody :> not
+        }
+    }
+
+    // s478 — does alias `s`'s right-hand side reach `s` again through the
+    // aliases it names (`type A = B`, `type B = A[]`)? `seen`: the aliases
+    // already walked (by Sym id). Read on the AST, so a cycle is found before
+    // any resolution recurses into it.
+    fn aliasCycles(te: TypeEnv, s: TypeStub, at: AType, seen: int[]) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> aliasNameCycles(te, s, n, seen)
+            .TSeq(elem: e) :> aliasCycles(te, s, e, seen)
+            .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
+            .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
+        }
+    }
+
+    fn aliasNameCycles(te: TypeEnv, s: TypeStub, n: string, seen: int[]) -> boolean {
+        const m: TypeStub | not = stubNamed(te, n)
+        if (m is not) return false
+        const rhs: AType | not = aliasRhs(m)
+        if (rhs is not) return false
+        if (m.sym.id == s.sym.id) return true
+        for (const x of seen) {
+            if (x == m.sym.id) return false
+        }
+        return aliasCycles(teAt(te, m.file), s, rhs, seen.concat([m.sym.id]))
     }
 
     fn variantNames(vs: AVariant[]) -> string[] {
@@ -1828,7 +1878,19 @@ ${
         if (n == "string") return { t: Type.Str, st: st, unresolved: false }
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
-        if (s is given) return { t: Type.Named(s.sym), st: st, unresolved: false }
+        if (s is given) {
+            // s478 — a type alias is its right-hand side wherever it is written
+            // ("`type A = E` is `E`", §34 E-TYPE-ARM-QUALIFIER-MISMATCH), resolved
+            // in the alias's own file. Its diagnostics are reported once, at the
+            // declaration (typeInfos); a cyclic alias resolves to nothing.
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                if (aliasCycles(teAt(te, s.file), s, rhs, [])) return { t: Type.Str, st: st, unresolved: true }
+                const ra: RType = resolveType(teAt(te, s.file), rhs, st)
+                return { t: ra.t, st: st, unresolved: ra.unresolved }
+            }
+            return { t: Type.Named(s.sym), st: st, unresolved: false }
+        }
         const ds: Sym | not = declTypeNamed(te, n)
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
@@ -1944,9 +2006,20 @@ ${
         for (const s of stubs) {
             const fte: TypeEnv = teAt(te, s.file)
             const body: ATypeBody = s.src.body
-            const r: RTypeDef = typeDefOf(fte, s, body, st)
-            st = r.st
-            out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                // s478 — an alias defines no type of its own (no TypeDef): its
+                // right-hand side is resolved here once, for its diagnostics
+                if (aliasCycles(fte, s, rhs, [])) {
+                    st = addDiag(st, s.file, s.src.span, "E-BOOTSTRAP-UNSUPPORTED", "the type alias `" + s.name + "` names itself through its right-hand side — a recursive type alias has no type the bootstrap can build; declare a `:struct` or `:enum` (§14.2)")
+                } else {
+                    st = resolveType(fte, rhs, st).st
+                }
+            } else {
+                const r: RTypeDef = typeDefOf(fte, s, body, st)
+                st = r.st
+                out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            }
         }
         return { ts: out, st: st }
     }
@@ -1958,6 +2031,7 @@ ${
             .EnumBody(variants: vs) :> enumDefOf(te, s, vs, st)
             .StructBody(fields: fs) :> structDefOf(te, s, fs, st)
             .HostBody :> hostDefOf(s, st)
+            .AliasBody(ty: x) :> hostDefOf(s, st)   // (unreached: typeInfos builds no TypeDef for an alias)
         }
     }
 
@@ -3323,12 +3397,26 @@ ${
         for (const it of items) {
             const p: AProgram | not = programOfItem(it)
             if (p is given) {
-                st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
+                // s478: the refusal only for a nested program §4.12.2 does not
+                // already reject — one with an attribute error stops the build
+                // on that error (its one root cause), and is never built
+                const sa: AS = nestedProgramAttrDiags(file, p, st)
+                if (!errorSince(sa, st.diags.length)) st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
                 st = nestedProgramAttrDiags(file, p, st)
                 st = nestedProgramDiags(file, p.items, st)
             }
         }
         return st
+    }
+
+    // s478 — did an Error-severity diagnostic join `st` after its first `n`?
+    fn errorSince(st: AS, n: int) -> boolean {
+        let i: int = n
+        while (i < st.diags.length) {
+            if (st.diags[i].severity == Severity.Error) return true
+            i = i + 1
+        }
+        return false
     }
 
     fn nestedProgramAttrDiags(file: string, p: AProgram, st0: AS) -> AS {
@@ -9879,6 +9967,9 @@ ${
             if (lr != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on an array literal: " + lr, args, st)
             const vt: string = viaText(env, m.obj)
             if (vt != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on `" + exprName(m.obj) + "` — " + vt, args, st)
+            // s478 r1 (review LOW-2): a receiver holding a parse error (a refused `given` arm's
+            // match, …) is blamed on that report — "a refused head is the site's one diagnostic"
+            if (hasErrIn(envParseErrs(env), m.obj.span)) return plain(not, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
         }
         const fix: string = tapeJsFix(m.method)
@@ -24632,13 +24723,21 @@ ${
         return false
     }
 
-    fn fileNames(t: Tables, lk: Linkage) -> FileName[] {
+    fn fileNames(files: FileAst[], t: Tables, lk: Linkage) -> FileName[] {
         let out: FileName[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", kind: "decl", nid: d.nid, exported: declExported(lk, d.file, d.sym.hint) }])
         }
         for (const ti of t.types) {
             if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", kind: "type", nid: ti.nid, exported: ti.exported }])
+        }
+        // s478 r1 (review HIGH-1): a type alias (`type A = T`) builds no TypeInfo (typeInfos),
+        // yet it is a file-scope binding — §34 E-SCOPE-010: a file-scope name is bound once
+        // "whatever the two bindings name … a `type`" — so it is one more `type` binding here
+        for (const f of files) {
+            for (const td of typeItems(f.items)) {
+                if (aliasDecl(td)) out = out.concat([{ name: td.name, file: f.path, span: td.span, what: "the type `" + td.name + "`", kind: "type", nid: td.nid, exported: td.exported }])
+            }
         }
         for (const f of t.fns) {
             if (f.host is not && f.outer < 0) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])   // s477: a nested function is in no file scope
@@ -24827,7 +24926,7 @@ ${
     }
 
     fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        const ns: FileName[] = fileNames(t, lk).concat(runLocalNames(files))
+        const ns: FileName[] = fileNames(files, t, lk).concat(runLocalNames(files))
         const imps: FileImports[] = importsByFile(files)
         const paths: string[] = filePaths(files)
         let out: Diag[] = []
