@@ -5621,8 +5621,49 @@ ${
         // §5.2.3 / §5.2.4: a `;` ending an unquoted value is reported by scanAttr
         // (bareSequence), which reads the rest of the sequence
         if (isP(r3.tp, ";")) return { v: AAttrValue.Bare(r3.e), mp: mAt(backToMarkup(mp, r3.tp), cur(r3.tp).start) }
+        if (wordOperatorAt(r3.tp)) return trailingWordOperator(mp, r3.tp, handler, name)
         const t4: TP = expectRegionEnd(r3.tp)
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    // s478 r1 (#1865 F1) — the bare value's expression stopped at a word operator:
+    // the keyword tests `is` / `instanceof` / `in` (§5.2: an unquoted value
+    // "continues across whitespace … before … the keyword tests `is` /
+    // `instanceof` / `in`") or a word-form `and` / `or` (§45.9: valid "in all
+    // expression positions (… attribute values …)"). The value was read whole
+    // across it, so it is one value, refused once:
+    //   - any attribute but an event handler: "any other attribute followed by an
+    //     operator … is `E-ATTR-UNQUOTED-OPERATOR`" (a condition too, cluster-A);
+    //   - an event handler whose word has no right operand (`onclick=f() in>`):
+    //     "A value that cannot be read whole is REFUSED, once per attribute, never
+    //     truncated" — E-ATTR-UNQUOTED-OPERATOR;
+    //   - an event handler's `and` / `or` WITH a right operand is a legal §45.9
+    //     expression the bootstrap does not parse: refused by name (the
+    //     refusals.scrml §45.9 row), never a generic E-PARSE-TRAILING. A handler's
+    //     `in` / `instanceof` with an operand keeps the expression parser's report.
+    fn wordOperatorAt(tp: TP) -> boolean {
+        return isWord(tp, "in") || isWord(tp, "instanceof") || isWord(tp, "is") || isWord(tp, "and") || isWord(tp, "or")
+    }
+
+    fn trailingWordOperator(mp: MP, tp: TP, handler: boolean, name: string) -> RValue {
+        const w: string = cur(tp).v
+        const operand: boolean = peekAt(tp, 1).cls != TC.End
+        if (handler && operand && w != "and" && w != "or") {
+            const t5: TP = expectRegionEnd(tp)
+            return { v: AAttrValue.Bare(recoveredAt(backToMarkup(mp, t5), mp.pos)), mp: backToMarkup(mp, t5) }
+        }
+        const d0: Diag[] = mp.diags
+        const m: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), d0)
+        const text: string = mp.src.substring(mp.pos, m.pos).trim()
+        let md: MP = m
+        if (handler && operand) {
+            md = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`word-form `" + w + "`` (§45.9) is not in the bootstrap yet; it is refused here by name rather than misread — write `" + (w == "and" ? "&&" : "||") + "`: `" + name + "=" + text + "`", mp.pos, m.pos)
+        } else if (handler) {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted event-handler value is read whole, and it ends in `" + w + "` with no right operand (§5.2). Complete the expression, write the handler as an inline block — `" + name + "={ … }` — or, if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
+        } else {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator, and `" + w + "` after it continues it as one (§5.1, §5.2). Parenthesize the expression — `" + name + "=(…)` — or quote it; if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
+        }
+        return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md }
     }
 
     // The region's tokens all consumed (at its Eof).
@@ -7190,7 +7231,14 @@ ${
             const ab: RAfterBare = afterBareValue(m, name, v, vStart, hd)
             v = ab.v
             m = ab.mp
-            if (!hd && !ab.reported) m = unquotedOperatorDiag(m, name, v, vStart)
+            if (!hd && !ab.reported) {
+                // s478 r1 (#1865 F1) — the refused value is refused whole, once per
+                // attribute: its parts are not judged again (`title=@last -x` is
+                // E-ATTR-UNQUOTED-OPERATOR alone, not also `x` undeclared)
+                const n0: int = m.diags.length
+                m = unquotedOperatorDiag(m, name, v, vStart)
+                if (m.diags.length > n0) v = AAttrValue.Bare(recoveredAt(m, vStart))
+            }
         } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
             // `<each … as name>` (§17.7): the binding name follows after a space.
             const m2: MP = skipSpace(m)

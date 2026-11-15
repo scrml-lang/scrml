@@ -1705,6 +1705,10 @@ ${
         if (isIdentCont(after)) return false
         if (after == 61 && peekCode(c, w.length + 1) != 61) return false   // `in=…` is an attribute
         if (after == 58) return false                                        // `in:slide` is a namespaced attribute
+        // s478 r1 (#1865 F1) — `in-view`, `is-active`, `or-x="1"`: a word written
+        // TOUCHING `-` and a name character is one hyphenated attribute name
+        // (an HTML attribute name holds `-`), never the test `in` before `-view`.
+        if (after == 45 && isIdentCont(peekCode(c, w.length + 1))) return false
         return true
     }
 
