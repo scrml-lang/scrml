@@ -32,6 +32,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, click, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -268,7 +269,8 @@ ${body}
 // empty listener with no diagnostic; a case variant (`ONCLICK="…"`) was
 // E-BOOTSTRAP-UNSUPPORTED (gap g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462, handler half).
 describe("§5.2 (S464) — a quoted event-handler attribute with no `${…}` is refused", () => {
-  const prog = (body, extra = "") => `${extra}<program>
+  // s478 (E-DG-002): `@rows` is declared only when the case names it
+  const prog = (body, extra = "") => dropUnnamedScaffold(`${extra}<program>
     let <code:string="x"/>
     <rows:Row[]=([{ id: 1 }])/>
     function go(s: string) { @code = s; }
@@ -276,7 +278,7 @@ describe("§5.2 (S464) — a quoted event-handler attribute with no `${…}` is 
 ${body}
     </main>
 </program>
-`;
+`, [`    <rows:Row[]=([{ id: 1 }])/>`]);
   const ROW = "type Row:struct = { id: int }\n";
   const QH = "E-ATTR-QUOTED-HANDLER";
   test("lowercase `onclick=\"…\"` (was an empty listener)", () => {
@@ -295,6 +297,6 @@ ${body}
     expect(codes(prog(`        <btn t="a"/>\n        <btn t="b"/>`, ROW + `<btn t:string>\n</>\nrenders <button onclick="alert(1)">b</button>\n\n`))).toEqual([QH]);
   });
   test("the unquoted forms and the exempt words stay clean", () => {
-    clean(prog(`        <button onclick=go("y")>a</button>\n        <button onclick={ go("y"); }>b</button>\n        <div one="1" online="2" onboarding="3"></div>`, ROW));
+    clean(prog(`        <button onclick=go("y")>a</button>\n        <button onclick={ go("y"); }>b</button>\n        <div one="1" online="2" onboarding="3"></div>\n        <p>\${@code}</p>`, ROW));
   });
 });

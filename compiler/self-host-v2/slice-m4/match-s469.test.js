@@ -360,7 +360,7 @@ describe("delta review — no path yields `undefined`", () => {
     }
   });
   test("HIGH-A: a `!` function that never returns a value is not judged (no success value)", () => {
-    expect(codes(`<program>\n    type E:enum = { Bad }\n    let <n:int=0/>\n    function f(x: int)! E {\n        if (x == 0) fail .Bad;\n        @n = x;\n    }\n    function go() { f(1) !{ _ :> @n = 2 }; }\n    <main><button onclick=go()>g</button></main>\n</program>\n`)).toEqual([]);
+    expect(codes(`<program>\n    type E:enum = { Bad }\n    let <_n:int=0/>\n    function f(x: int)! E {\n        if (x == 0) fail .Bad;\n        @_n = x;\n    }\n    function go() { f(1) !{ _ :> @_n = 2 }; }\n    <main><button onclick=go()>g</button></main>\n</program>\n`)).toEqual([]);
   });
   test("HIGH-B: an unannotated function that returns a value on one path and falls off (or bare-returns) on another is refused", () => {
     const LOOK = (tail) => `    function look(pw: string) {\n        if (pw == "hunter2") return "user";${tail};\n    }`;
@@ -368,7 +368,7 @@ describe("delta review — no path yields `undefined`", () => {
     expect(codes(LOGIN(LOOK(""), A))).toEqual(["E-RETURN-INCOMPLETE"]);
     expect(codes(LOGIN(LOOK("\n        return"), A))).toEqual(["E-RETURN-INCOMPLETE"]);
     // an unannotated function with no value return is a procedure: not judged
-    expect(codes(prog(`    let <n:int=0/>\n    function bump(x: int) {\n        if (x > 0) @n = x;\n    }`, `        <button onclick=bump(1)>b</button>`))).toEqual([]);
+    expect(codes(prog(`    let <_n:int=0/>\n    function bump(x: int) {\n        if (x > 0) @_n = x;\n    }`, `        <button onclick=bump(1)>b</button>`))).toEqual([]);
   });
   test("HIGH-B (2): `== not` / `!= not` is E-EQ-002 (§45; E-TYPE-042 retired S305); `===` is refused at parse", () => {
     const F = `    function look(pw: string) -> string | not {\n        if (pw == "hunter2") return "user";\n        return not;\n    }`;
@@ -396,7 +396,7 @@ describe("round 2 — always explicit; a no-value result is never read", () => {
     const M = (ok) => `\n    function a(pw: string) -> string {\n        return match chk(pw) {\n            ${ok},\n            .Bad :> "denied"\n        };\n    }`;
     expect(codes(prog(CHK + M('.Ok(v) :> "w" + v'), `        <p>\${a("x")}</p>`))).toEqual(["E-TYPE-001"]);
     expect(codes(prog(CHK + M('.Ok(_) :> "welcome"'), `        <p>\${a("x")}</p>`))).toEqual([]);
-    expect(codes(prog(CHK + `\n    let <m:string=""/>\n    function go() { chk("x") !{ _ :> @m = "denied" }; }`, `        <button onclick=go()>g</button>`))).toEqual([]);
+    expect(codes(prog(CHK + `\n    let <_m:string=""/>\n    function go() { chk("x") !{ _ :> @_m = "denied" }; }`, `        <button onclick=go()>g</button>`))).toEqual([]);
   });
   test("MED-2: a function with no value used as one — initializer, markup — is E-TYPE-001; as a statement or handler it is fine", () => {
     const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x;\n        }\n    }`;

@@ -26,6 +26,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -210,7 +211,8 @@ describe("diagnostics — E-CSS-SYNTAX (malformed CSS) with spans the author can
 });
 
 describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-site check", () => {
-  const G = (css, decls = "") => `<program>\n    <c:string="red"/>\n    <n:int=3/>\n    <b:bool=true/>\n${decls}    #{\n${css}\n    }\n    <main><p>x</p></main>\n</program>\n`;
+  // s478 (E-DG-002): a case's program carries only the scaffold cells its CSS names
+  const G = (css, decls = "") => dropUnnamedScaffold(`<program>\n    <c:string="red"/>\n    <n:int=3/>\n    <b:bool=true/>\n${decls}    #{\n${css}\n    }\n    <main><p>x</p></main>\n</program>\n`, [`    <c:string="red"/>`, `    <n:int=3/>`, `    <b:bool=true/>`]);
   for (const [name, css, at, words] of [
     ["`@media` (and every other block at-rule)", `        @media (min-width: 1px) { p { color: red; } }`, "@media", "`@media`"],
     ["a rule nested in a rule", `        p { color: red; a { color: blue; } }`, "a", "nested"],

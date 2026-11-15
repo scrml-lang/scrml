@@ -30,56 +30,56 @@ beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 const prog = (decls, body) => `<program>\n${decls}    let <shown:string=""/>\n    function go() {\n        ${body}\n    }\n    <main><button onclick=go()>go</button><p>\${@shown}</p></main>\n</program>\n`;
 const codes = (decls, body) => frontEnd(mods, [{ path: "w.scrml", src: prog(decls, body) }]).diags.map((d) => d.code);
 
-const cell = (t) => `    <xs:${t}=([])/>\n`;
-const box = (t) => `    type Box:struct = { title: string, xs: ${t} }\n    let <b:Box=({ title: "t", xs: [] })/>\n`;
-const nested = (t) => `    type Inner:struct = { ys: ${t} }\n    type Outer:struct = { name: string, inner: Inner }\n    let <o:Outer=({ name: "o", inner: { ys: [] } })/>\n`;
-const elems = (t) => `    type K:struct = { name: string, kids: ${t} }\n    <ks:K[free, append]=([])/>\n`;
-const param = (t) => `    <src:${t}=([])/>\n    function size(xs: int[free, append]) -> int {\n        return xs.length;\n    }\n`;
+const cell = (t) => `    <_xs:${t}=([])/>\n`;
+const box = (t) => `    type Box:struct = { title: string, xs: ${t} }\n    let <_b:Box=({ title: "t", xs: [] })/>\n`;
+const nested = (t) => `    type Inner:struct = { ys: ${t} }\n    type Outer:struct = { name: string, inner: Inner }\n    let <_o:Outer=({ name: "o", inner: { ys: [] } })/>\n`;
+const elems = (t) => `    type K:struct = { name: string, kids: ${t} }\n    <_ks:K[free, append]=([])/>\n`;
+const param = (t) => `    <_src:${t}=([])/>\n    function size(xs: int[free, append]) -> int {\n        return xs.length;\n    }\n`;
 
 // [form, refused: [decls, body, codes], granted: [decls, body, codes] | null]
 const FORMS = [
   // ---- a cell / declaration field (resolveEditCall, resolveRemoveCall, resolveSeqShape, wholeFieldWrite, resolveReset)
-  ["cell: `.append(v)`", [cell("int[]"), "@xs.append(1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append]"), "@xs.append(1);", []]],
-  ["cell: `.prepend(v)`", [cell("int[free, append]"), "@xs.prepend(1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, prepend]"), "@xs.prepend(1);", []]],
-  ["cell: `.pop()`", [cell("int[free, append]"), "@xs.pop();", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, pop]"), "@xs.pop();", []]],
-  ["cell: `.shift()`", [cell("int[free, pop]"), "@xs.shift();", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, remove]"), "@xs.shift();", []]],
-  ["cell: `@xs = [...@xs, v]` (end-append shape)", [cell("int[free, prepend]"), "@xs = [...@xs, 1];", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append]"), "@xs = [...@xs, 1];", []]],
-  ["cell: `@xs = [v, ...@xs]` (front-prepend shape)", [cell("int[free, append]"), "@xs = [1, ...@xs];", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, prepend]"), "@xs = [1, ...@xs];", []]],
-  ["cell: `@xs = @xs.filter(…)` (shrink-anywhere)", [cell("int[free, append, pop]"), "@xs = @xs.filter(x => x > 0);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, remove]"), "@xs = @xs.filter(x => x > 0);", []]],
-  ["cell: `@xs = @xs.map(…)` (position write)", [cell("int[free, append]"), "@xs = @xs.map(x => x + 1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@xs = @xs.map(x => x + 1);", []]],
-  ["cell: `@xs = @xs.sort()` (position write)", [cell("int[free, append]"), "@xs = @xs.sort();", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@xs = @xs.sort();", []]],
-  ["cell: `@xs = v` (replace)", [cell("int[free, append]"), "@xs = [1];", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "@xs = [1];", []]],
-  ["cell: `reset(@xs)` (replace)", [cell("int[free, append]"), "reset(@xs);", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "reset(@xs);", []]],
-  ["cell: JS `push` / `unshift` / `splice` (refused by name)", [cell("int[free, insert, remove]"), "@xs.push(1);", ["E-TAPE-JS-METHOD"]], null],
+  ["cell: `.append(v)`", [cell("int[]"), "@_xs.append(1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append]"), "@_xs.append(1);", []]],
+  ["cell: `.prepend(v)`", [cell("int[free, append]"), "@_xs.prepend(1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, prepend]"), "@_xs.prepend(1);", []]],
+  ["cell: `.pop()`", [cell("int[free, append]"), "@_xs.pop();", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, pop]"), "@_xs.pop();", []]],
+  ["cell: `.shift()`", [cell("int[free, pop]"), "@_xs.shift();", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, remove]"), "@_xs.shift();", []]],
+  ["cell: `@_xs = [...@_xs, v]` (end-append shape)", [cell("int[free, prepend]"), "@_xs = [...@_xs, 1];", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append]"), "@_xs = [...@_xs, 1];", []]],
+  ["cell: `@_xs = [v, ...@_xs]` (front-prepend shape)", [cell("int[free, append]"), "@_xs = [1, ...@_xs];", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, prepend]"), "@_xs = [1, ...@_xs];", []]],
+  ["cell: `@_xs = @_xs.filter(…)` (shrink-anywhere)", [cell("int[free, append, pop]"), "@_xs = @_xs.filter(x => x > 0);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, remove]"), "@_xs = @_xs.filter(x => x > 0);", []]],
+  ["cell: `@_xs = @_xs.map(…)` (position write)", [cell("int[free, append]"), "@_xs = @_xs.map(x => x + 1);", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@_xs = @_xs.map(x => x + 1);", []]],
+  ["cell: `@_xs = @_xs.sort()` (position write)", [cell("int[free, append]"), "@_xs = @_xs.sort();", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@_xs = @_xs.sort();", []]],
+  ["cell: `@_xs = v` (replace)", [cell("int[free, append]"), "@_xs = [1];", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "@_xs = [1];", []]],
+  ["cell: `reset(@_xs)` (replace)", [cell("int[free, append]"), "reset(@_xs);", ["E-WRITE-NOT-GRANTED"]], [cell("int[replace]"), "reset(@_xs);", []]],
+  ["cell: JS `push` / `unshift` / `splice` (refused by name)", [cell("int[free, insert, remove]"), "@_xs.push(1);", ["E-TAPE-JS-METHOD"]], null],
   // s472: a position write (`write`, §66.12.6 rule 3) — Core PositionAt
-  ["cell: `@xs[i] = v` (position write)", [cell("int[free, append]"), "@xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@xs[0] = 1;", []]],
-  ["cell: `@ks[i] = v` replaces the element's tape field (rule 4)", [`    type K:struct = { name: string, kids: int[free, append] }\n    <ks:K[write]=([])/>\n`, "@ks[0] = { name: \"k\", kids: [] };", ["E-WRITE-NOT-GRANTED"]], [`    type K:struct = { name: string, kids: int[free, append, replace] }\n    <ks:K[write]=([])/>\n`, "@ks[0] = { name: \"k\", kids: [] };", []]],
+  ["cell: `@_xs[i] = v` (position write)", [cell("int[free, append]"), "@_xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [cell("int[write]"), "@_xs[0] = 1;", []]],
+  ["cell: `@_ks[i] = v` replaces the element's tape field (rule 4)", [`    type K:struct = { name: string, kids: int[free, append] }\n    <_ks:K[write]=([])/>\n`, "@_ks[0] = { name: \"k\", kids: [] };", ["E-WRITE-NOT-GRANTED"]], [`    type K:struct = { name: string, kids: int[free, append, replace] }\n    <_ks:K[write]=([])/>\n`, "@_ks[0] = { name: \"k\", kids: [] };", []]],
 
   // ---- a struct field whose type is a tape (fieldAtWrite) — its OWN grants, never the owner's `let`
-  ["struct field: `@b.xs = v`", [box("int[free, append]"), "@b.xs = [1];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "@b.xs = [1];", []]],
-  ["struct field: `@b.xs = v` on an UNGRANTED tape", [box("int[]"), "@b.xs = [1];", ["E-WRITE-NOT-GRANTED"]], null],
+  ["struct field: `@_b.xs = v`", [box("int[free, append]"), "@_b.xs = [1];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "@_b.xs = [1];", []]],
+  ["struct field: `@_b.xs = v` on an UNGRANTED tape", [box("int[]"), "@_b.xs = [1];", ["E-WRITE-NOT-GRANTED"]], null],
   ["struct field: `let xs: T[]` (let on a sequence)", [`    type L:struct = { title: string, let xs: int[] }\n    let <l:L=({ title: "t", xs: [] })/>\n`, "@l.title = \"u\";", ["E-GRANT-LET-ON-SEQUENCE"]], null],
-  ["struct field: an edit of a sub-field tape (`.append`)", [box("int[free, append]"), "@b.xs.append(1);", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
-  ["struct field: an edit shape of a sub-field tape", [box("int[free, append]"), "@b.xs = [...@b.xs, 1];", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
+  ["struct field: an edit of a sub-field tape (`.append`)", [box("int[free, append]"), "@_b.xs.append(1);", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
+  ["struct field: an edit shape of a sub-field tape", [box("int[free, append]"), "@_b.xs = [...@_b.xs, 1];", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
 
   // ---- a WHOLE-STRUCT write replaces its tape fields (structTapeWrites, §66.12.6 rule 4)
-  ["whole struct: genuine replace changing `xs`", [box("int[free, append]"), "@b = { title: \"u\", xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "@b = { title: \"u\", xs: @b.xs };", []]],
-  ["whole struct: spread override of `xs`", [box("int[free, append]"), "@b = { ...@b, xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "@b = { ...@b, title: \"u\" };", []]],
-  ["whole struct: an opaque value (a name)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @b = nb;", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "const nb: Box = { title: \"u\", xs: [] };\n        @b = nb;", []]],
-  ["whole struct: a tape in a NESTED struct field", [nested("int[free, append]"), "@o = { name: \"n\", inner: { ys: [] } };", ["E-WRITE-NOT-GRANTED"]], [nested("int[free, append]"), "@o = { name: \"n\", inner: @o.inner };", []]],
-  ["whole struct: a struct-typed FIELD written whole", [nested("int[free, append]"), "@o.inner = { ys: [] };", ["E-WRITE-NOT-GRANTED"]], [nested("int[free, append, replace]"), "@o.inner = { ys: [] };", []]],
-  ["whole struct: `reset(@b)` (refused: run-time dependent)", [box("int[free, append]"), "reset(@b);", ["E-BOOTSTRAP-UNSUPPORTED"]], [box("int[free, append, replace]"), "reset(@b);", []]],
+  ["whole struct: genuine replace changing `xs`", [box("int[free, append]"), "@_b = { title: \"u\", xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "@_b = { title: \"u\", xs: @_b.xs };", []]],
+  ["whole struct: spread override of `xs`", [box("int[free, append]"), "@_b = { ...@_b, xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "@_b = { ...@_b, title: \"u\" };", []]],
+  ["whole struct: an opaque value (a name)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @_b = nb;", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "const nb: Box = { title: \"u\", xs: [] };\n        @_b = nb;", []]],
+  ["whole struct: a tape in a NESTED struct field", [nested("int[free, append]"), "@_o = { name: \"n\", inner: { ys: [] } };", ["E-WRITE-NOT-GRANTED"]], [nested("int[free, append]"), "@_o = { name: \"n\", inner: @_o.inner };", []]],
+  ["whole struct: a struct-typed FIELD written whole", [nested("int[free, append]"), "@_o.inner = { ys: [] };", ["E-WRITE-NOT-GRANTED"]], [nested("int[free, append, replace]"), "@_o.inner = { ys: [] };", []]],
+  ["whole struct: `reset(@_b)` (refused: run-time dependent)", [box("int[free, append]"), "reset(@_b);", ["E-BOOTSTRAP-UNSUPPORTED"]], [box("int[free, append, replace]"), "reset(@_b);", []]],
 
   // ---- an element field (resolveElemFieldWrite)
-  ["element field: `@ks[i].kids = v`", [elems("int[]"), "@ks[0].kids = [1];", ["E-WRITE-NOT-GRANTED"]], [elems("int[replace]"), "@ks[0].kids = [1];", []]],
+  ["element field: `@_ks[i].kids = v`", [elems("int[]"), "@_ks[0].kids = [1];", ["E-WRITE-NOT-GRANTED"]], [elems("int[replace]"), "@_ks[0].kids = [1];", []]],
 
   // ---- a LOCAL (localTapeProblems, run by the typer): `let` grants the tape nothing (O63)
   ["local: rebinding (replace)", ["", "let out: string[] = [\"a\"];\n        out = [];\n        @shown = out.join(\",\");", ["E-WRITE-NOT-GRANTED"]], ["", "let out: string[replace] = [\"a\"];\n        out = [\"b\"];\n        @shown = out.join(\",\");", []]],
   ["local: `out = out.sort()` (position write)", ["", "let out: string[] = [\"b\", \"a\"];\n        out = out.sort();\n        @shown = out.join(\",\");", ["E-WRITE-NOT-GRANTED"]], ["", "let out: string[write] = [\"b\", \"a\"];\n        out = out.sort();\n        @shown = out.join(\",\");", []]],
   ["local: `out = out.filter(…)` (shrink-anywhere)", ["", "let out: string[free, append] = [\"a\"];\n        out = out.filter(x => x != \"a\");\n        @shown = out.join(\",\");", ["E-WRITE-NOT-GRANTED"]], ["", "let out: string[free, remove] = [\"a\"];\n        out = out.filter(x => x != \"a\");\n        @shown = out.join(\",\");", []]],
   ["local: an inferred (un-annotated) tape", ["", "let out = [\"a\"];\n        out = [\"b\"];", ["E-WRITE-NOT-GRANTED"]], null],
-  ["local: an inferred tape from a granted cell (`let s = @xs`)", [cell("int[free, append, remove]"), "let s = @xs;\n        s = s.filter(x => x > 0);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append, remove]"), "let s: int[free, remove] = @xs;\n        s = s.filter(x => x > 0);", []]],
-  ["local: a struct local rebound whole", [box("int[free, append]"), "let q: Box = @b;\n        q = { title: \"u\", xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "let q: Box = @b;\n        q = { title: \"u\", xs: q.xs };", []]],
+  ["local: an inferred tape from a granted cell (`let s = @_xs`)", [cell("int[free, append, remove]"), "let s = @_xs;\n        s = s.filter(x => x > 0);", ["E-WRITE-NOT-GRANTED"]], [cell("int[free, append, remove]"), "let s: int[free, remove] = @_xs;\n        s = s.filter(x => x > 0);", []]],
+  ["local: a struct local rebound whole", [box("int[free, append]"), "let q: Box = @_b;\n        q = { title: \"u\", xs: [] };", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append]"), "let q: Box = @_b;\n        q = { title: \"u\", xs: q.xs };", []]],
   // s475 (s475-boot-local-tape-edits): the in-place edits of a local, judged by its TYPE (rules 1 and 3)
   ["local: an in-place edit (`.append`)", ["", "let out: int[free, pop] = [];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], ["", "let out: int[free, append] = [];\n        out.append(1);", []]],
   ["local: an in-place edit of an inferred tape (rule 1)", ["", "let out = [1];\n        out.append(1);", ["E-WRITE-NOT-GRANTED"]], null],
@@ -94,8 +94,8 @@ const FORMS = [
   ["const / parameter: an edit method is granted by the type; the rebinding spelling is E-ASSIGN-CONST (§50)", ["", "const out: int[free, append] = [];\n        out = [...out, 1];", ["E-ASSIGN-CONST"]], ["", "const out: int[free, append] = [];\n        out.append(1);", []]],
   ["parameter: an in-place edit (§66.12.3)",["    fn f(p: int[]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", ["E-WRITE-NOT-GRANTED"]], ["    fn f(p: int[free, append]) -> int[] {\n        p.append(1);\n        return p;\n    }\n", "", []]],
   // s472: a part write of a local — the tape field's OWN grants (rules 1 and 4)
-  ["local: a part write (`q.xs = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs = [];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "let q: Box = @b;\n        q.xs = [];", []]],
-  ["local: a position write of a struct local's tape field (`q.xs[i] = v`)", [box("int[free, append]"), "let q: Box = @b;\n        q.xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [box("int[write]"), "let q: Box = @b;\n        q.xs[0] = 1;", []]],
+  ["local: a part write (`q.xs = v`)", [box("int[free, append]"), "let q: Box = @_b;\n        q.xs = [];", ["E-WRITE-NOT-GRANTED"]], [box("int[free, append, replace]"), "let q: Box = @_b;\n        q.xs = [];", []]],
+  ["local: a position write of a struct local's tape field (`q.xs[i] = v`)", [box("int[free, append]"), "let q: Box = @_b;\n        q.xs[0] = 1;", ["E-WRITE-NOT-GRANTED"]], [box("int[write]"), "let q: Box = @_b;\n        q.xs[0] = 1;", []]],
   ["local: a position write (`ys[i] = v`)", ["", "let ys: int[free, append] = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], ["", "let ys: int[write] = [1];\n        ys[0] = 2;", []]],
   ["local: a position write of an inferred tape (rule 1)", ["", "let ys = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], null],
   ["local: a position write of a `const` tape (the TYPE grants, not the binding)", ["", "const ys: int[] = [1];\n        ys[0] = 2;", ["E-WRITE-NOT-GRANTED"]], ["", "const ys: int[write] = [1];\n        ys[0] = 2;", []]],
@@ -107,10 +107,10 @@ const FORMS = [
   ["parameter: a position write — the WRITTEN type's grants",
     ["    function h(xs: int[]) -> int {\n        xs[0] = 1;\n        return 1;\n    }\n", "const n = h([1]);", ["E-WRITE-NOT-GRANTED"]],
     ["    function h(xs: int[write]) -> int {\n        xs[0] = 1;\n        return 1;\n    }\n", "const n = h([1]);", []]],
-  ["whole struct: a self-spread overridden by a later spread (not kept)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @b = { ...@b, ...nb };", ["E-WRITE-NOT-GRANTED"]], null],
+  ["whole struct: a self-spread overridden by a later spread (not kept)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @_b = { ...@_b, ...nb };", ["E-WRITE-NOT-GRANTED"]], null],
 
   // ---- a call argument (checkArgTape, §66.12.3 subset) — the code is unruled: fail closed
-  ["call: a place granting less than the parameter", [param("int[]"), "const n = size(@src);", ["E-BOOTSTRAP-UNSUPPORTED"]], [param("int[free, append, pop]"), "const n = size(@src);", []]],
+  ["call: a place granting less than the parameter", [param("int[]"), "const n = size(@_src);", ["E-BOOTSTRAP-UNSUPPORTED"]], [param("int[free, append, pop]"), "const n = size(@_src);", []]],
 ];
 
 describe("every tape write form is judged by the grant reader (§66.12.6)", () => {
@@ -150,26 +150,26 @@ describe("Core check C3 judges a tape field's grants (the defence in depth, §66
   const writes = (core) => find(core.fns, (n) => n.variant === "Write");
   const boxField = (core, name) => find(core.types, (n) => n.sym && n.sym.hint === name && n.grants)[0];
   test("a whole-struct Replace whose value replaces an append-only tape field", () => {
-    const core = coreOf(box("int[free, append]"), "@b = { title: \"u\", xs: @b.xs };");
+    const core = coreOf(box("int[free, append]"), "@_b = { title: \"u\", xs: @_b.xs };");
     const w = writes(core).find((x) => x.data.edit === "Replace" || x.data.edit?.variant === "Replace");
     w.data.value.data.fields[1] = { variant: "ArrayOf", data: { elems: [] } };
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `b.xs`"))).toBe(true);
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `_b.xs`"))).toBe(true);
   });
   test("a Replace with an opaque value (a reset's InitOf, a Local) replaces every tape field", () => {
-    const core = coreOf(box("int[free, append]"), "@b = { title: \"u\", xs: @b.xs };");
+    const core = coreOf(box("int[free, append]"), "@_b = { title: \"u\", xs: @_b.xs };");
     const w = writes(core).find((x) => x.data.edit === "Replace" || x.data.edit?.variant === "Replace");
     w.data.value = { variant: "Lit", data: { lit: { variant: "Absent" } } };
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `b.xs`"))).toBe(true);
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `_b.xs`"))).toBe(true);
   });
   test("a FieldAt write of an UNGRANTED tape under the owner's `replace` (fieldAtProblem: a tape is a contract)", () => {
-    const core = coreOf(box("int[replace]"), "@b.xs = [1];");
+    const core = coreOf(box("int[replace]"), "@_b.xs = [1];");
     boxField(core, "xs").grants.replace = false;            // now `xs: int[]` — no grant, no edits
     expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("non-replace contract"))).toBe(true);
   });
   test("a FieldAt write of a struct-typed field replaces the tape inside it", () => {
-    const core = coreOf(nested("int[free, append, replace]"), "@o.inner = { ys: [] };");
+    const core = coreOf(nested("int[free, append, replace]"), "@_o.inner = { ys: [] };");
     boxField(core, "ys").grants.replace = false;
-    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `o.inner.ys`"))).toBe(true);
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `_o.inner.ys`"))).toBe(true);
   });
 });
 

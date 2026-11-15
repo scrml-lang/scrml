@@ -37,6 +37,7 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, artifacts, realDb, serve, post, pathOf, bridge } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import { loadProgram, click, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 120000 });
 
@@ -49,8 +50,9 @@ const one = (src) => run([{ path: "app.scrml", src }]);
 const codes = (r) => r.diags.map((d) => d.code);
 
 // a file-level `${ }` of constants (+ helpers), then a small program
+// s478 (E-DG-002): the scaffold cell `@n` is declared only when the case names it
 const P = (consts, extra = "", markup = "<p>x</p>") =>
-  `\${\n${consts}\n${extra}\n}\n<program>\n    let <n:int=4/>\n    <main>\n        ${markup}\n    </main>\n</program>\n`;
+  dropUnnamedScaffold(`\${\n${consts}\n${extra}\n}\n<program>\n    let <n:int=4/>\n    <main>\n        ${markup}\n    </main>\n</program>\n`, ["    let <n:int=4/>"]);
 
 const textOf = (sel) => document.querySelector(sel).textContent;
 

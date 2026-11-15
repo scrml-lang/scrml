@@ -59,15 +59,15 @@ describe("isLambda → isLambdaK: retsInExpr skips a lambda's body", () => {
     "        return 6;\n" +
     "    }\n";
   test("a lambda arm block that `return`s is refused by the binder first (the outcome the rename leaves unchanged)", () => {
-    const ds = diags(SIX + "    <v:int=(six([true]) + 1)/>");
+    const ds = diags(SIX + "    <_v:int=(six([true]) + 1)/>");
     expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ds.every((d) => d.message.includes("in a `match` whose value is used"))).toBe(true);
   });
   test("a plain lambda in an unannotated function: its return is still proven", () => {
-    expect(codes("    function six(xs: int[]) {\n        const ys: int[] = xs.map((x) => x + 1);\n        return 6;\n    }\n    <v:int=(six([1]) + 1)/>")).toEqual([]);
+    expect(codes("    function six(xs: int[]) {\n        const ys: int[] = xs.map((x) => x + 1);\n        return 6;\n    }\n    <_v:int=(six([1]) + 1)/>")).toEqual([]);
   });
   test("control: a string `return` in the function's OWN body still makes it unproven", () => {
-    expect(codes("    function mk(b: bool) { if (b) { return 5; } else { return \"five\"; } }\n    <v:int=(mk(true))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
+    expect(codes("    function mk(b: bool) { if (b) { return 5; } else { return \"five\"; } }\n    <_v:int=(mk(true))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
 });
 

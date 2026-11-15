@@ -19,6 +19,7 @@
 import { describe, test, expect, beforeAll, afterEach, spyOn } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -46,13 +47,14 @@ function elementOf(markup, sel) {
   return document.querySelector(sel);
 }
 
-const BASE = (tag, extra = "") => `<program>
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names
+const BASE = (tag, extra = "") => dropUnnamedScaffold(`<program>
     let <u:string="https://evil.example/"/>
 ${extra}    <main>
         ${tag}
     </main>
 </program>
-`;
+`, ["    let <u:string=\"https://evil.example/\"/>"]);
 
 // ---------------------------------------------------------------------------
 // 1. compile — E-ATTR-BASE-HREF

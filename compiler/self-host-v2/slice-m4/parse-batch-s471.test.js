@@ -5,12 +5,14 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
+// s478 (E-DG-002): the scaffold cell `@n` is declared only when the case names it
+const P = (body, decls = "") => dropUnnamedScaffold(`<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`, ["    let <n:int=5/>"]);
 const W = (inner) => `\n        ${inner}\n        <b>end</b>\n    `;
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
@@ -117,7 +119,8 @@ describe("a declaration in a `<db>` / `<channel>` body is an item, not a misplac
   // s473 (Lane B): the block-owned state is built — a `<db>` cell (slice-m4/db-cells-s473.test.js);
   // `export` of one is not, and is refused by name
   const DBMSG = "a `<db>` cell is `[let] <name:Type=value/>`";
-  for (const decl of ["let <hits:int=0/>", "<hits:int=0/>"]) {
+  // s478: nothing reads the `<db>` cell here (its shape is the point) — `_`-named (§34 E-DG-002)
+  for (const decl of ["let <_hits:int=0/>", "<_hits:int=0/>"]) {
     test(`\`${decl}\` in a <db> body → a \`<db>\` cell, no E-DECL-KEYWORD-NOT-ITEM`, () => {
       expect(run(DB(decl)).diags.map((d) => d.code)).toEqual([]);
     });

@@ -1,8 +1,8 @@
 <program>
     let <a:int=1/>
     let <x:int=0/>
-    let <y:int=0/>
     fn f(n: int) -> int { return n + 1; }
+    function peek() -> int { return @x; }
     <request id="r">${ @x = f(@a); }</request>
     <main><p>${@a}</p></main>
 </program>

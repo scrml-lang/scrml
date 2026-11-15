@@ -27,6 +27,7 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, check, realDb, serve, bridge } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 300000 });
 const realFetch = globalThis.fetch;
@@ -49,16 +50,17 @@ const LOAD = `    function loadName(id: int) -> string {
 `;
 // The program under test: a request on a server function, its target read in markup, a button that
 // changes its inferred dependency, and (opt) an `if=` region holding the request (teardown).
+// s478 (E-DG-002): `@show` and its two buttons exist only with the region that reads it (`inIf`).
 const APP = (opts = {}) => `<program db="./app.db">
     type User:struct = { id: int, name: string }
     let <userId:int=1/>
-    let <show:boolean=true/>
-    let <userName:string="${opts.init ?? ""}"/>
+${opts.inIf ? `    let <show:boolean=true/>\n` : ""}    let <userName:string="${opts.init ?? ""}"/>
 ${LOAD}${opts.inIf ? `    <div id="box" if=(@show)>\n        <request id="userReq">${D} @userName = loadName(@userId); }</request>\n    </div>\n` : `    <request id="userReq">${D} @userName = loadName(@userId); }</request>\n`}    <main>
         <button id="u2" onclick={ @userId = 2; }>2</button>
         <button id="u3" onclick={ @userId = 3; }>3</button>
-        <button id="hide" onclick={ @show = false; }>hide</button>
+${opts.inIf ? `        <button id="hide" onclick={ @show = false; }>hide</button>
         <button id="showb" onclick={ @show = true; }>show</button>
+` : ""}
         <p id="who">${D}@userName}</p>
     </main>
 </program>
@@ -266,7 +268,7 @@ describe("runtime — the request machine on a real server (Bun.SQL) through the
   });
 
   test("the target is never a dependency: `@items = load(@page, @items)` runs once per @page change (no self-trigger)", async () => {
-    const src = `<program>\n    let <page:int=1/>\n    let <items:int=0/>\n    let <runs:int=0/>\n    fn load(p: int, prev: int) -> int { return prev + p; }\n    <request id="items">${D} @items = load(@page, @items); }</request>\n    <main>\n        <button id="next" onclick={ @page = @page + 1; }>next</button>\n        <p id="items">${D}@items}</p>\n    </main>\n</program>\n`;
+    const src = `<program>\n    let <page:int=1/>\n    let <items:int=0/>\n    fn load(p: int, prev: int) -> int { return prev + p; }\n    <request id="items">${D} @items = load(@page, @items); }</request>\n    <main>\n        <button id="next" onclick={ @page = @page + 1; }>next</button>\n        <p id="items">${D}@items}</p>\n    </main>\n</program>\n`;
     const r = compile(src);
     const prog = r.core.decls.find((d) => d.sym.id === r.core.program.id);
     const req = prog.renders.find((v) => v.variant === "Request").data;
@@ -284,7 +286,8 @@ describe("runtime — the request machine on a real server (Bun.SQL) through the
 });
 
 describe("refusals — each by its code or by name (fail closed)", () => {
-  const P = (decls, markup) => `<program>\n    let <a:int=1/>\n    let <x:int=0/>\n    let <y:int=0/>\n    fn f(n: int) -> int { return n + 1; }\n${decls}${markup}    <main><p>${D}@x}${D}@y}</p></main>\n</program>\n`;
+  // s478 (E-DG-002): `@a` is declared only when the case names it
+  const P = (decls, markup) => dropUnnamedScaffold(`<program>\n    let <a:int=1/>\n    let <x:int=0/>\n    let <y:int=0/>\n    fn f(n: int) -> int { return n + 1; }\n${decls}${markup}    <main><p>${D}@x}${D}@y}</p></main>\n</program>\n`, ["    let <a:int=1/>"]);
   const REQ = (attrs, body) => `    <request${attrs}>${D} ${body} }</request>\n`;
 
   test("E-LIFECYCLE-018: no `id`; and a non-literal `id=`", () => {
@@ -316,7 +319,9 @@ describe("refusals — each by its code or by name (fail closed)", () => {
     expect(codes(P("", REQ(` id="r" deps=[]`, "@x = f(1);")))).toEqual([]);
   });
   test("W-LIFECYCLE-011: the assigned cell is never read in markup", () => {
-    const src = `<program>\n    let <a:int=1/>\n    let <x:int=0/>\n    fn f(n: int) -> int { return n + 1; }\n${REQ(` id="r"`, "@x = f(@a);")}    <main><p>${D}@a}</p></main>\n</program>\n`;
+    // s478: `@x` IS read — in logic (`peek`), not the markup — so the case is W-LIFECYCLE-011 alone, not
+    // also a cell nothing reads (§34 E-DG-002)
+    const src = `<program>\n    let <a:int=1/>\n    let <x:int=0/>\n    fn f(n: int) -> int { return n + 1; }\n    function peek() -> int { return @x; }\n${REQ(` id="r"`, "@x = f(@a);")}    <main><p>${D}@a}</p></main>\n</program>\n`;
     expect(codes(src)).toEqual(["W-LIFECYCLE-011"]);
   });
   test("a `lin` in the body consumed by the assignment is valid; one it does not consume is E-LIN-001", () => {

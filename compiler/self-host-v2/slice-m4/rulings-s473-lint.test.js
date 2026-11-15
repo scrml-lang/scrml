@@ -21,6 +21,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -36,7 +37,8 @@ const clean = (src) => {
 };
 const two = (lib, app) =>
   frontEnd(mods, [{ path: "a.scrml", src: lib }, { path: "app.scrml", src: app }], "app.scrml").diags.map((d) => [d.code, d.file]);
-const P = (decls, main = `        <p>x</p>`) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the scaffold cells (LETR / FREER) it names
+const P = (decls, main = `        <p>x</p>`) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, [`    <ps:R[]=([{ name: "a" }])/>`, `    let <shown:string=""/>`]);
 const CARD = `    <card t:string/>\n    renders <div>\${t}</div>`;
 const find = (n, pred, out = []) => {
   if (n && typeof n === "object") {
@@ -50,7 +52,8 @@ const find = (n, pred, out = []) => {
 describe("3 — a part write to a loop copy that nothing reads: W-LOOP-COPY-WRITE-UNREAD (§66.10, S473)", () => {
   const LETR = `    type R:struct = { let name: string }\n    <ps:R[]=([{ name: "a" }])/>\n    let <shown:string=""/>`;
   const FREER = `    type R:struct = { name: string }\n    <ps:R[]=([{ name: "a" }])/>\n    let <shown:string=""/>`;
-  const fn = (decls, body) => P(`${decls}\n    function go() {\n${body}\n    }`);
+  // s478: the program renders `@shown`, the cell the bodies copy the binder into
+  const fn = (decls, body) => P(`${decls}\n    function go() {\n${body}\n    }`, `        <p>\${@shown}</p>`);
   const lint = (src) => run(src).diags.filter((d) => d.code === "W-LOOP-COPY-WRITE-UNREAD");
 
   test("`for (let p of @ps) { p.name = … }` — the cell is unchanged: the lint, at the write", () => {

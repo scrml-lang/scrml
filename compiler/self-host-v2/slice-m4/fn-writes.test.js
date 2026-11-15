@@ -16,6 +16,7 @@
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -23,7 +24,8 @@ beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 const ROW = "type Row:struct = { let qty: int }\n";
-const P = (decls, main = `        <p>\${@n}</p>`) => `${ROW}<program>
+// s478 (E-DG-002): a case's program carries only the scaffold cells it names
+const P = (decls, main = `        <p>\${@n}</p>`) => dropUnnamedScaffold(`${ROW}<program>
     let <n:int=0/>
     <xs:int[free, append, pop]=([1])/>
     <rows:Row[]=([{ qty: 1 }])/>
@@ -32,7 +34,7 @@ ${decls}
 ${main}
     </main>
 </program>
-`;
+`, ["    let <n:int=0/>", "    <xs:int[free, append, pop]=([1])/>", "    <rows:Row[]=([{ qty: 1 }])/>"]);
 
 describe("§48.3.3 — a `fn` body that writes a reactive cell is E-FN-003 (it compiled clean)", () => {
   for (const [what, body] of [
@@ -75,7 +77,7 @@ describe("twins — what §48.3.3 admits stays clean", () => {
     expect(codes(P(`    fn f(k: int) -> int {\n        let acc: int = 0;\n        acc = acc + k + @n;\n        return acc; }`))).toEqual([]);
   });
   test("a `function` writing cells (the impure form) is clean", () => {
-    expect(codes(P(`    function f() { @n = 1;\n        @xs.append(2); }`, `        <button onclick=f()>b</button>`))).toEqual([]);
+    expect(codes(P(`    function f() { @n = 1;\n        @xs.append(2); }`, `        <button onclick=f()>b</button>\n        <p>\${@n} \${@xs.length}</p>`))).toEqual([]);
   });
   test("the caller writes what the `fn` computed (the fix the message names)", () => {
     expect(codes(P(`    fn next(k: int) -> int { return k + 1; }\n    function bump() { @n = next(@n); }`, `        <button onclick=bump()>b</button>`))).toEqual([]);

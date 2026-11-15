@@ -24745,6 +24745,101 @@ ${
         return out
     }
 
+    // s478 (triage C11b) — E-DG-002 (§31, §22.6; §34 Severity: Warning): "a reactive
+    // `@variable` is **declared but never consumed** — no reader edge in any render or logic
+    // context (`readers.size === 0`). Resolution: remove the unused cell, or prefix with `_`
+    // to suppress." A program cell is consumed by any READ the binder resolved to it (an
+    // `@x` in markup, an attribute, logic, a derived initializer, an effect's `deps=`, a
+    // server body — NameFact NField; a write target records none), a `bind:` of it (ABind:
+    // the bound element renders the value), a `reset-on=[…]` trigger list naming it, a
+    // `persist=` on it (the stored copy reads it) or a `@x` in a `#{}` stylesheet (the CSS
+    // bridge, §25.7). Not judged: an exported cell (another file may read it — §31.2's graph
+    // is the whole program, and an importer is not this file), a `_`-prefixed one, and an
+    // attribute of the program (not a cell). §22.6's `^{}` rule has nothing to apply to:
+    // the bootstrap has no runtime meta block. Run only over a compile with no Error
+    // (analyzeRun): a read inside a refused or broken construct is never resolved.
+    // Scope: the PROGRAM's cells (the fields of the entry `<program>`).
+    fn unreadCells(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const d of t.decls) {
+            if (d.sym.id == t.program.id) {
+                let read: int[] = []
+                for (const f of t.names.facts) {
+                    const ix: int = programFieldRead(t.program, f)
+                    if (ix >= 0) read = read.concat([ix])
+                }
+                for (const a of t.attrs.facts) {
+                    const bx: int = programFieldBound(t.program, a)
+                    if (bx >= 0) read = read.concat([bx])
+                }
+                for (const m of t.elems.facts) {
+                    const vx: int = programFieldViewed(t.program, m)
+                    if (vx >= 0) read = read.concat([vx])
+                }
+                for (const r of t.resets) { read = read.concat(r.triggers) }
+                for (const b of t.css.bridges) { read = read.concat([b.idx]) }
+                let persisted: int[] = []
+                for (const p of t.persists) { persisted = persisted.concat([p.sym.id]) }
+                let i = 0
+                for (const f of d.fields) {
+                    const nm: string = f.sym.hint
+                    if (isChildRole(f.role) && !f.exported && nm.substring(0, 1) != "_" && read.indexOf(i) < 0 && persisted.indexOf(f.sym.id) < 0 && !isLoadName(nm)) {
+                        out = out.concat([mkDiag(d.file, f.span, "E-DG-002", "`@" + nm + "` is declared but never read — no markup, attribute, logic or effect reads it, so nothing depends on it (§31.2, §34 E-DG-002). Remove it, or name it `_" + nm + "` if it is deliberately unread")])
+                    }
+                    i = i + 1
+                }
+            }
+        }
+        return out
+    }
+
+    // s478 — the program field a resolved name reads (-1: none).
+    fn programFieldRead(prog: Sym, f: NameFact) -> int {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> (d.id == prog.id ? x : -1)
+            .NLocal(sym: s) :> -1
+            .NInst(decl: d) :> -1
+            .NStruct(owner: o) :> -1
+            .NFn(sym: s) :> -1
+            .NLength :> -1
+            .NSurface(of: o) :> -1
+            .NConst(sym: s) :> -1
+            .NReq(id: r) :> -1
+        }
+    }
+
+    // s478 — the program field a `<*f/>` renders through its graph's state-child bodies (-1: none).
+    fn programFieldViewed(prog: Sym, m: ElemFact) -> int {
+        return match m {
+            .MStateView(v: v) :> (v.decl.id == prog.id ? v.idx : -1)
+            .MHtml :> -1
+            .MUse(decl: d) :> -1
+            .MEach(bind: b) :> -1
+            .MSlot :> -1
+            .MInline(v: v) :> -1
+            .MStar(decl: d) :> -1
+            .MErrors(of: o) :> -1
+            .MDb :> -1
+        }
+    }
+
+    // s478 — the program field a `bind:` attribute binds (-1: none).
+    fn programFieldBound(prog: Sym, k: AttrKind) -> int {
+        return match k {
+            .ABind(decl: d, idx: i) :> (d.id == prog.id ? i : -1)
+            .AConstruct(field: i) :> -1
+            .AStatic :> -1
+            .ABound :> -1
+            .AOn(event: ev) :> -1
+            .AIf :> -1
+            .AShow :> -1
+            .AAs :> -1
+            .AEachIn :> -1
+            .AEachKey :> -1
+            .AEachAs :> -1
+        }
+    }
+
     // s478 — §6.8.2: "`reset` is a RESERVED IDENTIFIER — declaring a local function
     // `function reset() { ... }` or `fn reset { ... }` is E-RESERVED-IDENTIFIER (compile
     // error; see §34)"; §34: "Local identifier shadows a reserved language keyword.
@@ -42647,8 +42742,22 @@ ${
         // other pass's diagnostics — so an Error anywhere inside the
         // initializer, or inside the function a failed proof stands in, owns
         // the failure whatever pass reported it (no cascade)
-        return { tp: { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
+        const judged: Diag[] = base.concat(originPass(files, t, base))
+        // s478: E-DG-002 (a Warning) is judged only over a compile with no Error — a read inside
+        // a refused or broken construct is never resolved, so "never read" is not known there
+        // (no cascade: the error accounts for it)
+        let unread: Diag[] = []
+        if (!hasErrorDiag(judged) && !parseFailed(files)) unread = unreadCells(t)
+        return { tp: { files: files, tables: t, diags: judged.concat(unread),
                        infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype }
+    }
+
+    // s478 — did any file draw an Error-severity parse diagnostic (FileAst.errs)?
+    fn parseFailed(files: FileAst[]) -> boolean {
+        for (const f of files) {
+            if (f.errs.length > 0) return true
+        }
+        return false
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {

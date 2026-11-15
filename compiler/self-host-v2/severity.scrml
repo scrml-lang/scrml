@@ -59,6 +59,7 @@ ${
     export fn severityOf(code: string) -> Severity {
         return match code {
             // §34 Severity: Warning
+            "E-DG-002" :> Severity.Warning
             "W-ATTR-001" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
             "W-FOREIGN-001" :> Severity.Warning

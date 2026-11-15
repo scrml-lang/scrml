@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 431 | 23.1% |
+| PASS | 432 | 23.1% |
 | CODES-ONLY | 4 | 0.2% |
-| FAIL | 133 | 7.1% |
+| FAIL | 132 | 7.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
 | UNSUPPORTED | 665 | 35.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 435 hold (76.6%). Runtime half executed on the bootstrap for 154 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 568; of those, 436 hold (76.8%). Runtime half executed on the bootstrap for 154 case(s).
 
-- **Vacuous** passes: 12 of 435 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **423**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 26 of 133; the other 107 are implemented checks that answered wrong.
+- **Vacuous** passes: 10 of 436 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **426**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 25 of 132; the other 107 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 665.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 278 · FAIL 107 · UNSUPPORTED 490. Twin holds 278 (non-vacuous 271). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **875** — PASS 279 · FAIL 106 · UNSUPPORTED 490. Twin holds 279 (non-vacuous 273). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | print | 1 | · | 1 | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 127 | 47 | · | 8 | · | 44 | 28 | · | · |
+| reactive | 127 | 48 | · | 7 | · | 44 | 28 | · | · |
 | refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 2 | · | 6 | 19 | · | · |
 
-### FAIL (133)
+### FAIL (132)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - missing E-PROGRAM-NESTED-ATTR
@@ -586,9 +586,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
-- `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
-  - missing E-DG-002
-  - severity: E-DG-002 did not fire (expected warning)
 - `reactive/hoist-forward-ref-neg` (twin · parse-reject)
   - E-PARSE-ITEM: unexpected text at program level
 - `reactive/reset-init-after-assignment-rt` (twin · parse-reject)
@@ -712,7 +709,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (435)
+### PASS / CODES-ONLY (436)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -845,9 +842,9 @@ none
 - `element-refusal/s474-parser-repair-p-div-neg` — PASS
 - `element-refusal/s474-parser-repair-table-foster-neg` — PASS
 - `element-refusal/text-string-attr-comment-neg` — PASS
-- `engine/engine-var-duplicate-neg` — PASS · TWIN
+- `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
-- `engine/initial-invalid-variant-neg` — PASS · TWIN
+- `engine/initial-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/initial-invalid-variant-pos` — PASS · TWIN
 - `engine/mount-not-engine-pos` — PASS · TWIN
 - `engine/onidle-duplicate-pos` — PASS · TWIN
@@ -855,13 +852,13 @@ none
 - `engine/onidle-legal-neg` — PASS · TWIN
 - `engine/onidle-misplaced-pos` — PASS · TWIN
 - `engine/phase-advance` — PASS · TWIN
-- `engine/rule-invalid-variant-neg` — PASS · TWIN
+- `engine/rule-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/rule-invalid-variant-pos` — PASS · TWIN
 - `engine/rule-violation-neg` — PASS · TWIN
 - `engine/self-write-neg` — PASS · TWIN
-- `engine/state-child-invalid-variant-neg` — PASS · TWIN
+- `engine/state-child-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-invalid-variant-pos` — PASS · TWIN
-- `engine/state-child-missing-neg` — PASS · TWIN
+- `engine/state-child-missing-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-missing-pos` — PASS · TWIN
 - `enum/variant-name-lowercase-reject` — PASS · TWIN
 - `error-boundary/bare-call-no-boundary-e002` — PASS · TWIN
@@ -870,10 +867,10 @@ none
 - `error/await-not-in-scrml` — PASS · TWIN
 - `error/construct-variant-payload-arity-return-neg` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
-- `error/fail-bare-variant-reaches-handler` — PASS · TWIN
+- `error/fail-bare-variant-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
 - `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
-- `error/fail-imported-builtin-name-enum-ok` — PASS · TWIN
+- `error/fail-imported-builtin-name-enum-ok` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `error/fail-in-failable-neg` — PASS · TWIN
 - `error/fail-non-enum-neg` — PASS · TWIN
 - `error/fail-outside-failable` — PASS · TWIN
@@ -904,7 +901,7 @@ none
 - `error/propagate-incompat-variants` — PASS · TWIN
 - `error/propagate-non-failable-callee-neg` — PASS · TWIN
 - `error/propagate-non-failable-callee-pos` — PASS · TWIN
-- `error/propagate-reaches-handler` — PASS · TWIN
+- `error/propagate-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `error/propagate-success-unwrap` — PASS · TWIN
 - `error/throw-not-in-scrml` — PASS · TWIN
 - `error/try-not-in-scrml` — PASS · TWIN
@@ -963,7 +960,7 @@ none
 - `lifecycle/pending-tape-granted-append-rt` — PASS
 - `lifecycle/pending-tape-granted-replace-rt` — PASS
 - `lifecycle/pending-tape-whole-write-not-granted-pos` — PASS
-- `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN
+- `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-pos` — PASS · TWIN
@@ -973,7 +970,7 @@ none
 - `markup-handler/inline-block-handler-in-engine-state-child` — PASS · TWIN
 - `markup-handler/inline-block-handler-in-engine-state-child-call-led` — PASS · TWIN
 - `markup-handler/inline-block-handler-multi-line` — PASS · TWIN
-- `markup-handler/inline-block-handler-runs-every-statement` — PASS · TWIN
+- `markup-handler/inline-block-handler-runs-every-statement` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `markup-handler/multi-stmt-handler-assign-led-pos` — PASS · TWIN
 - `markup-handler/multi-stmt-handler-attr-neg` — PASS · TWIN
 - `markup-handler/multi-stmt-handler-attr-pos` — PASS · TWIN
@@ -1002,21 +999,21 @@ none
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
-- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN
-- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN
-- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN
-- `match-leave/dpa068-guard-bare-fail` — PASS · TWIN
-- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN
-- `match-leave/dpa068-guard-bare-return-valuepos` — PASS · TWIN
-- `match-leave/dpa068-guard-stmt-bare-fail-then-after` — PASS · TWIN
-- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN
-- `match-leave/dpa068-stmt-bare-fail` — PASS · TWIN
-- `match-leave/dpa068-stmt-bare-return` — PASS · TWIN
-- `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN
-- `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN
-- `match-leave/stmt-arm-braced-break-continue-loop` — PASS · TWIN
-- `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN
-- `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN
+- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-guard-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-guard-bare-return-valuepos` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-guard-stmt-bare-fail-then-after` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/stmt-arm-braced-break-continue-loop` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
@@ -1045,7 +1042,7 @@ none
 - `own-value-type/boundary-persist-literal-pos` — PASS
 - `own-value-type/boundary-persist-neg` — PASS
 - `own-value-type/cycle-outranks-neg` — PASS
-- `own-value-type/infer-nonliteral-pos` — PASS
+- `own-value-type/infer-nonliteral-pos` — PASS (also emitted, unasserted: E-DG-002)
 - `own-value-type/not-inferable-logical-neg` — PASS
 - `own-value-type/not-inferable-member-neg` — PASS
 - `own-value-type/not-inferable-unproven-call-neg` — PASS
@@ -1067,8 +1064,9 @@ none
 - `reactive/debounce-trailing-commit` — PASS · TWIN
 - `reactive/debounce-valid-neg` — PASS · TWIN
 - `reactive/decl-needs-initializer-neg` — PASS · TWIN
-- `reactive/dg-001-cyclic-neg` — PASS · VACUOUS
-- `reactive/dg-002-no-readers-neg` — PASS · TWIN · VACUOUS
+- `reactive/dg-001-cyclic-neg` — PASS
+- `reactive/dg-002-no-readers-neg` — PASS · TWIN
+- `reactive/dg-002-no-readers-pos` — PASS · TWIN
 - `reactive/fn-mutual-recursion-hoist` — PASS · TWIN
 - `reactive/if-top-level-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
@@ -1120,7 +1118,7 @@ none
 - `server-db/sql-select-hydrate-rt-twin` — PASS
 - `server-db/sql-update-returning-rt-twin` — PASS
 - `server-db/sql-where-filter-rt-twin` — PASS
-- `server-fn/cell-assign-failable-arm-return-live` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
+- `server-fn/cell-assign-failable-arm-return-live` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/cell-assign-failable-recovery-value` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/cell-assign-failable-success-then-read` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/cell-assign-independent-writes-batched` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)

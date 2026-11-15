@@ -10,6 +10,7 @@
 import { describe, test, expect, beforeAll, afterEach, afterAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, instancesOf, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -78,7 +79,8 @@ describe("1 — bind (Attr.Bind)", () => {
   });
 
   test("§5.4 legality: the element and the attribute name", () => {
-    const one = (el) => codes(P(`    let <s:string=""/>\n    let <b:bool=false/>`, `        ${el}`));
+    // s478 (E-DG-002): each case declares only the cells its element names
+    const one = (el) => codes(dropUnnamedScaffold(P(`    let <s:string=""/>\n    let <b:bool=false/>`, `        ${el}`), [`    let <s:string=""/>`, `    let <b:bool=false/>`]));
     expect(one(`<div bind:value=@s></div>`)).toEqual(["E-ATTR-011"]);
     expect(one(`<input type="text" bind:checked=@b/>`)).toEqual(["E-ATTR-011"]);
     expect(one(`<input bind:colour=@s/>`)).toEqual(["E-ATTR-011"]);
@@ -184,7 +186,7 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
   test("twin: a `fn` calling a `fn` (§48.6.1), and a `function` calling the clock helper, are clean", () => {
     expect(codes(P(`    fn k() -> int { return 1; }\n    fn f() -> int { return k(); }`, `        <p>x</p>`))).toEqual([]);
-    expect(codes(P(`${h}\n    let <t:number=0/>\n    function mark() { @t = h(); }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
+    expect(codes(P(`${h}\n    let <_t:number=0/>\n    function mark() { @_t = h(); }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@_t = h())>n</button>`))).toEqual([]);
   });
   test("a clock helper in an initializer, markup, an attribute value, a lambda in markup → E-BOOTSTRAP-UNSUPPORTED, as `Date.now()` there is", () => {
     for (const [decls, main] of [
@@ -391,7 +393,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
   // `int` (`int` enforced, RULED S440 JS-WAT 7(a)). A negative int is not a
   // type error — the SPEC says nothing about it — and stays the runtime refusal.
   test("an index that is not an `int` → E-TYPE-031 (a string param, a string literal, a non-integer, a `number`, an `int | not`)", () => {
-    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2; }`, `        <p>x</p>`);
+    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <_rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @_rows[${ix}].qty = 2; }`, `        <p>x</p>`);
     for (const [params, ix] of [["i: string", "i"], ["", '"0"'], ["", "0.5"], ["n: number", "n"], ["m: int | not", "m"], ["", "true"]]) {
       const d = run(at(params, ix)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
