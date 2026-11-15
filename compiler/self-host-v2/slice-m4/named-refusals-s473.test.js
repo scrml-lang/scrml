@@ -51,6 +51,14 @@ const CASES = [
   ["x is <value>", P(`    let <n:int=0/>\n    function f() -> bool { return @n is 0; }`), "E-EQ-005"],
   ["{ @x } shorthand", P(`    let <owner:string="a"/>\n    function f() -> string { const o = { @owner }; return o.owner; }`), "E-OBJECT-SHORTHAND-CELL"],
   ["struct field of function type", P(`    type T:struct = { n: int, cb: () -> int }`), "E-STRUCT-FUNCTION-FIELD"],
+  // s478 (boot-missing-checks): a function-typed PARAMETER is not a struct field — §12.5 names
+  // E-ROUTE-004 on a server function; elsewhere it is scrml the bootstrap does not build
+  ["server function parameter of function type", P(`    server function badParam(cb: fn()) -> string { return "ok"; }`), "E-ROUTE-004"],
+  ["server function parameter of function type", P(`    server function badParam(cb: () -> int) -> string { return "ok"; }`), "E-ROUTE-004"],
+  // s478 fix r1 (#1894 L4): §12.5 is about a server FUNCTION, spelled `function` or `fn`
+  ["server function parameter of function type", P(`    server fn badParam(cb: fn()) -> string { return "ok"; }`), "E-ROUTE-004"],
+  ["function-typed parameter", P(`    function show(cb: () -> int) -> int { return 1; }`), UNS],
+  ["function-typed parameter", P(`    function show(cb: fn()) -> int { return 1; }`), UNS],
   // ---- retired (D22): named, under the SPEC's unknown-function code ----
   ["flush()", P(`    let <p:int=1/>\n    <d:int=(@p * 2)/>\n    function go() -> int { @p = 5; flush(); return @d; }`), "E-SCOPE-001"],
   // ---- scrml the bootstrap does not build yet ----
