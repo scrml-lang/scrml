@@ -158,6 +158,7 @@ ${
             .Slot :> "Slot"
             .Star(decl: x) :> "Star"
             .Effect(deps: x) :> "Effect"
+            .Run(body: x) :> "Run"
             .Request(deps: x) :> "Request"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"
