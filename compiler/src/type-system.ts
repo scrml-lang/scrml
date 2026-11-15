@@ -78,7 +78,6 @@ import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked, markOwnerReported } from "./engine-body-reader.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
-import { codeOnlyView } from "./codegen/code-segments.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
@@ -140,6 +139,7 @@ import { refusedElementMessage } from "./element-refusal.ts";
 import { RULED_FORM_CODE, ruledFormMessage, forEachRuledCallForm, collectRuledStatementForms, collectLiteralTapeNames } from "./impl1-ruled-form-refusal.ts";
 import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
+import { codeOnlyView } from "./codegen/code-segments.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
