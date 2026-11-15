@@ -3729,6 +3729,83 @@ ${
         return parseInterp(mp)
     }
 
+    // =========================================================================
+    // s478 (S478 triage C10) — a `${ … }` LOGIC BLOCK inside markup: one that
+    // starts with a declaration (`function`, `fn`, `server function`, `type`,
+    // `const`, `let`, `import`, `export`) — a statement list, not one
+    // interpolated expression. SPEC §7.1: "Logic contexts are
+    // valid inside markup contexts"; §7.6 (S439 #12): "A declaration in a
+    // `${…lift…}` block nested inside an `if=` element is a file-scope
+    // declaration: it runs ONCE, at file init — not once per mount of the `if=`
+    // scope." So its `function` / `fn` / `type` / `const` items are HOISTED to
+    // the enclosing item list (MP.hoist, as a `<db>` body's are), and the block
+    // renders nothing where it stands. What else it holds is refused by name
+    // (INTERIM, g-boot-nested-logic-statements-s478): its statements, which §7.6
+    // S439 #12 runs once per mount of the scope ("The block's `lift` statements
+    // run per mount") and §17.3 (S449) makes a render position that "may not
+    // write reactive state"; and an `import` / `export` there (§21 places them
+    // at a file's or a program's top level).
+    // =========================================================================
+    fn nestedLogicAhead(mp: MP) -> boolean {
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        if (!isP(tp, "{")) return false
+        // (a block of statements only — `${ f(); }` — is left to the element whose body it
+        // is: a lifecycle element (`<timer>`, `<poll>`) names its own refusal; and a keyword
+        // `when … changes { … }` there is parseInterp's effect, s449)
+        const t: TP = adv(tp)
+        // s478 r1 (LOW-7): `type` opens a declaration only in a type-declaration shape —
+        // `type Name =` / `type Name:kind` / `type Name<…>`; `${ type }` / `${ type + 1 }`
+        // read a binding named `type` (an `<each … as="type">` row binder) as before
+        if (isWord(t, "type")) return typeDeclShapeAhead(adv(t))
+        return logicItemAhead(t) && !whenAhead(t)
+    }
+
+    fn typeDeclShapeAhead(t: TP) -> boolean {
+        if (!isNameTok(cur(t))) return false
+        const n: TP = adv(t)
+        return isP(n, "=") || isP(n, ":") || isP(n, "<")
+    }
+
+    fn parseNestedLogic(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const lr: RLogicRegion = logicBlockTP(mp)
+        const inner: RItems = parseLogicItems(expectP(lr.tp, "{"), "}", false)
+        let t: TP = expectRegionEnd(expectP(inner.tp, "}"))
+        let hoisted: AItem[] = []
+        for (const it of inner.items) {
+            const why: string = nestedItemRefusal(it)
+            if (why == "") {
+                hoisted = hoisted.concat([it])
+            } else {
+                const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", why, t.file, it.span)
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+            }
+        }
+        const back: MP = backToMarkup(lr.mp, t)
+        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, ns: back.ns }
+        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }
+        return { n: n, mp: mBump(m) }
+    }
+
+    fn nestedExport(exported: boolean) -> string {
+        if (exported) return "an `export` in a `" + interpOpen() + " … }` inside markup is not in the bootstrap — export at the file's top level or the `<program>` body top (§21.2)"
+        return ""
+    }
+
+    // "" — the item is hoisted (a file-scope declaration, §7.6 S439 #12); else why it is refused.
+    fn nestedItemRefusal(it: AItem) -> string {
+        const k: AItemK = it.k
+        return match k {
+            .FnItem(f: x) :> nestedExport(x.exported)
+            .TypeItem(t: x) :> nestedExport(x.exported)
+            .ConstItem(c: x) :> nestedExport(x.exported)
+            .ImportItem(i: x) :> "an `import` in a `" + interpOpen() + " … }` inside markup is not in the bootstrap — write it at the file's top level or the `<program>` body top (§21.3)"
+            .DeclItem(d: x) :> "a declaration in a `" + interpOpen() + " … }` inside markup is not in the bootstrap — declare it in the `<program>` body (§66)"
+            .ProgramItem(p: x) :> "a `<program>` here is not in the bootstrap"
+            .MarkupItem(n: x) :> "statements in a `" + interpOpen() + " … }` logic block inside markup are not in the bootstrap — they run once per mount of the element's scope (§7.6) in a render position, which may not write a cell (§17.3); move them to the `<program>` body top, or into a function"
+        }
+    }
+
     fn rowTok(src: string, start: int, end: int, line: int) -> PTok {
         let text: string = src.substring(start, end)
         if (text.length > 24 || text.indexOf("\n") >= 0) text = "<…>"
@@ -8291,6 +8368,16 @@ ${
                 }
                 m = skipSigil(m)
                 textStart = m.pos
+            } else if (atInterp(m) && nestedLogicAhead(m)) {
+                // s478 (C10): a logic block of declarations renders nothing where it
+                // stands — like a `#{…}` block (above), it does not split the text
+                // around it (the template paths count one text node). s478 r1 (H2): its
+                // empty placeholder (renders nothing — lower textViews) stays in the tree,
+                // spanning the block, so analyze can see WHERE the hoisted items stood
+                // (nestedHoistCheck: never out of a binder scope)
+                const rl: RNodeOne = parseNestedLogic(m)
+                out = out.concat([rl.n])
+                m = rl.mp
             } else if (atInterp(m)) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])

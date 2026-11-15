@@ -20659,7 +20659,7 @@ ${
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> resolveElem(env, e, st)
-            .Text(text: t) :> st
+            .Text(text: t) :> nestedHoistCheck(env, n.span, t, st)        // s478 r1 (H2)
             .Interp(e: e) :> resolveExpr(env, e, not, st).st
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
             .Css(c: c) :> st
@@ -21764,6 +21764,61 @@ ${
             }
         }
         return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
+    }
+
+    // s478 r1 (H2) — a `${ … }` logic block inside markup hoists its `function` /
+    // `fn` / `const` items to file scope (parse.scrml parseNestedLogic; §7.6 S439
+    // #12: "A declaration in a `${…lift…}` block nested inside an `if=` element is
+    // a file-scope declaration"). Its empty placeholder Text spans the block. Where
+    // that block stands inside a scope that binds names — an `<each>` row, a loop
+    // or arm binder, a component's / engine's fields — the hoisted item would lose
+    // those names and silently bind a file-scope name of the same spelling, so it
+    // is refused by name, fail closed (as a `<db>`-body function is, dbNestedWhy).
+    fn nestedHoistCheck(env: Env, sp: ASpan, t: string, st0: AS) -> AS {
+        if (t != "" || sp.end <= sp.start) return st0
+        const where: string = nameScopeHere(env)
+        if (where == "") return st0
+        let st: AS = st0
+        for (const f of env.g.files) {
+            if (f.path == env.file) {
+                for (const h of hoistedWithin(f.items, sp)) {
+                    if (!refusedAt(st, env.file, h.span)) {
+                        st = addDiag(st, env.file, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "` is declared in a `${ … }` logic block that stands inside " + where + " — a declaration there is a FILE-SCOPE declaration (§7.6), so it would lose the names " + where + " binds (or silently bind a file-scope name of the same spelling); the bootstrap refuses it. Declare it at the `<program>` body top, and pass the values it needs as arguments")
+                    }
+                }
+            }
+        }
+        return st
+    }
+
+    type HoistedAt:struct = { name: string, span: ASpan }
+
+    // The function / constant items inside `sp` (the program's items included).
+    fn hoistedWithin(items: AItem[], sp: ASpan) -> HoistedAt[] {
+        let out: HoistedAt[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const own: HoistedAt[] = match k {
+                .FnItem(f: f) :> [{ name: f.name, span: it.span }]
+                .ConstItem(c: c) :> [{ name: c.name, span: it.span }]
+                .ProgramItem(p: p) :> hoistedWithin(p.items, sp)
+                .ImportItem(i: x) :> []
+                .TypeItem(t: x) :> []
+                .DeclItem(d: x) :> []
+                .MarkupItem(n: x) :> []
+            }
+            for (const h of own) {
+                if (h.span.start >= sp.start && h.span.end <= sp.end) out = out.concat([h])
+            }
+        }
+        return out
+    }
+
+    fn refusedAt(st: AS, file: string, sp: ASpan) -> boolean {
+        for (const d of st.diags) {
+            if (d.file == file && d.span.start == sp.start && d.code == "E-BOOTSTRAP-UNSUPPORTED") return true
+        }
+        return false
     }
 
     // s472 r1 — the name-binding scope this position stands in ("" — the
