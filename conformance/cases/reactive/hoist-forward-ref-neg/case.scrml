@@ -2,7 +2,7 @@ ${
     function readEarly() {
         return @count;
     }
-    @count = readEarly()
+    @count = readEarly();
     <count> = 0
 }
 <p>x</>
