@@ -24,32 +24,32 @@
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
             _ e              :> "other"
-        }
-        return r
+        };
+        return r;
     }
     function matchMiss() {
         const r = match ?{`SELECT id, body FROM empties`}.get() {
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
             _ e              :> "other"
-        }
-        return r
+        };
+        return r;
     }
     function matchFailed() {
         const r = match ?{`SELECT id, body FROM gone`}.get() {
             ::Ok(row)        :> row is not ? "none" : row.body,
             ::QueryFailed(m) :> "failed",
             _ e              :> "other"
-        }
-        return r
+        };
+        return r;
     }
     function matchAllFailed() {
         const r = match ?{`SELECT id FROM gone`}.all() {
             ::Ok(rows)       :> "rows:" + rows.length,
             ::QueryFailed(m) :> "failed:" + m,
             _ e              :> "other"
-        }
-        return r
+        };
+        return r;
     }
     function go() {
         @hit = matchHit() !{ .Transport(_) :> return };

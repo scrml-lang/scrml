@@ -5,8 +5,8 @@ type User:struct = { name: string }
 ${
     function show() {
         if (@user is given) {
-            const xs = ["x"].map((w) => w + @user.name)
-            @out = xs.join(",")
+            const xs = ["x"].map((w) => w + @user.name);
+            @out = xs.join(",");
         }
     }
 }

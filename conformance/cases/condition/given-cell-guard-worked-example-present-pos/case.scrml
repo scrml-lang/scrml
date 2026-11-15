@@ -4,10 +4,10 @@
     <user>: User | not = not
     <msg>: string = "none"
     function login() {
-        @user = { name: "ada" }
+        @user = { name: "ada" };
     }
     function greet() {
-        given @user :> { @msg = "hi " + @user.name }
+        given @user :> { @msg = "hi " + @user.name; }
     }
     <main>
         <button id="login" onclick=login()>login</button>

@@ -20,36 +20,36 @@
     // row the per-iteration query returns (no extra column). `.get()` is the FIRST
     // row the per-key query returns, in its own ORDER BY.
     function bodyOnly(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
             out.push(row is not ? "none" : row.body + ":" + Object.keys(row).join("|"));
         }
-        return out.join(",")
+        return out.join(",");
     }
     function viaAlias(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
             const row = ?{`SELECT id AS note_id, body FROM notes WHERE id = ${it.id}`}.get();
             out.push(row is not ? "none" : row.body + ":" + row.note_id);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function viaQualified(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
             const row = ?{`SELECT n.body FROM notes n WHERE n.id = ${it.id}`}.get();
             out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function firstTag(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
             const row = ?{`SELECT label FROM tags WHERE note_id = ${it.id} ORDER BY label`}.get();
             out.push(row is not ? "none" : row.label);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function go() {
         @aliased = viaAlias([{ id: 7 }, { id: 8 }]) !{ _ :> "err" };

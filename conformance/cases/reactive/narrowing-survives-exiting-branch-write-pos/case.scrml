@@ -6,10 +6,10 @@ ${
     function show(c: bool) {
         if (@user is given) {
             if (c) {
-                @user = not
-                return
+                @user = not;
+                return;
             }
-            @out = @user.name
+            @out = @user.name;
         }
     }
 }

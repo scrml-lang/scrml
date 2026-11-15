@@ -2,7 +2,7 @@
 <price> = 10
 function saveOrder(p:number) -> number {
     result = ?{`INSERT INTO orders (amount, uid, sid) VALUES (${p}, ${@currentUser.id}, ${session.userId}) RETURNING id`}
-    return result
+    return result;
 }
 <button id="save" onclick={ @price = saveOrder(@price) !{ .Transport(_) :> return }; }>Save</>
 <p id="p">Price: ${@price}</>

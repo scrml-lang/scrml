@@ -5,8 +5,8 @@ ${
 }
 <request id="profile">
   ${
-    lin token = "secret"
-    @userId = authenticate(token)
+    lin token = "secret";
+    @userId = authenticate(token);
   }
 </>
 <p>${@userId}</>

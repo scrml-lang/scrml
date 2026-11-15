@@ -1,4 +1,4 @@
 ${
-    let x: string = not
+    let x: string = not;
 }
 <program><p id="p">ok</></>
