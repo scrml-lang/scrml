@@ -842,7 +842,7 @@ type User:struct = { name: string, email: string, age: int }
 
 Four members, all imported from `scrml:data`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-PARSE-TYPE×4] — the bootstrap has no refinement types on struct fields (int(>=18)), no <schema> and no <formFor> / <tableFor> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×6] — the bootstrap emits no run-time check for a refinement on a struct field (int(>=18)), cannot import scrml:data yet, and has no <schema> or <formFor> / <tableFor> -->
 ```scrml
 <program db="app.db">
 
