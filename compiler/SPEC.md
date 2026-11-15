@@ -12365,13 +12365,14 @@ than one of them is in flight, they are ordered as follows.
    the reset's load is superseded, its result is discarded, and a load classified READ has its transport
    aborted. In `@who = "z"; reset(@who);` the reset is the later start, and its load's result replaces `"z"`
    when it settles. A dependency change in the same batch still re-runs the load when the batch ends, after
-   both, and that run wins. *⚑ PA reading, not the ruling's words:* a reset's start is dated the way rule 2
-   dates a write — at the last wait before the reset in its continuation, or when the reset runs if there is
-   none — and between a reset and a write that share a start (the same continuation), the one that runs later
-   is the later start. So a reset whose dated start is older than a load already started or a write already
-   landed is the older start under rule 1, and is superseded: it neither cancels the newer run nor lands over
-   it. A `reset-on=` entry's change (§6.8.4) is a write that triggers the load, so its run
-   starts when that write's batch ends.
+   both, and that run wins. *⚑ PA reading, not the ruling's words:* the run a reset triggers starts when the
+   reset executes; an author write later in the same continuation as the reset is the later start. So a reset
+   always starts a new run, and that run is the most recent start: under rule 1 it supersedes every load and
+   write that started before it, including ones started after the last wait in the reset's own continuation.
+   A load in flight is superseded (a READ load has its transport aborted; a WRITE load runs to completion and
+   its result is discarded, §6.7.7.1), and a write that started before the reset is discarded when it lands.
+   A write in any other continuation keeps the start rule 2 gives it. A `reset-on=` entry's change (§6.8.4) is
+   a write that triggers the load, so its run starts when that write's batch ends.
 4. **A winning write of `not` re-runs the load.** When a winning write's value is `not`, the write SHALL supersede
    the load in flight and then start the cell's load again. This includes a host `null` or `undefined`, which is
    `not` at the interop boundary (§42.9). This is the reset rule of §13.9.2 ("A reset of a pending cell (§6.8) is the
