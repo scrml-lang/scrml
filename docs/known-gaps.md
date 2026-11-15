@@ -31742,7 +31742,7 @@ Carried by `conformance/cases/fn/return-colon-spelling-neg` (impl1-ts xfail: E-P
 
 Loci inside a PR that was still open when this was filed (#1828, #1830, #1831) are named with that PR; the symbol is the same once it merges. The impl#1 string-literal item from the #1831 fix round (`fn` printed as `function` inside a match-arm string in `resolveHost`) is a recurrence of `g-impl1-bootstrap-build-rewrites-string-literals-s473` and is recorded there, not filed again.
 
-<!-- @gap id=g-hook-single-shard-test-pollution-s477 sev=LOW status=open locus=scripts/test-sharded.ts+scripts/git-hooks/pre-commit(hook shard runner) prov=lane:s477-boot-nested-fn -->
+<!-- @gap id=g-hook-single-shard-test-pollution-s477 sev=LOW status=resolved resolved-by=s478-hook-shards locus=scripts/test-sharded.ts+scripts/git-hooks/pre-commit(hook shard runner) prov=lane:s477-boot-nested-fn -->
 ### g-hook-single-shard-test-pollution-s477 — the pre-commit hook with `SCRML_HOOK_SHARDS=1` fails `compiler/tests/unit/b17-4-codegen-ontransition-effect.test.js` every time (test-order pollution; it passes alone), and the default shard count hits the 3072 MB per-shard ceiling under parallel lanes — `NEW S477; LOW; open`
 
 Workaround in use: `SCRML_HOOK_SHARD_MEM_MB=4608`. Who pays: every lane that commits while other lanes run. It must either raise the ceiling by hand or fall back to one shard, and one shard fails on an unrelated test.
@@ -31814,7 +31814,7 @@ Pre-existing (not caused by #1835). No real program is that deep, but the compil
 
 The file is refused anyway (fails closed), so only the message is wrong. It points the author at web-app server artifacts, not at the tool's library import.
 
-<!-- @gap id=g-hook-sharded-prepush-exit-s477 sev=LOW status=open locus=scripts/test-sharded.ts+scripts/git-hooks/pre-push(sharded runner exit status) prov=lane:s477-kind-tool-fix -->
+<!-- @gap id=g-hook-sharded-prepush-exit-s477 sev=LOW status=resolved resolved-by=s478-hook-shards locus=scripts/test-sharded.ts+scripts/git-hooks/pre-push(sharded runner exit status) prov=lane:s477-kind-tool-fix -->
 ### g-hook-sharded-prepush-exit-s477 — the sharded pre-push runner exited non-zero with 0 failures (and once printed no counts at all); `SCRML_HOOK_SHARDS=1` passed — `NEW S477; LOW; open`
 
 Who pays: the lane, which cannot tell a real failure from a runner fault and re-runs on one shard. That run then meets `g-hook-single-shard-test-pollution-s477`.
