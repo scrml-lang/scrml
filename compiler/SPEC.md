@@ -12374,9 +12374,10 @@ than one of them is in flight, they are ordered as follows.
    A write in any other continuation keeps the start rule 2 gives it, with one exception: the continuation that
    resumes after awaiting a waiting call. A reset issued anywhere inside that call (its body, its continuations,
    or a call it awaits) comes before that continuation in program order. So a write of the same cell in that
-   continuation is dated no earlier than the reset, and it is the later start and wins: in
+   continuation is dated no earlier than the reset, so it supersedes the reset's run: in
    `const r = inner(); @who = "z";`, where `inner` resets `@who` after a wait, `"z"` wins, as it does in the
-   inline `reset(@who); @who = "z";`. Only the caller that awaits the call is moved, and only for the cells the
+   inline `reset(@who); @who = "z";`. (It does not outrank a write the call itself makes after a LATER wait;
+   that write keeps the start rule 2 gives it, which can be later than the caller's.) Only the caller that awaits the call is moved, and only for the cells the
    call reset (or restarted under rule 4). A write of another cell, and a write in any other continuation, keep
    the start rule 2 gives them.
 
