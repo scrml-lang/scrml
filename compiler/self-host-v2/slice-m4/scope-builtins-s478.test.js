@@ -110,3 +110,68 @@ describe("§6.7.3 — `cleanup()` arguments", () => {
     expect(c).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
+
+// s478 fix round 1 (S239 review of #1887)
+describe("fix round 1 — the keywordless declaration is `const`'s twin everywhere", () => {
+  const fs = (body, pre = "", markup = "<p>hi</p>") => `<program>\n    <n:int=0/>\n${pre}    \${\n        ${body}\n    }\n    ${markup}\n    <p>\${@n}</p>\n</program>\n`;
+
+  test("MED-1: at file scope `x = 1;` is the file-scope constant (read by markup and functions)", () => {
+    expect(codes(`<program>\n    \${\n        x = 1;\n        function go() -> int { return x; }\n    }\n    <p>\${x}</p>\n    <button id="b" onclick=go()>go</button>\n</program>\n`)).toEqual([]);
+  });
+
+  test("MED-1: a body-top `x = 1;` is the same item", () => {
+    expect(codes(`<program>\n    x = 1;\n    <p>\${x}</p>\n</program>\n`)).toEqual([]);
+  });
+
+  test("MED-1: it gets the file-scope const's refusals (a cell read, a call)", () => {
+    for (const [kw, cst] of [
+      [fs("yy = @n + 1;"), fs("const yy = @n + 1;")],
+      [fs("yy = f();", "    function f() -> int { return 3; }\n"), fs("const yy = f();", "    function f() -> int { return 3; }\n")],
+    ]) {
+      const a = codes(kw);
+      expect(a).toContain("E-BOOTSTRAP-UNSUPPORTED");
+      expect(a).toEqual(codes(cst));
+    }
+  });
+
+  test("MED-1: a second file-scope write is an assignment to a file-scope const", () => {
+    expect(codes(`<program>\n    \${\n        x = 1;\n        x = 2;\n    }\n    <p>\${x}</p>\n</program>\n`)).toContain("E-ASSIGN-004");
+  });
+
+  test("MED-2 (INTERIM): an unread keywordless declaration is refused by name, never accepted", () => {
+    const r = run(prog(`    function go() -> int {\n        unusedThing = 42;\n        return 1;\n    }`));
+    const errs = r.diags.filter((d) => d.severity === "Error");
+    expect(errs.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs[0].message).toContain("E-MU-001");
+  });
+
+  test("MED-2: a read one, and a `_`-prefixed one, are accepted", () => {
+    expect(codes(prog(`    function go() -> int {\n        usedThing = 42;\n        return usedThing;\n    }`))).toEqual([]);
+    expect(codes(prog(`    function go() -> int {\n        _unused = 42;\n        return 1;\n    }`))).toEqual([]);
+  });
+
+  test("LOW-5: `log = 1;` / `navigate = 1;` declare, as `const log = 1` does (§20.6.7)", () => {
+    for (const n of ["log", "navigate"]) {
+      expect(codes(prog(`    function go() -> int {\n        ${n} = 1;\n        return ${n};\n    }`))).toEqual([]);
+    }
+  });
+
+  test("LOW-9: a cell declared after the function is never re-declared by `count = 1`", () => {
+    expect(codes(`<program>\n    function go() {\n        count = 1;\n    }\n    <count:int=0/>\n    <button id="b" onclick=go()>go</button>\n    <p>\${@count}</p>\n</program>\n`)).toContain("E-SCOPE-001");
+  });
+
+  test("LOW-9: nor one declared in nested markup", () => {
+    const c = codes(`<program>\n    <main>\n        <count:int=0/>\n        <button id="b" onclick={ count = 1; }>go</button>\n        <p>\${@count}</p>\n    </main>\n</program>\n`);
+    expect(c).toContain("E-SCOPE-001");
+  });
+
+  test("LOW-4: `cleanup(v)` with `v` of unknown (possibly function) type is never E-LIFECYCLE-004", () => {
+    const c = codes(prog(`    function go() { const v = () => 1; cleanup(v); }`));
+    expect(c).not.toContain("E-LIFECYCLE-004");
+    expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  test("LOW-4: a typed local value is still E-LIFECYCLE-004", () => {
+    expect(codes(prog(`    function go() { const v = 3; cleanup(v); }`))).toContain("E-LIFECYCLE-004");
+  });
+});

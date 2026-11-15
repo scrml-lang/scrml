@@ -28,3 +28,20 @@ Lane: spurious / wrong-code errors on otherwise-supported cases in the bootstrap
 ## Not done (residue)
 - log() / print / println implementation (Core host statement). Named refusals only.
 - module/e-import-002-circular-import-reject, type-state-codes/e-type-045-*: body-top, owned by #1876/#1880.
+
+## Fix round 1 (S239 review of #1887)
+- Merged origin/main twice (incl. #1885, #1886 body-top run locals). severity.scrml: theirs + regen.
+- MED-1: parse.scrml kwDeclAhead / parseKwConstItem — at a `${}` top / body top a keywordless declaration
+  (PNs.kw) is the file-scope const item, with constPass's refusals (cell read, call). logicItemAhead and
+  the program-body item reader route it.
+- MED-3: sql/multiple-statements-in-condition-neg handler `!{ _ :> return }` (impl#1 codes-ok).
+- MED-2 (INTERIM): analyze.scrml withKwUnread — an unread keywordless declaration (judged on run r0's
+  NLocal reads; not `_`-prefixed; not a file-scope const) is E-BOOTSTRAP-UNSUPPORTED naming E-MU-001.
+  Gap g-boot-kw-unread-must-use-s478 (owner question).
+- LOW-5: keywordlessName no longer excludes the built-in function names (log/print/println/navigate/route/cleanup).
+- LOW-9: keywordlessName excludes any cell name declared anywhere in the file (itemCellNames).
+- LOW-4: cleanup(v) — a local of unknown type is refused by name, not E-LIFECYCLE-004.
+- Gaps: LOW-8 text reframed (QUERY-NOT-READABLE is the more specific code; E-PROGRAM-MISSING not in SPEC);
+  LOW-6 g-boot-assign-const-no-row-s478. LOW-7 already fixed on main (#1885).
+- Conformance base 62015fa55 -> head: PASS 468->468, FAIL 71->70, UNSUPPORTED 694->695; PASS->FAIL 0.
+  Corpus (2,861 files): newly-rejecting 1 (linear/must-use-unread-pos, intended), newly-accepting 0.

@@ -7,5 +7,5 @@
             return 0;
         }
     }
-    <button onclick={ check() !{ .Transport(_) :> return }; }>check</button>
+    <button onclick={ check() !{ _ :> return }; }>check</button>
 </program>
