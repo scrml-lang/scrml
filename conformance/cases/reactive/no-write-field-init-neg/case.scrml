@@ -7,5 +7,6 @@
     renders <span>${k}</span>
     <main>
         <box/>
+        <p>${@hits}</p>
     </main>
 </program>

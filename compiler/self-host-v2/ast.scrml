@@ -371,6 +371,10 @@ ${
         Bare(e: AExpr),          // an unquoted value: a literal, a name, @ref, a call, a member path
         Paren(e: AExpr),         // ( expr )
         Braced(b: ABlock),       // { stmts }
+        // s478 — a DURATION (§6.13.3, §51.12.3): the value of `debounced=` /
+        // `throttled=` / `after=` written as a number with a unit (`300ms`) or
+        // `${expr}<unit>`, as its text — judged by the analyzer (durationOf)
+        Dur(text: string),
     }
     // `name` includes a namespace when written (`bind:value`, `class:active`).
     export type AAttr:struct = { nid: int, span: ASpan, name: string, value: AAttrValue }
@@ -457,6 +461,10 @@ ${
     export type ADeclChild:enum = {
         ChildField(d: ADecl),
         StateChild(s: AStateChild),
+        // s478 — `<onIdle after=DURATION to=.Variant/>` (§51.0.R) at the value's
+        // root, a sibling of its state-children: the engine-wide watchdog (its
+        // attributes; a body is refused). Not a state-child: it names no variant.
+        Idle(s: AStateChild),
     }
 
     // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4

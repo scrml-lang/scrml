@@ -20,6 +20,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -29,7 +30,9 @@ const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 const TYPES = `    type K:enum = { A, B, C }\n    type L:enum = { NotFound(id: string), Timeout }`;
 const LOAD = `    function load(id: string)! L {\n        if (id == "x") fail L.NotFound(id);\n        if (id == "t") fail L.Timeout;\n        return id;\n    }\n    function one() -> int { return 1; }`;
-const P = (decls, main = "        <p>x</p>") => `<program>\n    let <n:int=0/>\n${TYPES}\n${LOAD}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): the cases only write the scaffold cell (a landing), so it is `_`-named, and declared
+// only when the case names it
+const P = (decls, main = "        <p>x</p>") => dropUnnamedScaffold(`<program>\n    let <_n:int=0/>\n${TYPES}\n${LOAD}\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, ["    let <_n:int=0/>"]);
 // the line up to each missing-`;` report (where the `;` goes), trimmed; every span is empty
 const semis = (src) => run(src).diags.filter((d) => d.code === "E-STMT-MISSING-SEMICOLON").map((d) => {
   expect(d.span.end).toBe(d.span.start);
@@ -99,25 +102,25 @@ describe("B — a brace that holds a statement (or a second item) is still a sta
     expect(semis(P(fn(`        const v = match k { .A :> 1, .B :> { lift 2 }, .C :> 3 };\n        return v;`)))).toEqual(["const v = match k { .A :> 1, .B :> { lift 2"]);
   });
   test("a statement-position `match`: the arm's value is not used, so `{ e }` is a statement list (§7.2.2 rule 1)", () => {
-    const src = P(fn(`        match k { .A :> { one() }, .B :> { @n = 2 }, .C :> { 3 } }\n        return 0;`));
-    expect(semis(src)).toEqual(["match k { .A :> { one()", "match k { .A :> { one() }, .B :> { @n = 2", "match k { .A :> { one() }, .B :> { @n = 2 }, .C :> { 3"]);
+    const src = P(fn(`        match k { .A :> { one() }, .B :> { @_n = 2 }, .C :> { 3 } }\n        return 0;`));
+    expect(semis(src)).toEqual(["match k { .A :> { one()", "match k { .A :> { one() }, .B :> { @_n = 2", "match k { .A :> { one() }, .B :> { @_n = 2 }, .C :> { 3"]);
     // (one report per place: the `{ 3 }` no-effect tail is the terminator's root cause, not a second error)
     expect(codes(src)).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON"]);
-    expect(codes(P(fn(`        match k { .A :> { one(); }, .B :> { @n = 2; }, .C :> @n = 3 }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { one(); }, .B :> { @_n = 2; }, .C :> @_n = 3 }\n        return 0;`)))).toEqual([]);
   });
   test("#1722 F1: a block-like statement inside a statement-position arm brace owes no `;` — a nested statement `match`, an `if`, a `for`", () => {
     // (the review repro: base compiled it; the first cut reported "insert `;` after `}`")
-    expect(codes(P(fn(`        match k { .A :> { match k { .A :> { @n = 1; }, .B :> { @n = 2; }, .C :> { @n = 4; } } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
-    expect(codes(P(fn(`        match k { .A :> { if (@n == 0) { @n = 1; } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
-    expect(codes(P(fn(`        match k { .A :> { for (const x of [1, 2]) { @n = x; } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { match k { .A :> { @_n = 1; }, .B :> { @_n = 2; }, .C :> { @_n = 4; } } }, .B :> { @_n = 3; }, .C :> { @_n = 5; } }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { if (@_n == 0) { @_n = 1; } }, .B :> { @_n = 3; }, .C :> { @_n = 5; } }\n        return 0;`)))).toEqual([]);
+    expect(codes(P(fn(`        match k { .A :> { for (const x of [1, 2]) { @_n = x; } }, .B :> { @_n = 3; }, .C :> { @_n = 5; } }\n        return 0;`)))).toEqual([]);
     // the value position too: a nested `match` is one expression
     expect(codes(P(fn(`        const v = match k { .A :> { match k { .A :> 1, .B :> 2, .C :> 3 } }, .B :> 2, .C :> 3 };\n        return v;`)))).toEqual([]);
     // a nested `!{}` STATEMENT is not block-like (dpa-073 F3, PA reading S469): it still owes its `;`
-    expect(semis(P(`    function g(k: K, id: string) -> int {\n        match k { .A :> { load(id) !{ _ :> 0 } }, .B :> { @n = 3; }, .C :> { @n = 5; } }\n        return 0;\n    }`))).toEqual(["match k { .A :> { load(id) !{ _ :> 0 }"]);
+    expect(semis(P(`    function g(k: K, id: string) -> int {\n        match k { .A :> { load(id) !{ _ :> 0 } }, .B :> { @_n = 3; }, .C :> { @_n = 5; } }\n        return 0;\n    }`))).toEqual(["match k { .A :> { load(id) !{ _ :> 0 }"]);
   });
   test("a statement-position `!{}` handler likewise", () => {
-    const src = P(`    function g(id: string) -> int {\n        load(id) !{ .NotFound(m) :> { @n = 1 }, .Timeout :> { @n = 2; } };\n        return 0;\n    }`);
-    expect(semis(src)).toEqual(["load(id) !{ .NotFound(m) :> { @n = 1"]);
+    const src = P(`    function g(id: string) -> int {\n        load(id) !{ .NotFound(m) :> { @_n = 1 }, .Timeout :> { @_n = 2; } };\n        return 0;\n    }`);
+    expect(semis(src)).toEqual(["load(id) !{ .NotFound(m) :> { @_n = 1"]);
   });
   test("readings that come first are unchanged: a lone shorthand name, and an empty brace", () => {
     expect(codes(P(fn(`        const v = match k { .A :> 1, .B :> { x }, .C :> 3 };\n        return v;`)))).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");

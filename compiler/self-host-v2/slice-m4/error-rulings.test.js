@@ -325,7 +325,7 @@ describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fa
   });
 
   test("a function whose body can place it on the server: a client call of it is failable (§19.9.10) — s454: VALID, never E-ERROR-013", () => {
-    const src = `<program db="./app.db">\n    let <n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function go() {\n        @n = count() !{ _ :> 0 };\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
+    const src = `<program db="./app.db">\n    let <_n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function go() {\n        @_n = count() !{ _ :> 0 };\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 

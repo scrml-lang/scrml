@@ -57,14 +57,14 @@ describe("construction is a Core value (Expr.VariantOf) — every §14.4 locus",
   });
 
   test("the printed value is THE ENUM VALUE SHAPE a `fail` builds: `{ variant, data: [positional] }`", () => {
-    const r = compile(P(`    let <sh:Shape=(Shape.Rect(2, 5))/>`));
+    const r = compile(P(`    let <_sh:Shape=(Shape.Rect(2, 5))/>`));
     const { client } = artifacts(r.core);
     expect(client.refused).toEqual([]);
     expect(client.js).toContain(`{ variant: "Rect", data: [2 /* w */, 5 /* h */] }`);
   });
 
   test("checkCore C-V1 refuses a malformed VariantOf (wrong arity, a unit variant, no such variant)", () => {
-    const r = compile(P(`    let <sh:Shape=(Shape.Rect(2, 5))/>`));
+    const r = compile(P(`    let <_sh:Shape=(Shape.Rect(2, 5))/>`));
     const v = findAll(r.core, "VariantOf")[0];
     const orig = { idx: v.data.idx, args: v.data.args };
     v.data.args = [orig.args[0]];
@@ -214,7 +214,7 @@ describe("review round 1 — refusals the first round missed", () => {
     ["F3: as a return", `    function f() -> Shape {\n        return .Circle;\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
     ["F3: as an argument", `${AREA}\n    function f() -> int {\n        return area(.Rect);\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
     // F5 — a `T | not` position expects `T`
-    ["F5: a bare construction against `T | not` takes `T` (no false E-VARIANT-AMBIGUOUS)", `    type Other:enum = { Circle(n: int) }\n    let <x:Shape | not=(.Circle(1))/>`, []],
+    ["F5: a bare construction against `T | not` takes `T` (no false E-VARIANT-AMBIGUOUS)", `    type Other:enum = { Circle(n: int) }\n    let <_x:Shape | not=(.Circle(1))/>`, []],
     ["F5: … and a variant `T` does not declare is E-TYPE-VARIANT, not another enum's", `    type Other:enum = { Square(n: int) }\n    let <x:Shape | not=(.Square(1))/>`, ["E-TYPE-VARIANT"]],
     // r2 (CI claim gate, kickstarter block #62) — a refused construction does not cascade
     ["r2: a LOWERCASE bare callee is no variant — no E-TYPE-VARIANT / E-TYPE-STRUCT-CONTEXT cascade", `    function f() {\n        .send({ n: 1 });\n    }`, ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -265,7 +265,7 @@ describe("review round 1 — refusals the first round missed", () => {
   });
 
   test("checkCore C-V2 refuses a Lit(Variant) of a payload variant (the mirror of C-V1)", () => {
-    const r = compile(P(`    let <d:Shape=(Shape.Dot)/>`));
+    const r = compile(P(`    let <_d:Shape=(Shape.Dot)/>`));
     expect(check(r.core)).toEqual([]);
     const lit = findAll(r.core, "Variant").find((n) => n.data && n.data.enumSym && n.data.enumSym.hint === "Shape");
     lit.data.idx = 0;

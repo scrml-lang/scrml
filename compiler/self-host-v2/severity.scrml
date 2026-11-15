@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 327 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 335 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -59,6 +59,7 @@ ${
     export fn severityOf(code: string) -> Severity {
         return match code {
             // §34 Severity: Warning
+            "E-DG-002" :> Severity.Warning
             "W-ATTR-001" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
             "W-FOREIGN-001" :> Severity.Warning
@@ -128,6 +129,8 @@ ${
             "E-DB-CELL-EDIT-GRANT" :> Severity.Error
             "E-DB-CELL-SERVER-READ" :> Severity.Error
             "E-DB-CELL-WRITE-OUTSIDE-BLOCK" :> Severity.Error
+            "E-DEBOUNCED-WITH-DERIVED" :> Severity.Error
+            "E-DEBOUNCED-WITH-SERVER" :> Severity.Error
             "E-DECL-ELEMENT-NAME-COLLIDES" :> Severity.Error
             "E-DECL-SLOT-OUTSIDE-RENDERS" :> Severity.Error
             "E-DECL-TYPE-NOT-INFERABLE" :> Severity.Error
@@ -212,6 +215,9 @@ ${
             "E-HTML-FOREIGN-BREAKOUT" :> Severity.Error
             "E-HTML-OPTGROUP-NESTED" :> Severity.Error
             "E-HTML-PARSER-REPAIR" :> Severity.Error
+            "E-IDLE-DUPLICATE" :> Severity.Error
+            "E-IDLE-INVALID-VARIANT" :> Severity.Error
+            "E-IDLE-MISPLACED" :> Severity.Error
             "E-IMPORT-002" :> Severity.Error
             "E-IMPORT-003" :> Severity.Error
             "E-IMPORT-004" :> Severity.Error
@@ -306,6 +312,7 @@ ${
             "E-RANGE-BOUND-NOT-INT" :> Severity.Error
             "E-RANGE-OUTSIDE-LOOP-HEAD" :> Severity.Error
             "E-REACTIVE-003" :> Severity.Error
+            "E-REACTIVITY-ATTR-CONFLICT" :> Severity.Error
             "E-RESERVED-IDENTIFIER" :> Severity.Error
             "E-RESET-ON-CYCLE" :> Severity.Error
             "E-RESET-ON-ENGINE-REFUSED" :> Severity.Error
@@ -351,6 +358,7 @@ ${
             "E-SYNTAX-012" :> Severity.Error
             "E-SYNTAX-044" :> Severity.Error
             "E-SYNTAX-064" :> Severity.Error
+            "E-SYNTAX-DURATION" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
             "E-TAPE-JS-METHOD" :> Severity.Error
             "E-TENANT-UNDECLARED" :> Severity.Error

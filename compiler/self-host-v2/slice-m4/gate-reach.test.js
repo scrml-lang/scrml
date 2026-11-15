@@ -31,6 +31,9 @@ beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000
 afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "g.scrml", src }]);
+// s478 (E-DG-002, a cell nothing reads): a shared scaffold declares each of its optional cells only
+// when the case's markup (`site`) reads it — the lines kept, joined (one line per cell declaration).
+const declsReadBy = (site, ...lines) => lines.filter((l) => new RegExp(`@${l.match(/<([A-Za-z_]\w*)[:=]/)[1]}\\b`).test(site)).map((l) => l + "\n").join("");
 const clean = (src) => {
   const r = run(src);
   expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
@@ -210,7 +213,8 @@ describe("Core — View.Reach", () => {
     expect(calls()).toBe("1");
   });
   test("markup that binds nothing surfaced gets no Reach (no output change)", () => {
-    const src = P4(false).replace(`<input class="e" bind:value=@email/>`, `<input class="e"/>`);
+    // s478: the unbound value is then read by nothing — deliberately, so it is `_`-named (§34 E-DG-002)
+    const src = P4(false).replace(`<input class="e" bind:value=@email/>`, `<input class="e"/>`).replace(`let <email:`, `let <_email:`);
     expect(walk(clean(src), (n) => n.variant === "Reach")).toEqual([]);
   });
 });
@@ -282,12 +286,7 @@ describe("a closed `<*g/>` whose renders mounts a use — the use's instance exi
 describe("`form=\"id\"` (the HTML form owner) — the control joins that one form's gate (RULED S472)", () => {
   const OWNER = (control, extra = "", more = "") => `<program>
     let <calls:int=0/>
-    let <show:bool=false/>
-    let <id:string="f"/>
-    let <v:string="" length(>=2)/>
-    let <q:string=""/>
-    <xs:string[replace]=(["a"])/>
-    function save() { @calls = @calls + 1; }
+${declsReadBy(control + extra + more, `    let <show:bool=false/>`, `    let <id:string="f"/>`, `    let <v:string="" length(>=2)/>`, `    let <q:string=""/>`, `    <xs:string[replace]=(["a"])/>`)}    function save() { @calls = @calls + 1; }
     <main>
         <form id="f" onsubmit=save()>${extra}<button class="go" type="submit">go</button></form>
         ${control}
@@ -393,9 +392,7 @@ describe("`form=\"id\"` (the HTML form owner) — the control joins that one for
 describe("F1 — a shared value bound through a use that is not mounted still gates", () => {
   const A = (site) => `<program>
     let <calls:int=0/>
-    let <step:int=2/>
-    let <show:bool=false/>
-    let <email:string="" req/>
+${declsReadBy(site, `    let <step:int=2/>`, `    let <show:bool=false/>`)}    let <email:string="" req/>
     <stepOne note:string="n">
         let <t:string=""/>
     </>

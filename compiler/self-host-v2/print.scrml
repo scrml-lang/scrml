@@ -29,7 +29,7 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
-             Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
+             Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
@@ -3803,6 +3803,7 @@ ${
                 init = slot
             }
             body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, f, init))])
+            body = body.concat(idleWatchJs(fctx, d, f, i))
             i = i + 1
         }
         let k = 0
@@ -3813,6 +3814,20 @@ ${
         body = body.concat(kidsJs(fctx, d))
         const run: JsExpr = rtCall(ctx, "construct", [jid("inst$"), JsExpr.JArrow([], body)])
         return JsStmt.SFunc(nameOf(ctx.names, NameKey.Factory(d.sym.id)), params, [JsStmt.SReturn(run)])
+    }
+
+    // s478 — a graph field's `<onIdle after= to=>` watchdog (§51.0.R):
+    // `rt.idleWatch(inst$.scope, <cell>, <edges>, ms, "<to tag>")` — armed with the
+    // record ("Armed at module-init alongside the engine variant cell"), owned by
+    // the instance's scope. Only on a field with a write capability (analyze
+    // refuses `<onIdle>` on a derived value).
+    fn idleWatchJs(fctx: Ctx, d: Decl, f: Field, i: int) -> JsStmt[] {
+        const g: TransitionGraph | not = f.graph
+        if (g is not || f.wcap is not) return []
+        const w: IdleWatch | not = g.idle
+        if (w is not) return []
+        const edges: JsExpr = jid(nameOf(fctx.names, NameKey.Edges(d.sym.id, i)))
+        return [sexpr(rtCall(fctx, "idleWatch", [jmember(jid("inst$"), "scope"), fieldCell(jid("inst$"), d, i), edges, jnum(w.ms), jstr(variantTag(fctx, g.enumSym, w.to))]))]
     }
 
     // Does any `InitOf(d, _, idx)` appear in the program?
@@ -3872,7 +3887,21 @@ ${
         return jthunk(rtCall(ctx, "noDefault", [jstr("<" + d.sym.hint + "> attribute `" + f.sym.hint + "`")]))
     }
 
+    // s478 — a `debounced=` / `throttled=` field (§6.13):
+    // `rt.timed(inst$.scope, <cell>, "debounce" | "throttle", <ms>)` — the cell,
+    // whose LOCAL writes now pass through the timing rule (runtime `timed`).
     fn fieldCtor(ctx: Ctx, f: Field, init: JsExpr) -> JsExpr {
+        const c: JsExpr = fieldCell0(ctx, f, init)
+        const tm: Timing | not = f.timing
+        if (tm is given && f.wcap is given) {
+            let kind: string = "debounce"
+            if (tm.throttle) kind = "throttle"
+            return rtCall(ctx, "timed", [jmember(jid("inst$"), "scope"), c, jstr(kind), jnum(tm.ms)])
+        }
+        return c
+    }
+
+    fn fieldCell0(ctx: Ctx, f: Field, init: JsExpr) -> JsExpr {
         const ps: Persist | not = f.persist
         if (ps is given && f.wcap is given) return persistedJs(ctx, f, ps, init)
         if (f.wcap is given) return rtCall(ctx, "seeded", [init])

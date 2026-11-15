@@ -16,12 +16,14 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program declares the scaffold cell `@n` only when the case names it
+const P = (body, decls = "") => dropUnnamedScaffold(`<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`, ["    let <n:int=5/>"]);
 // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): the whitespace between
 // `<main>`'s children is kept exactly — W wraps the expected body in it.
 const W = (inner) => `\n        ${inner}\n        <b>end</b>\n    `;
@@ -39,7 +41,7 @@ function texts(r) {
   (function walk(x) { if (Array.isArray(x)) { x.forEach(walk); return; } if (!x || typeof x !== "object") return; if (x.k && x.k.variant === "Text") out.push(x.k.data.text); Object.values(x).forEach(walk); })(r.asts);
   return out;
 }
-const state = (idle) => P(`<p><*ph/></p>`, `    <ph:Ph=.A single>\n        <A rule=.B>${idle}</>\n        <B rule=.A : "B">\n    </>`);
+const state = (idle, decls = "") => P(`<p><*ph/></p>`, `${decls}    <ph:Ph=.A single>\n        <A rule=.B>${idle}</>\n        <B rule=.A : "B">\n    </>`);
 
 describe("dpa-045 D — the free-text production (behaviour)", () => {
   test("`a < b` and `5 <7` are content (a `<` not followed by [a-zA-Z!/?] opens nothing)", async () => {
@@ -90,7 +92,8 @@ describe("dpa-045 B(3) — SUPERSEDED S444: `\\\"` / `\\\\` / `\\${` are escapes
     expect(await html(state('"a\\\\b"'))).toBe(W("<p>a\\b<!--if--></p>"));
   });
   test("state body: `\\${@n}` is the literal `${@n}` — not a live interpolation", async () => {
-    expect(await html(state('"a \\${@n} b"'))).toBe(W("<p>a ${@n} b<!--if--></p>"));
+    // s478: the escaped `${@_n}` is literal text, so the cell it names is declared and read by nothing — `_`-named (§34 E-DG-002)
+    expect(await html(state('"a \\${@_n} b"', "    let <_n:int=5/>\n"))).toBe(W("<p>a ${@_n} b<!--if--></p>"));
   });
   test("`:`-shorthand: `\\\\` is ONE backslash (S442 B(2) = delete is superseded)", async () => {
     expect(await html(P('<p : "a\\\\b">'))).toBe(W("<p>a\\b</p>"));
@@ -212,7 +215,8 @@ describe("follow-up 3 — `${…}` inside a display-text literal interpolates (�
     expect(await html(state('"Loaded ${@n} rows"'))).toBe(W("<p>Loaded 5 rows<!--if--></p>"));
   });
   test("behaviour (S444 — escape restored): `\\${` is the literal `${` — no interpolation", async () => {
-    expect(await html(P('<p : "a \\${@n} b">'))).toBe(W("<p>a ${@n} b</p>"));
+    // s478: the literal names a declared cell nothing reads — `_`-named (§34 E-DG-002)
+    expect(await html(P('<p : "a \\${@_n} b">', "    let <_n:int=5/>"))).toBe(W("<p>a ${@_n} b</p>"));
   });
   test("an interpolating display-text literal nested in a larger expression is reported, not rendered raw", () => {
     expect(run(P('<p : @n == 5 ? "a ${@n}" : "b">')).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -307,7 +311,8 @@ describe("an unterminated display-text literal is E-CTX-001 against its opening 
 // elements is kept exactly — L13 (lower dropped whitespace-only text containing
 // a newline) is retired. Code-default formatting whitespace is unchanged.
 describe("follow-up 4 — whitespace-only text between elements is kept exactly", () => {
-  const main = (inner) => `<program>\n    let <n:int=5/>\n    <xs:string[]=(["a", "b"])/>\n    <main>${inner}</main>\n</program>\n`;
+  // s478 (E-DG-002): only the scaffold cells the case names
+  const main = (inner) => dropUnnamedScaffold(`<program>\n    let <n:int=5/>\n    <xs:string[]=(["a", "b"])/>\n    <main>${inner}</main>\n</program>\n`, ["    let <n:int=5/>", "    <xs:string[]=([\"a\", \"b\"])/>"]);
   const mainHtml = async (src) => {
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual([]);

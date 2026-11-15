@@ -2,16 +2,16 @@
 <program db="./app.db">
     type User:struct = { id: int, name: string }
     type LoadError:enum = { Db }
-    let <uid:int=0/>
-    let <name:string=""/>
+    let <_uid:int=0/>
+    let <_name:string=""/>
     function loadOne()! LoadError {
         const u: User = ?{`SELECT id, name FROM users`}.get() !{ _ :> { fail .Db; } };
         return u;
     }
     function load() {
         const u: User = loadOne() !{ _ :> { return; } };
-        @uid = u.id;
-        @name = u.name;
+        @_uid = u.id;
+        @_name = u.name;
     }
     <main>
         <button id="load" onclick=load()>Load</button>

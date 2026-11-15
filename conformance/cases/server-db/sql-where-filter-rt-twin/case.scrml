@@ -7,5 +7,6 @@
     }
     <main>
         <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return }; }>Load admins</button>
+        <p class="read">${@admins.length}</p>
     </main>
 </program>

@@ -13,27 +13,30 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2 } from "./harness.js";
 import { frontEnd } from "./lowered.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "./scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const prog = (decls, markup = "<p>x</p>") => `<program>\n${decls}\n    <main>${markup}</main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the shared-scaffold cells (O, C, G) it names
+const SCAFFOLD = ["    let <o:O=({ v: \"\", n: 0, f: false })/>", "    let <b:bool=false/>", "    let <c:bool=false/>"];
+const prog = (decls, markup = "<p>x</p>") => dropUnnamedScaffold(`<program>\n${decls}\n    <main>${markup}</main>\n</program>\n`, SCAFFOLD);
 const run = (src) => frontEnd(mods, [{ path: "app.scrml", src }]);
 const codes = (decls, markup) => run(prog(decls, markup)).diags.map((d) => d.code);
 const diags = (decls, markup) => run(prog(decls, markup)).diags;
 const SQ = "?" + "{";   // the SQL sigil, spelled in two pieces (impl#1 pre-scans source text for it)
 
 // `T | not` values reach a condition through a struct field (the slice parses no `T | not` cell opener).
-const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    let <o:O=({ v: \"\", n: 0, f: false })/>\n    let <m:int=0/>\n    let <b:bool=false/>\n";
+const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    let <o:O=({ v: \"\", n: 0, f: false })/>\n    let <_m:int=0/>\n    let <b:bool=false/>\n";
 const UNRESOLVED_MSG = "cannot resolve";
 
 describe("S460 — a bare `T | not` condition is the presence test, in every condition position", () => {
   test("admitted — `if=`, `else-if=`, an `if` statement, a ternary test", () => {
     expect(codes(O, "<p if=@o.v>${@o.v}</p>")).toEqual([]);
     expect(codes(O, "<p if=@b>a</p><p else-if=@o.v>${@o.v}</p>")).toEqual([]);
-    expect(codes(O + "    function f() { if (@o.n) { @m = @o.n + 1; } }")).toEqual([]);
-    expect(codes(O + "    function f() { @m = @o.n ? @o.n + 1 : 0; }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n) { @_m = @o.n + 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { @_m = @o.n ? @o.n + 1 : 0; }")).toEqual([]);
   });
   test("each is recorded as a presence test (lowered to an absence check)", () => {
     const r = run(prog(O, "<p if=@o.v>a</p><p else-if=@o.n>b</p>"));
@@ -70,7 +73,7 @@ describe("S460 — a bare `bool | not` stays an error naming both fixes (S442 ke
     expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(d[0].message).toContain("x is given");
     expect(d[0].message).toContain("x == true");
-    expect(codes(O + "    function f() { if (@o.f) { @m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(O + "    function f() { if (@o.f) { @_m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(O, "<p>${@o.f ? \"a\" : \"b\"}</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("twins — both fixes are legal", () => {
@@ -84,7 +87,7 @@ describe("S460 NEW — a condition whose type the compiler cannot resolve is E-C
     expect(codes(G, "<p if=g()>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(G + "    let <b:bool=false/>\n", "<p if=@b>a</p><p else-if=g()>b</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(G, "<p show=g()>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
-    expect(codes(G + "    let <m:int=0/>\n    function f() { if (g()) { @m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(G + "    let <_m:int=0/>\n    function f() { if (g()) { @_m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(G, "<p>${g() ? \"a\" : \"b\"}</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("the message says the type is unresolved and names the fixes (annotate; `x is given`; `x == true`)", () => {
@@ -95,7 +98,7 @@ describe("S460 NEW — a condition whose type the compiler cannot resolve is E-C
     expect(m).toContain("x == true");
   });
   test("an unannotated parameter — the slice refuses the parameter, and the condition is still reported", () => {
-    const cs = codes("    let <m:int=0/>\n    function f(a) { if (a) { @m = 1; } }");
+    const cs = codes("    let <_m:int=0/>\n    function f(a) { if (a) { @_m = 1; } }");
     expect(cs).toContain("E-PARAM-TYPE-REQUIRED");   // s473: §7.5's code
     expect(cs).toContain("E-COND-NOT-BOOLEAN");
   });
@@ -115,22 +118,22 @@ describe("S460 NEW — a condition whose type the compiler cannot resolve is E-C
   });
   test("non-condition rules stay provable-or-silent: an unresolved operand, `<each in=>`, an argument", () => {
     const C = "    let <s:string=\"\"/>\n    let <b:bool=false/>\n";
-    expect(codes(C + G + "    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
+    expect(codes(C + G + "    function f() { @s = @s + g();\n @b = g() < 1; }", "<p if=@b>x</p>")).toEqual([]);
     expect(codes(G, "<each in=g() as c><p>x</p></each>")).toEqual([]);
   });
 });
 
 describe("S460 statement 6 — no second report: an unresolved type an error already explains", () => {
-  const M = "    let <m:int=0/>\n";
+  const M = "    let <_m:int=0/>\n";
   test("an undeclared name (E-SCOPE-001 only)", () => {
-    expect(codes(M + "    function f() { if (zz) { @m = 1; } }")).toEqual(["E-SCOPE-001"]);
+    expect(codes(M + "    function f() { if (zz) { @_m = 1; } }")).toEqual(["E-SCOPE-001"]);
   });
   test("a refused operator (E-OPERATOR-OPERAND-TYPE only)", () => {
-    expect(codes(M + "    let <s:string=\"\"/>\n    function f() { if (@s - 1) { @m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes(M + "    let <s:string=\"\"/>\n    function f() { if (@s - 1) { @_m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("a parameter / return type that did not resolve (E-TYPE-UNKNOWN only — Rule C, r8)", () => {
-    expect(codes(M + "    function f(a: Nope) { if (a) { @m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
-    expect(codes(M + "    function g() -> Nope { }\n    function f() { if (g()) { @m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(codes(M + "    function f(a: Nope) { if (a) { @_m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(codes(M + "    function g() -> Nope { }\n    function f() { if (g()) { @_m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
   });
   test("a field that does not exist (E-SCOPE-001 only)", () => {
     expect(codes(O, "<p if=@o.qq>a</p>")).toEqual(["E-SCOPE-001"]);
@@ -144,7 +147,7 @@ describe("S460 statement 6 — no second report: an unresolved type an error alr
     expect(codes("", "<p if=nope()>a</p>")).toEqual(["E-SCOPE-001"]);
   });
   test("a parse error inside the condition (Rule C — the condition is not judged)", () => {
-    const cs = codes("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    let <m:int=0/>\n    function f() { if (g(#)) { @m = 1; } }");
+    const cs = codes("    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    let <_m:int=0/>\n    function f() { if (g(#)) { @_m = 1; } }");
     expect(cs).toContain("E-PARSE-EXPR");
     expect(cs).not.toContain("E-COND-NOT-BOOLEAN");
   });
@@ -152,7 +155,7 @@ describe("S460 statement 6 — no second report: an unresolved type an error alr
 
 describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `bool`, narrowing)", () => {
   test("parsed as the postfix presence tests (`!x is not` is `!(x is not)`)", () => {
-    const r = run(prog(O + "    function f() { if (!@o.n is not) { @m = @o.n + 1; } }"));
+    const r = run(prog(O + "    function f() { if (!@o.n is not) { @_m = @o.n + 1; } }"));
     expect(r.diags).toEqual([]);
     const un = [];
     (function walk(n) {
@@ -164,30 +167,30 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
     expect(un).toEqual(["Not", "IsNot"]);
   });
   test("value positions — a `const`, an assignment, a `return`, an argument", () => {
-    expect(codes(O + "    function g(x: bool) -> bool { return x; }\n    function f() -> bool { const ok: bool = @o.v is given;\n @b = @o.v is not;\n @b = g(@o.n is given);\n return ok; }")).toEqual([]);
+    expect(codes(O + "    function g(x: bool) -> bool { return x; }\n    function f() -> bool { const ok: bool = @o.v is given;\n @b = @o.v is not;\n @b = g(@o.n is given);\n return ok; }", "<p if=@b>x</p>")).toEqual([]);
   });
   test("compounds narrow: `x is given && x > 0`; `x is not || …`; an early `if (x is not) return`", () => {
-    expect(codes(O + "    function f() { if (@o.n is given && @o.n > 0) { @m = @o.n + 1; } }")).toEqual([]);
-    expect(codes(O + "    function f() { if (@o.n is not || @o.n > 0) { @m = 1; } }")).toEqual([]);
-    expect(codes(O + "    function f() { if (@o.n is not) return;\n @m = @o.n + 1; }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is given && @o.n > 0) { @_m = @o.n + 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is not || @o.n > 0) { @_m = 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is not) return;\n @_m = @o.n + 1; }")).toEqual([]);
     expect(codes(O, "<p if=(@o.v is given)>${@o.v + \"!\"}</p>")).toEqual([]);
   });
   test("twins — no narrowing where the test does not prove presence", () => {
-    expect(codes(O + "    function f() { if (@o.n is not) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given || @b) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is not) { @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given || @b) { @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a write drops the narrowing — directly, and inside a NESTED block (the join, r2 F1 / F3)", () => {
-    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not }; }\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not }; }\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twin: a nested block that writes something else keeps it
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2; }\n @m = @o.n + 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @_m = 2; }\n @_m = @o.n + 1; } }")).toEqual([]);
   });
   // s469 (§7.2.2 rule 4, RULED "Attach to the line above"): a line break is whitespace and `is given` /
   // `is not` cannot start a statement, so `x⏎is given` tests `x`. (Before: the test was read only on the
   // line of what it tests — an E-PARSE-* / E-SYNTAX-044 cascade, fail closed.)
   test("s469 rule 4 — a newline before `is` continues the expression: `x⏎is given` tests `x`", () => {
     expect(codes(O + "    function f() { const q: bool = @o.n\n        is given; }")).toEqual([]);
-    expect(codes(O + "    function f() { if (@o.n\n        is not) { @m = 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n\n        is not) { @_m = 1; } }")).toEqual([]);
     // the same tree as the one-line form
     const one = mods.parse.parseFile("t.scrml", prog(O + "    function f() { const q: bool = @o.n is given; }"), 0);
     const two = mods.parse.parseFile("t.scrml", prog(O + "    function f() { const q: bool = @o.n\n        is given; }"), 0);
@@ -200,15 +203,15 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
 
 describe("S460 — `!` / `&&` / `||` take booleans only: a bare `T | not` is a presence test only as a WHOLE condition (S440 Gotcha Q2 kept)", () => {
   test("`!x` / `x && …` / `x || …` on a `T | not` is E-OPERATOR-OPERAND-TYPE, and the hint names `x is given`", () => {
-    const d = diags(O + "    function f() { if (!@o.v) { @m = 1; } }");
+    const d = diags(O + "    function f() { if (!@o.v) { @_m = 1; } }");
     expect(d.map((x) => x.code)).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
     expect(d[0].message).toContain("x is given");
-    expect(codes(O + "    function f() { if (@o.v && @b) { @m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(codes(O + "    function f() { if (@b || @o.v) { @m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes(O + "    function f() { if (@o.v && @b) { @_m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes(O + "    function f() { if (@b || @o.v) { @_m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("twins — `!(x is not)`, `x is given && …` are legal", () => {
-    expect(codes(O + "    function f() { if (!(@o.v is not)) { @m = 1; } }")).toEqual([]);
-    expect(codes(O + "    function f() { if (@o.v is given && @b) { @m = 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (!(@o.v is not)) { @_m = 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.v is given && @b) { @_m = 1; } }")).toEqual([]);
   });
 });
 
@@ -216,8 +219,8 @@ describe("S460 — `!` / `&&` / `||` take booleans only: a bare `T | not` is a p
 // `||` whose type cannot be resolved is E-COND-NOT-BOOLEAN (unresolved message), like a bare unresolved
 // condition; operands OUTSIDE a condition stay provable-or-silent (S440 Q2). SPEC §42.4 statement 10.
 describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition is E-COND-NOT-BOOLEAN", () => {
-  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
-  const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @m = 1; } }`);
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <_m:int=0/>\n";
+  const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @_m = 1; } }`);
   test("fires — `!g()`, `g() && @b`, `g() || false` in an `if`", () => {
     expect(inIf("!g()")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(inIf("g() && @b")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -227,15 +230,15 @@ describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition 
   test("fires — markup `if=!g()`, `show=(g() && @b)`, a ternary test", () => {
     expect(codes(G, "<p if=!g()>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(codes(G, "<p show=(g() && @b)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
-    expect(codes(G + "    function f() { @m = (g() && @b) ? 1 : 0; }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(G + "    function f() { @_m = (g() && @b) ? 1 : 0; }")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("nested logical operators are walked — `!(g() && @b)` is ONE report, at `g()`", () => {
-    const r = run(prog(G + "    function f() { if (!(g() && @b)) { @m = 1; } }"));
+    const r = run(prog(G + "    function f() { if (!(g() && @b)) { @_m = 1; } }"));
     expect(r.diags.map((d) => d.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(inIf("g() && g()")).toEqual(["E-COND-NOT-BOOLEAN", "E-COND-NOT-BOOLEAN"]);
   });
   test("the message: an operand, the type is unresolved, the fixes, the ruling", () => {
-    const m = diags(G + "    function f() { if (!g()) { @m = 1; } }")[0].message;
+    const m = diags(G + "    function f() { if (!g()) { @_m = 1; } }")[0].message;
     expect(m).toContain("operand of `!`");
     expect(m).toContain(UNRESOLVED_MSG);
     expect(m).toContain("annotate");
@@ -249,9 +252,9 @@ describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition 
     expect(inIf("(g() is given) && @b")).toEqual([]);
   });
   test("twins — OUTSIDE a condition an unresolved operand stays silent (S440 Q2): a value, an argument inside a condition", () => {
-    expect(codes(G + "    function f() { @b = !g(); }")).toEqual([]);
-    expect(codes(G + "    function f() { @b = g() && @c; }")).toEqual([]);
-    expect(codes(G + "    function h(x: bool) -> bool { return x; }\n    function f() { if (h(!g())) { @m = 1; } }")).toEqual([]);
+    expect(codes(G + "    function f() { @b = !g(); }", "<p if=@b>x</p>")).toEqual([]);
+    expect(codes(G + "    function f() { @b = g() && @c; }", "<p if=@b>x</p>")).toEqual([]);
+    expect(codes(G + "    function h(x: bool) -> bool { return x; }\n    function f() { if (h(!g())) { @_m = 1; } }")).toEqual([]);
   });
   test("statement 6 per operand — an operand an error already explains is not reported again", () => {
     expect(inIf("zz && @b")).toEqual(["E-SCOPE-001"]);
@@ -305,10 +308,10 @@ describe("S460 at runtime — `is given` / `is not` lower to absence checks, nev
 // E-COND-NOT-BOOLEAN, blamed at the arm / operand; a `T | not` arm is a presence test). A ternary in a VALUE
 // position (an initializer, a call argument) stays a value: silent (S440 Q2).
 describe("S460 N1 — ternary arms of the condition's value are inside the condition", () => {
-  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    function h(x: bool) -> bool { return x; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
-  const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @m = 1; } }`);
+  const G = "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    function h(x: bool) -> bool { return x; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <_m:int=0/>\n";
+  const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @_m = 1; } }`);
   const blamed = (cond) => {
-    const src = prog(G + `    function f() { if (${cond}) { @m = 1; } }`);
+    const src = prog(G + `    function f() { if (${cond}) { @_m = 1; } }`);
     return run(src).diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)]);
   };
   test("fires — `@b ? !g() : @c` and `@b ? (g() && @c) : @c` (were clean), blamed at `g()`", () => {
@@ -355,7 +358,7 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
     // each arm alone would be a legal condition value; their join is unresolved, and N1 admits nothing new
     const C = O + "    let <c:bool=false/>\n";
     for (const cond of ["@b ? @o.n : @c", "@b ? @c : @o.n"]) {
-      const src = prog(C + `    function f() { if (${cond}) { @m = 1; } }`);
+      const src = prog(C + `    function f() { if (${cond}) { @_m = 1; } }`);
       const r = run(src);
       expect(r.diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)])).toEqual([["E-COND-NOT-BOOLEAN", cond]]);
       expect(r.diags[0].message).toContain(UNRESOLVED_MSG);
@@ -363,7 +366,7 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
     }
     expect(codes(C, "<p if=(@b ? @o.n : @c)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     // as an operand of `&&`: the `int | not` arm is not a boolean (statement 7)
-    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @m = 1; } }")).not.toEqual([]);
+    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @_m = 1; } }")).not.toEqual([]);
   });
 });
 
