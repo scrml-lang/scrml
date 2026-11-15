@@ -1,0 +1,61 @@
+{
+  "id": "lifecycle-pending-tape-granted-append-rt",
+  "description": "§13.9.1 rule 4 (RULED S478): a pending tape's type carries its grants. A locked `(not to User[free, append])` cell loads its rows on mount (\"ab\"); the handler, with the cell discriminated, appends a row through the tape's own `append` grant (\"abz\") — the same edit a plain `User[free, append]` cell grants. The load's settle write needs no grant (rule 5). RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.1",
+  "rationale": "§13.9.1 rule 4, RULED S478: \"`let` there grants an AUTHOR write nothing beyond the tape type's own bracket grants (O3's one spelling per grant stands for author writes), and neither does the lifecycle `(not to …)`: a whole-cell author write into a pending tape, `let` or locked, needs `replace` in the tape's grants (`(not to S[replace])`) like any other tape\". §66.12.3: a sequence's grants live on its type. §66.11.6 item 2: \"A **pending** cell allows `T → T′` whether `let` or locked: it reloads.\" ruling:user-voice-scrml.md S478 \"⭐ RULED — S477 owner questions 1 and 2, PA recs adopted\" item 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#add"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#rows",
+        "text": "abz"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:973f16a42f908ef5"
+      }
+    }
+  }
+}

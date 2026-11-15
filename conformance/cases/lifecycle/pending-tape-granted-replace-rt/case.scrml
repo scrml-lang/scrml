@@ -1,0 +1,15 @@
+// §13.9.1 rule 4 (RULED S478) — `(not to S[replace])`: the author's whole write into a pending tape is its `replace` grant.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    let <q:int=1/>
+    function load(n: int) -> User[] {
+        const rs: User[] = ?{`SELECT id, name FROM users WHERE id >= ${n} ORDER BY id`}.all() !{ _ :> { return []; } };
+        return rs;
+    }
+    let <users:(not to User[replace])=(load(@q) !{ _ :> not })/>
+    <main>
+        <button id="set" onclick={ const v: User = { id: 7, name: "r" }; @users = [v]; }>set</button>
+        <div id="rows" if=@users><each in=@users><span>${@.name}</span></each></div>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

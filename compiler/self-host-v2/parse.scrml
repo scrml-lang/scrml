@@ -4826,7 +4826,11 @@ ${
         if (arrow && !isNotType(fromT) && !variantAType(fromT)) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`). If `" + text + "` is meant as a function type, function types are not in the bootstrap either — declare a named function and pass its name"
         if (arrow) return "the legacy lifecycle glyph `->` (`" + text + "`) is not in the bootstrap — write `to`: `(not to T)` (§14.12.2; §14.12.5 deprecates `->`)"
         if (!isNotType(fromT) || variantAType(toT)) return "the lifecycle `" + text + "` is not in the bootstrap yet — it builds only the presence lifecycle `(not to T)` (§14.12.3, §14.12.6.1); a variant progression `(.A to .B)` (§14.12.6.2) is not built — for a variant graph, declare an engine (`<x:T=.A single>` with state-children, §66.13)"
-        if (grantedSeq(toT)) return "a granted sequence in a lifecycle type (`" + text + "`) is not in the bootstrap — its grants are not checked through the lifecycle (§14.12); declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)"
+        // s478 (s478-boot-pending-tape-grants): a granted tape as the second state,
+        // `(not to S[replace])`, is READ here — its grants ride the type (§13.9.1 rule 4,
+        // RULED S478: "needs `replace` in the tape's grants (`(not to S[replace])`)").
+        // Which cell may carry one is analyze's (fieldOf: a pending tape; a plain
+        // lifecycle cell's granted tape stays refused by name there, lifeTapeGrantsWhy).
         return ""
     }
 

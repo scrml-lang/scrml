@@ -1475,6 +1475,10 @@ ${
         }
     }
 
+    fn lifeTapeGrantsWhy(name: string, post: Type) -> string {
+        return "`@" + name + "` is declared `(not to " + tapeTypeName(post) + ")`, a tape with grants, but has no waiting initializer — a granted tape in a lifecycle type is built for a PENDING tape only (§13.9.1 rule 4: `let <" + name + ":(not to S[replace])=(load() !{ _ :> not })/>`). On a plain lifecycle cell the lifecycle writes it once, `not → S` (§66.11.6), and how the tape's grants combine with that write is not in the bootstrap yet (g-boot-plain-lifecycle-tape-grants-s478). Declare the tape on its own (`<" + name + ":S[grants]=[]/>`, §66.12), or give it a waiting initializer"
+    }
+
     // Is `at` the presence lifecycle `(not to T)` (at its top)?
     fn isPresenceLife(at: AType) -> boolean {
         const k: ATypeK = at.k
@@ -4307,7 +4311,15 @@ ${
         const rg: RGraph = graphOf(te, g, ty, body, st)
         st = rg.st
         const reads: string[] = valueReads(init)
-        let edits: EditKind[] = typeEdits(ty)
+        // s478 (s478-boot-pending-tape-grants) — a PENDING tape's edit grants are its post-type's
+        // (§13.9.1 rule 4, RULED S478: "needs `replace` in the tape's grants (`(not to S[replace])`)
+        // like any other tape"): `(not to S[g])` resolves to `S[g] | not`, and the edits are read
+        // off `S[g]` — the tape — exactly as a plain `S[g]` cell's are. (Its `replace` channel is
+        // the lifecycle's, below; an AUTHOR edit / whole write is judged by the tape's own grants,
+        // authorGrants / pendTapeReplaces.)
+        let tapeTy: Type = ty
+        if (pend && seqElem(unMaybe(ty)) is given) tapeTy = unMaybe(ty)
+        let edits: EditKind[] = typeEdits(tapeTy)
         // s473: a DERIVED value's state-children carry no transition grant (§51.0.J
         // "Direct writes … REJECTED"; derivedRules below) — so it gets no write
         // capability and is printed as a Derived that recomputes, never seeded
@@ -4316,10 +4328,10 @@ ${
         // `let` grants an ELEMENT-field write (`@xs[i].f = v`, dpa-052 Q3) —
         // listed as FieldAt(path) over the element struct (Core EditKind note)
         let elemEdits: EditKind[] = []
-        const et: Type | not = seqElem(ty)
+        const et: Type | not = seqElem(tapeTy)
         if (et is given) elemEdits = subFieldEdits(g, et)
         let grantRep: boolean = isLet || seqRep
-        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
+        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, tapeTy)).concat(elemEdits)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
             if (reads.length > 0) {
@@ -4351,6 +4363,21 @@ ${
             } else {
                 life = true
             }
+        }
+        // s478 (s478-boot-pending-tape-grants) — a granted tape in a lifecycle type is built for a
+        // PENDING tape only (§13.9.1 rule 4). On a PLAIN `(not to S[g])` cell (no waiting
+        // initializer) the lifecycle writes the cell once, `not → S` (§66.11.6 item 2), and how
+        // the tape's own grants (`replace`, the edits) combine with that one write is not ruled —
+        // refused by name, INTERIM (g-boot-plain-lifecycle-tape-grants-s478). A `let` one is
+        // already E-GRANT-LET-ON-SEQUENCE above (one report per construct). The field is untrusted
+        // and no lifecycle cell (no second report at its writes — as a lifeCellWhy refusal); the
+        // pending-cell scan reads the declaration, not this field (pendingCell),
+        // so on the first pass a pending tape is still found, and this pass's report is discarded
+        // with the pass (analyzeSources analyzes the desugared program again, `pend` set).
+        if (life && !pend && !isLet && aty is given && lifeTapeGranted(aty)) {
+            st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", lifeTapeGrantsWhy(name, unMaybe(ty)))
+            resolved = false
+            life = false
         }
         // s475 (s475-boot-lifecycle-reads) — §66.11.1: "a lifecycle `(A to B)` | a write
         // along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6)".
@@ -12037,10 +12064,11 @@ ${
     fn resolveEditCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, m.obj.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, m.obj.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         let elem: Type | not = not
         const pt: Type | not = p.ty
         if (pt is given) elem = seqElem(pt)
@@ -12054,8 +12082,8 @@ ${
             what = "a front-prepend"
         }
         const cap: Sym | not = f.wcap
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "(…)` is " + what))     // s475 r1 F2b
-        const granted: boolean = grantsAdmit(f.grants, edit)
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "(…)` is " + what))     // s475 r1 F2b
+        const granted: boolean = grantsAdmit(authorGrants(env.g, f), edit)
         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is given) {
@@ -12162,6 +12190,20 @@ ${
 
     fn tapeGrantSet(g: SeqGrants) -> GrantSet {
         return { replace: g.replace, edits: seqEdits(g) }
+    }
+
+    // s478 (s478-boot-pending-tape-grants) — the grants an AUTHOR edit of field `f` is judged by
+    // (resolveEditCall, resolveSeqShape, resolveRemoveCall, resolvePositionWrite). For a PENDING
+    // tape, `f.grants`' `replace` is the lifecycle's channel for the compiler's own writes (its
+    // load's settle, a reset's re-run — §13.9.1 rule 5) and grants the author nothing (RULED S478:
+    // "`let` there grants an AUTHOR write nothing beyond the tape type's own bracket grants …, and
+    // neither does the lifecycle `(not to …)`"): the author's set is the tape type's own `replace`
+    // with the edits fieldOf read off the post-type. Every other field: its own set.
+    fn authorGrants(g: Globals, f: FieldInfo) -> GrantSet {
+        if (!pendTapeField(g, f)) return f.grants
+        const tg: GrantSet | not = tapeGrants(f.ty)
+        if (tg is not) return f.grants
+        return { replace: tg.replace, edits: f.grants.edits }
     }
 
     // s478 (RULED S478 item 1) — may an AUTHOR replace pending cell `f` whole (checkWrite)? A
@@ -12871,6 +12913,18 @@ ${
         return out
     }
 
+    // s478 (s478-boot-pending-tape-grants) — does lifecycle type `at` carry a granted tape in its second state
+    // (`(not to S[g])`, a grant at any depth of the tape)?
+    fn lifeTapeGranted(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> false
+            .TSeq(elem: e, grants: gs) :> gs.length > 0 || lifeTapeGranted(e)
+            .TMaybe(inner: i) :> lifeTapeGranted(i)
+            .TLife(pre: f, post: x) :> lifeTapeGranted(x)
+        }
+    }
+
     // Does a sequence type expression grant `replace` in its brackets?
     fn seqReplace(at: AType) -> boolean {
         const k: ATypeK = at.k
@@ -13190,12 +13244,13 @@ ${
     fn resolveSeqShape(env: Env, e: AExpr, target: AExpr, value: AExpr, shape: int, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, target, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, target.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, target.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + " = …` is " + shapeWhat(shape)))     // s475 r1 F2b
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + " = …` is " + shapeWhat(shape)))     // s475 r1 F2b
         // r1 nit: the shape over a value that is not a sequence is a type error
         const pty: Type | not = p.ty
         if (pty is given) {
@@ -13206,7 +13261,7 @@ ${
         const edit: EditKind = shapeEdit(shape)
         const cap: Sym | not = f.wcap
         // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert` (shapeEdit)
-        const isGranted: boolean = grantsAdmit(f.grants, edit)
+        const isGranted: boolean = grantsAdmit(authorGrants(env.g, f), edit)
         // s444: every granted shape lowers, so a granted field always has a
         // write capability (its grants list the edit — seqEdits)
         if (!isGranted || cap is not) {
@@ -13582,16 +13637,17 @@ ${
     fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, m.obj.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, m.obj.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         if (p.path.length > 0) {
             // r3: a removal on a sub-field sequence is judged by THAT field's grants (dpa-052 Q6,
             // the deepest field written) — not tracked here; refused, as `.push` on one is
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + placeKey(m.obj) + "." + m.method + "()` — an edit of a sub-field sequence is not in bootstrap slice M2 (it would be judged by that field's own grants, dpa-052 Q6)")
         }
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "()` is a removal"))     // s475 r1 F2b
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "()` is a removal"))     // s475 r1 F2b
         let place: SeqAt = SeqAt.Front
         let what: string = "a removal at the front (the `shift` grant)"
         if (m.method == "pop") {
@@ -13601,7 +13657,7 @@ ${
         // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
         let redit: EditKind = EditKind.RemoveFront
         if (m.method == "pop") redit = EditKind.RemoveEnd
-        const isGranted: boolean = grantsAdmit(f.grants, redit)
+        const isGranted: boolean = grantsAdmit(authorGrants(env.g, f), redit)
         // r3 nit: messages name the place written (`@r.xs`), not only its field (`@r`)
         const at: string = placeKey(m.obj)
         if (!isGranted) {
@@ -13772,12 +13828,13 @@ ${
     fn resolveElemFieldWrite(env: Env, e: AExpr, ef: ElemFieldTarget, value: AExpr, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, ef.seq, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, ef.seq.span, st)
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, ef.seq.span, st)
         st = resolveExpr(env, ef.index, Type.Int, st).st
-        const f: FieldInfo = p.decl.fields[p.idx]
-        if (lockedLife(f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an element-field write"), st)     // s475 r1 F2b
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's element-field write writes its tape
+        if (lockedLifeEdit(env.g, f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an element-field write"), st)     // s475 r1 F2b
         let elem: Type | not = not
         const pt: Type | not = p.ty
         if (pt is given) elem = seqElem(pt)
@@ -13887,14 +13944,15 @@ ${
     fn resolvePositionWrite(env: Env, e: AExpr, it: IndexTarget, value: AExpr, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, it.seq, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
+        const p0: WPlace | not = rp.place
         const lc: LocalB | not = rp.local
         if (lc is given) return partRefused(env, value, e.span, "E-ASSIGN-TARGET", "`" + lc.name + "[…] = …` — `" + lc.name + "` names an instance (narrowed by `given`), which has no positions; write one of its fields", st)
-        if (p is not) return resolveExpr(env, value, not, resolveExpr(env, it.index, Type.Int, st).st).st
-        st = writeGuards(env, p, it.seq.span, st)
+        if (p0 is not) return resolveExpr(env, value, not, resolveExpr(env, it.index, Type.Int, st).st).st
+        st = writeGuards(env, p0, it.seq.span, st)
         st = resolveExpr(env, it.index, Type.Int, st).st
-        const f: FieldInfo = p.decl.fields[p.idx]
-        if (lockedLife(f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…] = …` is a position write"), st)     // s475 r1 F2b
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's position write writes its tape
+        if (lockedLifeEdit(env.g, f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…] = …` is a position write"), st)     // s475 r1 F2b
         const at: string = writtenLabel(placeKey(it.seq), f.sym.hint)
         const label: string = at + "[…]"
         let elem: Type | not = not
@@ -13909,7 +13967,7 @@ ${
         // a tape reached through a struct field: Core writes a struct field only as a
         // whole (`replace`), as for every other edit of a sub-field tape (fieldAtWrite)
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` is a position write of a sub-field tape — Core writes a struct field only as a whole (`replace`), so an edit of a sub-field tape is not in the bootstrap yet")
-        const pd: TapeDiag[] = positionWriteProblem(f.grants, label, tapeTypeName(f.ty))
+        const pd: TapeDiag[] = positionWriteProblem(authorGrants(env.g, f), label, tapeTypeName(f.ty))
         if (pd.length > 0) {
             if (f.mode == FieldMode.Derived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
             return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
@@ -26057,6 +26115,30 @@ ${
         return f.life && lockedMode(f.mode)
     }
 
+    // s478 (s478-boot-pending-tape-grants) — `f` is a PENDING tape: a `(not to S[…])` program cell
+    // whose initializer waits (§13.9.1; pendFiles desugared it).
+    fn pendTapeField(g: Globals, f: FieldInfo) -> boolean {
+        return f.life && seqElem(unMaybe(f.ty)) is given && isPendingDecl(g, f.nid)
+    }
+
+    // s475 r1 F2b at an EDIT site (an edit, a position / element-field write): a locked `(not to T)`
+    // cell is written once, `not → T`. s478: except a PENDING tape — ruling S475 item 3 allows a
+    // pending cell `T → T′` ("allowed for a pending cell (it reloads)"; §66.11.6 item 2), and an
+    // edit of its tape is judged by the tape type's own grants (authorGrants), as a plain tape's is
+    // (§13.9.1 rule 4, RULED S478).
+    fn lockedLifeEdit(g: Globals, f: FieldInfo) -> boolean {
+        return lockedLife(f) && !pendTapeField(g, f)
+    }
+
+    // s478 — the place an EDIT of field `f` writes: a pending tape's place type is its tape `S[g]`,
+    // not `S[g] | not` — an edit reads the tape it changes, so the typer holds it to a present cell
+    // (§13.9.3: E-TYPE-001 on a read before discrimination, typeCallStmt / typePlace).
+    fn editPlace(g: Globals, f: FieldInfo, p: WPlace) -> WPlace {
+        const pt: Type | not = p.ty
+        if (pt is not || !pendTapeField(g, f)) return p
+        return { decl: p.decl, inst: p.inst, idx: p.idx, path: p.path, ty: unMaybe(pt), maybe: p.maybe }
+    }
+
     // A local's written type (`let a: T = …`), if it has one.
     fn annotOf(t: Tables, s: Sym) -> Type | not {
         for (const a of t.annots) {
@@ -29617,8 +29699,10 @@ ${
         return []
     }
 
-    fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
+    fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts00: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s478: a position / element-field write of a pending tape reads the tape it changes
+        const ts0: TypeState = pendEditRead(env, partCapOf(f), target.span, ts00)
         // s472: a write to a PART of a local — each index an `int`, the value against
         // the part's type; `@xs[i] = v` — the index, and the value against the element
         const lp: PartTyping | not = partTypingOf(env, f)
@@ -29920,10 +30004,53 @@ ${
             return typeExpr(env, e, ts0).ts
         }
         let ts: TypeState = typePlace(env, callee, VType.Unknown, typeExprs(env, args, ts0))
+        // s478: an edit method (`@xs.append(v)`, `.pop()`, …) of a pending tape reads the tape it changes
+        if (ws.length == 1 && ws[0].w.edit != EditKind.Replace) ts = pendEditRead(env, ws[0].w.cap, callee.span, ts)
         if (args.length == 1) {
             for (const sw of ws) { ts = checkWrite(env, sw.w, exprType0(ts, args[0].nid), args[0], "an element of this sequence", ts) }
         }
         return record(ts, e.nid, VType.Unknown)
+    }
+
+    // s478 (s478-boot-pending-tape-grants) — an EDIT of a pending tape (an edit method, a position
+    // or element-field write) changes the tape the cell holds, so it reads that tape: before the
+    // cell is discriminated its load may still be in flight and the cell `not` (§13.9.3 "Reads before
+    // discrimination are E-TYPE-001"), which has no positions and nothing to append to. Held to the
+    // same narrowing a read is (narrowRead's `env.narrowed`). A whole write (`replace`) reads nothing;
+    // a shape write (`@xs = [...@xs, v]`, `.filter`, `.map`) reads the cell in its value, typed there.
+    fn pendEditRead(env: TEnv, cap: Sym | not, span: ASpan, ts: TypeState) -> TypeState {
+        if (cap is not) return ts
+        const f: FieldInfo | not = fieldOfCap(env.t, cap)
+        if (f is not) return ts
+        if (!f.trusted || !f.life || !pendingField(env.t, f)) return ts
+        if (env.narrowed.indexOf("@" + f.sym.hint) >= 0) return ts
+        const inner: Type | not = maybeInner(f.ty)
+        if (inner is not) return ts
+        return report(ts, env, span, "E-TYPE-001", pendEditMsg(env.t, f, inner))
+    }
+
+    fn pendEditMsg(t: Tables, f: FieldInfo, inner: Type) -> string {
+        const n: string = f.sym.hint
+        let load: string = "its declared initializer"
+        const rq: ReqFact | not = pendingOf(t, f)
+        if (rq is given) load = pendLoadText(rq)
+        return "`@" + n + "` is edited before it is discriminated — an edit changes the tape the cell holds, and `@" + n + "` is a pending tape, declared `(not to " + tapeTypeName(inner) + ")`, so here its load (" + load + ") may still be in flight and the cell still `not`, with nothing to edit (§13.9.3). Discriminate it first on this path: `if (@" + n + " is given) { … }` or `if (@" + n + " is not) return` (§13.9.3, §14.12.3)"
+    }
+
+    // s478: the cell write capability of a position / element-field write's effect, else `not`.
+    fn partCapOf(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .EPosition(cap: c) :> c
+            .EElemAt(cap: c) :> c
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            .EEdits(w: w) :> not
+            .ERemove(w: w) :> not
+            .ELocalEdit(sym: s) :> not
+            not :> not
+        }
     }
     // s475 (s475-boot-local-tape-edits) — `xs.append(v)` … `xs.remove(i)` on a local
     // tape (the resolver's ELocalEdit): the receiver and the argument typed, the
@@ -30218,7 +30345,7 @@ ${
         let el: string = "S"
         const et: Type | not = seqElem(unMaybe(f.ty))
         if (et is given) el = typeName(et)
-        return "`@" + n + "` is a pending tape whose type grants nothing — this whole-value write needs `replace` in the tape's grants (`(not to " + el + "[replace])`, §66.12.2), like any other tape: `let` and the lifecycle `(not to …)` grant a tape no `replace` (its grants live on the type, §66.12.3; RULED S478). Only the cell's own load writes it whole (§13.9.2) — `reset(@" + n + ")` re-runs that load. (A granted tape inside a lifecycle type is not in the bootstrap yet, gap g-boot-pending-tape-granted-lifecycle-s478.)"
+        return "`@" + n + "` is a pending tape whose type does not grant `replace` — this whole-value write needs `replace` in the tape's grants (`(not to " + el + "[replace])`, §66.12.2), like any other tape: `let` and the lifecycle `(not to …)` grant a tape no `replace` (its grants live on the type, §66.12.3; RULED S478). Without it only the cell's own load writes it whole (§13.9.2) — `reset(@" + n + ")` re-runs that load"
     }
 
     // s475 (S4) — `nid` is the right-hand side of a pending cell's settle write (§13.9.2).
