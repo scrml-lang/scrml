@@ -57,6 +57,14 @@ export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, str
 export { parseIntText, parseNumText, parseBoolText };
 // s469 — a logic template slot's text (§14.13.3, §20.7.2)
 export { textOf };
+// s478 (s478-boot-print-builtins) — `print(…)` / `println(…)` (SPEC §20.7). The printer passes ONE
+// string, already space-joined, with println's "\n" appended (lower.scrml printExpr), so this writes it
+// verbatim: "raw text with NO origin tag / `file:line` / side classification" (§20.7.6). Program output,
+// never stripped (§20.7.4). Its value is `not` (§20.7.1: "the emitted call evaluates to `not`").
+export function printOut(s) {
+  globalThis.process.stdout.write(s);
+  return null;
+}
 // s472 (boot-math-port) — a host-backed function's return-point decode (§21.3.1; print.scrml hostFnJs)
 export { hostResult };
 // s477 (s477-boot-tape-bounds) — a bounded tape's runtime length check and a local `insert` (O36 RULED S477): the SAME functions

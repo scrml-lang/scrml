@@ -283,6 +283,7 @@ ${
         VIndex(loc: string),                              // s469: `xs[i]` read (§49.13) — an index node; `loc` "file:line" for the trap (§19.17)
         VAt,                                              // s469: `xs.at(i)` (§49.13) — a call node: `T | not`, never a trap
         VTemplate(text: boolean[]),                       // s469: a logic template (§14.13.3) — per slot, true when it is not a `string` and lower renders its text (Core Text)
+        VPrint(text: boolean[], newline: boolean),        // s478: a `print(…)` / `println(…)` built-in call (§20.7) — per argument, true when it is not a `string` (Core Text); `newline` for println
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -8467,8 +8468,10 @@ ${
     fn builtinUnbuilt(name: string) -> string {
         return match name {
             "log" :> "`log(…)` is a language built-in (§20.6: \"`log(...args)` SHALL be a compiler-managed built-in\") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-ins slice"
-            "print" :> "`print(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
-            "println" :> "`println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
+            // s478-boot-print-builtins: a CALL of `print` / `println` is built (resolvePrint); only the bare name, a
+            // function VALUE, reaches here — the bootstrap has no function values (§14.3 S469 R2′ note)
+            "print" :> "`print` named without a call — the §20.7 built-in is called as a statement (`print(…)`); the bootstrap has no function values, so the name itself is not a value here"
+            "println" :> "`println` named without a call — the §20.7 built-in is called as a statement (`println(…)`); the bootstrap has no function values, so the name itself is not a value here"
             "navigate" :> "`navigate(…)` is a language built-in (§20.1) that the bootstrap does not build yet"
             "route" :> "`route` is a language built-in (§20.4, route parameters) that the bootstrap does not build yet"
             "cleanup" :> "`cleanup(…)` is a language built-in (§6.7.3, scope-exit teardown) that the bootstrap does not build yet"
@@ -8572,6 +8575,37 @@ ${
         if (shape == "call") return diagX(env, e, "E-LIFECYCLE-002", "the argument of `cleanup(…)` is a call expression — it would run NOW and register its result, not a function (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
         if (shape == "value") return diagX(env, e, "E-LIFECYCLE-004", "the argument of `cleanup(…)` is not a function — `cleanup()` registers a function to run when the scope is destroyed (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", builtinUnbuilt("cleanup"), st)
+    }
+
+    // s478-boot-print-builtins — `print(…)` / `println(…)` (§20.7): "compiler-managed built-ins lowered at
+    // code generation, NOT stdlib imports" (§20.7.6). The call is built where §20.7.3 places it — "a
+    // `function` that calls `print` / `println` is **server-placed** by Route Inference (§12)", and "In a
+    // `kind=\"tool\"` program … `print` / `println` write the tool process's stdout directly" — so in the
+    // body of a `function` (FnFacts.prints makes it server-placed, directPlace), at statement position
+    // (§20.7.1: "Statement-position; no usable return value"). Each argument is a text sink (§14.13.1
+    // item 1: "a `print` / `println` argument (§20.7)"), judged by the typer (printArgCheck,
+    // E-PRINT-NON-PRIMITIVE); the fact records which arguments are not a `string` — lower renders
+    // exactly those as their one honest text (Core Text, §20.7.2).
+    fn resolvePrint(env: Env, e: AExpr, nl: boolean, args: AExpr[], st0: AS) -> RX {
+        const w: string = nl ? "println" : "print"
+        if (env.fx.stmtCall != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` used as a value — §20.7.1 makes it a statement (\"Statement-position; no usable return value\"), and the bootstrap builds it only as a statement of its own (INTERIM). Call it on its own line", resolveExprs(env, args, not, st0))
+        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, a server-only resource (§20.7.3), and the SPEC does not say whether a pure `fn` (§48.3) may call it; the bootstrap does not build it there (INTERIM). Call it from a `function`", resolveExprs(env, args, not, st0))
+        if (!env.fx.inFn || env.fx.fnSym < 0 || env.inEffect || env.host != HostCtx.HostOk) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` outside a `function` body — §20.7.3 places it by the function that calls it (\"a `function` that calls `print` / `println` is server-placed\"), and the bootstrap builds it only in a `function` body (INTERIM: an event handler, a body-top statement or an initializer is not one). Move it into a `function`", resolveExprs(env, args, not, st0))
+        let st: AS = st0
+        let text: boolean[] = []
+        for (const a of args) {
+            const r: RX = resolveExpr(env, a, not, st)
+            text = text.concat([!isStrType(r.x.ty)])
+            st = r.st
+        }
+        return plain(not, addValue(st, e.nid, ValueFact.VPrint(text, nl)))
+    }
+
+    // §20.7.5: "A user-declared in-scope binding named `print` / `println` wins; the built-in steps aside
+    // and the call is emitted as an ordinary call to the user's binding, with an info-level lint
+    // **`W-PRINT-SHADOWED`** at the shadowing use".
+    fn printShadowed(env: Env, e: AExpr, n: string, st: AS) -> AS {
+        return addDiag(st, env.file, e.span, "W-PRINT-SHADOWED", "`" + n + "(…)` here calls the binding `" + n + "` declared in scope, not the §20.7 clean-stdout built-in — a user-declared `" + n + "` wins (§20.7.5). Rename the binding to use the built-in")
     }
 
     fn runLocalFnReadWhy(name: string) -> string {
@@ -9265,6 +9299,10 @@ ${
         const n: string = exprName(callee)
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
         if (n == "cleanup" && builtinFree(env, n)) return resolveCleanup(env, e, args, st0)   // s478 (§6.7.3)
+        // s478-boot-print-builtins (§20.7) — the clean-stdout built-ins, unless a user binding of
+        // the name wins (§20.7.5, builtinFree) — then the call is the user's, and W-PRINT-SHADOWED
+        if ((n == "print" || n == "println") && builtinFree(env, n)) return resolvePrint(env, e, n == "println", args, st0)
+        const st1: AS = (n == "print" || n == "println") ? printShadowed(env, e, n, st0) : st0
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
             // s475 (S3b): `<#id>.refetch()` (§6.7.7 Properties)
@@ -9324,7 +9362,7 @@ ${
             }
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
-        const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
+        const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st1)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
         // against its parameter's declared type — §18.5 reads an object in an argument "exactly as
         // `f({ … })`", and §14.10 names "a function parameter type" as a position's type
@@ -20437,6 +20475,7 @@ ${
             .VIndex(loc: l) :> l
             .VAt :> ""
             .VTemplate(text: tx) :> ""
+            .VPrint(text: tx2, newline: nl2) :> ""
             .VToEnum(enumSym: s) :> ""
             .VMethod(op: zm) :> ""
             .VLit(lit: l) :> ""
@@ -20455,6 +20494,7 @@ ${
         return match f {
             .VAt :> true
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VIndex(loc: x) :> false
             .VToEnum(enumSym: s) :> false
             .VMethod(op: zm) :> false
@@ -28239,6 +28279,7 @@ ${
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> VType.Unknown
             .VTemplate(text: tx) :> known(Type.Str)
+            .VPrint(text: tx2, newline: nl2) :> VType.Unknown
             .VToEnum(enumSym: s) :> VType.Unknown
             .VMethod(op: o) :> VType.Unknown
             not :> VType.Unknown
@@ -28258,6 +28299,7 @@ ${
             .VIndex(loc: x) :> not
             .VAt :> not
             .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not
@@ -28734,6 +28776,7 @@ ${
             .VIndex(loc: x) :> []
             .VAt :> []
             .VTemplate(text: tx) :> []
+            .VPrint(text: tx2, newline: nl2) :> []
             .VToEnum(enumSym: s) :> []
             .VMethod(op: o) :> []
             .VLit(lit: l) :> []
@@ -28763,6 +28806,7 @@ ${
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> atCallType(ts, callee)
             .VTemplate(text: tx) :> VType.Unknown
+            .VPrint(text: tx2, newline: nl2) :> VType.Unknown
             .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
             .VMethod(op: o) :> methodType(ts, o, callee)
             not :> VType.Unknown
@@ -28877,6 +28921,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -28896,6 +28941,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -28915,6 +28961,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -28933,6 +28980,7 @@ ${
             .VIndex(loc: zl) :> not
             .VAt :> not
             .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
@@ -28967,6 +29015,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             not :> false
         }
     }
@@ -28986,6 +29035,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             not :> false
         }
     }
@@ -29159,6 +29209,7 @@ ${
             .TapeIncludes :> ts
             .LengthCheck :> ts
             .TapeInsert :> ts
+            .Print :> ts
         }
     }
 
@@ -29904,6 +29955,7 @@ ${
             .TapeIncludes :> VType.Unknown
             .LengthCheck :> VType.Unknown
             .TapeInsert :> VType.Unknown
+            .Print :> VType.Unknown
         }
     }
 
@@ -29957,6 +30009,62 @@ ${
         let ts: TypeState = ts0
         for (const x of f.crossings) { ts = typeExpr(env, x, ts).ts }
         return rvt(VType.Unknown, ts)
+    }
+
+    // s478-boot-print-builtins — §20.7.2: "A `print` / `println` argument SHALL be a **string**, **int**,
+    // **number**, **bool** or **unit enum value** … A **non-primitive** argument — a struct, payload enum
+    // value, tape, value-native map (§59), markup-as-value, or `not` — is **`E-PRINT-NON-PRIMITIVE`**".
+    // §14.13.2 makes the argument a text sink whose refused set includes "a value whose type the compiler
+    // cannot resolve" (fail closed, INTERIM S474), and "A `print` / `println` argument keeps its own code,
+    // `E-PRINT-NON-PRIMITIVE`" — so an unresolved argument (a foreign block's `asIs` value) is that code
+    // too. A `T | not` is refused as `not` is (it may be `not`). The judgment is textSlot's, one rule.
+    fn isPrintFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VPrint(text: tx, newline: nl) :> true
+            // no-default-arm: one question of the fact — is it a print built-in call
+            _ :> false
+        }
+    }
+
+    fn printArgCheck(env: TEnv, args: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const a of args) { ts = printSlot(env, a, exprType0(ts, a.nid), ts) }
+        return ts
+    }
+
+    fn printSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, s.span)) return ts          // Rule C: not judged across a parse error
+        return match v {
+            .Known(t: t) :> printKnown(env, s, t, ts)
+            .Absent :> notPrint(env, s, "`not` (an absent value has no text)", ts)
+            .Unknown :> printUnresolved(env, s, ts)
+            .OneOf(ts: xs) :> printOneOf(env, s, xs, ts)
+            .Partial(ts: xs) :> printUnresolved(env, s, ts)
+        }
+    }
+
+    fn printOneOf(env: TEnv, s: AExpr, xs: Type[], ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = printKnown(env, s, t, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
+    }
+
+    fn printUnresolved(env: TEnv, s: AExpr, ts: TypeState) -> TypeState {
+        if (condBlamed(env, s, ts)) return ts
+        return report(ts, env, s.span, "E-PRINT-NON-PRIMITIVE", "a `print` / `println` argument is text, and the compiler cannot resolve this value's type — only a known `string`, `int`, `number`, `bool` or unit enum value has one honest text (§20.7.2, §14.13.2: fail closed). Annotate what it reads (`const v: string = …`, a parameter, a function's return type), or convert it (`T.parse`, §14.13.4)")
+    }
+
+    fn printKnown(env: TEnv, s: AExpr, t: Type, ts: TypeState) -> TypeState {
+        const inner: Type | not = maybeInner(t)
+        if (inner is given) return notPrint(env, s, "a `" + typeName(t) + "` — it may be `not`, which has no text; narrow it first (`if (x is given) { … }`)", ts)
+        if (isTextPrimitive(env, t)) return ts
+        return notPrint(env, s, textWhat(env, t), ts)
+    }
+
+    fn notPrint(env: TEnv, s: AExpr, what: string, ts: TypeState) -> TypeState {
+        return report(ts, env, s.span, "E-PRINT-NON-PRIMITIVE", "a `print` / `println` argument is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§20.7.2). `print` writes machine-read program output: serialize structured data explicitly, or show it to a developer with `log()` (§20.6)")
     }
 
     fn textSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
@@ -30115,6 +30223,8 @@ ${
         // `E`"). The callee names a type and a variant — never a value to type.
         const cf: ValueFact | not = valueFact(env.t.values, e.nid)
         if (isConstructFact(cf)) return rvt(valueType(cf), checkConstructArgs(env, cf, args, ts))
+        // s478-boot-print-builtins — a `print` / `println` built-in call: every argument is a text sink (§20.7.2)
+        if (isPrintFact(cf)) return rvt(VType.Unknown, printArgCheck(env, args, ts))
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
@@ -30789,6 +30899,7 @@ ${
             .VIndex(loc: x) :> []
             .VAt :> []
             .VTemplate(text: tx) :> []
+            .VPrint(text: tx2, newline: nl2) :> []
             .VToEnum(enumSym: s) :> []
             .VMethod(op: o) :> []
             not :> []
@@ -30808,6 +30919,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VToEnum(enumSym: s) :> false
             .VMethod(op: o) :> false
             not :> false
@@ -33250,6 +33362,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> true
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VToEnum(enumSym: s) :> true
             .VMethod(op: o) :> true
             not :> false
@@ -35892,6 +36005,7 @@ ${
         modifier: boolean, failable: boolean,
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
         foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
+        prints: ASpan[],        // s478: its `print` / `println` built-in calls (§20.7.3: "a `function` that calls `print` / `println` is **server-placed**")
         repeats: ASpan[],       // s473 (ruled refusals): the regions of its body that may run more than once (repeatsInBlock)
         // s477 — a `function` of a `kind="tool"` program (§64): the tool is "an in-process
         // monolith with no client boundary" (§64.5.1), so every `function` of it runs where
@@ -35959,6 +36073,57 @@ ${
             .Defer(body: b) :> foreignsInBlock(b)
             .Fail(f: f) :> foreignsInExprs(failExprs(f))
         }
+    }
+
+    // s478-boot-print-builtins — every `print` / `println` BUILT-IN call in a body, at any depth (the
+    // binder's VPrint fact on the call: a call of a user binding of the name is not one, §20.7.5).
+    fn printsInBlock(t: Tables, b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(printsInStmt(t, s)) }
+        return out
+    }
+
+    fn printsInStmt(t: Tables, s: AStmt) -> ASpan[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> printsInExpr(t, e)
+            .Local(name: n, init: i) :> printsInExpr(t, i)
+            .Return(e: e) :> printsInMaybe(t, e)
+            .If(cond: c, thenB: tb, elseB: eb) :> printsInExpr(t, c).concat(printsInBlock(t, tb)).concat(printsInMaybeBlock(t, eb))
+            .Given(name: n, subject: x, body: b) :> printsInExpr(t, x).concat(printsInBlock(t, b))
+            .For(f: lf) :> printsInExprs(t, forExprs(lf)).concat(printsInBlock(t, lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> printsInExprs(t, liftExprs(w))
+            .LocalFn(f: f) :> printsInBlock(t, f.body)
+            .EffectStmt(w: w) :> printsInBlock(t, w.body)
+            .Defer(body: b) :> printsInBlock(t, b)
+            .Fail(f: f) :> printsInExprs(t, failExprs(f))
+        }
+    }
+
+    fn printsInMaybe(t: Tables, e: AExpr | not) -> ASpan[] {
+        if (e is not) return []
+        return printsInExpr(t, e)
+    }
+
+    fn printsInMaybeBlock(t: Tables, b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return printsInBlock(t, b)
+    }
+
+    fn printsInExpr(t: Tables, e: AExpr) -> ASpan[] {
+        let out: ASpan[] = []
+        if (isPrintFact(valueFact(t.values, e.nid))) out = [e.span]
+        for (const x of exprKids(e)) { out = out.concat(printsInExpr(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(printsInBlock(t, b)) }
+        return out
+    }
+
+    fn printsInExprs(t: Tables, es: AExpr[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const x of es) { out = out.concat(printsInExpr(t, x)) }
+        return out
     }
 
     // s473 (ruled refusals, §8.9.2 interim) — the regions of a body that may
@@ -36344,12 +36509,12 @@ ${
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
                  sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
-                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body),
+                 foreigns: foreignsInBlock(fs.f.body), prints: printsInBlock(cx.t, fs.f.body), repeats: repeatsInBlock(fs.f.body),
                  tool: !fs.f.pure && fileIsTool(cx.g, fs.info.file) }
     }
 
     // ---- placement -------------------------------------------------------------
-    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.modifier || f.tool }
+    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.prints.length > 0 || f.modifier || f.tool }
     fn clientDirect(f: FnFacts) -> boolean { return f.reads.length > 0 || f.scan.writes.length > 0 || f.doms.length > 0 }
 
     // §12.2 + §19.9.5 / §6.6.9, by the function's OWN body. Calling a server
@@ -36364,7 +36529,8 @@ ${
             // unless the deprecated `server` modifier declares the WHOLE body
             // server (§52.10: "historically forced server-side execution"); a
             // DOM access makes it unplaceable (E-ROUTE-005, judged first)
-            if ((f.sqls.length > 0 || f.foreigns.length > 0) && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
+            // s478: a `print` is a server trigger "exactly like a function that touches `?{}` SQL" (§20.7.3)
+            if ((f.sqls.length > 0 || f.foreigns.length > 0 || f.prints.length > 0) && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
             return PlaceK.Server
         }
         if (clientDirect(f)) return PlaceK.Client
@@ -36968,7 +37134,7 @@ ${
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
             } else if (pk == PlaceK.Split) {
-                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `?{}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
+                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both uses " + serverTrigger(f) + " and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
                 st = serverBodyDiags(cx, f, all, places, sum, st)
@@ -37121,6 +37287,8 @@ ${
         // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
         if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
         if (f.tool) return "being a `function` of a `kind=\"tool\"` program (§64.5.1: the tool runs in process, with no client)"
+        // s478: §20.7.3 "Host `process.stdout` is a server-only resource (§12.2 Trigger 3)"
+        if (f.prints.length > 0) return "a `print` / `println` call (host stdout is a server-only resource, §20.7.3)"
         return "the `server` modifier"
     }
 
@@ -40567,7 +40735,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [], tool: false }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], prints: [], repeats: [], tool: false }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).

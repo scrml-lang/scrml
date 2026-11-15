@@ -336,6 +336,26 @@ ${
         return acc
     }
 
+    // s478-boot-print-builtins — `print(a, b, …)` / `println(a, b, …)` (§20.7.1): "Arguments are
+    // **space-joined** (`println(\"a\", \"b\")` emits `a b\\n`) … `print()` with no args emits the empty
+    // string; `println()` with no args emits a bare newline", each argument as its one honest text
+    // (§20.7.2 — a `string` verbatim, any other primitive through Core Text). One Print of the joined
+    // string: the arguments are evaluated left to right, then written once.
+    fn printExpr(c: LC, args: AExpr[], text: boolean[], nl: boolean) -> Expr {
+        let acc: Expr | not = not
+        let i: int = 0
+        for (const a of args) {
+            let part: Expr = lowerExpr(c, a)
+            if (i < text.length && text[i]) part = Expr.Prim(PrimOp.Text, [part])
+            if (i > 0) acc = catOnto(acc, Expr.Lit(Literal.Str(" ")))
+            acc = catOnto(acc, part)
+            i = i + 1
+        }
+        if (nl) acc = catOnto(acc, Expr.Lit(Literal.Str("\n")))
+        if (acc is not) return Expr.Prim(PrimOp.Print, [Expr.Lit(Literal.Str(""))])
+        return Expr.Prim(PrimOp.Print, [acc])
+    }
+
     fn catOnto(a: Expr | not, b: Expr) -> Expr {
         if (a is not) return b
         return Expr.Prim(PrimOp.Concat, [a, b])
@@ -347,6 +367,7 @@ ${
     fn templateText(f: ValueFact | not, n: int) -> boolean[] {
         return match f {
             .VTemplate(text: tx) :> tx
+            .VPrint(text: tx2, newline: nl2) :> allText(n)
             .VLit(lit: l) :> allText(n)
             .VVariant(enumSym: x) :> allText(n)
             .VOp(op: x) :> allText(n)
@@ -556,6 +577,7 @@ ${
             .VIndex(loc: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VAt :> atExpr(c, cal, args)
             .VTemplate(text: tx) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VPrint(text: tx2, newline: nl2) :> printExpr(c, args, tx2, nl2)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             .VMethod(op: o) :> methodExpr(c, o, cal, args)
             not :> removalOrCall(c, e, cal, args)
@@ -618,6 +640,7 @@ ${
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
+            .VPrint(text: tx2, newline: nl2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
@@ -681,6 +704,7 @@ ${
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
+            .VPrint(text: tx2, newline: nl2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             not :> missing()
@@ -700,6 +724,7 @@ ${
             .VIndex(loc: x) :> PrimOp.Not
             .VAt :> PrimOp.Not
             .VTemplate(text: tx) :> PrimOp.Not
+            .VPrint(text: tx2, newline: nl2) :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
             .VMethod(op: x) :> PrimOp.Not
             not :> PrimOp.Not
@@ -721,6 +746,7 @@ ${
             .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VAt :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VTemplate(text: tx) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VPrint(text: tx2, newline: nl2) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VMethod(op: m) :> Expr.Prim(m, [lowerExpr(c, o)])        // s469: a string's `.length` (StrLength)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -1093,6 +1119,7 @@ ${
             .VIndex(loc: l) :> l
             .VAt :> ""
             .VTemplate(text: tx) :> ""
+            .VPrint(text: tx2, newline: nl2) :> ""
             .VLit(lit: x) :> ""
             .VVariant(enumSym: x) :> ""
             .VStructOf(ty: x) :> ""
@@ -3019,6 +3046,7 @@ ${
             .VIndex(loc: x) :> not
             .VAt :> not
             .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not

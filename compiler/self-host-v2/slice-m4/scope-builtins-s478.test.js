@@ -56,8 +56,10 @@ describe("§50.8.5 — the keywordless declaration", () => {
 describe("unbuilt built-ins are refused by name, never undeclared", () => {
   for (const [what, body] of [
     ["log", `log("x");`],
-    ["println", `println("x");`],
-    ["print", `print("x");`],
+    // s478-boot-print-builtins: `print(…)` / `println(…)` are built (print-builtins-s478.test.js);
+    // only the bare name — a function value — stays refused by name
+    ["println (as a value)", `const f = println;`],
+    ["print (as a value)", `const f = print;`],
     ["navigate", `navigate("/a");`],
     ["document (read)", `const t = document.title;`],
     ["document (write)", `document.title = "t";`],
