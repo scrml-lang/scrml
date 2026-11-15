@@ -1592,6 +1592,7 @@ ${
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
+            .Run(body: x) :> []                 // s478: body-top statements are checked as a handler block is (C-rules over Nodes)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, cls: k) :> checkRequest(p, encl, t, ds, b, m, st).concat(checkReadRequest(p, b, k))
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
@@ -2643,6 +2644,7 @@ ${
             .Slot :> not
             .Star(decl: x) :> not
             .Effect(deps: x) :> not
+            .Run(body: x) :> not
             .Request(deps: x) :> not
             .ResetOn(triggers: x) :> not
             .Errors(of: x) :> not
@@ -2899,6 +2901,7 @@ ${
     fn viewOwnerTails(v: View) -> string[] {
         return match v {
             .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
+            .Run(body: b) :> tailBlock(b, true, [], "a body-top statement")
             .Request(body: b) :> tailBlock(b, true, [], "a request body")
             .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
             .Errors(of: x) :> []
@@ -3266,6 +3269,7 @@ ${
         return match v {
             .Request(body: b, state: st) :> loadBindIf(b, st is given)
             .Effect(body: x) :> []
+            .Run(body: x) :> []
             .ResetOn(reset: x) :> []
             .Errors(of: x) :> []
             .Reach(fields: fs) :> []
@@ -4087,6 +4091,7 @@ ${
     fn jumpView(v: View) -> string[] {
         return match v {
             .Effect(body: b) :> jumpBlock(b, [])
+            .Run(body: b) :> jumpBlock(b, [])
             .Request(body: b) :> jumpBlock(b, [])
             .ResetOn(reset: b) :> jumpBlock(b, [])
             .Errors(of: x) :> []
@@ -4281,6 +4286,7 @@ ${
         return match v {
             .Gather(g: g, rows: rows) :> gatherProblems(g, rows.length)
             .Effect(body: b) :> liftBlock(b, -1, -1)
+            .Run(body: b) :> liftBlock(b, -1, -1)
             .Request(body: b) :> liftBlock(b, -1, -1)
             .ResetOn(reset: b) :> liftBlock(b, -1, -1)
             .Errors(of: x) :> []
@@ -5458,6 +5464,7 @@ ${
             .Slot :> not
             .Star(decl: d) :> not
             .Effect(deps: ds) :> not
+            .Run(body: x) :> not
             .Request(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
             .Errors(of: ds) :> not

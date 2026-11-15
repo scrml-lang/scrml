@@ -1,6 +1,6 @@
 ${
     async function loadThing() {
-        return 1
+        return 1;
     }
 }
 <p>z</>

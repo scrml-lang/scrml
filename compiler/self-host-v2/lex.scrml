@@ -1522,6 +1522,7 @@ ${
         Line,        // a braceless declaration (`import … from "…"`): stop at depth 0 before a newline
         Shorthand,   // a `:`-shorthand body (§4.14): stop at depth 0 before the `>` (or `/>`) that ends the opener
         CodeBody,    // a run of a code-default body (§4.18.1): stop at depth 0 before a tag (`<x`, `</`, `<!`) or `${`
+        Decl,        // s478 — a `;`-terminated declaration at a body top (`[export] const x = …;`): stop after a `;` at depth 0, or before a tag / `${` there
     }
     export type LexRun:struct = { tokens: Token[], end: int }
 
@@ -1571,6 +1572,7 @@ ${
             .Line      :> lineEndsAt(skipBlanks(st.cur))
             .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
             .CodeBody  :> startsMarkup(skipTriviaAhead(st.cur))
+            .Decl      :> startsMarkup(skipTriviaAhead(st.cur))
             .Balanced  :> false
             .Statement :> false
         }
@@ -1586,7 +1588,15 @@ ${
             .Line      :> false
             .Shorthand :> false
             .CodeBody  :> false
+            .Decl      :> lastIsSemi(st)
         }
+    }
+
+    fn lastIsSemi(st: LexState) -> boolean {
+        const k: TokenKind | not = lastKind(st)
+        if (k is not) return false
+        if (k is .Semicolon) return true
+        return false
     }
 
     // s478 — SPEC §5.2 "An unquoted value is read WHOLE (S457)": "An unquoted
@@ -1798,6 +1808,7 @@ ${
         return match stop {
             .Shorthand :> true
             .CodeBody  :> true
+            .Decl      :> false
             .Balanced  :> false
             .BareValue :> false
             .Statement :> false
@@ -1817,6 +1828,17 @@ ${
     export type LexPause:struct = { tokens: Token[], end: int, line: int, paused: boolean, depth: int }
 
     export fn lexTier0(src: string, pos: int, depth: int) -> LexPause {
+        return lexTier0X(src, pos, depth, false)
+    }
+
+    // s478 — `bare`: also pause before an element that STARTS a statement (bare
+    // markup in a logic block, an implied-`lift` arm: `${ <x/> }`, `${ if (c) {
+    // <x/> } }`) — SPEC §4.17 S462: a `<script>` / `<style>` "SHALL be rejected
+    // … at EVERY position markup is parsed or built: … markup in a logic block —
+    // `lift <markup>`, `for … lift`, `if … lift` and implied-`lift` arms, bare
+    // markup in `${ … }`"; "The decision is made on the parsed element (its
+    // node), never on source text" — so the element is read as markup.
+    export fn lexTier0X(src: string, pos: int, depth: int, bare: boolean) -> LexPause {
         let stack: BracketKind[] = []
         let i: int = 0
         while (i < depth) {
@@ -1827,7 +1849,7 @@ ${
         let done = false
         let paused = false
         while (!done && !isEof(st.cur)) {
-            if (liftMarkupAhead(st)) {
+            if (liftMarkupAhead(st) || (bare && bareMarkupAhead(st, depth))) {
                 paused = true
                 done = true
             } else {
@@ -1854,6 +1876,44 @@ ${
         const c0: int = peekCode(c, 0)
         const c1: int = peekCode(c, 1)
         return c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122))
+    }
+
+    // s478 — an element opener `<name` at the START of a statement, at statement
+    // level: nothing lexed yet in this run (the run resumed after an element, or
+    // is a block's first token — `depth` > 0), or the last token ends a statement
+    // or opens a block (`{`, `;`, `}`).
+    fn bareMarkupAhead(st: LexState, depth: int) -> boolean {
+        if (st.interps.length != 0) return false
+        if (st.mode != LexMode.InCode) return false
+        for (const b of st.bracketStack) {
+            if (!isBraceKind(b)) return false
+        }
+        if (st.bracketStack.length == 0) return false
+        if (st.tokens.length == 0) {
+            if (depth == 0) return false
+        } else {
+            const k: TokenKind = st.tokens[st.tokens.length - 1].kind
+            if (!(k is .LBrace) && !(k is .Semicolon) && !(k is .RBrace)) return false
+        }
+        const c: Cursor = skipTriviaAhead(st.cur)
+        const c0: int = peekCode(c, 0)
+        const c1: int = peekCode(c, 1)
+        if (!(c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)))) return false
+        return !legacyDeclHead(c)
+    }
+
+    // `<name> = …` / `<name> : T = …` — the retired (§66.21) declaration spelling, which
+    // has no closer: not an element, so it is left to the logic reader (read as markup,
+    // it would run to the end of the file).
+    fn legacyDeclHead(c: Cursor) -> boolean {
+        let k: int = 1
+        while (isIdentCont(peekCode(c, k)) || peekCode(c, k) == 45) { k = k + 1 }
+        if (peekCode(c, k) != 62) return false
+        k = k + 1
+        while (peekCode(c, k) == 32 || peekCode(c, k) == 9) { k = k + 1 }
+        const n0: int = peekCode(c, k)
+        if (n0 == 61) return peekCode(c, k + 1) != 61
+        return n0 == 58
     }
 
     fn isBraceKind(b: BracketKind) -> boolean {

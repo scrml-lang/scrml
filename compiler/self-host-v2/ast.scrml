@@ -408,6 +408,15 @@ ${
         // value form whose lifts are the rendered rows. Its `lift`s hold their
         // markup (ALift.LiftNode).
         Gather(f: AFor),
+        // s478 — a run of STATEMENTS where an item stands: a bare run at a
+        // `<program>` / `<page>` body top (§40.8 S441: "A bare run … is code.
+        // It SHALL be parsed and checked as logic at its position"), or the
+        // statements at the top level of a `${ … }` logic block there (§17.3
+        // S449: "A `${ … }` at a `<program>` / `<page>` / `<channel>` body top
+        // is a statement list, evaluated, not rendered"). §40.8: "it runs once
+        // at mount in source order, like any other body-top statement". Owned,
+        // like an effect, by the scope it stands in; renders nothing.
+        Run(b: ABlock),
     }
 
     // -------------------------------------------------------------------------

@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -3197,6 +3197,8 @@ ${
     fn parseStmt(tp: TP) -> RStmt {
         const t: PTok = cur(tp)
         const start: int = t.start
+        // s478 — bare markup / an implied-`lift` arm in a body-top logic block (logicBlockTP)
+        if (isLogicRowTok(t)) return logicRowStmt(tp, start, "markup standing as a statement in a `" + interpOpen() + " … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)")
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (isWord(tp, "lin")) return parseLinLocal(tp)   // s471 (§35.2)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
@@ -3790,6 +3792,8 @@ ${
             const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
             return mkS(adv(adv(t)), kw.start, AStmtK.Lift(ALift.LiftNode(stand)))
         }
+        // s478 — `lift <markup>` in a body-top logic block (logicBlockTP)
+        if (isLogicRowTok(nx)) return logicRowStmt(adv(t), kw.start, "lifting MARKUP is in the bootstrap only in a Tier-0 `" + interpOpen() + " for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `" + interpOpen() + " … }` logic block (§10, §17.4) is not")
         if (tk(nx, "<") && nx.cls == TC.Punct) {
             const tn: PTok = peekAt(tp, 2)
             if ((tn.cls == TC.Ident || tn.cls == TC.Keyword) && tn.start == nx.end) {
@@ -3846,6 +3850,99 @@ ${
         const t: TP = adv(tp)
         if (isWord(t, "for")) return true
         return labelAhead(t)
+    }
+
+    // =========================================================================
+    // s478 (S478 triage C3) — a `${ … }` logic block at a body top, lexed with
+    // the run PAUSED before each markup element in it: a `lift` operand
+    // (lexTier0) and an element that starts a statement (lexTier0X `bare` — bare
+    // markup, an implied-`lift` arm). SPEC §4.17 (S462): "A `<script>` /
+    // `<style>` element SHALL be rejected with the same codes … at EVERY
+    // position markup is parsed or built: … markup in a logic block — `lift
+    // <markup>`, `for … lift`, `if … lift` and implied-`lift` arms, bare markup in
+    // `${ … }` …. The decision is made on the parsed element (its node), never on
+    // source text". So each element is read here as markup (parseMarkupNode —
+    // E-SCRIPT-001 / E-STYLE-001 with the skip-the-body recovery) and stands in
+    // the token run as a logic-row token. A refused element (its node is the
+    // refusal's empty Text) is done; any other is refused by name where it
+    // stands (parseLift / parseStmt): lifting or placing markup outside a Tier-0
+    // `${ for … }` in markup is not in the bootstrap.
+    // =========================================================================
+    type RLogicRegion:struct = { tp: TP, mp: MP }
+
+    fn logicRowMark(refused: boolean) -> string {
+        if (refused) return "logic-row-refused"
+        return "logic-row"
+    }
+
+    fn isLogicRowTok(t: PTok) -> boolean {
+        return t.cls == TC.Other && (t.v == logicRowMark(true) || t.v == logicRowMark(false))
+    }
+
+    fn refusedRowNode(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: s) :> s == ""
+            .Elem(e: x) :> false
+            .Interp(e: x) :> false
+            .DeclNode(d: x) :> false
+            .Css(c: x) :> false
+            .Effect(w: x) :> false
+            .Request(r: x) :> false
+            .Gather(f: x) :> false
+            .Run(b: x) :> false
+        }
+    }
+
+    fn refusalSince(ds: Diag[], from: int) -> boolean {
+        let i: int = from
+        while (i < ds.length) {
+            if (ds[i].code == "E-SCRIPT-001" || ds[i].code == "E-STYLE-001") return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn logicBlockTP(mp: MP) -> RLogicRegion {
+        let pos: int = mp.pos + 1
+        let depth: int = 0
+        let toks: PTok[] = []
+        let m: MP = mp
+        let going = true
+        while (going) {
+            const p: LexPause = lexTier0X(mp.src, pos, depth, true)
+            const pt: PTok[] = nsToks(mp.ns, toPToks(p.tokens))
+            toks = toks.concat(pt.slice(0, pt.length - 1))
+            if (!p.paused) {
+                toks = toks.concat([pt[pt.length - 1]])
+                going = false
+            } else {
+                const d0: int = m.diags.length
+                const rn: RNodeOne = parseMarkupNode(mAt(m, p.end))
+                m = rn.mp
+                let text: string = mp.src.substring(p.end, m.pos)
+                if (text.length > 24 || text.indexOf("\n") >= 0) text = "<…>"
+                // refused: the element itself, or one inside it (`<svg><script>…`) — rejected by §4.17
+                const refused: boolean = refusedRowNode(rn.n) || refusalSince(m.diags, d0)
+                const rt: PTok = { cls: TC.Other, v: logicRowMark(refused), text: text, start: p.end, end: m.pos, line: p.line, bad: "" }
+                toks = toks.concat([rt])
+                pos = m.pos
+                depth = p.depth
+            }
+        }
+        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns }
+        return { tp: t, mp: m }
+    }
+
+    // The logic-row token at the cursor as the statement it stands for: nothing
+    // to run (a Recovered placeholder — no `;` owed, no E-STMT-NO-EFFECT); a
+    // refused element is already reported, any other is refused by name here.
+    fn logicRowStmt(tp: TP, start: int, why: string) -> RStmt {
+        const row: PTok = cur(tp)
+        let t: TP = tp
+        if (row.v == logicRowMark(false)) t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, row)
+        const re: RExpr = mkE(adv(t), start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
     }
 
     fn parseInterpOrTier0(mp: MP) -> RNodeOne {
@@ -5163,6 +5260,15 @@ ${
                 going = false
             } else if (isP(t, ";")) {
                 t = adv(t)
+            } else if (close == "}" && !logicItemAhead(t)) {
+                // s478 — statements at the top level of a `${ … }` logic block
+                // (§17.3, §40.8). (`close` is "" for a declaration's own region —
+                // logicRegionItem — which holds that one item and nothing else.)
+                const before: int = t.i
+                const rs: RItems = parseStmtRun(t, close)
+                out = out.concat(rs.items)
+                t = rs.tp
+                if (t.i == before) t = adv(t)
             } else {
                 const before: int = t.i
                 const r: RItems = parseLogicItem(t, top)
@@ -5215,6 +5321,62 @@ ${
         const bad: PTok = cur(t)
         const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `" + bad.text + "` (other statements at logic-block level are not in the bootstrap)", bad)
         return { items: [], tp: skipToLineEnd(d) }
+    }
+
+    // =========================================================================
+    // s478 (S478 triage C3) — STATEMENTS where an item stands.
+    // SPEC §17.3 (S449): "A `${ … }` at a `<program>` / `<page>` / `<channel>`
+    // body top is a statement list, evaluated, not rendered (§40.8)"; §40.8 S441:
+    // a bare expression statement there "is evaluated, not rendered — it runs
+    // once at mount in source order, like any other body-top statement", and a
+    // bare write "is an ordinary write in a logic context". Before s478 every
+    // such statement was E-PARSE-ITEM ("other statements at logic-block level
+    // are not in the bootstrap").
+    // A run of statements up to the next item (logicItemAhead), the block's
+    // `close` or the region's end is ONE ANodeK.Run, in source order among the
+    // items. Each statement is read by the one statement reader (parseTermStmt:
+    // its `;` per §7.2.2 rule 1, E-STMT-NO-EFFECT per rule 9).
+    // =========================================================================
+    fn logicItemAhead(tp: TP) -> boolean {
+        if (isWord(tp, "export") || isWord(tp, "import") || isWord(tp, "type")) return true
+        if (isWord(tp, "function") || isWord(tp, "fn") || isWord(tp, "const") || isWord(tp, "let")) return true
+        if (isWord(tp, "server")) return isWord(adv(tp), "function") || isWord(adv(tp), "fn")
+        return whenAhead(tp)
+    }
+
+    fn parseStmtRun(tp: TP, close: string) -> RItems {
+        const start: int = cur(tp).start
+        const b0: int = hardErrors(tp.diags)
+        let t: TP = tp
+        let stmts: AStmt[] = []
+        let going = true
+        while (going) {
+            if (atEnd(t) || (close != "" && isP(t, close)) || logicItemAhead(t)) {
+                going = false
+            } else if (isP(t, ";")) {
+                t = adv(t)
+            } else {
+                const before: int = t.i
+                const r: RStmt = parseTermStmt(t, b0)
+                stmts = stmts.concat([r.s])
+                t = r.tp
+                if (t.i == before) t = adv(t)
+            }
+        }
+        return runItem(t, start, stmts)
+    }
+
+    // The statements `stmts` (read from `start`) as one Run item; none → no item.
+    fn runItem(tp: TP, start: int, stmts: AStmt[]) -> RItems {
+        if (stmts.length == 0) return { items: [], tp: tp }
+        const last: AStmt = stmts[stmts.length - 1]
+        const sp: ASpan = mkSpan(start, last.span.end)
+        const b: ABlock = { nid: tp.nid, span: sp, stmts: stmts }
+        const t1: TP = bumpId(tp)
+        const n: ANode = { nid: t1.nid, span: sp, k: ANodeK.Run(b) }
+        const t2: TP = bumpId(t1)
+        const it: AItem = { nid: t2.nid, span: sp, k: AItemK.MarkupItem(n) }
+        return { items: [it], tp: bumpId(t2) }
     }
 
     // s472 — `[export] const NAME[: T] = init;` at the top level of a `${ }`
@@ -6408,7 +6570,7 @@ ${
         let out: Diag[] = []
         for (const d of parsed) {
             let keep = true
-            if (d.code == "E-STMT-NO-EFFECT") {
+            if (d.code == "E-STMT-NO-EFFECT" && d.message.indexOf(bodyTopForms()) < 0) {
                 for (const a of later) {
                     const refusal: boolean = a.code == "E-BOOTSTRAP-UNSUPPORTED" || a.code.substring(0, 8) == "E-SCOPE-"
                     if (refusal && a.file == d.file && a.span.start >= d.span.start && a.span.end <= d.span.end) keep = false
@@ -10175,10 +10337,11 @@ ${
         // s452: a `!{ … }` standing in a program body (E-ERROR-014, skipSigil)
         if (chAt(mp, 0) == "!" && chAt(mp, 1) == "{") return { items: [], mp: skipSigil(mp) }
         if (atInterp(mp)) {
-            const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
-            const inner: RItems = parseLogicItems(expectP(tp, "{"), "}", false)
+            // s478 — markup in the block is read as markup (logicBlockTP)
+            const lr: RLogicRegion = logicBlockTP(mp)
+            const inner: RItems = parseLogicItems(expectP(lr.tp, "{"), "}", false)
             const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
-            return { items: inner.items, mp: backToMarkup(mp, t2) }
+            return { items: inner.items, mp: backToMarkup(lr.mp, t2) }
         }
         if (chAt(mp, 0) == "<") return parseTagItem(mp, false, false, ctx)
         const w: RWord = readName(mp)
@@ -10200,6 +10363,8 @@ ${
             // s478: an export list (`export { … } [from "…"];`, `export * from "…";`, §21.4) is a
             // statement like an `import`: its region ends at the line, not after its `}`
             if (chAt(after, 0) == "{" || chAt(after, 0) == "*") return logicRegionItem(mp, LexStop.Line, fileTop)
+            // s478: `export const NAME = …;` ends at its `;` (LexStop.Decl), not at a later `}`
+            if (!fileTop && (wl.w == "const" || wl.w == "let")) return logicRegionItem(mp, LexStop.Decl, false)
             return logicRegionItem(mp, LexStop.Statement, false)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false)
@@ -10208,12 +10373,368 @@ ${
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
         if (w.w == "when") return logicRegionItem(mp, LexStop.Statement, false)
         if (w.w == "import") return logicRegionItem(mp, LexStop.Line, fileTop)
+        // s478 — a `const NAME = …;` / `let NAME …` at a body top is the same item
+        // as at the top level of a `${ … }` there (§40.8: the auto-lift covers
+        // "`let`/`const` local declarations"): a file-scope constant (§7.6,
+        // parseConstItem) / the by-name refusal of a top-level `let` (refusedLetItem)
+        if (!fileTop && (w.w == "const" || w.w == "let")) return logicRegionItem(mp, LexStop.Decl, false)
+        // s478 — any other bare run at a `<program>` / `<page>` body top is code (§40.8 S441)
+        if (!fileTop) return bodyTopRun(mp, ctx)
         const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
         return { items: [], mp: skipLineComment(d) }
     }
 
+    // =========================================================================
+    // s478 (S478 triage C3) — a BARE RUN at a `<program>` / `<page>` body top.
+    // SPEC §40.8 S441: "A bare run — a run of non-whitespace source characters
+    // written directly among the body's children, not inside a markup element and
+    // not a `"..."` display-text literal — is **code**. It SHALL be parsed and
+    // checked as logic at its position, exactly as the content of the declaration
+    // auto-lift above is, and it SHALL NOT ship as page text." Display text is
+    // declared: a markup element, or "(b) a `"..."` display-text literal …, which
+    // renders as a text node at its position". "A bare run that is not valid code
+    // is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7)." §4.18.7: "One diagnostic covers each
+    // maximal run of consecutive statements that are not valid code, and the
+    // statements it covers raise no other diagnostic"; the diagnostic "SHALL also
+    // name the markup-element form (`<p>…</p>`) as a fix, alongside the `"..."`
+    // literal".
+    //
+    // The run is the code-default region up to the next tag or `${` (LexStop.
+    // CodeBody), lexed as logic. It is read statement by statement, stopping
+    // before an item (bodyTopItemAhead — the item reader takes it):
+    //  - a standalone `"…"` (bodyTopDisplayAt) is a display-text literal → its
+    //    Text / Interp nodes (§4.18.3 / §4.18.4);
+    //  - a statement the reader parses with no E-PARSE-* error is code: kept, in
+    //    a Run with the statements around it (its own diagnostics — a missing `;`
+    //    (§7.2.2 rule 1), E-STMT-NO-EFFECT, a named refusal — stand);
+    //  - a statement that does not parse (an E-PARSE-* error, or a token the
+    //    lexer could not read), or one built only from literals and operators
+    //    (§40.8: "`404`, `-1`, `true`, `[1, 2]`, `"a" + 1` … it is
+    //    `E-UNQUOTED-DISPLAY-TEXT`"), is not valid code: it and the statements
+    //    before it ON ITS LINE that lacked their `;` (`Welcome to the dashboard.`
+    //    reads `Welcome`, `to`, `the`, then fails) are dropped with their
+    //    diagnostics, and the run of display text runs to the end of that line.
+    //    Consecutive such lines are ONE E-UNQUOTED-DISPLAY-TEXT.
+    // INTERIM (⚑ dpa-073 R7, OPEN): two readings here are by line — the
+    // display-literal test (§40.8: "it opens a line (or directly follows a markup
+    // element) … and nothing but whitespace, `;` or a `//` comment follows its
+    // closing `"` on that line"; §7.2.2 "Remaining newline-sensitive readings":
+    // INTERIM), and where a run of display text ends (the end of the failing
+    // statement's line — §40.8 round 5: "The tokens after the end, on the
+    // statement's own line, are E-UNQUOTED-DISPLAY-TEXT; tokens it consumed from
+    // later lines are parsed as the statements that follow it").
+    // =========================================================================
+    fn bodyTopRun(mp: MP, ctx: string) -> RMItems {
+        const run: LexRun = lexFromMode(mp.src, mp.pos, LexStop.CodeBody, false)
+        let t: TP = { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
+        let items: AItem[] = []
+        let stmts: AStmt[] = []
+        let runStart: int = -1
+        // the chain: the statements on one line since the last one that ended with its `;`
+        let chain: TP = t
+        let chainLen: int = 0
+        let chainLine: int = -1
+        // the pending run of display text, [badStart, badEnd)
+        let badStart: int = -1
+        let badEnd: int = -1
+        let resume: int = -1
+        let going = true
+        while (going) {
+            const tok: PTok = cur(t)
+            if (atEnd(t) || bodyTopItemAhead(t)) {
+                going = false
+            } else if (isP(t, ";")) {
+                // §7.2.2 rule 6: "`;` is never text": the terminator (an empty statement)
+                if (chainLine >= 0 && stmts.length > chainLen) {
+                    t = proseDiag(t, mp.src, ctx, badStart, badEnd)
+                    badStart = -1
+                }
+                t = adv(t)
+                chainLine = -1
+            } else if (bodyTopDisplayAt(mp.src, t)) {
+                const fr: RItems = runItem(t, runStart, stmts)
+                const fb: TP = proseDiag(fr.tp, mp.src, ctx, badStart, badEnd)
+                items = items.concat(fr.items)
+                stmts = []
+                runStart = -1
+                badStart = -1
+                const rd: RItems = bodyTopDisplay(mp, fb)
+                items = items.concat(rd.items)
+                t = rd.tp
+                chainLine = -1
+            } else {
+                if (chainLine != tok.line) {
+                    // the open chain on the line before is settled (its statements stand):
+                    // the display run before it is final
+                    if (chainLine >= 0 && stmts.length > chainLen) {
+                        t = proseDiag(t, mp.src, ctx, badStart, badEnd)
+                        badStart = -1
+                    }
+                    chain = t
+                    chainLen = stmts.length
+                    chainLine = tok.line
+                }
+                const before: TP = t
+                const r: RStmt = parseTermStmt(t, hardErrors(t.diags))
+                if (notCode(before, r) && closedLiteralStmt(before, r)) {
+                    // s478 r1 (LOW-2) — a literal-only statement that ended with its own `;`
+                    // (`"a"; @n = 5;` — §40.8: the `"a"` is a code string, since more than `;`
+                    // follows it on its line) is display text up to that `;`; what follows it
+                    // on the line is read as the statements it is
+                    const from2: int = cur(chain).start
+                    stmts = stmts.slice(0, chainLen)
+                    if (stmts.length == 0) runStart = -1
+                    if (badStart < 0) badStart = from2
+                    badEnd = r.tp.toks[r.tp.i - 1].end
+                    t = { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: chain.diags, file: r.tp.file, ns: r.tp.ns }
+                    chainLine = -1
+                } else if (notCode(before, r)) {
+                    // not valid code: drop the chain and read its line as display text
+                    const from: int = cur(chain).start
+                    stmts = stmts.slice(0, chainLen)
+                    if (stmts.length == 0) runStart = -1
+                    t = chain
+                    let last: int = from
+                    while (!atEnd(t) && cur(t).line <= tok.line) {
+                        last = cur(t).end
+                        t = adv(t)
+                    }
+                    const nl: int = mp.src.indexOf("\n", from)
+                    if (nl > from && nl < last) {
+                        // s478 r1 (LOW-1) — a token of this line runs past its end (the `'` of
+                        // `Don't panic.` opens a string the lexer reads to the end of the run):
+                        // the display text ends at the line (§4.18.7: "the statements it covers
+                        // raise no other diagnostic"), and the body is read again from the next line
+                        last = nl
+                        resume = nl
+                        going = false
+                    }
+                    if (badStart < 0) badStart = from
+                    badEnd = last
+                    chainLine = -1
+                } else {
+                    t = bodyTopNoEffect(r.tp, before.diags.length, ctx)
+                    if (runStart < 0) runStart = tok.start
+                    stmts = stmts.concat([r.s])
+                    // a statement that ended with its `;` (or is block-like) closes the
+                    // chain: it can no longer be read back as display text
+                    if ((t.i > 0 && tk(t.toks[t.i - 1], ";")) || !needsSemi(r.s)) {
+                        t = proseDiag(t, mp.src, ctx, badStart, badEnd)
+                        badStart = -1
+                        chainLine = -1
+                    }
+                    if (t.i == before.i) t = adv(t)
+                }
+            }
+        }
+        const fr2: RItems = runItem(t, runStart, stmts)
+        const fb2: TP = proseDiag(fr2.tp, mp.src, ctx, badStart, badEnd)
+        const back: MP = backToMarkup(mp, fb2)
+        if (resume >= 0) return { items: items.concat(fr2.items), mp: mAt(back, resume) }
+        return { items: items.concat(fr2.items), mp: mAt(back, cur(fb2).start) }
+    }
+
+    // s478 r1 (owner ruling 4) — §4.18.7 (S445): "a lone identifier or cell read
+    // standing as a statement has no effect, so at a `<program>` / `<page>` /
+    // `<channel>` body top it is `E-STMT-NO-EFFECT` (§40.8), whose message names
+    // the declared forms". A body-top E-STMT-NO-EFFECT names them, and is kept
+    // beside a later scope refusal (withoutRefusedNoEffect keeps one carrying
+    // bodyTopForms()): `Counter;` is E-STMT-NO-EFFECT + E-SCOPE-001 there only.
+    fn bodyTopForms() -> string {
+        return " At a body top, displayed text is declared: a markup element (`<p>…</p>`) or a quoted display-text literal (`\"…\"`) (§4.18.7, §40.8)."
+    }
+
+    fn bodyTopNoEffect(tp: TP, from: int, ctx: string) -> TP {
+        let ds: Diag[] = tp.diags.slice(0, from)
+        let i: int = from
+        while (i < tp.diags.length) {
+            const d: Diag = tp.diags[i]
+            if (d.code == "E-STMT-NO-EFFECT" && d.message.indexOf(bodyTopForms()) < 0) {
+                ds = ds.concat([newDiag(d.code, d.message + bodyTopForms(), d.file, d.span)])
+            } else {
+                ds = ds.concat([d])
+            }
+            i = i + 1
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
+    }
+
+    // s478 r1 — the statement just read is literal-only (§40.8), parsed with no
+    // E-PARSE-* error, and ended with its own `;`.
+    fn closedLiteralStmt(before: TP, r: RStmt) -> boolean {
+        if (r.tp.i <= before.i) return false
+        if (!tk(r.tp.toks[r.tp.i - 1], ";")) return false
+        let i: int = before.diags.length
+        while (i < r.tp.diags.length) {
+            if (r.tp.diags[i].code.startsWith("E-PARSE-")) return false
+            i = i + 1
+        }
+        const x: AExpr | not = stmtExpr(r.s)
+        if (x is given) return literalOnly(x)
+        return false
+    }
+
+    // An item starts at the token (the program-body item reader takes it,
+    // parseMarkupItem): a declaration keyword. A tag or `${` already ended the region.
+    fn bodyTopItemAhead(tp: TP) -> boolean {
+        return logicItemAhead(tp)
+    }
+
+    // Is the statement just read (from `before` to `r`) not valid code at a body top?
+    // A statement a recognizer NAMED (an E- code other than a generic E-PARSE-* /
+    // a terminator one — `throw` E-THROW-NOT-IN-SCRML, a by-name
+    // E-BOOTSTRAP-UNSUPPORTED) is code, written wrong or not built: it keeps its
+    // diagnostics, never read as display text.
+    fn notCode(before: TP, r: RStmt) -> boolean {
+        if (r.tp.i == before.i) return true
+        let generic = false
+        let i: int = before.diags.length
+        while (i < r.tp.diags.length) {
+            const d: Diag = r.tp.diags[i]
+            if (d.severity == Severity.Error) {
+                if (d.code.startsWith("E-PARSE-")) {
+                    generic = true
+                } else if (!softError(d.code)) {
+                    return false
+                }
+            }
+            i = i + 1
+        }
+        if (generic) return true
+        // a token the lexer could not read (`©`, `★`)
+        let k: int = before.i
+        while (k < r.tp.i) {
+            if (before.toks[k].cls == TC.Other && before.toks[k].text.substring(0, 1) != "/") return true
+            k = k + 1
+        }
+        const x: AExpr | not = stmtExpr(r.s)
+        if (x is given) return literalOnly(x)
+        return false
+    }
+
+    // §40.8: "A bare expression statement at this body-top built only from
+    // literals and operators — `404`, `-1`, `true`, `[1, 2]`, `"a" + 1` —
+    // computes nothing observable, so it compiles nothing: it is
+    // `E-UNQUOTED-DISPLAY-TEXT`".
+    fn literalOnly(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> true
+            .Str(v: s) :> true
+            .Bool(v: b) :> true
+            .NotLit :> true
+            .Unary(op: o, e: x) :> literalOnly(x)
+            .Binary(op: o, l: l, r: r) :> literalOnly(l) && literalOnly(r)
+            .Ternary(test: c, yes: y, no: n) :> literalOnly(c) && literalOnly(y) && literalOnly(n)
+            .ArrayLit(elems: es) :> allLiteral(es)
+            .Template(quasis: qs, slots: ss) :> allLiteral(ss)
+            .Call(callee: c) :> false
+            .Assign(target: t) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Recovered :> false
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Variant(name: n) :> false
+            .Lambda(params: ps) :> false
+            .Member(obj: o) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o, idx: i) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+        }
+    }
+
+    fn allLiteral(es: AExpr[]) -> boolean {
+        for (const x of es) { if (!literalOnly(x)) return false }
+        return true
+    }
+
+    // The pending run of display text [start, end) as ONE E-UNQUOTED-DISPLAY-TEXT
+    // (nothing when start < 0).
+    fn proseDiag(tp: TP, src: string, ctx: string, start: int, end: int) -> TP {
+        if (start < 0) return tp
+        const tag: string = ctx == "page" ? "page" : "program"
+        const text: string = src.substring(start, end).trim()
+        const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
+        const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a bare run there is code, and this one is not valid code (§40.8, §4.18.7)", tp.file, mkSpan(start, end))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+    }
+
+    // §40.8: "A `"..."` is a display-text literal here only when it stands as its
+    // OWN statement: it opens a line (or directly follows a markup element), is
+    // not the operand of a preceding operator …, and nothing but whitespace, `;`
+    // or a `//` comment follows its closing `"` on that line" (INTERIM, above).
+    // At a statement start, so never an operand.
+    fn bodyTopDisplayAt(src: string, tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Str || t.text.substring(0, 1) != "\"") return false
+        if (tp.i > 0 && !opensLine(src, t.start)) return false
+        let n: PTok = peekAt(tp, 1)
+        if (n.cls != TC.End && tk(n, ";")) n = peekAt(tp, 2)
+        if (n.cls == TC.End) return true
+        return opensLine(src, n.start) && lineBreakBetween(src, t.end, n.start)
+    }
+
+    // Only spaces / tabs between the line's start (or the source's) and `pos`.
+    fn opensLine(src: string, pos: int) -> boolean {
+        let i: int = pos - 1
+        while (i >= 0) {
+            const c: string = src.substring(i, i + 1)
+            if (c == "\n" || c == "\r") return true
+            if (c != " " && c != "\t") return false
+            i = i - 1
+        }
+        return true
+    }
+
+    fn lineBreakBetween(src: string, from: int, to: int) -> boolean {
+        const s: string = src.substring(from, to)
+        return s.indexOf("\n") >= 0 || s.indexOf("\r") >= 0
+    }
+
+    // The display-text literal at the cursor (bodyTopDisplayAt) — re-read in the
+    // display mode (§4.18.3 escapes, §4.18.4 `${…}` segments, the code-default
+    // body's own reader parseDisplayItem) — as markup items, and its `;`.
+    fn bodyTopDisplay(mp: MP, tp: TP) -> RItems {
+        const lit: PTok = cur(tp)
+        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
+        const d: TP = regionTP(at, LexStop.Line)
+        let nodes: ANode[] = []
+        let m: MP = at
+        if (d.toks.length >= 2 && d.toks[0].end == lit.end) {
+            const rn: RNodes = parseDisplayItem(at, d)
+            nodes = rn.nodes
+            m = rn.mp
+        } else {
+            m = mDiag(at, "E-BOOTSTRAP-UNSUPPORTED", "this display-text literal reads differently as display text and as code (an escape) — not in the bootstrap; write it in a markup element", lit.start, lit.end)
+        }
+        let items: AItem[] = []
+        let nid: int = m.nid
+        for (const n of nodes) {
+            items = items.concat([{ nid: nid, span: n.span, k: AItemK.MarkupItem(n) }])
+            nid = nid + 1
+        }
+        let t: TP = adv({ toks: tp.toks, i: tp.i, nid: nid, diags: m.diags, file: tp.file, ns: tp.ns })
+        if (isP(t, ";")) t = adv(t)
+        return { items: items, tp: t }
+    }
+
     fn logicRegionItem(mp: MP, stop: LexStop, top: boolean) -> RMItems {
         const tp: TP = regionTP(mp, stop)
+        if (stop == LexStop.Decl) {
+            // s478 — ONE declaration; what its region holds after it (a statement
+            // its missing `;` let the region run on into) goes back to the
+            // body-top reader, which reads it as what it is
+            const r1: RItems = parseLogicItem(tp, top)
+            let t: TP = r1.tp
+            while (isP(t, ";")) { t = adv(t) }
+            const back: MP = backToMarkup(mp, t)
+            if (atEnd(t)) return { items: r1.items, mp: back }
+            return { items: r1.items, mp: mAt(back, cur(t).start) }
+        }
         const r: RItems = parseLogicItems(tp, "", top)
         return { items: r.items, mp: backToMarkup(mp, r.tp) }
     }
