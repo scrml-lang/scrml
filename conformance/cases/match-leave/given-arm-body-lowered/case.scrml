@@ -7,21 +7,21 @@ ${
         let out = match name {
             not :> "absent",
             given name :> "hi " + name
-        }
-        return out
+        };
+        return out;
     }
     function ret(name: string | not) -> string {
         return match name {
             not :> "none",
             given name :> "ret " + name
-        }
+        };
     }
     function stmt(v: number | not) -> number {
         match v {
             not :> { return 1; },
             given v :> { return 2; }
         }
-        return 3
+        return 3;
     }
     function go() {
         @a = decl("al");

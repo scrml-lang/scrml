@@ -2105,8 +2105,29 @@ ${
         return src.length
     }
 
-    fn isVoidName(n: string) -> boolean {
-        return n == "input" || n == "br" || n == "hr" || n == "img" || n == "meta" || n == "link"
+    // The HTML void elements (no closer, no children) — the list the markup reader
+    // uses too (parse.scrml isVoidTag reads THIS one), so the extent ends where the
+    // reader does (s478 review L2: a 6-tag copy made `return <wbr>;` swallow what
+    // followed). It is the printer's list (html.scrml isVoid) — the lexer is
+    // compiled standalone, so it cannot import that module; a test holds the two
+    // equal (slice-m4/markup-value-s478.test.js).
+    export fn isVoidName(n: string) -> boolean {
+        return match n {
+            "area" :> true
+            "base" :> true
+            "br" :> true
+            "col" :> true
+            "embed" :> true
+            "hr" :> true
+            "img" :> true
+            "input" :> true
+            "link" :> true
+            "meta" :> true
+            "source" :> true
+            "track" :> true
+            "wbr" :> true
+            _ :> false
+        }
     }
 
     fn isRawName(n: string) -> boolean {

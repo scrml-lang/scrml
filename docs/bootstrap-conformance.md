@@ -11,27 +11,27 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 475 | 25.4% |
+| PASS | 498 | 26.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 63 | 3.4% |
+| FAIL | 36 | 1.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 695 | 37.2% |
+| UNSUPPORTED | 699 | 37.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 538; of those, 475 hold (88.3%). Runtime half executed on the bootstrap for 161 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 534; of those, 498 hold (93.3%). Runtime half executed on the bootstrap for 162 case(s).
 
-- **Vacuous** passes: 11 of 475 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **464**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 17 of 63; the other 46 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 498 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **487**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 8 of 36; the other 28 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 695.
+UNSUPPORTED by reason: bootstrap-unsupported 699.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 311 · FAIL 59 · UNSUPPORTED 504. Twin holds 311 (non-vacuous 303). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 334 · FAIL 32 · UNSUPPORTED 508. Twin holds 334 (non-vacuous 326). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 1 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
 NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
@@ -111,7 +111,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 24 | · | 1 | · | 2 | 9 | · | · |
-| control-flow | 76 | 36 | · | 1 | · | 24 | 15 | · | · |
+| control-flow | 76 | 37 | · | · | · | 24 | 15 | · | · |
 | defer | 51 | 24 | · | 2 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -126,7 +126,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
 | foreign | 16 | 2 | · | · | · | 7 | 7 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
-| forms | 66 | 14 | · | 2 | · | 49 | 1 | · | · |
+| forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 68 | 28 | · | · | · | 22 | 18 | · | · |
@@ -134,14 +134,14 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | loop | 8 | 1 | · | 1 | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 30 | · | · | · | 40 | 19 | · | · |
-| match-block | 22 | 4 | · | 3 | · | 6 | 9 | · | · |
-| match-codes | 25 | 5 | · | 9 | · | · | 11 | · | · |
+| match-block | 22 | 6 | · | · | · | 6 | 10 | · | · |
+| match-codes | 25 | 12 | · | 2 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 46 | 16 | · | 3 | · | 12 | 15 | · | · |
+| match-leave | 46 | 17 | · | 2 | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 23 | · | 3 | · | 8 | 11 | · | · |
+| module | 45 | 24 | · | 2 | · | 8 | 11 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -153,11 +153,11 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
 | reactive | 127 | 50 | · | 5 | · | 44 | 28 | · | · |
-| refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
+| refinement | 57 | 9 | · | · | · | 23 | 25 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 91 | 10 | · | 2 | · | 17 | 62 | · | · |
+| server-db | 91 | 11 | · | 1 | · | 17 | 62 | · | · |
 | server-fn | 27 | 8 | · | 4 | · | 7 | 8 | · | · |
 | sql | 20 | 3 | · | 1 | · | 9 | 7 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (63)
+### FAIL (36)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `when` (other statements at logic-block level are not in the bootstrap)
@@ -200,8 +200,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `condition/given-presence-deprecated-arm` (twin · parse-reject)
   - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `control-flow/ctrl-003-extend-past-else-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-CTRL-001
 - `defer/control-flow-inner-loop-ok` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-PARSE-EXPECTED: expected `:`, found `(`
@@ -225,12 +223,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `error/error-008-neg` (twin · parse-reject)
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `forms/derived-refinement-type-accepted` (twin · parse-reject)
-  - E-PARSE-TAG: unexpected `(` in the tag `<doubled`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-CLOSER: `</program>` closes `<doubled>`
-- `forms/validator-applies-typed-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-VALIDATOR-DEAD
 - `linear/lin-001-never-consumed-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -240,52 +232,9 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `loop/loop-002-continue-outside` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `continue`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `match-block/member-access-complete-clean` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-block/member-access-nonexhaustive` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-block/member-access-subset-dead-arm` (twin · parse-reject; not in the bootstrap: E-MATCH-SUBSET-DEAD-ARM)
-  - missing E-MATCH-SUBSET-DEAD-ARM
-  - E-PARSE-EXPECTED: expected `:`, found `(`
-  - E-PARSE-TYPE: expected a type, found `(`
-  - E-PARSE-TYPE: expected a field name, found `)`
-- `match-codes/e-match-arm-markup-in-value-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-codes/e-match-arm-markup-in-value-pos` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-codes/e-syntax-010-else-last-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-codes/e-syntax-010-else-not-last-pos` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
 - `match-codes/e-syntax-011-guard-clause-pos` (twin · parse-reject)
   - missing E-SYNTAX-011
-  - E-PARSE-EXPECTED: expected `:`, found `,`
-  - E-PARSE-TYPE: expected a type, found `,`
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-syntax-011-plain-pattern-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `,`
-  - E-PARSE-TYPE: expected a type, found `,`
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-type-024-enum-subject-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
-- `match-codes/e-type-024-struct-subject-pos` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `:`, found `}`
-  - E-PARSE-TYPE: expected a type, found `}`
-  - E-PARSE-EXPECTED: expected `}`, found ``
+  - E-PARSE-ARM: alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
 - `match-leave/given-arm-body-lowered` (twin · parse-reject)
@@ -295,14 +244,10 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `match-leave/given-arm-legacy-arrow-keeps-body` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `out`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `match-leave/given-arm-malformed-heads-in-assignment-match-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-STRUCT-CONTEXT
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
-- `module/e-import-002-circular-import-reject` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
@@ -315,69 +260,12 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `reactive/write-not-in-logic-context-pos` (twin · parse-reject)
   - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `refinement/base-type-literal-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-001)
-  - missing E-CONTRACT-001
-  - severity: E-CONTRACT-001 did not fire (expected error)
-  - E-PARSE-TAG: unexpected `(` in the tag `<count`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-CLOSER: `</program>` closes `<count>`
-- `refinement/const-reject-rt` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `=`, found `(`
-- `refinement/external-ref-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-003)
-  - missing E-CONTRACT-003
-  - severity: E-CONTRACT-003 did not fire (expected error)
-  - E-PARSE-TAG: unexpected `(` in the tag `<hp`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-CLOSER: `</program>` closes `<hp>`
-- `refinement/literal-violation-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-001)
-  - missing E-CONTRACT-001
-  - severity: E-CONTRACT-001 did not fire (expected error)
-  - E-PARSE-TAG: unexpected `(` in the tag `<amount`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-CLOSER: `</program>` closes `<amount>`
-- `refinement/string-shape-literal-violation-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-001)
-  - missing E-CONTRACT-001
-  - severity: E-CONTRACT-001 did not fire (expected error)
-  - E-PARSE-TAG: unexpected `(` in the tag `<email`
-  - E-PARSE-TAG: unexpected `)` in the tag `<email`
-  - E-PARSE-TAG: unexpected `=` in the tag `<email`
-- `refinement/struct-field-reject-rt` (twin · parse-reject)
-  - E-PARSE-TYPE: expected a field name, found `(`
-  - E-PARSE-EXPECTED: expected `:`, found `)`
-  - E-PARSE-TYPE: expected a type, found `)`
-- `refinement/tail-after-predicate-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
-  - missing E-CONTRACT-002
-  - severity: E-CONTRACT-002 did not fire (expected error)
-  - E-PARSE-EXPECTED: expected `=`, found `(`
-  - E-PARSE-EXPR: expected an expression, found `>`
-  - E-PARSE-EXPECTED: expected `)`, found `0`
-- `refinement/union-shaped-member-accept-neg` (twin · parse-reject)
-  - E-PARSE-TAG: unexpected `(` in the tag `<d`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-TAG: unexpected `(` in the tag `<t`
-- `refinement/union-unjudgeable-member-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
-  - missing E-CONTRACT-002
-  - E-PARSE-TAG: unexpected `(` in the tag `<m`
-  - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
-  - E-PARSE-CLOSER: `</program>` closes `<m>`
-- `refinement/unknown-shape-boundary-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
-  - missing E-CONTRACT-002
-  - severity: E-CONTRACT-002 did not fire (expected error)
-  - E-PARSE-EXPECTED: expected `=`, found `(`
-- `refinement/unknown-shape-pos` (twin · parse-reject; not in the bootstrap: E-CONTRACT-002)
-  - missing E-CONTRACT-002
-  - severity: E-CONTRACT-002 did not fire (expected error)
-  - E-PARSE-TAG: unexpected `(` in the tag `<s`
-  - E-PARSE-TAG: unexpected `)` in the tag `<s`
-  - E-PARSE-TAG: unexpected `=` in the tag `<s`
 - `server-db/async-fn-escapes-handler-destructured-scheduler-neg` (twin · parse-reject; not in the bootstrap: E-ASYNC-FN-ESCAPES-AS-VALUE)
   - missing E-ASYNC-FN-ESCAPES-AS-VALUE
   - severity: E-ASYNC-FN-ESCAPES-AS-VALUE did not fire (expected error)
   - E-PARSE-LOCAL: expected a name after `let` / `const`
   - E-PARSE-EXPECTED: expected `=`, found `setTimeout`
   - E-PARSE-TRAILING: unexpected `=` after the expression
-- `server-db/inline-handler-server-call-condition-runtime` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-ERROR-002)
 - `server-fn/branch-declared-server-fn-routes-to-server` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"COMPUTED-IN-THE-BODY"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -407,7 +295,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (475)
+### PASS / CODES-ONLY (498)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -488,6 +376,7 @@ none
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
 - `control-flow/ctrl-002-orphan-else-if-program-pos` — PASS
 - `control-flow/ctrl-003-extend-past-else-neg` — PASS · TWIN
+- `control-flow/ctrl-003-extend-past-else-pos` — PASS · TWIN
 - `control-flow/ctrl-003-extend-past-else-program-pos` — PASS (also emitted, unasserted: E-CTRL-001)
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — PASS · TWIN
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — PASS · TWIN
@@ -659,6 +548,7 @@ none
 - `forms/surface-top-level-validated-neg` — PASS
 - `forms/validator-applies-min-on-string-reject` — PASS · TWIN
 - `forms/validator-applies-pattern-on-number-reject` — PASS · TWIN
+- `forms/validator-applies-typed-clean` — PASS · TWIN
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
 - `hostmethod/substring-match-typed` — PASS · TWIN
@@ -722,6 +612,8 @@ none
 - `markup-handler/s457-unquoted-assign-read-whole` — PASS · TWIN
 - `markup-handler/s457-unquoted-operator-non-handler-neg` — PASS · TWIN
 - `markup-handler/s457-user-function-named-event-pos` — PASS · TWIN
+- `match-block/member-access-complete-clean` — PASS · TWIN
+- `match-block/member-access-nonexhaustive` — PASS · TWIN
 - `match-block/s474-arm-tail-value-after-statement` — PASS
 - `match-block/s474-one-expr-brace-arm-value-pos` — PASS
 - `match-block/s474-one-expr-brace-statement-arm-needs-semicolon` — PASS
@@ -729,6 +621,13 @@ none
 - `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-012-tnot-missing-not-arm-pos` — PASS · TWIN
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
+- `match-codes/e-match-arm-markup-in-value-neg` — PASS · TWIN
+- `match-codes/e-match-arm-markup-in-value-pos` — PASS · TWIN
+- `match-codes/e-syntax-010-else-last-neg` — PASS · TWIN
+- `match-codes/e-syntax-010-else-not-last-pos` — PASS · TWIN
+- `match-codes/e-syntax-011-plain-pattern-neg` — PASS · TWIN
+- `match-codes/e-type-024-enum-subject-neg` — PASS · TWIN
+- `match-codes/e-type-024-struct-subject-pos` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
 - `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -743,6 +642,7 @@ none
 - `match-leave/dpa068-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — PASS · TWIN
 - `match-leave/stmt-arm-braced-break-continue-loop` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -753,6 +653,7 @@ none
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
 - `module/e-import-001-export-inside-logic-clean` — PASS · TWIN · VACUOUS
 - `module/e-import-002-acyclic-import-clean` — PASS · TWIN
+- `module/e-import-002-circular-import-reject` — PASS · TWIN
 - `module/e-import-002-reexport-cycle-named-reject` — PASS · TWIN
 - `module/e-import-002-reexport-cycle-star-reject` — PASS · TWIN
 - `module/e-import-002-reexport-import-cycle-mixed-reject` — PASS · TWIN
@@ -845,6 +746,16 @@ none
 - `reactive/throttle-leading` — PASS · TWIN
 - `reactive/throttle-trailing-commit` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
+- `refinement/base-type-literal-pos` — PASS · TWIN
+- `refinement/external-ref-pos` — PASS · TWIN
+- `refinement/literal-violation-pos` — PASS · TWIN
+- `refinement/malformed-predicate-param-pos` — PASS · TWIN
+- `refinement/string-shape-literal-violation-pos` — PASS · TWIN
+- `refinement/tail-after-predicate-pos` — PASS · TWIN
+- `refinement/union-unjudgeable-member-pos` — PASS · TWIN
+- `refinement/unknown-shape-boundary-pos` — PASS · TWIN
+- `refinement/unknown-shape-pos` — PASS · TWIN
+- `server-db/inline-handler-server-call-condition-runtime` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/sql-aggregate-group-rt-twin` — PASS
 - `server-db/sql-all-array-shape-rt-twin` — PASS
 - `server-db/sql-delete-reflects-rt-twin` — PASS
@@ -885,7 +796,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (695)
+### UNSUPPORTED (699)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1088,7 +999,7 @@ none
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `f` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `error/handler-exhaustive-neg` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
-- `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-guard-in-arrow-rt` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
 - `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1125,22 +1036,23 @@ none
 - `foreign/foreign-slice-sealed-crossings-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `foreign/foreign-slice-unparseable-in-block-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `foreign/foreign-slice-unparseable-neg` — twin · bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
-- `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-nested-struct-with-slot-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-not-imported` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-omit-invalid-field` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-omit-valid-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-onsubmit-signature` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-pick-invalid-field` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-pick-omit-conflict` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-pick-valid-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-slot-unknown` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-submit-collects-values` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-nested-struct-with-slot-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-not-imported` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-omit-invalid-field` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-omit-valid-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-onsubmit-signature` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-pick-invalid-field` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-pick-omit-conflict` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-pick-valid-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-slot-unknown` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-submit-collects-values` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-type-not-struct` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-typing-errors` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-valid-enables-submit` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `form-for/formfor-typing-errors` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-valid-enables-submit` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `forms/derived-refinement-type-accepted` — twin · bootstrap-unsupported: the refinement `number(>=0)` on `@doubled` whose value is not a literal — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a runtime check for every boundary-z
 - `forms/msgchain-l2-template-fn-reject` — bootstrap-unsupported: `anonymous fn expression` (§48.2.1) is not in the bootstrap yet; it is refused here by name rather than misread — declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callba
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1198,6 +1110,7 @@ none
 - `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/inline-markup-match` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
+- `match-block/member-access-subset-dead-arm` — twin · bootstrap-unsupported: the validator `oneOf` on the field `role` is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at run time) — an enum subset (§53.1
 - `match-block/payload-bind` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/phase-arm-swap` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/round-trip` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1410,44 +1323,46 @@ none
 - `reactive/server-fn-ambient-identity-clean` — twin · bootstrap-unsupported: `@currentUser` (§52.15.1) is not in the bootstrap yet; it is refused here by name rather than misread — read the session in a server function and pass the value in
 - `reactive/server-fn-authority-wholly-server-error` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/tape-append-on-returned-tape-rt` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `refinement/array-literal-element-pos` — twin · bootstrap-unsupported: `<links>` has an own value (or an own type) AND attributes — what `@links` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/block-arrow-refined-local-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
-- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/array-literal-element-pos` — twin · bootstrap-unsupported: the refinement `string(url)[]` inside the type of `<links>` — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a runtime check for every boundary-zone assignme
+- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
+- `refinement/block-arrow-refined-local-pos` — twin · bootstrap-unsupported: the refinement `number(>0)` on the `let` local `k` — each later assignment to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a 
+- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0 && <10000)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
+- `refinement/const-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` on the local `link` whose value is not a literal — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a runtime check for every boun
 - `refinement/enum-subset-param-accept-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/enum-subset-param-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/inhabit-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/literal-call-arg-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/local-write-forms-reject-rt` — twin · bootstrap-unsupported: `--` is not in bootstrap slice M2 — write `x = x - 1`
-- `refinement/malformed-predicate-param-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/nested-fn-param-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/reassign-cell-accept-neg` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/reassign-cell-reject-rt` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/reassign-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/struct-field-literal-pos` — twin · bootstrap-unsupported: member access `.href` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/url-executable-scheme-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
-- `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `schema-for/error-invalid-call-context` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-nested-struct-no-fk` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-no-sql-mapping` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-no-sql-mapping-canonical-array` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-omit-invalid-field` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-pick-invalid-field` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-pick-omit-conflict` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `refinement/inhabit-rt` — twin · bootstrap-unsupported: the refinement `number(>0 && <10000)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
+- `refinement/literal-call-arg-neg` — twin · bootstrap-unsupported: the refinement `number(>=0 && <=100)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
+- `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: the refinement `number(>=0 && <=100)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
+- `refinement/local-write-forms-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
+- `refinement/nested-fn-param-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
+- `refinement/reassign-cell-accept-neg` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
+- `refinement/reassign-cell-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
+- `refinement/reassign-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
+- `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: the refinement `number(min(0) && max(100))` uses the call form `min(…)` inside a refinement's parentheses (§53.6.1 spells the shared validator vocabulary `base.min(…)`) — not in the bootstrap (INTERIM
+- `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: the refinement `string(eq("yes"))` uses the call form `eq(…)` inside a refinement's parentheses (§53.6.1 spells the shared validator vocabulary `base.eq(…)`) — not in the bootstrap (INTERIM)
+- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: the refinement `string(email)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches 
+- `refinement/struct-field-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
+- `refinement/struct-field-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
+- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
+- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
+- `refinement/union-shaped-member-accept-neg` — twin · bootstrap-unsupported: the union type `number(>0) | date` is not in the bootstrap — its type system has `T | not` only (§66.2.4 admits any union here, S451)
+- `refinement/url-executable-scheme-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` on `@link` — whether the literal `"javascript:alert(1)"` satisfies it is not decided by the bootstrap (the normative `url` predicate is the WHATWG URL parser with the §5.2
+- `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
+- `schema-for/error-invalid-call-context` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/error-nested-struct-no-fk` — twin · bootstrap-unsupported: `req` on the field `street` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT a
+- `schema-for/error-no-sql-mapping` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `schema-for/error-no-sql-mapping-canonical-array` — twin · bootstrap-unsupported: `req` on the field `title` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/error-omit-invalid-field` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/error-pick-invalid-field` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/error-pick-omit-conflict` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
 - `schema-for/error-type-not-struct` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/error-variant-payload-enum` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/happy-canonical-expansion` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/happy-enum-lowering` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/happy-multi-table-composition` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/happy-nullable-field` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/invalid-call-context-attr` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `schema-for/invalid-call-context-handler` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `schema-for/error-variant-payload-enum` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `schema-for/happy-canonical-expansion` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/happy-enum-lowering` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `schema-for/happy-multi-table-composition` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/happy-nullable-field` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
+- `schema-for/invalid-call-context-attr` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
+- `schema-for/invalid-call-context-handler` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
 - `schema/clean-pos` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/schema-001-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/schema-002-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
