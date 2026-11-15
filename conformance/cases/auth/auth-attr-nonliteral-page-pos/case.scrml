@@ -1,4 +1,4 @@
-${ const mode = "required" }
+${ const mode = "required"; }
 <program>
 <page auth=${mode}>
 <p>page</p>

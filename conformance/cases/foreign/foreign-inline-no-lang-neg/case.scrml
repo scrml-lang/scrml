@@ -1,6 +1,6 @@
 ${
   export fn compute() {
-    const out = _={ 1 + 1 }=
-    return out
+    const out = _={ 1 + 1 }=;
+    return out;
   }
 }

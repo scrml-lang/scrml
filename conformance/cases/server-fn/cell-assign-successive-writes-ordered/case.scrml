@@ -2,7 +2,7 @@ ${
     <out> : number = 0
     <final> : number = -1
     server fn double(n: number) -> number {
-        return n * 2
+        return n * 2;
     }
     function seq() {
         @out = double(1) !{ .Transport(_) :> return };

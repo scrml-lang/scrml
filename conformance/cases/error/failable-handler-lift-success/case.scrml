@@ -25,19 +25,19 @@ ${
         loadItem("missing") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
-        }
+        };
     }
     function handleSlow() {
         loadItem("slow") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
-        }
+        };
     }
     function handleOk() {
         let result = loadItem("ok") !{
-            .NotFound(mid) :> { @phase = Phase.Missing(mid); return },
-            .Timeout :> { @phase = Phase.TimedOut; return }
-        }
+            .NotFound(mid) :> { @phase = Phase.Missing(mid); return; },
+            .Timeout :> { @phase = Phase.TimedOut; return; }
+        };
         @phase = Phase.Loaded(result);
     }
 }
