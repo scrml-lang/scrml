@@ -87,24 +87,76 @@ EXIT_CODE=0
 # S468 (s468-hook-sharding): same file set, run across parallel processes by scripts/test-sharded.ts
 # (see pre-commit). SCRML_HOOK_SHARDS=1 keeps the original single-process command.
 if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
+  SHARDED=0
   TEST_OUTPUT=$(bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
-  COUNTS_LINE="$TEST_OUTPUT"
 else
+  SHARDED=1
   TEST_OUTPUT=$(bun scripts/test-sharded.ts compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
-  # The runner prints per-shard counts first; the overall numbers are on its TOTAL line.
-  COUNTS_LINE=$(echo "$TEST_OUTPUT" | grep -E '^(PARTIAL )?TOTAL' || true)
 fi
-
-PASS_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ pass' | head -1)
-FAIL_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ fail' | head -1)
-SKIP_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ skip' | head -1)
-echo "Tests: $PASS_COUNT, $FAIL_COUNT, $SKIP_COUNT"
-
+# S478 (s478-hook-shards, g-hook-sharded-prepush-exit-s477) — the VERDICT. Until S478 this step printed the
+# pass/fail counts and the `(fail)` lines and nothing else, so a run that failed for any OTHER reason read as
+# "exit 1, 0 failures": an unhandled error outside any test (bun prints "# Unhandled error between tests",
+# " 0 fail", " 1 error", exit 1 — no `(fail)` line), a shard killed at the memory ceiling, by a signal or by its
+# timeout, an integrity error. A runner that died before its TOTAL line printed no counts at all. Now:
+#   - the full output is kept on disk (path printed); a failing run prints the runner's RESULT line (it names
+#     every reason), every `(fail)` / `(error)` / "# Unhandled error" line, and — with no RESULT line — the last
+#     40 lines;
+#   - a run that exits 0 but printed no summary (TOTAL for the runner, "Ran N tests" for bun), or whose RESULT
+#     line says FAIL, is BLOCKED: an exit 0 with no evidence of a finished run is a fault, never a pass.
+# VERSION SKEW: this hook runs from the main checkout against the pushed worktree's runner. A runner from before
+# S478 prints no RESULT line and no error count; it still gets the counts, the fail lines and the last 40 lines.
+# (The block between the BEGIN/END markers is run verbatim by hook-prepush-suite-verdict-s478.test.js.)
+# BEGIN suite-verdict
+SUITE_BLOCK=0
+SUITE_LOG="${XDG_CACHE_HOME:-$HOME/.cache}/scrml/pre-push-suite-last.log"
+mkdir -p "$(dirname "$SUITE_LOG")" 2>/dev/null || true
+printf '%s\n' "$TEST_OUTPUT" > "$SUITE_LOG" 2>/dev/null || SUITE_LOG="(could not be written)"
+if [ "$SHARDED" = "1" ]; then
+  # The runner prints per-shard counts first; the overall numbers are on its TOTAL line.
+  FINISHED=$(printf '%s\n' "$TEST_OUTPUT" | grep -E '^(PARTIAL )?TOTAL' | tail -1 || true)
+  RESULT_LINE=$(printf '%s\n' "$TEST_OUTPUT" | grep -E '^RESULT: ' | tail -1 || true)
+  PASS_COUNT=$(printf '%s\n' "$FINISHED" | grep -oP '\d+ pass' | head -1 || true)
+  FAIL_COUNT=$(printf '%s\n' "$FINISHED" | grep -oP '\d+ fail' | head -1 || true)
+  ERROR_COUNT=$(printf '%s\n' "$FINISHED" | grep -oP '\d+ error' | head -1 || true)
+  SKIP_COUNT=$(printf '%s\n' "$FINISHED" | grep -oP '\d+ skip' | head -1 || true)
+else
+  # bun's own summary lines (" N pass" alone on a line) — not the first "N pass" anywhere in the tests' output.
+  RESULT_LINE=""
+  FINISHED=$(printf '%s\n' "$TEST_OUTPUT" | grep -E '^Ran [0-9]+ tests? across' | tail -1 || true)
+  PASS_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -oP '^\s*\K\d+ pass$' | tail -1 || true)
+  FAIL_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -oP '^\s*\K\d+ fail$' | tail -1 || true)
+  ERROR_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -oP '^\s*\K\d+ error(?=s?$)' | tail -1 || true)
+  SKIP_COUNT=$(printf '%s\n' "$TEST_OUTPUT" | grep -oP '^\s*\K\d+ skip$' | tail -1 || true)
+fi
+echo "Tests: ${PASS_COUNT:-? pass}, ${FAIL_COUNT:-? fail}, ${ERROR_COUNT:-0 error}, ${SKIP_COUNT:-? skip}"
 if [ "$EXIT_CODE" -ne 0 ]; then
-    echo ""
-    echo "❌ Tests failed — push blocked."
-    echo "$TEST_OUTPUT" | grep "^(fail)" | head -20
-    exit 1
+  SUITE_BLOCK=1
+  echo ""
+  echo "❌ Tests failed (exit $EXIT_CODE) — push blocked. Full output: $SUITE_LOG"
+  if [ -n "$RESULT_LINE" ]; then echo "$RESULT_LINE"; fi
+  if [ -z "$FINISHED" ]; then
+    echo "   No test summary was printed: the run did not finish (a runner crash, a kill or an interrupt) — NOT a test result."
+  fi
+  printf '%s\n' "$TEST_OUTPUT" | grep -E '^(\[s[0-9]+\] )?\((fail|error)\) |^# Unhandled error' | head -20 || true
+  if [ -z "$RESULT_LINE" ]; then
+    echo "--- last 40 lines ---"
+    printf '%s\n' "$TEST_OUTPUT" | tail -40
+  fi
+elif [ -z "$FINISHED" ] || printf '%s\n' "$RESULT_LINE" | grep -q '^RESULT: FAIL'; then
+  SUITE_BLOCK=1
+  echo ""
+  if [ -z "$FINISHED" ]; then
+    echo "❌ The test run exited 0 but printed no test summary — a fault, never a pass. Push blocked. Full output: $SUITE_LOG"
+  else
+    echo "❌ The test run exited 0 but its verdict is FAIL — a fault, never a pass. Push blocked. Full output: $SUITE_LOG"
+    echo "$RESULT_LINE"
+  fi
+  echo "--- last 40 lines ---"
+  printf '%s\n' "$TEST_OUTPUT" | tail -40
+fi
+# END suite-verdict
+if [ "$SUITE_BLOCK" = "1" ]; then
+  exit 1
 fi
 else
 echo "--- test suite SKIPPED (new-ref push; cloud \`gate\` on the PR is authority — S254) ---"
