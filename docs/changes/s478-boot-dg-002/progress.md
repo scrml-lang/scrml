@@ -109,3 +109,8 @@ rejecting. Slices on the rebased tree: 7332 tests, 0 fail.
 ## Residual
 501 E-DG-002 sites remain in slice tests that do not assert a clean diagnostic list (they pass); not
 touched (the brief's scope is the failing fixtures).
+
+## Fix round 1 (review ~/.cache/scrml/review/s478-1871/review.md)
+- MED-1: `compiler/self-host-v2/slice-m4/dg-002-s478.test.js` (24 tests): fires as a Warning (compile not failed) for unread, write-only (`@n = 5`, a writing fn, `reset(@n)`), unread derived, `n_`; silent for `_`, exported, persist, reset-on, bind:value/checked, the `#{}` bridge, `<*f/>`, and a read in interpolation / attr / if= / handler / derived / fn / uncalled fn / effect deps=; not judged beside an Error. Red check (local, not committed): wiring disabled → 8 fail; Error gate and `_`/export/persist exemptions removed → 4 fail.
+- LOW-1: effect.test.js E-LIFECYCLE-007 `deps=[n]` row reads `@n` in main so `let <n>` is kept (asserted).
+- LOW-3: gap g-boot-dg-002-entry-program-cells-only-s478 (INTERIM). LOW-4: gap g-conf-notcodeprefixes-e-is-not-error-s478.

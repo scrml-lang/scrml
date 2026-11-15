@@ -272,7 +272,9 @@ describe("§6.7.4 — codes", () => {
 
   test("E-LIFECYCLE-007 — an entry that is not a declared mutable cell: undeclared, non-`@`, locked, derived", () => {
     expect(codes(P(`${D}\n    <effect deps=[@nope]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
-    expect(codes(P(`${D}\n    <effect deps=[n]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
+    // a DECLARED cell named without `@` (s478 review LOW-1: the main reads `@n`, so the scaffold keeps `let <n>`)
+    expect(codes(P(`${D}\n    <effect deps=[n]${body}`, `        <p>\${@n}</p>`))).toEqual(["E-LIFECYCLE-007"]);
+    expect(P(`${D}\n    <effect deps=[n]${body}`, `        <p>\${@n}</p>`)).toContain("let <n:int=0/>");
     expect(codes(P(`${D}\n    <effect deps=[@step]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
     expect(codes(P(`${D}\n    <effect deps=[@dbl]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
     expect(codes(P(`${D}\n    <effect deps=[@n, @dbl]${body}`, ""))).toEqual(["E-LIFECYCLE-007"]);
