@@ -23,9 +23,11 @@ const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\
 // request-surface-s475.test.js); its non-body shapes are refused by their own codes (below).
 // s476: `page` left it — `<page>` in `<program>` (§40.8) is built (page-s476.test.js); a `<page>`
 // inside markup, as here, is E-STRUCTURAL-ELEMENT-MISPLACED (§4.15) — still never an HTML element.
+// s478: `onIdle` left it — `<onIdle>` at an engine's root is built (durations-s478.test.js); in
+// markup, as here, it is E-IDLE-MISPLACED (§51.0.R, §4.15 "the element's specific misplacement code").
 const STRUCTURAL = [
   "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
-  "engine", "onTransition", "onTimeout", "onIdle", "match", "empty", "render", "outlet", "column",
+  "engine", "onTransition", "onTimeout", "match", "empty", "render", "outlet", "column",
   "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
 ];
@@ -39,6 +41,11 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(d[0].message).toContain("structural element");
     });
   }
+  test("s478: an `<onIdle>` inside markup is never an HTML element — E-IDLE-MISPLACED (§51.0.R)", () => {
+    const d = run(inMain(`<onIdle x="1"><p>inside</p></onIdle>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-IDLE-MISPLACED"]);
+    expect(d[0].message).toContain("`<onIdle>`");
+  });
   test("s476: a `<page>` inside markup is never an HTML element — E-STRUCTURAL-ELEMENT-MISPLACED (§4.15)", () => {
     const d = run(inMain(`<page x="1"><p>inside</p></page>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
