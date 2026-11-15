@@ -402,3 +402,38 @@ describe("S478 F4 — the code-only fence is linear in the text", () => {
     expect(big).toBeLessThan(small * 24 + 150);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S478 fix round 1 — the library emitter's own `fn` → `function` regexes (emit-library.ts) were
+// not fenced either: on base a library `"a pure fn body"` shipped as `"a pure function body"`, and
+// `// call fn` + newline + `export const k = 2` became ONE comment line (`\s+` crossed the
+// newline) — `k` silently vanished from the module. They now act in code only.
+// ---------------------------------------------------------------------------
+describe("S478 — library mode `fn` → `function` acts in code only", () => {
+  function libJs(body) {
+    const root = mkdtempSync(join(tmpdir(), "s478-libfn-"));
+    try {
+      const file = join(root, "m.scrml");
+      writeFileSync(file, `\${\n${body}\n}\n`);
+      const outDir = join(root, "out");
+      const r = compileScrml({ inputFiles: [file], outputDir: outDir, mode: "library", write: true, log: () => {} });
+      const errors = (r.errors ?? []).filter((e) => e && e.severity !== "warning" && !/^[WI]-/.test(e.code ?? ""));
+      expect(errors.map((e) => e.code)).toEqual([]);
+      return readFileSync(join(outDir, readdirSync(outDir).find((f) => f.endsWith(".js"))), "utf8");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  test("a string / template literal keeps its `fn`", () => {
+    const js = libJs('export const s = "a pure fn body"\nexport const t = `fn x`');
+    expect(js).toContain('export const s = "a pure fn body"');
+    expect(js).toContain("export const t = `fn x`");
+  });
+
+  test("a line comment ending in `fn` does not swallow the next declaration", () => {
+    const js = libJs("const u = 1\n// call fn\nexport const k = 2\n// Dont fn\nexport const m = u");
+    expect(js).toContain("// call fn\nexport const k = 2");
+    expect(js).toContain("// Dont fn\nexport const m = u");
+  });
+});

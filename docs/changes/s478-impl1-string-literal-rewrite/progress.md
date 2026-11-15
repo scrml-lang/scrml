@@ -56,3 +56,36 @@ rewriteServerReactiveRefs, rewriteResetCalls, rewriteReactiveAssign, rewriteTemp
 ## Log
 - start 314bad402; WIP commits 35dd9e776, 05aa0f2e5, dc43195d7.
 - Hook: 54658 pass / 0 fail (one earlier run timed out on the single-file shard under machine load avg 22).
+
+## Fix round 1 (review of e31a3a762)
+- F1 FIXED — library mode (`emit-library.ts`, verbatim block + region paths) ran
+  `rewriteIsOperator(rewriteNotKeyword(line))` per line; the line closing a multi-line template / block
+  comment had its closer read as an opener. Both paths now run the passes over the whole text (the per-line
+  split only skipped `//` lines; the fence handles comments itself). `rewriteIsVariantWithOperand` blanked
+  comments in its OUTPUT, which over a whole block would have erased every doc comment: it now blanks only
+  the copy it reads (operand taken from it, as before) and splices into the original. Also fixes the
+  pre-existing base failures on the same path (`is not` / `is some` after a multi-line closer; base
+  rewrote `is .A` inside a multi-line block comment's second line).
+- F4 FIXED — `rewriteCodeSegments` re-built `ctx + segment` at every `/` and `regexAllowedAfter` walked
+  back over a whole parenthesised inside after every `)`. Now a `CodeContext` (chars appended once, `)`→`(`
+  recorded on the way in); `regexAllowedAfter` keeps one definition (`regexAllowedAfterIn`). 300 KB of
+  `let q = (a + b) / c / 2 + f(x) / 3; s = "fn"` lines, IsOperator+Fn+EnumVariantAccess: base 0.7 ms,
+  e31a3a762 11275 ms, now 129 ms (18 KB 14 ms, 72 KB 32 ms). Nested `((x) / fn) / fn …` depth 20000:
+  2485 ms → 17 ms. Pre-existing and unchanged in kind: `rewriteIsVariantWithOperand` re-masks per
+  `<operand> is .V` match (base 52.6 s on 300 KB of such lines; now 16.5 s because the mask is linear).
+- F2 LEFT — `}` before `/` stays a regex opener: `{…} / n` (object-literal division) is always NaN, while
+  `}` closing a block before a statement-position regex is real code, and the same lean is in the
+  shared `regexAllowedAfter` the tokenizer invariant pins. A misread is bounded to the line (an
+  unterminated regex returns to code at `\n`).
+- F3 LEFT — an unpaired `'` cannot reach these passes from valid source: markup prose goes to HTML, and
+  comments / strings / templates are fenced before the apostrophe is seen. Probed: markup prose with
+  `Don't do fn here, x is .A`, `// Don't` and `/* Don't */` lines, `"it's fn"`, `` `don't ${u}` `` — all
+  verbatim. Markup inside a library `${}` block is refused on base and head alike (E-CODEGEN-INVALID-LOGIC).
+- ALSO FIXED (same class, found while probing F3) — emit-library's own `\bfn\s+X` → `function X` regexes
+  were unfenced: library `"a pure fn body"` shipped as `"a pure function body"`, and `// call fn` + newline
+  + `export const k = 2` became one comment line, silently dropping `k` from the module (base too). Now
+  `replaceInCode`.
+- Emit differential base 314bad402 vs round-1 head, samples + conformance: 2780 sources, 7966 artifacts,
+  compile/diagnostic/syntax deltas 0; 134 artifact diffs, all the embedded compiler-root path (24 bytes,
+  the two checkout paths' length difference) — 0 after path normalization. Bootstrap bundle (29 chunks)
+  base vs head: byte-identical.

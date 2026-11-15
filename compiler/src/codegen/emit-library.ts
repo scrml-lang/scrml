@@ -8,6 +8,7 @@ import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator, rewriteVariantTagReads } from "./rewrite.ts";
 import { lowerEqualityOps } from "./string-equality-lowering.ts";
+import { replaceInCode } from "./code-segments.ts";
 import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
@@ -1907,8 +1908,10 @@ export function generateLibraryJs(
           // `export`, so no dangling `export` is left); enum runtime reps are
           // emitted up top by emitEnumRuntimeReps, struct/alias are pure types.
           blockText = stripScrmlTypeDecls(blockText);
-          // Convert fn → function
-          blockText = blockText.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          // Convert fn → function — in CODE only (S478 fix round 1, `replaceInCode`): `fn` in a
+          // string or template text is the author's text, and a `// … fn` line comment's `\s+`
+          // must not reach across the newline and comment out the next line's declaration.
+          blockText = replaceInCode(blockText, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip scrml type annotations from the emitted fn signatures.
           blockText = cleanFnSignatures(blockText);
           // Strip inline ^{} meta
@@ -2127,20 +2130,21 @@ export function generateLibraryJs(
           // §21.2/§21.5 — remove scrml `type` decls incl. any leading `export`.
           text = stripScrmlTypeDecls(text);
           // Convert `fn name` to `function name` for complete fn declarations in gaps
-          text = text.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          // S478 fix round 1 — code only (`replaceInCode`), as the verbatim-block path above.
+          text = replaceInCode(text, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip bare `fn` keywords that are fragments (fn keyword without a name —
           // the name is in the next node's span). These are artifacts of span splitting.
-          text = text.replace(/\bfn\s*$/gm, "");
+          text = replaceInCode(text, /\bfn\s*$/gm, "");
           text = text.trim();
           if (!text) continue;
         }
 
         // For non-gap regions, also convert fn keyword
         if (!region.isGap) {
-          text = text.replace(/\bfn\s+([A-Za-z_$])/g, "function $1");
+          text = replaceInCode(text, /\bfn\s+([A-Za-z_$])/g, "function $1");
           // Strip trailing bare `fn` (artifact of overlapping AST spans —
           // the fn keyword for the next declaration leaks into this node's span)
-          text = text.replace(/\bfn\s*$/g, "").trimEnd();
+          text = replaceInCode(text, /\bfn\s*$/g, "").trimEnd();
         }
 
         // Strip scrml type annotations from emitted fn signatures (gap + non-gap).
