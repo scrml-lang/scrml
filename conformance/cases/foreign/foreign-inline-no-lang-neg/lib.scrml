@@ -1,0 +1,4 @@
+export function compute() {
+    const out = _={ 1 + 1 }=;
+    return out;
+}

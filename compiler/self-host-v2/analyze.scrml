@@ -985,6 +985,7 @@ ${
             .EnumBody(variants: vs) :> true
             .StructBody(fields: fs) :> false
             .HostBody :> false
+            .AliasBody(ty: x) :> false
         }
     }
 
@@ -993,7 +994,56 @@ ${
             .EnumBody(variants: vs) :> variantNames(vs)
             .StructBody(fields: fs) :> typeFieldNames(fs)
             .HostBody :> []
+            .AliasBody(ty: x) :> []
         }
+    }
+
+    // s478 r1 — is `td` a type alias (`type A = T`)?
+    fn aliasDecl(td: ATypeDecl) -> boolean {
+        const b: ATypeBody = td.body
+        return match b {
+            .AliasBody(ty: x) :> true
+            .EnumBody(variants: vs) :> false
+            .StructBody(fields: fs) :> false
+            .HostBody :> false
+        }
+    }
+
+    // s478 — a type alias's right-hand side (`type A = T`), else not.
+    fn aliasRhs(s: TypeStub) -> AType | not {
+        const b: ATypeBody = s.src.body
+        return match b {
+            .AliasBody(ty: x) :> x
+            .EnumBody(variants: vs) :> not
+            .StructBody(fields: fs) :> not
+            .HostBody :> not
+        }
+    }
+
+    // s478 — does alias `s`'s right-hand side reach `s` again through the
+    // aliases it names (`type A = B`, `type B = A[]`)? `seen`: the aliases
+    // already walked (by Sym id). Read on the AST, so a cycle is found before
+    // any resolution recurses into it.
+    fn aliasCycles(te: TypeEnv, s: TypeStub, at: AType, seen: int[]) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> aliasNameCycles(te, s, n, seen)
+            .TSeq(elem: e) :> aliasCycles(te, s, e, seen)
+            .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
+            .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
+        }
+    }
+
+    fn aliasNameCycles(te: TypeEnv, s: TypeStub, n: string, seen: int[]) -> boolean {
+        const m: TypeStub | not = stubNamed(te, n)
+        if (m is not) return false
+        const rhs: AType | not = aliasRhs(m)
+        if (rhs is not) return false
+        if (m.sym.id == s.sym.id) return true
+        for (const x of seen) {
+            if (x == m.sym.id) return false
+        }
+        return aliasCycles(teAt(te, m.file), s, rhs, seen.concat([m.sym.id]))
     }
 
     fn variantNames(vs: AVariant[]) -> string[] {
@@ -1844,7 +1894,19 @@ ${
         if (n == "string") return { t: Type.Str, st: st, unresolved: false }
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
-        if (s is given) return { t: Type.Named(s.sym), st: st, unresolved: false }
+        if (s is given) {
+            // s478 — a type alias is its right-hand side wherever it is written
+            // ("`type A = E` is `E`", §34 E-TYPE-ARM-QUALIFIER-MISMATCH), resolved
+            // in the alias's own file. Its diagnostics are reported once, at the
+            // declaration (typeInfos); a cyclic alias resolves to nothing.
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                if (aliasCycles(teAt(te, s.file), s, rhs, [])) return { t: Type.Str, st: st, unresolved: true }
+                const ra: RType = resolveType(teAt(te, s.file), rhs, st)
+                return { t: ra.t, st: st, unresolved: ra.unresolved }
+            }
+            return { t: Type.Named(s.sym), st: st, unresolved: false }
+        }
         const ds: Sym | not = declTypeNamed(te, n)
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
@@ -1960,9 +2022,20 @@ ${
         for (const s of stubs) {
             const fte: TypeEnv = teAt(te, s.file)
             const body: ATypeBody = s.src.body
-            const r: RTypeDef = typeDefOf(fte, s, body, st)
-            st = r.st
-            out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                // s478 — an alias defines no type of its own (no TypeDef): its
+                // right-hand side is resolved here once, for its diagnostics
+                if (aliasCycles(fte, s, rhs, [])) {
+                    st = addDiag(st, s.file, s.src.span, "E-BOOTSTRAP-UNSUPPORTED", "the type alias `" + s.name + "` names itself through its right-hand side — a recursive type alias has no type the bootstrap can build; declare a `:struct` or `:enum` (§14.2)")
+                } else {
+                    st = resolveType(fte, rhs, st).st
+                }
+            } else {
+                const r: RTypeDef = typeDefOf(fte, s, body, st)
+                st = r.st
+                out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            }
         }
         return { ts: out, st: st }
     }
@@ -1974,6 +2047,7 @@ ${
             .EnumBody(variants: vs) :> enumDefOf(te, s, vs, st)
             .StructBody(fields: fs) :> structDefOf(te, s, fs, st)
             .HostBody :> hostDefOf(s, st)
+            .AliasBody(ty: x) :> hostDefOf(s, st)   // (unreached: typeInfos builds no TypeDef for an alias)
         }
     }
 
@@ -3382,12 +3456,26 @@ ${
         for (const it of items) {
             const p: AProgram | not = programOfItem(it)
             if (p is given) {
-                st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
+                // s478: the refusal only for a nested program §4.12.2 does not
+                // already reject — one with an attribute error stops the build
+                // on that error (its one root cause), and is never built
+                const sa: AS = nestedProgramAttrDiags(file, p, st)
+                if (!errorSince(sa, st.diags.length)) st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
                 st = nestedProgramAttrDiags(file, p, st)
                 st = nestedProgramDiags(file, p.items, st)
             }
         }
         return st
+    }
+
+    // s478 — did an Error-severity diagnostic join `st` after its first `n`?
+    fn errorSince(st: AS, n: int) -> boolean {
+        let i: int = n
+        while (i < st.diags.length) {
+            if (st.diags[i].severity == Severity.Error) return true
+            i = i + 1
+        }
+        return false
     }
 
     fn nestedProgramAttrDiags(file: string, p: AProgram, st0: AS) -> AS {
@@ -8325,7 +8413,27 @@ ${
         if (nm.code == "-") return plain(not, st)
         if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
         if (isNsBinding(env.g.te.link, env.file, name)) return diagX(env, e, "E-SCOPE-001", "`" + name + "(…)` — `" + name + "` is a namespace import, not a function; call one of its exports: `" + name + ".name(…)` (§21.3)", st)
+        // s478-boot-run-locals — a function written after a body-top statement that binds
+        // `name`: §7.6 puts the local in scope there (owner ruling S478: file-scope), but a
+        // function is hoisted — callable before the statement runs, and any number of
+        // times — and the SPEC does not say how its read of a `lin` counts (§35.6 names
+        // closure EXPRESSIONS). Refused by name (INTERIM), never "not declared".
+        if (isFnCtx(env) && runLocalBefore(env.g.files, env.file, name, e.span.start)) {
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", runLocalFnReadWhy(name), st)
+        }
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    fn runLocalFnReadWhy(name: string) -> string {
+        return "a function body reads the body-top local `" + name + "` — it is file-scope (§7.6, owner ruling S478), but a function is hoisted (callable before the statement that binds it runs, and any number of times), and the bootstrap does not build a function's read of it (INTERIM). Pass the value to the function as an argument (a `lin` parameter, §35.2.1), at a body-top statement or a markup interpolation"
+    }
+
+    // Is `name` a body-top statement's top-level local in `file`, bound before `at`?
+    fn runLocalBefore(files: FileAst[], file: string, name: string, at: int) -> boolean {
+        for (const l of runLocalNames(files)) {
+            if (l.file == file && l.name == name && l.span.start < at) return true
+        }
+        return false
     }
 
     // s475 r1 — a binding of `n` nearer than the file's namespace import: resolveNameOf's own order
@@ -9923,6 +10031,9 @@ ${
             if (lr != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on an array literal: " + lr, args, st)
             const vt: string = viaText(env, m.obj)
             if (vt != "") return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on `" + exprName(m.obj) + "` — " + vt, args, st)
+            // s478 r1 (review LOW-2): a receiver holding a parse error (a refused `given` arm's
+            // match, …) is blamed on that report — "a refused head is the site's one diagnostic"
+            if (hasErrIn(envParseErrs(env), m.obj.span)) return plain(not, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
         }
         const fix: string = tapeJsFix(m.method)
@@ -14741,6 +14852,12 @@ ${
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
+        return resolveBlockEnv(env, b, st0).st
+    }
+
+    // s478-boot-run-locals: and the env the block's last statement leaves (a body-top run's
+    // top-level locals are file-scope, §7.6 — resolveNodes carries them on).
+    fn resolveBlockEnv(env: Env, b: ABlock, st0: AS) -> RB {
         let st: AS = st0
         let env2: Env = bindLocalFns(env, b)     // s477: hoisted (§48.6.4)
         for (const s of b.stmts) {
@@ -14748,7 +14865,7 @@ ${
             env2 = r.env
             st = r.st
         }
-        return resolveLocalFns(env2, b, st)      // s477: in the block's final scope
+        return { env: env2, st: resolveLocalFns(env2, b, st) }      // s477: in the block's final scope
     }
 
     fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
@@ -17119,7 +17236,14 @@ ${
         if (!inProgramCtx(env) || env.own != "") {
             return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "statements here are not in the bootstrap — only a `<program>` / `<page>` body top runs statements (§40.8)")
         }
-        let st: AS = resolveBlock(runBodyEnv(env), b, st0)
+        return resolveRunEnv(env, b, st0).st
+    }
+
+    // s478-boot-run-locals — a run resolved in the program body (resolveNodes): the env its
+    // last statement leaves — its top-level locals are in scope for the later nodes (§7.6).
+    fn resolveRunEnv(env: Env, b: ABlock, st0: AS) -> RB {
+        const r0: RB = resolveBlockEnv(runBodyEnv(env), b, st0)
+        let st: AS = r0.st
         // s478 r1 — §34 E-STMT-RETURN-OUTSIDE-FUNCTION: "Also a `return` at the top of a
         // `${ … }` logic block, or nested there only in control flow that runs in place
         // (`if` / loop bodies, `match` arms — bare or braced — and a decl-position
@@ -17128,7 +17252,7 @@ ${
         for (const sp of runReturnSpans(b)) {
             st = addDiag(st, env.file, sp, "E-STMT-RETURN-OUTSIDE-FUNCTION", "`return` outside a function — body-top statements (and a `${ … }` at a `<program>` / `<page>` body top) run in place once at mount; they are not a function body, so there is nothing to return from (§34, §40.8). Remove the `return`, or put the statements in a function")
         }
-        return loopChecks(env.file, b, st)
+        return { env: r0.env, st: loopChecks(env.file, b, st) }
     }
 
     // s478 r1 — every `return` in a body-top run that is not inside a nested
@@ -20352,8 +20476,82 @@ ${
     // =========================================================================
     fn resolveNodes(env: Env, ns: ANode[], st0: AS) -> AS {
         let st: AS = st0
-        for (const n of ns) { st = resolveNode(env, n, st) }
+        let shared: RunLocals[] = []
+        for (const n of ns) {
+            const page: int = pageIndexAt(env.g.files, env.file, n.span.start)
+            const nenv: Env = withRunLocals(env, shared, page)
+            const rb: ABlock | not = runOfNode(n)
+            if (rb is given && runShares(env)) {
+                const r: RB = resolveRunEnv(nenv, rb, st)
+                st = r.st
+                let added: LocalB[] = []
+                let i = 0
+                for (const l of r.env.locals) {
+                    if (i >= nenv.locals.length) added = added.concat([l])
+                    i = i + 1
+                }
+                shared = shared.concat([{ locals: added, page: page }])
+            } else {
+                st = resolveNode(nenv, n, st)
+            }
+        }
         return chainCheck(env, ns, st)
+    }
+
+    // s478-boot-run-locals — OWNER RULING S478 (body-top question 2, user-voice-scrml.md):
+    // "`lin` (and every local) declared at a body-top run's top level is FILE-SCOPE per §7.6,
+    // so `${ lin token = …; }` then `<p>${token}</p>` is legal". §7.6: "A variable declared
+    // with `let` or `const` at the top level of a file-level `${}` block SHALL be in scope for
+    // all subsequent `${}` blocks and markup interpolations in the same file" — SUBSEQUENT: a
+    // node before the run does not see it (E-SCOPE-001), and "Only top-level declarations
+    // within the `${}` block participate in file scope" — a local of a nested block stays
+    // block-scoped (resolveBlock drops it). A `<page>` is its own route region (§40.8): a
+    // run's local in a page is in scope for the rest of THAT page only (`page`: the index of
+    // the page, -1 = the program body outside every page); one at the program body is in
+    // scope in every later node (linPass refuses the read across the page boundary).
+    // The `lin` count over these reads is linPass's (linProgramRuns); the binding is
+    // hoisted to the scope by lower (View.Run's `hoist`).
+    type RunLocals:struct = { locals: LocalB[], page: int }
+
+    fn runShares(env: Env) -> boolean { return inProgramCtx(env) && env.own == "" }
+
+    fn runOfNode(n: ANode) -> ABlock | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Run(b: b) :> b
+            .Elem(e: x) :> not
+            .Text(text: x) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: x) :> not
+            .Css(c: x) :> not
+            .Effect(w: x) :> not
+            .Request(r: x) :> not
+            .Gather(f: x) :> not
+        }
+    }
+
+    fn withRunLocals(env: Env, shared: RunLocals[], page: int) -> Env {
+        let e: Env = env
+        for (const rl of shared) {
+            if (rl.page < 0 || rl.page == page) {
+                for (const l of rl.locals) { e = withLocal(e, l) }
+            }
+        }
+        return e
+    }
+
+    // The index of the `<page>` whose body holds `offset` in `file` (-1: none).
+    fn pageIndexAt(files: FileAst[], file: string, offset: int) -> int {
+        for (const f of files) {
+            if (f.path == file) {
+                let i = 0
+                for (const pg of f.pages) {
+                    if (offset >= pg.body.start && offset < pg.body.end) return i
+                    i = i + 1
+                }
+            }
+        }
+        return -1
     }
 
     // ---- s451: `if=` / `else-if=` / `else` chains (§17.1.1) ------------------
@@ -24597,13 +24795,21 @@ ${
         return false
     }
 
-    fn fileNames(t: Tables, lk: Linkage) -> FileName[] {
+    fn fileNames(files: FileAst[], t: Tables, lk: Linkage) -> FileName[] {
         let out: FileName[] = []
         for (const d of t.decls) {
             if (d.sym.id != t.program.id) out = out.concat([{ name: d.sym.hint, file: d.file, span: d.span, what: "the declaration `<" + d.sym.hint + ">`", kind: "decl", nid: d.nid, exported: declExported(lk, d.file, d.sym.hint) }])
         }
         for (const ti of t.types) {
             if (ti.file != builtinFile()) out = out.concat([{ name: ti.name, file: ti.file, span: ti.span, what: "the type `" + ti.name + "`", kind: "type", nid: ti.nid, exported: ti.exported }])
+        }
+        // s478 r1 (review HIGH-1): a type alias (`type A = T`) builds no TypeInfo (typeInfos),
+        // yet it is a file-scope binding — §34 E-SCOPE-010: a file-scope name is bound once
+        // "whatever the two bindings name … a `type`" — so it is one more `type` binding here
+        for (const f of files) {
+            for (const td of typeItems(f.items)) {
+                if (aliasDecl(td)) out = out.concat([{ name: td.name, file: f.path, span: td.span, what: "the type `" + td.name + "`", kind: "type", nid: td.nid, exported: td.exported }])
+            }
         }
         for (const f of t.fns) {
             if (f.host is not && f.outer < 0) out = out.concat([{ name: f.name, file: f.file, span: f.span, what: "the function `" + f.name + "`", kind: "fn", nid: f.nid, exported: f.exported }])   // s477: a nested function is in no file scope
@@ -24710,6 +24916,50 @@ ${
         return ""
     }
 
+    // s478-boot-run-locals — the top-level locals of the body-top runs of each file's
+    // `<program>` (and its `<page>`s): FILE-SCOPE bindings (owner ruling S478, body-top
+    // question 2: "`lin` (and every local) declared at a body-top run's top level is
+    // FILE-SCOPE per §7.6 … E-SCOPE-010 stays for a collision with another file-scope name").
+    // §7.6: "Re-declaring a name with `let` in a later file-level `${}` block when that name
+    // was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate
+    // binding in file scope)"; "A file-scope name is bound once in its file, whatever it names".
+    fn runLocalNames(files: FileAst[]) -> FileName[] {
+        let out: FileName[] = []
+        for (const f of files) {
+            for (const it of f.items) {
+                const p: AProgram | not = programOfItem(it)
+                if (p is given) {
+                    for (const n of markupNodes(p.items)) {
+                        const rb: ABlock | not = runOfNode(n)
+                        if (rb is given) {
+                            for (const s of rb.stmts) {
+                                const nm: string = localNameOf(s)
+                                if (nm != "") out = out.concat([{ name: nm, file: f.path, span: s.span, what: "the body-top local `" + nm + "`", kind: "local", nid: rb.span.start, exported: false }])
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // A pair another rule owns, or no clash: two locals of ONE run (blockRedeclares —
+    // E-SCOPE-REDECLARE); two locals of two different `<page>`s (a page is its own route
+    // region, so neither is in scope in the other); a local beside a cell
+    // (E-NAME-COLLIDES-STATE, §7.6.1). `nid` of a "local" is its run's start.
+    fn runLocalPairOwned(files: FileAst[], m: FileName, n: FileName) -> boolean {
+        if (m.kind != "local" && n.kind != "local") return false
+        if (m.kind == "cell" || n.kind == "cell") return true
+        if (m.kind == "local" && n.kind == "local") {
+            if (m.nid == n.nid) return true
+            const pm: int = pageIndexAt(files, m.file, m.span.start)
+            const pn: int = pageIndexAt(files, n.file, n.span.start)
+            if (pm >= 0 && pn >= 0 && pm != pn) return true
+        }
+        return false
+    }
+
     // Does another pass report AT the binding `n` (see the header)?
     fn reportedElsewhereAt(files: FileAst[], lk: Linkage, t: Tables, ns: FileName[], n: FileName) -> boolean {
         if (n.kind == "fn") {
@@ -24748,7 +24998,7 @@ ${
     }
 
     fn fileNameClashes(files: FileAst[], t: Tables, lk: Linkage) -> Diag[] {
-        const ns: FileName[] = fileNames(t, lk)
+        const ns: FileName[] = fileNames(files, t, lk).concat(runLocalNames(files))
         const imps: FileImports[] = importsByFile(files)
         const paths: string[] = filePaths(files)
         let out: Diag[] = []
@@ -24756,17 +25006,19 @@ ${
             if (!reportedElsewhereAt(files, lk, t, ns, n)) {
                 const imported: string = importBringing(imps, paths, lk, n.file, n.name)
                 // linkage reports a known kind beside an import of its name, at the import
-                if (n.kind == "cell" || imported == "") {
+                if (n.kind == "cell" || n.kind == "local" || imported == "") {
                     // the first earlier binding `n` clashes with, in a pair no other pass reports
                     let first: FileName | not = not
                     for (const m of ns) {
-                        if (m.name == n.name && bindsBefore(files, m, n) && bindingsClash(m, n) && !pairOwned(files, lk, t, m, n)) {
+                        if (m.name == n.name && bindsBefore(files, m, n) && bindingsClash(m, n) && !pairOwned(files, lk, t, m, n) && !runLocalPairOwned(files, m, n)) {
                             const cur: FileName | not = first
                             if (cur is not || bindsBefore(files, m, cur)) first = m
                         }
                     }
                     if (first is given) {
                         out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is already bound in this file by " + first.what + " (at " + placeIn(files, first.file, first.span.start) + ") — a file-scope name is bound once, whatever it names (a declaration, a type, a function, a constant, a cell): duplicate binding in file scope (§7.6; ruled S473); rename one")])
+                    } else if (n.kind == "local" && imported != "") {
+                        out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imported + "` and also bound in this file by " + n.what + " — a body-top statement's top-level local is a file-scope binding (§7.6; owner ruling S478), and a name is bound once in file scope, an import included; rename the local, or drop the import")])
                     } else if (n.kind == "cell" && imported != "") {
                         // s473 r2 review MED-1: a cell beside an import of its name, whatever the source
                         out = out.concat([mkDiag(n.file, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imported + "` and also bound in this file by " + n.what + " — a name is bound once in file scope, an import included (§7.6); rename the cell, or drop the import")])
@@ -25024,6 +25276,17 @@ ${
                 if (d.file == c.file && d.sym.id == t.program.id) {
                     for (const fi of d.fields) {
                         if (fi.sym.hint == c.name) out = out.concat([mkDiag(c.file, c.span, "E-NAME-COLLIDES-STATE", "`" + c.name + "` is also a cell of the program (`@" + c.name + "`, at " + placeIn(files, c.file, fi.span.start) + ") — a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
+                    }
+                }
+            }
+        }
+        // s478-boot-run-locals: a body-top statement's top-level local is file-scope too
+        // (owner ruling S478) — §7.6.1 "cannot coexist in the same file scope"
+        for (const l of runLocalNames(files)) {
+            for (const d2 of t.decls) {
+                if (d2.file == l.file && d2.sym.id == t.program.id) {
+                    for (const fi2 of d2.fields) {
+                        if (fi2.sym.hint == l.name) out = out.concat([mkDiag(l.file, l.span, "E-NAME-COLLIDES-STATE", "`" + l.name + "` is also a cell of the program (`@" + l.name + "`, at " + placeIn(files, l.file, fi2.span.start) + ") — a body-top statement's top-level local is a file-scope binding (§7.6, owner ruling S478), and a local name cannot take the name of a registered state cell (§1.6, §7.6.1); rename one")])
                     }
                 }
             }
@@ -31385,13 +31648,15 @@ ${
     // gate (`gateMarks`, s462 Q18: the member is removed synchronously when an earlier
     // condition turns true). The chain is chainCheck's: whitespace-only text between
     // members does not break it.
-    fn typeNodes(env: TEnv, ns: ANode[], ts0: TypeState) -> TypeState {
+    fn typeNodes(env0: TEnv, ns: ANode[], ts0: TypeState) -> TypeState {
         let ts: TypeState = ts0
         let no: string[] = []          // what the open chain's conditions prove false so far
         let conds: AExpr[] = []        // … and those conditions (their calls un-narrow)
         let open: boolean = false
+        let env: TEnv = env0           // s478-boot-run-locals: + the earlier runs' top-level locals (§7.6)
         for (const n of ns) {
             const e: AElem | not = nodeElem(n)
+            const rb: ABlock | not = runOfNode(n)
             if (e is given) {
                 const isIf: boolean = attrNamed(e.attrs, "if") is given
                 const member: boolean = !isIf && open && (attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given)
@@ -31415,7 +31680,13 @@ ${
                     open = false
                 }
             } else {
-                ts = typeNode(env, n, ts)
+                if (rb is given) {
+                    const rr: RTEnv = typeBlockEnv(env, rb, ts)
+                    ts = rr.ts
+                    env = tWithLocals(env, rr.env.locals)
+                } else {
+                    ts = typeNode(env, n, ts)
+                }
                 if (!blankNode(n) && !isCssNode(n)) {
                     no = []
                     conds = []
@@ -31424,6 +31695,10 @@ ${
             }
         }
         return ts
+    }
+
+    fn tWithLocals(env: TEnv, locals: LocalT[]) -> TEnv {
+        return { t: env.t, file: env.file, errs: env.errs, locals: locals, settled: env.settled, narrowed: env.narrowed, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     fn nodeElem(n: ANode) -> AElem | not {
@@ -42088,6 +42363,7 @@ ${
             st = linBlockAt(cx, fs.f.body, s, 0).st
         }
         for (const a of actionPositions(g)) {
+            if (a.what == runActionWhat()) continue     // s478-boot-run-locals: walked in order with the program's markup (linProgramRuns)
             const v: AAttrValue = a.v
             const b: ABlock | not = match v {
                 .Braced(b: bb) :> bb
@@ -42109,7 +42385,437 @@ ${
             const s3: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
             st = linBlockAt(cx3, rq.req.body, s3, 0).st
         }
+        st = linProgramRuns(g, t, prior, st)
         return st.diags
+    }
+
+    // =========================================================================
+    // s478-boot-run-locals — a body-top run's `lin` is FILE-SCOPE.
+    // Owner ruling S478 (body-top question 2, user-voice-scrml.md): "`lin` (and every
+    // local) declared at a body-top run's top level is FILE-SCOPE per §7.6, so
+    // `${ lin token = …; }` then `<p>${token}</p>` is legal". §35.2.2: "A `lin` variable
+    // declared in a `${}` logic block MAY be consumed in a later `${}` logic block or in
+    // an intervening markup interpolation within the same parent scope"; "Any reference
+    // to the `lin` variable in an intermediate `${}` logic block, intermediate markup
+    // interpolation, or any other intermediate position between the declaration and the
+    // single consumption SHALL be E-LIN-002"; "Scope-exit enforcement applies at the
+    // parent scope boundary: a `lin` variable declared in a nested `${}` block but never
+    // consumed before the parent scope closes SHALL be E-LIN-001".
+    //
+    // One walk per `<program>`, over its body's nodes IN SOURCE ORDER: each run's
+    // statements (its top-level `lin`s stay live after it — no scope exit at its end),
+    // and each later node's markup interpolations, counting one consumption per
+    // APPEARANCE (§35.3: "the existence of a reference … is the consumption" — static:
+    // a re-render of an interpolation does not count again). The program body is ONE
+    // scope (`scope`), so a later run's `lin` of the same name is not shadowing
+    // (E-SCOPE-010 is fileNameClashes'); a `<page>` is a route region of its own.
+    // Positions that are not "the same parent scope" — counted as the consumption (no
+    // cascading E-LIN-001, §35.5) and refused:
+    //   - an `<effect>` body (§6.7.4: "a `lin` variable read in it is E-LIN-004")  E-LIN-004
+    //   - a `<request>` body (§35.5: "consumed inside a `<request>` … body and the
+    //     `lin` variable was declared outside that body")                         E-LIN-006
+    //   - a `${ for … }` loop or an `<each>` row (§35.4.4: "SHALL NOT be consumed
+    //     inside loop bodies")                                                     E-LIN-002
+    //   - an attribute value, an event handler, an `if=` / `else-if=` / `else`
+    //     element's body, a component use's content, a read across a `<page>`
+    //     boundary — the SPEC does not say how these count (INTERIM)              E-BOOTSTRAP-UNSUPPORTED
+    // Every appearance the name table records that this walk did not reach is refused
+    // at the declaration (fail closed: no reference goes uncounted).
+    // =========================================================================
+    type LinSeen:struct = { id: int, span: ASpan }
+
+    fn runActionWhat() -> string { return "this body-top statement" }
+
+    fn linProgramRuns(g: Globals, t: Tables, prior: Diag[], st0: LinSt) -> LinSt {
+        let st: LinSt = st0
+        for (const ds of g.decls) {
+            if (ds.isProgram) st = linRunNodes(g, t, ds.file, rendersNodes(ds), prior, st)
+        }
+        return st
+    }
+
+    fn linRunNodes(g: Globals, t: Tables, file: string, ns: ANode[], prior: Diag[], st0: LinSt) -> LinSt {
+        const scope: int = st0.scopes + 1
+        const cx: LinCx = { t: t, file: file, depth: 0, loops: [], scope: scope, errs: errorSpansIn(prior, file), failable: false, caller: -1 }
+        let s: LinSt = { vars: [], diags: st0.diags, reported: st0.reported, scopes: scope }
+        let pages: int[] = []           // the page of each `s.vars` entry's run (-1: the program body)
+        let late: int[] = []            // the `lin`s bound after their run waits …
+        let lateRuns: ABlock[] = []     // … and those runs
+        let end: ASpan = mkSpan(0, 0)
+        for (const n of ns) {
+            end = n.span
+            const page: int = pageIndexAt(g.files, file, n.span.start)
+            // a binding of another region: any appearance here crosses a page boundary
+            const other: int[] = linIdsWhere(s, pages, page, false)
+            if (other.length > 0) s = linRefuse(cx, s, seenNode(t, n, other), "E-BOOTSTRAP-UNSUPPORTED", "is read across a `<page>` boundary — a `<page>` is its own route region (§40.8), which may mount more than once; the bootstrap does not build a `lin` consumed there. Declare and consume it in the same region")
+            // this region's bindings only (another region's were refused above)
+            const mine: int[] = linIdsWhere(s, pages, page, true)
+            const sub: LinSt = linOnly(s, mine)
+            const rb: ABlock | not = runOfNode(n)
+            let after: LinSt = sub
+            if (rb is given) {
+                after = linRunBlock(cx, rb, sub)
+                // a `lin` bound after the run WAITS (a server call before it, §13.8): its value
+                // arrives after the scope's later views are built, so a read of it outside
+                // the run would see no value — refused by name (INTERIM, linLateReads)
+                let k = 0
+                for (const st2 of rb.stmts) {
+                    if (localNameOf(st2) != "" && runWaitsBefore(t, rb, k)) {
+                        const sy: Sym | not = linBindSym(bindFact(t.binds, st2.nid))
+                        if (sy is given) {
+                            late = late.concat([sy.id])
+                            lateRuns = lateRuns.concat([rb])
+                        }
+                    }
+                    k = k + 1
+                }
+            } else if (mine.length > 0) {
+                after = linMarkupNode(cx, n, sub, mine, true)
+            }
+            let i: int = sub.vars.length
+            while (i < after.vars.length) {
+                pages = pages.concat([page])
+                i = i + 1
+            }
+            s = linBack(s, after, sub.vars.length)
+        }
+        // a function's read of one is refused by name (runLocalFnReadWhy) — counted as its
+        // consumption, so E-LIN-001 does not cascade (§35.5)
+        let vi = 0
+        for (const fv of s.vars) {
+            for (const pd of prior) {
+                if (pd.file == file && pd.code == "E-BOOTSTRAP-UNSUPPORTED" && pd.message == runLocalFnReadWhy(fv.name)) s = linMark(s, vi)
+            }
+            vi = vi + 1
+        }
+        // every `lin` the program's runs declared: consumed by the end of its scope (§35.5)
+        s = linScopeExit(cx, s, 0, end)
+        let li = 0
+        for (const lid of late) {
+            if (seenNodes(t, ns, [lid]).length > seenBlock(t, lateRuns[li], [lid]).length) {
+                for (const lv of s.vars) {
+                    if (lv.id == lid && s.reported.indexOf(lid) < 0) {
+                        s = linDiag(cx, s, "E-BOOTSTRAP-UNSUPPORTED", lv.decl, "`" + lv.name + "` is bound after a wait in its body-top statements (a server call or a query before it, §13.8) and read after them — its value arrives once the call settles, after the scope's later markup and statements have run, so they would read no value. The bootstrap does not build that (INTERIM): bind it before the call, or consume it in the same statements")
+                        s = { vars: s.vars, diags: s.diags, reported: s.reported.concat([lid]), scopes: s.scopes }
+                    }
+                }
+            }
+            li = li + 1
+        }
+        // the appearances no position above reached (fail closed)
+        for (const v of s.vars) {
+            const seen: int = seenNodes(t, ns, [v.id]).length
+            if (nameUses(t, v.id) > seen && s.reported.indexOf(v.id) < 0) {
+                s = linDiag(cx, s, "E-BOOTSTRAP-UNSUPPORTED", v.decl, "`lin` variable `" + v.name + "` is read at a position the bootstrap does not count `lin` consumptions in — a body-top `lin` is counted in later body-top statements and in markup `${…}` text interpolations only (§35.2.2); consume it there")
+                s = { vars: s.vars, diags: s.diags, reported: s.reported.concat([v.id]), scopes: s.scopes }
+            }
+        }
+        return { vars: [], diags: s.diags, reported: s.reported, scopes: s.scopes }
+    }
+
+    // The ids of the bindings in `s` whose region is (`same`) / is not (!`same`) `page`.
+    fn linIdsWhere(s: LinSt, pages: int[], page: int, same: boolean) -> int[] {
+        let out: int[] = []
+        let i = 0
+        for (const v of s.vars) {
+            if ((pages[i] == page) == same) out = out.concat([v.id])
+            i = i + 1
+        }
+        return out
+    }
+
+    // Does a statement of `b` up to and including the `k`th hold a suspension point (the
+    // placement plan's — a client call of a server function, a query; lower.scrml's
+    // continuation pass moves everything after one into its continuation)?
+    fn runWaitsBefore(t: Tables, b: ABlock, k: int) -> boolean {
+        let i = 0
+        for (const s of b.stmts) {
+            if (i <= k && stmtWaits(t, s)) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn stmtWaits(t: Tables, s: AStmt) -> boolean {
+        for (const e of stmtExprs(s)) {
+            if (exprWaits(t, e)) return true
+        }
+        const k: AStmtK = s.k
+        const sub: ABlock[] = match k {
+            .If(cond: c, thenB: tb, elseB: eb) :> thenElse(tb, eb)
+            .Given(name: n, body: gb) :> [gb]
+            .For(f: lf) :> [forInitBlock(lf), lf.body]
+            .Defer(body: db) :> [db]
+            .LocalFn(f: x) :> []
+            .EffectStmt(w: x) :> []
+            .Lift(what: x) :> []
+            .Eval(e: x) :> []
+            .Local(name: n) :> []
+            .Return(e: x) :> []
+            .Fail(f: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+        }
+        for (const nb of sub) {
+            for (const s2 of nb.stmts) {
+                if (stmtWaits(t, s2)) return true
+            }
+        }
+        return false
+    }
+
+    fn exprWaits(t: Tables, e: AExpr) -> boolean {
+        if (suspendAtOf(t.server.plan, e.nid) is given) return true
+        for (const x of exprKids(e)) {
+            if (exprWaits(t, x)) return true
+        }
+        for (const b of exprBlocks(e)) {
+            for (const s of b.stmts) {
+                if (stmtWaits(t, s)) return true
+            }
+        }
+        return false
+    }
+
+    // `s` with only the bindings `ids` (in their order).
+    fn linOnly(s: LinSt, ids: int[]) -> LinSt {
+        let vars: LinVar[] = []
+        for (const v of s.vars) {
+            if (ids.indexOf(v.id) >= 0) vars = vars.concat([v])
+        }
+        return { vars: vars, diags: s.diags, reported: s.reported, scopes: s.scopes }
+    }
+
+    // `full` updated from `sub` (linOnly of it, then walked): its first `n` bindings
+    // replace theirs in `full` by id; the bindings after them are new — appended.
+    fn linBack(full: LinSt, sub: LinSt, n: int) -> LinSt {
+        let vars: LinVar[] = []
+        for (const v of full.vars) {
+            let w: LinVar = v
+            let i = 0
+            for (const x of sub.vars) {
+                if (i < n && x.id == v.id) w = x
+                i = i + 1
+            }
+            vars = vars.concat([w])
+        }
+        let j = 0
+        for (const x2 of sub.vars) {
+            if (j >= n) vars = vars.concat([x2])
+            j = j + 1
+        }
+        return { vars: vars, diags: sub.diags, reported: sub.reported, scopes: sub.scopes }
+    }
+
+    // How many appearances of the local `id` the binder recorded (its name facts).
+    fn nameUses(t: Tables, id: int) -> int {
+        let n = 0
+        for (const f of t.names.facts) {
+            if (nLocalId(f) == id) n = n + 1
+        }
+        return n
+    }
+
+    fn nLocalId(f: NameFact | not) -> int {
+        return match f {
+            .NLocal(sym: sy) :> sy.id
+            .NField(decl: x) :> -1
+            .NInst(decl: x) :> -1
+            .NStruct(owner: x) :> -1
+            .NFn(sym: x) :> -1
+            .NLength :> -1
+            .NSurface(of: x) :> -1
+            .NReq(id: rq0, sig: rs0) :> -1
+            .NConst(sym: x) :> -1
+            not :> -1
+        }
+    }
+
+    // A run: its statements in the program's scope; its top-level `lin`s stay live.
+    fn linRunBlock(cx: LinCx, b: ABlock, s0: LinSt) -> LinSt {
+        let s: LinSt = s0
+        for (const st of b.stmts) {
+            const r: LinR = linStmt(cx, st, s)
+            s = r.st
+            if (r.ends) return s
+        }
+        return s
+    }
+
+    // A node after a run, for the bindings `ids`: a text interpolation in the scope's own
+    // markup (`ok`: reached through plain HTML elements only) is a consumption; any other
+    // appearance is refused by name (see the header).
+    fn linMarkupNode(cx: LinCx, n: ANode, s: LinSt, ids: int[], ok: boolean) -> LinSt {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: x) :> s
+            .Interp(e: e) :> linInterp(cx, e, s, ids, ok)
+            .Elem(e: e) :> linMarkupElem(cx, e, s, ids, ok)
+            .Effect(w: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-004", "is read inside an `<effect>` body — an effect body is a recurring execution context (§6.7.4: \"a `lin` variable read in it is E-LIN-004\"). Consume it once outside the effect")
+            .Request(r: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-006", "is consumed inside a `<request>` body but was declared outside it — the body may run zero or many times (§35.5, §6.7.7). Declare the `lin` inside the `<request>` body, or pass a consumed (non-`lin`) value in")
+            .Gather(f: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-002", "(declared outside this loop) is consumed inside a `${ for … }` loop body — the body may run many times, or none (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
+            .Run(b: x) :> s
+            .DeclNode(d: x) :> s
+            .Css(c: x) :> s
+        }
+    }
+
+    fn linInterp(cx: LinCx, e: AExpr, s: LinSt, ids: int[], ok: boolean) -> LinSt {
+        if (!ok) return linRefuse(cx, s, seenExpr(cx.t, e, ids), "E-BOOTSTRAP-UNSUPPORTED", "is read in markup inside an `if=` / `else-if=` / `else` element, a component use's content or a structural element — that markup mounts on its own (zero or many times), and the SPEC does not say how a `lin` read there counts (INTERIM). Consume it in markup the program body renders directly, or in a later body-top statement")
+        return linExpr(cx, e, s).st
+    }
+
+    fn linMarkupElem(cx: LinCx, e: AElem, s0: LinSt, ids: int[], ok: boolean) -> LinSt {
+        let s: LinSt = s0
+        let attrSeen: LinSeen[] = []
+        for (const a of e.attrs) { attrSeen = attrSeen.concat(seenAttr(cx.t, a, ids)) }
+        s = linRefuse(cx, s, attrSeen, "E-BOOTSTRAP-UNSUPPORTED", "is read in an attribute value (or an event handler) — the bootstrap counts a body-top `lin`'s consumption in later body-top statements and in markup `${…}` text only; how a read in an attribute or a handler counts is not built (INTERIM). Consume it in a `${…}` text interpolation or a later body-top statement")
+        const f: ElemFact | not = elemFact(cx.t.elems, e.nid)
+        const each: boolean = match f {
+            .MEach(bind: x) :> true
+            .MHtml :> false
+            .MUse(decl: x) :> false
+            .MSlot :> false
+            .MStateView(v: x) :> false
+            .MInline(v: x) :> false
+            .MStar(decl: x) :> false
+            .MErrors(of: x) :> false
+            .MDb :> false
+            not :> false
+        }
+        if (each) return linRefuse(cx, s, seenNodes(cx.t, e.kids, ids), "E-LIN-002", "(declared outside this loop) is consumed inside an `<each>` row — the row renders once per item, or never (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
+        const html: boolean = match f {
+            .MHtml :> true
+            .MEach(bind: x) :> false
+            .MUse(decl: x) :> false
+            .MSlot :> false
+            .MStateView(v: x) :> false
+            .MInline(v: x) :> false
+            .MStar(decl: x) :> false
+            .MErrors(of: x) :> false
+            .MDb :> false
+            not :> false
+        }
+        const plain: boolean = ok && html && !e.star && attrNamed(e.attrs, "if") is not && attrNamed(e.attrs, "else-if") is not && attrNamed(e.attrs, "else") is not
+        for (const k of e.kids) { s = linMarkupNode(cx, k, s, ids, plain) }
+        return s
+    }
+
+    // Each appearance in `seen`: refused (`code`), and counted as the binding's
+    // consumption (§35.5: "that reference SHALL be treated as having consumed the `lin`
+    // variable for scope-exit accounting; E-LIN-001 SHALL NOT cascade").
+    fn linRefuse(cx: LinCx, s0: LinSt, seen: LinSeen[], code: string, why: string) -> LinSt {
+        let s: LinSt = s0
+        for (const a of seen) {
+            let i = 0
+            for (const v of s0.vars) {
+                if (v.id == a.id) {
+                    s = linDiag(cx, s, code, a.span, "`lin` variable `" + v.name + "` (declared at " + offsetOf(v.decl) + ") " + why)
+                    s = linMark(s, i)
+                }
+                i = i + 1
+            }
+        }
+        return s
+    }
+
+    // ---- every appearance of the locals `ids` under a node (a TOTAL walk of the
+    // markup, statements and expressions — the name facts decide what is one) ----------
+    fn seenNodes(t: Tables, ns: ANode[], ids: int[]) -> LinSeen[] {
+        let out: LinSeen[] = []
+        for (const n of ns) { out = out.concat(seenNode(t, n, ids)) }
+        return out
+    }
+
+    fn seenNode(t: Tables, n: ANode, ids: int[]) -> LinSeen[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> seenAttrs(t, e.attrs, ids).concat(seenNodes(t, e.kids, ids))
+            .Text(text: x) :> []
+            .Interp(e: e) :> seenExpr(t, e, ids)
+            .DeclNode(d: x) :> []
+            .Css(c: x) :> []
+            .Effect(w: w) :> seenExprs(t, w.deps, ids).concat(seenBlock(t, w.body, ids))
+            .Run(b: b) :> seenBlock(t, b, ids)
+            .Request(r: r) :> seenAttrs(t, r.attrs, ids).concat(seenBlock(t, r.body, ids))
+            .Gather(f: lf) :> seenFor(t, lf, ids)
+        }
+    }
+
+    fn seenAttrs(t: Tables, attrs: AAttr[], ids: int[]) -> LinSeen[] {
+        let out: LinSeen[] = []
+        for (const a of attrs) { out = out.concat(seenAttr(t, a, ids)) }
+        return out
+    }
+
+    fn seenAttr(t: Tables, a: AAttr, ids: int[]) -> LinSeen[] {
+        const v: AAttrValue = a.value
+        return match v {
+            .Bare(e: e) :> seenExpr(t, e, ids)
+            .Paren(e: e) :> seenExpr(t, e, ids)
+            .Braced(b: b) :> seenBlock(t, b, ids)
+            .Quoted(v: x) :> []
+            .Dur(text: x) :> []
+            .NoValue :> []
+        }
+    }
+
+    fn seenBlock(t: Tables, b: ABlock, ids: int[]) -> LinSeen[] {
+        let out: LinSeen[] = []
+        for (const s of b.stmts) { out = out.concat(seenStmt(t, s, ids)) }
+        return out
+    }
+
+    fn seenBlocks(t: Tables, bs: ABlock[], ids: int[]) -> LinSeen[] {
+        let out: LinSeen[] = []
+        for (const b of bs) { out = out.concat(seenBlock(t, b, ids)) }
+        return out
+    }
+
+    fn seenFor(t: Tables, f: AFor, ids: int[]) -> LinSeen[] {
+        return seenBlock(t, forInitBlock(f), ids).concat(seenExprs(t, forHeadExprs(f), ids)).concat(seenBlock(t, f.body, ids))
+    }
+
+    fn seenStmt(t: Tables, s: AStmt, ids: int[]) -> LinSeen[] {
+        const k: AStmtK = s.k
+        const own: LinSeen[] = seenExprs(t, stmtExprs(s), ids)
+        const sub: LinSeen[] = match k {
+            .If(cond: c, thenB: tb, elseB: eb) :> seenBlocks(t, thenElse(tb, eb), ids)
+            .Given(name: n, body: gb) :> seenBlock(t, gb, ids)
+            .For(f: lf) :> seenBlock(t, forInitBlock(lf), ids).concat(seenBlock(t, lf.body, ids))
+            .Defer(body: db) :> seenBlock(t, db, ids)
+            .LocalFn(f: lf) :> seenBlock(t, lf.body, ids)
+            .EffectStmt(w: w) :> seenExprs(t, w.deps, ids).concat(seenBlock(t, w.body, ids))
+            .Lift(what: w) :> seenLiftNode(t, w, ids)
+            .Eval(e: x) :> []
+            .Local(name: n) :> []
+            .Return(e: x) :> []
+            .Fail(f: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+        }
+        return own.concat(sub)
+    }
+
+    fn seenLiftNode(t: Tables, w: ALift, ids: int[]) -> LinSeen[] {
+        return match w {
+            .LiftNode(n: n) :> seenNode(t, n, ids)
+            .LiftExpr(e: x) :> []
+        }
+    }
+
+    fn seenExprs(t: Tables, es: AExpr[], ids: int[]) -> LinSeen[] {
+        let out: LinSeen[] = []
+        for (const e of es) { out = out.concat(seenExpr(t, e, ids)) }
+        return out
+    }
+
+    fn seenExpr(t: Tables, e: AExpr, ids: int[]) -> LinSeen[] {
+        const id: int = nLocalId(nameFact(t.names, e.nid))
+        if (id >= 0 && ids.indexOf(id) >= 0) return [{ id: id, span: e.span }]
+        let out: LinSeen[] = []
+        for (const x of exprKids(e)) { out = out.concat(seenExpr(t, x, ids)) }
+        return out.concat(seenBlocks(t, exprBlocks(e), ids))
     }
 
     fn linParamSym(f: BindFact | not) -> Sym | not {
@@ -42906,7 +43612,7 @@ ${
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
-        const base: Diag[] = base0.concat(linPass(ra.g, typedT, base0))
+        const base: Diag[] = base0.concat(linPass(ra.g, t, base0))
         // s462 (fix round 2): the own-value type reports run LAST, over every
         // other pass's diagnostics — so an Error anywhere inside the
         // initializer, or inside the function a failed proof stands in, owns

@@ -1,5 +1,5 @@
 <program kind="tool" lang="js">
-    const banner = "MODULE"
+    const banner = "MODULE";
     function main(args: string[]) -> number {
         const hidden = "LOCAL";
         const seen = _={ [typeof hidden, typeof banner].join(",") }=;

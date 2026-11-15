@@ -1,7 +1,7 @@
 <program>
-<on> = true
+<shown> = true
 <div id="w">
-${ @on ? <div><md>
+${ @shown ? <div><md>
     **yes**
 </md></div> : <p>no</p> }
 </div>

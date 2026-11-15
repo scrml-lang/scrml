@@ -6,7 +6,7 @@
 
 If you have never met linear types before, the shortest way to think about them is: **`lin` is a `const` that has to go somewhere.** `const` lets you read the value as many times as you want, or never. `lin` insists the value is used precisely one time — once forget it, once use it twice, and the compiler stops you. This doc walks through when to reach for it, what counts as "using" it, how the rules interact with control flow and the markup bodies, and how to read and fix every `lin` error message.
 
-This page is written in **today's ruled scrml**, the language `compiler/SPEC.md` defines (statements end with `;`, parameters are annotated, match arms are comma-separated). The scrml-native bootstrap compiler (`bun run boot:compile`) does not implement `lin` yet, so the complete programs below are marked spec-ahead in this file's source: CI compiles them with the bootstrap, expects them to fail for now, and flags the day they start compiling. Short excerpts are labelled as fragments. `docs/DIALECT.md` explains the markers.
+This page is written in **today's ruled scrml**, the language `compiler/SPEC.md` defines (statements end with `;`, parameters are annotated, match arms are comma-separated). The scrml-native bootstrap compiler (`bun run boot:compile`) compiles the complete programs below: CI compiles each one with the bootstrap and fails on any error. Short excerpts are labelled as fragments. `docs/DIALECT.md` explains the markers.
 
 For the normative spec, see `compiler/SPEC.md` §35. For the language as a whole, see `docs/tutorial.md`.
 
@@ -188,7 +188,6 @@ A `lin` declared *inside* the loop body and consumed inside the same iteration i
 
 A `lin` declared in one `${}` logic block can be consumed in a later `${}` block, or in a markup interpolation between them, as long as both sit under the same parent scope.
 
-<!-- gate: spec-ahead [E-LIN-001, E-SCOPE-001(token)] — the bootstrap reads statements in a program-level `${ }` logic block (s478) but scopes a `lin` there to its own statement run, so a later markup interpolation cannot consume it (g-boot-run-locals-scope-s478) -->
 ```scrml
 <program>
 

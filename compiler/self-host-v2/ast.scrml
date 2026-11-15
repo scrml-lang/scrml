@@ -323,6 +323,7 @@ ${
         EnumBody(variants: AVariant[]),
         StructBody(fields: ATypeField[]),
         HostBody,       // s473: `type Name:host` inside a `<host>` (DRAFT §21.3.3 rule 15) — a closed, opaque host handle type
+        AliasBody(ty: AType),   // s478: `type Name = T` — a type alias; `Name` is `T` wherever it is written (§14.1.2 "type-alias right-hand sides (`type A = Type`)")
     }
     export type ATypeDecl:struct = { nid: int, span: ASpan, exported: boolean, name: string, body: ATypeBody }
 
