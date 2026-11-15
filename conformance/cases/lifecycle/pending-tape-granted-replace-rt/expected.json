@@ -1,0 +1,61 @@
+{
+  "id": "lifecycle-pending-tape-granted-replace-rt",
+  "description": "§13.9.1 rule 4 (RULED S478): a whole-cell author write into a pending tape needs `replace` in the tape's grants — spelled `(not to User[replace])`. A `let` pending tape loads on mount (\"ab\"); the handler writes the cell whole (`@users = [v]`), which the type's `replace` grants (\"r\"). Without `[replace]` the same write is E-WRITE-NOT-GRANTED (lifecycle/pending-tape-whole-write-not-granted-pos). The load's settle write needs no grant (rule 5). RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.1",
+  "rationale": "§13.9.1 rule 4, RULED S478: \"a whole-cell author write into a pending tape, `let` or locked, needs `replace` in the tape's grants (`(not to S[replace])`) like any other tape, and without it is **E-WRITE-NOT-GRANTED**. The load's own writes are rule 5's, and a reset (§6.8) re-runs the load (§13.9.2), so neither needs `replace`.\" §66.11.2 item 3: `replace` is its own explicit grant. ruling:user-voice-scrml.md S478 \"⭐ RULED — S477 owner questions 1 and 2, PA recs adopted\" item 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        },
+        {
+          "id": 2,
+          "name": "b"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#set"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#rows",
+        "text": "r"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}
