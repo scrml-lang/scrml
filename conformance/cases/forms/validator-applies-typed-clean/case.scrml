@@ -3,5 +3,5 @@ ${
     <age min(18)>: number = 25
     <label length(>=2)>: string = "hello"
 }
-${ @age } ${ @label }
+<p>${ @age } ${ @label }</p>
 </program>
