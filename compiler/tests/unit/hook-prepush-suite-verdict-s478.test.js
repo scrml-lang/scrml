@@ -39,7 +39,8 @@ const tmp = (p) => {
 
 // ------------------------------------------------------------------ 1. the runner, for real
 
-describe("test-sharded.ts — exit status and RESULT line follow the run (S478)", () => {
+// The sharded runner is the POSIX git-hook tool (process trees, RSS sampling); it does not run on Windows.
+describe.skipIf(process.platform === "win32")("test-sharded.ts — exit status and RESULT line follow the run (S478)", () => {
   // SCRML_TEST_TIMINGS in a private dir moves the timing cache, the run logs AND the machine-wide slot pool
   // there (all three live next to the cache), so these runs never touch or wait on the real hooks' slots.
   const dir = tmp("s478-verdict-");
@@ -114,7 +115,8 @@ describe("test-sharded.ts — exit status and RESULT line follow the run (S478)"
 
 // ------------------------------------------------------------------ 1b. the memory ceiling: env floor vs exact flag
 
-describe("test-sharded.ts — SCRML_HOOK_SHARD_MEM_MB is a floor, --shard-mem is exact (S478 review F1)", () => {
+// The sharded runner is the POSIX git-hook tool (process trees, RSS sampling); it does not run on Windows.
+describe.skipIf(process.platform === "win32")("test-sharded.ts — SCRML_HOOK_SHARD_MEM_MB is a floor, --shard-mem is exact (S478 review F1)", () => {
   const dir = tmp("s478-ceiling-");
   const env = { ...process.env, SCRML_TEST_TIMINGS: join(dir, "timings.json"), SCRML_HOOK_SLOTS: "2" };
   delete env.SCRML_HOOK_SHARDS;
