@@ -110,3 +110,40 @@ describe("a `<` with a left operand is still less-than", () => {
     expect(codes(prog(" fn lt(n: int, m: int) -> boolean { return n <m; }\n fn lt2(n: int, m: int) -> boolean { return (n) < m && n < m; }\n<p>${lt(1, 2)}${lt2(1, 2)}</p>"))).toEqual([]);
   });
 });
+
+// s478-boot-review-followups (review of #1885).
+describe("L1 — a named markup refusal hides the INTERIM refusal on its own line only", () => {
+  test("a body `<style>` does not hide another function's markup value (E-STYLE-001 + the refusal)", () => {
+    const src = prog("<style>p{}</style>\nfunction f() { return <li>x</li>; }\n<ul>${f()}</ul>");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-STYLE-001"]);
+  });
+  test("a `<style>` ternary branch on one line does not hide a markup value on another", () => {
+    const src = prog("let <c=true/>\n<div>${ @c ? <style>p{}</style> : 1 }</div>\nfunction f() { return <li>x</li>; }\n<ul>${f()}</ul>");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-STYLE-001"]);
+  });
+  test("a markup match arm in one function does not hide a markup value in another", () => {
+    const src = prog("type R:enum = { A, B }\nfunction f(r: R) { return match r { .A :> <p>a</p>, .B :> 2 }; }\nfunction g() { return <li>x</li>; }\n<p>${f(.A)}${g()}</p>");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-MATCH-ARM-MARKUP-IN-VALUE"]);
+  });
+});
+
+describe("L2 — the markup-value extent ends where the reader does (the shared void list)", () => {
+  for (const tag of ["wbr", "area", "source", "track", "col", "embed", "base"]) {
+    test(`\`return <${tag}>;\` is one element: the function after it is still read`, () => {
+      const src = prog(` function f() { return <${tag}>; }\nfunction g() -> int { return 1; }\n<p>\${g()}</p>`);
+      expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    });
+  }
+  test("the lexer's void list IS the printer's (lex.scrml isVoidName == html.scrml isVoid)", () => {
+    const names = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
+      "div", "p", "b", "span", "svg", "rect", "path", "param", "keygen", "template", "slot", "md"];
+    for (const n of names) expect([n, mods.lex.isVoidName(n)]).toEqual([n, mods.html.isVoid(n)]);
+  });
+  test("a void element in a markup body takes no closer (`<p>a<wbr>b</p>`)", () => {
+    expect(codes(prog("<p>a<wbr>b</p>"))).toEqual([]);
+  });
+  test("text the token holds past the element is E-PARSE-TRAILING, never dropped", () => {
+    const src = prog(" function f() { return <b>x</b junk>; }\nfunction g() -> int { return 1; }\n<p>${g()}</p>");
+    expect(codes(src)).toContain("E-PARSE-TRAILING");
+  });
+});

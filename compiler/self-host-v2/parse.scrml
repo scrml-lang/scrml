@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -2233,6 +2233,13 @@ ${
         const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], ns: tp.ns }
         const rn: RNodeOne = parseMarkupNode(m0)
         let ds: Diag[] = rn.mp.diags
+        // text the token holds past the element the reader read (the lexer's extent
+        // ran on): E-PARSE-TRAILING (§34: "An unexpected token after a complete
+        // expression") — never silently dropped (s478 review L2)
+        const restAt: int = rn.mp.pos
+        if (restAt < t.end && m0.src.substring(restAt, t.end).trim().length > 0) {
+            ds = ds.concat([newDiag("E-PARSE-TRAILING", "unexpected text after this markup value's element: the element ends before it. Close the element where it ends, or write the rest as markup inside it", tp.file, mkSpan(restAt, t.end))])
+        }
         let named = false
         for (const d of ds) {
             if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") named = true
@@ -2255,24 +2262,54 @@ ${
         return "markup as a value in logic (a function's return, an operand, an argument, a binding — §1.4, §7.4.1) is not built in the bootstrap yet: the element is read and checked, but no value is made of it. Write the markup where it renders — in a markup body, choosing with `if=` / `else` (§17.1) or `<match for=… on=…>` (§18.0.1) — or compute a value (a string) in logic and interpolate it"
     }
 
-    // A file's diagnostics, the INTERIM markup-value refusal dropped where the file
-    // already carries a NAMED markup refusal (E-SCRIPT-001, E-STYLE-001,
-    // E-MD-IN-LOGIC-NOMINAL, E-MATCH-ARM-MARKUP-IN-VALUE): `@f ? <style>…</style> :
+    // A file's diagnostics, the INTERIM markup-value refusal dropped where a NAMED
+    // markup refusal (E-SCRIPT-001, E-STYLE-001, E-MD-IN-LOGIC-NOMINAL,
+    // E-MATCH-ARM-MARKUP-IN-VALUE) covers its line (the lines from the named span's
+    // first to its last): `@f ? <style>…</style> :
     // <b>b</b>` is the one error the author must act on, not that plus a bootstrap
     // limit on its sibling (the named-refusal table's rule, refusals.scrml: "the
-    // named refusal is what the author must act on first"). Fail closed either way:
-    // the named refusal is an Error, so the file still fails.
-    fn markupValueDiags(ds: Diag[]) -> Diag[] {
-        let namedHere = false
+    // named refusal is what the author must act on first"). A named refusal
+    // elsewhere in the file (a body `<style>`, another function's arm) does not
+    // hide this one: each markup value the bootstrap cannot build is reported
+    // (s478 review L1). Fail closed either way: both are Errors.
+    fn markupValueDiags(ds: Diag[], src: string) -> Diag[] {
+        // each named refusal's lines: from the line its span starts on to the end
+        // of the line it ends on
+        let from: int[] = []
+        let to: int[] = []
         for (const d of ds) {
-            if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001" || d.code == "E-MD-IN-LOGIC-NOMINAL" || d.code == "E-MATCH-ARM-MARKUP-IN-VALUE") namedHere = true
+            if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001" || d.code == "E-MD-IN-LOGIC-NOMINAL" || d.code == "E-MATCH-ARM-MARKUP-IN-VALUE") {
+                from = from.concat([lineStartOf(src, d.span.start)])
+                to = to.concat([lineEndOf(src, d.span.end)])
+            }
         }
-        if (!namedHere) return ds
+        if (from.length == 0) return ds
         let out: Diag[] = []
         for (const d of ds) {
-            if (!(d.code == "E-BOOTSTRAP-UNSUPPORTED" && d.message == markupValueRefusal())) out = out.concat([d])
+            let drop = false
+            if (d.code == "E-BOOTSTRAP-UNSUPPORTED" && d.message == markupValueRefusal()) {
+                let k: int = 0
+                while (k < from.length) {
+                    if (d.span.start >= from[k] && d.span.start <= to[k]) drop = true
+                    k = k + 1
+                }
+            }
+            if (!drop) out = out.concat([d])
         }
         return out
+    }
+
+    // The offset where the line holding offset `at` starts.
+    fn lineStartOf(src: string, at: int) -> int {
+        const p: int = at > src.length ? src.length : at
+        if (p <= 0) return 0
+        return src.lastIndexOf("\n", p - 1) + 1
+    }
+
+    // The offset of the newline ending the line holding offset `at` (the end of input on the last line).
+    fn lineEndOf(src: string, at: int) -> int {
+        const nl: int = src.indexOf("\n", at)
+        return nl < 0 ? src.length : nl
     }
 
     // The spans of the `<md>` elements in `n` (itself included).
@@ -8461,17 +8498,10 @@ ${
         return TagKind.IsElem
     }
 
-    fn isVoidTag(t: string) -> boolean {
-        return match t {
-            "input" :> true
-            "br"    :> true
-            "hr"    :> true
-            "img"   :> true
-            "meta"  :> true
-            "link"  :> true
-            _       :> false
-        }
-    }
+    // The HTML void elements (no closer, no children): the markup-value extent's
+    // list (lex.scrml isVoidName, held equal to the printer's html.scrml isVoid),
+    // so the reader, the extent and the printed page agree (s478 review L2).
+    fn isVoidTag(t: string) -> boolean { return isVoidName(t) }
 
     // At `</`: consume `</>` or `</name>`; `name` must match the open tag.
     fn parseCloser(mp: MP, tag: string) -> MP {
@@ -11202,7 +11232,7 @@ ${
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
         const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], ns: ns }
         const r0: RMItems = parseMarkupItems(m0, "")
-        const r: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags)) }
+        const r: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
