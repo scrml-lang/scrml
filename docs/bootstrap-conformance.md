@@ -13,20 +13,20 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 456 | 24.4% |
 | CODES-ONLY | 4 | 0.2% |
-| FAIL | 99 | 5.3% |
+| FAIL | 97 | 5.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 674 | 36.1% |
+| UNSUPPORTED | 676 | 36.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 559; of those, 460 hold (82.3%). Runtime half executed on the bootstrap for 159 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 557; of those, 460 hold (82.6%). Runtime half executed on the bootstrap for 159 case(s).
 
 - **Vacuous** passes: 10 of 460 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **450**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 25 of 99; the other 74 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 24 of 97; the other 73 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 674.
+UNSUPPORTED by reason: bootstrap-unsupported 676.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -104,7 +104,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | apply | 7 | · | · | · | · | · | 7 | · | · |
 | attr-executable-sink | 23 | 7 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 9 | · | 3 | · | 15 | 38 | · | · |
-| block-grammar | 14 | 10 | · | 1 | · | 1 | 2 | · | · |
+| block-grammar | 14 | 10 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | 14 | · | 6 | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
@@ -129,7 +129,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | forms | 66 | 14 | · | 2 | · | 49 | 1 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 68 | 27 | · | 3 | · | 22 | 16 | · | · |
+| lifecycle | 68 | 27 | · | 1 | · | 22 | 18 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
 | loop | 8 | 1 | · | 1 | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -158,7 +158,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 10 | · | 2 | · | 17 | 62 | · | · |
-| server-fn | 27 | 8 | · | 7 | · | 7 | 5 | · | · |
+| server-fn | 27 | 8 | · | 8 | · | 7 | 4 | · | · |
 | sql | 20 | 3 | · | 3 | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (99)
+### FAIL (97)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - missing E-PROGRAM-NESTED-ATTR
@@ -181,9 +181,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-lifecycle-attr-neg` (parse-reject)
   - E-PARSE-PROGRAM: `<program>` inside markup
-- `block-grammar/block-047-closed-brace-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `}`, found `x`
-  - E-PARSE-TRAILING: unexpected `x` after the expression
 - `body-top/bare-write-is-legal` (twin · parse-reject)
   - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -295,15 +292,8 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-CLOSER: `</program>` closes `<doubled>`
 - `forms/validator-applies-typed-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-VALIDATOR-DEAD
-- `lifecycle/cleanup-error-call-expression` (parse-reject; not in the bootstrap: E-LIFECYCLE-002)
-  - missing E-LIFECYCLE-002
-  - E-PARSE-EXPECTED: expected `}`, found `closeConnection`
-  - E-PARSE-TRAILING: unexpected `closeConnection` after the expression
 - `lifecycle/cleanup-error-non-function` (codes; not in the bootstrap: E-LIFECYCLE-004)
   - missing E-LIFECYCLE-004
-- `lifecycle/cleanup-happy-arrow-and-reference` (parse-reject)
-  - E-PARSE-EXPECTED: expected `}`, found `teardown`
-  - E-PARSE-TRAILING: unexpected `teardown` after the expression
 - `linear/lin-001-never-consumed-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -506,18 +496,19 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"accepted"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"rejected"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `server-fn/branch-declared-server-fn-routes-to-server` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `}`, found `fn`
-  - E-PARSE-TRAILING: unexpected `fn` after the expression
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"COMPUTED-IN-THE-BODY"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `server-fn/e-route-002-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
 - `server-fn/e-route-002-pos` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
 - `server-fn/e-route-003-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `}`, found `Item`
-  - E-PARSE-TRAILING: unexpected `Item` after the expression
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `server-fn/e-route-004-neg` (twin · parse-reject)
-  - E-PARSE-EXPECTED: expected `}`, found `function`
-  - E-PARSE-TRAILING: unexpected `function` after the expression
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `name`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `server-fn/e-route-004-pos` (twin · codes)
+  - missing E-ROUTE-004
+  - severity: E-ROUTE-004 did not fire (expected error)
 - `server-fn/e-route-005-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
 - `server-fn/session-value-in-tool-neg` (codes; not in the bootstrap: E-SESSION-VALUE)
@@ -1009,7 +1000,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (674)
+### UNSUPPORTED (676)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1072,7 +1063,8 @@ none
 - `auth/w-auth-redirect-loop-neg` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/w-auth-redirect-loop-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `block-grammar/block-015-bare-slash-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `block-grammar/block-047-unclosed-brace-pos` — twin · bootstrap-unsupported: `<p>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
+- `block-grammar/block-047-closed-brace-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
+- `block-grammar/block-047-unclosed-brace-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `body-top/bare-expression-evaluates-not-renders` — twin · bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `body-top/prose-before-code-line-rejected` — bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse(
@@ -1258,6 +1250,8 @@ none
 - `forms/msgchain-l2-template-fn-reject` — bootstrap-unsupported: `anonymous fn expression` (§48.2.1) is not in the bootstrap yet; it is refused here by name rather than misread — declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callba
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/cleanup-error-call-expression` — bootstrap-unsupported: statements in a `${ … }` logic block inside markup are not in the bootstrap — they run once per mount of the element's scope (§7.6) in a render position, which may not write a cell (§17.3); move them 
+- `lifecycle/cleanup-happy-arrow-and-reference` — bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `lifecycle/effect-on-leave` — twin · bootstrap-unsupported: `effect=${…}` — an engine's `effect=` logic block (§51.0.H) is not in the bootstrap; on any other element `effect=` is a plain attribute, written `effect=(…)` (one expression, §5.2.4)
 - `lifecycle/effect-ontransition-coexist` — twin · bootstrap-unsupported: `effect=${…}` — an engine's `effect=` logic block (§51.0.H) is not in the bootstrap; on any other element `effect=` is a plain attribute, written `effect=(…)` (one expression, §5.2.4)
 - `lifecycle/effect-write-unproven-pos` — twin · bootstrap-unsupported: `beacon` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `beacon(…)`
@@ -1629,7 +1623,6 @@ none
 - `server-db/sql-hoisted-loop-write-between-iterations-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
 - `server-fn/e-route-003-pos` — twin · bootstrap-unsupported: `snippet type` (§14.9) is not in the bootstrap yet; it is refused here by name rather than misread
-- `server-fn/e-route-004-pos` — twin · bootstrap-unsupported: `anonymous fn expression` (§48.2.1) is not in the bootstrap yet; it is refused here by name rather than misread — declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callba
 - `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
