@@ -2382,6 +2382,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
         }
     }
@@ -5378,6 +5379,7 @@ ${
                     .DeclNode(d: x) :> -1
                     .Css(c: x) :> -1
                     .Effect(w: x) :> -1
+                    .Run(b: rb0) :> -1
                     .Gather(f: x) :> -1
                 }
                 if (pd >= 0) out = out.concat([pd])
@@ -5427,6 +5429,7 @@ ${
             .Css(c: c) :> noHandles(st)
             .Gather(f: lf) :> handlesIn(g0, gatherRows(lf), w, st)
             .Effect(w: w) :> noHandles(st)
+            .Run(b: rb0) :> noHandles(st)
             .Request(r: r) :> noHandles(st)
         }
     }
@@ -10687,6 +10690,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Run(b: rb0) :> not
             .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: x) :> not
@@ -17031,6 +17035,107 @@ ${
         return addEffectSrc(st, w, env.file)
     }
 
+    // s478 — body-top statements (ANodeK.Run): SPEC §40.8 S441 — a bare run at a
+    // `<program>` / `<page>` body top "SHALL be parsed and checked as logic at its
+    // position … Every diagnostic the same statements raise inside an explicit
+    // `${ … }` at that position SHALL fire there"; "A bare write at this body-top
+    // (`@x = 1`) is an ordinary write in a logic context". They run once at mount
+    // (§17.3), so they are resolved as a handler block is (a write, a host call and
+    // a server call are allowed; a `lift` has no loop to append to; a `break` /
+    // `continue` has no loop around it — loopChecks).
+    fn resolveRun(env: Env, b: ABlock, st0: AS) -> AS {
+        if (!inProgramCtx(env) || env.own != "") {
+            return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "statements here are not in the bootstrap — only a `<program>` / `<page>` body top runs statements (§40.8)")
+        }
+        let st: AS = resolveBlock(runBodyEnv(env), b, st0)
+        // s478 r1 — §34 E-STMT-RETURN-OUTSIDE-FUNCTION: "Also a `return` at the top of a
+        // `${ … }` logic block, or nested there only in control flow that runs in place
+        // (`if` / loop bodies, `match` arms — bare or braced — and a decl-position
+        // `match`)". A body-top run is not a function body: a `return` in it would leave
+        // the scope's build and silently skip every statement after it.
+        for (const sp of runReturnSpans(b)) {
+            st = addDiag(st, env.file, sp, "E-STMT-RETURN-OUTSIDE-FUNCTION", "`return` outside a function — body-top statements (and a `${ … }` at a `<program>` / `<page>` body top) run in place once at mount; they are not a function body, so there is nothing to return from (§34, §40.8). Remove the `return`, or put the statements in a function")
+        }
+        return loopChecks(env.file, b, st)
+    }
+
+    // s478 r1 — every `return` in a body-top run that is not inside a nested
+    // function (a `fn` statement's body is its own; a lambda's body is an
+    // expression, and an arm block inside one is the lambda's).
+    fn runReturnSpans(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(runReturnsIn(s)) }
+        return out
+    }
+
+    fn runReturnsIn(s: AStmt) -> ASpan[] {
+        if (isReturnStmt(s)) return [s.span]
+        let out: ASpan[] = []
+        for (const nb of runInPlaceBlocks(s)) { out = out.concat(runReturnSpans(nb)) }
+        return out
+    }
+
+    fn isReturnStmt(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> true
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Lift(what: w) :> false
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .Defer(body: db) :> false
+            .LocalFn(f: x) :> false
+            .EffectStmt(w: x) :> false
+            .Fail(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+        }
+    }
+
+    fn runInPlaceBlocks(s: AStmt) -> ABlock[] {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: t, elseB: el) :> inPlaceExprBlocks(c).concat(thenElse(t, el))
+            .Given(name: n, subject: x, body: gb) :> inPlaceExprBlocks(x).concat([gb])
+            .For(f: lf) :> runForBlocks(lf)
+            .Lift(what: w) :> inPlaceExprsBlocks(liftExprs(w))
+            .Eval(e: e) :> inPlaceExprBlocks(e)
+            .Local(name: n, init: i) :> inPlaceExprBlocks(i)
+            .Return(e: x) :> []
+            .Defer(body: db) :> [db]
+            .LocalFn(f: x) :> []                          // its body is a function's
+            .EffectStmt(w: x) :> []                       // an effect body is its own root
+            .Fail(f: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+        }
+    }
+
+    fn runForBlocks(f: AFor) -> ABlock[] {
+        return [forInitBlock(f)].concat(inPlaceExprsBlocks(forHeadExprs(f))).concat([f.body])
+    }
+
+    // The arm blocks inside an expression, at any depth, never through a lambda.
+    fn inPlaceExprBlocks(e: AExpr) -> ABlock[] {
+        if (lambdaBody(e) is given) return []
+        let out: ABlock[] = exprBlocks(e)
+        for (const x of exprKids(e)) { out = out.concat(inPlaceExprBlocks(x)) }
+        return out
+    }
+
+    fn inPlaceExprsBlocks(es: AExpr[]) -> ABlock[] {
+        let out: ABlock[] = []
+        for (const x of es) { out = out.concat(inPlaceExprBlocks(x)) }
+        return out
+    }
+
+    fn runBodyEnv(env: Env) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: false, fx: env.fx, lift: LiftCtx.NoLift, nest: env.nest }
+    }
+
     // `<effect deps=[@a, @b]>` — the canonical spelling of an effect, for a message.
     fn effectSpelling(w: AEffect) -> string {
         let names: string[] = []
@@ -17391,6 +17496,7 @@ ${
                 .Request(r: r) :> hashTagOfAttrs(r.attrs, id, "request")
                 .Elem(e: e) :> hashTagOfElem(e, id)
                 .Effect(w: x) :> ""
+                .Run(b: rb0) :> ""
                 .Text(text: x) :> ""
                 .Interp(e: x) :> ""
                 .DeclNode(d: x) :> ""
@@ -18478,6 +18584,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
             .Css(c: c) :> not
             .Gather(f: f) :> not
@@ -20211,6 +20318,7 @@ ${
                 .Css(c: c) :> not
                 .Gather(f: x) :> not
                 .Effect(w: w) :> not
+                .Run(b: rb0) :> not
                 .Request(r: r) :> not
             }
             if (e is given) {
@@ -20403,6 +20511,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> staticExecRows(t, file, gatherRows(lf), parent)
             .Effect(w: w) :> []
+            .Run(b: rb0) :> []
             .Request(r: r) :> []
         }
     }
@@ -20555,6 +20664,7 @@ ${
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
             .Css(c: c) :> st
             .Effect(w: w) :> resolveEffect(env, w, st)
+            .Run(b: b) :> resolveRun(env, b, st)                          // s478 (§40.8)
             .Request(r: r) :> resolveRequest(env, r, st)
             .Gather(f: lf) :> resolveTier0(env, n, lf, st)                 // s469 (§17.4)
         }
@@ -20967,6 +21077,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Run(b: rb0) :> not
             .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: lf) :> not
@@ -20980,6 +21091,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Run(b: rb0) :> not
             .Request(r: x) :> not
             .Css(c: x) :> not
             .Gather(f: lf) :> not
@@ -21026,6 +21138,7 @@ ${
             .Interp(e: x) :> []
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
+            .Run(b: rb0) :> []
             .Request(r: x) :> []
             .Css(c: x) :> []
             .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
@@ -21331,6 +21444,7 @@ ${
                 .Interp(e: x) :> ""
                 .DeclNode(d: x) :> ""
                 .Effect(w: x) :> ""
+                .Run(b: rb0) :> ""
                 .Request(r: x) :> ""
                 .Css(c: x) :> ""
                 .Gather(f: lf) :> mkSlotIn(g, file, rowsOfBlock(lf.body), ns, depth)
@@ -21359,6 +21473,7 @@ ${
                 .Interp(e: x) :> "?"
                 .DeclNode(d: x) :> "?"
                 .Effect(w: x) :> "?"
+                .Run(b: rb0) :> "?"
                 .Request(r: x) :> "?"
                 .Css(c: x) :> "?"
                 .Gather(f: lf) :> mkSlotPlIn(g, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)), depth)
@@ -21528,6 +21643,7 @@ ${
             .DeclNode(d: d) :> not
             .Css(c: c) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
             .Gather(f: f) :> not
         }
@@ -21867,6 +21983,7 @@ ${
                 .Interp(e: x) :> []
                 .DeclNode(d: dd) :> []
                 .Effect(w: w) :> []
+                .Run(b: rb0) :> []
                 .Request(r: r) :> []
                 .Css(c: c) :> []
                 .Gather(f: f) :> slotsWalk(gatherRows(f), wantLooped, true)
@@ -21917,6 +22034,7 @@ ${
                 .Css(c: c) :> not
                 .Gather(f: x) :> not
                 .Effect(w: w) :> not
+                .Run(b: rb0) :> not
                 .Request(r: r) :> not
             }
             if (e is given) {
@@ -21991,6 +22109,7 @@ ${
             .Interp(e: e) :> false
             .DeclNode(d: d) :> false
             .Effect(w: w) :> false
+            .Run(b: rb0) :> false
             .Request(r: r) :> false
         }
     }
@@ -22005,6 +22124,7 @@ ${
             .Css(c: c) :> false
             .Gather(f: x) :> false
             .Effect(w: w) :> false
+            .Run(b: rb0) :> false
             .Request(r: r) :> false
         }
     }
@@ -25035,6 +25155,7 @@ ${
             .Gather(f: lf) :> blockRedeclares(file, lf.body, [], false).concat(rowsRedeclares(file, gatherRows(lf)))
             // s449: an effect body is a block like an inline handler's
             .Effect(w: w) :> blockRedeclares(file, w.body, [], false)
+            .Run(b: b) :> blockRedeclares(file, b, [], false)
             .Request(r: r) :> blockRedeclares(file, r.body, [], false)
         }
     }
@@ -31188,6 +31309,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
         }
     }
@@ -31318,6 +31440,7 @@ ${
             .DeclNode(d: d) :> ts
             .Css(c: c) :> ts
             .Effect(w: w) :> typeEffect(env, w, ts)
+            .Run(b: b) :> typeBlock(env, b, ts)                          // s478: typed as a handler block is
             .Request(r: r) :> typeRequest(env, r, ts)
             .Gather(f: lf) :> typeGather(env, lf, ts)                     // s469 (§17.4); s473 r1
         }
@@ -33129,6 +33252,7 @@ ${
                 .DeclNode(d: x) :> []
                 .Css(c: x) :> []
                 .Effect(w: x) :> []
+                .Run(b: rb0) :> []
                 .Request(r: x) :> []
             }
             out = out.concat(more)
@@ -33858,6 +33982,7 @@ ${
             .DeclNode(d: d) :> []          // refused where it stands
             .Css(c: c) :> []
             .Effect(w: w) :> []            // a lifecycle body — the effect rule's (§6.7.4), not a value position
+            .Run(b: rb0) :> []            // s478: body-top statements — a statement list, not a value position (§40.8)
             .Request(r: r) :> []            // a lifecycle body — the request rule's (§6.7.7), not a value position
             .Gather(f: lf) :> tier0Positions(t, lf, n.span, file)
         }
@@ -34895,6 +35020,7 @@ ${
             .Text(text: t) :> st
             .Interp(e: x) :> st
             .Effect(w: w) :> st
+            .Run(b: rb0) :> st
             .Request(r: r) :> st
         }
     }
@@ -34927,7 +35053,7 @@ ${
             for (const it of f.items) {
                 for (const n of markupOf(it)) {
                     for (const sp of effectSpans(n)) {
-                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "an `<effect>` / `<request>` outside `<program>` — no element scope owns it (§6.7.4, §6.7.7); move it into the program")
+                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "an `<effect>` / `<request>` / logic-block statement outside `<program>` — no element scope owns it, so nothing would run it (§6.7.4, §6.7.7, §40.8); move it into the program")
                     }
                 }
             }
@@ -34939,6 +35065,7 @@ ${
         const k: ANodeK = n.k
         return match k {
             .Effect(w: w) :> [w.span]
+            .Run(b: b) :> [b.span]
             .Request(r: r) :> [r.span]
             .Elem(e: e) :> kidEffectSpans(e.kids)
             .Text(text: t) :> []
@@ -35736,6 +35863,7 @@ ${
             .Elem(e: e) :> dbsInElem(g, file, e, scope, acc)
             .Interp(e: x) :> withSites(acc, sqlsInExpr(x), scope)
             .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
+            .Run(b: b) :> withSites(acc, sqlsInBlock(b), scope)
             .Request(r: r) :> withSites(acc, sqlsInBlock(r.body), scope)
             .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
             .Css(c: c) :> acc
@@ -35860,6 +35988,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
         }
     }
@@ -36049,6 +36178,7 @@ ${
         return match k {
             .Elem(e: e) :> elemActions(e, file)
             .Effect(w: w) :> [{ what: "this `<effect>` body", v: AAttrValue.Braced(w.body), file: file }]
+            .Run(b: b) :> [{ what: "this body-top statement", v: AAttrValue.Braced(b), file: file }]   // s478: planned as a handler block is
             .Request(r: r) :> []            // s475: a request body is planned by requestPlan (one suspension, its load)
             .Text(text: s) :> []
             .Interp(e: x) :> []
@@ -41304,6 +41434,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
+                .Run(b: rb0) :> not
                 .Request(r: r) :> not
             }
             const e: AElem | not = match k {
@@ -41314,6 +41445,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
+                .Run(b: rb0) :> not
                 .Request(r: r) :> not
             }
             if (c is given) a = cssBlock(g, prog, at, file, c, a)
@@ -41584,6 +41716,7 @@ ${
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
+                .Run(b: rb0) :> not
                 .Request(r: r) :> not
             }
             if (c is given) {
@@ -41637,6 +41770,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
         }
     }
@@ -41662,6 +41796,7 @@ ${
             .Interp(e: x) :> not
             .DeclNode(d: x) :> not
             .Effect(w: x) :> not
+            .Run(b: rb0) :> not
             .Request(r: x) :> not
         }
     }
@@ -42907,6 +43042,7 @@ ${
             .Css(c: c) :> w
             .Gather(f: lf) :> ownerWalkRows(t, file, isProg, gatherRows(lf), w)
             .Effect(w: x) :> w
+            .Run(b: rb0) :> w
             .Request(r: x) :> w
         }
     }
@@ -42988,6 +43124,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> gatesInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
+            .Run(b: rb0) :> []
             .Request(r: r) :> []
         }
     }
@@ -43047,6 +43184,7 @@ ${
             .DeclNode(d: d) :> []
             .Css(c: c) :> []
             .Effect(w: w) :> []
+            .Run(b: rb0) :> []
             .Request(r: r) :> []
         }
     }
@@ -43248,6 +43386,7 @@ ${
             .Css(c: c) :> []
             .Gather(f: lf) :> formsInRows(cx, gatherRows(lf))
             .Effect(w: w) :> []
+            .Run(b: rb0) :> []
             .Request(r: r) :> []
         }
     }
@@ -43298,6 +43437,7 @@ ${
             .Css(c: c) :> not
             .Gather(f: x) :> not
             .Effect(w: w) :> not
+            .Run(b: rb0) :> not
             .Request(r: r) :> not
         }
     }

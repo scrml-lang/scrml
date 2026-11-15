@@ -85,6 +85,15 @@ describe("INTERIM — any other markup value is refused by name (fail closed), w
     expect(codes(prog(" function f(x: string) -> string { return x; }\n function g() { return f(<b>x</b>); }\n<p>${g()}</p>"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(" function g() { return [<li>a</li>, <li>b</li>]; }\n<p>${g()}</p>"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
   });
+  test("a body-top declaration reads its markup value to its `;` (the region does not stop at the tag)", () => {
+    const es = errs(prog("let <f=true/>\nconst v = @f ? <b>a</b> : <i>b</i>;\n<p>x</p>"));
+    expect(es.filter((d) => d.message.startsWith(MV)).length).toBe(2);
+    expect(es.map((d) => d.code).filter((c) => c.startsWith("E-PARSE") || c === "E-UNQUOTED-DISPLAY-TEXT")).toEqual([]);
+  });
+  test("a markup value in a Tier-0 `${ for … }` lift operand is read too", () => {
+    const es = errs(prog("let <f=true/>\n<div>${ for (const x of [1, 2]) { lift @f ? <b>a</b> : <i>b</i>; } }</div>"));
+    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+  });
   test("an unclosed markup value reports at the element, without swallowing the logic around it", () => {
     const es = errs(prog(" function item() { return <li>x; }\n<ul>${item()}</ul>"));
     expect(es.length).toBeGreaterThan(0);

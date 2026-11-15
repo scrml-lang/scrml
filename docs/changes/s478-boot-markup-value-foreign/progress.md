@@ -28,5 +28,26 @@ g-boot-markup-as-value-unbuilt-s473, g-boot-foreign-header-checks-unbuilt-s473.
 - async-fn-escapes-handler-destructured-scheduler-neg: needs destructuring `const { a } = …`
   in a handler (E-PARSE-LOCAL) — not cheap; listed.
 
+## Commits
+- 7d2c01c21 — the lexer token, parseMarkupValue, the named refusals, the three case edits,
+  arms-union pin updated (the markup arm body is read whole: E-MATCH-ARM-MARKUP-IN-VALUE alone).
+- merge of origin/main b8a25034e (#1876 body-top): `mdElemsIn` takes ANodeK.Run; lexTier0X reads a
+  markup value too; LexStop.Decl does not stop before a markup VALUE (`const v = c ? <b/> : 1;`).
+
+- foreignHeader (g-boot-foreign-header-checks-unbuilt-s473, RESOLVED): E-FOREIGN-007 for a duplicate
+  crossing, a reserved-word / `await` / `eval` / `arguments` crossing, and a header after a comment
+  (§23.2.4a: "not valid JavaScript as the body of a strict-mode async function whose parameters are its
+  crossings"). Tests slice-m4/foreign-header-s478.test.js (3 of 4 red on base).
+- known-gaps: g-boot-markup-as-value-unbuilt-s473 narrowed; filed g-spec-18-10-pipe-guard-unruled-s478,
+  g-conf-e-type-026-case-asserts-retired-code-s478, g-boot-destructuring-local-unbuilt-s478.
+
+## Measurements (after the merge; base = origin/main b8a25034e bootstrap, same case files)
+- Conformance: PASS 457 → 460, FAIL 97 → 94; 0 PASS→FAIL. FAIL→PASS: element-refusal/fn-return-script-pos,
+  element-refusal/interp-markup-value-style-pos, md/in-logic-markup-refused. foreign/foreign-inline-no-lang-neg
+  is FAIL→PASS by the case edit alone (vs the original case on main: FAIL).
+- Corpus (samples, examples, conformance/cases, self-host-v2/acceptance, stdlib — 3,204 files, single-file
+  front end): newly rejecting 0, newly accepting 0; 111 already-failing files change their error set
+  (cascade codes lost: E-PARSE-EXPR 79, E-STMT-MISSING-SEMICOLON 43, E-SCOPE-001 40, …).
+
 ## Next
-- tests (slice-m4/markup-value-s478.test.js), conformance before/after, corpus, hook, PR.
+- hook, PR.

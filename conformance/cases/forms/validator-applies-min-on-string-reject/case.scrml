@@ -2,5 +2,5 @@
 ${
     <label min(3)> = "hi"
 }
-${ @label }
+<p>${ @label }</p>
 </program>
