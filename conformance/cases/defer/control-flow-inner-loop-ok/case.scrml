@@ -5,12 +5,12 @@ ${
         defer {
             for (const i of [1, 2, 3]) {
                 if (i == 2) {
-                    continue
+                    continue;
                 }
                 if (i == 3) {
-                    break
+                    break;
                 }
-                @trace = `${@trace}x${i};`
+                @trace = `${@trace}x${i};`;
             }
             let helper = function(v) {
                 if (v > 0) {

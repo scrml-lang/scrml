@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§17.1.1",
   "source-test": "compiler/src/ast-builder.js",
-  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on the same element as `if=`. A single element cannot simultaneously open and continue a chain. The compiler SHALL reject such usage (E-CTRL-005).' §17 Error Code Summary + §34 both register E-CTRL-005 at severity Error.",
+  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on the same element as `if=`. A single element cannot simultaneously open and continue a chain. The compiler SHALL reject such usage (E-CTRL-005).' §17 Error Code Summary + §34 both register E-CTRL-005 at severity Error. S478 (bootstrap triage C7 / F2): migrated to a twinnable declaration. The legacy inline-typed state-object opener `<session { … }` only declared the cell(s) the chain reads; it is now the legacy declaration `<loggedIn>: bool = false`, which the `scrml fix` §66 rules twin to a §66 declaration (§66.21 row 1). (A direct §66 `let <x:T=v/>` here makes impl#1's ESM client emit throw — \"The keyword 'let' is reserved\" — so the twinnable legacy declaration keeps both implementations graded.) The if= / else-if= / else chain under test is unchanged.",
   "expect": {
     "codes": ["E-CTRL-005"],
     "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003"],

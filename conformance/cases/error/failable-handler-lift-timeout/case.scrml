@@ -16,6 +16,15 @@ ${
         if (id == "slow") fail LoadError.Timeout;
         return id;
     }
+
+    function label(p: Phase) -> string {
+        return match p {
+            .Idle :> "idle",
+            .Missing(id) :> "missing " + id,
+            .TimedOut :> "timed out",
+            .Loaded(data) :> "loaded " + data
+        };
+    }
 }
 
 <phase> = Phase.Idle
@@ -25,19 +34,19 @@ ${
         loadItem("missing") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
-        }
+        };
     }
     function handleSlow() {
         loadItem("slow") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
-        }
+        };
     }
     function handleOk() {
         let result = loadItem("ok") !{
-            .NotFound(mid) :> { @phase = Phase.Missing(mid); return },
-            .Timeout :> { @phase = Phase.TimedOut; return }
-        }
+            .NotFound(mid) :> { @phase = Phase.Missing(mid); return; },
+            .Timeout :> { @phase = Phase.TimedOut; return; }
+        };
         @phase = Phase.Loaded(result);
     }
 }
@@ -45,4 +54,4 @@ ${
 <button id="btn-missing" onclick=handleMissing()>missing</>
 <button id="btn-slow" onclick=handleSlow()>slow</>
 <button id="btn-ok" onclick=handleOk()>ok</>
-<div id="out">${@phase}</>
+<div id="out">${label(@phase)}</>

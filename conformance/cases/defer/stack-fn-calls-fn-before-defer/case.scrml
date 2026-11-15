@@ -3,23 +3,23 @@ ${
     <out> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function n2() {
-        let r = first()
-        defer D("e;")
+        let r = first();
+        defer D("e;");
         function first() {
-            return second() + "1"
+            return second() + "1";
         }
         function second() {
-            return "2"
+            return "2";
         }
-        return r
+        return r;
     }
 
     function go() {
-        @out = n2()
+        @out = n2();
     }
 }
 <program>

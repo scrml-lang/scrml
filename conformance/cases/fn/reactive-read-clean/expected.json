@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/gauntlet-s20/fn-purity-reactive.test.js",
   "spec": "§48.3.3",
-  "rationale": "§48.3.3 targets outer-scope MUTATION; reading an `@`-cell as a pure value (§48.5.3) is not a mutation and is allowed inside `fn`. E-FN-003 fires on `@x = ...`, not on `... + @x`.",
+  "rationale": "§48.3.3 targets outer-scope MUTATION; reading an `@`-cell as a pure value (§48.5.3) is not a mutation and is allowed inside `fn`. E-FN-003 fires on `@x = ...`, not on `... + @x`. S478 (bootstrap triage C12, twin defect): the legacy implicit cell `${ @x = v }` is now the legacy declaration `<x> = v`, which the `scrml fix` §66 rules twin. The §66 twin left `@x = v` as a body-top code line, i.e. a write to an undeclared cell (E-STATE-UNDECLARED, §6.1.1).",
   "expect": {
     "codes": [],
     "notCodes": ["E-FN-003"]

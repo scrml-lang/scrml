@@ -1,5 +1,6 @@
 <program>
-  <session { loggedIn: bool, visible: bool }
+  <loggedIn>: bool = false
+  <visible>: bool = true
 
   <div class="auth-area">
     <span if=@loggedIn show=@visible>Welcome back</>

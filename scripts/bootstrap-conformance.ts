@@ -220,7 +220,36 @@ export const LEGACY_MARKERS: ReadonlyArray<[string, RegExp]> = [
   ["engine-element", /<engine\b/],
   // no `<program>` root in the entry file
   ["no-program-root", /^(?![\s\S]*<program\b)/],
+  // §4.2 / §4.3 legacy state-object openers (S478 triage C7, fork F2): the spaced opener
+  // `< profile …>` (§4.3 W-WHITESPACE-001 soft deprecation) and the inline-typed `<session { f: T }`.
+  // Line-anchored, so a `<` comparison inside an expression does not count. No `scrml fix` §66
+  // rule rewrites either form (see NO_FIX_RULE_MARKERS), so a case carrying one is NOT-TWINNED.
+  // INTERIM: the capable form is the bootstrap parsing the §4.2 spaced opener
+  // (g-boot-spaced-state-opener-s478).
+  ["spaced-state-opener", /^[ \t]*<[ \t]+[A-Za-z_]\w*/m],
+  ["inline-typed-state-opener", /^[ \t]*<[A-Za-z_]\w*[ \t]*\{/m],
 ];
+
+/**
+ * Markers of legacy forms that no `scrml fix` §66 rule rewrites. A twin whose output still
+ * carries one is half-migrated, so twinOf reports it as a blocker (NOT-TWINNED) instead of grading
+ * the unchanged legacy text as if it were §66. INTERIM (S478 F2) — g-boot-spaced-state-opener-s478.
+ */
+export const NO_FIX_RULE_MARKERS: ReadonlySet<string> = new Set(["spaced-state-opener", "inline-typed-state-opener"]);
+
+/** `file:line marker: reason` blockers for the NO_FIX_RULE_MARKERS a (twinned) file still carries. */
+function unrewrittenMarkerBlockers(file: string, output: string): string[] {
+  const s = stripComments(output);
+  const out: string[] = [];
+  for (const [name, re] of LEGACY_MARKERS) {
+    if (!NO_FIX_RULE_MARKERS.has(name)) continue;
+    const m = re.exec(s);
+    if (!m) continue;
+    const line = s.slice(0, m.index + m[0].length).split("\n").length;
+    out.push(`${file}:${line} ${name}: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)`);
+  }
+  return out;
+}
 
 export function legacyMarkers(source: string): string[] {
   const s = stripComments(source);
@@ -371,6 +400,7 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
   const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES, allowNonCompiling: true, wrapPageRoot: true });
   for (const a of entry.applied) rules.add(a.rule);
   for (const b of entry.blockers) blockers.push(`case.scrml:${b.line} ${b.rule}: ${b.reason}`);
+  blockers.push(...unrewrittenMarkerBlockers("case.scrml", entry.output));
   changed ||= entry.changed;
   const auxFiles: Record<string, string> = {};
   for (const p of Object.keys(c.auxFiles).sort()) {
@@ -379,6 +409,7 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
     const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others, rules: TWIN_RULES, allowNonCompiling: true });
     for (const a of r.applied) rules.add(a.rule);
     for (const b of r.blockers) blockers.push(`${p}:${b.line} ${b.rule}: ${b.reason}`);
+    blockers.push(...unrewrittenMarkerBlockers(p, r.output));
     changed ||= r.changed;
     auxFiles[p] = r.output;
   }

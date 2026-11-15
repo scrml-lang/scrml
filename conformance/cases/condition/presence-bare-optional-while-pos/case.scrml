@@ -1,12 +1,12 @@
-// §42.4 / §49.2.3 — a bare `T | not` `while` condition is a presence test.
+// §42.4 / §49.2.3 — a bare `T | not` loop condition (`for (cond)`, the S469 successor of `while`) is a presence test.
 <program>
     function count(a: int | not) -> int {
         let n: int = 0;
-        while (a) {
+        for (a) {
             n = n + 1;
             break;
         }
-        return n
+        return n;
     }
     <main><p>x</p></main>
 </program>

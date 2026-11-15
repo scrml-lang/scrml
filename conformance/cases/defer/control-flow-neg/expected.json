@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§19.16.3",
   "provenance": "ruling:user-voice-S430-P3",
-  "rationale": "§19.16.3 rule 1: a deferred body runs while its block is already exiting, so it cannot redirect control; each of the four forms is E-DEFER-CONTROL-FLOW.",
+  "rationale": "§19.16.3 rule 1: a deferred body runs while its block is already exiting, so it cannot redirect control; each of the four forms is E-DEFER-CONTROL-FLOW. S478 (bootstrap triage C12): `risky` now returns a value. It only failed, so `risky()?` used a call that returns nothing as a value — \"a call of a function that returns nothing is not a value (§48 \\\"The return rule\\\", rule 3; E-TYPE-001 in a value position)\" (§4.14) — which is a second, unrelated error at probe (c).",
   "expect": {
     "codes": ["E-DEFER-CONTROL-FLOW"],
     "codeCounts": { "E-DEFER-CONTROL-FLOW": 4 },

@@ -1,5 +1,5 @@
 <program>
-  <session { loggedIn: bool }
+  <loggedIn>: bool = false
 
   <div class="auth-area">
     <span if=@loggedIn else>Welcome back</>

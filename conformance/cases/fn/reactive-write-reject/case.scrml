@@ -1,10 +1,10 @@
 <program>
-${ @counter = 0 }
+<counter> = 0
 ${
     fn badWrite(a: int) {
         @counter = a;
         return a;
     }
 }
-<p>${badWrite(1)}</>
+<button onclick=badWrite(1)>write</>
 </program>

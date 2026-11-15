@@ -18,8 +18,8 @@ ${
     }
 
     function l() {
-        for (const i of [1, 2]) defer D("l;");
-        D("x;")
+        for (const i of [1, 2]) { defer D("l;"); }
+        D("x;");
     }
 }
 <program>

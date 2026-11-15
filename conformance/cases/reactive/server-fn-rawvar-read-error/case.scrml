@@ -1,8 +1,8 @@
 ${
     <price> = 10
     function saveOrder() -> number {
-        result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`}
-        return result
+        result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`};
+        return result;
     }
 }
 <button id="save" onclick={ @price = saveOrder() !{ .Transport(_) :> return }; }>Save</>
