@@ -21,5 +21,15 @@ Lane: bootstrap conformance FAILs where a required check is missing.
 - [x] corpus (3150 files, as-written + §66 twins, old vs new bootstrap): newly-rejecting 1 =
       conformance/cases/engine/rule-violation-pos (the target, correct per §51.0.F); 0 newly-accepting
 
+## Fix round 1 (review s478-1894)
+- [x] H1: from-state known only on a straight-line prefix (analyze.scrml stateChildFromKnown / seqFrom):
+      an earlier write of the field, any call, a moving if-condition / match subject, a loop, defer or nested
+      fn → dynamic (runtime decides). Same gate for the self-write lint.
+- [x] L4: server rows match `function|fn`.
+- [x] L1: quoted / braced / no-variant `rule=` refused by name; state admits every target (no cascade).
+- [x] gaps filed: payload literal write (L2), server-fn signature shapes (L5), refusal line-scope swallow (L6),
+      rule= spellings + unparsed `rule=*` (L1).
+- [ ] conformance + corpus re-measure, CI checks, hook, push
+
 ## Todo
 - [ ] CI checks, hook, PR

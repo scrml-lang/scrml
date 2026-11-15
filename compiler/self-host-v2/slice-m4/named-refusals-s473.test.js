@@ -55,6 +55,8 @@ const CASES = [
   // E-ROUTE-004 on a server function; elsewhere it is scrml the bootstrap does not build
   ["server function parameter of function type", P(`    server function badParam(cb: fn()) -> string { return "ok"; }`), "E-ROUTE-004"],
   ["server function parameter of function type", P(`    server function badParam(cb: () -> int) -> string { return "ok"; }`), "E-ROUTE-004"],
+  // s478 fix r1 (#1894 L4): §12.5 is about a server FUNCTION, spelled `function` or `fn`
+  ["server function parameter of function type", P(`    server fn badParam(cb: fn()) -> string { return "ok"; }`), "E-ROUTE-004"],
   ["function-typed parameter", P(`    function show(cb: () -> int) -> int { return 1; }`), UNS],
   ["function-typed parameter", P(`    function show(cb: fn()) -> int { return 1; }`), UNS],
   // ---- retired (D22): named, under the SPEC's unknown-function code ----

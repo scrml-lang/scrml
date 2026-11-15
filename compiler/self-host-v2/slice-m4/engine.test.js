@@ -195,3 +195,107 @@ type Phase:enum = { Idle, Loading, Done }
     expect(diags(prog("@phase = @phase"))).toEqual([]);
   });
 });
+
+// s478 fix r1 (#1894 H1) — §51.0.F: "Compile-time validation when from-state is statically
+// known" … "When the from-state is dynamic (write outside any state-child body, or after a chain
+// of conditionals), the rule= is enforced at runtime". The body fixes the from-state only up to
+// the first statement that could move the field: an earlier write of it, or any call.
+describe("§51.0.F — the from-state is known only until something could move the field", () => {
+  const prog = (idle, extra = "", idleRule = "rule=.Loading") => `<program>
+type Phase:enum = { Idle, Loading, Done }
+<phase:Phase=.Idle single>
+    <Idle ${idleRule}>
+        <button onclick=\${${idle}}>a</>
+    </>
+    <Loading rule=.Done></>
+    <Done></>
+</>
+<*phase/>
+${extra}
+</program>
+`;
+  const codes = (src) => compileDiags(src).map((d) => [d.code, d.severity]);
+  const LOAD = "${ function load() { @phase = .Loading; } }";
+
+  // red on #1894 head c7e31c9cb (each was E-ENGINE-INVALID-TRANSITION; base compiled them clean)
+  test("a legal chain Idle → Loading → Done in one handler compiles clean", () => {
+    expect(codes(prog("@phase = .Loading; @phase = .Done;"))).toEqual([]);
+  });
+  test("a call before the write makes the from-state dynamic (the call may move it)", () => {
+    expect(codes(prog("load(); @phase = .Done;", LOAD))).toEqual([]);
+  });
+  test("a server call between the writes: no engine report (the failable is its own report)", () => {
+    const src = prog("@phase = .Loading; const r: int = fetchIt(); @phase = .Done;", "${ server function fetchIt() -> int { return 1; } }");
+    expect(codes(src).map((c) => c[0])).not.toContain("E-ENGINE-INVALID-TRANSITION");
+  });
+  test("a write of the variant after an earlier write is not a self-write: no W-ENGINE-SELF-WRITE-DETECTED", () => {
+    expect(codes(prog("@phase = .Loading; @phase = .Idle;"))).toEqual([]);
+  });
+  // conservative extensions of the same rule (not probed on c7e31c9cb)
+  test("an earlier `if` that writes the field in a branch makes the from-state dynamic", () => {
+    expect(codes(prog("if (true) { @phase = .Loading; } @phase = .Done;"))).toEqual([]);
+  });
+  test("a call in the enclosing `if` condition makes the from-state dynamic", () => {
+    const src = prog("if (ok()) { @phase = .Done; }", "${ function ok() -> boolean { return true; } }");
+    expect(codes(src)).toEqual([]);
+  });
+
+  // guards: what the static check must still catch
+  test("the FIRST write is still checked, whatever follows it", () => {
+    expect(codes(prog("@phase = .Done; @phase = .Loading;"))).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+  });
+  test("an earlier statement that cannot move the field keeps the from-state known", () => {
+    expect(codes(prog("const k: int = 1; @phase = .Done;"))).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+  });
+  test("a write inside a nested `if` arm (no call, no earlier write) is still checked", () => {
+    expect(codes(prog("if (true) { @phase = .Done; }"))).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+  });
+  test("a first-statement self-write is still W-ENGINE-SELF-WRITE-DETECTED (Info)", () => {
+    expect(codes(prog("@phase = .Idle; @phase = .Loading;"))).toEqual([["W-ENGINE-SELF-WRITE-DETECTED", "Info"]]);
+  });
+  test("a multi-target rule= is still checked", () => {
+    expect(codes(prog("@phase = .Idle; @phase = .Done;", "", "rule=(.Loading | .Done)"))).toEqual([["W-ENGINE-SELF-WRITE-DETECTED", "Info"]]);
+    expect(codes(prog("@phase = .Done;", "", "rule=(.Loading | .Done)"))).toEqual([]);
+  });
+  test("a `:`-shorthand body's write is still checked", () => {
+    const src = `<program>
+type Phase:enum = { Idle, Loading, Done }
+<phase:Phase=.Idle single>
+    <Idle rule=.Loading : <button onclick=\${@phase = .Done}>a</>>
+    <Loading rule=.Done : "l">
+    <Done : "d">
+</>
+<*phase/>
+</program>
+`;
+    expect(codes(src)).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
+  });
+});
+
+// s478 fix r1 (#1894 L1) — §51.0.F: "Three accepted forms" (`rule=.NextVariant`,
+// `rule=(.A | .B | .C)`, `rule=*`). A quoted spelling is none of them; before it was read as no
+// rule at all (base: silently accepted; #1894 head: a misleading "no rule=" transition error).
+describe("§51.0.F — a `rule=` spelling that is not one of the three forms is refused by name", () => {
+  const prog = (rule) => `<program>
+type Phase:enum = { Idle, Loading, Done }
+<phase:Phase=.Idle single>
+    <Idle ${rule}>
+        <button onclick=\${@phase = .Done}>a</>
+    </>
+    <Loading rule=.Done></>
+    <Done></>
+</>
+<*phase/>
+</program>
+`;
+  const ds = (src) => compileDiags(src);
+  test.each([['rule=".Loading"', '`rule=".Loading"`'], ['rule="*"', '`rule="*"`']])("%s → one E-BOOTSTRAP-UNSUPPORTED naming the spelling, nothing cascading", (rule, shown) => {
+    const d = ds(prog(rule));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain(shown);
+    expect(d[0].message).toContain("§51.0.F");
+  });
+  test("an unquoted rule= naming no variant (`rule=Loading`) → one E-BOOTSTRAP-UNSUPPORTED", () => {
+    expect(ds(prog("rule=Loading")).map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
