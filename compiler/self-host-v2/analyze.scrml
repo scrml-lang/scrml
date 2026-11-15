@@ -8501,7 +8501,7 @@ ${
     }
 
     fn runLocalConstReadWhy(name: string) -> string {
-        return "the initializer of a file-scope constant reads the body-top local `" + name + "` — the local is file-scope (§7.6, owner ruling S478), but the bootstrap builds a file-scope `const` whose value is fixed at compile time (§7.4.2), and a body-top local's value is made when its statement runs, so the bootstrap does not build that read (INTERIM). Bind the value in the body-top statements (`${ const k = " + name + "; }`), or read it in a markup interpolation"
+        return "the initializer of a file-scope constant reads the body-top local `" + name + "` — the local is file-scope (§7.6, owner ruling S478), but the bootstrap builds a file-scope `const` whose value is fixed at compile time (§7.4.2), and a body-top local's value is made when its statement runs, so the bootstrap does not build that read (INTERIM). Write it to a cell from a later body-top statement (`${ @k = " + name + "; }`), pass it to a function as an argument (a `lin` parameter, §35.2.1), or read it in a markup `${…}` text interpolation"
     }
 
     fn runLocalCellReadWhy(name: string) -> string {
@@ -42938,7 +42938,11 @@ ${
             .Elem(e: e) :> linMarkupElem(cx, e, s, ids, ok)
             .Effect(w: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-004", "is read inside an `<effect>` body — an effect body is a recurring execution context (§6.7.4: \"a `lin` variable read in it is E-LIN-004\"). Consume it once outside the effect")
             .Request(r: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-006", "is consumed inside a `<request>` body but was declared outside it — the body may run zero or many times (§35.5, §6.7.7). Declare the `lin` inside the `<request>` body, or pass a consumed (non-`lin`) value in")
-            .Gather(f: lf) :> linGather(cx, lf, s, ids)
+            // s478-boot-review-followups r1 (H1): a gather inside an `if=` / `else-if=` /
+            // `else` body or a component use's content mounts on its own (zero or many
+            // times), so its iterable is not one consumption — the whole gather is refused
+            // by name (INTERIM), as a text interpolation there is (linInterp)
+            .Gather(f: lf) :> linGatherAt(cx, n, lf, s, ids, ok)
             // s478-boot-review-followups (LOW-6): a `${ … }` logic block nested in markup —
             // refused by name and counted (it is not a body-top statement of the program
             // body, and the SPEC does not say how a read there counts), never skipped
@@ -42954,6 +42958,11 @@ ${
     // steps and `key` run per iteration: §35.4.4 "`lin` variables from outer scope SHALL
     // NOT be consumed inside loop bodies" — E-LIN-002. Its binder is a `const`
     // declaration: one that names an in-scope body-top `lin` is E-LIN-005 (§35.5).
+    fn linGatherAt(cx: LinCx, n: ANode, f: AFor, s: LinSt, ids: int[], ok: boolean) -> LinSt {
+        if (!ok) return linRefuse(cx, s, seenNode(cx.t, n, ids), "E-BOOTSTRAP-UNSUPPORTED", "is read in a `${ for … }` inside an `if=` / `else-if=` / `else` element, a component use's content or a structural element — that markup mounts on its own (zero or many times), so the loop's iterable is not read once, and the SPEC does not say how a `lin` read there counts (INTERIM). Consume it in markup the program body renders directly, or in a later body-top statement")
+        return linGather(cx, f, s, ids)
+    }
+
     fn linGather(cx: LinCx, f: AFor, s0: LinSt, ids: int[]) -> LinSt {
         let s: LinSt = linForBinder(cx, f, s0)
         const h: AForHead = f.head
@@ -43021,9 +43030,17 @@ ${
             // `else-if=` condition counts as a consumption. The compiler SHALL enforce that a
             // `lin` variable in a condition is not referenced in any other branch" — counted
             // like a text interpolation (one per appearance; a later branch's read is the
-            // second, E-LIN-002), where the element is markup the scope renders directly
-            if (ok && (a.name == "if" || a.name == "else-if")) {
+            // second, E-LIN-002), where the element is markup the scope renders directly.
+            // s478-boot-review-followups r1 (M1): only the chain's FIRST condition (`if=`) is
+            // evaluated on every path; an `else-if=` condition runs only when every condition
+            // before it is false, so a `lin` first read there is consumed on some paths only
+            // (§17 says it "counts as a consumption"; §35.4 requires one on every path) — the
+            // owner has not ruled: refused by name (INTERIM, linElseIfCond). A `lin` already
+            // consumed (by the `if=`, or earlier) and read again there stays E-LIN-002.
+            if (ok && a.name == "if") {
                 s = linAttrCond(cx, a, s)
+            } else if (ok && a.name == "else-if") {
+                s = linElseIfCond(cx, a, s, ids)
             } else {
                 attrSeen = attrSeen.concat(seenAttr(cx.t, a, ids))
             }
@@ -43070,6 +43087,25 @@ ${
             .Dur(text: x) :> s
             .NoValue :> s
         }
+    }
+
+    fn linElseIfCond(cx: LinCx, a: AAttr, s0: LinSt, ids: int[]) -> LinSt {
+        let fresh: LinSeen[] = []
+        let again: LinSeen[] = []
+        for (const x of seenAttr(cx.t, a, ids)) {
+            let used = false
+            for (const v of s0.vars) {
+                if (v.id == x.id && v.used) used = true
+            }
+            if (used) {
+                again = again.concat([x])
+            } else {
+                fresh = fresh.concat([x])
+            }
+        }
+        let s: LinSt = linRefuse(cx, s0, again, "E-LIN-002", "is consumed earlier and read again in an `else-if=` condition — a `lin` variable must be used exactly once (§35.2, §35.5; §17: \"the compiler SHALL enforce that a `lin` variable in a condition is not referenced in any other branch\"). Remove one use")
+        s = linRefuse(cx, s, fresh, "E-BOOTSTRAP-UNSUPPORTED", "is first read in an `else-if=` condition — that condition runs only when every condition before it in the chain is false, so the read happens on some paths only (§17 counts a condition read as a consumption; §35.4 requires one on every path), and the SPEC does not say which governs (INTERIM). Consume it in the chain's `if=` condition, in markup the program body renders directly, or in a later body-top statement")
+        return s
     }
 
     fn linIdsOf(s: LinSt) -> int[] {

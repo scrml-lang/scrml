@@ -6,6 +6,7 @@ Branch s478-boot-review-followups (from origin/main 733394af4). LOW follow-ups f
 - [x] L1 parse.scrml `markupValueDiags`: the INTERIM markup-value refusal is dropped only on the lines a named markup refusal spans (was: file-wide).
 - [x] L2 lex.scrml `isVoidName` is the full HTML void list (= html.scrml `isVoid`; lex is compiled standalone, so a test holds them equal); parse.scrml `isVoidTag` reads it. `parseMarkupValue` reports text past the element as E-PARSE-TRAILING.
   - consequence: `<wbr>…`, `<area>`, `<source>`, `<track>`, `<col>`, `<embed>`, `<base>` in a markup body take no closer (were E-PARSE-CLOSER); `<wbr></wbr>` is now a stray-closer error, like `<br></br>` already was. Corpus: 0 files affected.
+  - NEWLY REJECTING (stated per the #1891 review): a WRITTEN closer of a void element — `</source>`, `</col>`, `</track>`, `</area>`, `</wbr>`, `<wbr>b</wbr>` — was accepted and is now a stray-closer error. This matches impl#1, which gives E-CTX-001 for the same sources; the S239 reviewer verified it against §24.1 (the element registry's `isVoid`), §4.4 and §24.5. Corpus: 0 files affected. SPEC §4 itself has no explicit void-element list: filed LOW g-spec-void-element-list-s478.
 - [x] L5b checked: `/* c  in: { a } a` — the front end's core is non-null by design; slice-m1/tool-slices.js `prepareToolSlices` refuses it at the driver (E-FOREIGN-007 "Unterminated comment", §23.2.4a). No fix needed.
 
 ## #1886 (body-top run locals / lin)
@@ -19,3 +20,11 @@ Branch s478-boot-review-followups (from origin/main 733394af4). LOW follow-ups f
 ## Measurements
 - conformance: base == head (PASS 462, CODES-ONLY 5, FAIL 88, NOT-TWINNED 635, UNSUPPORTED 678); 0 verdict or emitted-code changes.
 - corpus (samples, examples, conformance/cases, acceptance, slice-m2/m4 src; 3176 files): 0 newly rejecting, 0 newly accepting, 0 code changes.
+
+## Fix round 1 (S239 review of #1891, verdict FIX)
+- merged origin/main (analyze.scrml conflict: kept both — LOW-4 cell-read refusal, then main's built-in checks; severity.scrml regenerated, `--check` clean).
+- [x] H1 (HIGH) `linMarkupNode` `.Gather` → `linGatherAt(…, ok)`: a gather in an `if=` / `else-if=` / `else` body, component content or a structural element is refused whole by name (E-BOOTSTRAP-UNSUPPORTED, INTERIM, counted) — was counted as one consumption (zero / many reads at run time). Red tests: if-body, else-body, component content.
+- [x] M1 (MED) only the `if=` condition counts; a `lin` first read in an `else-if=` condition is refused by name (INTERIM, `linElseIfCond`), one already consumed and read there is E-LIN-002. §17 vs §35.4 noted in g-boot-run-local-lin-interim-positions-s478.
+- [x] L1 `runLocalConstReadWhy` remedy: a cell write `${ @k = token; }`, a `lin` argument, or a text interpolation (not the refused `${ const k = token; }`).
+- [x] L2 parse `markupValueDiags`: an E-SCRIPT-001 / E-STYLE-001 drop range runs to the named element's closer (lex `markupValueExtentAt`), so a multi-line `<style>` branch covers its sibling branch.
+- [x] L3 gap note: `lin` parameters are not checked for E-LIN-005 (§35.5 ambiguous). No code.

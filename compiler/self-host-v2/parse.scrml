@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -2279,13 +2279,21 @@ ${
     // (s478 review L1). Fail closed either way: both are Errors.
     fn markupValueDiags(ds: Diag[], src: string) -> Diag[] {
         // each named refusal's lines: from the line its span starts on to the end
-        // of the line it ends on
+        // of the line its ELEMENT ends on. s478-boot-review-followups r1 (L2): an
+        // E-SCRIPT-001 / E-STYLE-001 span is the opener only, so a `<style>` written
+        // over several lines (`@c ? <style>\np{}\n</style> : <b>b</b>`) is measured to
+        // its closer — the extent the lexer gave the element (markupValueExtentAt).
         let from: int[] = []
         let to: int[] = []
         for (const d of ds) {
             if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001" || d.code == "E-MD-IN-LOGIC-NOMINAL" || d.code == "E-MATCH-ARM-MARKUP-IN-VALUE") {
+                let end: int = d.span.end
+                if ((d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") && d.span.start < src.length && src.charCodeAt(d.span.start) == 60) {
+                    const x: int = markupValueExtentAt(src, d.span.start)
+                    if (x > end) end = x
+                }
                 from = from.concat([lineStartOf(src, d.span.start)])
-                to = to.concat([lineEndOf(src, d.span.end)])
+                to = to.concat([lineEndOf(src, end)])
             }
         }
         if (from.length == 0) return ds

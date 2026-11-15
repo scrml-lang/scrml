@@ -147,3 +147,16 @@ describe("L2 — the markup-value extent ends where the reader does (the shared 
     expect(codes(src)).toContain("E-PARSE-TRAILING");
   });
 });
+
+// s478-boot-review-followups fix round 1 (S239 review of #1891, L2).
+describe("L2 — the drop range is the named element's full extent, not its opener", () => {
+  test("a `<style>` written over several lines covers its sibling branch after `</style>`", () => {
+    // RED ON ded48db95: E-STYLE-001 plus the INTERIM refusal (the span ended at the opener's line)
+    const src = prog("let <c:bool=true/>\n${ function f() { return @c ? <style>\np{}\n</style> : <b>b</b>; } }\n<p>x</p>");
+    expect(codes(src)).toEqual(["E-STYLE-001"]);
+  });
+  test("a markup value on a line after the element's closer line is still refused", () => {
+    const src = prog("let <c:bool=true/>\n${ function f() { return @c ? <style>\np{}\n</style> : 1; }\nfunction g() { return <b>b</b>; } }\n<p>x</p>");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-STYLE-001"]);
+  });
+});

@@ -238,3 +238,56 @@ describe("LOW-1 — §35.5 E-LIN-005: a declaration in a strictly inner scope sh
     expect(codes(run(P(`function f() -> int { const token = 1; return token; }\n${L}\n<p>\${token}\${f()}</p>`)))).toEqual([]);
   });
 });
+
+// s478-boot-review-followups fix round 1 (S239 review of #1891).
+describe("H1 — a `${ for … }` that mounts on its own is refused by name (INTERIM), never counted", () => {
+  // RED ON ded48db95: each compiled clean — the iterable counted as the one consumption,
+  // while at run time the loop read it zero times (`if=` false) or once per mount (toggle).
+  const LX = "${ lin xs = [1, 2]; }";
+  const G = '<ul>${ for (const x of xs) { lift <li>x</li>; } }</ul>';
+  const NAMED = "is read in a `${ for … }` inside an `if=` / `else-if=` / `else` element, a component use's content";
+  test("in an `if=` body", () => {
+    const r = run(P(`let <c:bool=true/>\n${LX}\n<div if=@c>${G}</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in an `else` body", () => {
+    const r = run(P(`let <c:bool=true/>\n${LX}\n<div if=@c>a</div><div else>${G}</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in a component use's content", () => {
+    const r = run(P(`<card t:string/>\n    renders <div><slot/></div>\n${LX}\n<card t="a">${G}</card>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in markup the program body renders directly it is still the one consumption", () => {
+    expect(codes(run(P(`${LX}\n<div>${G}</div>`)))).toEqual([]);
+  });
+});
+
+describe("M1 — only the chain's `if=` condition runs on every path", () => {
+  const L = '${ lin token = "ab"; }';
+  test("a `lin` first read in an `else-if=` condition: refused by name (INTERIM), not accepted", () => {
+    // RED ON ded48db95: compiled clean, though the read runs only when `@c` is false
+    const r = run(P(`let <c:bool=true/>\n${L}\n<div if=@c>x</div><div else-if=(token == "ab")>y</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain("is first read in an `else-if=` condition");
+  });
+  test("read in both the `if=` and the `else-if=`: E-LIN-002 (no INTERIM refusal)", () => {
+    expect(codes(run(P(`${L}\n<div if=(token == "a")>a</div><div else-if=(token == "b")>b</div>`)))).toEqual(["E-LIN-002"]);
+  });
+});
+
+describe("L1 — the constant-initializer refusal recommends forms that compile", () => {
+  test("the remedy names a cell write, a `lin` argument and a text interpolation — not `${ const k = … }`", () => {
+    const r = run(P(`\${ lin token = "a"; }\nconst k = token;\n<p>\${k}</p>`));
+    const m = errs(r)[0].message;
+    expect(m).toContain("`${ @k = token; }`");
+    expect(m).toContain("a `lin` parameter");
+    expect(m).not.toContain("const k = token");
+  });
+  test("the recommended cell write compiles clean", () => {
+    expect(codes(run(P(`let <k:string=""/>\n\${ lin token = "ab"; }\n\${ @k = token; }\n<p>\${@k}</p>`)))).toEqual([]);
+  });
+});
