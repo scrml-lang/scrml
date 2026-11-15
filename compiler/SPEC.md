@@ -12368,7 +12368,9 @@ than one of them is in flight, they are ordered as follows.
    both, and that run wins. *⚑ PA reading, not the ruling's words:* a reset's start is dated the way rule 2
    dates a write — at the last wait before the reset in its continuation, or when the reset runs if there is
    none — and between a reset and a write that share a start (the same continuation), the one that runs later
-   is the later start. A `reset-on=` entry's change (§6.8.4) is a write that triggers the load, so its run
+   is the later start. So a reset whose dated start is older than a load already started or a write already
+   landed is the older start under rule 1, and is superseded: it neither cancels the newer run nor lands over
+   it. A `reset-on=` entry's change (§6.8.4) is a write that triggers the load, so its run
    starts when that write's batch ends.
 4. **A winning write of `not` re-runs the load.** When a winning write's value is `not`, the write SHALL supersede
    the load in flight and then start the cell's load again. This includes a host `null` or `undefined`, which is
