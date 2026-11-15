@@ -50,6 +50,15 @@ describe("test-sharded.ts — exit status and RESULT line follow the run (S478)"
     writeFileSync(p, `import { test, expect, afterAll } from "bun:test";\n${body}\n`);
     return p;
   };
+  const runWith = (args) => {
+    const r = spawnSync(process.execPath, [join(REPO, "scripts/test-sharded.ts"), ...args], {
+      cwd: REPO,
+      encoding: "utf8",
+      env,
+      timeout: 120000,
+    });
+    return { rc: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") };
+  };
   const runner = (...files) => {
     const r = spawnSync(process.execPath, [join(REPO, "scripts/test-sharded.ts"), "--shards=2", ...files], {
       cwd: REPO,
@@ -81,6 +90,79 @@ describe("test-sharded.ts — exit status and RESULT line follow the run (S478)"
     expect(r.out).toMatch(/^RESULT: FAIL — 1 unhandled error\(s\) outside any test/m);
     expect(r.out).toMatch(/\(error\) Unhandled error between tests in .*late\.test\.js/);
     expect(r.out).toContain("late reject"); // the failure report carries the error itself
+  }, RUN_TIMEOUT);
+
+  // Review F2 (S478 fix round 1): the banner and the " N errors" count are acted on only when the shard exits
+  // non-zero. A PASSING test that prints both used to bail the run under --bail and end RESULT: FAIL, rc 1.
+  test("a passing test that PRINTS '# Unhandled error…' and ' 3 errors' → PASS under --bail", () => {
+    const printy = file("printy.test.js", `test("prints", () => { console.log(" 3 errors"); console.log("# Unhandled error between tests"); expect(1).toBe(1); });`);
+    const r = runWith(["--shards=2", "--bail", ok, printy]);
+    expect(r.out).toMatch(/^TOTAL: 2 pass, 0 fail, 0 error,/m);
+    expect(r.out).toContain("RESULT: PASS");
+    expect(r.out).not.toContain("(error) Unhandled error");
+    expect(r.rc).toBe(0);
+  }, RUN_TIMEOUT);
+
+  test("…and a REAL unhandled error (afterAll rejection) still FAILS under --bail", () => {
+    const late = file("late2.test.js", `test("fine", () => { expect(1).toBe(1); });\nafterAll(() => { Promise.reject(new Error("late reject 2")); });`);
+    const r = runWith(["--shards=2", "--bail", ok, late]);
+    expect(r.rc).toBe(1);
+    expect(r.out).toMatch(/^RESULT: FAIL — 1 unhandled error\(s\) outside any test/m);
+    expect(r.out).toMatch(/\(error\) Unhandled error between tests in .*late2\.test\.js/);
+  }, RUN_TIMEOUT);
+});
+
+// ------------------------------------------------------------------ 1b. the memory ceiling: env floor vs exact flag
+
+describe("test-sharded.ts — SCRML_HOOK_SHARD_MEM_MB is a floor, --shard-mem is exact (S478 review F1)", () => {
+  const dir = tmp("s478-ceiling-");
+  const env = { ...process.env, SCRML_TEST_TIMINGS: join(dir, "timings.json"), SCRML_HOOK_SLOTS: "2" };
+  delete env.SCRML_HOOK_SHARDS;
+  delete env.SCRML_HOOK_SHARD_MEM_MB;
+  const okFile = join(dir, "ok.test.js");
+  writeFileSync(okFile, `import { test, expect } from "bun:test";\ntest("ok", () => { expect(1).toBe(1); });\n`);
+  const run = (extraEnv, args, files = [okFile]) => {
+    const r = spawnSync(process.execPath, [join(REPO, "scripts/test-sharded.ts"), ...args, ...files], {
+      cwd: REPO,
+      encoding: "utf8",
+      env: { ...env, ...extraEnv },
+      timeout: 120000,
+    });
+    const out = (r.stdout ?? "") + (r.stderr ?? "");
+    return { rc: r.status, out, header: out.split("\n").find((l) => /^test-sharded: \d+ files in/.test(l)) ?? "" };
+  };
+
+  // The lane workaround (SCRML_HOOK_SHARD_MEM_MB=4608) with memory short (a huge reserve -> memory-derived N=1):
+  // the whole suite in one shard gets the adaptive 7680, not a 4608 cap (measured N=1 peak 5009 MB — 4608 killed
+  // it). The header names the floor.
+  test("explicit env 4608 at a memory-derived N=1 → ceiling 7680 (adaptive), floor named", () => {
+    const r = run({ SCRML_HOOK_MEM_RESERVE_MB: "10000000", SCRML_HOOK_SHARD_MEM_MB: "4608" }, []);
+    expect(r.header).toContain("1 shard(s)");
+    expect(r.header).toContain("ceiling 7680 MB per shard (adaptive, floor 4608 MB from SCRML_HOOK_SHARD_MEM_MB)");
+    expect(r.rc).toBe(0);
+  }, RUN_TIMEOUT);
+
+  test("an env value above the adaptive ceiling raises it (a floor, not ignored)", () => {
+    const r = run({ SCRML_HOOK_SHARD_MEM_MB: "9000" }, ["--shards=1", "--plan"]);
+    expect(r.out).toMatch(/^shard 0: 1 files, est [0-9.]+, ceiling 9000 MB$/m);
+  }, RUN_TIMEOUT);
+
+  test("--shard-mem is exact: below the adaptive value, and over the env floor", () => {
+    const r = run({ SCRML_HOOK_SHARD_MEM_MB: "4608" }, ["--shards=1", "--shard-mem=600"]);
+    expect(r.header).toContain("ceiling 600 MB per shard (--shard-mem, exact)");
+  }, RUN_TIMEOUT);
+
+  // The review's probe of the ceiling itself: an exact 600 MB ceiling and a ~1 GB allocation must be killed.
+  test("--shard-mem=600 with a 1 GB allocation → MEMORY CEILING kill, RESULT: FAIL (the bite)", () => {
+    const mem = join(dir, "mem.test.js");
+    writeFileSync(
+      mem,
+      `import { test, expect } from "bun:test";\ntest("mem", async () => { const a = []; for (let i = 0; i < 40; i++) a.push(Buffer.alloc(25 * 1024 * 1024, 1)); await Bun.sleep(4000); expect(a.length).toBe(40); }, 20000);\n`,
+    );
+    const r = run({}, ["--shards=1", "--shard-mem=600"], [mem]);
+    expect(r.out).toMatch(/MEMORY CEILING: \d+ MB > 600 MB/);
+    expect(r.out).toMatch(/^RESULT: FAIL — shard 0: memory/m);
+    expect(r.rc).toBe(1);
   }, RUN_TIMEOUT);
 });
 
@@ -192,9 +274,18 @@ describe("pre-push suite-verdict block — no failure without its cause, no exit
     expect(r.out).toContain("SUITE_BLOCK=1");
   });
 
-  test("the full output is kept on disk and its path printed", () => {
-    const r = verdict(1, 1, shardedUnhandled);
-    expect(r.out).toContain(join(logDir, "scrml/pre-push-suite-last.log"));
-    expect(readFileSync(join(logDir, "scrml/pre-push-suite-last.log"), "utf8")).toContain("late reject");
+  // Review F3 (S478 fix round 1): one log per run — the single machine-wide file let concurrent pushes overwrite
+  // each other's log.
+  const logPath = (out) => /Full output: (\S+)/.exec(out)?.[1];
+  test("the full output is kept on disk, in a per-run file, and its path printed", () => {
+    const a = verdict(1, 1, shardedUnhandled);
+    const b = verdict(1, 1, shardedMemoryKill);
+    const pa = logPath(a.out);
+    const pb = logPath(b.out);
+    expect(pa).toStartWith(join(logDir, "scrml/pre-push-suite-logs/pre-push-suite-"));
+    expect(pb).toStartWith(join(logDir, "scrml/pre-push-suite-logs/pre-push-suite-"));
+    expect(pa).not.toBe(pb);
+    expect(readFileSync(pa, "utf8")).toContain("late reject");
+    expect(readFileSync(pb, "utf8")).toContain("shard 2: memory");
   });
 });

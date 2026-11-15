@@ -27,8 +27,8 @@ Gaps: g-hook-single-shard-test-pollution-s477, g-hook-sharded-prepush-exit-s477.
   2578 / 3424 MB — 3424 is over the old 3072 ceiling; N=12 966–2045 MB plus the one-file shard
   bootstrap-conformance-counter at 2603 MB.
 - Rule: ceiling = max(4608, ceil512(1.5 × (2900 + 2100 × share))), share = the shard's fraction of the run's
-  estimated seconds. 7680 / 5632 / 5120 MB at N=1 / 4 / 12. An explicit SCRML_HOOK_SHARD_MEM_MB / --shard-mem
-  is still a fixed ceiling. Not tied to free memory: admission + slots already do that.
+  estimated seconds. 7680 / 5632 / 5120 MB at N=1 / 4 / 12. (Superseded in fix round 1: SCRML_HOOK_SHARD_MEM_MB
+  is a floor, max(env, adaptive); only --shard-mem is a fixed ceiling.) Not tied to free memory: admission + slots already do that.
 
 ## 3. Pre-push exit status
 - Root: bun reports an error outside any test as " 0 fail" + " 1 error", exit 1, no `(fail)` line.
@@ -55,3 +55,19 @@ Gaps: g-hook-single-shard-test-pollution-s477, g-hook-sharded-prepush-exit-s477.
 ## Seen, not this lane
 - N=4 measuring run, under load: "§3 scrml dev run from the project root > REFERENCING program, missing
   database …" failed at 30.7 s (a timing failure under CPU load; passed in every other run).
+
+## Fix round 1 (PR #1855, S239 review of 6c5862197)
+- F1 (MED, false red): SCRML_HOOK_SHARD_MEM_MB is now a FLOOR — ceiling = max(env, adaptive); only
+  `--shard-mem=MB` is exact. Repro (`SCRML_HOOK_MEM_RESERVE_MB=10000000 SCRML_HOOK_SHARD_MEM_MB=4608`, N=1):
+  PR head said "ceiling 4608 MB per shard (SCRML_HOOK_SHARD_MEM_MB)"; now "ceiling 7680 MB per shard
+  (adaptive, floor 4608 MB from SCRML_HOOK_SHARD_MEM_MB)". Probe `--shard-mem=600` + 1 GB alloc → MEMORY
+  CEILING 1031 > 600, RESULT: FAIL, rc 1 (still works).
+- F2 (LOW, false red under --bail): `# Unhandled error` lines are recorded as candidates and become `(error)`
+  fail lines (and bail) only when the shard exits non-zero; an exit-0 shard's " N errors" count is zeroed.
+  Repro (passing test printing " 3 errors" + "# Unhandled error between tests", --shards=2 --bail): PR head
+  rc 1 "RESULT: FAIL — 3 unhandled error(s)"; now rc 0, RESULT: PASS. Real afterAll rejection: still rc 1,
+  "RESULT: FAIL — 1 unhandled error(s)", `(error)` line names late.test.js.
+- F3 (LOW): pre-push SUITE_LOG is per run — mktemp under ~/.cache/scrml/pre-push-suite-logs/
+  (`pre-push-suite-<date>-<pid>-XXXXXX`), pruned after a day; path printed in the block messages.
+- Tests: hook-prepush-suite-verdict-s478.test.js 20 pass. Bite: the same file against 6c5862197's runner +
+  pre-push → 4 fail (F2 printy, F1 floor header, --shard-mem exact label, F3 per-run log), 16 pass.

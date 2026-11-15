@@ -108,9 +108,13 @@ fi
 # (The block between the BEGIN/END markers is run verbatim by hook-prepush-suite-verdict-s478.test.js.)
 # BEGIN suite-verdict
 SUITE_BLOCK=0
-SUITE_LOG="${XDG_CACHE_HOME:-$HOME/.cache}/scrml/pre-push-suite-last.log"
-mkdir -p "$(dirname "$SUITE_LOG")" 2>/dev/null || true
-printf '%s\n' "$TEST_OUTPUT" > "$SUITE_LOG" 2>/dev/null || SUITE_LOG="(could not be written)"
+# One log PER RUN (S478 fix round 1): concurrent pushes from different lanes must not overwrite each other's
+# log. Logs older than a day are pruned here.
+SUITE_LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/scrml/pre-push-suite-logs"
+mkdir -p "$SUITE_LOG_DIR" 2>/dev/null || true
+find "$SUITE_LOG_DIR" -maxdepth 1 -name 'pre-push-suite-*' -mtime +0 -delete 2>/dev/null || true
+SUITE_LOG=$(mktemp "$SUITE_LOG_DIR/pre-push-suite-$(date +%Y%m%d-%H%M%S)-$$-XXXXXX" 2>/dev/null) || SUITE_LOG=""
+if [ -z "$SUITE_LOG" ] || ! printf '%s\n' "$TEST_OUTPUT" > "$SUITE_LOG" 2>/dev/null; then SUITE_LOG="(could not be written)"; fi
 if [ "$SHARDED" = "1" ]; then
   # The runner prints per-shard counts first; the overall numbers are on its TOTAL line.
   FINISHED=$(printf '%s\n' "$TEST_OUTPUT" | grep -E '^(PARTIAL )?TOTAL' | tail -1 || true)
