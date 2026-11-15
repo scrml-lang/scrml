@@ -3,9 +3,9 @@ ${
   type Post:struct = { role: Role req }
 
   fn label(p: Post) -> string {
-    match p {
+    return match p {
       .Admin :> "admin"
-    }
+    };
   }
 }
 <program>

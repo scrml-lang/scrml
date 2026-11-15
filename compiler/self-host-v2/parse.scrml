@@ -4043,15 +4043,42 @@ ${
         t = adv(t)
         let aty: AType | not = not
         if (isP(t, ":")) {
-            const ty: RType = parseType(adv(t))
+            const ty: RType = parseTypeAt(adv(t), true)
             aty = ty.t
             t = ty.tp
         }
         t = expectP(t, "=")
         // s469 — a `for-binding` (§49.2.1): the value form, from any head (§49.6)
-        if (isWord(t, "for") || labelAhead(t)) return parseForBinding(t, start, nameTok, mutable, aty)
+        if (isWord(t, "for") || labelAhead(t)) {
+            if (aty is given) t = refuseRefineIn(t, aty, "on the loop-bound `" + nameTok.v + "` (its value is the loop's)")
+            return parseForBinding(t, start, nameTok, mutable, aty)
+        }
         const init: RExpr = parseAssign(t)
-        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e, false))
+        let t2: TP = init.tp
+        if (aty is given && standingRefine(aty)) {
+            const rz: RLocalRefine = localRefine(t2, aty, init.e, mutable, nameTok.v)
+            t2 = rz.tp
+            aty = rz.ty
+        }
+        return mkS(t2, start, AStmtK.Local(nameTok.v, mutable, aty, init.e, false))
+    }
+
+    // s478 — the zone of a local's top refinement (parseLocal): a `const` whose
+    // value is a literal is the static zone (§53.4.2 rules 1-2), judged now; a `let`
+    // (every later assignment is a boundary-zone write, §53.4.3) or any other value
+    // is refused by name (INTERIM).
+    type RLocalRefine:struct = { ty: AType, tp: TP }
+
+    fn localRefine(tp: TP, ty: AType, init: AExpr, mutable: boolean, name: string) -> RLocalRefine {
+        let z: RefZone = refineFixedZone(ty, refLitOf(init), "the local `" + name + "`")
+        if (mutable && z.code != "E-CONTRACT-001") {
+            z = { code: "E-BOOTSTRAP-UNSUPPORTED", msg: refBoundaryMsg(typeNameText(ty), "on the `let` local `" + name + "` — each later assignment to it is a boundary-zone write"), reported: false }
+        }
+        if (z.code == "") return { ty: ty, tp: tp }
+        const d: Diag = newDiag(z.code, z.msg, tp.file, ty.span)
+        const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        if (z.reported) return { ty: reportedRefine(ty), tp: t }
+        return { ty: ty, tp: t }
     }
 
     // s471 — `lin name = init;` (§35.2: "`lin` is a declaration keyword. It takes
@@ -4678,6 +4705,20 @@ ${
     }
 
     fn parseType(tp: TP) -> RType {
+        return parseTypeAt(tp, false)
+    }
+
+    // s478 — `own`: the caller judges the zone of a refinement at the type's TOP
+    // (parseLocal — a fixed local with a literal value is the static zone, §53.4.2);
+    // every other refinement, and every one when `own` is false, is the boundary
+    // zone here and refused by name (refuseRefineIn, INTERIM).
+    fn parseTypeAt(tp: TP, own: boolean) -> RType {
+        const r0: RType = parseTypeBody(tp)
+        if (own && standingRefine(r0.t)) return r0
+        return { t: r0.t, tp: refuseRefineIn(r0.tp, r0.t, "stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local)") }
+    }
+
+    fn parseTypeBody(tp: TP) -> RType {
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
         if (lifeAhead(tp)) return parseLifeType(tp)
@@ -4689,6 +4730,10 @@ ${
         const nh: NsHead = nsHeadAt(t, 0)
         let r: RType = mkT(adv(t), start, ATypeK.TName(nameTok.v))
         if (nh.n > 0) r = mkT(adv(adv(adv(t))), start, ATypeK.TName(nh.name))
+        // s478 — a refinement `base(pred)` (§53.2.1), its `(` touching the base name
+        if (nh.n == 0 && refinableBase(nameTok.v) && isP(r.tp, "(") && touching(nameTok, cur(r.tp))) {
+            r = parseRefine(r.tp, start, r.t)
+        }
         while (isP(r.tp, "[")) {
             let g: TP = adv(r.tp)
             let grants: string[] = []
@@ -4720,10 +4765,630 @@ ${
             r = maybeType(adv(adv(r.tp)), start, tp.i, r.t)
         } else if (nameTok.v == "not" && isP(r.tp, "|")) {
             // s469 review r2: `not | T`, the same union written the other way round
-            const rest: RType = parseType(adv(r.tp))
+            const rest: RType = parseTypeBody(adv(r.tp))
             r = maybeType(rest.tp, start, tp.i, rest.t)
         }
         return r
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-refinement) — refinement types `base(pred)` (§53).
+    //
+    // §53.2.1: `inline-predicate = base-type "(" predicate-expr ")"`, `base-type
+    // = "number" | "string" | "int" | "integer" | "bool" | "boolean"`. A
+    // refinement is READ in every type position (a code type here, an opener type
+    // in openerTypeMember) and JUDGED where it is declared, whatever zone its value
+    // is in (§53.11: "Both forms of E-CONTRACT-002 SHALL be emitted where the
+    // refinement is declared, whatever zone its value is in"): a malformed
+    // predicate or an unknown named shape is E-CONTRACT-002, a reference outside
+    // the incoming value is E-CONTRACT-003. Its ZONE (§53.4) is then decided where
+    // the value is known: a fixed declaration (`const x: T(p) = lit`, a top-level
+    // `<x:T(p)=lit/>`) whose value is a literal is judged now — the static zone
+    // (§53.4.2 rules 1-2): a literal that fails is E-CONTRACT-001. Every other
+    // position is the boundary zone, where §53.11 requires a runtime check ("The
+    // compiler SHALL emit a runtime check for every boundary-zone assignment that
+    // it cannot statically elide"); the bootstrap does not build that check yet, so
+    // it refuses the refinement by name (INTERIM, g-boot-refinement-runtime-checks-s478)
+    // — never an annotation read without its check.
+    // =========================================================================
+    fn refinableBase(n: string) -> boolean {
+        return n == "number" || n == "int" || n == "integer" || n == "string" || n == "bool" || n == "boolean"
+    }
+
+    fn numericBase(n: string) -> boolean {
+        return n == "number" || n == "int" || n == "integer"
+    }
+
+    // §53.6.1 "The following shapes SHALL be defined in the initial release"
+    fn builtinShape(n: string) -> boolean {
+        return n == "email" || n == "url" || n == "uuid" || n == "phone" || n == "date" || n == "time" || n == "color"
+    }
+
+    // A predicate token: k = num · op · and · or · not · lp · rp · prop (`.name`) ·
+    // ident · ext (`@name`) · str · bad · end.
+    type RefTok:struct = { k: string, v: string }
+    type RefPred:enum = {
+        PCmp(op: string, n: number),       // `>0` — the value against a number
+        PLen(op: string, n: number),       // `.length > 7`
+        PShape(name: string),              // a named shape (§53.6)
+        PAnd(l: RefPred, r: RefPred),
+        POr(l: RefPred, r: RefPred),
+        PNot(p: RefPred),
+    }
+    // A parse result: `code` "" (read) or the code of the first fault, `msg` its why.
+    type RRef:struct = { p: RefPred, i: int, code: string, msg: string }
+    type RefJudge:struct = { code: string, msg: string, p: RefPred }
+
+    fn refToks(src: string) -> RefTok[] {
+        let out: RefTok[] = []
+        let i: int = 0
+        while (i < src.length) {
+            const c: string = src.charAt(i)
+            const c2: string = src.substring(i, i + 2)
+            if (c == " " || c == "\t" || c == "\n" || c == "\r") {
+                i = i + 1
+            } else if (c2 == "&&") {
+                out = out.concat([{ k: "and", v: c2 }])
+                i = i + 2
+            } else if (c2 == "||") {
+                out = out.concat([{ k: "or", v: c2 }])
+                i = i + 2
+            } else if (c2 == ">=" || c2 == "<=" || c2 == "==" || c2 == "!=") {
+                out = out.concat([{ k: "op", v: c2 }])
+                i = i + 2
+            } else if (c == ">" || c == "<") {
+                out = out.concat([{ k: "op", v: c }])
+                i = i + 1
+            } else if (c == "!") {
+                out = out.concat([{ k: "not", v: c }])
+                i = i + 1
+            } else if (c == "(") {
+                out = out.concat([{ k: "lp", v: c }])
+                i = i + 1
+            } else if (c == ")") {
+                out = out.concat([{ k: "rp", v: c }])
+                i = i + 1
+            } else if (isDigitStr(c) || (c == "-" && isDigitStr(src.charAt(i + 1)))) {
+                let j: int = i + 1
+                while (j < src.length && (isDigitStr(src.charAt(j)) || src.charAt(j) == ".")) j = j + 1
+                out = out.concat([{ k: "num", v: src.substring(i, j) }])
+                i = j
+            } else if ((c == "." || c == "@") && isIdentStartCh(src.charAt(i + 1))) {
+                let j: int = i + 1
+                while (j < src.length && isIdentCh(src.charAt(j))) j = j + 1
+                let kind: string = "prop"
+                if (c == "@") kind = "ext"
+                out = out.concat([{ k: kind, v: src.substring(i + 1, j) }])
+                i = j
+            } else if (isIdentStartCh(c)) {
+                let j: int = i + 1
+                while (j < src.length && isIdentCh(src.charAt(j))) j = j + 1
+                out = out.concat([{ k: "ident", v: src.substring(i, j) }])
+                i = j
+            } else if (c == "\"" || c == "'") {
+                let j: int = i + 1
+                while (j < src.length && src.charAt(j) != c) {
+                    if (src.charAt(j) == "\\") j = j + 1
+                    j = j + 1
+                }
+                if (j >= src.length) {
+                    out = out.concat([{ k: "bad", v: "an unterminated string" }])
+                    i = src.length
+                } else {
+                    out = out.concat([{ k: "str", v: src.substring(i + 1, j) }])
+                    i = j + 1
+                }
+            } else {
+                out = out.concat([{ k: "bad", v: "`" + c + "`" }])
+                i = i + 1
+            }
+        }
+        return out
+    }
+
+    fn refAt(ts: RefTok[], i: int) -> RefTok {
+        if (i < ts.length) return ts[i]
+        return { k: "end", v: "" }
+    }
+
+    fn refOk(p: RefPred, i: int) -> RRef { return { p: p, i: i, code: "", msg: "" } }
+
+    fn refErr(i: int, code: string, msg: string) -> RRef {
+        return { p: RefPred.PShape(""), i: i, code: code, msg: msg }
+    }
+
+    fn refOr(ts: RefTok[], i: int) -> RRef {
+        let l: RRef = refAnd(ts, i)
+        while (l.code == "" && refAt(ts, l.i).k == "or") {
+            const r: RRef = refAnd(ts, l.i + 1)
+            if (r.code != "") return r
+            l = refOk(RefPred.POr(l.p, r.p), r.i)
+        }
+        return l
+    }
+
+    fn refAnd(ts: RefTok[], i: int) -> RRef {
+        let l: RRef = refUnary(ts, i)
+        while (l.code == "" && refAt(ts, l.i).k == "and") {
+            const r: RRef = refUnary(ts, l.i + 1)
+            if (r.code != "") return r
+            l = refOk(RefPred.PAnd(l.p, r.p), r.i)
+        }
+        return l
+    }
+
+    fn refUnary(ts: RefTok[], i: int) -> RRef {
+        const t: RefTok = refAt(ts, i)
+        if (t.k == "not") {
+            const r: RRef = refUnary(ts, i + 1)
+            if (r.code != "") return r
+            return refOk(RefPred.PNot(r.p), r.i)
+        }
+        if (t.k == "lp") {
+            const r2: RRef = refOr(ts, i + 1)
+            if (r2.code != "") return r2
+            if (refAt(ts, r2.i).k != "rp") return refErr(r2.i, "E-CONTRACT-002", "an unclosed `(`")
+            return refOk(r2.p, r2.i + 1)
+        }
+        return refSimple(ts, i)
+    }
+
+    // `lo < value < hi` reads as `value > lo && value < hi`: the operator seen from `value`.
+    fn refFlip(op: string) -> string {
+        if (op == "<") return ">"
+        if (op == "<=") return ">="
+        if (op == ">") return "<"
+        if (op == ">=") return "<="
+        return op
+    }
+
+    fn refExtMsg(name: string) -> string {
+        return "EXT:" + name
+    }
+
+    fn refSimple(ts: RefTok[], i: int) -> RRef {
+        const t: RefTok = refAt(ts, i)
+        if (t.k == "ext") return refErr(i, "E-CONTRACT-003", refExtMsg(t.v))
+        if (t.k == "op") {
+            const n: RefTok = refAt(ts, i + 1)
+            if (n.k == "num") return refOk(RefPred.PCmp(t.v, Number(n.v)), i + 2)
+            if (n.k == "ext") return refErr(i + 1, "E-CONTRACT-003", refExtMsg(n.v))
+            if (n.k == "ident") return refErr(i + 1, "E-BOOTSTRAP-UNSUPPORTED", "the name `" + n.v + "` as a comparison operand (§53.3.1: an inline predicate references only the incoming value — whether this name is an outer binding the bootstrap does not decide)")
+            return refErr(i + 1, "E-CONTRACT-002", "expected a number after `" + t.v + "`")
+        }
+        if (t.k == "prop") {
+            const o: RefTok = refAt(ts, i + 1)
+            const n2: RefTok = refAt(ts, i + 2)
+            if (o.k == "op" && n2.k == "num" && t.v == "length") return refOk(RefPred.PLen(o.v, Number(n2.v)), i + 3)
+            if (o.k == "op" && n2.k == "ext") return refErr(i + 2, "E-CONTRACT-003", refExtMsg(n2.v))
+            if (o.k == "op" && (n2.k == "num" || n2.k == "str")) return refErr(i, "E-BOOTSTRAP-UNSUPPORTED", "the property comparison `." + t.v + " " + o.v + " " + n2.v + "` (the bootstrap judges `.length` against a number)")
+            return refErr(i + 1, "E-CONTRACT-002", "expected a comparison after `." + t.v + "`")
+        }
+        if (t.k == "ident") {
+            if (refAt(ts, i + 1).k == "lp") return refErr(i, "E-BOOTSTRAP-UNSUPPORTED", "the call form `" + t.v + "(…)` inside a refinement's parentheses (§53.6.1 spells the shared validator vocabulary `base." + t.v + "(…)`)")
+            if (t.v == "value") return refErr(i, "E-CONTRACT-002", "`value` stands only in the range form `lo < value < hi`")
+            if (!builtinShape(t.v)) return refErr(i, "E-CONTRACT-002", "SHAPE:" + t.v)
+            return refOk(RefPred.PShape(t.v), i + 1)
+        }
+        if (t.k == "num") {
+            const o1: RefTok = refAt(ts, i + 1)
+            const vv: RefTok = refAt(ts, i + 2)
+            const o2: RefTok = refAt(ts, i + 3)
+            const hi: RefTok = refAt(ts, i + 4)
+            if (o1.k == "op" && vv.k == "ident" && vv.v == "value" && o2.k == "op" && hi.k == "num") {
+                return refOk(RefPred.PAnd(RefPred.PCmp(refFlip(o1.v), Number(t.v)), RefPred.PCmp(o2.v, Number(hi.v))), i + 5)
+            }
+            return refErr(i, "E-CONTRACT-002", "a bare number `" + t.v + "` is not a predicate (write a comparison: `>" + t.v + "`)")
+        }
+        if (t.k == "end") return refErr(i, "E-CONTRACT-002", "the predicate ends where a comparison or a shape is expected")
+        if (t.k == "bad") return refErr(i, "E-CONTRACT-002", "an unexpected " + t.v)
+        return refErr(i, "E-CONTRACT-002", "an unexpected `" + t.v + "`")
+    }
+
+    // Does each part of `p` fit the base type? A comparison judges a number; a
+    // `.length` comparison and a named shape judge a string (§53.6.1 "Base type").
+    fn refFits(p: RefPred, base: string) -> boolean {
+        return match p {
+            .PCmp(op: o) :> numericBase(base)
+            .PLen(op: o) :> base == "string"
+            .PShape(name: n) :> base == "string"
+            .PAnd(l: a, r: b) :> refFits(a, base) && refFits(b, base)
+            .POr(l: a, r: b) :> refFits(a, base) && refFits(b, base)
+            .PNot(p: x) :> refFits(x, base)
+        }
+    }
+
+    // The judgement of `base(pred)` where it is declared: `code` "" (the refinement
+    // stands), E-CONTRACT-002 / -003 (§53.11), or E-BOOTSTRAP-UNSUPPORTED (a form
+    // the grammar or impl#1 reads that the bootstrap does not judge).
+    fn judgeRefine(base: string, pred: string) -> RefJudge {
+        const shown: string = base + "(" + pred + ")"
+        const ts: RefTok[] = refToks(pred)
+        let r: RRef = refOr(ts, 0)
+        if (r.code == "" && r.i < ts.length) r = refErr(r.i, "E-CONTRACT-002", "text is left over after the predicate, at `" + refAt(ts, r.i).v + "`")
+        if (r.code == "E-CONTRACT-003") {
+            const nm: string = r.msg.substring(4)
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). For a constraint on external state use a `<machine>` guard: `<machine name=Range for=" + base + "> { * => * given (value <= @" + nm + ") }`" }
+        }
+        if (r.code == "E-CONTRACT-002" && r.msg.substring(0, 6) == "SHAPE:") {
+            return { code: r.code, p: r.p, msg: "the named shape `" + r.msg.substring(6) + "` in `" + shown + "` is not in the shape registry (§53.6.3: \"If a named shape identifier does not match any entry in the built-in or extended registry, the compiler SHALL emit E-CONTRACT-002\"). Built-in shapes: email, url, uuid, phone, date, time, color" }
+        }
+        if (r.code == "E-CONTRACT-002") {
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` is malformed (" + r.msg + "), so it cannot be enforced — §53.11: \"A malformed predicate SHALL NOT be treated as an unrefined annotation\". The §53.2.1 grammar reads comparisons (`>0`, `<=100`), `lo < value < hi`, `.length` comparisons, a named shape (`email`), `!`, `&&`, `||` and parentheses" }
+        }
+        if (r.code != "") return { code: r.code, p: r.p, msg: "the refinement `" + shown + "` uses " + r.msg + " — not in the bootstrap (INTERIM)" }
+        if (!refFits(r.p, base)) return { code: "E-BOOTSTRAP-UNSUPPORTED", p: r.p, msg: "the refinement `" + shown + "` — the bootstrap judges comparisons on `number` / `int` and `.length` comparisons or a named shape on `string` (INTERIM)" }
+        return { code: "", msg: "", p: r.p }
+    }
+
+    // ---- the static zone: a literal judged now (§53.4.2 rules 1-2, T-PRED-1) ----
+    // A literal value: `isStr` a string (`s`), else a number (`n`, `raw` as written).
+    type RefLit:struct = { isStr: boolean, n: number, s: string, raw: string }
+
+    fn refLitOf(e: AExpr) -> RefLit | not {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> { isStr: false, n: Number(r), s: "", raw: r }
+            .Str(v: s) :> { isStr: true, n: 0, s: s, raw: "\"" + s + "\"" }
+            .Unary(op: o, e: x) :> refNegLit(o, x)
+            // no-default-arm: one question of the expression — is it a literal (§53.4.2); every other form is not one
+            _ :> not
+        }
+    }
+
+    fn refNegLit(o: UnOp, x: AExpr) -> RefLit | not {
+        if (!isNegNum(o, x)) return not
+        const inner: RefLit | not = refLitOf(x)
+        if (inner is not) return not
+        return { isStr: false, n: 0 - inner.n, s: "", raw: "-" + inner.raw }
+    }
+
+    fn refCmp(op: string, a: number, b: number) -> boolean {
+        if (op == ">") return a > b
+        if (op == ">=") return a >= b
+        if (op == "<") return a < b
+        if (op == "<=") return a <= b
+        if (op == "==") return a == b
+        return a != b
+    }
+
+    // 1: holds · 0: fails · -1: not decided now.
+    fn refEval(p: RefPred, v: RefLit) -> int {
+        return match p {
+            .PCmp(op: o, n: k) :> refCmpLit(o, k, v)
+            .PLen(op: o, n: k) :> refLenLit(o, k, v)
+            .PShape(name: nm) :> refShapeLit(nm, v)
+            .PAnd(l: a, r: b) :> refAnd3(refEval(a, v), refEval(b, v))
+            .POr(l: a, r: b) :> refOr3(refEval(a, v), refEval(b, v))
+            .PNot(p: x) :> refNot3(refEval(x, v))
+        }
+    }
+
+    fn refCmpLit(op: string, k: number, v: RefLit) -> int {
+        if (v.isStr) return -1
+        if (refCmp(op, v.n, k)) return 1
+        return 0
+    }
+
+    fn refLenLit(op: string, k: number, v: RefLit) -> int {
+        if (!v.isStr) return -1
+        if (refCmp(op, v.s.length, k)) return 1
+        return 0
+    }
+
+    fn refAnd3(a: int, b: int) -> int {
+        if (a == 0 || b == 0) return 0
+        if (a == 1 && b == 1) return 1
+        return -1
+    }
+
+    fn refOr3(a: int, b: int) -> int {
+        if (a == 1 || b == 1) return 1
+        if (a == 0 && b == 0) return 0
+        return -1
+    }
+
+    fn refNot3(a: int) -> int {
+        if (a == -1) return -1
+        return 1 - a
+    }
+
+    // A named shape against a string literal (§53.4.2 rule 2: "The value is a string
+    // literal and the predicate is a named shape with a pure structural check"). The
+    // checks are impl#1's informative predicates (§53.6.1 "The normative predicate
+    // implementations are compiler-defined"). `url` is not decided by the bootstrap:
+    // its normative predicate is the WHATWG URL parser plus the §5.2 scheme reader,
+    // which the bootstrap does not have — not decided, so refused (INTERIM).
+    fn refShapeLit(name: string, v: RefLit) -> int {
+        if (!v.isStr) return -1
+        let ok = false
+        if (name == "email") {
+            ok = shapeEmail(v.s)
+        } else if (name == "uuid") {
+            ok = shapeUuid(v.s)
+        } else if (name == "phone") {
+            ok = shapePhone(v.s)
+        } else if (name == "date") {
+            ok = shapeDigits(v.s, "dddd-dd-dd")
+        } else if (name == "time") {
+            ok = shapeDigits(v.s, "dd:dd") || shapeDigits(v.s, "dd:dd:dd")
+        } else if (name == "color") {
+            ok = shapeColor(v.s)
+        } else {
+            return -1
+        }
+        if (ok) return 1
+        return 0
+    }
+
+    // JS `\s` (the regex class impl#1's shape predicates use).
+    fn isRegexSpace(c: string) -> boolean {
+        const n: int = c.charCodeAt(0)
+        return (n >= 9 && n <= 13) || n == 32 || n == 160 || n == 5760 || (n >= 8192 && n <= 8202) || n == 8232 || n == 8233 || n == 8239 || n == 8287 || n == 12288 || n == 65279
+    }
+
+    fn isHexCh(c: string) -> boolean {
+        return isDigitStr(c) || (c >= "a" && c <= "f") || (c >= "A" && c <= "F")
+    }
+
+    // `^[^\s@]+@[^\s@]+\.[^\s@]+$`
+    fn shapeEmail(s: string) -> boolean {
+        let at: int = -1
+        let ats: int = 0
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = s.charAt(i)
+            if (isRegexSpace(c)) return false
+            if (c == "@") {
+                ats = ats + 1
+                at = i
+            }
+            i = i + 1
+        }
+        if (ats != 1 || at < 1) return false
+        const dom: string = s.substring(at + 1)
+        let j: int = 1
+        while (j <= dom.length - 2) {
+            if (dom.charAt(j) == ".") return true
+            j = j + 1
+        }
+        return false
+    }
+
+    // `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` (case-insensitive)
+    fn shapeUuid(s: string) -> boolean {
+        if (s.length != 36) return false
+        let i: int = 0
+        while (i < 36) {
+            const c: string = s.charAt(i)
+            if (i == 8 || i == 13 || i == 18 || i == 23) {
+                if (c != "-") return false
+            } else if (!isHexCh(c)) {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    // `^[+]?[0-9\s\-().]{7,15}$`
+    fn shapePhone(s: string) -> boolean {
+        let body: string = s
+        if (s.substring(0, 1) == "+") body = s.substring(1)
+        if (body.length < 7 || body.length > 15) return false
+        let i: int = 0
+        while (i < body.length) {
+            const c: string = body.charAt(i)
+            if (!(isDigitStr(c) || isRegexSpace(c) || c == "-" || c == "(" || c == ")" || c == ".")) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    // `form`: `d` a digit `[0-9]`, any other character itself.
+    fn shapeDigits(s: string, form: string) -> boolean {
+        if (s.length != form.length) return false
+        let i: int = 0
+        while (i < s.length) {
+            const f: string = form.charAt(i)
+            const c: string = s.charAt(i)
+            if (f == "d") {
+                if (!isDigitStr(c)) return false
+            } else if (c != f) {
+                return false
+            }
+            i = i + 1
+        }
+        return true
+    }
+
+    // `^#[0-9A-Fa-f]{6}$|^[a-z]+$`
+    fn shapeColor(s: string) -> boolean {
+        if (s.length == 7 && s.charAt(0) == "#") {
+            let i: int = 1
+            while (i < 7) {
+                if (!isHexCh(s.charAt(i))) return false
+                i = i + 1
+            }
+            return true
+        }
+        if (s.length == 0) return false
+        let j: int = 0
+        while (j < s.length) {
+            const c: string = s.charAt(j)
+            if (!(c >= "a" && c <= "z")) return false
+            j = j + 1
+        }
+        return true
+    }
+
+    // The static-zone verdict of literal `v` against `base(pred)` (the judgement
+    // `p`): "pass" · "fail" (E-CONTRACT-001) · "base" (E-CONTRACT-001 — a number
+    // that is not an integer, against an `int` base) · "mismatch" (a literal of
+    // another primitive: the typer's type check reports it, not the predicate) ·
+    // "open" (not decided now).
+    // S458 (§53.3.4: "The constrained type is a subtype of the base type"): the
+    // literal check tests the BASE type, as the runtime judge does — `1.5` does not
+    // inhabit `integer(>0)`.
+    fn refVerdict(base: string, p: RefPred, v: RefLit) -> string {
+        if (numericBase(base) && v.isStr) return "mismatch"
+        if (base == "string" && !v.isStr) return "mismatch"
+        if ((base == "int" || base == "integer") && Math.floor(v.n) != v.n) return "base"
+        const r: int = refEval(p, v)
+        if (r == 1) return "pass"
+        if (r == 0) return "fail"
+        return "open"
+    }
+
+    fn refFailMsg(base: string, pred: string, v: RefLit, what: string, verdict: string) -> string {
+        let why: string = "it does not satisfy `(" + pred + ")`"
+        if (verdict == "base") why = "it is not an integer, so it is not a `" + base + "` (§53.3.4: the constrained type is a subtype of the base type)"
+        return what + " is declared `" + base + "(" + pred + ")`, and its value, the literal `" + v.raw + "`, demonstrably fails it: " + why + " (§53.11 E-CONTRACT-001: \"The compiler SHALL emit E-CONTRACT-001 when a literal value is assigned to a constrained type variable and the literal demonstrably fails the predicate\"). Use a value satisfying `(" + pred + ")`"
+    }
+
+    // The refusal of a boundary-zone refinement (INTERIM: §53.11 requires a runtime
+    // check there, which the bootstrap does not build yet).
+    fn refBoundaryMsg(shown: string, where: string) -> string {
+        return "the refinement `" + shown + "` " + where + " — a value that reaches it is checked at run time (§53.4.3, §53.11: \"The compiler SHALL emit a runtime check for every boundary-zone assignment that it cannot statically elide\"), and the bootstrap does not build that check yet (INTERIM, g-boot-refinement-runtime-checks-s478). The bootstrap judges a refinement on a fixed declaration whose value is a literal: `const x: " + shown + " = <literal>` or a top-level `<x:" + shown + "=<literal>/>`"
+    }
+
+    // Is `t` a refinement still standing (not reported) — at its top?
+    fn standingRefine(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> false
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+            .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> p != ""
+        }
+    }
+
+    // The span of a standing refinement anywhere inside `t`, or not.
+    fn refineInside(t: AType) -> ASpan | not {
+        return match t.k {
+            .TName(name: n) :> not
+            .TSeq(elem: e) :> refineInside(e)
+            .TMaybe(inner: i) :> refineInside(i)
+            .TLife(pre: f, post: x) :> not      // a lifecycle refuses a refinement in it by name (lifeRefineWhy)
+            .TRefine(base: b, pred: p) :> refineSpanIf(t, p)
+        }
+    }
+
+    fn refineSpanIf(t: AType, p: string) -> ASpan | not {
+        if (p == "") return not
+        return t.span
+    }
+
+    // Base name and predicate of a refinement node (`base` "" when `t` is none).
+    fn refineBaseName(t: AType) -> string {
+        return match t.k {
+            .TName(name: n) :> ""
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
+            .TRefine(base: b, pred: p) :> typeNameText(b)
+        }
+    }
+
+    fn refinePred(t: AType) -> string {
+        return match t.k {
+            .TName(name: n) :> ""
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+            .TLife(pre: f, post: x) :> ""
+            .TRefine(base: b, pred: p) :> p
+        }
+    }
+
+    // `t` with its top refinement marked REPORTED (`pred` "": untrusted downstream).
+    fn reportedRefine(t: AType) -> AType {
+        return match t.k {
+            .TName(name: n) :> t
+            .TSeq(elem: e) :> t
+            .TMaybe(inner: i) :> t
+            .TLife(pre: f, post: x) :> t
+            .TRefine(base: b, pred: p) :> { nid: t.nid, span: t.span, k: ATypeK.TRefine(b, "") }
+        }
+    }
+
+    // The zone of a FIXED declaration's top refinement `t` with value `init`
+    // (`what` names the declaration for the message): a literal is judged now
+    // (§53.4.2), anything else is refused (the boundary zone, INTERIM). Returns the
+    // diagnostic (code "" none) and whether the type is now reported.
+    type RefZone:struct = { code: string, msg: string, reported: boolean }
+
+    fn refineFixedZone(t: AType, lit: RefLit | not, what: string) -> RefZone {
+        const base: string = refineBaseName(t)
+        const pred: string = refinePred(t)
+        const shown: string = base + "(" + pred + ")"
+        const j: RefJudge = judgeRefine(base, pred)
+        if (lit is not) return { code: "E-BOOTSTRAP-UNSUPPORTED", msg: refBoundaryMsg(shown, "on " + what + " whose value is not a literal"), reported: false }
+        const verdict: string = refVerdict(base, j.p, lit)
+        if (verdict == "fail" || verdict == "base") return { code: "E-CONTRACT-001", msg: refFailMsg(base, pred, lit, what, verdict), reported: verdict == "base" }
+        if (verdict == "open") return { code: "E-BOOTSTRAP-UNSUPPORTED", msg: "the refinement `" + shown + "` on " + what + " — whether the literal `" + lit.raw + "` satisfies it is not decided by the bootstrap (the normative `url` predicate is the WHATWG URL parser with the §5.2 scheme reader, which it does not have; INTERIM, g-boot-refinement-runtime-checks-s478)", reported: false }
+        return { code: "", msg: "", reported: false }
+    }
+
+    // A refinement read in a code type, at its `(` (touching the base name):
+    // the tokens to the matching `)` are the predicate, judged now. A tail after
+    // the `)` that is not `[…]` (a label, or a tape: read by parseType's loop) and
+    // is a name on the same line is malformed (§53.11: "a tail after the closing
+    // `)` other than one `[label]`"). `own`: the caller decides the zone of a top
+    // refinement (parseLocal); otherwise a standing refinement is refused here.
+    fn parseRefine(tp: TP, start: int, base: AType) -> RType {
+        const open: PTok = cur(tp)
+        let t: TP = adv(tp)
+        const from: int = t.i
+        let depth: int = 1
+        let closed = false
+        while (!closed && !atEnd(t)) {
+            if (isP(t, "(")) depth = depth + 1
+            if (isP(t, ")")) {
+                depth = depth - 1
+                if (depth == 0) closed = true
+            }
+            if (!closed) t = adv(t)
+        }
+        const pred: string = tokText(t, from, t.i)
+        const shown: string = typeNameText(base) + "(" + pred + ")"
+        if (!closed) {
+            t = diagAt(t, "E-CONTRACT-002", "the inline predicate `" + shown + "` is malformed (an unclosed `(`), so it cannot be enforced (§53.11)", open)
+            return mkT(t, start, ATypeK.TRefine(base, ""))
+        }
+        const close: PTok = cur(t)
+        t = adv(t)
+        const j: RefJudge = judgeRefine(typeNameText(base), pred)
+        let p: string = pred
+        if (j.code != "") {
+            const d: Diag = newDiag(j.code, j.msg, t.file, mkSpan(start, close.end))
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+            p = ""
+        }
+        // a tail: a name on the `)`'s line that is no validator word and no keyword
+        const tail: PTok = cur(t)
+        if (tail.cls == TC.Ident && tail.line == close.line && !isValidatorWord(tail.v)) {
+            let last: PTok = tail
+            const tailFrom: int = t.i
+            while (!atEnd(t) && cur(t).line == close.line && !isP(t, "=") && !isP(t, ",") && !isP(t, ")") && !isP(t, ";") && !isP(t, "{") && !isP(t, "}")) {
+                last = cur(t)
+                t = adv(t)
+            }
+            if (p != "") {
+                const d2: Diag = newDiag("E-CONTRACT-002", "the refinement `" + shown + "` is followed by `" + tokText(t, tailFrom, t.i) + "` — text after a refinement's closing `)` other than one `[label]` is outside the §53.2.1 grammar, so the annotation is malformed (§53.11 E-CONTRACT-002; a malformed predicate \"SHALL NOT be treated as an unrefined annotation\")", t.file, mkSpan(start, last.end))
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d2]), file: t.file, ns: t.ns }
+            }
+            p = ""
+        }
+        return mkT(t, start, ATypeK.TRefine(base, p))
+    }
+
+    // A refinement anywhere in `ty` (a code type parsed at `start`) that its
+    // position does not judge: refused by name (the boundary zone, INTERIM).
+    fn refuseRefineIn(tp: TP, ty: AType, where: string) -> TP {
+        const sp: ASpan | not = refineInside(ty)
+        if (sp is not) return tp
+        const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", refBoundaryMsg(typeNameText(ty), where), tp.file, sp)
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
     }
 
     // s475 (s475-boot-lifecycle-type) — a lifecycle type `(A to B)` (§14.12) in a
@@ -4788,10 +5453,16 @@ ${
             t = bumpId(adv(adv(t)))
         } else if (!bad) {
             const n0: int = t.diags.length
-            const rb: RType = parseType(t)
+            const rb: RType = parseTypeBody(t)
             toT = rb.t
             t = rb.tp
             if (t.diags.length > n0) bad = true
+            // s478: a refinement as B — read whole, refused by name (one report)
+            if (!bad && refineInside(toT) is given) {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", lifeRefineWhy(), cur(t))
+                toT = reportedRefine(toT)
+                bad = true
+            }
         }
         if (!bad && !isP(t, ")")) {
             const c: PTok = cur(t)
@@ -4867,7 +5538,7 @@ ${
     // INTERIM, the open refinement limb (g-bootstrap-opener-refinement-lifecycle-type-rejected,
     // g-bootstrap-refinement-types-unbuilt-all-positions-s473); the capable form is §53.
     fn lifeRefineWhy() -> string {
-        return "a refinement type (§53) as the lifecycle's second state is not in the bootstrap yet — it reads no refinement type in any position (an opener's `<hp:number(>0)=5/>` included); write `(not to T)` with the base type and check the value where it is written"
+        return "a refinement type (§53) as the lifecycle's second state is not in the bootstrap yet — the value the lifecycle's write brings is not judged against it (g-boot-refinement-runtime-checks-s478); write `(not to T)` with the base type and check the value where it is written"
     }
 
     fn blankAType(t: AType) -> AType {
@@ -4881,6 +5552,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -4914,6 +5586,7 @@ ${
             .TSeq(elem: e, grants: gs) :> gs.length > 0 || grantedSeq(e)
             .TMaybe(inner: i) :> grantedSeq(i)
             .TLife(pre: f, post: x) :> grantedSeq(x)
+            .TRefine(base: b, pred: p) :> grantedSeq(b)
         }
     }
 
@@ -5418,7 +6091,16 @@ ${
                 t = expectP(adv(t), ":")
                 const ty: RType = parseType(t)
                 t = ty.tp
-                fs = fs.concat([{ nid: t.nid, span: spanFrom(t, fstart), isLet: isLet, name: n.v, ty: ty.t }])
+                // s478 — validator words after the type (`name: string req`, `role: Role
+                // oneOf([.A, .B]) req` — §53.6.1, §41.15.6): read whole (a word, and its
+                // `(…)` arguments), judged by analyze (fieldDefsOf)
+                let vals: string[] = []
+                while ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && isValidatorWord(cur(t).v)) {
+                    vals = vals.concat([cur(t).v])
+                    t = adv(t)
+                    if (isP(t, "(")) t = skipParens(t)
+                }
+                fs = fs.concat([{ nid: t.nid, span: spanFrom(t, fstart), isLet: isLet, name: n.v, ty: ty.t, vals: vals }])
                 t = bumpId(t)
             }
             if (isP(t, ",")) t = adv(t)
@@ -6188,6 +6870,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6264,11 +6947,32 @@ ${
         let seqs: int = 0
         if (seqUnionCheck(first.t)) seqs = 1
         let blank = isBlankAType(first.t)
+        // s478 — a refined member (§53.11: "A union with a refined member is checked by
+        // testing the value against each member, so every member SHALL have a runtime
+        // test"), and a map / set member `[K: V]` whose entries are refined (one with none)
+        let refined: boolean = standingRefine(first.t)
+        let untested: string = ""
         let going = true
         while (going) {
             const after: MP = skipSpace(m)
-            if (chAt(after, 0) == "|" && chAt(after, 1) != "|") {
+            if (chAt(after, 0) == "|" && chAt(after, 1) != "|" && chAt(skipSpace(mAdv(after, 1)), 0) == "[") {
+                // a map / set member: read to its `]`; judged below
+                const ms: MP = skipSpace(mAdv(after, 1))
+                const mclose: int = bracketCloseCh(mp.src, ms.pos)
+                let mend: int = mp.src.length
+                if (mclose >= 0) mend = mclose + 1
+                const mtext: string = mp.src.substring(ms.pos, mend)
+                if (refinedEntries(mtext)) {
+                    if (untested == "") untested = mtext
+                } else {
+                    m = mDiag(ms, "E-PARSE-TYPE", "expected a type after `|`", ms.pos, ms.pos + 1)
+                }
+                m = mBump(mAt(m, mend))
+                members = members + 1
+                blank = true
+            } else if (chAt(after, 0) == "|" && chAt(after, 1) != "|") {
                 const rm: RMType = openerTypeMember(skipSpace(mAdv(after, 1)), "`|`")
+                if (standingRefine(rm.t)) refined = true
                 m = rm.mp
                 members = members + 1
                 if (seqUnionCheck(rm.t)) seqs = seqs + 1
@@ -6283,6 +6987,14 @@ ${
             }
         }
         const text: string = mp.src.substring(start, m.pos)
+        if (untested != "" && !refined) m = mDiag(m, "E-PARSE-TYPE", "expected a type after `|`", start, m.pos)
+        if (untested != "" && refined) {
+            m = mDiag(m, "E-CONTRACT-002", "`" + text + "` has a refined member, so a value is checked against each member at run time — and the member `" + untested + "`, a map or set whose entries are refined, has no runtime test (§53.11: \"every member SHALL have a runtime test. The compiler SHALL emit E-CONTRACT-002 where such a union is declared when a member has none … A member SHALL NOT be admitted without a test\")", start, m.pos)
+            ty = reportedRefine(ty)
+        } else if (refined && members > 1 && !blank && !(members == 2 && nots == 1)) {
+            // refused below (a general union); its refined member is not refused twice
+            ty = reportedRefine(ty)
+        }
         // (a blank member was reported by openerTypeMember: E-PARSE-TYPE)
         if (!blank && members > 1 && seqs > 0) {
             m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", seqUnionReason(text), start, m.pos)
@@ -6353,8 +7065,15 @@ ${
         } else if (!bad) {
             const rb: RMType = openerTypeMember(m, "`to`")
             toT = rb.t
-            m = skipSpace(rb.mp)
+            m = rb.mp
             if (isBlankAType(toT)) bad = true     // openerTypeMember reported it: E-PARSE-TYPE
+            // s478: a refinement as B — read whole (openerTypeMember), refused by name (one report)
+            if (!bad && refineInside(toT) is given) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", lifeRefineWhy(), toT.span.start, toT.span.end)
+                toT = reportedRefine(toT)
+                bad = true
+            }
+            m = skipSpace(m)
         }
         if (!bad && chAt(m, 0) != ")") {
             const w: RWord = readName(m)
@@ -6394,6 +7113,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> true
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6414,6 +7134,40 @@ ${
         const shielded: int = lifeCloseChIn(src, open, true)
         if (shielded >= 0) return shielded
         return lifeCloseChIn(src, open, false)
+    }
+
+    // s478 — the index of the `]` matching the `[` at `open` (quotes shielded), or -1.
+    fn bracketCloseCh(src: string, open: int) -> int {
+        let depth: int = 0
+        let q: string = ""
+        let i: int = open
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (q != "") {
+                if (c == "\\") {
+                    i = i + 1
+                } else if (c == q) {
+                    q = ""
+                }
+            } else if (c == "\"" || c == "'" || c == "`") {
+                q = c
+            } else if (c == "[") {
+                depth = depth + 1
+            } else if (c == "]") {
+                depth = depth - 1
+                if (depth == 0) return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    // s478 — does a map / set type's text `[K: V]` hold a refinement (`base(`)?
+    fn refinedEntries(text: string) -> boolean {
+        for (const b of ["number", "int", "integer", "string", "bool", "boolean"]) {
+            if (text.indexOf(b + "(") >= 0) return true
+        }
+        return false
     }
 
     fn lifeCloseChIn(src: string, open: int, shield: boolean) -> int {
@@ -6452,6 +7206,7 @@ ${
             .TSeq(elem: e) :> true
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6461,6 +7216,7 @@ ${
             .TSeq(elem: e) :> isBlankAType(e)
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6470,6 +7226,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6484,6 +7241,28 @@ ${
         }
         let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
         m = mBump(m)
+        // s478 — a refinement `base(pred)` (§53.2.1). §66.2.4: "a refinement type (§53)
+        // … MAY stand bare … A `>` or `/` inside the type's OWN parentheses … does not
+        // end the opener" — the predicate runs to the MATCHING `)`.
+        if (refinableBase(nm.w) && chAt(m, 0) == "(") {
+            const rclose: int = lifeCloseCh(mp.src, m.pos)
+            if (rclose < 0) {
+                m = mDiag(m, "E-CONTRACT-002", "the inline predicate after `" + nm.w + "` is malformed (an unclosed `(`), so it cannot be enforced (§53.11)", m.pos, m.pos + 1)
+                m = mAt(m, mp.src.length)
+                ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TRefine(ty, "") }
+            } else {
+                const pred: string = mp.src.substring(m.pos + 1, rclose)
+                const j: RefJudge = judgeRefine(nm.w, pred)
+                let p: string = pred
+                m = mAt(m, rclose + 1)
+                if (j.code != "") {
+                    m = mDiag(m, j.code, j.msg, start, m.pos)
+                    p = ""
+                }
+                ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TRefine(ty, p) }
+            }
+            m = mBump(m)
+        }
         while (chAt(m, 0) == "[") {
             const close: int = mp.src.indexOf("]", m.pos)
             let inner: string = ""
@@ -7417,6 +8196,10 @@ ${
             if (isLifeAType(rt.t) && !hasDiagIn(m.diags, rt.t.span)) {
                 m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a lifecycle type on the attribute `" + nm.w + "` is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3); write `T | not` here", rt.t.span.start, rt.t.span.end)
             }
+            // s478 — a refinement on a typed ATTRIBUTE: each use site's value is a
+            // boundary-zone write (§53.4.3) — refused by name (INTERIM)
+            const rsp: ASpan | not = refineInside(rt.t)
+            if (rsp is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", refBoundaryMsg(typeNameText(rt.t), "on the attribute `" + nm.w + "` — each use site's value reaches it unproven"), rsp.start, rsp.end)
             let dflt: AAttrValue = AAttrValue.NoValue
             m = checkSpacedEq(m)
             if (chAt(m, 0) == "=") {
@@ -8923,6 +9706,7 @@ ${
             .TSeq(elem: e) :> typeNameText(e) + "[]"
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
+            .TRefine(base: b, pred: p) :> typeNameText(b) + "(" + p + ")"
         }
     }
 
@@ -9549,6 +10333,61 @@ ${
     // After the opener: the body (child fields + state-children), the closer,
     // then an optional `renders <element>`.
     fn finishDecl(o: Opener, mp: MP, exported: boolean) -> RDecl {
+        return finishDeclIn(o, mp, exported, false)
+    }
+
+    // s478 — the zone of a declaration's own refinement (§53.4). A fixed
+    // (no `let`), self-closing, attribute-free TOP-LEVEL cell whose own value is a
+    // literal is the static zone (§53.4.2 rules 1-2): judged now, E-CONTRACT-001 on
+    // a literal that fails. Every other refined declaration is reached by values the
+    // bootstrap does not check (a later write to a `let` cell; a field a use site
+    // seeds, §66.9 rule 8; a non-literal value) — the boundary zone, refused by name
+    // (INTERIM). A refinement inside the type (`number(>0)[]`, `number(>0) | not`)
+    // is refused the same way.
+    type RDeclRefine:struct = { ty: AType | not, mp: MP }
+
+    fn declRefine(mp: MP, o: Opener, child: boolean, mods: AAttr[]) -> RDeclRefine {
+        const ty: AType | not = o.ty
+        if (ty is not) return { ty: ty, mp: mp }
+        const shown: string = typeNameText(ty)
+        if (!standingRefine(ty)) {
+            const sp: ASpan | not = refineInside(ty)
+            if (sp is not) return { ty: ty, mp: mp }
+            return { ty: ty, mp: mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", refBoundaryMsg(shown, "inside the type of `<" + o.name + ">`"), sp.start, sp.end) }
+        }
+        let why: string = ""
+        if (child) {
+            why = "on the field `" + o.name + "` of a declaration — a use site's value seeds it (§66.9 rule 8) unproven"
+        } else if (o.isLet) {
+            why = "on the `let` cell `@" + o.name + "` — each later write to it is a boundary-zone write"
+        } else if (!o.selfClosing || mods.length > 0 || o.typed.length > 0) {
+            why = "on `<" + o.name + ">`, a declaration with a body or attributes"
+        }
+        let z: RefZone = { code: "", msg: "", reported: false }
+        if (why != "") {
+            z = { code: "E-BOOTSTRAP-UNSUPPORTED", msg: refBoundaryMsg(shown, why), reported: false }
+        } else {
+            z = refineFixedZone(ty, ownLit(o.own), "`@" + o.name + "`")
+        }
+        if (z.code == "") return { ty: ty, mp: mp }
+        const m: MP = mDiag(mp, z.code, z.msg, ty.span.start, ty.span.end)
+        if (z.reported) return { ty: reportedRefine(ty), mp: m }
+        return { ty: ty, mp: m }
+    }
+
+    // An own value as a literal (§53.4.2), or not.
+    fn ownLit(v: AAttrValue) -> RefLit | not {
+        return match v {
+            .Bare(e: e) :> refLitOf(e)
+            .Paren(e: e) :> refLitOf(e)
+            .Quoted(v: s) :> { isStr: true, n: 0, s: s, raw: "\"" + s + "\"" }
+            .NoValue :> not
+            .Dur(text: s) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn finishDeclIn(o: Opener, mp: MP, exported: boolean, child: boolean) -> RDecl {
         let m: MP = mp
         if (isNamespace(o.name)) {
             m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "`" + o.name + "` cannot name a declaration or field — it is reserved for namespaced attributes (`" + o.name + ":…`, §66.2.3)", o.start, m.pos)
@@ -9573,6 +10412,9 @@ ${
                 m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
             }
         }
+        const rz: RDeclRefine = declRefine(m, o, child, mods)
+        m = rz.mp
+        const dty: AType | not = rz.ty
         let body: ADeclChild[] = []
         if (o.short is given) {
             m = mDiag(m, "E-PARSE-SHORTHAND", "a declaration has no `:`-shorthand body — its markup is its `renders` (§66.5); a `:`-shorthand body belongs to an element or a state-child (§4.14)", o.start, m.pos)
@@ -9602,7 +10444,7 @@ ${
         }
         const d: ADecl = {
             nid: m.nid, span: mkSpan(o.start, declEnd), exported: exported, isLet: o.isLet,
-            name: o.name, ty: o.ty, own: o.own, attrs: o.typed, mods: mods, body: body, renders: renders,
+            name: o.name, ty: dty, own: o.own, attrs: o.typed, mods: mods, body: body, renders: renders,
             validators: bySource(bare.concat(o.vals)),
         }
         return { d: d, mp: mBump(m) }
@@ -9742,7 +10584,7 @@ ${
         const o: Opener = ro.o
         if (isDeclOpener(o)) {
             const od: Opener = isLet ? withLet(o) : o
-            const rd: RDecl = finishDecl(od, ro.mp, exported)
+            const rd: RDecl = finishDeclIn(od, ro.mp, exported, true)
             return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
         }
         let m: MP = keywordOnUse(ro.mp, o, exported, isLet)
