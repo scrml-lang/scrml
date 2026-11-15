@@ -313,13 +313,14 @@ describe("errors", () => {
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("`pinned` on an import");
   });
-  // §21.4 defines the renamed re-export; the bootstrap reads no re-export at all yet
-  // (g-boot-reexport-from-s473, whose capable form now names the rename too). Fails closed.
-  test("a renamed re-export `export { Box as Crate } from` is still refused where it is written (INTERIM)", () => {
+  // §21.4 defines the renamed re-export; s478 builds it (g-boot-reexport-from-s473 — the full
+  // surface is slice-m4/reexport-cycles-s478.test.js): `Crate` is the declaring file's `Box`.
+  test("a renamed re-export `export { Box as Crate } from` binds `Box` of t.scrml under `Crate` (s478)", async () => {
     const T = { path: "t.scrml", src: `\${\n    export type Box:struct = { v: string }\n}\n` };
     const R = { path: "r.scrml", src: `\${\n    export { Box as Crate } from "./t.scrml";\n}\n` };
-    const r = prog([T, R, useFns(`import { Crate } from "./r.scrml";`, `<p>x</p>`)]);
-    expect(at(r)).toContainEqual(["E-PARSE-ITEM", "r.scrml"]);
+    const r = clean(prog([T, R, useFns(`import { Crate } from "./r.scrml";\n    fn mk() -> string {\n        const b: Crate = { v: "crate" };\n        return b.v;\n    }`, `<p id="c">\${mk()}</p>`)]));
+    await loadProgram(r.core, "s474-alias-reexport-" + k++);
+    expect($("#c").textContent).toBe("crate");
   });
   test("`import stuff` (no `from`) is no import form — not reported as a default import", () => {
     const r = prog([useFns(`import stuff;`, `<p>x</p>`)]);

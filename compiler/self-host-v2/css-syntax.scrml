@@ -32,8 +32,9 @@
 //     reaches CSS only through `@name`, §25.7; dynamic raw CSS is only the quoted
 //     `style="…"`, §65.4.2.)
 //
-// impl#1 workarounds: F14 (braces only via LB()/RB()); a `/*`, `${` or `#{`
-// spelled in a string literal is assembled from pieces.
+// impl#1 workaround: a `${` or `#{` spelled in a string literal is assembled
+// from pieces (`"$" + LB()`, `"#" + LB()`); every other brace and comment
+// delimiter is a plain literal (S478: impl#1 no longer rewrites them).
 // =============================================================================
 ${
     import { SimpleSel, Combinator, Compound, SelLink, ComplexSel } from "./core.scrml"
@@ -41,8 +42,6 @@ ${
 
     fn LB() -> string { return "{" }
     fn RB() -> string { return "}" }
-    fn openComment() -> string { return "/" + "*" }
-    fn closeComment() -> string { return "*" + "/" }
 
     // A finding: its code, message and absolute source span.
     export type CssErr:struct = { code: string, text: string, start: int, end: int }
@@ -173,14 +172,14 @@ ${
 
     // Index just past the comment opened at `i` (`/*`), or -1 if it never closes.
     fn skipComment(s: string, i: int, stop: int) -> int {
-        const k: int = s.indexOf(closeComment(), i + 2)
+        const k: int = s.indexOf("*/", i + 2)
         if (k < 0 || k + 2 > stop) return 0 - 1
         return k + 2
     }
 
     // `/*` opens a comment — unless the `/` is escaped (`\/*` is an escaped slash, CSS Syntax §4.3.7).
     fn atComment(s: string, i: int) -> boolean {
-        if (s.substring(i, i + 2) != openComment()) return false
+        if (s.substring(i, i + 2) != "/*") return false
         return i == 0 || charAt(s, i - 1) != "\\"
     }
 
@@ -197,7 +196,7 @@ ${
         // bounded: a `url(` never spans a line break or a brace — an unclosed one must
         // not swallow the block's `}` by matching a `)` further on in the page
         const body: string = s.substring(i, k)
-        if (body.indexOf("\n") >= 0 || body.indexOf(LB()) >= 0 || body.indexOf(RB()) >= 0) return 0 - 1
+        if (body.indexOf("\n") >= 0 || body.indexOf("{") >= 0 || body.indexOf("}") >= 0) return 0 - 1
         return k + 1
     }
 
@@ -274,10 +273,10 @@ ${
                 const nl: int = s.indexOf("\n", j)
                 if (nl < 0) return 0 - 1
                 j = nl
-            } else if (c == LB()) {
+            } else if (c == "{") {
                 depth = depth + 1
                 j = j + 1
-            } else if (c == RB()) {
+            } else if (c == "}") {
                 depth = depth - 1
                 if (depth == 0) return j
                 j = j + 1
@@ -325,15 +324,15 @@ ${
 
     // A `${` at `j` (unruled inside CSS): the index just past its balanced `}`,
     // or `stop`. Scanners step over it whole, so the value scan names it.
-    fn atInterp(s: string, j: int) -> boolean { return charAt(s, j) == "$" && charAt(s, j + 1) == LB() }
+    fn atInterp(s: string, j: int) -> boolean { return charAt(s, j) == "$" && charAt(s, j + 1) == "{" }
 
     fn skipInterp(s: string, j: int, stop: int) -> int {
         let depth = 0
         let k: int = j + 1
         while (k < stop) {
             const c: string = charAt(s, k)
-            if (c == LB()) depth = depth + 1
-            if (c == RB()) {
+            if (c == "{") depth = depth + 1
+            if (c == "}") {
                 depth = depth - 1
                 if (depth == 0) return k + 1
             }
@@ -364,7 +363,7 @@ ${
             } else if (atComment(cs.src, j)) {
                 const k: int = skipComment(cs.src, j, stop)
                 if (k < 0) {
-                    c = withErr(c, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2))
+                    c = withErr(c, syntax("this CSS comment is never closed — end it with `*/`", j, j + 2))
                     j = stop
                 } else {
                     j = k
@@ -405,7 +404,7 @@ ${
             } else {
                 if (c == "(" || c == "[") depth = depth + 1
                 if ((c == ")" || c == "]") && depth > 0) depth = depth - 1
-                if (depth == 0 && (c == LB() || c == ";")) return { pos: j, ch: c }
+                if (depth == 0 && (c == "{" || c == ";")) return { pos: j, ch: c }
                 j = j + 1
             }
         }
@@ -434,8 +433,8 @@ ${
                 if (k < 0) return 0 - 1
                 j = k
             } else {
-                if (c == LB()) depth = depth + 1
-                if (c == RB()) {
+                if (c == "{") depth = depth + 1
+                if (c == "}") {
                     depth = depth - 1
                     if (depth == 0) return j
                 }
@@ -763,12 +762,12 @@ ${
                 any = true
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, stop)
-                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2)), ok: false }
+                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS comment is never closed — end it with `*/`", j, j + 2)), ok: false }
                 buf = buf + " "
                 j = k
             } else if (c == "!") {
                 return { parts: [], cs: withErr(cs, unsupported("`!important` in a `#" + LB() + RB() + "` block is not in the bootstrap — §65.7 makes internal `!important` an error and allows only an interop escape, and the bootstrap does not classify which this is; drop it (scrml's fixed precedence already decides the rule)", j, stop)), ok: false }
-            } else if (c == "$" && charAt(s, j + 1) == LB()) {
+            } else if (c == "$" && charAt(s, j + 1) == "{") {
                 return { parts: [], cs: withErr(cs, syntax("`$" + LB() + "…" + RB() + "` is never allowed inside a `#" + LB() + RB() + "` block (§9.1, ruled S469) — a cell's value reaches CSS through `@name` (`color: @accent`, §25.7), and dynamic raw CSS only through a quoted `style=\"…\"` (§65.4.2)", j, j + 2)), ok: false }
             } else if (c == "@") {
                 const n: string = readRef(s, j + 1)
@@ -886,7 +885,7 @@ ${
             const eq: int = sepAt(s, i, stop, "=")
             if (eq < 0) {
                 const text: string = stripComments(s.substring(i, stop)).trim()
-                return { d: not, cs: withErr(cs, syntax("`" + text + "` is not a declaration — write `property: value;`" + (inRule ? "" : " (or a selector rule `selector " + LB() + " … " + RB() + "`)"), i, stop)) }
+                return { d: not, cs: withErr(cs, syntax("`" + text + "` is not a declaration — write `property: value;`" + (inRule ? "" : " (or a selector rule `selector { … }`)"), i, stop)) }
             }
             const name: string = stripComments(s.substring(i, eq)).trim()
             if (!inRule) {
@@ -963,7 +962,7 @@ ${
                 const n: string = readName(s, j + 1)
                 const st: Stop = nextStop(s, j, close)
                 let skipTo: int = st.pos + 1
-                if (st.ch == LB()) {
+                if (st.ch == "{") {
                     const k: int = closeBrace(s, st.pos, close)
                     skipTo = k < 0 ? close : k + 1
                 }
@@ -976,7 +975,7 @@ ${
                 j = skipTo
             } else {
                 const st: Stop = nextStop(s, j, close)
-                if (st.ch == LB()) {
+                if (st.ch == "{") {
                     const k: int = closeBrace(s, st.pos, close)
                     let pe: int = st.pos
                     while (pe > j && isSpace(charAt(s, pe - 1))) { pe = pe - 1 }
@@ -1051,7 +1050,7 @@ ${
         const n: string = readName(s, j + 1)
         const st: Stop = nextStop(s, j, stop)
         let skipTo: int = st.pos + 1
-        if (st.ch == LB()) {
+        if (st.ch == "{") {
             const k: int = closeBrace(s, st.pos, stop)
             skipTo = k < 0 ? stop : k + 1
         }
@@ -1110,10 +1109,10 @@ ${
                 }
             } else {
                 const st: Stop = nextStop(src, j, close)
-                if (st.ch == LB()) {
+                if (st.ch == "{") {
                     const k: int = closeBrace(src, st.pos, close)
                     if (k < 0) {
-                        cs = withErr(cs, syntax("this rule's `" + LB() + "` is never closed — add `" + RB() + "`", st.pos, st.pos + 1))
+                        cs = withErr(cs, syntax("this rule's `{` is never closed — add `}`", st.pos, st.pos + 1))
                         j = close
                     } else {
                         const rr: RuleR = parseRule(cs, j, st.pos, k)
@@ -1137,8 +1136,8 @@ ${
         if (close0 >= 0) {
             let k: int = end
             while (k < src0.length && isSpace(charAt(src0, k))) { k = k + 1 }
-            if (charAt(src0, k) == RB()) {
-                cs = withErr(cs, syntax("an extra `" + RB() + "` after this CSS block — it would be shown as page text; remove it (or close a rule inside the block)", k, k + 1))
+            if (charAt(src0, k) == "}") {
+                cs = withErr(cs, syntax("an extra `}` after this CSS block — it would be shown as page text; remove it (or close a rule inside the block)", k, k + 1))
                 end = k + 1
             }
         }

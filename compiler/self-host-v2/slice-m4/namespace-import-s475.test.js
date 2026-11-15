@@ -223,15 +223,16 @@ describe("errors", () => {
     expect(ns.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ns.diags[0].message).toBe(named.diags[0].message);
   });
-  // re-exports are not built (g-boot-reexport-from-s473): the re-exporting module is refused where it
-  // is written, and a namespace over it does not bring the re-exported name — its use names it
-  test("a namespace over a module that RE-exports: the re-exported member is refused by name (E-IMPORT-004), the module at its `export … from`", () => {
+  // s478 builds the re-exports (g-boot-reexport-from-s473): §21.3 rule 1 — the namespace's members
+  // are the module's own exports AND its re-exports (§21.4)
+  test("a namespace over a module that RE-exports: the re-exported member is a member (s478)", () => {
     const T = { path: "t.scrml", src: `\${\n    export fn inner() -> string {\n        return "t";\n    }\n}\n` };
     const R = { path: "r.scrml", src: `\${\n    export { inner as outer } from "./t.scrml";\n    export fn own() -> string {\n        return "r";\n    }\n}\n` };
     const r = prog([T, R, { path: ENTRY, src: `import * as r from "./r.scrml";\n<program>\n    <main><p>\${r.outer()}</p></main>\n</program>\n` }]);
-    expect(at(r)).toContainEqual(["E-PARSE-ITEM", "r.scrml"]);
-    expect(at(r)).toContainEqual(["E-IMPORT-004", ENTRY]);
-    expect(errs(r).find((d) => d.file === ENTRY).message).toContain("`outer` is not exported by `./r.scrml`");
+    expect(at(r)).toEqual([]);
+    const miss = prog([T, R, { path: ENTRY, src: `import * as r from "./r.scrml";\n<program>\n    <main><p>\${r.inner()}</p></main>\n</program>\n` }]);
+    expect(at(miss)).toEqual([["E-IMPORT-004", ENTRY]]);
+    expect(errs(miss)[0].message).toContain("`inner` is not exported by `./r.scrml`");
   });
 });
 
