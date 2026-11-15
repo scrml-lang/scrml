@@ -160,6 +160,23 @@ describe("positions that are not the run's own scope — refused by name, counte
     expect(errs(r)[0].message).toContain("body-top local `token`");
   });
 
+  test("LOW-4: a cell initializer / derived cell reading it: refused by name, no E-SCOPE-001, no E-LIN-001 cascade", () => {
+    for (const decl of ["let <k:string=(token)/>", "<d=(token)/>"]) {
+      const r = run(P(`\${ lin token = "a"; }\n${decl}\n<p>x</p>`));
+      expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(errs(r)[0].message).toContain("a cell's initializer (or a derived cell) reads the body-top local `token`");
+    }
+  });
+
+  test("LOW-5: a `const` item and a nested `${ const … }` name the constant's initializer, not \"a function body\"", () => {
+    const item = run(P(`\${ lin token = "a"; }\nconst k = token;\n<p>\${k}</p>`));
+    expect(codes(item)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(item)[0].message).toContain("the initializer of a file-scope constant reads the body-top local `token`");
+    const nested = run(P(`\${ lin token = "a"; }\n<div>\${ const q = token; }</div>`));
+    expect(errs(nested).map((d) => d.message).join("\n")).toContain("the initializer of a file-scope constant reads the body-top local `token`");
+    expect(errs(nested).map((d) => d.message).join("\n")).not.toContain("a function body reads");
+  });
+
   test("bound after a wait in its run and read outside it: refused by name; read inside the run: built", async () => {
     const SRV = `server function srv() -> string { return "s"; }`;
     const late = run(P(`${SRV}\n\${ lin t = srv() !{ _ :> "u" }; }\n<p>\${t}</p>`));
@@ -168,5 +185,109 @@ describe("positions that are not the run's own scope — refused by name, counte
     expect(codes(run(P(`${SRV}\nfunction use(x: string) -> int { return 1; }\nlet <n:int=0/>\n\${ lin t = srv() !{ _ :> "u" }; @n = use(t); }\n<p>\${@n}</p>`)))).toEqual([]);
     // bound BEFORE the wait: read after the run, built
     expect(codes(run(P(`${SRV}\nlet <m:string=""/>\n\${ lin t = "x"; @m = srv() !{ _ :> "u" }; }\n<p>\${t}\${@m}</p>`)))).toEqual([]);
+  });
+});
+
+// s478-boot-review-followups (review of #1886).
+describe("LOW-3 — §17: an `if=` / `else-if=` condition counts as a consumption", () => {
+  test("`<div if=(token == \"a\")>` consumes it: compiles clean", () => {
+    expect(codes(run(P(`\${ lin token = "a"; }\n<div if=(token == "a")><p>y</p></div>`)))).toEqual([]);
+  });
+  test("a read in another branch's condition is the second consumption: E-LIN-002", () => {
+    expect(codes(run(P(`\${ lin token = "a"; }\n<div if=(token == "a")>a</div><div else-if=(token == "b")>b</div>`)))).toEqual(["E-LIN-002"]);
+  });
+  test("a condition plus a later interpolation: E-LIN-002", () => {
+    expect(codes(run(P(`\${ lin token = "a"; }\n<div if=(token == "a")>a</div><p>\${token}</p>`)))).toEqual(["E-LIN-002"]);
+  });
+  test("an `if=` nested in an `if=` body is still refused (INTERIM)", () => {
+    expect(codes(run(P(`let <c:bool=true/>\n\${ lin token = "a"; }\n<div if=@c><span if=(token == "a")>a</span></div>`)))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("LOW-2 — §35.4.4 restricts loop BODIES: a `${ for … }`'s iterable is read once", () => {
+  test("`${ for (const c of xs) { … } }` consumes `xs`: compiles clean", () => {
+    expect(codes(run(P(`\${ lin xs = [1, 2]; }\n<ul>\${ for (const c of xs) { lift <li>x</li>; } }</ul>`)))).toEqual([]);
+  });
+  test("the iterable, then a later interpolation: E-LIN-002 on the second", () => {
+    const N = "fn cnt(t: int[]) -> int { return 1; }";
+    expect(codes(run(P(`${N}\n\${ lin xs = [1, 2]; }\n<ul>\${ for (const c of xs) { lift <li>x</li>; } }</ul><p>\${cnt(xs)}</p>`)))).toEqual(["E-LIN-002"]);
+  });
+  test("the body is still E-LIN-002", () => {
+    expect(codes(run(P(`\${ lin token = "a"; }\n<ul>\${ for (const i of [1, 2]) { lift <li>\${token}</li>; } }</ul>`)))).toEqual(["E-LIN-002"]);
+  });
+});
+
+describe("LOW-1 — §35.5 E-LIN-005: a declaration in a strictly inner scope shadowing a body-top `lin`", () => {
+  const L = '${ lin token = "ab"; }';
+  test("an event handler's `const`", () => {
+    expect(codes(run(P(`let <n:int=0/>\n${L}\n<p>\${token}</p><button onclick={ const token = 1; @n = token; }>b</button>`)))).toEqual(["E-LIN-005"]);
+  });
+  test("a function's `const` and `lin`", () => {
+    expect(codes(run(P(`${L}\nfunction f() -> int { const token = 1; return token; }\n<p>\${token}\${f()}</p>`)))).toEqual(["E-LIN-005"]);
+    expect(codes(run(P(`${L}\n<p>\${token}</p>\nfunction g() -> int { lin token = 1; return token; }\n<p>\${g()}</p>`)))).toEqual(["E-LIN-005"]);
+  });
+  test("a later run's `for` binder, and a `${ for … }` binder", () => {
+    expect(codes(run(P(`let <n:int=0/>\n${L}\n\${ for (const token of [1]) { @n = token; } }\n<p>\${token}</p>`)))).toEqual(["E-LIN-005"]);
+    expect(codes(run(P(`${L}\n<p>\${token}</p><ul>\${ for (const token of [1, 2]) { lift <li>\${token}</li>; } }</ul>`)))).toEqual(["E-LIN-005"]);
+  });
+  test("a `for` binder or a counted `let` in a function shadowing the function's own `lin`", () => {
+    expect(codes(run(P(`function f() -> int { lin token = "ab"; let s = 0; for (const token of [1]) { s = token; } return s + token.length; }\n<p>\${f()}</p>`)))).toContain("E-LIN-005");
+  });
+  test("a parameter is not a `let` / `const` / `lin` declaration; a function before the run is not in its scope", () => {
+    expect(codes(run(P(`${L}\nfunction f(token: int) -> int { return token; }\n<p>\${token}\${f(1)}</p>`)))).toEqual([]);
+    expect(codes(run(P(`function f() -> int { const token = 1; return token; }\n${L}\n<p>\${token}\${f()}</p>`)))).toEqual([]);
+  });
+});
+
+// s478-boot-review-followups fix round 1 (S239 review of #1891).
+describe("H1 — a `${ for … }` that mounts on its own is refused by name (INTERIM), never counted", () => {
+  // RED ON ded48db95: each compiled clean — the iterable counted as the one consumption,
+  // while at run time the loop read it zero times (`if=` false) or once per mount (toggle).
+  const LX = "${ lin xs = [1, 2]; }";
+  const G = '<ul>${ for (const x of xs) { lift <li>x</li>; } }</ul>';
+  const NAMED = "is read in a `${ for … }` inside an `if=` / `else-if=` / `else` element, a component use's content";
+  test("in an `if=` body", () => {
+    const r = run(P(`let <c:bool=true/>\n${LX}\n<div if=@c>${G}</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in an `else` body", () => {
+    const r = run(P(`let <c:bool=true/>\n${LX}\n<div if=@c>a</div><div else>${G}</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in a component use's content", () => {
+    const r = run(P(`<card t:string/>\n    renders <div><slot/></div>\n${LX}\n<card t="a">${G}</card>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain(NAMED);
+  });
+  test("in markup the program body renders directly it is still the one consumption", () => {
+    expect(codes(run(P(`${LX}\n<div>${G}</div>`)))).toEqual([]);
+  });
+});
+
+describe("M1 — only the chain's `if=` condition runs on every path", () => {
+  const L = '${ lin token = "ab"; }';
+  test("a `lin` first read in an `else-if=` condition: refused by name (INTERIM), not accepted", () => {
+    // RED ON ded48db95: compiled clean, though the read runs only when `@c` is false
+    const r = run(P(`let <c:bool=true/>\n${L}\n<div if=@c>x</div><div else-if=(token == "ab")>y</div>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain("is first read in an `else-if=` condition");
+  });
+  test("read in both the `if=` and the `else-if=`: E-LIN-002 (no INTERIM refusal)", () => {
+    expect(codes(run(P(`${L}\n<div if=(token == "a")>a</div><div else-if=(token == "b")>b</div>`)))).toEqual(["E-LIN-002"]);
+  });
+});
+
+describe("L1 — the constant-initializer refusal recommends forms that compile", () => {
+  test("the remedy names a cell write, a `lin` argument and a text interpolation — not `${ const k = … }`", () => {
+    const r = run(P(`\${ lin token = "a"; }\nconst k = token;\n<p>\${k}</p>`));
+    const m = errs(r)[0].message;
+    expect(m).toContain("`${ @k = token; }`");
+    expect(m).toContain("a `lin` parameter");
+    expect(m).not.toContain("const k = token");
+  });
+  test("the recommended cell write compiles clean", () => {
+    expect(codes(run(P(`let <k:string=""/>\n\${ lin token = "ab"; }\n\${ @k = token; }\n<p>\${@k}</p>`)))).toEqual([]);
   });
 });
