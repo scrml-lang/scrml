@@ -356,3 +356,49 @@ describe("S478 F1 — a multi-line literal / comment closer does not swallow the
     expect(run(js, ["m", "k"])).toEqual({ m: true, k: 1 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// S478 fix round 1 — review F4: the fence re-built its significant prefix (`ctx + segment`) at
+// every `/`, and `regexAllowedAfter` walked back over a whole parenthesised inside after every
+// `)`, so a pass over a long text was quadratic (300 KB of `(a + b) / c` lines: 11 s). The
+// prefix is now a `CodeContext` (each character appended once, `)` → `(` recorded on the way in).
+// ---------------------------------------------------------------------------
+describe("S478 F4 — the code-only fence is linear in the text", () => {
+  test("regex-vs-division answers are unchanged on the CodeContext prefix", () => {
+    // `)` closing a control-flow head → regex; closing an expression → division.
+    expect(codeOnlyView("if (c) /fn/.test(s)")).toBe(`if (c) ${NON_CODE.repeat(4)}.test(s)`);
+    expect(codeOnlyView('(a + "s") / fn / 2')).toBe(`(a + ${NON_CODE.repeat(3)}) / fn / 2`);
+    expect(codeOnlyView("f(x) / fn / 2")).toBe("f(x) / fn / 2");
+    expect(codeOnlyView('x = "q"; ) / fn / 2')).toBe(`x = ${NON_CODE.repeat(3)}; ) / fn / 2`);
+    expect(codeOnlyView('while ((a)) /fn/.test("z")')).toBe(`while ((a)) ${NON_CODE.repeat(4)}.test(${NON_CODE.repeat(3)})`);
+    // inside a template hole, the same: both `/ fn` are division, so both `fn` are code
+    const v = codeOnlyView("`${if_(c) / fn}` + `${'a' / fn}`");
+    expect(v).toContain("if_(c) / fn");
+    expect(v.split("fn").length - 1).toBe(2);
+  });
+
+  test("deeply nested `((x) / x) / x …` with a literal reads in linear time and correctly", () => {
+    const depth = 20000;
+    const src = '"s" + ' + "(".repeat(depth) + "x" + ") / fn".repeat(depth);
+    const t0 = performance.now();
+    const out = rewriteFnKeyword(src);
+    const ms = performance.now() - t0;
+    expect(out).toBe('"s" + ' + "(".repeat(depth) + "x" + ") / function".repeat(depth));
+    expect(ms).toBeLessThan(1500);
+  });
+
+  test("doubling the text three times grows the pass cost far less than quadratically", () => {
+    const unit = 'let q = (a + b) / c / 2 + f(x) / 3; s = "fn x is .A"; t = Color.Red\n';
+    const time = (n) => {
+      const src = unit.repeat(n);
+      const t0 = performance.now();
+      rewriteIsOperator(src); rewriteFnKeyword(src); rewriteEnumVariantAccess(src);
+      return performance.now() - t0;
+    };
+    time(200); // warm up
+    const small = time(500);
+    const big = time(4000);
+    // Quadratic would be ~64x; linear ~8x. Generous headroom for a loaded runner.
+    expect(big).toBeLessThan(small * 24 + 150);
+  });
+});
