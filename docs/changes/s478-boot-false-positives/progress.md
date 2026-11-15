@@ -26,7 +26,7 @@ PASS 475 / FAIL 63 / UNSUPPORTED 695. Of the 18 assigned cases, already NOT FAIL
 - E-CTRL-001 co-fire after E-CTRL-003.
 
 ## Status
-- [x] fixes  - [x] full conformance after  - [x] corpus  - [x] CI gates  - [ ] hook/commit  - [ ] PR
+- [x] fixes  - [x] full conformance after  - [x] corpus  - [x] CI gates  - [x] hook/commit (947c3e4b8, hook PASS 55207/0)  - [x] PR (see report)
 
 ## Measurements
 - Conformance base 475 PASS / 63 FAIL → head 480 / 58. FAIL→PASS: the 5 fixed cases. PASS→FAIL 0; no other case's emitted set changed.
