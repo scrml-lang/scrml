@@ -5711,17 +5711,24 @@ ${
     }
 
     // ---- attribute values ---------------------------------------------------
-    // At the char after `=`: "…" / '…' · ( expr ) · { stmts } · bare.
+    // At the char after `=`: "…" / '…' · ( expr ) · { stmts } · ${ … } · bare.
     // s469 — `handler`: the attribute is an event handler (`on…`), whose `{ … }`
     // value is a statement list (§5.2.3) — judged for E-STMT-NO-EFFECT, except
     // the one-name reference `{ f }` / `{ f; }` (§19.4.3 "Handler references":
     // the event CALLS `f`). Any other attribute's `{ … }` is not a statement
     // list (analyze refuses it, §5.2.4), so its statements are not judged.
-    fn parseAttrValue(mp: MP, handler: boolean) -> RValue {
+    // s478 — `name`: the attribute's name (for the §5.2.4 diagnostic, which
+    // "SHALL name the attribute"); `decl`: the value is a declaration's own value
+    // or typed-attribute default (§66.2.4), where `${…}` is not a value form.
+    fn parseAttrValue(mp: MP, handler: boolean, name: string, decl: boolean) -> RValue {
         const c: string = chAt(mp, 0)
         if (c == "\"" || c == "'") return parseQuoted(mp, c)
+        if (c == "$" && chAt(mp, 1) == "{") return parseDollarValue(mp, handler, name, decl)
         if (c == "(") {
             const tp: TP = regionTP(mp, LexStop.Balanced)
+            // §5.2.4: "in a `(…)` value … it detects statements separated by a
+            // statement-level `;`" — a non-handler value is ONE expression
+            if (!handler && parenHasStatements(tp)) return multiStatementValue(mp, backToMarkup(mp, endOfRegion(tp)), name, "(…)")
             const r: RExpr = parsePrimary(tp)
             const t2: TP = expectRegionEnd(r.tp)
             return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) }
@@ -5731,6 +5738,8 @@ ${
             const n0: int = tp2.diags.length
             const b: RBlock = parseBlock(tp2)
             let t3: TP = expectRegionEnd(b.tp)
+            // §5.2.4: two or more statements in a non-handler `{…}` value
+            if (!handler && !decl && isStatementList(tp2, b.b, t3)) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
             if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
             return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
         }
@@ -5739,9 +5748,280 @@ ${
             const d: MP = mDiag(mp, "E-PARSE-ATTR", "expected an attribute value after `=`", mp.pos, mp.pos + 1)
             return { v: AAttrValue.NoValue, mp: d }
         }
-        const r3: RExpr = parseTernary(tp3)
+        const r3: RExpr = parseAssign(tp3)
+        // §5.2.3 / §5.2.4: a `;` ending an unquoted value is reported by scanAttr
+        // (bareSequence), which reads the rest of the sequence
+        if (isP(r3.tp, ";")) return { v: AAttrValue.Bare(r3.e), mp: mAt(backToMarkup(mp, r3.tp), cur(r3.tp).start) }
+        if (wordOperatorAt(r3.tp)) return trailingWordOperator(mp, r3.tp, handler, name)
         const t4: TP = expectRegionEnd(r3.tp)
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    // s478 r1 (#1865 F1) — the bare value's expression stopped at a word operator:
+    // the keyword tests `is` / `instanceof` / `in` (§5.2: an unquoted value
+    // "continues across whitespace … before … the keyword tests `is` /
+    // `instanceof` / `in`") or a word-form `and` / `or` (§45.9: valid "in all
+    // expression positions (… attribute values …)"). The value was read whole
+    // across it, so it is one value, refused once:
+    //   - any attribute but an event handler: "any other attribute followed by an
+    //     operator … is `E-ATTR-UNQUOTED-OPERATOR`" (a condition too, cluster-A);
+    //   - an event handler whose word has no right operand (`onclick=f() in>`):
+    //     "A value that cannot be read whole is REFUSED, once per attribute, never
+    //     truncated" — E-ATTR-UNQUOTED-OPERATOR;
+    //   - an event handler's `and` / `or` WITH a right operand is a legal §45.9
+    //     expression the bootstrap does not parse: refused by name (the
+    //     refusals.scrml §45.9 row), never a generic E-PARSE-TRAILING. A handler's
+    //     `in` / `instanceof` with an operand keeps the expression parser's report.
+    fn wordOperatorAt(tp: TP) -> boolean {
+        return isWord(tp, "in") || isWord(tp, "instanceof") || isWord(tp, "is") || isWord(tp, "and") || isWord(tp, "or")
+    }
+
+    fn trailingWordOperator(mp: MP, tp: TP, handler: boolean, name: string) -> RValue {
+        const w: string = cur(tp).v
+        const operand: boolean = peekAt(tp, 1).cls != TC.End
+        if (handler && operand && w != "and" && w != "or") {
+            const t5: TP = expectRegionEnd(tp)
+            return { v: AAttrValue.Bare(recoveredAt(backToMarkup(mp, t5), mp.pos)), mp: backToMarkup(mp, t5) }
+        }
+        const d0: Diag[] = mp.diags
+        const m: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), d0)
+        const text: string = mp.src.substring(mp.pos, m.pos).trim()
+        let md: MP = m
+        if (handler && operand) {
+            md = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`word-form `" + w + "`` (§45.9) is not in the bootstrap yet; it is refused here by name rather than misread — write `" + (w == "and" ? "&&" : "||") + "`: `" + name + "=" + text + "`", mp.pos, m.pos)
+        } else if (handler) {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted event-handler value is read whole, and it ends in `" + w + "` with no right operand (§5.2). Complete the expression, write the handler as an inline block — `" + name + "={ … }` — or, if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
+        } else {
+            md = mDiag(m, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text + "` — an unquoted attribute value holds no operator, and `" + w + "` after it continues it as one (§5.1, §5.2). Parenthesize the expression — `" + name + "=(…)` — or quote it; if `" + w + "` is a separate attribute, parenthesize the value before it: `" + name + "=(…) " + w + "`", mp.pos, m.pos)
+        }
+        return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md }
+    }
+
+    // The region's tokens all consumed (at its Eof).
+    fn endOfRegion(tp: TP) -> TP {
+        return { toks: tp.toks, i: tp.toks.length - 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
+    }
+
+    // A `;` at the region's statement level (depth 1: directly inside its outer
+    // `(…)`) with more of the value after it — two statements (§5.2.4: "A
+    // trailing `;` after the one expression … does not make a second statement").
+    fn parenHasStatements(tp: TP) -> boolean {
+        let depth: int = 0
+        let semi = false
+        let i: int = 0
+        while (i < tp.toks.length - 1) {
+            const t: PTok = tp.toks[i]
+            const opens: boolean = tk(t, "(") || tk(t, "[") || tk(t, "{") || t.cls == TC.TIStart
+            const closes: boolean = tk(t, ")") || tk(t, "]") || tk(t, "}") || t.cls == TC.TIEnd
+            if (semi && depth == 1 && !closes) return true
+            if (opens) {
+                depth = depth + 1
+            } else if (closes) {
+                depth = depth - 1
+                if (depth == 0) return false
+            } else if (depth == 1 && tk(t, ";")) {
+                semi = true
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    // s478 — §5.2.4 (S450): "A `(…)`, `{…}` or `${…}` value of an attribute that
+    // is not an event handler … SHALL be exactly one expression. When it holds
+    // two or more statements, the compiler SHALL report E-ATTR-MULTI-STATEMENT
+    // (an error) — never silently keep one statement or drop the attribute", and
+    // "The diagnostic SHALL name the attribute and SHALL give the fix". The value
+    // is refused whole: what parsing its statements reported is dropped (the
+    // refusal is the root cause), and it reaches analyze as a recovered value.
+    // `effect=` is the §51.0.H engine logic block on an engine (not judged) and a
+    // plain attribute elsewhere (judged) — the bootstrap builds neither reading,
+    // so a statement list there is refused by name.
+    fn multiStatementValue(mp: MP, after: MP, name: string, form: string) -> RValue {
+        const m0: MP = withDiagsOf(after, mp.diags)
+        let m: MP = m0
+        if (name == "effect") {
+            m = mDiag(m0, "E-BOOTSTRAP-UNSUPPORTED", "`effect=" + form + "` holding a statement list — an engine's `effect=` logic block (§51.0.H) is not in the bootstrap, and on any other element `effect=` is a plain attribute whose value is one expression (§5.2.4, E-ATTR-MULTI-STATEMENT)", mp.pos, after.pos)
+        } else {
+            m = mDiag(m0, "E-ATTR-MULTI-STATEMENT", "`" + name + "=" + form + "` holds two or more statements — only an event handler takes a statement list (§5.2.3); every other attribute value is ONE expression (§5.2.4). Write a single expression, or move the statements into a function and use its result: `function compute() { … }` then `" + name + "=compute()`", mp.pos, after.pos)
+        }
+        return { v: AAttrValue.Paren(recoveredAt(m, mp.pos)), mp: mBump(m) }
+    }
+
+    fn withDiagsOf(mp: MP, ds: Diag[]) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, ns: mp.ns }
+    }
+
+    fn recoveredAt(mp: MP, start: int) -> AExpr {
+        return { nid: mp.nid, span: mkSpan(start, mp.pos), k: AExprK.Recovered }
+    }
+
+    // s478 — `name=${ … }`, the §5.2.1 expression form. A value that "parses
+    // whole as ONE expression is one expression" (§5.2.4) — a trailing `;`
+    // included; anything else is the value's statement list.
+    //   - a non-handler attribute: the one expression is the value — the same
+    //     value as `name=(expr)` (Paren: one lowering, one escape path for every
+    //     delimited expression value); two or more statements are
+    //     E-ATTR-MULTI-STATEMENT.
+    //   - an event handler (§5.2.1: "`onclick=${expr}` … SHALL use the `${...}`
+    //     expression directly as the event handler, with `@var` references
+    //     rewritten to reactive getters"): a statement list is the handler's
+    //     statements (§5.2.4: "its inline block and `${…}` statement list are
+    //     legal") — the inline block's value (Braced); one expression that is not
+    //     a function is the compiler-written listener of §5.2 (S457: "a `${…}`
+    //     value that is not itself a function"), read as `name=(expr)` is; a
+    //     function with no parameters, `${() => e}`, is the listener itself and
+    //     runs `e` — the same value as `name=(e)`. A function that takes the
+    //     event object (`${(e) => …}`) or has a braced body is the
+    //     function-values slice (g-bootstrap-function-values-slice-s451):
+    //     REFUSED by name (E-BOOTSTRAP-UNSUPPORTED), never silently accepted.
+    //   - a declaration's own value / attribute default (§66.2.4: "a literal or
+    //     a plain `@ref`, written bare, or any other expression, PARENTHESIZED"):
+    //     E-DECL-OPENER-EXPR-UNPARENTHESIZED.
+    fn parseDollarValue(mp: MP, handler: boolean, name: string, decl: boolean) -> RValue {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        if (decl) {
+            const md: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), mp.diags)
+            const m: MP = mDiag(md, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value is a literal or a plain `@ref` written bare, or any other expression PARENTHESIZED — `=(…)`, not `=" + dollarOpen() + "…}` (§66.2.4)", start, md.pos)
+            return { v: AAttrValue.Paren(recoveredAt(m, start)), mp: mBump(m) }
+        }
+        if (name == "effect") {
+            // §51.0.H: on an engine opener / state-child `effect=${…}` is a logic
+            // block that runs on entry; on any other element a plain attribute.
+            // The parser cannot tell the two apart and the bootstrap builds the
+            // engine block nowhere — refused by name rather than read as an attribute.
+            const me: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), mp.diags)
+            const m5: MP = mDiag(me, "E-BOOTSTRAP-UNSUPPORTED", "`effect=" + dollarOpen() + "…}` — an engine's `effect=` logic block (§51.0.H) is not in the bootstrap; on any other element `effect=` is a plain attribute, written `effect=(…)` (one expression, §5.2.4)", start, me.pos)
+            return { v: AAttrValue.Paren(recoveredAt(m5, start)), mp: mBump(m5) }
+        }
+        // a handler value led by `if` / `match` is its statement (block-like, §7.2.2),
+        // never a value-`if` / value `match` whose arms would be assignments
+        const stmtLed: boolean = handler && (isWord(adv(tp), "if") || isWord(adv(tp), "match"))
+        let one: RExpr | not = not
+        if (!stmtLed) one = oneExprIn(tp)
+        if (one is not && !stmtLed && !parenHasStatements(tp) && !stmtKeywordAt(adv(tp))) {
+            // no statement separator and no statement keyword: the value is one
+            // expression that does not parse — its own report, never a
+            // statement-list reading (`${@s is .Busy}` is not two statements)
+            one = exprWithErrors(tp)
+        }
+        if (one is not) {
+            const n0: int = tp.diags.length
+            const b: RBlock = parseBlock(tp)
+            let t: TP = expectRegionEnd(b.tp)
+            if (!handler) {
+                // §5.2.4 "In a `${…}` / `{…}` value it detects ANY clean parse of two
+                // or more statements" — clean: no error beyond a statement's
+                // terminator (softError). A value whose statements do not parse
+                // keeps what the parse reported (`${switch …}` is E-SWITCH-FORBIDDEN).
+                const clean: boolean = hardErrors(t.diags) == hardErrors(tp.diags)
+                if (b.b.stmts.length >= 2 && clean) return multiStatementValue(mp, backToMarkup(mp, t), name, dollarOpen() + "…}")
+                const mb: MP = backToMarkup(mp, t)
+                if (!clean) return { v: AAttrValue.Paren(recoveredAt(mb, start)), mp: mBump(mb) }
+                // one statement that is not an expression (`${ const x = 1 }`)
+                const m2: MP = mDiag(mb, "E-PARSE-ATTR", "`" + name + "=" + dollarOpen() + "…}` is ONE expression on an attribute that is not an event handler (§5.2.4) — write the expression alone", start, mb.pos)
+                return { v: AAttrValue.Paren(recoveredAt(m2, start)), mp: mBump(m2) }
+            }
+            if (oneNameBlock(b.b)) t = dropNoEffect(t, n0)
+            return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t) }
+        }
+        const after: MP = backToMarkup(mp, one.tp)
+        if (!handler) return { v: AAttrValue.Paren(one.e), mp: after }
+        const lam: RLam | not = lambdaOf(one.e)
+        if (lam is not) return { v: AAttrValue.Paren(one.e), mp: after }
+        if (lam.params.length > 0) {
+            const m3: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "(" + lam.params.join(", ") + ") => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `" + name + "=" + dollarOpen() + "() => …}`, an inline block `" + name + "={ … }` or a call `" + name + "=f(x)`", start, after.pos)
+            return { v: AAttrValue.Paren(recoveredAt(m3, start)), mp: mBump(m3) }
+        }
+        if (isNameExpr(lam.body)) {
+            const m4: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "() => f}` — an arrow handler whose body is a bare name RETURNS the function without calling it, and a function value is not in the bootstrap (g-bootstrap-function-values-slice-s451). Call it — `" + name + "=" + dollarOpen() + "() => f()}` — or wire it directly: `" + name + "=f`", start, after.pos)
+            return { v: AAttrValue.Paren(recoveredAt(m4, start)), mp: mBump(m4) }
+        }
+        return { v: AAttrValue.Paren(lam.body), mp: after }
+    }
+
+    fn dollarOpen() -> string { return "$" + "{" }
+
+    // `{ expr }` read as one expression, its errors reported where they arise.
+    fn exprWithErrors(tp: TP) -> RExpr {
+        const t: TP = expectP(tp, "{")
+        const r: RExpr = parseAssign(t)
+        let t2: TP = r.tp
+        if (isP(t2, ";")) t2 = adv(t2)
+        t2 = expectRegionEnd(expectP(t2, "}"))
+        return { e: r.e, tp: t2 }
+    }
+
+    // A statement keyword — the value is a statement list, not an expression.
+    fn stmtKeywordAt(tp: TP) -> boolean {
+        for (const w of ["if", "for", "while", "do", "const", "let", "var", "return", "given", "lift", "fail", "function", "fn", "switch", "try", "throw", "break", "continue", "defer", "match"]) {
+            if (isWord(tp, w)) return true
+        }
+        return false
+    }
+
+    // §5.2.4 for a non-handler `{…}` value: two or more statements, parsed clean
+    // (no error beyond a terminator), written as a list — a statement-level `;`
+    // or a statement keyword — not one expression the parser could not read.
+    fn isStatementList(tp: TP, b: ABlock, after: TP) -> boolean {
+        if (b.stmts.length < 2) return false
+        if (hardErrors(after.diags) != hardErrors(tp.diags)) return false
+        return parenHasStatements(tp) || stmtKeywordAt(adv(tp))
+    }
+
+    // `{ expr }` / `{ expr; }` — the whole region one expression, else `not`.
+    // (A braced-arrow body is reported by parseLambda, and still one expression.)
+    fn oneExprIn(tp: TP) -> RExpr | not {
+        if (!isP(tp, "{")) return not
+        const t: TP = adv(tp)
+        if (isP(t, "}") || isP(t, ";")) return not
+        const r: RExpr = parseAssign(t)
+        let t2: TP = r.tp
+        if (isP(t2, ";")) t2 = adv(t2)
+        if (!isP(t2, "}")) return not
+        t2 = adv(t2)
+        if (!atEnd(t2)) return not
+        return { e: r.e, tp: t2 }
+    }
+
+    type RLam:struct = { params: string[], body: AExpr }
+
+    fn lambdaOf(e: AExpr) -> RLam | not {
+        const k: AExprK = e.k
+        return match k {
+            .Lambda(params: ps, body: b) :> { params: ps, body: b }
+            .Name(name: n) :> not
+            .Recovered :> not
+            .Sql(q: q) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Handled(h: h) :> not
+        }
+    }
+
+    fn isNameExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        if (k is .Name) return true
+        return false
     }
 
     // An event-handler attribute name (§5.2 rule 1 — analyze's rule: `on…`,
@@ -6254,7 +6534,7 @@ ${
         let own: AAttrValue = AAttrValue.NoValue
         m = checkSpacedEq(m)
         if (chAt(m, 0) == "=") {
-            const rv: RValue = parseAttrValue(mAdv(m, 1), false)
+            const rv: RValue = parseAttrValue(mAdv(m, 1), false, nm.w, true)
             own = rv.v
             m = rv.mp
         }
@@ -6462,7 +6742,20 @@ ${
         } else {
             const r: RExpr = parseTernary(t)
             e = r.e
-            t = expectRegionEnd(r.tp)
+            if (isP(r.tp, ";") && !atEnd(adv(r.tp))) {
+                // s478 — §5.2.3 cross-ref: "§4.14 (`:`-shorthand body) — keeps its
+                // own single-expression rule … A multi-statement `:`-shorthand body
+                // is still `E-MULTI-STATEMENT-HANDLER`, and its escape is the
+                // bare-body form." The body is refused whole (its statements are
+                // not judged one by one).
+                const last: PTok = r.tp.toks[r.tp.toks.length - 1]
+                const d: Diag = newDiag("E-MULTI-STATEMENT-HANDLER", "a `:`-shorthand body holds ONE expression (§4.14); this one is a `;`-separated statement sequence. Write the statements in the element's body instead of after `:` (the bare-body form, `<tag>…</>`), or name a function and call it", r.tp.file, mkSpan(e.span.start, last.start))
+                const te: TP = endOfRegion(r.tp)
+                t = { toks: te.toks, i: te.i, nid: te.nid, diags: te.diags.concat([d]), file: te.file, ns: te.ns }
+                e = { nid: e.nid, span: mkSpan(e.span.start, last.start), k: AExprK.Recovered }
+            } else {
+                t = expectRegionEnd(r.tp)
+            }
         }
         let m: MP = skipSpace(backToMarkup(mp, t))
         if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
@@ -7030,7 +7323,7 @@ ${
             let dflt: AAttrValue = AAttrValue.NoValue
             m = checkSpacedEq(m)
             if (chAt(m, 0) == "=") {
-                const rv: RValue = parseAttrValue(mAdv(m, 1), false)
+                const rv: RValue = parseAttrValue(mAdv(m, 1), false, nm.w, true)
                 dflt = rv.v
                 m = rv.mp
             }
@@ -7062,10 +7355,21 @@ ${
         let v: AAttrValue = AAttrValue.NoValue
         if (chAt(m, 0) == "=") {
             const vStart: int = m.pos + 1
-            const rv2: RValue = parseAttrValue(mAdv(m, 1), isHandlerName(name))
+            const hd: boolean = isHandlerName(name)
+            const rv2: RValue = parseAttrValue(mAdv(m, 1), hd, name, false)
             v = rv2.v
             m = rv2.mp
-            if (!isHandlerName(name)) m = unquotedOperatorDiag(m, name, v, vStart)
+            const ab: RAfterBare = afterBareValue(m, name, v, vStart, hd)
+            v = ab.v
+            m = ab.mp
+            if (!hd && !ab.reported) {
+                // s478 r1 (#1865 F1) — the refused value is refused whole, once per
+                // attribute: its parts are not judged again (`title=@last -x` is
+                // E-ATTR-UNQUOTED-OPERATOR alone, not also `x` undeclared)
+                const n0: int = m.diags.length
+                m = unquotedOperatorDiag(m, name, v, vStart)
+                if (m.diags.length > n0) v = AAttrValue.Bare(recoveredAt(m, vStart))
+            }
         } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
             // `<each … as name>` (§17.7): the binding name follows after a space.
             const m2: MP = skipSpace(m)
@@ -7096,6 +7400,140 @@ ${
         const fix: string = "make `" + name + "` a child declaration in the body, `" + kw + " <" + name + ":Type=…/>` (a `:struct` opener when no typed attribute is left) — an attribute is always locked data (§66.4 rule 6, S447)"
         if (isLet) return mDiag(mp, "E-DECL-LET-IN-OPENER", "`" + kw + "` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
         return mDiag(mp, "E-PARSE-ATTR", "`export` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
+    }
+
+    type RAfterBare:struct = { v: AAttrValue, mp: MP, reported: boolean }
+
+    // s478 — what may follow an unquoted value (§5.2 "An unquoted value is read
+    // WHOLE (S457)"; the value itself was read whole by the lexer's BareValue
+    // rule). `m` is just past the value.
+    //   - a `;`: a BARE event-handler value "that contains a `;` outside of
+    //     expression-internal contexts … is compile error
+    //     `E-MULTI-STATEMENT-HANDLER`" (§5.2.3); after any other attribute "A `;`
+    //     after it is `E-ATTR-MULTI-STATEMENT` (§5.2.4)". The rest of the
+    //     sequence (each further `;`-separated expression, up to the tag's end or
+    //     a `name=` attribute) is read into the one refused value — reported
+    //     once, never turned into further attributes.
+    //   - "an event-handler EXPRESSION (an assignment or operator form) followed
+    //     by `>` after inline whitespace — `<button onclick=@big = @n > 1>` — is
+    //     `E-ATTR-UNQUOTED-OPERATOR` too: a comparison and the end of the tag
+    //     read the same there".
+    //   - "text after it that cannot begin an attribute (`onclick=fn() (g)`,
+    //     `title=x "y"`) is `E-ATTR-UNQUOTED-OPERATOR`" — that text (one
+    //     delimited or quoted value) is read into the refused attribute.
+    fn afterBareValue(mp: MP, name: string, v: AAttrValue, vStart: int, handler: boolean) -> RAfterBare {
+        const x: AExpr | not = bareExprOf(v)
+        if (x is not) return { v: v, mp: mp, reported: false }
+        if (chAt(mp, 0) == ";") {
+            const d0: Diag[] = mp.diags
+            let m: MP = mp
+            let going = true
+            while (going && chAt(m, 0) == ";") {
+                m = skipSpace(mAdv(m, 1))
+                if (mEof(m) || chAt(m, 0) == ">" || mLooking(m, "/>") || nameEqAt(m)) {
+                    going = false
+                } else {
+                    const tp: TP = regionTP(m, LexStop.BareValue)
+                    if (atEnd(tp)) {
+                        going = false
+                    } else {
+                        const r: RExpr = parseAssign(tp)
+                        m = mAt(backToMarkup(m, r.tp), cur(r.tp).start)
+                        if (!isP(r.tp, ";")) m = backToMarkup(m, r.tp)
+                    }
+                }
+            }
+            const text: string = mp.src.substring(vStart, m.pos).trim()
+            const m0: MP = withDiagsOf(m, d0)
+            let md: MP = m0
+            if (handler) {
+                md = mDiag(m0, "E-MULTI-STATEMENT-HANDLER", "`" + name + "=" + text + "` — a bare (unbraced) event-handler value is exactly ONE expression; this one is a `;`-separated statement sequence, whose extent cannot be told apart from the tag's further attributes (§5.2.3). Wrap the statements in braces — `" + name + "={ " + text + " }` — or name a function", vStart, m.pos)
+            } else {
+                md = mDiag(m0, "E-ATTR-MULTI-STATEMENT", "`" + name + "=" + text + "` — an unquoted attribute value is ONE expression, and a `;` after it makes a statement list, which only an event handler takes (§5.2.4). Write a single expression, or move the statements into a function and use its result: `function compute() { … }` then `" + name + "=compute()`", vStart, m.pos)
+            }
+            return { v: AAttrValue.Bare(recoveredAt(md, vStart)), mp: mBump(md), reported: true }
+        }
+        const sp: MP = skipInlineSpace(mp)
+        if (handler && sp.pos > mp.pos && chAt(sp, 0) == ">" && chAt(sp, 1) != "=" && isOperatorForm(x)) {
+            const text2: string = mp.src.substring(vStart, mp.pos)
+            const m2: MP = mDiag(mp, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text2 + " >` — after an unquoted event-handler expression, a `>` after whitespace reads both as a comparison and as the end of the tag (§5.2). Write the handler as an inline block — `" + name + "={ " + text2 + " > … }` — or drop the space before the closing `>`", vStart, sp.pos + 1)
+            return { v: AAttrValue.Bare(recoveredAt(m2, vStart)), mp: mBump(m2), reported: true }
+        }
+        const at: MP = skipSpace(mp)
+        if (at.pos > mp.pos && startsDelimitedValue(at)) {
+            const d1: Diag[] = mp.diags
+            const tail: RValue = parseAttrValue(at, false, name, false)
+            const m3: MP = withDiagsOf(tail.mp, d1)
+            const text3: string = mp.src.substring(vStart, m3.pos)
+            const m4: MP = mDiag(m3, "E-ATTR-UNQUOTED-OPERATOR", "`" + name + "=" + text3 + "` — an unquoted attribute value is read whole, and the text after it cannot continue it or begin an attribute (§5.2). An expression is written `(…)`, `" + dollarOpen() + "…}` or, on an event handler, an inline block `{ … }`", vStart, m3.pos)
+            return { v: AAttrValue.Bare(recoveredAt(m4, vStart)), mp: mBump(m4), reported: true }
+        }
+        return { v: v, mp: mp, reported: false }
+    }
+
+    fn bareExprOf(v: AAttrValue) -> AExpr | not {
+        return match v {
+            .Bare(e: e) :> e
+            .NoValue :> not
+            .Paren(e: e) :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    // `name=` (not `name==`) at `mp` — an attribute begins there.
+    fn nameEqAt(mp: MP) -> boolean {
+        const nm: RWord = readName(mp)
+        if (nm.w == "") return false
+        let m: MP = nm.mp
+        if (chAt(m, 0) == ":") m = readName(mAdv(m, 1)).mp
+        return chAt(m, 0) == "=" && chAt(m, 1) != "="
+    }
+
+    // Text no attribute begins with: a quoted string, `(`, `[`, `{`, `${`, a template.
+    fn startsDelimitedValue(mp: MP) -> boolean {
+        const c: string = chAt(mp, 0)
+        if (c == "\"" || c == "'" || c == "(" || c == "[" || c == "{" || c == "`") return true
+        return c == "$" && chAt(mp, 1) == "{"
+    }
+
+    // Spaces and tabs only (not a line break).
+    fn skipInlineSpace(mp: MP) -> MP {
+        let m: MP = mp
+        while (!mEof(m) && (chAt(m, 0) == " " || chAt(m, 0) == "\t")) { m = mAdv(m, 1) }
+        return m
+    }
+
+    // "an event-handler EXPRESSION (an assignment or operator form)" (§5.2).
+    fn isOperatorForm(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .Binary(op: o) :> true
+            .Ternary(test: t) :> true
+            .Assign(target: t) :> true
+            .Unary(op: o) :> true
+            .Name(name: n) :> false
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: s) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
     }
 
     // s473 — §5.2 "Unquoted attribute CONDITIONS are atomic-only (cluster-A,
