@@ -1,0 +1,10 @@
+// §66.12.2 + S478 Option A — a choice with ONE branch a literal outside the type's length
+// bound and one inside is refused: each branch of a written value is judged on its own,
+// the way a branch's type is, so the outside branch is E-WRITE-INVARIANT at compile time.
+<program>
+    <flag:boolean=(true)/>
+    <xs:int[1..=2, append]=(@flag ? [1, 2, 3, 4, 5] : [1])/>
+    <main>
+        <p id="n">${@xs.length}</p>
+    </main>
+</program>

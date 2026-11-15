@@ -689,39 +689,88 @@ describe("G — a tool: a foreign value into a bounded slot is checked at run ti
 });
 
 // ---------------------------------------------------------------------------
-// s478-boot-bound-branch-static — gap g-boot-bound-branch-literal-static-s477. A CHOICE
-// value (a ternary, a value-`if`, a value `match`) into a bounded tape is judged branch
-// by branch (O36 RULED S477: "a write that PROVABLY violates a sequence invariant …
-// stays a compile error (`E-WRITE-INVARIANT`); a write whose effect the compiler cannot
-// prove is checked at RUN TIME and TRAPS on violation"). EVERY value-yielding branch
-// provably outside the bound: provable whichever branch runs — E-WRITE-INVARIANT. Every
-// branch proven inside: no run-time check. SOME branches outside: it depends on which
-// branch runs — not provable, so the write compiles and traps (E-WRITE-INVARIANT-RT).
+// s478-boot-bound-branch-static (gap g-boot-bound-branch-literal-static-s477), widened by
+// s478-boot-bound-any-branch (gap g-boot-bound-branch-any-literal-ruling-s478). A CHOICE
+// value (a ternary, a value-`if`, a value `match`, a `!{}` guard's arms) into a bounded
+// tape is judged branch by branch. RULED S478, Option A (ruling:user-voice-scrml.md S478):
+// "ANY branch whose literal provably breaks a tape's bound is a compile error
+// (E-WRITE-INVARIANT), judged per branch the way types already are (E-TYPE-031,
+// `checkLitFields`). `const xs: int[1..=2] = @c ? [1,2,3,4,5] : [1]` is refused. … A
+// branch whose length cannot be proven still traps at run time (O36)." So: ANY
+// value-yielding branch provably outside — E-WRITE-INVARIANT at that branch, naming it.
+// Every branch proven inside — no run-time check. Otherwise (some branch unknown, none
+// outside) — the write compiles and traps at run time (E-WRITE-INVARIANT-RT).
 const KE = `    type K:enum = { A, B, C }\n    <k:K=(K.A)/>\n    <c:boolean=(true)/>`;
-describe("I — a choice into a bounded tape: every branch outside is provable (s478)", () => {
-  test("every branch a literal outside the bound: ternary, value-if, nested, match — E-WRITE-INVARIANT", () => {
-    const e = errs(prog(KE, `        const xs: int[1..=2] = @c ? [1, 2, 3, 4, 5] : [1, 2, 3];`));
+const FE = `    type AuthErr:enum = { Denied, Locked }\n    function load(p: string)! AuthErr {\n        if (p != "secret") fail AuthErr.Denied;\n        return [1];\n    }`;
+// the source offset of the first occurrence of `frag` in `src`
+const at = (src, frag) => src.indexOf(frag);
+describe("I — a choice into a bounded tape: ANY branch provably outside is E-WRITE-INVARIANT (s478, Option A)", () => {
+  test("the S478 ruling's example: one branch outside, one inside — refused at the outside branch, naming it", () => {
+    const src = prog(KE, `        const xs: int[1..=2] = @c ? [1, 2, 3, 4, 5] : [1];`);
+    const e = errs(src);
     expect(e.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
-    expect(e[0].message).toContain("every branch");
-    expect(e[0].message).toContain("(5, 3)");
-    // one branch above the max, one below the min: still every branch outside
-    expect(codes(prog(KE, `        const xs: int[2..=3] = @c ? [1, 2, 3, 4, 5] : [1];`))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE, `        const xs: int[1..=2] = if (@c) { [1, 2, 3] } else { [] };`))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE, `        const xs: int[1..=2] = @c ? [1, 2, 3] : (@c ? [] : [1, 2, 3, 4]);`))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE, `        const xs: int[1..=2] = match @k { .A :> [1, 2, 3], .B :> { [] }, else :> [1, 2, 3, 4] };`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(e[0].span.start).toBe(at(src, "[1, 2, 3, 4, 5]"));
+    expect(e[0].message).toContain("the true branch (after `?`) is a tape of length 5");
+    expect(e[0].message).toContain("`1..=2`");
+  });
+
+  test("every branch outside: one error per branch, each at its own span", () => {
+    const src = prog(KE, `        const xs: int[2..=3] = @c ? [1, 2, 3, 4, 5] : [1];`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT", "E-WRITE-INVARIANT"]);
+    expect(e.map((d) => d.span.start)).toEqual([at(src, "[1, 2, 3, 4, 5]"), at(src, "[1]")]);
+    expect(e[1].message).toContain("the false branch (after `:`) is a tape of length 1");
+  });
+
+  test("a value-if, a nested choice, a value match — each names its branch", () => {
+    const vi = errs(prog(KE, `        const xs: int[1..=2] = if (@c) { [1] } else { [1, 2, 3] };`));
+    expect(vi.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(vi[0].message).toContain("the `else` branch is a tape of length 3");
+    const nested = errs(prog(KE, `        const xs: int[1..=2] = @c ? [1] : (@c ? [1, 2] : [1, 2, 3, 4]);`));
+    expect(nested.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(nested[0].message).toContain("the false branch (after `:`) of the false branch (after `:`) is a tape of length 4");
+    const m = errs(prog(KE, `        const xs: int[1..=2] = match @k { .A :> [1], .B :> { [1, 2] }, else :> [1, 2, 3] };`));
+    expect(m.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(m[0].message).toContain("arm 3 of the `match` is a tape of length 3");
+  });
+
+  test("a `!{}` guard arm outside is a branch outside; an in-bound guard arm is checked at run time", () => {
+    const g = errs(prog(KE + "\n" + FE, `        const xs: int[1..=2] = load("x") !{ _ :> [1, 2, 3] };`));
+    expect(g.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(g[0].message).toContain("arm 1 of the `!{}` guard is a tape of length 3");
+    // the subject's success value is a result too, so in-bound arms never prove it
+    const r = clean(prog(KE + "\n" + FE, `        const xs: int[1..=2] = load("x") !{ _ :> [1] };\n${show("xs")}`));
+    expect(lengthChecks(r.core).length).toBe(1);
   });
 
   test("every position into a bound: a cell, a return, an argument, a struct field", () => {
-    expect(codes(prog(KE + `\n    <d:int[1..=2]=(@c ? [1, 2, 3] : [])/>`, ""))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE + `\n    fn f(b: boolean) -> int[1..=2] { return b ? [1, 2, 3] : []; }`, ""))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE + `\n    fn f(xs: int[1..=2]) -> int { return xs.length; }`, `        @shown = \`\${f(@c ? [1, 2, 3] : [])}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
-    expect(codes(prog(KE + `\n    type B:struct = { xs: int[1..=2] }`, `        const b: B = { xs: @c ? [1, 2, 3] : [] };`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(KE + `\n    <d:int[1..=2]=(@c ? [1, 2, 3] : [1])/>`, ""))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(KE + `\n    fn f(b: boolean) -> int[1..=2] { return b ? [1, 2, 3] : [1]; }`, ""))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(KE + `\n    fn f(xs: int[1..=2]) -> int { return xs.length; }`, `        @shown = \`\${f(@c ? [1] : [])}\`;`))).toEqual(["E-WRITE-INVARIANT"]);
+    expect(codes(prog(KE + `\n    type B:struct = { xs: int[1..=2] }`, `        const b: B = { xs: @c ? [1, 2, 3] : [1] };`))).toEqual(["E-WRITE-INVARIANT"]);
   });
 
-  test("a spread branch wholly outside counts as outside; a branch of unknown length does not", () => {
-    expect(codes(prog(KE, `        const a: int[3..=3] = [1, 2, 3];\n        const xs: int[1..=2] = @c ? [0, ...a] : [];`))).toEqual(["E-WRITE-INVARIANT"]);
-    const r = clean(prog(KE, `        const ys: int[] = [1];\n        const xs: int[1..=2] = @c ? [1, 2, 3] : ys;\n${show("xs")}`));
-    expect(lengthChecks(r.core).length).toBe(1);
+  test("a spread branch wholly outside counts as outside, beside a branch of unknown length", () => {
+    const src = prog(KE, `        const a: int[3..=3] = [1, 2, 3];\n        const ys: int[] = [1];\n        const xs: int[1..=2] = @c ? [0, ...a] : ys;`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(e[0].message).toContain("the true branch (after `?`) is a tape of length at least 4");
+  });
+
+  test("element-level choices: a choice as an element, and a choice of literals whose elements are bounded", () => {
+    const el = errs(prog(KE, `        const xs: int[1..=2][] = [@c ? [1, 2, 3] : [1]];`));
+    expect(el.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(el[0].message).toContain("an element of `xs` is a choice, and the true branch (after `?`) is a tape of length 3");
+    const outer = errs(prog(KE, `        const xs: int[1..=2][] = @c ? [[1]] : (@c ? [[1, 2]] : [[1], [1, 2, 3]]);`));
+    expect(outer.map((d) => d.code)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(outer[0].message).toContain("an element of `xs`'s false branch (after `:`) of its false branch (after `:`) is a tape of length 3");
+    // every branch's elements inside: proven, it compiles with no check
+    const r = clean(prog(KE, `        const xs: int[1..=2][] = @c ? [[1]] : [[1, 2], [2]];\n        @shown = \`\${xs.length}\`;`));
+    expect(lengthChecks(r.core)).toEqual([]);
+    // a branch whose elements cannot be proven is still refused (INTERIM), naming the branch
+    const u = errs(prog(KE, `        const ys: int[][] = [[1]];\n        const xs: int[1..=2][] = @c ? [[1]] : ys;`));
+    expect(u.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(u[0].message).toContain("`xs`'s false branch (after `:`)");
   });
 
   test("every branch proven inside: no run-time check", () => {
@@ -729,28 +778,17 @@ describe("I — a choice into a bounded tape: every branch outside is provable (
     expect(lengthChecks(r.core)).toEqual([]);
   });
 
-  test("SOME branches outside: not provable — compiles, traps at run time when that branch runs, nothing written", async () => {
-    const src = prog(KE, `        @shown = "before";\n        const xs: int[1..=2] = @c ? [1, 2, 3, 4, 5] : [1];\n${show("xs")}`);
+  test("no branch outside, one of unknown length: compiles, traps at run time when that branch runs, nothing written", async () => {
+    const src = prog(KE, `        @shown = "before";\n        const ys: int[] = [1, 2, 3, 4, 5];\n        const xs: int[1..=2] = @c ? ys : [1];\n${show("xs")}`);
     expect(lengthChecks(clean(src).core).length).toBe(1);
     await load(src);
     const e = clickTrap(btn("go"));
     expect(e.map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
-    expect(e[0].detail).toEqual({ length: 5, min: 1, max: 2, at: "t.scrml:8" });
+    expect(e[0].detail).toEqual({ length: 5, min: 1, max: 2, at: "t.scrml:9" });
     expect($("#o").textContent).toBe("before");
   });
 
-  test("SOME arms outside a value match: compiles; the in-range arm that runs writes", async () => {
-    const src = prog(KE, `        const xs: int[1..=2] = match @k { .A :> [1], .B :> [1, 2, 3], else :> [2] };\n${show("xs")}`);
-    expect(lengthChecks(clean(src).core).length).toBe(1);
-    await load(src);
-    click(btn("go"));
-    expect($("#o").textContent).toBe("1");
-  });
-
-  test("a constant condition is not folded: a literal `true` test with an outside and an inside branch still traps", async () => {
-    const src = prog(KE, `        const xs: int[1..=2] = true ? [1, 2, 3] : [1];\n${show("xs")}`);
-    expect(codes(src)).toEqual([]);
-    await load(src);
-    expect(clickTrap(btn("go")).map((x) => x.code)).toEqual(["E-WRITE-INVARIANT-RT"]);
+  test("a constant condition is not folded: a literal `true` test with an outside branch is refused, as a type clash would be", () => {
+    expect(codes(prog(KE, `        const xs: int[1..=2] = true ? [1] : [1, 2, 3];`))).toEqual(["E-WRITE-INVARIANT"]);
   });
 });

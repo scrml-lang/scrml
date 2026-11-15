@@ -1,7 +1,7 @@
 // §66.12.2 + O36 RULED S477 — a choice whose EVERY branch is a literal outside the type's
 // length bound provably breaks the invariant whichever branch runs: E-WRITE-INVARIANT at
-// compile time. (A choice with only SOME branches outside is not provable: it traps at run
-// time, E-WRITE-INVARIANT-RT.)
+// compile time, at each branch. (S478 Option A: ANY branch outside is enough — see
+// reactive/tape-bound-branch-mixed-neg; a branch of unknown length traps at run time.)
 <program>
     <flag:boolean=(true)/>
     <xs:int[1..=2, append]=(@flag ? [1, 2, 3] : [])/>
