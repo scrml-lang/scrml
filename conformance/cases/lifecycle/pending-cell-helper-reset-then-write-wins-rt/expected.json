@@ -1,0 +1,60 @@
+{
+  "id": "lifecycle-pending-cell-helper-reset-then-write-wins-rt",
+  "description": "S478 follow-up (PA decision, conformance to RULED S478 item 2): `const r = inner(); @who = \"z\";` where the waiting helper `inner` resets `@who` after a wait. The reset comes before the caller's write in program order, so the write is the later start and wins, as in the inline `reset(@who); @who = \"z\";`: the cell holds \"z\" once everything settles and the reset's reload \"a\" never lands over it. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§13.9.4",
+  "rationale": "ruling:user-voice-scrml.md S478 \"⭐ RULED — S477 owner questions 1 and 2\" item 2: \"in `reset(@who); @who = \"z\";` the later write WINS … the author write after it starts later and wins.\" §13.9.4 rule 3 (⚑ PA reading, S478 follow-up): a write of the same cell in the continuation that resumes after awaiting a call is dated no earlier than a reset issued inside that call.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "who": "z"
+    },
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "z"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

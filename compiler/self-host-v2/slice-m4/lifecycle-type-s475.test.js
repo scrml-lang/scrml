@@ -155,10 +155,14 @@ describe("other lifecycles and other declarations are refused by name", () => {
       expect(e[0].message).toContain("refinement type (§53)");
     }
   });
-  test("a granted tape inside the lifecycle", () => {
+  // s478 (s478-boot-pending-tape-grants): the parse refusal is lifted — a PENDING tape carries its
+  // grants (slice-m4/pending-tape-grants-s478.test.js); a PLAIN lifecycle cell's granted tape is
+  // refused by name in analyze (g-boot-plain-lifecycle-tape-grants-s478)
+  test("a granted tape inside the lifecycle of a plain (non-pending) cell", () => {
     const e = errs(P(`<m:(not to int[append])=not/>`));
     expect(e.map((d) => d.code)).toEqual([U]);
-    expect(e[0].message).toContain("granted sequence");
+    expect(e[0].message).toContain("`(not to int[append])`");
+    expect(e[0].message).toContain("g-boot-plain-lifecycle-tape-grants-s478");
   });
   test("`transition()` (§14.12.6.3): named, not E-SCOPE-001", () => {
     const e = errs(P(`let <n:int=0/>\nfunction f() { transition(n); }`));
@@ -198,7 +202,8 @@ let <m:(not to int)=(cnt(@u) !{ _ :> not })/>
 describe("the opener's paren matcher skips `[…]` and strings: a malformed lifecycle swallows nothing", () => {
   test("`int[a)b]`", () => {
     const cs = codes(P(`let <m:(not to int[a)b])=not/>\n<p>after</p>`));
-    expect(cs).toContain(U);
+    // s478: the grant list is read now (the granted-lifecycle parse refusal is lifted) — `a)b` is no grant
+    expect(cs).toContain("E-GRANT-UNKNOWN");
     expect(cs.some((c) => c.startsWith("E-PARSE-"))).toBe(false);
   });
   test("`int[(]` does not swallow the markup after it", () => {

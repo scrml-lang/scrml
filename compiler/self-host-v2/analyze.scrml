@@ -49,7 +49,7 @@ ${
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
-             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
@@ -59,7 +59,7 @@ ${
     import { isIdentifierText } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
-    import { importTarget, importsOfItems, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
+    import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
     import { PNs, Parsed, parseFileNs, nsOfItems } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
@@ -1071,7 +1071,254 @@ ${
     // s475: `nss` — every namespace import (`import * as ns from "…"`) of every file: `target`
     // the file it resolves to, "" when none (its refusal is checkImports').
     type NsBind:struct = { file: string, ns: string, from: string, target: string }
-    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[] }
+    // s478: `exps` — every file's EXPORT TABLE (exportTables): what an import of the file binds.
+    type Linkage:struct = { own: OwnName[], scopes: FileScope[], nss: NsBind[], exps: ExpTable[] }
+
+    // ---- s478 (s478-boot-modules): a file's exports — its own and its re-exports ----
+    // SPEC §21.4 (ruling:user-voice-scrml.md S458 "ratify 21.4"):
+    //   "A re-export (named, renamed `export { a as b } from`, or `export * from`) SHALL link
+    //    its source module exactly as an `import` of that specifier does (§21.3). The name it
+    //    binds is the same binding the source module exports: it resolves to the module that
+    //    DECLARES it."
+    //   "`export * from './m.scrml'` SHALL re-export every name `./m.scrml` exports by name …
+    //    including names `./m.scrml` itself re-exports. It SHALL NOT re-export `default`."
+    //   "A name the file exports explicitly — a local export, or a named re-export of that
+    //    name — SHALL take precedence over every `export *` of the file; the stars are not
+    //    consulted for it."
+    //   "A name that two or more `export *` sources of one file resolve to DIFFERENT
+    //    declarations is ambiguous: that file SHALL NOT export it (the ES module rule). …
+    //    The SAME declaration reached through two or more paths (a diamond) is not ambiguous."
+    //   "An `export *` from a module outside the compilation — a stdlib `scrml:` module, a
+    //    `vendor:` module, a plain `.js` file — SHALL NOT be expanded: it exports no names
+    //    from the re-exporting file."
+    // An ExpTable is one file's export namespace, every entry resolved to the DECLARING file:
+    //   `ents` — the names it exports, one entry per exported declaration (a type and a
+    //            function of one name are two, as in OwnName); `from` / `orig` the declaring
+    //            file and the declaration's name there;
+    //   `amb`  — the names its stars bind to different declarations (not exported; an import
+    //            of one by name is E-IMPORT-004 "ambiguous", naming the stars);
+    //   `unexp` — the `from` of every unexpanded star it reaches (outside the compilation);
+    //   `dead` — the names a named re-export of it exports that resolve to nothing: their
+    //            fault is reported at that re-export (E-IMPORT-004 / E-IMPORT-006 / the cycle's
+    //            E-IMPORT-002), so an import of one is not reported again;
+    //   `open` — a star of it reaches a module that resolves to nothing (E-IMPORT-006) or a
+    //            re-export cycle (E-IMPORT-002): a name it lacks may be one only that module
+    //            could supply — §21.4: "A name only that missing module could supply SHALL NOT
+    //            be reported again as E-IMPORT-004 at an importer."
+    type ExpEnt:struct = { name: string, kind: NameKind, from: string, orig: string }
+    type ExpAmb:struct = { name: string, stars: string[] }
+    type ExpTable:struct = { file: string, ents: ExpEnt[], amb: ExpAmb[], unexp: string[], dead: string[], open: boolean }
+    type StarCand:struct = { ent: ExpEnt, star: string }
+
+    // A star re-export's source is outside the compilation (§21.4: not expanded).
+    fn starOutside(from: string) -> boolean {
+        return from.startsWith("scrml:") || from.startsWith("vendor:") || from.endsWith(".js") || from.endsWith(".mjs")
+    }
+
+    fn tableOf(exps: ExpTable[], file: string) -> ExpTable | not {
+        for (const t of exps) {
+            if (t.file == file) return t
+        }
+        return not
+    }
+
+    // The table of `target` among the `done` ones — `not` when it resolves to no file, is the
+    // file itself, or is not read yet (a re-export cycle).
+    fn readyTable(done: ExpTable[], target: string, self: string) -> ExpTable | not {
+        if (target == "" || target == self) return not
+        return tableOf(done, target)
+    }
+
+    // Does `file` export `name`?
+    fn tableHas(exps: ExpTable[], file: string, name: string) -> boolean {
+        const t: ExpTable | not = tableOf(exps, file)
+        if (t is not) return false
+        for (const e of t.ents) {
+            if (e.name == name) return true
+        }
+        return false
+    }
+
+    // The scope entries an import of `name` from `file` brings, bound under `local`: one per
+    // exported declaration of that name — the DECLARING file's (§21.4).
+    fn tableEntries(exps: ExpTable[], file: string, name: string, local: string) -> ScopeName[] {
+        let out: ScopeName[] = []
+        const t: ExpTable | not = tableOf(exps, file)
+        if (t is not) return out
+        for (const e of t.ents) {
+            if (e.name == name) out = out.concat([{ name: local, kind: e.kind, from: e.from, orig: e.orig }])
+        }
+        return out
+    }
+
+    // Every file's table. A file is read once the files its re-exports name are read; a
+    // re-export cycle (reported E-IMPORT-002) is cut at its first file, whose re-exports of a
+    // file not read yet are `dead` / `open` (the cycle is the one error).
+    fn exportTables(files: FileAst[], own: OwnName[], paths: string[]) -> ExpTable[] {
+        let done: ExpTable[] = []
+        let left: FileAst[] = files
+        while (left.length > 0) {
+            let rest: FileAst[] = []
+            let moved = false
+            for (const f of left) {
+                if (reexportsReady(f, paths, done)) {
+                    done = done.concat([exportTable(f, own, paths, done)])
+                    moved = true
+                } else {
+                    rest = rest.concat([f])
+                }
+            }
+            if (!moved) {
+                done = done.concat([exportTable(rest[0], own, paths, done)])
+                rest = rest.slice(1)
+            }
+            left = rest
+        }
+        return done
+    }
+
+    fn reexportsReady(f: FileAst, paths: string[], done: ExpTable[]) -> boolean {
+        for (const r of reexportsOfItems(f.items)) {
+            if (!(r.re == ALink.ReexportAll && starOutside(r.from))) {
+                const target: string = importTarget(f.path, r.from, paths)
+                if (target != "" && (target == f.path || tableOf(done, target) is not)) return false
+            }
+        }
+        return true
+    }
+
+    fn exportTable(f: FileAst, own: OwnName[], paths: string[], done: ExpTable[]) -> ExpTable {
+        let ents: ExpEnt[] = []
+        for (const o of own) {
+            if (o.file == f.path && o.exported) ents = ents.concat([{ name: o.name, kind: o.kind, from: f.path, orig: o.name }])
+        }
+        let explicit: string[] = []
+        for (const e of ents) {
+            if (explicit.indexOf(e.name) < 0) explicit = explicit.concat([e.name])
+        }
+        let dead: string[] = []
+        // the named re-exports: each name resolves to what its source exports under `orig`
+        for (const r of reexportsOfItems(f.items)) {
+            if (r.re == ALink.Reexport) {
+                const src: ExpTable | not = readyTable(done, importTarget(f.path, r.from, paths), f.path)
+                for (const n of r.names) {
+                    let hit = false
+                    if (src is given) {
+                        for (const e of src.ents) {
+                            if (e.name == n.orig) {
+                                ents = ents.concat([{ name: n.name, kind: e.kind, from: e.from, orig: e.orig }])
+                                hit = true
+                            }
+                        }
+                    }
+                    if (!hit && dead.indexOf(n.name) < 0) dead = dead.concat([n.name])
+                    if (explicit.indexOf(n.name) < 0) explicit = explicit.concat([n.name])
+                }
+            }
+        }
+        // the stars: every name their sources export, but an explicit one
+        let cands: StarCand[] = []
+        let amb: ExpAmb[] = []
+        let unexp: string[] = []
+        let open = false
+        for (const r of reexportsOfItems(f.items)) {
+            if (r.re == ALink.ReexportAll) {
+                if (starOutside(r.from)) {
+                    if (unexp.indexOf(r.from) < 0) unexp = unexp.concat([r.from])
+                } else {
+                    const src: ExpTable | not = readyTable(done, importTarget(f.path, r.from, paths), f.path)
+                    if (src is not) {
+                        open = true
+                    } else {
+                        for (const e of src.ents) {
+                            if (explicit.indexOf(e.name) < 0) cands = cands.concat([{ ent: e, star: r.from }])
+                        }
+                        // an ambiguous name of the source is ambiguous here too (ES ResolveExport)
+                        for (const a of src.amb) {
+                            if (explicit.indexOf(a.name) < 0 && !ambHas(amb, a.name)) amb = amb.concat([a])
+                        }
+                        for (const d of src.dead) {
+                            if (explicit.indexOf(d) < 0 && dead.indexOf(d) < 0) dead = dead.concat([d])
+                        }
+                        for (const u of src.unexp) {
+                            if (unexp.indexOf(u) < 0) unexp = unexp.concat([u])
+                        }
+                        if (src.open) open = true
+                    }
+                }
+            }
+        }
+        let seen: string[] = []
+        for (const c of cands) {
+            const nm: string = c.ent.name
+            if (seen.indexOf(nm) < 0 && !ambHas(amb, nm)) {
+                seen = seen.concat([nm])
+                let picked: ExpEnt[] = []
+                let stars: string[] = []
+                let clash = false
+                for (const c2 of cands) {
+                    if (c2.ent.name == nm) {
+                        if (stars.indexOf(c2.star) < 0) stars = stars.concat([c2.star])
+                        if (picked.length > 0 && (picked[0].from != c2.ent.from || picked[0].orig != c2.ent.orig)) clash = true
+                        if (!entHas(picked, c2.ent)) picked = picked.concat([c2.ent])
+                    }
+                }
+                if (clash) {
+                    amb = amb.concat([{ name: nm, stars: stars }])
+                } else {
+                    ents = ents.concat(picked)
+                }
+            }
+        }
+        return { file: f.path, ents: ents, amb: amb, unexp: unexp, dead: dead, open: open }
+    }
+
+    fn ambHas(amb: ExpAmb[], name: string) -> boolean {
+        for (const a of amb) {
+            if (a.name == name) return true
+        }
+        return false
+    }
+
+    fn entHas(es: ExpEnt[], e: ExpEnt) -> boolean {
+        for (const x of es) {
+            if (x.kind == e.kind && x.from == e.from && x.orig == e.orig) return true
+        }
+        return false
+    }
+
+    // Why an import (or a named re-export) of `orig` from `from` — resolving to the file
+    // `target` — binds nothing (§21.3, §21.4). Code "" when it binds, or when another report
+    // owns the failure (a dead name, a module only a missing / cyclic star could supply).
+    fn exportMiss(exps: ExpTable[], from: string, target: string, orig: string) -> NsMiss {
+        const t: ExpTable | not = tableOf(exps, target)
+        if (t is not) return { code: "", why: "" }
+        for (const e of t.ents) {
+            if (e.name == orig) return { code: "", why: "" }
+        }
+        for (const a of t.amb) {
+            if (a.name == orig) {
+                return { code: "E-IMPORT-004", why: "`" + orig + "` is ambiguous in `" + from + "`: its stars " + starList(a.stars) + " bind it to different declarations, so `" + from + "` does not export it (§21.4, the ES module rule) — re-export the one you mean by name there (`export { " + orig + " } from \"" + a.stars[0] + "\";` — an explicit export wins over the stars), or import it from its source directly" }
+            }
+        }
+        if (t.dead.indexOf(orig) >= 0 || t.open) return { code: "", why: "" }
+        if (t.unexp.length > 0) {
+            return { code: "E-IMPORT-004", why: "`" + orig + "` is not exported by `" + from + "` — a name it could reach only through " + starList(t.unexp) + " is not exported: an `export *` from a module outside the compilation is not expanded (§21.4); re-export the name explicitly (`export { " + orig + " } from \"" + t.unexp[0] + "\";`) or import it from the source directly" }
+        }
+        return { code: "E-IMPORT-004", why: "`" + orig + "` is not exported by `" + from + "`" }
+    }
+
+    fn starList(froms: string[]) -> string {
+        let out: string = ""
+        let i = 0
+        for (const s of froms) {
+            if (i > 0 && i == froms.length - 1) out = out + " and "
+            if (i > 0 && i < froms.length - 1) out = out + ", "
+            out = out + "`export * from \"" + s + "\"`"
+            i = i + 1
+        }
+        return out
+    }
 
     // The file whose declaration of KIND `k` named `name` is in scope in
     // `file`; "" when none is.
@@ -1148,13 +1395,6 @@ ${
         return boundAs(lk, file, k, name, declFile).length > 0
     }
 
-    fn exportsName(own: OwnName[], file: string, name: string) -> boolean {
-        for (const o of own) {
-            if (o.file == file && o.name == name && o.exported) return true
-        }
-        return false
-    }
-
     // Every declared name of every file: its types, its functions (a
     // `<program>`'s included — typeItems / fnItems), its user declarations
     // (the decl stubs — the program itself is not a name).
@@ -1193,6 +1433,8 @@ ${
     fn linkage(files: FileAst[], own: OwnName[], st0: AS) -> RLinkage {
         let st: AS = st0
         const paths: string[] = filePaths(files)
+        // s478: what each file exports, its re-exports resolved (exportTables, §21.4)
+        const exps: ExpTable[] = exportTables(files, own, paths)
         let scopes: FileScope[] = []
         let nss: NsBind[] = []
         for (const f of files) {
@@ -1241,8 +1483,10 @@ ${
                         importedOrig = importedOrig.concat(["*"])
                     }
                     if (target != "" && !(at0 >= 0 && importedFrom[at0] == target && importedOrig[at0] == "*")) {
-                        for (const o of own) {
-                            if (o.file == target && o.exported) names = names.concat([{ name: nsn + "." + o.name, kind: o.kind, from: target, orig: o.name }])
+                        // s478: its members are its exports, re-exports included (§21.3 rule 1, §21.4)
+                        const tt: ExpTable | not = tableOf(exps, target)
+                        if (tt is given) {
+                            for (const e of tt.ents) { names = names.concat([{ name: nsn + "." + e.name, kind: e.kind, from: e.from, orig: e.orig }]) }
                         }
                     }
                 }
@@ -1251,7 +1495,7 @@ ${
                     // a reserved `_scrml_` / `__scrml_` one is refused at the import (§47.1.1),
                     // as a declaration's is, not only at a use
                     if (n.name != n.orig) st = reservedName(st, f.path, n.span, n.name)
-                    if (target != "" && exportsName(own, target, n.orig)) {
+                    if (target != "" && tableHas(exps, target, n.orig)) {
                         if (mine.indexOf(n.name) >= 0) {
                             st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is imported from `" + imp.from + "` and also declared in this file — a name is bound once in file scope (duplicate binding in file scope, §7.6); rename one, drop the import, or import it under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`)")
                         } else {
@@ -1276,16 +1520,16 @@ ${
                                     // of EITHER kind resolves — never also E-SCOPE-001 ("this file does not
                                     // import it") for a name this file does import
                                     st = addDiag(st, f.path, n.span, "E-SCOPE-010", "`" + n.name + "` is already imported into this file (" + importedShown(importedOrig[at], earlier) + "), and this import binds it to another declaration (`" + n.orig + "` from `" + target + "`) — one local name cannot bind two declarations, whichever files (user or stdlib) export them (duplicate binding in file scope, §7.6; ruled S474); import one of them under another name (`import { " + n.orig + " as " + n.orig + "2 } from \"" + imp.from + "\"`), or drop one import")
-                                    names = names.concat(exportedEntries(own, target, n.orig, n.name))
+                                    names = names.concat(tableEntries(exps, target, n.orig, n.name))
                                 } else {
                                     st = addDiag(st, f.path, n.span, "W-IMPORT-001", "`" + n.name + "` is already imported by an earlier import in this file — the same declaration imported twice; this later import wins (§41.7); remove the duplicate")
-                                    names = unbound(names, n.name).concat(exportedEntries(own, target, n.orig, n.name))
+                                    names = unbound(names, n.name).concat(tableEntries(exps, target, n.orig, n.name))
                                 }
                             } else {
                                 imported = imported.concat([n.name])
                                 importedFrom = importedFrom.concat([target])
                                 importedOrig = importedOrig.concat([n.orig])
-                                names = names.concat(exportedEntries(own, target, n.orig, n.name))
+                                names = names.concat(tableEntries(exps, target, n.orig, n.name))
                             }
                         }
                     }
@@ -1293,7 +1537,7 @@ ${
             }
             scopes = scopes.concat([{ file: f.path, names: names }])
         }
-        return { lk: { own: own, scopes: scopes, nss: nss }, st: st }
+        return { lk: { own: own, scopes: scopes, nss: nss, exps: exps }, st: st }
     }
 
     // s475 — how an earlier import that bound a local name is shown: `orig` from `from`, or (orig
@@ -1340,19 +1584,13 @@ ${
         const h: NsHit = nsMember(lk, file, name)
         if (h.ns == "") return { code: "", why: "" }
         if (h.target == "") return { code: "-", why: "" }
-        if (exportsName(lk.own, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        if (tableHas(lk.exps, h.target, h.member)) return { code: "E-SCOPE-001", why: "`" + name + "` — `" + h.member + "`, exported by `" + h.from + "`, is not " + what + " (namespace import `" + h.ns + "`)" }
+        // s478: an ambiguous star name is no member either (§21.3 rule 6); a name only a missing /
+        // cyclic module could supply is that re-export's report
+        const em: NsMiss = exportMiss(lk.exps, h.from, h.target, h.member)
+        if (em.code == "") return { code: "-", why: "" }
+        if (em.why.indexOf("is ambiguous") >= 0) return { code: em.code, why: em.why + " — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3 rule 6)" }
         return { code: "E-IMPORT-004", why: "`" + h.member + "` is not exported by `" + h.from + "` — `" + name + "` names no member of the namespace import `" + h.ns + "` (§21.3)" }
-    }
-
-    // The scope entries an import of `name` from `target` brings: one per
-    // EXPORTED declaration of that name there (never a private one).
-    // s474: bound under the LOCAL name `local` (an alias, or `name` itself).
-    fn exportedEntries(own: OwnName[], target: string, name: string, local: string) -> ScopeName[] {
-        let out: ScopeName[] = []
-        for (const o of own) {
-            if (o.file == target && o.name == name && o.exported) out = out.concat([{ name: local, kind: o.kind, from: target, orig: name }])
-        }
-        return out
     }
 
     fn unbound(names: ScopeName[], name: string) -> ScopeName[] {
@@ -1473,6 +1711,10 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
         }
+    }
+
+    fn lifeTapeGrantsWhy(name: string, post: Type) -> string {
+        return "`@" + name + "` is declared `(not to " + tapeTypeName(post) + ")`, a tape with grants, but has no waiting initializer — a granted tape in a lifecycle type is built for a PENDING tape only (§13.9.1 rule 4: `let <" + name + ":(not to S[replace])=(load() !{ _ :> not })/>`). On a plain lifecycle cell the lifecycle writes it once, `not → S` (§66.11.6), and how the tape's grants combine with that write is not in the bootstrap yet (g-boot-plain-lifecycle-tape-grants-s478). Declare the tape on its own (`<" + name + ":S[grants]=[]/>`, §66.12), or give it a waiting initializer"
     }
 
     // Is `at` the presence lifecycle `(not to T)` (at its top)?
@@ -4307,7 +4549,15 @@ ${
         const rg: RGraph = graphOf(te, g, ty, body, st)
         st = rg.st
         const reads: string[] = valueReads(init)
-        let edits: EditKind[] = typeEdits(ty)
+        // s478 (s478-boot-pending-tape-grants) — a PENDING tape's edit grants are its post-type's
+        // (§13.9.1 rule 4, RULED S478: "needs `replace` in the tape's grants (`(not to S[replace])`)
+        // like any other tape"): `(not to S[g])` resolves to `S[g] | not`, and the edits are read
+        // off `S[g]` — the tape — exactly as a plain `S[g]` cell's are. (Its `replace` channel is
+        // the lifecycle's, below; an AUTHOR edit / whole write is judged by the tape's own grants,
+        // authorGrants / pendTapeReplaces.)
+        let tapeTy: Type = ty
+        if (pend && seqElem(unMaybe(ty)) is given) tapeTy = unMaybe(ty)
+        let edits: EditKind[] = typeEdits(tapeTy)
         // s473: a DERIVED value's state-children carry no transition grant (§51.0.J
         // "Direct writes … REJECTED"; derivedRules below) — so it gets no write
         // capability and is printed as a Derived that recomputes, never seeded
@@ -4316,10 +4566,10 @@ ${
         // `let` grants an ELEMENT-field write (`@xs[i].f = v`, dpa-052 Q3) —
         // listed as FieldAt(path) over the element struct (Core EditKind note)
         let elemEdits: EditKind[] = []
-        const et: Type | not = seqElem(ty)
+        const et: Type | not = seqElem(tapeTy)
         if (et is given) elemEdits = subFieldEdits(g, et)
         let grantRep: boolean = isLet || seqRep
-        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
+        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, tapeTy)).concat(elemEdits)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
             if (reads.length > 0) {
@@ -4351,6 +4601,21 @@ ${
             } else {
                 life = true
             }
+        }
+        // s478 (s478-boot-pending-tape-grants) — a granted tape in a lifecycle type is built for a
+        // PENDING tape only (§13.9.1 rule 4). On a PLAIN `(not to S[g])` cell (no waiting
+        // initializer) the lifecycle writes the cell once, `not → S` (§66.11.6 item 2), and how
+        // the tape's own grants (`replace`, the edits) combine with that one write is not ruled —
+        // refused by name, INTERIM (g-boot-plain-lifecycle-tape-grants-s478). A `let` one is
+        // already E-GRANT-LET-ON-SEQUENCE above (one report per construct). The field is untrusted
+        // and no lifecycle cell (no second report at its writes — as a lifeCellWhy refusal); the
+        // pending-cell scan reads the declaration, not this field (pendingCell),
+        // so on the first pass a pending tape is still found, and this pass's report is discarded
+        // with the pass (analyzeSources analyzes the desugared program again, `pend` set).
+        if (life && !pend && !isLet && aty is given && lifeTapeGranted(aty)) {
+            st = addDiag(st, te.file, aty.span, "E-BOOTSTRAP-UNSUPPORTED", lifeTapeGrantsWhy(name, unMaybe(ty)))
+            resolved = false
+            life = false
         }
         // s475 (s475-boot-lifecycle-reads) — §66.11.1: "a lifecycle `(A to B)` | a write
         // along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6)".
@@ -6703,14 +6968,6 @@ ${
         return "`" + w + "` is written twice on `<" + decl + ">` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no code for a repeated opener word, so it is refused: write it once"
     }
 
-    // s451 — the `persist=` storage value "session", spelled in pieces: impl#1
-    // (which compiles the bootstrap) escalates a function to the SERVER when
-    // its body holds the word `session` ANYWHERE, string literals included —
-    // route-inference.ts SERVER_ONLY_PATTERNS `/(?<!@)\bsession\b/` is
-    // string-blind (the `print(` and `Bun.*` triggers moved to the AST; this
-    // one did not). Dogfood finding, s451.
-    fn sessionWord() -> string { return "sess" + "ion" }
-
     // s451 — the §6.14 opener words: `persist=`, `key=` and `prepaint`.
     fn isPersistWord(w: string) -> boolean {
         return w == "persist" || w == "key" || w == "prepaint"
@@ -6723,7 +6980,7 @@ ${
     // opener is §6.14.4.2 rule 2's error wherever it is written.
     fn persistFieldDiag(file: string, d: ADecl, a: AAttr, st: AS) -> AS {
         if (a.name == "prepaint" && attrNamed(d.mods, "persist") is not) {
-            return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"session\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
         }
         return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + d.name + ">`, a declaration or a field of one, is not in the bootstrap — on a §66 declaration `persist=` governs the shared instance only (§6.14.1 rule 3), and its position there and per-instance keys are OPEN (O-061-9); the bootstrap persists a program cell, `let <x:T=v persist=\"local\" key=\"app.x\"/>`")
     }
@@ -9026,26 +9283,16 @@ ${
     // of a `fn` body — so the spelling is never written whole in one here.)
     fn dateNowText() -> string { return "`Date" + ".now()`" }
 
-    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` names the `fn` that makes the body pure:
-    // the function itself, or — in a nested function — the enclosing `fn` (§48.3: "anywhere
-    // inside a `fn` body, including inside nested closures"), never "a `function` body".
-    // (Built outside resolveHost's match: impl#1 printed this text's "`fn`" as "`function`"
-    // when it stood inline in the match arm.)
-    fn clockInPureText(env: Env) -> string {
-        const tail: string = " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter"
-        const outer: string = env.nest.pureFn
-        if (outer != "" && outer != env.fx.fnName) {
-            return dateNowText() + " is non-deterministic — the nested function `" + env.fx.fnName + "` is inside `fn " + outer + "`, which is pure (nested functions included, §48.3) and cannot call it" + tail
-        }
-        return dateNowText() + " is non-deterministic — `fn " + env.fx.fnName + "` is pure and cannot call it" + tail
-    }
-
+    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` (the `.HostPure` arm below) names the `fn`
+    // that makes the body pure: the function itself, or — in a nested function — the enclosing
+    // `fn` (§48.3: "anywhere inside a `fn` body, including inside nested closures"), never "a
+    // `function` body".
     fn resolveHost(env: Env, e: AExpr, args: AExpr[], st: AS) -> RX {
         if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " takes no argument", st)
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", clockInPureText(env), st)
+            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
@@ -12055,10 +12302,11 @@ ${
     fn resolveEditCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, m.obj.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, m.obj.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         let elem: Type | not = not
         const pt: Type | not = p.ty
         if (pt is given) elem = seqElem(pt)
@@ -12072,8 +12320,8 @@ ${
             what = "a front-prepend"
         }
         const cap: Sym | not = f.wcap
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "(…)` is " + what))     // s475 r1 F2b
-        const granted: boolean = grantsAdmit(f.grants, edit)
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "(…)` is " + what))     // s475 r1 F2b
+        const granted: boolean = grantsAdmit(authorGrants(env.g, f), edit)
         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is given) {
@@ -12180,6 +12428,20 @@ ${
 
     fn tapeGrantSet(g: SeqGrants) -> GrantSet {
         return { replace: g.replace, edits: seqEdits(g) }
+    }
+
+    // s478 (s478-boot-pending-tape-grants) — the grants an AUTHOR edit of field `f` is judged by
+    // (resolveEditCall, resolveSeqShape, resolveRemoveCall, resolvePositionWrite). For a PENDING
+    // tape, `f.grants`' `replace` is the lifecycle's channel for the compiler's own writes (its
+    // load's settle, a reset's re-run — §13.9.1 rule 5) and grants the author nothing (RULED S478:
+    // "`let` there grants an AUTHOR write nothing beyond the tape type's own bracket grants …, and
+    // neither does the lifecycle `(not to …)`"): the author's set is the tape type's own `replace`
+    // with the edits fieldOf read off the post-type. Every other field: its own set.
+    fn authorGrants(g: Globals, f: FieldInfo) -> GrantSet {
+        if (!pendTapeField(g, f)) return f.grants
+        const tg: GrantSet | not = tapeGrants(f.ty)
+        if (tg is not) return f.grants
+        return { replace: tg.replace, edits: f.grants.edits }
     }
 
     // s478 (RULED S478 item 1) — may an AUTHOR replace pending cell `f` whole (checkWrite)? A
@@ -12889,6 +13151,18 @@ ${
         return out
     }
 
+    // s478 (s478-boot-pending-tape-grants) — does lifecycle type `at` carry a granted tape in its second state
+    // (`(not to S[g])`, a grant at any depth of the tape)?
+    fn lifeTapeGranted(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> false
+            .TSeq(elem: e, grants: gs) :> gs.length > 0 || lifeTapeGranted(e)
+            .TMaybe(inner: i) :> lifeTapeGranted(i)
+            .TLife(pre: f, post: x) :> lifeTapeGranted(x)
+        }
+    }
+
     // Does a sequence type expression grant `replace` in its brackets?
     fn seqReplace(at: AType) -> boolean {
         const k: ATypeK = at.k
@@ -13208,12 +13482,13 @@ ${
     fn resolveSeqShape(env: Env, e: AExpr, target: AExpr, value: AExpr, shape: int, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, target, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, target.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, target.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + " = …` is " + shapeWhat(shape)))     // s475 r1 F2b
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + " = …` is " + shapeWhat(shape)))     // s475 r1 F2b
         // r1 nit: the shape over a value that is not a sequence is a type error
         const pty: Type | not = p.ty
         if (pty is given) {
@@ -13224,7 +13499,7 @@ ${
         const edit: EditKind = shapeEdit(shape)
         const cap: Sym | not = f.wcap
         // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert` (shapeEdit)
-        const isGranted: boolean = grantsAdmit(f.grants, edit)
+        const isGranted: boolean = grantsAdmit(authorGrants(env.g, f), edit)
         // s444: every granted shape lowers, so a granted field always has a
         // write capability (its grants list the edit — seqEdits)
         if (!isGranted || cap is not) {
@@ -13600,16 +13875,17 @@ ${
     fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], taken: boolean, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, m.obj, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, m.obj.span, st)
-        const f: FieldInfo = p.decl.fields[p.idx]
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, m.obj.span, st)
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's edit writes its tape
         if (p.path.length > 0) {
             // r3: a removal on a sub-field sequence is judged by THAT field's grants (dpa-052 Q6,
             // the deepest field written) — not tracked here; refused, as `.push` on one is
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + placeKey(m.obj) + "." + m.method + "()` — an edit of a sub-field sequence is not in bootstrap slice M2 (it would be judged by that field's own grants, dpa-052 Q6)")
         }
-        if (lockedLife(f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "()` is a removal"))     // s475 r1 F2b
+        if (lockedLifeEdit(env.g, f)) return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "." + m.method + "()` is a removal"))     // s475 r1 F2b
         let place: SeqAt = SeqAt.Front
         let what: string = "a removal at the front (the `shift` grant)"
         if (m.method == "pop") {
@@ -13619,7 +13895,7 @@ ${
         // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
         let redit: EditKind = EditKind.RemoveFront
         if (m.method == "pop") redit = EditKind.RemoveEnd
-        const isGranted: boolean = grantsAdmit(f.grants, redit)
+        const isGranted: boolean = grantsAdmit(authorGrants(env.g, f), redit)
         // r3 nit: messages name the place written (`@r.xs`), not only its field (`@r`)
         const at: string = placeKey(m.obj)
         if (!isGranted) {
@@ -13790,12 +14066,13 @@ ${
     fn resolveElemFieldWrite(env: Env, e: AExpr, ef: ElemFieldTarget, value: AExpr, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, ef.seq, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
-        if (p is not) return st
-        st = writeGuards(env, p, ef.seq.span, st)
+        const p0: WPlace | not = rp.place
+        if (p0 is not) return st
+        st = writeGuards(env, p0, ef.seq.span, st)
         st = resolveExpr(env, ef.index, Type.Int, st).st
-        const f: FieldInfo = p.decl.fields[p.idx]
-        if (lockedLife(f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an element-field write"), st)     // s475 r1 F2b
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's element-field write writes its tape
+        if (lockedLifeEdit(env.g, f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an element-field write"), st)     // s475 r1 F2b
         let elem: Type | not = not
         const pt: Type | not = p.ty
         if (pt is given) elem = seqElem(pt)
@@ -13905,14 +14182,15 @@ ${
     fn resolvePositionWrite(env: Env, e: AExpr, it: IndexTarget, value: AExpr, st0: AS) -> AS {
         const rp: RPlace = resolvePlace(env, it.seq, st0)
         let st: AS = rp.st
-        const p: WPlace | not = rp.place
+        const p0: WPlace | not = rp.place
         const lc: LocalB | not = rp.local
         if (lc is given) return partRefused(env, value, e.span, "E-ASSIGN-TARGET", "`" + lc.name + "[…] = …` — `" + lc.name + "` names an instance (narrowed by `given`), which has no positions; write one of its fields", st)
-        if (p is not) return resolveExpr(env, value, not, resolveExpr(env, it.index, Type.Int, st).st).st
-        st = writeGuards(env, p, it.seq.span, st)
+        if (p0 is not) return resolveExpr(env, value, not, resolveExpr(env, it.index, Type.Int, st).st).st
+        st = writeGuards(env, p0, it.seq.span, st)
         st = resolveExpr(env, it.index, Type.Int, st).st
-        const f: FieldInfo = p.decl.fields[p.idx]
-        if (lockedLife(f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…] = …` is a position write"), st)     // s475 r1 F2b
+        const f: FieldInfo = p0.decl.fields[p0.idx]
+        const p: WPlace = editPlace(env.g, f, p0)       // s478: a pending tape's position write writes its tape
+        if (lockedLifeEdit(env.g, f)) return partRefused(env, value, e.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`@" + f.sym.hint + "[…] = …` is a position write"), st)     // s475 r1 F2b
         const at: string = writtenLabel(placeKey(it.seq), f.sym.hint)
         const label: string = at + "[…]"
         let elem: Type | not = not
@@ -13927,7 +14205,7 @@ ${
         // a tape reached through a struct field: Core writes a struct field only as a
         // whole (`replace`), as for every other edit of a sub-field tape (fieldAtWrite)
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` is a position write of a sub-field tape — Core writes a struct field only as a whole (`replace`), so an edit of a sub-field tape is not in the bootstrap yet")
-        const pd: TapeDiag[] = positionWriteProblem(f.grants, label, tapeTypeName(f.ty))
+        const pd: TapeDiag[] = positionWriteProblem(authorGrants(env.g, f), label, tapeTypeName(f.ty))
         if (pd.length > 0) {
             if (f.mode == FieldMode.Derived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
             return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg)
@@ -23905,7 +24183,7 @@ ${
                     if (imp.ns == name) return imp.from   // s475: a namespace import binds `name` itself
                     if (target != "") {
                         for (const x of imp.names) {
-                            if (x.name == name && exportsName(lk.own, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
+                            if (x.name == name && tableHas(lk.exps, target, x.orig)) return imp.from   // s474: `name` is the local (alias) name
                         }
                     }
                 }
@@ -26073,6 +26351,30 @@ ${
     // s475 r1 F2b: is this write place a LOCKED `(not to T)` cell?
     fn lockedLife(f: FieldInfo) -> boolean {
         return f.life && lockedMode(f.mode)
+    }
+
+    // s478 (s478-boot-pending-tape-grants) — `f` is a PENDING tape: a `(not to S[…])` program cell
+    // whose initializer waits (§13.9.1; pendFiles desugared it).
+    fn pendTapeField(g: Globals, f: FieldInfo) -> boolean {
+        return f.life && seqElem(unMaybe(f.ty)) is given && isPendingDecl(g, f.nid)
+    }
+
+    // s475 r1 F2b at an EDIT site (an edit, a position / element-field write): a locked `(not to T)`
+    // cell is written once, `not → T`. s478: except a PENDING tape — ruling S475 item 3 allows a
+    // pending cell `T → T′` ("allowed for a pending cell (it reloads)"; §66.11.6 item 2), and an
+    // edit of its tape is judged by the tape type's own grants (authorGrants), as a plain tape's is
+    // (§13.9.1 rule 4, RULED S478).
+    fn lockedLifeEdit(g: Globals, f: FieldInfo) -> boolean {
+        return lockedLife(f) && !pendTapeField(g, f)
+    }
+
+    // s478 — the place an EDIT of field `f` writes: a pending tape's place type is its tape `S[g]`,
+    // not `S[g] | not` — an edit reads the tape it changes, so the typer holds it to a present cell
+    // (§13.9.3: E-TYPE-001 on a read before discrimination, typeCallStmt / typePlace).
+    fn editPlace(g: Globals, f: FieldInfo, p: WPlace) -> WPlace {
+        const pt: Type | not = p.ty
+        if (pt is not || !pendTapeField(g, f)) return p
+        return { decl: p.decl, inst: p.inst, idx: p.idx, path: p.path, ty: unMaybe(pt), maybe: p.maybe }
     }
 
     // A local's written type (`let a: T = …`), if it has one.
@@ -29635,8 +29937,10 @@ ${
         return []
     }
 
-    fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
+    fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts00: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s478: a position / element-field write of a pending tape reads the tape it changes
+        const ts0: TypeState = pendEditRead(env, partCapOf(f), target.span, ts00)
         // s472: a write to a PART of a local — each index an `int`, the value against
         // the part's type; `@xs[i] = v` — the index, and the value against the element
         const lp: PartTyping | not = partTypingOf(env, f)
@@ -29938,10 +30242,53 @@ ${
             return typeExpr(env, e, ts0).ts
         }
         let ts: TypeState = typePlace(env, callee, VType.Unknown, typeExprs(env, args, ts0))
+        // s478: an edit method (`@xs.append(v)`, `.pop()`, …) of a pending tape reads the tape it changes
+        if (ws.length == 1 && ws[0].w.edit != EditKind.Replace) ts = pendEditRead(env, ws[0].w.cap, callee.span, ts)
         if (args.length == 1) {
             for (const sw of ws) { ts = checkWrite(env, sw.w, exprType0(ts, args[0].nid), args[0], "an element of this sequence", ts) }
         }
         return record(ts, e.nid, VType.Unknown)
+    }
+
+    // s478 (s478-boot-pending-tape-grants) — an EDIT of a pending tape (an edit method, a position
+    // or element-field write) changes the tape the cell holds, so it reads that tape: before the
+    // cell is discriminated its load may still be in flight and the cell `not` (§13.9.3 "Reads before
+    // discrimination are E-TYPE-001"), which has no positions and nothing to append to. Held to the
+    // same narrowing a read is (narrowRead's `env.narrowed`). A whole write (`replace`) reads nothing;
+    // a shape write (`@xs = [...@xs, v]`, `.filter`, `.map`) reads the cell in its value, typed there.
+    fn pendEditRead(env: TEnv, cap: Sym | not, span: ASpan, ts: TypeState) -> TypeState {
+        if (cap is not) return ts
+        const f: FieldInfo | not = fieldOfCap(env.t, cap)
+        if (f is not) return ts
+        if (!f.trusted || !f.life || !pendingField(env.t, f)) return ts
+        if (env.narrowed.indexOf("@" + f.sym.hint) >= 0) return ts
+        const inner: Type | not = maybeInner(f.ty)
+        if (inner is not) return ts
+        return report(ts, env, span, "E-TYPE-001", pendEditMsg(env.t, f, inner))
+    }
+
+    fn pendEditMsg(t: Tables, f: FieldInfo, inner: Type) -> string {
+        const n: string = f.sym.hint
+        let load: string = "its declared initializer"
+        const rq: ReqFact | not = pendingOf(t, f)
+        if (rq is given) load = pendLoadText(rq)
+        return "`@" + n + "` is edited before it is discriminated — an edit changes the tape the cell holds, and `@" + n + "` is a pending tape, declared `(not to " + tapeTypeName(inner) + ")`, so here its load (" + load + ") may still be in flight and the cell still `not`, with nothing to edit (§13.9.3). Discriminate it first on this path: `if (@" + n + " is given) { … }` or `if (@" + n + " is not) return` (§13.9.3, §14.12.3)"
+    }
+
+    // s478: the cell write capability of a position / element-field write's effect, else `not`.
+    fn partCapOf(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .EPosition(cap: c) :> c
+            .EElemAt(cap: c) :> c
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            .EEdits(w: w) :> not
+            .ERemove(w: w) :> not
+            .ELocalEdit(sym: s) :> not
+            not :> not
+        }
     }
     // s475 (s475-boot-local-tape-edits) — `xs.append(v)` … `xs.remove(i)` on a local
     // tape (the resolver's ELocalEdit): the receiver and the argument typed, the
@@ -30236,7 +30583,7 @@ ${
         let el: string = "S"
         const et: Type | not = seqElem(unMaybe(f.ty))
         if (et is given) el = typeName(et)
-        return "`@" + n + "` is a pending tape whose type grants nothing — this whole-value write needs `replace` in the tape's grants (`(not to " + el + "[replace])`, §66.12.2), like any other tape: `let` and the lifecycle `(not to …)` grant a tape no `replace` (its grants live on the type, §66.12.3; RULED S478). Only the cell's own load writes it whole (§13.9.2) — `reset(@" + n + ")` re-runs that load. (A granted tape inside a lifecycle type is not in the bootstrap yet, gap g-boot-pending-tape-granted-lifecycle-s478.)"
+        return "`@" + n + "` is a pending tape whose type does not grant `replace` — this whole-value write needs `replace` in the tape's grants (`(not to " + el + "[replace])`, §66.12.2), like any other tape: `let` and the lifecycle `(not to …)` grant a tape no `replace` (its grants live on the type, §66.12.3; RULED S478). Without it only the cell's own load writes it whole (§13.9.2) — `reset(@" + n + ")` re-runs that load"
     }
 
     // s475 (S4) — `nid` is the right-hand side of a pending cell's settle write (§13.9.2).
@@ -33701,7 +34048,7 @@ ${
         for (const x of es) {
             const n: string = atName(x)
             if (n != "" && isSyncedCell(infos, n)) {
-                st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `@" + d.name + "` lists `@" + n + "`, a `persist=\"local\"` cell another tab can write — whether that cross-tab write is a change that resets `@" + d.name + "` is OPEN (§6.8.4 rule 7, O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync) or drop the entry")
+                st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `@" + d.name + "` lists `@" + n + "`, a `persist=\"local\"` cell another tab can write — whether that cross-tab write is a change that resets `@" + d.name + "` is OPEN (§6.8.4 rule 7, O-061-5); use `persist=\"session\"` (no cross-tab sync) or drop the entry")
             }
         }
         return st
@@ -33728,14 +34075,14 @@ ${
         const km: AAttr | not = attrNamed(d.mods, "key")
         const pp: AAttr | not = attrNamed(d.mods, "prepaint")
         if (pm is not) {
-            if (pp is given) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
-            if (km is given) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"" + sessionWord() + "\"` (§6.14.1)")
+            if (pp is given) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"session\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            if (km is given) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"session\"` (§6.14.1)")
             return { info: not, st: st }
         }
         let ok = true
         const store: PersistStore | not = storeOf(pm.value)
         if (store is not) {
-            st = addDiag(st, prog.file, pm.span, "E-PERSIST-STORAGE-UNKNOWN", "`persist=` takes \"local\" (localStorage) or \"" + sessionWord() + "\" (sessionStorage) — " + storeText(pm.value) + " is neither (§6.14.1 rule 1; \"cookie\" is deferred, and IndexedDB is a planned stdlib addition, not a `persist=` value)")
+            st = addDiag(st, prog.file, pm.span, "E-PERSIST-STORAGE-UNKNOWN", "`persist=` takes \"local\" (localStorage) or \"session\" (sessionStorage) — " + storeText(pm.value) + " is neither (§6.14.1 rule 1; \"cookie\" is deferred, and IndexedDB is a planned stdlib addition, not a `persist=` value)")
             ok = false
         }
         let key: string = ""
@@ -33789,7 +34136,7 @@ ${
             }
         }
         if (store is given && store == PersistStore.Local && (f.graph is given || !grantsAdmit(f.grants, EditKind.Replace))) {
-            return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
+            return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"session\"` (no cross-tab sync)"
         }
         // s469-boot-tape-grants (review r2 H1): the cross-tab value is a whole-value write of a
         // STRUCT too, so it replaces each tape field it changes (§66.12.6 rule 4) — a struct
@@ -33797,7 +34144,7 @@ ${
         // only at run time: refused, as `reset` is (resetTapeProblem, the one reader).
         if (store is given && store == PersistStore.Local) {
             const tp: string = resetTapeProblem(g.types, f.ty, "@" + f.sym.hint)
-            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"" + sessionWord() + "\"` (no cross-tab sync), or grant `replace` on the field's type"
+            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"session\"` (no cross-tab sync), or grant `replace` on the field's type"
         }
         // r8: an unresolved type is never checked against
         if (st.bad.fields.indexOf(f.sym.id) >= 0) return ""
@@ -33824,7 +34171,7 @@ ${
         const s: string | not = quotedOf(v)
         if (s is not) return not
         if (s == "local") return PersistStore.Local
-        if (s == sessionWord()) return PersistStore.Session
+        if (s == "session") return PersistStore.Session
         return not
     }
 
@@ -42079,15 +42426,139 @@ ${
                 } else {
                     for (const n of imp.names) {
                         // s474: an aliased import (`{ a as b }`) names the export `a`
-                        if (!exportedBy(g, target, n.orig)) {
-                            st = addDiag(st, f.path, n.span, "E-IMPORT-004", "`" + n.orig + "` is not exported by `" + imp.from + "`")
+                        // s478: judged against the target's export table — its re-exports
+                        // included, an ambiguous star name named (§21.4)
+                        const miss: NsMiss = exportMiss(g.te.link.exps, imp.from, target, n.orig)
+                        if (miss.code != "") st = addDiag(st, f.path, n.span, miss.code, miss.why)
+                    }
+                }
+            }
+            st = checkReexports(f, paths, g, st)
+            st = checkLocalExports(f, g, st)
+            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(g, st, f.path, h) }
+        }
+        st = checkExportClashes(g.te.link.exps, files, st)
+        // s478 — §21.3: "Circular imports SHALL be a compile error (E-IMPORT-002). The compiler
+        // SHALL detect cycles in the import graph before any stage runs and report all files in
+        // the cycle." One report per file on a cycle (link.scrml importCycles), at its statement
+        // that closes it; re-export edges are edges of the graph (§21.4).
+        for (const c of importCycles(files)) {
+            st = addDiag(st, c.file, c.at, "E-IMPORT-002", cycleWhy(c))
+        }
+        return st
+    }
+
+    fn cycleWhy(c: ImportCycle) -> string {
+        if (c.cycle.length <= 2) return "circular import: `" + c.file + "` imports itself (§21.3: circular imports are a compile error; a re-export is an import edge, §21.4) — remove the self-import"
+        let shown: string = ""
+        let i = 0
+        for (const p of c.cycle) {
+            if (i > 0) shown = shown + " → "
+            shown = shown + "`" + p + "`"
+            i = i + 1
+        }
+        return "circular import: " + shown + " — every file in the cycle imports (or re-exports from) the next (§21.3: circular imports are a compile error; re-export edges are import edges, §21.4). Break the cycle: move what these files share into a file that imports none of them"
+    }
+
+    // s478 (s478-boot-modules) — a file's RE-EXPORTS (§21.4), each linked as an import of
+    // its source is (§21.3): "A relative re-export (named or `export *`, other than of a
+    // `.js` file) whose target file cannot be found SHALL be a compile error (E-IMPORT-006),
+    // reported at the re-export"; "A named re-export of a name its source module does not
+    // export SHALL be a compile error (E-IMPORT-004), reported at the re-export"; "A named
+    // re-export from a `scrml:` module SHALL be checked against that module's exports". A
+    // source the bootstrap does not import (a server-only or unsupplied stdlib module, a
+    // `.js` / `vendor:` module) is refused by name, as an `import` of it is.
+    fn checkReexports(f: FileAst, paths: string[], g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const r of reexportsOfItems(f.items)) {
+            const target: string = importTarget(f.path, r.from, paths)
+            if (isServerOnlyStdlib(r.from)) {
+                st = addDiag(st, f.path, r.span, "E-BOOTSTRAP-UNSUPPORTED", serverOnlyWhy(r.from))
+            } else if (target == "") {
+                const why: ImportRefusal = importRefusal(r.from)
+                st = addDiag(st, f.path, r.span, why.code, why.why)
+            } else if (r.re == ALink.Reexport) {
+                for (const n of r.names) {
+                    const miss: NsMiss = exportMiss(g.te.link.exps, r.from, target, n.orig)
+                    if (miss.code != "") st = addDiag(st, f.path, n.span, miss.code, miss.why + " — a named re-export binds a name its source exports (§21.4)")
+                }
+            }
+        }
+        return st
+    }
+
+    // s478 — a local export list (`export { a, b };`, no `from`). §21.2: "A reactive state cell
+    // SHALL NOT be exported … an `export` referencing it (`export { count }` in a `${ }` block
+    // …) … is `E-EXPORT-001`" (the S473 D15 carve-out is the §66.2.5 form `export let <x/>`
+    // only). Any other name: the list is not built yet — INTERIM, refused by name; the capable
+    // form is `export` before the declaration (§21.2 Form 2, §66.2.5).
+    fn checkLocalExports(f: FileAst, g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const le of localExportsOfItems(f.items)) {
+            let other: string[] = []
+            for (const n of le.names) {
+                if (programCellIn(g, f.path, n.orig)) {
+                    st = addDiag(st, f.path, n.span, "E-EXPORT-001", "`" + n.orig + "` is a reactive cell (`@" + n.orig + "`) — a cell is not in the exportable set (`type` / `function` / `fn` / `const` / `let`, §21.2): it holds per-instance state and has no cross-file meaning. Export a function that returns its value, or export the declaration itself where §66 allows it (`export let <" + n.orig + " …/>`, §66.2.5)")
+                } else {
+                    other = other.concat([n.orig])
+                }
+            }
+            if (other.length > 0) {
+                st = addDiag(st, f.path, le.span, "E-BOOTSTRAP-UNSUPPORTED", "a local export list (`export { " + other.join(", ") + " };`) is not in the bootstrap yet — write `export` before each declaration instead (`export fn …`, `export type …`, `export const …`, `export <decl …>`, §21.2 / §66.2.5)")
+            }
+        }
+        return st
+    }
+
+    // `name` is a cell of the `<program>` of `file`.
+    fn programCellIn(g: Globals, file: string, name: string) -> boolean {
+        for (const d of g.decls) {
+            if (d.isProgram && d.file == file) {
+                for (const fi of d.info.fields) {
+                    if (fi.sym.hint == name) return true
+                }
+            }
+        }
+        return false
+    }
+
+    // s478 — one exported name naming two DIFFERENT declarations in one file (a local export
+    // and a named re-export of the name, or two named re-exports): every import of it would
+    // bind one of them by position. §21.4 orders an explicit export over the stars, but names
+    // no order between two explicit ones; ES makes the duplicate a SyntaxError. Refused
+    // (PA reading — the import rule "one local name cannot bind two declarations", S474,
+    // applied to the file's export namespace), at the file.
+    fn checkExportClashes(exps: ExpTable[], files: FileAst[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const t of exps) {
+            let seen: string[] = []
+            for (const e of t.ents) {
+                if (seen.indexOf(e.name) < 0) {
+                    seen = seen.concat([e.name])
+                    for (const e2 of t.ents) {
+                        if (e2.name == e.name && (e2.from != e.from || e2.orig != e.orig) && seen.indexOf("!" + e.name) < 0) {
+                            seen = seen.concat(["!" + e.name])
+                            st = addDiag(st, t.file, exportSpan(files, t.file, e.name), "E-SCOPE-010", "`" + e.name + "` is exported twice by `" + t.file + "`, naming two declarations (`" + e.orig + "` of `" + e.from + "` and `" + e2.orig + "` of `" + e2.from + "`) — one exported name names one declaration; rename one export (`export { " + e2.orig + " as other } from …`)")
                         }
                     }
                 }
             }
-            for (const h of hostImportsOfItems(f.items)) { st = checkHostImport(g, st, f.path, h) }
         }
         return st
+    }
+
+    // The span of a named re-export of `name` in `file` (else the file's start).
+    fn exportSpan(files: FileAst[], file: string, name: string) -> ASpan {
+        for (const f of files) {
+            if (f.path == file) {
+                for (const r of reexportsOfItems(f.items)) {
+                    for (const n of r.names) {
+                        if (n.name == name) return n.span
+                    }
+                }
+            }
+        }
+        return { start: 0, end: 0 }
     }
 
     // s472 — an `import:<tag> { … } from "…"` declaration (§21.3.1), judged in
@@ -42267,24 +42738,10 @@ ${
         return { code: "E-IMPORT-005", why: "`" + from + "` is not a module scrml can import: a source begins with `./`, `../`, `scrml:`, `vendor:`, `bun:` or `node:` — a bare npm-style name is never valid (§41.4)" }
     }
 
-    // `name` is an exported type / declaration / function of the file `path`.
+    // `name` is exported by the file `path` — an exported type / declaration / function /
+    // constant of it, or (s478) a name it re-exports (its export table, §21.4).
     fn exportedBy(g: Globals, path: string, name: string) -> boolean {
-        for (const t of g.types) {
-            if (t.file == path && t.name == name && t.exported) return true
-        }
-        for (const d of g.decls) {
-            const ad: ADecl | not = d.d
-            if (ad is given) {
-                if (d.file == path && ad.name == name && ad.exported) return true
-            }
-        }
-        for (const f of g.fns) {
-            if (f.info.file == path && f.info.name == name && f.info.exported) return true
-        }
-        for (const c of g.consts) {
-            if (c.file == path && c.name == name && c.exported) return true
-        }
-        return false
+        return tableHas(g.te.link.exps, path, name)
     }
 
     // s471 — `name` is named by an import in `file` that analyze REFUSES (it

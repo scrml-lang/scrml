@@ -163,7 +163,8 @@ function stdlibFile(root, rel) {
  */
 /**
  * s473 (#1658 review F2) — the import specifiers (`from`) of one file, in source order, read by
- * the bootstrap parser (parse.scrml `parseFile` + link.scrml `importsOfItems`). The result depends
+ * the bootstrap parser (parse.scrml `parseFile` + link.scrml `linkFromsOfItems` — s478: its imports
+ * AND its re-exports, §21.4 "SHALL link its source module exactly as an `import`"). The result depends
  * on `src` alone (`path` reaches only diagnostic spans), so it is memoised by the text: a driver
  * that shares one reader between its own import closure and the front end parses each file for its
  * imports once. One reader per compile — the memo holds every text it was given.
@@ -173,7 +174,7 @@ export function importFroms(mods) {
   return (path, src) => {
     let r = memo.get(src);
     if (r === undefined) {
-      r = mods.link.importsOfItems(mods.parse.parseFile(path, src, 0).ast.items).map((imp) => String(imp.from));
+      r = mods.link.linkFromsOfItems(mods.parse.parseFile(path, src, 0).ast.items).map((imp) => String(imp.from));
       memo.set(src, r);
     }
     return r;
