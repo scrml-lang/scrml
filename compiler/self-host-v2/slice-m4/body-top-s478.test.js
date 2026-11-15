@@ -135,6 +135,12 @@ describe("§4.17 (S462) — `<script>` / `<style>` in a body-top logic block is 
     expect(codes(run(B(`const s = "<script>x</script>";`)))).not.toContain("E-SCRIPT-001");
   });
 
+  test("the retired `<name> = …` declaration spelling there is not read as an (unclosed) element", () => {
+    const c = codes(run(P(`\${\n    <trace> = "";\n    <n> : int = 0;\n}\n<p>x</p>`)));
+    expect(c).not.toContain("E-PARSE-UNCLOSED");
+    expect(c).not.toContain("E-PARSE-PROGRAM");
+  });
+
   test("any other markup there is refused by name (not in the bootstrap), never misread", () => {
     expect(codes(run(B("lift <noscript>n</noscript>")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(run(B("if (@f) { <p>waiting</p> }")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

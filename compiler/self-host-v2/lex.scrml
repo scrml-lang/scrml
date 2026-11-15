@@ -1881,7 +1881,22 @@ ${
         const c: Cursor = skipTriviaAhead(st.cur)
         const c0: int = peekCode(c, 0)
         const c1: int = peekCode(c, 1)
-        return c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122))
+        if (!(c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)))) return false
+        return !legacyDeclHead(c)
+    }
+
+    // `<name> = …` / `<name> : T = …` — the retired (§66.21) declaration spelling, which
+    // has no closer: not an element, so it is left to the logic reader (read as markup,
+    // it would run to the end of the file).
+    fn legacyDeclHead(c: Cursor) -> boolean {
+        let k: int = 1
+        while (isIdentCont(peekCode(c, k)) || peekCode(c, k) == 45) { k = k + 1 }
+        if (peekCode(c, k) != 62) return false
+        k = k + 1
+        while (peekCode(c, k) == 32 || peekCode(c, k) == 9) { k = k + 1 }
+        const n0: int = peekCode(c, k)
+        if (n0 == 61) return peekCode(c, k + 1) != 61
+        return n0 == 58
     }
 
     fn isBraceKind(b: BracketKind) -> boolean {
