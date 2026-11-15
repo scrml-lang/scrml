@@ -33,7 +33,7 @@ import { splitArmSeparatorCommas } from "./arm-list-split.ts";
 // `regexAllowedAfter` is the fence's context-tracking regex-vs-division decision
 // (ECMA preceding-token rule), reused by rewriteIsPredicates (S252, #1) to skip
 // the word `is` inside regex-literal interiors without fragmenting its LHS scan.
-import { rewriteCodeSegments, regexAllowedAfter } from "./codegen/code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, replaceInCode } from "./codegen/code-segments.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./codegen/server-session-guard.ts";
 
 import type {
@@ -677,9 +677,9 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
   processed = sqlScan.result;
 
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
+  processed = replaceInCode(processed, /<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
   // Handle <#id> input state refs — replace with placeholder
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
+  processed = replaceInCode(processed, /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   // F-SQL-001: if the SQL scanner found an unbalanced `?{` opener, surface
   // it as a hard error (E-SQL-008). Callers (parseExprToNode, ast-builder)
@@ -728,8 +728,8 @@ export function parseStatements(raw: string, opts: { tolerant?: boolean } = {}):
   const sqlScan = replaceSqlBlockPlaceholder(processed);
   processed = sqlScan.result;
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
+  processed = replaceInCode(processed, /<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
+  processed = replaceInCode(processed, /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   const sqlDiag = sqlScan.unbalanced
     ? { code: "E-SQL-008", message: sqlScan.unbalanced.message, offset: sqlScan.unbalanced.offset }
