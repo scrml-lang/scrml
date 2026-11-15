@@ -49,8 +49,13 @@ const REVIEW_EXPECT = {
   "s1/hostMethod": ["REFUSED", ["E-SCOPE-001"]],
   "s1/methodOnResult": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   // s469 round 2: the recovered (unparsed) default leaves a no-value call read as a value — E-TYPE-001 replaces E-COND-NOT-BOOLEAN
-  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-TYPE-001", "E-TYPE-STRUCT-CONTEXT"]],
-  "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TYPE", "E-ROUTE-001", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
+  // s478-boot-semicolon-residue: the `{ return ok }` after the unread head is read as a block (parse.scrml bareBlock
+  // recovery), not an object literal — its missing `;` (§7.2.2 rule 1) replaces E-TYPE-STRUCT-CONTEXT
+  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-STMT-MISSING-SEMICOLON", "E-TYPE-001"]],
+  // s478-boot-semicolon-residue: likewise — the body after the unreadable function-typed parameter is a recovered
+  // block, read and dropped, so the E-ROUTE-001 its object-literal misread drew (`c(p, h)` as an unresolvable callee)
+  // goes with E-TYPE-STRUCT-CONTEXT; still REFUSED
+  "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TYPE", "E-SCOPE-001", "E-STMT-MISSING-SEMICOLON"]],
   "s1/mapLambda": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/hostArgCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/orRight": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],

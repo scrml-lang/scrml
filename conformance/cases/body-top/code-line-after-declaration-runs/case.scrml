@@ -1,5 +1,5 @@
 <program>
 <count> = 2
-@count = @count + 5
+@count = @count + 5;
 <p id="z">${@count}</p>
 </program>

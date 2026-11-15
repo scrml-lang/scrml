@@ -1,7 +1,7 @@
 <ul>
 ${
   server function goodParam(id: int, name: string) -> string {
-    return name
+    return name;
   }
 }
 <li>x</li>

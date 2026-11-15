@@ -1,7 +1,7 @@
 ${
     function fetchToken() { return "t"; }
     function authenticate(t: string) { return t; }
-    lin token = fetchToken()
-    authenticate(token)
+    lin token = fetchToken();
+    authenticate(token);
 }
 <p>x</>
