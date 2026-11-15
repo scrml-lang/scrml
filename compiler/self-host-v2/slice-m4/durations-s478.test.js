@@ -112,6 +112,42 @@ describe("refused BY NAME — compositions whose rule the runtime does not build
   });
 });
 
+describe("r1 fix round (review s478-1875)", () => {
+  // F1 — a delay above 2147483647 ms is clamped to 1 ms by the host timer: the timing would invert.
+  // §51.12.3 states no range, so it is refused by name (INTERIM), naming the maximum.
+  for (const v of ["1000h", "99999999999999999999h", "2147483648ms"]) {
+    test(`F1 debounced=${v} → refused by name, naming the max`, () => {
+      const e = errs(cell(`debounced=${v}`));
+      expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(e[0].message).toContain("2147483647");
+    });
+  }
+  test("F1 the maximum itself compiles", () => {
+    expect(fieldOf(cell("debounced=2147483647ms"), "x").timing).toEqual({ throttle: false, ms: 2147483647 });
+  });
+  test("F1 <onIdle after=600h> → refused by name", () => {
+    const src = P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n<onIdle after=600h to=.Idle/>\n</>`, `<p>\${@phase}</p>`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("2147483647");
+  });
+  // F2 — an ignored `<program>` attribute still has its malformed DURATION reported.
+  const prog = (open) => run(`${open}\nlet <x:int=0/>\n<main><p>\${@x}</p></main>\n</program>\n`).diags.map((d) => d.code);
+  test("F2 <program after=5zz> → W-ATTR-001 + E-SYNTAX-DURATION", () => {
+    expect(prog("<program after=5zz>").sort()).toEqual(["E-SYNTAX-DURATION", "W-ATTR-001"]);
+  });
+  test("F2 <program debounced=300ms> → only W-ATTR-001 (well-formed, ignored)", () => {
+    expect(prog("<program debounced=300ms>")).toEqual(["W-ATTR-001"]);
+  });
+  // F5 — §6.13 rules no timing wrapper over an engine's transitions.
+  test("F5 debounced= on an engine → refused by name", () => {
+    const src = P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single debounced=300ms>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n</>`, `<p>\${@phase}</p>`);
+    const e = errs(src);
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("an engine");
+  });
+});
+
 describe("`<onIdle>` (§51.0.R) — the static rules", () => {
   const ENG = (idles, extra = "") => P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single>\n<Active rule=.Idle>${extra}</>\n<Idle rule=.Active></>\n${idles}\n</>`, `<p>\${@phase}</p>`);
   test("one legal watchdog compiles clean and lowers to graph.idle", () => {

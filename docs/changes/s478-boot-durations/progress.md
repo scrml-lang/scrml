@@ -29,3 +29,14 @@ Branch `s478-boot-durations` (from origin/main af7fe4bab).
   pins dropped E-PARSE-TRAILING: README.md:27, NERDME.md:135, llm-kickstarter-v2:747/1629).
 
 Tests: compiler/self-host-v2/slice-m4/durations-s478.test.js (41).
+
+## Fix round 1 (review s478-1875)
+- F1: a DURATION > 2147483647 ms → E-BOOTSTRAP-UNSUPPORTED naming the max (durationDiag / maxTimerMs; §51.12.3
+  states no range). Chained timers = capable alternative, in g-boot-timing-compositions-s478. impl#1 hole filed
+  g-impl1-duration-timer-overflow-s478 (not fixed).
+- F2: `<program after=5zz>` → W-ATTR-001 + E-SYNTAX-DURATION (unknownProgramAttrDiag).
+- F5: debounced=/throttled= on an engine → refused by name (timingCellProblem).
+- F6: coverage §51.0.R → PARTIAL. F3/F4/F7 filed: g-spec-onidle-self-write-reset-s478,
+  g-boot-debounce-read-modify-write-s478, g-boot-idle-unreachable-target-s478.
+- Merged origin/main 47d1250cb. Conformance: main 422 → head 431, 0 PASS→FAIL (vs main and vs 41c48e083: 0 changes).
+  Corpus (24 files with debounced=/throttled=/after=/onIdle): 0 newly rejecting vs main.

@@ -2700,7 +2700,22 @@ ${
         if (isProgramAttrName(lower) || lower == "loginredirect" || lower == "sessionexpiry" || (lower != a.name && isControlAttrName(lower))) {
             return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<program>` is a case variant of a `<program>` / scrml attribute name — the bootstrap reads attribute names exactly, so it would be ignored; write the exact name")
         }
-        return addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+        const st1: AS = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+        // r1 F2 — the attribute is ignored, but its value is still a literal DURATION
+        // (`after=5zz`): "A literal-form DURATION that does not parse SHALL produce a
+        // compile error" (§6.13.6) — E-SYNTAX-DURATION, beside the warning.
+        const durText: string = match a.value {
+            .Dur(text: t) :> t
+            .NoValue :> ""
+            .Quoted(v: q) :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+        if (durText == "") return st1
+        const dp: DurParse = durationText(durText)
+        if (dp.why == "") return st1
+        return addDiag(st1, file, a.span, "E-SYNTAX-DURATION", "`" + a.name + "=` on `<program>` is malformed: " + dp.why + ". A DURATION is a literal `Nms` / `Ns` / `Nm` / `Nh` or a computed `" + dollarBrace() + "expr}<unit>` (§6.13.3)")
     }
 
     // §4.12.2's table: what a NESTED `<program>` may carry.
@@ -34512,8 +34527,15 @@ ${
         const dp: DurParse = durationOf(a.value)
         if (dp.computed) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a computed DURATION `" + a.name + "=" + dollarBrace() + "…}<unit>` (§51.12.3.1) is not in the bootstrap yet — it reads a literal duration, `" + a.name + "=300ms`")
         if (dp.why != "") return addDiag(st, file, a.span, "E-SYNTAX-DURATION", "`" + a.name + "=` on " + owner + " is malformed: " + dp.why + ". A DURATION is a literal `Nms` / `Ns` / `Nm` / `Nh` or a computed `" + dollarBrace() + "expr}<unit>` (§6.13.3)")
+        // r1 F1 (INTERIM, g-boot-timing-compositions-s478): the runtime arms one
+        // host timer, whose delay is a signed 32-bit millisecond count — a longer
+        // one is clamped to 1 ms, so the timing would silently invert. §51.12.3
+        // states no range, so it is refused by name, giving the maximum.
+        if (dp.ms > maxTimerMs()) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on " + owner + " is longer than the bootstrap's longest timer — " + maxTimerMs() + " ms (about 596h, 24.8 days); a longer one is not in the bootstrap yet. Use at most `" + a.name + "=596h`")
         return st
     }
+
+    fn maxTimerMs() -> int { return 2147483647 }
 
     fn durationText(s: string) -> DurParse {
         if (s.indexOf(dollarBrace()) == 0) return { ms: 0, why: "", computed: true }
@@ -34634,6 +34656,10 @@ ${
     // Why the bootstrap refuses to time `f` ("" — it does not): each a composition
     // the SPEC rules and the runtime does not build (INTERIM).
     fn timingCellProblem(g: Globals, prog: DeclSrc, d: ADecl, f: FieldInfo, idx: int, resets: ResetOnInfo[], reqs: ReqFact[]) -> string {
+        // r1 F5 — §6.13 times a plain state cell's writes; an engine's writes are its
+        // transitions (§51.0.F rule= contract, <onIdle> / <onTimeout> timers) and the SPEC
+        // rules no timing wrapper over them.
+        if (f.graph is given) return "an engine (a value with state-children): its writes are transitions, checked against `rule=` and seen by `<onIdle>` / `<onTimeout>` (§51.0) — §6.13 rules no timing wrapper over them; not built. Time a plain cell and `.advance()` from it"
         if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
         if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
         if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
