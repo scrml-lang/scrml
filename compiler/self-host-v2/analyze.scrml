@@ -420,7 +420,7 @@ ${
     //     binders the statement form reads a payload through.
     export type PlainArm:struct = { nid: int, inner: Sym[] }
     // s478: `refused` — the binder reported an Error for this match's coverage (E-TYPE-020 /
-    // E-MATCH-012); the typer then gives its value no type to check (coverageRefused, triage C13).
+    // E-MATCH-012); the typer then does not widen its value by `not` (coverageRefused, triage C13).
     export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean, refused: boolean,
                                       stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
@@ -20524,6 +20524,11 @@ ${
         // without one, as an undeclared component (E-COMPONENT-035). Its attributes
         // are not judged again (one report per fault). A field tag / parser-refused /
         // unresolved-import tag keeps its own report (below).
+        // s478 (#1867 review F3) — a capitalised tag naming an IMPORTED non-declaration (`import
+        // { Helper }` of a function, `import { Kind }` of a type) is §34's `<EngineName/>` form
+        // itself: E-ENGINE-MOUNT-NOT-ENGINE (unknownElement), not E-COMPONENT-035. A tag with
+        // a §52 state-type attribute keeps its own refusal (capitalTagCode).
+        if (isCapitalTag(e.tag) && !namesOwnField(env, e.tag) && !unknownExcused(env, e) && mountsImportedNonDecl(env, e) && stateTypeAttr(e) == "") return unknownElement(env, e, st)
         if (isCapitalTag(e.tag) && !namesOwnField(env, e.tag) && !unknownExcused(env, e)) return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, capitalTagCode(e), capitalTagWhy(e))
         if (!markupElementName(e.tag) && !namesOwnField(env, e.tag)) {
             if (unknownExcused(env, e)) return resolveHtml(env, e, st)
@@ -21268,6 +21273,15 @@ ${
         return ""
     }
 
+    // s478 — does this kid-less, non-`*` tag name an IMPORTED non-declaration (importedNonDecl)?
+    // That is E-ENGINE-MOUNT-NOT-ENGINE's case, lowercase (`<helper/>`) or capitalised
+    // (`<Helper/>`, §34's own `<EngineName/>` form; #1867 review F3). The message names the tag
+    // by its opener, `<helper>`, because the AST does not record whether it was written
+    // `<helper/>` or `<helper></helper>` (#1867 review F3).
+    fn mountsImportedNonDecl(env: Env, e: AElem) -> boolean {
+        return !e.star && e.kids.length == 0 && importedNonDecl(env, e.tag) != ""
+    }
+
     // s473 — an element name that resolves to nothing (§4.1, §24.1). §34's
     // retired E-STATE-001 row: "a PascalCase name surfaces as E-COMPONENT-035,
     // a lowercase-HTML name as E-MARKUP-001". Its attributes and children are
@@ -21276,7 +21290,7 @@ ${
         const first: string = e.tag.substring(0, 1)
         let st: AS = st0
         const imported: string = importedNonDecl(env, e.tag)
-        if (!e.star && e.kids.length == 0 && imported != "") {
+        if (mountsImportedNonDecl(env, e)) {
             // s478 (triage C11a, F3) — §34 E-ENGINE-MOUNT-NOT-ENGINE (§51.0.D, §21.8): "A
             // self-closing tag `<EngineName/>` mounts an imported binding whose source export
             // is NOT an engine (e.g., a component, channel, type, function, or arbitrary
@@ -21285,7 +21299,7 @@ ${
             // (§66.13.3), both mounted by tag — so the code fires when the self-closing tag
             // names an IMPORTED binding that is no declaration at all (a function, a constant,
             // a type), the one limb that is not already some other code here.
-            st = addDiag(st, env.file, e.span, "E-ENGINE-MOUNT-NOT-ENGINE", "`<" + e.tag + "/>` mounts the imported `" + e.tag + "`, which is " + imported + ", not a declaration — a tag mounts a declaration (a `single` engine or a component, §66.13.3, §51.0.D). Import a declaration, or use `" + e.tag + "` where a value stands (an interpolation, a handler)")
+            st = addDiag(st, env.file, e.span, "E-ENGINE-MOUNT-NOT-ENGINE", "`<" + e.tag + ">` mounts the imported `" + e.tag + "`, which is " + imported + ", not a declaration — a tag mounts a declaration (a `single` engine or a component, §66.13.3, §51.0.D). Import a declaration, or use `" + e.tag + "` where a value stands (an interpolation, a handler)")
             return resolveHtml(env, e, st)
         }
         if (first != first.toLowerCase()) {
@@ -29439,12 +29453,14 @@ ${
         if (m.stmt) return rvt(VType.Unknown, ts)
         if (conflict) return rvt(VType.Unknown, ts)
         // s478 (triage C13): a `match` the binder REFUSED for its coverage — E-TYPE-020 (an
-        // enum case with no arm) or E-MATCH-012 (a `T | not` subject with no `not` arm) — has
-        // no value type to check against: that error accounts for it, as for the arm
-        // conflict above (one report per fault; its `| not` widening would draw a second,
-        // E-TYPE-031 "this value is `T | not`", for the same missing arm). A literal-kind
-        // match without `else` (W-MATCH-002, a warning) does give `not` and is widened.
-        if (!m.exhaustive && coverageRefused(m)) return rvt(VType.Unknown, ts)
+        // enum case with no arm) or E-MATCH-012 (a `T | not` subject with no `not` arm) — is
+        // not widened by `not`: that error accounts for the missing arm (one report per fault;
+        // the `| not` widening would draw a second, E-TYPE-031 "this value is `T | not`", for
+        // the same missing arm). Its arms' own type is kept (s478 #1867 review F1): an arm
+        // that is itself `T | not` is a separate fault, and its E-TYPE-031 still fires. A
+        // literal-kind match without `else` (W-MATCH-002, a warning) does give `not` and is
+        // widened.
+        if (!m.exhaustive && coverageRefused(m)) return rvt(vt, ts)
         if (!m.exhaustive) vt = joinVT(vt, VType.Absent)
         return rvt(vt, ts)
     }
@@ -40873,7 +40889,7 @@ ${
                 if (prop != "") {
                     const el: StyleEl | not = sharedElement(rules[i].r, rules[j].r, els)
                     if (el is given) {
-                        out = out.concat([mkDiag(file, rules[j].r.span, "W-STYLE-CONFLICT-POSSIBLE", "`" + selText(rules[j].r.sel) + "` and `" + selText(rules[i].r.sel) + "` (at " + placeIn(files, file, rules[i].r.span.start) + ") both set `" + prop + "` on " + elText(el) + " (at " + placeIn(files, file, el.span.start) + ") — program-level `#" + "{}` rules are global, with no scope to order them, so which value wins is decided by source order alone (§65.2.4 R3, §65.2.1). Disambiguate: merge the two rules, narrow one selector, or drop one of the declarations")])
+                        out = out.concat([mkDiag(file, rules[j].r.span, "W-STYLE-CONFLICT-POSSIBLE", "`" + selText(rules[j].r.sel) + "` and `" + selText(rules[i].r.sel) + "` (at " + placeIn(files, file, rules[i].r.span.start) + ") both set `" + prop + "` on " + elText(el) + " (at " + placeIn(files, file, el.span.start) + ") — " + styleWinner(rules[i].r.sel, rules[j].r.sel, el) + " (§65.2.4 R3, §65.2.1, §65.8). Disambiguate: merge the two rules, narrow one selector, or drop one of the declarations")])
                     }
                 }
                 i = i + 1
@@ -40881,6 +40897,71 @@ ${
             j = j + 1
         }
         return out
+    }
+
+    // s478 (#1867 review F2) — which of the pair wins, as the message says it. §65.2 (amended
+    // S473 D20): specificity-flatness is a COMPONENT scope's; program-global rules are emitted
+    // un-wrapped (inside `@layer global`, §65.8), so the ordinary cascade decides between two
+    // of them — the higher-specificity selector wins, and source order only breaks a tie.
+    // `first` is the earlier rule's selector, `later` the later one's.
+    fn styleWinner(first: ComplexSel[], later: ComplexSel[], el: StyleEl) -> string {
+        const a: int[] = armSpecificity(first, el)
+        const b: int[] = armSpecificity(later, el)
+        const c: int = specCompare(a, b)
+        const sa: string = "`" + selText(first) + "` (" + specText(a) + ")"
+        const sb: string = "`" + selText(later) + "` (" + specText(b) + ")"
+        if (c == 0) return "program-level `#" + "{}` rules are global and un-wrapped, and these two have equal " + specText(a) + ", so which value wins is decided by source order alone: the later rule, `" + selText(later) + "`"
+        if (c > 0) return "program-level `#" + "{}` rules are global and un-wrapped, so the cascade decides by specificity: the higher-specificity selector, " + sa + ", wins over " + sb + " although it comes first"
+        return "program-level `#" + "{}` rules are global and un-wrapped, so the cascade decides by specificity: the higher-specificity selector, " + sb + ", wins over " + sa
+    }
+
+    // The specificity (ids, classes, tags) of the most specific arm of `sel` that matches
+    // `el` (selMatches: an arm of tag / `.class` / `#id` parts, with no combinator).
+    fn armSpecificity(sel: ComplexSel[], el: StyleEl) -> int[] {
+        let best: int[] = [0, 0, 0]
+        for (const c of sel) {
+            if (c.links.length == 0 && compoundMatches(c.head, el)) {
+                const s: int[] = compoundSpecificity(c.head)
+                if (specCompare(s, best) > 0) best = s
+            }
+        }
+        return best
+    }
+
+    fn compoundSpecificity(c: Compound) -> int[] {
+        let ids = 0
+        let cls = 0
+        let tags = 0
+        for (const p of c.parts) {
+            const k: SimpleSel = p
+            const w: int = match k {
+                .IdSel(name: n) :> 0
+                .ClassSel(name: n) :> 1
+                .AttrSel(test: x) :> 1
+                .PseudoClass(name: n) :> 1
+                .TagSel(name: n) :> 2
+                .PseudoElement(name: n) :> 2
+                .Universal :> 3
+            }
+            if (w == 0) ids = ids + 1
+            if (w == 1) cls = cls + 1
+            if (w == 2) tags = tags + 1
+        }
+        return [ids, cls, tags]
+    }
+
+    fn specCompare(a: int[], b: int[]) -> int {
+        let i = 0
+        while (i < 3) {
+            if (a[i] > b[i]) return 1
+            if (a[i] < b[i]) return -1
+            i = i + 1
+        }
+        return 0
+    }
+
+    fn specText(s: int[]) -> string {
+        return "specificity " + s[0] + "," + s[1] + "," + s[2]
     }
 
     fn sharedProp(a: string[], b: string[]) -> string {
