@@ -1,7 +1,7 @@
 ${
-    let x: string | not = not
+    let x: string | not = not;
     if (x == not) {
-        let _bad = 1
+        let _bad = 1;
     }
 }
 <program>

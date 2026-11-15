@@ -1,5 +1,5 @@
 ${
-  import { formFor } from 'scrml:data'
+  import { formFor } from 'scrml:data';
 
   type SignupError:enum = { Rejected(reason: string) }
 
@@ -8,10 +8,10 @@ ${
   }
 
   server function persistSignup(values: Signup) ! SignupError {
-    return "ok"
+    return "ok";
   }
 
-  function risky()! -> SignupError { fail SignupError.Rejected("no") }
+  function risky()! -> SignupError { fail SignupError.Rejected("no"); }
 }
 <program>
   <rows> = [1, 2]
