@@ -308,6 +308,37 @@ describe("§21.3 E-IMPORT-002: every import cycle is reported, at every file in 
     expect(at(r)).toContainEqual(["E-SCOPE-001", "a.scrml"]);
     expect(at(r)).toContainEqual(["E-IMPORT-002", "a.scrml"]);
   });
+  // s478 (review-followups-2, #1895 LOW-3): the untyped-constant refusal is let through only for
+  // the read the cycle owns — not for every constant of a file that lies on a cycle.
+  test("guard: an untyped constant of a cyclic file that reads nothing across the cycle keeps its refusal", () => {
+    const A2 = mod("a.scrml", `    import { fromEntry } from "./app.scrml";\n    export const fromA = fromEntry;\n    export const odd = not;`);
+    const E = { path: ENTRY, src: `\${\n    import { fromA } from "./a.scrml";\n    export const fromEntry = 1;\n}\n<program>\n    <main><p>\${fromA}</p></main>\n</program>\n` };
+    const r = prog([A2, E]);
+    expect(at(r)).toContainEqual(["E-BOOTSTRAP-UNSUPPORTED", "a.scrml"]);
+    expect(errs(r).find((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").message).toContain("`odd` is not known");
+  });
+  test("a constant built from one the cycle left untyped: E-IMPORT-002 only (no cascade)", () => {
+    const A2 = mod("a.scrml", `    import { fromEntry } from "./app.scrml";\n    export const fromA = fromEntry;\n    export const fromA2 = fromA + 1;`);
+    const E = { path: ENTRY, src: `\${\n    import { fromA } from "./a.scrml";\n    export const fromEntry = 1;\n}\n<program>\n    <main><p>\${fromA}</p></main>\n</program>\n` };
+    const r = prog([A2, E]);
+    expect(at(r)).toEqual([["E-IMPORT-002", "a.scrml"], ["E-IMPORT-002", ENTRY]]);
+  });
+  // #1895 LOW-1: the cycle set is computed once per run (Globals.cycles), not per read.
+  test("a ring of 120 files each reading the next: reported, and in linear-ish time", () => {
+    const nm = (i) => `f${String(i).padStart(3, "0")}.scrml`;
+    const fs = [];
+    for (let i = 0; i < 120; i++) {
+      const nx = (i + 1) % 120;
+      let b = `    import { c${nx}_0 } from "./${nm(nx)}";\n`;
+      for (let j = 0; j < 5; j++) b += `    export const c${i}_${j} = c${nx}_0 + ${j};\n`;
+      fs.push(mod(nm(i), b));
+    }
+    const t0 = performance.now();
+    const r = prog([...fs, app(`import { c0_0 } from "./f000.scrml";`, `<p>\${c0_0}</p>`)]);
+    const ms = performance.now() - t0;
+    expect(errs(r).filter((d) => d.code === "E-IMPORT-002").length).toBe(120);
+    expect(ms).toBeLessThan(2500);   // was ≈3000ms+ (importCycles per read); ≈150ms now
+  });
   test("control: an acyclic diamond of imports is clean", () => {
     const BASE = mod("base.scrml", `    export const V = "v";`);
     const L = mod("l.scrml", `    import { V } from "./base.scrml";\n    export fn l() -> string {\n        return V;\n    }`);
