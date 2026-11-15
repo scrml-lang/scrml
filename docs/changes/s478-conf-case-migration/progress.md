@@ -195,3 +195,80 @@ emit throws "Unexpected token":
 Pre-existing, not touched (reported as "fixed — no longer throw", outside this lane, 3 of them in the
 off-limits markup-handler dir): body-top/template-cell-renders, markup-handler/s437-r5-template-cell-read-
 {first-multiline,second}, reactive/s437-r5-template-cell-read-function-body.
+
+## Results (final tree)
+
+- bootstrap: PASS 343 -> 383 (+40) · CODES-ONLY 0 -> 4 · FAIL 260 -> 204 (-56) · NOT-TWINNED 624 -> 635 (+11)
+  · UNSUPPORTED 638 -> 639 (+1). No PASS -> FAIL.
+- impl#1: 1751/1865 pass, 114 xfail, 0 FAIL — per-case outcomes IDENTICAL to before. Intended
+  xfail-signature recaptures: `lifecycle/effect-nested-pos`, `condition/known-int-while-neg`.
+- `control-flow/ctrl-003-extend-past-else-pos` still FAILs, now as `twin-extra-error`: the twin reports
+  E-CTRL-001 beside E-CTRL-003 (the cascade its description calls "by design"; impl#1 emits both too).
+  A C13 double-report question, not migrated.
+
+Per-case bucket delta:
+
+- UNSUPPORTED -> NOT-TWINNED: `auth/auth-003-neg`
+- UNSUPPORTED -> NOT-TWINNED: `auth/auth-003-pos`
+- UNSUPPORTED -> NOT-TWINNED: `auth/auth-004-neg`
+- UNSUPPORTED -> NOT-TWINNED: `auth/auth-004-pos`
+- FAIL -> PASS: `body-top/template-const-renders-explicit-logic`
+- FAIL -> PASS: `condition/is-given-expr-twin`
+- FAIL -> PASS: `condition/is-some-deprecated-expr`
+- FAIL -> PASS: `condition/known-int-while-neg`
+- FAIL -> PASS: `condition/presence-bare-optional-while-pos`
+- FAIL -> UNSUPPORTED: `condition/unresolved-call-markup-neg`
+- FAIL -> UNSUPPORTED: `condition/unresolved-call-neg`
+- FAIL -> UNSUPPORTED: `condition/unresolved-operand-markup-neg`
+- FAIL -> UNSUPPORTED: `condition/unresolved-operand-not-neg`
+- FAIL -> UNSUPPORTED: `condition/unresolved-ternary-arm-neg`
+- FAIL -> PASS: `control-flow/ctrl-001-orphan-else-neg`
+- FAIL -> UNSUPPORTED: `control-flow/ctrl-002-orphan-else-if-neg`
+- FAIL -> PASS: `control-flow/ctrl-003-extend-past-else-neg`
+- FAIL -> NOT-TWINNED: `control-flow/ctrl-004-else-on-state-opener-neg`
+- FAIL -> NOT-TWINNED: `control-flow/ctrl-004-else-on-state-opener-pos`
+- FAIL -> NOT-TWINNED: `control-flow/ctrl-004-orphan-else-on-state-opener-pos`
+- FAIL -> PASS: `control-flow/ctrl-005-else-and-if-same-element-neg`
+- FAIL -> PASS: `control-flow/ctrl-005-else-and-if-same-element-pos`
+- FAIL -> PASS: `control-flow/ctrl-010-else-on-for-without-lift-neg`
+- FAIL -> PASS: `control-flow/ctrl-012-bare-control-flow-in-markup-neg`
+- FAIL -> PASS: `control-flow/ctrl-013-braceless-for-of-head-neg`
+- FAIL -> PASS: `defer/control-flow-neg`
+- FAIL -> PASS: `defer/duplicate-function-neg`
+- FAIL -> PASS: `defer/duplicate-function-no-defer-ok`
+- FAIL -> PASS: `defer/function-hoist-across-defer`
+- FAIL -> PASS: `defer/later-shadow-ok`
+- FAIL -> PASS: `defer/stack-fn-calls-fn-before-defer`
+- FAIL -> PASS: `defer/stack-fn-calls-fn-before-defer-twin`
+- FAIL -> PASS: `defer/unbraced-arm-neg`
+- FAIL -> PASS: `element-refusal/text-string-attr-comment-neg`
+- FAIL -> PASS: `error/await-not-in-scrml`
+- FAIL -> PASS: `error/failable-handler-lift`
+- FAIL -> PASS: `error/failable-handler-lift-success`
+- FAIL -> PASS: `error/failable-handler-lift-timeout`
+- FAIL -> PASS: `error/propagate-success-unwrap`
+- FAIL -> PASS: `fn/plain-arrow-clean`
+- FAIL -> PASS: `fn/reactive-read-clean`
+- FAIL -> PASS: `fn/reactive-write-reject`
+- FAIL -> CODES-ONLY: `foreign/foreign-slice-await-regex-pos`
+- FAIL -> CODES-ONLY: `foreign/foreign-slice-lexing-regex-quote-pos`
+- FAIL -> CODES-ONLY: `foreign/foreign-slice-sealed-crossings-pos`
+- FAIL -> PASS: `hostmethod/substring-match-typed`
+- FAIL -> PASS: `lifecycle/effect-nested-pos`
+- FAIL -> UNSUPPORTED: `match-block/value-decl-block-arm-raw`
+- FAIL -> UNSUPPORTED: `match-block/value-decl-block-arm-variant`
+- FAIL -> UNSUPPORTED: `match-leave/argument-match-arm-labelled-break-outer-neg`
+- FAIL -> PASS: `module/e-scope-010-filescope-distinct-clean`
+- FAIL -> PASS: `module/e-scope-010-filescope-duplicate-reject`
+- FAIL -> CODES-ONLY: `print/tool-println-clean-stdout`
+- FAIL -> PASS: `server-fn/cell-assign-failable-arm-return-live`
+- FAIL -> PASS: `server-fn/cell-assign-failable-recovery-value`
+- FAIL -> PASS: `server-fn/cell-assign-failable-success-then-read`
+- FAIL -> PASS: `server-fn/cell-assign-independent-writes-batched`
+- FAIL -> PASS: `server-fn/cell-assign-read-after-write`
+- FAIL -> PASS: `server-fn/cell-assign-successive-writes-ordered`
+- FAIL -> PASS: `server-fn/e-route-005-pos`
+- UNSUPPORTED -> NOT-TWINNED: `type-state-codes/e-state-terminal-mutation-neg`
+- UNSUPPORTED -> NOT-TWINNED: `type-state-codes/e-state-terminal-mutation-pos`
+- UNSUPPORTED -> NOT-TWINNED: `type-state-codes/e-state-transition-illegal-neg`
+- UNSUPPORTED -> NOT-TWINNED: `type-state-codes/e-state-transition-illegal-pos`
