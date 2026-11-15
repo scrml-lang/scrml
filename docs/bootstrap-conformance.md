@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1861 of 1861 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1862 of 1862 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 339 | 18.2% |
+| PASS | 340 | 18.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 260 | 14.0% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1861 of 1861 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 599; of those, 339 hold (56.6%). Runtime half executed on the bootstrap for 124 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 600; of those, 340 hold (56.7%). Runtime half executed on the bootstrap for 124 case(s).
 
-- **Vacuous** passes: 17 of 339 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **322**.
+- **Vacuous** passes: 17 of 340 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **323**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 260; the other 185 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -150,7 +150,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | print | 1 | · | · | 1 | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 126 | 40 | · | 15 | · | 44 | 27 | · | · |
+| reactive | 127 | 41 | · | 15 | · | 44 | 27 | · | · |
 | refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -1172,7 +1172,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (339)
+### PASS / CODES-ONLY (340)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1472,6 +1472,7 @@ none
 - `reactive/tape-bound-append-rt` — PASS
 - `reactive/tape-bound-append-trap-rt` — PASS
 - `reactive/tape-bound-branch-literal-neg` — PASS
+- `reactive/tape-bound-branch-mixed-neg` — PASS
 - `reactive/tape-bound-literal-neg` — PASS
 - `reactive/tape-insert-rt` — PASS
 - `reactive/tape-local-part-edit-rt` — PASS · TWIN
