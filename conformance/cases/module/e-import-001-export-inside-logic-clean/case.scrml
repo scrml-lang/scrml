@@ -1,4 +1,4 @@
 ${
-    export const greeting = "hi"
+    export const greeting = "hi";
 }
 <p>${greeting}</>
