@@ -8356,14 +8356,59 @@ ${
         // function is hoisted — callable before the statement runs, and any number of
         // times — and the SPEC does not say how its read of a `lin` counts (§35.6 names
         // closure EXPRESSIONS). Refused by name (INTERIM), never "not declared".
+        // s478-boot-review-followups (LOW-5): a file-scope CONSTANT's initializer (a `const`
+        // item, or one hoisted from a nested `${ … }` block) is not a function body — it is
+        // named as what it is.
         if (isFnCtx(env) && runLocalBefore(env.g.files, env.file, name, e.span.start)) {
+            if (!env.fx.inFn) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", runLocalConstReadWhy(name), st)
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", runLocalFnReadWhy(name), st)
+        }
+        // s478-boot-review-followups (LOW-4): a program cell's initializer or a derived cell
+        // reading a body-top local bound before it — refused by name (INTERIM), as a function
+        // and a constant are, never "not declared" (and no E-LIN-001 cascade, linRunNodes)
+        if (isProgramCtx(env) && runLocalSeenAt(env.g.files, env.file, name, e.span.start)) {
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", runLocalCellReadWhy(name), st)
         }
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
     }
 
     fn runLocalFnReadWhy(name: string) -> string {
         return "a function body reads the body-top local `" + name + "` — it is file-scope (§7.6, owner ruling S478), but a function is hoisted (callable before the statement that binds it runs, and any number of times), and the bootstrap does not build a function's read of it (INTERIM). Pass the value to the function as an argument (a `lin` parameter, §35.2.1), at a body-top statement or a markup interpolation"
+    }
+
+    fn runLocalConstReadWhy(name: string) -> string {
+        return "the initializer of a file-scope constant reads the body-top local `" + name + "` — the local is file-scope (§7.6, owner ruling S478), but the bootstrap builds a file-scope `const` whose value is fixed at compile time (§7.4.2), and a body-top local's value is made when its statement runs, so the bootstrap does not build that read (INTERIM). Bind the value in the body-top statements (`${ const k = " + name + "; }`), or read it in a markup interpolation"
+    }
+
+    fn runLocalCellReadWhy(name: string) -> string {
+        return "a cell's initializer (or a derived cell) reads the body-top local `" + name + "` — the local is file-scope (§7.6, owner ruling S478), but the program's cells are made before its body-top statements run, so the bootstrap does not build that read (INTERIM). Write the cell from a later body-top statement (`${ @k = " + name + "; }`), or read the local in a markup interpolation"
+    }
+
+    // Is `msg` the by-name refusal of a function's, a constant's or a cell's read of the
+    // body-top local `name` (counted as its consumption by linRunNodes)?
+    fn isRunLocalReadRefusal(msg: string, name: string) -> boolean {
+        return msg == runLocalFnReadWhy(name) || msg == runLocalConstReadWhy(name) || msg == runLocalCellReadWhy(name)
+    }
+
+    fn isProgramCtx(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InDecl(owner: o, isProgram: p) :> p
+            .InFn :> false
+        }
+    }
+
+    // `name` a body-top local of `file` bound before `at`, in scope at `at`'s region: the
+    // program body's, or the same `<page>`'s (a page's run locals are that page's, §40.8)
+    fn runLocalSeenAt(files: FileAst[], file: string, name: string, at: int) -> boolean {
+        const here: int = pageIndexAt(files, file, at)
+        for (const l of runLocalNames(files)) {
+            if (l.file == file && l.name == name && l.span.start < at) {
+                const pg: int = pageIndexAt(files, file, l.span.start)
+                if (pg < 0 || pg == here) return true
+            }
+        }
+        return false
     }
 
     // Is `name` a body-top statement's top-level local in `file`, bound before `at`?
@@ -42275,7 +42320,7 @@ ${
         for (const fs of g.fns) {
             const cx: LinCx = { t: t, file: fs.info.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, fs.info.file),
                                 failable: fs.info.failable, caller: fs.info.sym.id }
-            let s: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
+            let s: LinSt = linOuterRunLins(g, fs.info.file, fs.f.span.start, { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes })
             for (const p of fs.f.params) {
                 if (p.lin) {
                     const ps: Sym | not = linParamSym(bindFact(t.binds, p.nid))
@@ -42297,7 +42342,7 @@ ${
             }
             if (b is given) {
                 const cx2: LinCx = { t: t, file: a.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, a.file), failable: false, caller: -1 }
-                const s2: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
+                const s2: LinSt = linOuterRunLins(g, a.file, b.span.start, { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes })
                 st = linBlockAt(cx2, b, s2, 0).st
             }
         }
@@ -42336,17 +42381,74 @@ ${
     //   - an `<effect>` body (§6.7.4: "a `lin` variable read in it is E-LIN-004")  E-LIN-004
     //   - a `<request>` body (§35.5: "consumed inside a `<request>` … body and the
     //     `lin` variable was declared outside that body")                         E-LIN-006
-    //   - a `${ for … }` loop or an `<each>` row (§35.4.4: "SHALL NOT be consumed
-    //     inside loop bodies")                                                     E-LIN-002
+    //   - a `${ for … }` loop's body / per-iteration head, or an `<each>` row
+    //     (§35.4.4: "SHALL NOT be consumed inside loop bodies"; the iterable is read
+    //     once — a consumption, s478 review LOW-2)                                E-LIN-002
     //   - an attribute value, an event handler, an `if=` / `else-if=` / `else`
-    //     element's body, a component use's content, a read across a `<page>`
-    //     boundary — the SPEC does not say how these count (INTERIM)              E-BOOTSTRAP-UNSUPPORTED
+    //     element's body, a component use's content, a `${ … }` logic block nested
+    //     in markup, a read across a `<page>` boundary — not built (INTERIM,
+    //     g-boot-run-local-lin-interim-positions-s478)                            E-BOOTSTRAP-UNSUPPORTED
+    // An `if=` / `else-if=` CONDITION is a consumption (§17: "A `lin` variable in an
+    // `if=` or `else-if=` condition counts as a consumption"; s478 review LOW-3).
     // Every appearance the name table records that this walk did not reach is refused
     // at the declaration (fail closed: no reference goes uncounted).
     // =========================================================================
     type LinSeen:struct = { id: int, span: ASpan }
 
     fn runActionWhat() -> string { return "this body-top statement" }
+
+    // s478-boot-review-followups (LOW-1) — a function body or an event handler is a scope
+    // strictly inside the program body, where a body-top `lin` bound before it is in scope
+    // (file-scope, owner ruling S478; a `<page>`'s in that page only). §35.5: "The compiler
+    // SHALL emit E-LIN-005 when a `let`, `const`, or `lin` declaration has the same name as
+    // an in-scope `lin` variable declared in a strictly enclosing scope." So the walk of
+    // such a body starts with those bindings in scope — for linShadow only: each is already
+    // counted (`used`, no E-LIN-001 here; its consumption is linRunNodes'), its scope is
+    // none of the body's, and its id (negative) is no Name's, so no read in the body
+    // counts against it.
+    fn linOuterRunLins(g: Globals, file: string, at: int, s0: LinSt) -> LinSt {
+        let s: LinSt = s0
+        const here: int = pageIndexAt(g.files, file, at)
+        let k = 0
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const n of markupNodes(p.items)) {
+                            const rb: ABlock | not = runOfNode(n)
+                            if (rb is given) {
+                                for (const st of rb.stmts) {
+                                    const sk: AStmtK = st.k
+                                    const isLin: boolean = match sk {
+                                        .Local(lin: l) :> l
+                                        .Eval(e: x) :> false
+                                        .Return(e: x) :> false
+                                        .Fail(f: x) :> false
+                                        .If(cond: x) :> false
+                                        .Given(name: x) :> false
+                                        .For(f: x) :> false
+                                        .Break(label: x) :> false
+                                        .Continue(label: x) :> false
+                                        .Lift(what: x) :> false
+                                        .LocalFn(f: x) :> false
+                                        .EffectStmt(w: x) :> false
+                                        .Defer(body: x) :> false
+                                    }
+                                    const pg: int = pageIndexAt(g.files, file, st.span.start)
+                                    if (isLin && st.span.start < at && (pg < 0 || pg == here)) {
+                                        k = k + 1
+                                        s = linDeclare(s, { id: -1 - k, name: localNameOf(st), decl: st.span, used: true, at: st.span, depth: 0, scope: -1 })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return s
+    }
 
     fn linProgramRuns(g: Globals, t: Tables, prior: Diag[], st0: LinSt) -> LinSt {
         let st: LinSt = st0
@@ -42406,7 +42508,7 @@ ${
         let vi = 0
         for (const fv of s.vars) {
             for (const pd of prior) {
-                if (pd.file == file && pd.code == "E-BOOTSTRAP-UNSUPPORTED" && pd.message == runLocalFnReadWhy(fv.name)) s = linMark(s, vi)
+                if (pd.file == file && pd.code == "E-BOOTSTRAP-UNSUPPORTED" && isRunLocalReadRefusal(pd.message, fv.name)) s = linMark(s, vi)
             }
             vi = vi + 1
         }
@@ -42575,11 +42677,74 @@ ${
             .Elem(e: e) :> linMarkupElem(cx, e, s, ids, ok)
             .Effect(w: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-004", "is read inside an `<effect>` body — an effect body is a recurring execution context (§6.7.4: \"a `lin` variable read in it is E-LIN-004\"). Consume it once outside the effect")
             .Request(r: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-006", "is consumed inside a `<request>` body but was declared outside it — the body may run zero or many times (§35.5, §6.7.7). Declare the `lin` inside the `<request>` body, or pass a consumed (non-`lin`) value in")
-            .Gather(f: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-LIN-002", "(declared outside this loop) is consumed inside a `${ for … }` loop body — the body may run many times, or none (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
-            .Run(b: x) :> s
+            .Gather(f: lf) :> linGather(cx, lf, s, ids)
+            // s478-boot-review-followups (LOW-6): a `${ … }` logic block nested in markup —
+            // refused by name and counted (it is not a body-top statement of the program
+            // body, and the SPEC does not say how a read there counts), never skipped
+            .Run(b: x) :> linRefuse(cx, s, seenNode(cx.t, n, ids), "E-BOOTSTRAP-UNSUPPORTED", "is read in a `${ … }` logic block nested in markup — the bootstrap counts a body-top `lin`'s consumption in later body-top statements and in markup `${…}` text interpolations only (§35.2.2), and does not build a read in a nested block (INTERIM). Consume it in a later body-top statement or a text interpolation")
             .DeclNode(d: x) :> s
             .Css(c: x) :> s
         }
+    }
+
+    // A `${ for … }` in markup after a run (s478-boot-review-followups LOW-2 / LOW-1). Its
+    // iterable — and a counted head's `init` — are evaluated ONCE, where the loop stands: a
+    // read there is the consumption, as in a statement loop (linFor). Its body, condition,
+    // steps and `key` run per iteration: §35.4.4 "`lin` variables from outer scope SHALL
+    // NOT be consumed inside loop bodies" — E-LIN-002. Its binder is a `const`
+    // declaration: one that names an in-scope body-top `lin` is E-LIN-005 (§35.5).
+    fn linGather(cx: LinCx, f: AFor, s0: LinSt, ids: int[]) -> LinSt {
+        let s: LinSt = linForBinder(cx, f, s0)
+        const h: AForHead = f.head
+        const once: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> []
+            .HCounted(init: i) :> []
+            .HIter(bind: b, src: src) :> iterSrcExprs(src)
+        }
+        const each: AExpr[] = match h {
+            .HForever :> []
+            .HCond(cond: c) :> [c]
+            .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
+            .HIter(bind: b, key: ky) :> maybeExprList(ky)
+        }
+        s = linExprs(cx, once, s).st
+        const mark: int = s.vars.length
+        s = linStmtsIn(linInnerScope(cx, s), forInit(f), linBumpScope(s)).st
+        let kept: LinVar[] = []
+        let i = 0
+        for (const v of s.vars) {
+            if (i < mark) kept = kept.concat([v])
+            i = i + 1
+        }
+        s = { vars: kept, diags: s.diags, reported: s.reported, scopes: s.scopes }
+        const perIter: LinSeen[] = seenExprs(cx.t, each, ids).concat(seenBlock(cx.t, f.body, ids))
+        return linRefuse(cx, s, perIter, "E-LIN-002", "(declared outside this loop) is consumed inside a `${ for … }` loop body — the body may run many times, or none (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
+    }
+
+    // A loop's `for (const x of …)` binder is a `const` declaration of the loop's scope —
+    // strictly inside every scope a binding in `s` was declared in: one that names an
+    // in-scope `lin` is E-LIN-005 (§35.5: "when a `let`, `const`, or `lin` declaration has
+    // the same name as an in-scope `lin` variable declared in a strictly enclosing scope").
+    fn linForBinder(cx: LinCx, f: AFor, s: LinSt) -> LinSt {
+        const h: AForHead = f.head
+        const b: ABind | not = match h {
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+            .HIter(bind: bb) :> bb
+        }
+        if (b is not) return s
+        return linShadow(linInnerScope(cx, s), s, b.name, b.span)
+    }
+
+    // `cx` in a new scope, one past every scope `s` has opened (the scope a loop's head binds in)
+    fn linInnerScope(cx: LinCx, s: LinSt) -> LinCx {
+        return { t: cx.t, file: cx.file, depth: cx.depth, loops: cx.loops, scope: s.scopes + 1, errs: cx.errs, failable: cx.failable, caller: cx.caller }
+    }
+
+    fn linBumpScope(s: LinSt) -> LinSt {
+        return { vars: s.vars, diags: s.diags, reported: s.reported, scopes: s.scopes + 1 }
     }
 
     fn linInterp(cx: LinCx, e: AExpr, s: LinSt, ids: int[], ok: boolean) -> LinSt {
@@ -42590,7 +42755,18 @@ ${
     fn linMarkupElem(cx: LinCx, e: AElem, s0: LinSt, ids: int[], ok: boolean) -> LinSt {
         let s: LinSt = s0
         let attrSeen: LinSeen[] = []
-        for (const a of e.attrs) { attrSeen = attrSeen.concat(seenAttr(cx.t, a, ids)) }
+        for (const a of e.attrs) {
+            // s478-boot-review-followups (LOW-3) — §17: "A `lin` variable in an `if=` or
+            // `else-if=` condition counts as a consumption. The compiler SHALL enforce that a
+            // `lin` variable in a condition is not referenced in any other branch" — counted
+            // like a text interpolation (one per appearance; a later branch's read is the
+            // second, E-LIN-002), where the element is markup the scope renders directly
+            if (ok && (a.name == "if" || a.name == "else-if")) {
+                s = linAttrCond(cx, a, s)
+            } else {
+                attrSeen = attrSeen.concat(seenAttr(cx.t, a, ids))
+            }
+        }
         s = linRefuse(cx, s, attrSeen, "E-BOOTSTRAP-UNSUPPORTED", "is read in an attribute value (or an event handler) — the bootstrap counts a body-top `lin`'s consumption in later body-top statements and in markup `${…}` text only; how a read in an attribute or a handler counts is not built (INTERIM). Consume it in a `${…}` text interpolation or a later body-top statement")
         const f: ElemFact | not = elemFact(cx.t.elems, e.nid)
         const each: boolean = match f {
@@ -42621,6 +42797,24 @@ ${
         const plain: boolean = ok && html && !e.star && attrNamed(e.attrs, "if") is not && attrNamed(e.attrs, "else-if") is not && attrNamed(e.attrs, "else") is not
         for (const k of e.kids) { s = linMarkupNode(cx, k, s, ids, plain) }
         return s
+    }
+
+    fn linAttrCond(cx: LinCx, a: AAttr, s: LinSt) -> LinSt {
+        const v: AAttrValue = a.value
+        return match v {
+            .Bare(e: e) :> linExpr(cx, e, s).st
+            .Paren(e: e) :> linExpr(cx, e, s).st
+            .Braced(b: b) :> linRefuse(cx, s, seenBlock(cx.t, b, linIdsOf(s)), "E-BOOTSTRAP-UNSUPPORTED", "is read in a braced `if=` value — the bootstrap counts an `if=` / `else-if=` condition written as an expression only (§17)")
+            .Quoted(v: x) :> s
+            .Dur(text: x) :> s
+            .NoValue :> s
+        }
+    }
+
+    fn linIdsOf(s: LinSt) -> int[] {
+        let out: int[] = []
+        for (const v of s.vars) { out = out.concat([v.id]) }
+        return out
     }
 
     // Each appearance in `seen`: refused (`code`), and counted as the binding's
@@ -42934,9 +43128,11 @@ ${
         const r0: LinR = linExprs(cx, once, s)
         if (r0.ends) return r0
         s = r0.st
+        // the `for (const x of …)` binder: E-LIN-005 where it names an in-scope `lin` (s478 review LOW-1)
+        s = linForBinder(cx, f, s)
         // a counted head's `init`: its `let`s are the loop's (in the loop's scope, E-LIN-005 applies)
         const mark: int = s.vars.length
-        const rh: LinR = linStmtsIn(cx, forInit(f), s)
+        const rh: LinR = linStmtsIn(linInnerScope(cx, s), forInit(f), linBumpScope(s))
         if (rh.ends) return rh
         s = rh.st
         const re: LinR = linExprs(inner, each, s)
