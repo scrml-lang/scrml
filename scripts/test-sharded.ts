@@ -17,14 +17,15 @@
 //               still running at S is killed (its whole process group, nothing else) and the run FAILS, naming
 //               the shard, the file it was in and its assigned files. Never a pass.
 //   --shard-mem=MB      RSS ceiling per shard, MB, summed over the shard's process group (bun test + every
-//               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB, default 3072). Over it -> killed, run FAILS, as above.
+//               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB). Over it -> killed, run FAILS, as above. Default
+//               (S478): ADAPTIVE per shard, from the shard's share of the run's estimated work — see
+//               adaptiveCeilingMb (4608 MB floor; ~5120 at N=12, ~5632 at N=4, 7680 for the whole suite in one
+//               shard). A value given here or in the env is a FIXED ceiling for every shard.
 //               Sampled every second (Linux /proc; elsewhere the ceiling is not enforced and N falls back to
 //               os.freemem()).
 //   budget      $SCRML_HOOK_SHARD_BUDGET_MB (default 1536): the memory a shard is EXPECTED to hold — what the default
 //               N, the slot pool and the memory admission check are sized from (S469; until then they used the
 //               ceiling, which held the 32-core / 30 GB box to 8 slots for every hook combined).
-//               A memory-derived N of 1 (memory already short; the whole suite in one shard) doubles the ceiling,
-//               so the normal single-process peak (~2.8 GB) cannot false-red it.
 //   reserve     $SCRML_HOOK_MEM_RESERVE_MB (default 2048): memory left for everything else when deriving N and when
 //               admitting a shard (a shard starts only if MemAvailable - reserve >= budget, or none of its run's
 //               shards is running yet; otherwise it waits, bounded by slot-wait, like a busy slot).
@@ -114,7 +115,8 @@ interface Options {
   verbose: boolean;
   plan: boolean;
   timeoutS: number;
-  memMb: number;
+  memMb: number; // 0 = adaptive per shard (adaptiveCeilingMb); > 0 = fixed for every shard
+  memWhy: string;
   slotWaitS: number;
   shardsWhy?: string;
   passthrough: string[];
@@ -162,7 +164,7 @@ function availableMemoryBytes(): number {
 const MB = 1024 * 1024;
 
 // S469 (s469-hook-shard-tuning). The PLANNING budget per shard — what a shard is expected to hold, used to size N
-// and the machine-wide slot pool — is separate from the KILL ceiling (--shard-mem, 3072). Until S469 both used the
+// and the machine-wide slot pool — is separate from the KILL ceiling (--shard-mem; adaptive since S478). Until S469 both used the
 // ceiling, so the pool on a 32-core / 30 GB box was MemTotal*0.8/3072 = 8 slots for EVERY hook on the machine:
 // with 3-5 agents committing at once each hook got ~2 slots and took ~10 min. Measured (S469, N=8..16, 1614
 // files): a shard averages 0.85-1.0 GB (all-shards peak 7.7 GB at N=8, 11.7 GB at 12, 13.4 GB at 16) and the
@@ -190,6 +192,34 @@ function defaultShards(budgetMb: number, slotCount: number): { n: number; why: s
     n,
     why: `cores ${cores} -> ${byCores}; pool ${slotCount} x 3/4 -> ${byPool}; ${availMb} MB available - ${reserveMb} reserve / ${budgetMb} budget per shard -> ${Math.max(0, byMem)}`,
   };
+}
+
+// S478 (s478-hook-shards, g-hook-single-shard-test-pollution-s477) — the KILL CEILING, adaptive per shard.
+// Until S478 it was a fixed 3072 MB (doubled only for a memory-derived N=1). But N is derived from MemAvailable,
+// so exactly when other lanes are running N drops, each shard carries a bigger slice of the suite, and its peak
+// rises past 3072 — the false red the gap records. Measured S478 on the 32-core / 30 GB box, the 1681-file
+// pre-commit set, RSS summed over the shard's whole process tree:
+//   N=1  (one process, the whole suite)            peak 5009 MB
+//   N=4  (~428 files a shard, other lanes running) peaks 1404 / 2176 / 2578 / 3424 MB  <- 3424 > 3072: KILLED
+//   N=12 (~170 files a shard)                      peaks 966-2045 MB; the one-file shard
+//        bootstrap-conformance-counter.test.js alone 2603 MB (85% of the old ceiling, on its own)
+// A shard's peak is about a fixed part (the heaviest file it holds; ~2.6-2.9 GB) plus a part that grows with how
+// much of the suite the one process loads: peak ~= 2900 + 2100 x share MB fits all three (share = the shard's
+// fraction of the run's estimated seconds: 1 -> 5000, 1/4 -> 3425, 1/12 -> 3075). The ceiling is that x 1.5,
+// rounded up to 512 MB, never below 4608 (the value lanes were already setting by hand, S477): 7680 / 5632 /
+// 5120 MB at N=1 / 4 / 12 — at least 1.5x every measured peak.
+// It does NOT depend on free memory, deliberately: the ceiling's job is to stop a RUNAWAY shard (unbounded
+// growth reaches any bound), not to keep the box inside its RAM — the slot pool and the memory admission check
+// below do that, and they already read MemAvailable. A ceiling that shrank as memory got short would turn
+// "the box is busy" into a red commit, which is the bug.
+const CEILING_FIXED_MB = 2900;
+const CEILING_SUITE_MB = 2100;
+const CEILING_HEADROOM = 1.5;
+const CEILING_MIN_MB = 4608;
+
+function adaptiveCeilingMb(share: number): number {
+  const expected = CEILING_FIXED_MB + CEILING_SUITE_MB * Math.min(1, Math.max(0, share));
+  return Math.max(CEILING_MIN_MB, Math.ceil((expected * CEILING_HEADROOM) / 512) * 512);
 }
 
 function envNumber(name: string, dflt: number, max?: number): number {
@@ -264,7 +294,7 @@ function parseShardCount(raw: string, from: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, slotWaitS: 0, passthrough: [], groups: [{ env: {}, paths: [] }] };
+  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, memWhy: "--shard-mem", slotWaitS: 0, passthrough: [], groups: [{ env: {}, paths: [] }] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bail") o.bail = true;
@@ -290,7 +320,10 @@ function parseArgs(argv: string[]): Options {
   }
   if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200, MAX_SECONDS);
   if (o.slotWaitS === 0) o.slotWaitS = envNumber("SCRML_HOOK_SLOT_WAIT_S", 1800, MAX_SECONDS);
-  if (o.memMb === 0) o.memMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 3072);
+  if (o.memMb === 0) {
+    o.memMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 0);
+    o.memWhy = o.memMb > 0 ? "SCRML_HOOK_SHARD_MEM_MB" : "adaptive";
+  }
   o.shardsWhy = "explicit";
   if (o.shards === 0) {
     const env = process.env.SCRML_HOOK_SHARDS;
@@ -301,13 +334,6 @@ function parseArgs(argv: string[]): Options {
       const d = defaultShards(shardBudgetMb(), slotCount(shardBudgetMb()).count);
       o.shards = d.n;
       o.shardsWhy = d.why;
-      // Memory-derived N=1 happens only when memory is already short, and then the WHOLE suite is one shard: the
-      // per-shard ceiling (sized for 1/Nth of the suite) would false-red it (sequential peaks ~2.8 GB). Lift it to
-      // twice the configured value — still a bound against a runaway, no longer a trap for the normal run.
-      if (d.n === 1) {
-        o.memMb *= 2;
-        o.shardsWhy += `; N=1 -> ceiling lifted to ${o.memMb} MB`;
-      }
     }
   }
   if (o.groups.every((g) => g.paths.length === 0)) {
@@ -604,10 +630,15 @@ async function main(): Promise<void> {
   const files = pathGroups.flatMap((g) => g.files); // one entry per (group, file) run
   const shards = plan(pathGroups, opts.shards, loadTimings());
   const groupNote = (s: Shard) => (pathGroups.length > 1 ? `, group ${s.group}${s.tag}` : "");
+  const totalEstimate = shards.reduce((t, s) => t + s.estimate, 0);
+  const ceilingMb = new Map(shards.map((s) => [s.index, opts.memMb > 0 ? opts.memMb : adaptiveCeilingMb(totalEstimate > 0 ? s.estimate / totalEstimate : 1)]));
+  const ceilings = [...new Set(ceilingMb.values())].sort((a, b) => a - b);
+  const ceilingNote =
+    opts.memMb > 0 ? `ceiling ${opts.memMb} MB per shard (${opts.memWhy})` : `ceiling ${ceilings.length === 1 ? ceilings[0] : `${ceilings[0]}-${ceilings[ceilings.length - 1]}`} MB per shard (adaptive)`;
 
   if (opts.plan) {
     for (const s of shards) {
-      console.log(`shard ${s.index}: ${s.files.length} files, est ${s.estimate.toFixed(1)}${groupNote(s)}`);
+      console.log(`shard ${s.index}: ${s.files.length} files, est ${s.estimate.toFixed(1)}, ceiling ${ceilingMb.get(s.index)} MB${groupNote(s)}`);
       for (const f of s.files) console.log(`  ${f}`);
     }
     return;
@@ -632,7 +663,7 @@ async function main(): Promise<void> {
       (pathGroups.length > 1
         ? ` over ${pathGroups.length} path groups (${pathGroups.map((g, i) => `${i}${envTag(g.env)}: ${g.files.length} files, ${shards.filter((s) => s.group === i).length} shard(s)`).join("; ")})`
         : "") +
-      `${opts.bail ? " (--bail)" : ""} [N: ${opts.shardsWhy}]; timeout ${opts.timeoutS}s, ceiling ${opts.memMb} MB per shard;` +
+      `${opts.bail ? " (--bail)" : ""} [N: ${opts.shardsWhy}]; timeout ${opts.timeoutS}s, ${ceilingNote};` +
       ` SCRML_HOOK_SHARDS=1 for the single-process run`,
   );
 
@@ -711,8 +742,8 @@ async function main(): Promise<void> {
       const mb = (byGroup.get(pgid) ?? 0) / MB;
       total += mb;
       if (mb > (peakRss.get(index) ?? 0)) peakRss.set(index, mb);
-      if (mb > opts.memMb && !stopReason.has(index)) {
-        console.log(`[s${index}] MEMORY CEILING: ${mb.toFixed(0)} MB > ${opts.memMb} MB — killing shard ${index}`);
+      if (mb > ceilingMb.get(index)! && !stopReason.has(index)) {
+        console.log(`[s${index}] MEMORY CEILING: ${mb.toFixed(0)} MB > ${ceilingMb.get(index)} MB — killing shard ${index}`);
         stop(index, "memory", "SIGKILL");
         bail(index);
       }
@@ -892,7 +923,7 @@ async function main(): Promise<void> {
       r.outcome === "timeout"
         ? `TIMED OUT (limit ${opts.timeoutS}s; killed after ${r.seconds.toFixed(0)}s)`
         : r.outcome === "memory"
-          ? `KILLED AT THE MEMORY CEILING (${opts.memMb} MB; peak ${r.peakRssMb.toFixed(0)} MB)`
+          ? `KILLED AT THE MEMORY CEILING (${ceilingMb.get(r.shard.index)} MB; peak ${r.peakRssMb.toFixed(0)} MB)`
           : r.outcome === "noslot"
             ? `NEVER STARTED: not admitted within ${opts.slotWaitS}s (every machine-wide slot busy, or memory short — see its NO SLOT line)`
             : r.outcome === "signal"
@@ -950,7 +981,7 @@ async function main(): Promise<void> {
       `${total.pass} pass, ${total.fail} fail, ${total.errors} error, ${total.skip} skip, ${total.todo} todo, ` +
       `${total.expects} expect() calls; ran ${total.tests} tests across ${total.files} files in ${wall}s wall`,
   );
-  console.log(`peak RSS, all shards together: ${peakTotalRss.toFixed(0)} MB (ceiling ${opts.memMb} MB per shard; timeout ${opts.timeoutS}s per shard)`);
+  console.log(`peak RSS, all shards together: ${peakTotalRss.toFixed(0)} MB (${ceilingNote}; timeout ${opts.timeoutS}s per shard)`);
 
   if (integrity.length > 0) {
     console.log("\nINTEGRITY ERROR:");
@@ -961,7 +992,7 @@ async function main(): Promise<void> {
   const failing = failed.length > 0 || integrity.length > 0 || bailedBy !== null;
   // ONE verdict line, always last, naming every reason — a caller that captures the output (the pre-push hook)
   // prints it, so "exit 1, 0 fail" can never reach the user without its cause (S478). The pre-push hook also
-  // refuses an exit 0 that has no `RESULT: PASS` line.
+  // refuses an exit 0 with no TOTAL line, or with a `RESULT: FAIL` line.
   const reasons: string[] = [];
   if (total.fail > 0) reasons.push(`${total.fail} test(s) failed`);
   if (total.errors > 0) reasons.push(`${total.errors} unhandled error(s) outside any test (bun prints "# Unhandled error between tests"; exit 1 with 0 fail)`);
