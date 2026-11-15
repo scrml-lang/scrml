@@ -28,7 +28,12 @@ let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
+// The shared prelude declares cells (`@a` `@b` `@c` `@v`) that not every test reads; the
+// unread-cell warning E-DG-002 is not this file's subject, so it is dropped here.
+const run = (src) => {
+  const r = frontEnd(mods, [{ path: "t.scrml", src }]);
+  return { ...r, diags: r.diags.filter((d) => d.code !== "E-DG-002") };
+};
 const codes = (src) => run(src).diags.map((d) => d.code);
 const $ = (sel) => document.querySelector(sel);
 
