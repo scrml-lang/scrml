@@ -172,11 +172,9 @@ function bump() { @n = @n + 1; }
   test("a claimed `else` in a handler block is clean", () => {
     expect(errCodes(p(`{ if (@ok) { bump(); } else { bump(); } }`))).toEqual([]);
   });
-  // The `onclick=${ … }` handler form is #1865's (parse.scrml parseAttrValue, §5.2). Until it is
-  // on main, a clean `${…}` handler is itself refused, and there is nothing to judge. These
-  // tests start asserting by themselves once that form parses clean.
-  test("`onclick=${ if (…) { … }; else { … } }` and `onclick=${ bump(); else bump(); }` (once `${…}` handlers parse)", () => {
-    if (errCodes(p(`${D} if (@ok) { bump(); } else { bump(); } }`)).length > 0) return;
+  // The `onclick=${ … }` handler form (§5.2, parse.scrml parseAttrValue).
+  test("`onclick=${ if (…) { … }; else { … } }` and `onclick=${ bump(); else bump(); }`", () => {
+    expect(errCodes(p(`${D} if (@ok) { bump(); } else { bump(); } }`))).toEqual([]);
     expect(errCodes(p(`${D} if (@ok) { bump(); }; else { bump(); } }`))).toEqual(["E-STMT-UNEXPECTED-TOKEN"]);
     expect(errCodes(p(`${D} bump(); else bump(); }`))).toEqual(["E-STMT-UNEXPECTED-TOKEN"]);
   });
