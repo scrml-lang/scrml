@@ -5528,6 +5528,23 @@ ${
     fn parseTypeDecl(tp: TP, start: int, exported: boolean) -> RItems {
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
+        // s478 — the type alias `type Name = T` (§14.1.2: "type-alias right-hand
+        // sides (`type A = Type`)"; §40.8: "a `type` alias ends where its type
+        // expression ends (§7.5 `type-expr`, which has no juxtaposition — `type N
+        // = number extra` compiles `number` only)"). Not a `type … = { … }`
+        // declaration, so it is a statement that takes `;` (§7.2.2 rule 1).
+        if (nameTok.cls == TC.Ident && isP(adv(t), "=")) {
+            const d0: int = hardErrors(t.diags)
+            const ra: RType = parseType(adv(adv(t)))
+            let at: TP = ra.tp
+            if (isP(at, ";")) {
+                at = adv(at)
+            } else if (hardErrors(at.diags) == d0) {
+                at = missingSemi(at)
+            }
+            const ad: ATypeDecl = { nid: at.nid, span: spanFrom(at, start), exported: exported, name: nameTok.v, body: ATypeBody.AliasBody(ra.t) }
+            return mkItem(bumpId(at), start, AItemK.TypeItem(ad))
+        }
         t = expectP(adv(t), ":")
         const kind: PTok = cur(t)
         t = adv(t)

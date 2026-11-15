@@ -11,7 +11,12 @@ Branch `s478-boot-parser-smalls` from origin/main af7fe4bab. Base conformance JS
   The 4 conformance cases still FAIL only on case dialect (newline-terminated statements /
   newline-separated arms: E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR, C1). With the
   terminators written in, all 4 PASS (runtime included) — checked against scratch copies.
-- [ ] C8 type alias `type Id = int`
+- [x] C8 type alias `type Id = int;` — ast `ATypeBody.AliasBody`, parse.scrml `parseTypeDecl`,
+  analyze.scrml `aliasRhs` / `aliasCycles` / `resolveTypeName` / `typeInfos`;
+  slice-m4/type-alias-s478.test.js. `cg-export-enum-library-rep` still FAILs only on its
+  newline-terminated `type Id = int` (§7.2.2 rule 1 — an alias is not a `type … = { … }` item, so
+  it takes `;`). `type E : error` NOT built (owner question). `body-top/declaration-trailing-tokens-rejected`
+  is the body-top lane's (program-level reader).
 - [ ] C15 nested `<program>` diagnostics
 - [ ] C13 cascades
 - [ ] C19 misc

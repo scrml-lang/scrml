@@ -989,6 +989,7 @@ ${
             .EnumBody(variants: vs) :> true
             .StructBody(fields: fs) :> false
             .HostBody :> false
+            .AliasBody(ty: x) :> false
         }
     }
 
@@ -997,7 +998,45 @@ ${
             .EnumBody(variants: vs) :> variantNames(vs)
             .StructBody(fields: fs) :> typeFieldNames(fs)
             .HostBody :> []
+            .AliasBody(ty: x) :> []
         }
+    }
+
+    // s478 — a type alias's right-hand side (`type A = T`), else not.
+    fn aliasRhs(s: TypeStub) -> AType | not {
+        const b: ATypeBody = s.src.body
+        return match b {
+            .AliasBody(ty: x) :> x
+            .EnumBody(variants: vs) :> not
+            .StructBody(fields: fs) :> not
+            .HostBody :> not
+        }
+    }
+
+    // s478 — does alias `s`'s right-hand side reach `s` again through the
+    // aliases it names (`type A = B`, `type B = A[]`)? `seen`: the aliases
+    // already walked (by Sym id). Read on the AST, so a cycle is found before
+    // any resolution recurses into it.
+    fn aliasCycles(te: TypeEnv, s: TypeStub, at: AType, seen: int[]) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> aliasNameCycles(te, s, n, seen)
+            .TSeq(elem: e) :> aliasCycles(te, s, e, seen)
+            .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
+            .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
+        }
+    }
+
+    fn aliasNameCycles(te: TypeEnv, s: TypeStub, n: string, seen: int[]) -> boolean {
+        const m: TypeStub | not = stubNamed(te, n)
+        if (m is not) return false
+        const rhs: AType | not = aliasRhs(m)
+        if (rhs is not) return false
+        if (m.sym.id == s.sym.id) return true
+        for (const x of seen) {
+            if (x == m.sym.id) return false
+        }
+        return aliasCycles(teAt(te, m.file), s, rhs, seen.concat([m.sym.id]))
     }
 
     fn variantNames(vs: AVariant[]) -> string[] {
@@ -1832,7 +1871,19 @@ ${
         if (n == "string") return { t: Type.Str, st: st, unresolved: false }
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
-        if (s is given) return { t: Type.Named(s.sym), st: st, unresolved: false }
+        if (s is given) {
+            // s478 — a type alias is its right-hand side wherever it is written
+            // ("`type A = E` is `E`", §34 E-TYPE-ARM-QUALIFIER-MISMATCH), resolved
+            // in the alias's own file. Its diagnostics are reported once, at the
+            // declaration (typeInfos); a cyclic alias resolves to nothing.
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                if (aliasCycles(teAt(te, s.file), s, rhs, [])) return { t: Type.Str, st: st, unresolved: true }
+                const ra: RType = resolveType(teAt(te, s.file), rhs, st)
+                return { t: ra.t, st: st, unresolved: ra.unresolved }
+            }
+            return { t: Type.Named(s.sym), st: st, unresolved: false }
+        }
         const ds: Sym | not = declTypeNamed(te, n)
         if (ds is given) return { t: Type.Named(ds), st: st, unresolved: false }
         // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
@@ -1948,9 +1999,20 @@ ${
         for (const s of stubs) {
             const fte: TypeEnv = teAt(te, s.file)
             const body: ATypeBody = s.src.body
-            const r: RTypeDef = typeDefOf(fte, s, body, st)
-            st = r.st
-            out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is given) {
+                // s478 — an alias defines no type of its own (no TypeDef): its
+                // right-hand side is resolved here once, for its diagnostics
+                if (aliasCycles(fte, s, rhs, [])) {
+                    st = addDiag(st, s.file, s.src.span, "E-BOOTSTRAP-UNSUPPORTED", "the type alias `" + s.name + "` names itself through its right-hand side — a recursive type alias has no type the bootstrap can build; declare a `:struct` or `:enum` (§14.2)")
+                } else {
+                    st = resolveType(fte, rhs, st).st
+                }
+            } else {
+                const r: RTypeDef = typeDefOf(fte, s, body, st)
+                st = r.st
+                out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+            }
         }
         return { ts: out, st: st }
     }
@@ -1962,6 +2024,7 @@ ${
             .EnumBody(variants: vs) :> enumDefOf(te, s, vs, st)
             .StructBody(fields: fs) :> structDefOf(te, s, fs, st)
             .HostBody :> hostDefOf(s, st)
+            .AliasBody(ty: x) :> hostDefOf(s, st)   // (unreached: typeInfos builds no TypeDef for an alias)
         }
     }
 
