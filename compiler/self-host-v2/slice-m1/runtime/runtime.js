@@ -205,7 +205,9 @@ export class Cell {
     if (this.pend !== null) {                       // s475 r3/r4: a pending cell's write (pendWrite)
       const w = pendWrite(this, v);
       if (w === PEND_STALE) return;
-      if (w === PEND_RELOAD) { const req = this.pend.req; batch(() => { req.markStale(); this.land(v); }); return; }
+      // s478 follow-up (§13.9.4 rule 4, RULED S478): the reload a winning `not` starts AT THE WRITE
+      // (as a reset's does), not at the batch's end — so a later write in the same continuation wins
+      if (w === PEND_RELOAD) { const req = this.pend.req; batch(() => { this.land(v); req.resetRun(); }); return; }
     }
     this.land(v);
   }
@@ -499,10 +501,42 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 //    `pendOlder` test as a write — a backstop, since stamps only rise).
 //  - s478 r2: a `reset(@x)` starts its run when the reset executes — a fresh stamp, never skipped
 //    (Request.resetRun); a write later in the reset's own continuation is dated at the reset.
+//  - s478 follow-up: a winning write of `not` restarts the load the same way, AT THE WRITE (rule 4,
+//    RULED S478). And a reset / `not`-restart issued INSIDE an awaited waiting call lifts the caller's
+//    continuation that resumes after that call: its writes of THAT cell are dated no earlier than the
+//    restart (ruling 2 in program order across the call — `const r = inner(); @who = "z";` keeps "z"
+//    when `inner` resets after a wait). The lift is per continuation (`curLift`) and per cell; it is
+//    carried by the call's frame (`curFrame`, one per waiting call, `waitFrames`), so only the awaiting
+//    caller adopts it — an unrelated concurrent continuation keeps the stamp rule 2 gives it.
 // Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
 // author write does not supersede its fetch).
 let pendSeq = 0;
 let curStamp = 0;                 // the running continuation's start stamp; 0 = none (a synchronous write)
+// s478 follow-up — the running continuation's per-cell LIFTS: Map<pend record, restart stamp> | null.
+// A restart (reset / winning `not`) in this continuation, or inside a waiting call this continuation
+// resumed from, dates this continuation's later writes of that cell at the restart (a tie it wins).
+// Only ever non-null inside `withStamp` (restored on exit), so a handler's synchronous part has none.
+let curLift = null;
+// s478 follow-up — the running waiting call's FRAME ({ parent, restarts: Map | null }) | null: the
+// restarts issued anywhere inside the call (its body, its continuations, the calls it awaits), which
+// its caller's resuming continuation adopts as its lifts (suspend → withStamp).
+let curFrame = null;
+const waitFrames = new WeakMap();  // a waiting call's Promise → its frame (rt.waiting)
+
+// s478 follow-up — a pending cell's load was restarted with stamp `s` (Request.resetRun): lift the
+// rest of this continuation, and record it in every enclosing waiting call's frame (its caller's
+// resume adopts it). `s` is fresh, so a later restart of the same cell always overwrites.
+function pendRestarted(p, s) {
+  if (curStamp !== 0) {
+    const m = new Map(curLift ?? []);   // copy: an adopted map is a frame's own record
+    m.set(p, s);
+    curLift = m;
+  }
+  for (let f = curFrame; f !== null; f = f.parent) {
+    if (f.restarts === null) f.restarts = new Map();
+    f.restarts.set(p, s);
+  }
+}
 
 const PEND_STALE = 0;              // discarded: a newer load started, or a newer write landed
 const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
@@ -524,8 +558,12 @@ function pendWrite(cell, v) {
   let s = curStamp !== 0 ? curStamp : ++pendSeq;
   // s478 r2 (§13.9.4 rule 3 ⚑): a write later in the SAME continuation as a reset is the later start
   // — dated no earlier than the reset's run (a tie, which the write wins below). Writes from other
-  // continuations keep their wait's stamp (rule 2).
-  if (curStamp !== 0 && p.resetCont === curStamp && p.resetAt > s) s = p.resetAt;
+  // continuations keep their wait's stamp (rule 2). s478 follow-up: the same for a `not`-restart
+  // (rule 4), and for a restart inside a waiting call this continuation resumed from (curLift).
+  if (curLift !== null) {
+    const l = curLift.get(p);
+    if (l !== undefined && l > s) s = l;
+  }
   if (pendOlder(p, s)) return PEND_STALE;             // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
   // r4 F-A: every winning write, a no-op included. s478: `<=` — a tie is a reset's run and a write
@@ -546,7 +584,7 @@ class Request {
     this.tasks = new Set();
     for (const d of deps) d.observers.add(this);
     // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
-    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false, resetAt: 0, resetCont: 0 };
+    if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
     stats.requests++;
     scope.ownEffect(() => this.unregister());
   }
@@ -569,18 +607,19 @@ class Request {
    * task — a READ's transport is aborted, a WRITE's call completes and is discarded; a write
    * started earlier that lands later is discarded by `pendOlder`). It is never skipped: a reset
    * after a save (`save(2); reset(@who)`) or a retry after a failed load always reloads.
-   * Ruling 2 inside a continuation: the continuation that issued the reset is recorded
-   * (`resetCont`), and an author write later in that same continuation is dated at the reset
-   * (pendWrite) — the `<=` tie there lets it supersede the reset's load (`reset(@who); @who = "z";`
-   * keeps "z"). A dependency change in the same batch still re-runs the load at the batch's end,
-   * the newest start (rule 3). Stamps only rise: `++pendSeq` exceeds every stamp already issued.
+   * Ruling 2 inside a continuation: the restart lifts the rest of that continuation
+   * (pendRestarted → `curLift`), so an author write later in it is dated at the reset (pendWrite)
+   * — the `<=` tie there lets it supersede the reset's load (`reset(@who); @who = "z";` keeps
+   * "z"); and it is recorded in the enclosing waiting calls' frames, so the caller's continuation
+   * that resumes after awaiting such a call is lifted the same way. A dependency change in the
+   * same batch still re-runs the load at the batch's end, the newest start (rule 3). Stamps only
+   * rise: `++pendSeq` exceeds every stamp already issued. s478 follow-up: a winning write of `not`
+   * restarts the load through here too (rule 4, RULED S478: the reload starts AT THE WRITE).
    */
   resetRun() {
     if (this.disposed) return;
-    const p = this.target.pend;
     const s = ++pendSeq;
-    p.resetAt = s;
-    p.resetCont = curStamp;          // 0 in a handler's synchronous part: a later write there is fresh anyway
+    pendRestarted(this.target.pend, s);
     this.run(s);
   }
   run(start = 0) {
@@ -603,6 +642,10 @@ class Request {
         });
       }
       let load;
+      // s478 follow-up: a load's body belongs to no author continuation or waiting call
+      const prevFrame = curFrame, prevLift = curLift;
+      curFrame = null;
+      curLift = null;
       try {
         load = untrack(() => this.body(task));
       } catch (e) {
@@ -611,6 +654,9 @@ class Request {
         reportHostError(e);
         this.idle();
         return;
+      } finally {
+        curFrame = prevFrame;
+        curLift = prevLift;
       }
       suspend(task, load.on, (v) => this.settle(v, load.then), () => this.idle());
     } finally {
@@ -774,12 +820,17 @@ export function suspend(task, value, k, onLiveReject) {
   task.pending++;
   // s475 r3 (N2): this wait's start stamp — ambient while its continuation runs (pendWrite)
   const stamp = ++pendSeq;
+  // s478 follow-up: the waiting call this wait belongs to (its continuation stays in it), and the
+  // frame of the waiting call being awaited, if `value` is one — its restarts lift the continuation
+  const frame = curFrame;
+  const callee = waitFrames.get(value);
   Promise.resolve(value).then(
     (v) => {
       task.pending--;
       if (task.cancelled) return;
       try {
-        batch(() => untrack(() => withStamp(stamp, k, v)));
+        const lift = callee !== undefined ? callee.restarts : null;
+        batch(() => untrack(() => withStamp(stamp, frame, lift, k, v)));
       } catch (e) {
         reportHostError(e);
         abandonWaiting(task);
@@ -809,6 +860,21 @@ export function suspend(task, value, k, onLiveReject) {
  * by the synchronous part rejects, and the caller's `suspend` reports it.
  */
 export function waiting(task, executor) {
+  // s478 follow-up: this call's frame — the body (and every continuation of it) runs inside it
+  const frame = { parent: curFrame, restarts: null };
+  const prevFrame = curFrame;
+  curFrame = frame;
+  let pr;
+  try {
+    pr = waitingPromise(task, executor);
+  } finally {
+    curFrame = prevFrame;
+  }
+  waitFrames.set(pr, frame);
+  return pr;
+}
+
+function waitingPromise(task, executor) {
   return new Promise((resolve, reject) => {
     // s454 fix round F2: registered on the task, so a host error in one of this body's
     // continuations (reported by `suspend`) abandons the Promise — its caller's continuation
@@ -829,10 +895,13 @@ export function waiting(task, executor) {
 }
 
 // s475 r3 (N2): run a continuation with its wait's start stamp ambient (restored on exit and on throw).
-function withStamp(stamp, k, v) {
-  const prev = curStamp;
+// s478 follow-up: also its waiting call's frame and its lifts (the awaited call's restarts, or none).
+function withStamp(stamp, frame, lift, k, v) {
+  const prev = curStamp, prevFrame = curFrame, prevLift = curLift;
   curStamp = stamp;
-  try { return k(v); } finally { curStamp = prev; }
+  curFrame = frame;
+  curLift = lift;
+  try { return k(v); } finally { curStamp = prev; curFrame = prevFrame; curLift = prevLift; }
 }
 
 // The rejection a waiting function's Promise is abandoned with after its host error was REPORTED
