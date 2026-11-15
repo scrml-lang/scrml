@@ -494,8 +494,9 @@ const REQUEST_SIGNALS = ["loading", "data", "error", "stale"];
 //  - nothing is superseded before a write actually lands (a wait whose continuation then writes
 //    nothing — an untaken `if`, a failure arm that skips the write, an early exit — leaves the
 //    load alone).
-//  - the load's own settle is never re-checked: a write that would beat it cancelled its task, so
-//    a load whose continuation runs is the newest start (`settling` lets its write through).
+//  - the load's own settle never reloads: a write that would beat it cancelled its task, so a load
+//    whose continuation runs is the newest start (`settling` lets its write through, after the same
+//    `pendOlder` test as a write — s478 r1: a backstop, since stamps only rise).
 // Only a pending cell carries the record (a `<request>` with state keeps §6.7.7's own rules: an
 // author write does not supersede its fetch).
 let pendSeq = 0;
@@ -505,11 +506,21 @@ const PEND_STALE = 0;              // discarded: a newer load started, or a newe
 const PEND_LAND = 1;               // lands (Cell.land: a no-op still notifies nothing)
 const PEND_RELOAD = 2;             // lands `not`, then the cell's load re-runs (r4 D)
 
+// THE one supersede test (s475 r3; s478 r1 reuses it for a reset and a load's own settle): a start
+// dated `s` is the OLDER start under §13.9.4 rule 1 when a load started after it or a write started
+// after it has already landed. Ties are not older (the later-running of the two wins, see below).
+// Stamps only rise: `p.load` / `p.wrote` are only ever set from a start that passed this test.
+function pendOlder(p, s) {
+  return p.load > s || p.wrote > s;
+}
+
 function pendWrite(cell, v) {
   const p = cell.pend;
-  if (p.settling) return PEND_LAND;                   // the load's own settle (never re-checked, never reloads)
+  // the load's own settle never reloads; s478 r1 (F2): it lands only while its start is still the
+  // newest — a run whose start a landed write has passed is superseded (never lands over it)
+  if (p.settling) return pendOlder(p, p.load) ? PEND_STALE : PEND_LAND;
   const s = curStamp !== 0 ? curStamp : ++pendSeq;
-  if (p.load > s || p.wrote > s) return PEND_STALE;   // a newer load started, or a newer write landed
+  if (pendOlder(p, s)) return PEND_STALE;             // a newer load started, or a newer write landed
   p.wrote = s;                                        // older writes still in flight now lose
   // r4 F-A: every winning write, a no-op included. s478: `<=` — a tie is a reset's run and a write
   // in the SAME continuation (resetRun dates the run as a write is dated); the write runs after it
@@ -554,7 +565,13 @@ class Request {
    */
   resetRun() {
     if (this.disposed) return;
-    this.run(curStamp !== 0 ? curStamp : ++pendSeq);
+    const s = curStamp !== 0 ? curStamp : ++pendSeq;
+    // s478 r1 (F1/F2; §13.9.4 rule 3 ⚑ companion): a reset dated before a load already started or
+    // a write already landed is the OLDER start (rule 1) and is superseded — it neither cancels the
+    // newer run nor lowers `p.load` (stamps stay monotonic), and its load would never land over the
+    // newer start anyway, so it is not issued.
+    if (pendOlder(this.target.pend, s)) return;
+    this.run(s);
   }
   run(start = 0) {
     if (this.disposed) return;
