@@ -25444,7 +25444,151 @@ ${
             }
             if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return out
         }
+        // s478 (s478-boot-bound-branch-static) — a CHOICE value (a ternary / value-`if`,
+        // a value `match`): judged branch by branch, with the same leaf judgement as above.
+        // EVERY branch that yields a value provably outside the bound: whichever runs, the
+        // write breaks the invariant — provable, E-WRITE-INVARIANT (O36). Every branch
+        // proven inside: no run-time check. Anything else (some branches outside, some in
+        // or unknown) depends on which branch runs — not provable, checked at run time.
+        if (isChoice(x)) {
+            const bv: BranchLens = choiceLengths(env, x, b, out)
+            if (bv.v == 2) return report(out, env, x.span, "E-WRITE-INVARIANT", what + " is a choice whose every branch is a tape of a length outside its type's bound `" + b.min + "..=" + b.max + "` (" + bv.lens.join(", ") + ") — whichever branch runs, the write provably breaks the length invariant (§66.11.2, §66.12.2)")
+            if (bv.v == 1) return out
+        }
         return recordBound(out, env, x, b)
+    }
+
+    // s478 — the length verdict of a value into a bound: `v` 2 = provably outside (`lens`
+    // names each branch's length), 1 = proven inside, 0 = not provable either way.
+    type BranchLens:struct = { v: int, lens: string[] }
+
+    fn isChoice(x: AExpr) -> boolean {
+        if (ternaryBranches(x).length > 0) return true
+        return valueMatchArms(x).length > 0
+    }
+
+    // a ternary's two branches, else []
+    fn ternaryBranches(x: AExpr) -> AExpr[] {
+        const k: AExprK = x.k
+        return match k {
+            .Ternary(test: t, yes: y, no: n) :> [y, n]
+            .ArrayLit(elems: es) :> []
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: v) :> []
+            .Bool(v: v) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Assign(target: t) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: e) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
+            .Handled(h: h) :> []
+            .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
+            .Foreign(f: fb0) :> []
+        }
+    }
+
+    // a value `match e { … }`'s arms, else [] (a `!{}` guard's value may be the subject's
+    // success value, a `?` the subject's — neither is a choice among written branches)
+    fn valueMatchArms(x: AExpr) -> AArm[] {
+        const h: AHandled | not = handledOf(x.k)
+        if (h is not) return []
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> []
+            .Guard(arms: a) :> []
+            .MatchOn(arms: a) :> a
+        }
+    }
+
+    fn lengthVerdict(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState) -> BranchLens {
+        if (isNotLit(x)) return { v: 1, lens: [] }
+        if (isChoice(x)) return choiceLengths(env, x, b, ts)
+        const n: int = plainArrayLength(x)
+        if (n >= 0) {
+            if (n < b.min || n > b.max) return { v: 2, lens: ["" + n] }
+            return { v: 1, lens: [] }
+        }
+        const sr: BoundRange | not = spreadLengthRange(env, x, ts)
+        if (sr is given) {
+            if (sr.min > b.max) return { v: 2, lens: ["at least " + sr.min] }
+            if (sr.max >= 0 && sr.max < b.min) return { v: 2, lens: ["at most " + sr.max] }
+            if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return { v: 1, lens: [] }
+            return { v: 0, lens: [] }
+        }
+        const d: Type | not = declaredTapeType(env, x, ts)
+        if (d is given) {
+            const db: BoundRange | not = boundOfType(d)
+            if (db is given) {
+                if (db.min >= b.min && db.max <= b.max) return { v: 1, lens: [] }
+            }
+        }
+        return { v: 0, lens: [] }
+    }
+
+    // A choice's verdict: every branch's. A ternary's two branches; a `match`'s arms, each
+    // its one expression or what its block `lift`s — an arm whose block DIVERGES (`return`,
+    // `fail`, …) yields no value and is skipped; any other arm shape is not provable.
+    fn choiceLengths(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState) -> BranchLens {
+        let vs: BranchLens[] = []
+        for (const br of ternaryBranches(x)) {
+            vs = vs.concat([lengthVerdict(env, br, b, ts)])
+        }
+        for (const a of valueMatchArms(x)) {
+            vs = vs.concat([armVerdict(env, a, b, ts)])
+        }
+        let lens: string[] = []
+        let all2: boolean = false
+        let all1: boolean = false
+        let any: boolean = false
+        for (const v of vs) {
+            if (v.v >= 0) {
+                if (!any) {
+                    all2 = true
+                    all1 = true
+                    any = true
+                }
+                if (v.v != 2) all2 = false
+                if (v.v != 1) all1 = false
+                lens = lens.concat(v.lens)
+            }
+        }
+        if (any && all2) return { v: 2, lens: lens }
+        if (any && all1) return { v: 1, lens: [] }
+        return { v: 0, lens: [] }
+    }
+
+    // one arm's verdict; `v` -1 = the arm yields no value (its block diverges)
+    fn armVerdict(env: TEnv, a: AArm, b: BoundRange, ts: TypeState) -> BranchLens {
+        const body: AArmBody = a.body
+        const one: AExpr | not = plainOneExpr(body)
+        if (one is given) {
+            if (assignValue(one) is given || isWriteExpr(one)) return { v: 0, lens: [] }
+            return lengthVerdict(env, one, b, ts)
+        }
+        for (const blk of armBlockOf(body)) {
+            if (blockDiverges(blk)) return { v: -1, lens: [] }
+            const n: int = blk.stmts.length
+            if (a.lifted && n > 0) {
+                const last: AExpr | not = evalOf(blk.stmts[n - 1])
+                if (last is given) {
+                    if (assignValue(last) is given || isWriteExpr(last)) return { v: 0, lens: [] }
+                    return lengthVerdict(env, last, b, ts)
+                }
+            }
+        }
+        return { v: 0, lens: [] }
     }
 
     // An array literal holding a spread: the range of lengths it can have — `max` -1 when
