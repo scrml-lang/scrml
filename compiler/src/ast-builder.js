@@ -36,6 +36,7 @@
  */
 
 import { PHP_MV, placeholderParam } from "./placeholder-nonce.ts";
+import { codeOnlyView, replaceInCode, NON_CODE } from "./codegen/code-segments.ts";
 import {
   tokenizeAttributes as _defaultTokenizeAttributes,
   tokenizeLogic as _defaultTokenizeLogic,
@@ -1168,9 +1169,17 @@ function preprocessWorkerAndStateRefs(raw, childRanges) {
     { re: /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, build: (m) => `_scrml_input_${m[1]}_` },
   ];
 
+  // S478 (g-input-ref-rewritten-inside-string-literal) — a `<#name>` is a
+  // reference only in CODE. Inside a string / template-static text / comment it
+  // is prose (`"read <#id>.error"`), and lowering it there silently changed the
+  // literal's value. Every rule acts only where its match BEGINS in code
+  // (`replaceInCode` / `codeOnlyView`, the shared lexical fence, map invariant
+  // 43); a template's `${…}` interior is code and is still lowered. The patterns
+  // are unchanged — only the text they can see is.
+
   // No child context — preserve the original simple sequential-replace contract.
   if (!childRanges || childRanges.length === 0) {
-    for (const rule of RULES) raw = raw.replace(rule.re, (...args) => rule.build(args));
+    for (const rule of RULES) raw = replaceInCode(raw, rule.re, (...args) => rule.build(args));
     return childRanges ? { text: raw, shifts: [] } : raw;
   }
 
@@ -1187,8 +1196,19 @@ function preprocessWorkerAndStateRefs(raw, childRanges) {
     }
     return false;
   }
+  // The code view is read with every child block stood in by a same-length
+  // VALUE token (`000…`): a child preprocesses itself, and its interior (a
+  // foreign `_={…}=` body, a `#{}` stylesheet) is not this body's lexical
+  // context — an unpaired quote in it must not blank the code after it.
+  let neutral = raw;
+  for (const r of childRanges) {
+    const s = Math.max(0, r.start);
+    const e = Math.min(neutral.length, r.end);
+    if (e > s) neutral = neutral.slice(0, s) + "0".repeat(e - s) + neutral.slice(e);
+  }
+  const view = codeOnlyView(neutral);
   while (i < raw.length) {
-    if (raw[i] === "<" && raw[i + 1] === "#" && !inChildRange(i)) {
+    if (raw[i] === "<" && raw[i + 1] === "#" && !inChildRange(i) && view[i] !== NON_CODE) {
       let matched = null;
       for (const rule of RULES) {
         rule.re.lastIndex = i;

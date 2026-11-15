@@ -139,6 +139,7 @@ import { refusedElementMessage } from "./element-refusal.ts";
 import { RULED_FORM_CODE, ruledFormMessage, forEachRuledCallForm, collectRuledStatementForms, collectLiteralTapeNames } from "./impl1-ruled-form-refusal.ts";
 import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
+import { codeOnlyView } from "./codegen/code-segments.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -33861,11 +33862,37 @@ function checkFnBodyProhibitions(
    * BPP may have parsed raw expression text into `value`, `expr`, `text`, or `raw` fields.
    */
   function nodeText(node: ASTNodeLike): string {
+    return nodeTextParts(node).join(" ");
+  }
+
+  /**
+   * S478 (g-fn-001-text-scan-fires-on-string-literal,
+   * g-fn-004-text-scan-fires-on-string-literal) — `nodeText` with every
+   * character that is NOT code (string / template-static text / regex body /
+   * comment) blanked by the shared lexical fence (`codeOnlyView`, map invariant
+   * 43). Same length as `nodeText`, so an index read on one is valid on the
+   * other. A template literal's `${…}` interior is CODE and stays visible, so
+   * `` `t ${Date.now()}` `` still fires. Each field is viewed on its own, so an
+   * unpaired quote in one field cannot blank the next.
+   *
+   * Rule 7 — why the purity scans stay text scans over this view rather than
+   * ExprNode walks: `nodeText` is a union of heterogeneous fields (`value` /
+   * `expr` / `raw` escape-hatch text, `callee`, `name`, …) and many statement
+   * shapes reach this walker with NO ExprNode, so a tree-only walk would drop
+   * detections; the fence changes the scans' INPUT, not their patterns.
+   * A markup-shaped field (`<…`) is not JS: its prose apostrophes would read as
+   * string openers and blank real code, so it is scanned as written (unchanged).
+   */
+  function nodeCodeText(node: ASTNodeLike): string {
+    return nodeTextParts(node).map((p) => (/^\s*</.test(p) ? p : codeOnlyView(p))).join(" ");
+  }
+
+  function nodeTextParts(node: ASTNodeLike): string[] {
     // Phase 4d: ExprNode-first — reconstruct text from ExprNode if available
     const nodeAny = node as Record<string, unknown>;
     const exprNodeField = nodeAny.exprNode ?? nodeAny.initExpr;
     if (exprNodeField && typeof exprNodeField === "object" && (exprNodeField as any).kind) {
-      try { return emitStringFromTree(exprNodeField as import("./types/ast.ts").ExprNode); } catch { /* fall through */ }
+      try { return [emitStringFromTree(exprNodeField as import("./types/ast.ts").ExprNode)]; } catch { /* fall through */ }
     }
     const parts: string[] = [];
     if (typeof node.value === "string") parts.push(node.value);
@@ -33877,7 +33904,7 @@ function checkFnBodyProhibitions(
     if (typeof node.left === "string") parts.push(node.left);
     if (typeof node.right === "string") parts.push(node.right);
     if (typeof node.target === "string") parts.push(node.target);
-    return parts.join(" ");
+    return parts;
   }
 
   // ---------------------------------------------------------------------------
@@ -34027,7 +34054,7 @@ function checkFnBodyProhibitions(
   // closes the accumulator itself (`return ~`), even without an explicit
   // `~acc = []` declaration.
   function textMentionsTilde(stmt: ASTNodeLike): boolean {
-    const t = nodeText(stmt);
+    const t = nodeCodeText(stmt);
     return typeof t === "string" && /(^|[\s(=,{\[])~($|[\s);,}\]])/.test(t);
   }
   for (const stmt of body) {
@@ -34267,6 +34294,11 @@ function checkFnBodyProhibitions(
 
       // Heuristic text checks for E-FN-001, E-FN-002, E-FN-003, E-FN-004 and field tracking
       const txt = nodeText(stmt);
+      // S478 — the purity scans below read CODE only (`nodeCodeText`): a `?{`,
+      // `Date.now()`, `window.x`, `name(` inside a string / template text /
+      // comment is prose, not an access. `txt` stays for the E-FN-003 assignment
+      // heuristic (already literal-masked) and E-STATE-COMPLETE field tracking.
+      const codeTxt = nodeCodeText(stmt);
       if (txt) {
         // E-FN-001: ?{} SQL access (text-heuristic — catches ?{} embedded in let-decl init or return-stmt)
         // S96 Bug 15 fix — pattern must be `?{` with NO whitespace. The pre-fix
@@ -34275,7 +34307,7 @@ function checkFnBodyProhibitions(
         // bodies. SPEC §48 (purity) targets the SQL sigil `?{` which is
         // tokenized as a single unit — no whitespace permitted between `?`
         // and `{`. Tightening the regex matches that tokenizer contract.
-        if (stmt.kind !== "sql" && /\?\{/.test(txt)) {
+        if (stmt.kind !== "sql" && /\?\{/.test(codeTxt)) {
           errors.push(new TSError(
             "E-FN-001",
             `E-FN-001: \`fn ${fnName}\` body contains a \`?{}\` SQL access. ` +
@@ -34290,7 +34322,7 @@ function checkFnBodyProhibitions(
           // Extract all identifier-followed-by-`(` occurrences
           const CALL_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
           let m: RegExpExecArray | null;
-          while ((m = CALL_RE.exec(txt)) !== null) {
+          while ((m = CALL_RE.exec(codeTxt)) !== null) {
             const callee = m[1];
             if (nonPureFnNames.has(callee)) {
               errors.push(new TSError(
@@ -34307,7 +34339,7 @@ function checkFnBodyProhibitions(
 
         // E-FN-004: non-deterministic calls
         for (const nd of NON_DET_CALLS) {
-          if (txt.includes(nd)) {
+          if (codeTxt.includes(nd)) {
             errors.push(new TSError(
               "E-FN-004",
               `E-FN-004: \`fn ${fnName}\` body calls \`${nd}()\`, which is non-deterministic. ` +
@@ -34340,14 +34372,14 @@ function checkFnBodyProhibitions(
           const GLOBAL_READ_RE =
             /\b(window|document|navigator|location|screen|history|localStorage|sessionStorage)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g;
           let gm: RegExpExecArray | null;
-          while ((gm = GLOBAL_READ_RE.exec(txt)) !== null) {
+          while ((gm = GLOBAL_READ_RE.exec(codeTxt)) !== null) {
             // Skip a member access of something else (`foo.window`) or a
             // `$`-prefixed identifier (`$window`) — only the bare global root is
             // the host global. (`\b` already rejects `myLocation` / word-char
             // prefixes; this guards the `.`/`$` cases — mirrors the NONDET_CALL_RE
             // guard above.)
             if (gm.index > 0) {
-              const prev = txt[gm.index - 1];
+              const prev = codeTxt[gm.index - 1];
               if (prev === "." || prev === "$") continue;
             }
             const root = gm[1];
@@ -34378,10 +34410,10 @@ function checkFnBodyProhibitions(
         if (nonDetStdlibBindings && nonDetStdlibBindings.size > 0) {
           const NONDET_CALL_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
           let mn: RegExpExecArray | null;
-          while ((mn = NONDET_CALL_RE.exec(txt)) !== null) {
+          while ((mn = NONDET_CALL_RE.exec(codeTxt)) !== null) {
             // Skip member accesses (`x.now(`) — a preceding `.` means this is
             // not the imported bare binding.
-            if (mn.index > 0 && txt[mn.index - 1] === ".") continue;
+            if (mn.index > 0 && codeTxt[mn.index - 1] === ".") continue;
             const callee = mn[1];
             if (nonDetStdlibBindings.has(callee)) {
               const origin = nonDetStdlibOrigin?.get(callee) ?? callee;
@@ -34398,7 +34430,7 @@ function checkFnBodyProhibitions(
 
         // E-FN-002: DOM mutation calls
         for (const domApi of DOM_MUTATION_APIS) {
-          if (txt.includes(domApi)) {
+          if (codeTxt.includes(domApi)) {
             errors.push(new TSError(
               "E-FN-002",
               `E-FN-002: \`fn ${fnName}\` body contains a DOM mutation call (\`${domApi}\`). ` +
