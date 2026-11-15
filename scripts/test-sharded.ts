@@ -20,7 +20,10 @@
 //               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB). Over it -> killed, run FAILS, as above. Default
 //               (S478): ADAPTIVE per shard, from the shard's share of the run's estimated work — see
 //               adaptiveCeilingMb (4608 MB floor; ~5120 at N=12, ~5632 at N=4, 7680 for the whole suite in one
-//               shard). A value given here or in the env is a FIXED ceiling for every shard.
+//               shard). `--shard-mem=MB` is an EXACT ceiling for every shard (tests and probes use it to force
+//               one). $SCRML_HOOK_SHARD_MEM_MB is a FLOOR (S478 fix round 1): each shard's ceiling is
+//               max(env, adaptive), so a lane exporting the S477 workaround value 4608 never caps a shard below what
+//               its share of the suite needs (N=1 under that env -> 7680, not 4608; the measured N=1 peak is 5009).
 //               Sampled every second (Linux /proc; elsewhere the ceiling is not enforced and N falls back to
 //               os.freemem()).
 //   budget      $SCRML_HOOK_SHARD_BUDGET_MB (default 1536): the memory a shard is EXPECTED to hold — what the default
@@ -115,8 +118,8 @@ interface Options {
   verbose: boolean;
   plan: boolean;
   timeoutS: number;
-  memMb: number; // 0 = adaptive per shard (adaptiveCeilingMb); > 0 = fixed for every shard
-  memWhy: string;
+  memMb: number; // --shard-mem: 0 = not given; > 0 = the EXACT ceiling for every shard
+  memFloorMb: number; // $SCRML_HOOK_SHARD_MEM_MB: 0 = unset; > 0 = a FLOOR under the adaptive ceiling
   slotWaitS: number;
   shardsWhy?: string;
   passthrough: string[];
@@ -294,7 +297,7 @@ function parseShardCount(raw: string, from: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, memWhy: "--shard-mem", slotWaitS: 0, passthrough: [], groups: [{ env: {}, paths: [] }] };
+  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, memFloorMb: 0, slotWaitS: 0, passthrough: [], groups: [{ env: {}, paths: [] }] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bail") o.bail = true;
@@ -320,10 +323,9 @@ function parseArgs(argv: string[]): Options {
   }
   if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200, MAX_SECONDS);
   if (o.slotWaitS === 0) o.slotWaitS = envNumber("SCRML_HOOK_SLOT_WAIT_S", 1800, MAX_SECONDS);
-  if (o.memMb === 0) {
-    o.memMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 0);
-    o.memWhy = o.memMb > 0 ? "SCRML_HOOK_SHARD_MEM_MB" : "adaptive";
-  }
+  // The env value is a floor, never a cap: a lane that exports it (the S477 workaround, still in dispatch briefs)
+  // must not pin a memory-derived N=1 shard below its own measured peak. Only --shard-mem sets an exact ceiling.
+  if (o.memMb === 0) o.memFloorMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 0);
   o.shardsWhy = "explicit";
   if (o.shards === 0) {
     const env = process.env.SCRML_HOOK_SHARDS;
@@ -570,6 +572,10 @@ const REPORT_TAIL = 150;
 // the tests were collected). It prints NO `(fail)` line, counts it as " N error" and exits 1 with " 0 fail" — so
 // every place that looks for `(fail)` must also look for this, or the run reads as "0 fail, exit 1" (S478,
 // g-hook-sharded-prepush-exit-s477).
+// The banner and the " N error(s)" count are ACTED ON ONLY WHEN THE SHARD EXITS NON-ZERO (S478 fix round 1): a
+// passing test may print either text itself (a test about this runner, a log line " 3 errors"), and bun exits 1
+// whenever it really saw an unhandled error. So the live handler only records banner candidates; the shard's exit
+// code decides whether they become `(error)` fail lines (and bail the run), and an exit 0 zeroes the count.
 const UNHANDLED = /^# Unhandled error/;
 const FILE_HEADER = /^\S.*(\.test|_test|\.spec|_spec)\.(js|jsx|ts|tsx|mjs|cjs|mts|cts):$/;
 const SUMMARY_LINE = /^\s*\d+ (pass|fail|skip|todo|errors?|expect\(\) calls?)$|^Ran \d+ tests? across|^Bailed out after/;
@@ -631,10 +637,17 @@ async function main(): Promise<void> {
   const shards = plan(pathGroups, opts.shards, loadTimings());
   const groupNote = (s: Shard) => (pathGroups.length > 1 ? `, group ${s.group}${s.tag}` : "");
   const totalEstimate = shards.reduce((t, s) => t + s.estimate, 0);
-  const ceilingMb = new Map(shards.map((s) => [s.index, opts.memMb > 0 ? opts.memMb : adaptiveCeilingMb(totalEstimate > 0 ? s.estimate / totalEstimate : 1)]));
+  const ceilingMb = new Map(
+    shards.map((s) => [
+      s.index,
+      opts.memMb > 0 ? opts.memMb : Math.max(opts.memFloorMb, adaptiveCeilingMb(totalEstimate > 0 ? s.estimate / totalEstimate : 1)),
+    ]),
+  );
   const ceilings = [...new Set(ceilingMb.values())].sort((a, b) => a - b);
   const ceilingNote =
-    opts.memMb > 0 ? `ceiling ${opts.memMb} MB per shard (${opts.memWhy})` : `ceiling ${ceilings.length === 1 ? ceilings[0] : `${ceilings[0]}-${ceilings[ceilings.length - 1]}`} MB per shard (adaptive)`;
+    opts.memMb > 0
+      ? `ceiling ${opts.memMb} MB per shard (--shard-mem, exact)`
+      : `ceiling ${ceilings.length === 1 ? ceilings[0] : `${ceilings[0]}-${ceilings[ceilings.length - 1]}`} MB per shard (adaptive${opts.memFloorMb > 0 ? `, floor ${opts.memFloorMb} MB from SCRML_HOOK_SHARD_MEM_MB` : ""})`;
 
   if (opts.plan) {
     for (const s of shards) {
@@ -803,6 +816,7 @@ async function main(): Promise<void> {
       const output: string[] = [];
       const failLines: string[] = [];
       let lastFile: string | null = null;
+      const unhandled: string[] = []; // banner candidates; real only if the shard exits non-zero (see UNHANDLED)
       let onAcquired: () => void = () => {};
       const onLine = (line: string) => {
         if (line === SLOT_MARKER) return onAcquired();
@@ -814,9 +828,7 @@ async function main(): Promise<void> {
           if (!opts.verbose) console.log(`[s${shard.index}] ${line}`);
           if (!stopReason.has(shard.index)) bail(shard.index);
         } else if (UNHANDLED.test(line)) {
-          failLines.push(`(error) ${line.replace(/^#\s*/, "")} in ${lastFile ?? "(no file header yet)"}`);
-          if (!opts.verbose) console.log(`[s${shard.index}] ${failLines[failLines.length - 1]}`);
-          if (!stopReason.has(shard.index)) bail(shard.index);
+          unhandled.push(`(error) ${line.replace(/^#\s*/, "")} in ${lastFile ?? "(no file header yet)"}`);
         }
       };
       const spawnOpts = { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, ...shard.env }, detached: true } as const;
@@ -887,6 +899,12 @@ async function main(): Promise<void> {
       killGroup(shard.index, "SIGKILL");
       const seconds = (Date.now() - tRun) / 1000;
       const counts = parseCounts(output);
+      if (exitCode !== 0) {
+        for (const u of unhandled) {
+          failLines.push(u);
+          if (!opts.verbose) console.log(`[s${shard.index}] ${u}`);
+        }
+      } else if (counts) counts.errors = 0; // exit 0: any " N errors" line was a test's own output
       const signalled = (proc.signalCode !== null && proc.signalCode !== undefined) || (timeoutBin !== null && (exitCode === 124 || exitCode === 137));
       const ours = stopReason.get(shard.index);
       let outcome: ShardResult["outcome"];
