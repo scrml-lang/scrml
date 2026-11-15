@@ -161,10 +161,6 @@ describe("3 — the named codes", () => {
     expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
     expect(c.length).toBeGreaterThan(0);
   });
-  test("a namespaced attribute after an unquoted value is not read as `in` / `is`: `<p if=@ok in:fade out:fly>`", () => {
-    const c = codes(prog(`<p if=@ok in:fade out:fly>x</p>`));
-    expect(c).not.toContain("E-ATTR-UNQUOTED-OPERATOR");
-  });
   test("one expression is legal: a trailing `;`, a `;` in a string, an arrow body", () => {
     expect(codes(prog(`<p title=\${ @last; }>x</p>`))).toEqual([]);
     expect(codes(prog(`<p title=\${ "a;b" }>x</p>`))).toEqual([]);
@@ -186,6 +182,41 @@ describe("3 — the named codes", () => {
   test("E-ATTR-UNQUOTED-OPERATOR: text after a value that cannot begin an attribute", () => {
     expect(codes(prog(`<p title=@last "y">t</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
     expect(codes(prog(`<button onclick=track("a") (track)>t</>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+  });
+  // r1 (#1865 F1) — §5.2: an unquoted value "continues … before … the keyword tests `is` / `instanceof` /
+  // `in`", and `and` / `or` are operators "in all expression positions (… attribute values …)" (§45.9).
+  // A word TOUCHING `-` and a name character is a hyphenated attribute name, never that operator.
+  test("a hyphenated attribute name led by a keyword word follows an unquoted value: it compiles and renders", async () => {
+    for (const n of [`in-view`, `is-active`, `or-x="1"`, `and-y`, `instanceof-z`]) {
+      expect(codes(prog(`<p title=@last ${n}>x</p>`))).toEqual([]);
+    }
+    await load(prog(`<p id="e" title=@last in-view is-active or-x="1">a</p>\n<button id="h" onclick=track("a") in-view>t</>`));
+    expect($("#e").getAttribute("title")).toBe("");
+    expect($("#e").hasAttribute("in-view")).toBe(true);
+    expect($("#e").hasAttribute("is-active")).toBe(true);
+    expect($("#e").getAttribute("or-x")).toBe("1");
+    expect($("#h").hasAttribute("in-view")).toBe(true);
+    click($("#h"));
+    expect($("#e").getAttribute("title")).toBe("a");
+  });
+  test("an exact keyword word after an unquoted value continues it (§5.2) and is refused once BY NAME, never E-PARSE-TRAILING", () => {
+    for (const w of [`in`, `is`, `instanceof`, `and`, `or`]) {
+      expect(codes(prog(`<p title=@last ${w}>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+      expect(codes(prog(`<button onclick=track("a") ${w}>x</button>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    }
+    expect(codes(prog(`<p title=@ok and class="z">x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    expect(codes(prog(`<p if=@ok and @ok>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    const e = errs(prog(`<p title=@last in>x</p>`))[0];
+    expect(e.message).toContain("`title=@last in`");
+    expect(e.message).toContain("`title=(…) in`");
+    // a handler's word-form operator WITH an operand is legal §45.9 the bootstrap refuses by name
+    expect(codes(prog(`<button onclick=@ok = @ok and @ok>x</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // the escape the message gives: a parenthesized value ends before the word, which is an attribute
+    expect(codes(prog(`<p title=(@last) in>x</p>`))).toEqual([]);
+  });
+  test("a leading-hyphen word after an unquoted value is the operator `-`: the named code alone, the value refused whole", () => {
+    expect(codes(prog(`<p title=@last -x>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    expect(codes(prog(`<p title=@last in -x>x</p>`))).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
   });
   test("the `:`-shorthand body after an unquoted value is not read into it", () => {
     expect(codes(prog(`<p title=@last : "hi">`))).toEqual([]);
