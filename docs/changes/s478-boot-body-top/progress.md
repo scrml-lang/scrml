@@ -21,8 +21,8 @@ Measurements: ~/.cache/scrml/review/s478-body-top/ (base.json, h2.json = (a)+(b)
   `<x/>`, implied-lift arm) read as markup: `<script>` / `<style>` → E-SCRIPT-001 / E-STYLE-001 on the element
   (§4.17 S462), any other markup refused by name (INTERIM, g-boot-logic-block-markup-statements-s478).
 
-Conformance h3 vs base: PASS 422→437 (+15), FAIL 142→118, UNSUPPORTED 665→674. Moves: FAIL→PASS 12,
-UNSUPPORTED→PASS 5, FAIL→UNSUPPORTED 15, PASS→FAIL 2, UNSUPPORTED→FAIL 1 (all three: C1 `;` — see below).
+Conformance h3 vs base: PASS 422→437 (+15), FAIL 142→118, UNSUPPORTED 665→674. Moves (review r1 re-measured; the
+first write-up said FAIL→PASS 12 / UNSUPPORTED→PASS 5 / FAIL→UNSUPPORTED 15): FAIL→PASS 17, FAIL→UNSUPPORTED 10, PASS→FAIL 2, UNSUPPORTED→FAIL 1 (all three: C1 `;` — see below).
 PASS→FAIL / UNSUPPORTED→FAIL explained: error/async-not-in-scrml, fn/async-decl-reject, loop/loop-006-neg —
 the bootstrap now reads the function / loop body that the E-PARSE-ITEM cascade used to hide, and that body's
 `return 1` / `return id` / `let a = i` lacks its `;` (§7.2.2 rule 1, cluster C1). Editing the cases was not done
@@ -64,3 +64,19 @@ Conformance vs 47d1250cb: PASS 422→437, FAIL 142→118, UNSUPPORTED 665→674.
 - `;`-only (C1): server-fn/{branch-declared-server-fn-routes-to-server (runtime), e-route-003-neg, e-route-004-neg}
   PASS once `;` is inserted (15 of the cluster in all).
 - Tests: slice-m4/nested-logic-s478.test.js (6).
+
+## Fix round 1 (review of #1876)
+- H1: analyze `resolveRun` → `runReturnSpans`: a `return` in a body-top run (bare, at the top of a body-top
+  `${ … }`, nested in `if` / loop bodies / `match` arms, not inside a `fn` / lambda) is
+  E-STMT-RETURN-OUTSIDE-FUNCTION (§34 row: "Also a `return` at the top of a `${ … }` logic block, or nested there
+  only in control flow that runs in place"). severity.scrml regenerated. Handler blocks / effect bodies keep
+  `return` (§5.2.3: an inline handler block has "the same statement grammar as a function body"; §6.7.4 effect
+  teardown `return () => …`) — no change, no gap.
+- LOW-2: `"a"; @n = 5;` — `"a";` (a code string by §40.8's own-line test) is the literal-only statement, its
+  E-UNQUOTED-DISPLAY-TEXT ends at its `;`, `@n = 5;` is code.
+- LOW-1: `Don't panic.` — a token running past the failing line ends the display run at the line and the body is
+  re-read from the next line (no E-PARSE-UNCLOSED cascade, §4.18.7).
+- LOW-4/5/6/8 filed: g-boot-body-top-regex-unicode-as-prose-s478, g-boot-body-top-template-span-s478,
+  g-boot-body-top-tilde-exemption-s478, g-boot-run-before-dom-insertion-s478.
+- `;` migrated in error/async-not-in-scrml, fn/async-decl-reject, loop/loop-006-neg (impl#1 `bun conformance/run.ts`
+  result lines identical before/after).

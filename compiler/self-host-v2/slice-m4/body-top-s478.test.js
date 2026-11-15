@@ -159,3 +159,54 @@ describe("§40.8 (b) / §4.18.3 — a standalone `\"…\"` is a display-text lit
     expect(codes(run(P(`"x".length;\n<p>x</p>`)))).toEqual(["E-STMT-NO-EFFECT"]);
   });
 });
+
+// s478 r1 (H1) — §34 E-STMT-RETURN-OUTSIDE-FUNCTION: "Also a `return` at the top of a `${ … }`
+// logic block, or nested there only in control flow that runs in place (`if` / loop bodies,
+// `match` arms — bare or braced — and a decl-position `match`)". RED before r1: each compiled
+// clean and the `return` silently skipped the statements after it (`rt.run(scope$, () => { return null; … })`).
+describe("§34 — a `return` in body-top statements is E-STMT-RETURN-OUTSIDE-FUNCTION", () => {
+  const RET = "E-STMT-RETURN-OUTSIDE-FUNCTION";
+  const retAt = (src) => { const r = run(src); expect(codes(r)).toEqual([RET]); const d = errs(r)[0]; return src.slice(d.span.start, d.span.start + 6); };
+  test("bare at the body top", () => {
+    expect(retAt(P(`let <c:int=0/>\nreturn;\n@c = 5;\n<p>\${@c}</p>`))).toBe("return");
+  });
+  test("at the top of a body-top `${ … }`", () => {
+    expect(retAt(P(`let <c:int=0/>\n\${ return; }\n@c = 5;\n<p>\${@c}</p>`))).toBe("return");
+  });
+  test("nested in an `if` and a loop body that run in place", () => {
+    expect(retAt(P(`let <c:int=0/>\nif (@c == 0) { return; }\n@c = 5;\n<p>\${@c}</p>`))).toBe("return");
+    expect(retAt(P(`let <c:int=0/>\nfor (const i of [1, 2]) { return; }\n<p>\${@c}</p>`))).toBe("return");
+  });
+  test("in a `match` arm, braced and bare", () => {
+    const T = `type S:enum = { A, B }\nlet <s:S=(S.A)/>\nlet <c:int=0/>\n`;
+    expect(retAt(P(T + `match @s { .A :> { return; }, .B :> { @c = 1; } }\n<p>\${@c}</p>`))).toBe("return");
+    expect(retAt(P(T + `match @s { .A :> return,\n .B :> @c = 1 }\n<p>\${@c}</p>`))).toBe("return");
+  });
+  test("a `return` inside a function declared there is the function's (clean)", () => {
+    expect(codes(run(P(`let <c:int=0/>\nfunction f() -> int { if (@c == 0) { return 1; } return 2; }\n@c = f();\n<p>\${@c}</p>`)))).toEqual([]);
+  });
+  test("an inline handler block keeps `return` (§5.2.3: \"the same statement grammar as a function body\")", () => {
+    expect(codes(run(P(`let <c:int=0/>\n<button onclick={ if (@c == 0) { return; } @c = 1; }>x</button>`)))).toEqual([]);
+  });
+});
+
+// s478 r1 (LOW-1 / LOW-2) — §4.18.7: "One diagnostic covers each maximal run of consecutive
+// statements that are not valid code, and the statements it covers raise no other diagnostic".
+describe("§4.18.7 / §40.8 — a display-text run ends where its statement does", () => {
+  test("an apostrophe in prose (`Don't panic.`) is one report on its line; the body after it is read", () => {
+    const src = P(`let <n:int=0/>\nDon't panic.\n@n = 5;\n<p>\${@n}</p>`);
+    const r = run(src);
+    expect(codes(r)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    const d = errs(r)[0];
+    expect(src.slice(d.span.start, d.span.end)).toBe("Don't panic.");
+  });
+  test("`\"a\"; @n = 5;` on one line: `\"a\";` is the literal-only statement; `@n = 5;` is code", () => {
+    const src = P(`let <n:int=0/>\n"a"; @n = 5;\n<p>\${@n}</p>`);
+    const r = run(src);
+    expect(codes(r)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    const d = errs(r)[0];
+    expect(src.slice(d.span.start, d.span.end)).toBe(`"a";`);
+    // the statement after it is checked as code (an undeclared cell is §6.1's, not display text)
+    expect(codes(run(P(`"a"; @nope = 5;\n<p>x</p>`)))).toEqual(["E-UNQUOTED-DISPLAY-TEXT", "E-STATE-UNDECLARED"]);
+  });
+});
