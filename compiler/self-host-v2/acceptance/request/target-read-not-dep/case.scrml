@@ -2,7 +2,6 @@
 <program>
     let <page:int=1/>
     let <items:int=0/>
-    let <runs:int=0/>
     fn load(p: int, prev: int) -> int { return prev + p; }
     <request id="items">${ @items = load(@page, @items); }</request>
     <main>

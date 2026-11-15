@@ -419,7 +419,7 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
       expect([w, d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("`" + w + "` is written twice"))]).toEqual([w, true]);
     }
     // negative: validator CALLS with different arguments are a conjunction, each read — not a repeat
-    expect(codes(P(`    let <x:string="" length(>2) length(<9)/>`, `        <p>x</p>`))).toEqual([]);
+    expect(codes(P(`    let <_x:string="" length(>2) length(<9)/>`, `        <p>x</p>`))).toEqual([]);
     // `single single` on an engine cell
     const eng = `<program>\n    type P:enum = { A, B }\n    <pt:P=.A single single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main><*pt/></main>\n</program>\n`;
     expect(diagsOf(eng).some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("`single` is written twice"))).toBe(true);
@@ -441,7 +441,7 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
 
   test("a `persist=\"local\"` cell as a `reset-on=` trigger (§6.8.4 rule 7 → O-061-5); a \"session\" trigger is accepted", () => {
     one(`    let <q:string="" persist="local" key="r7"/>\n    let <page:int=1 reset-on=[@q]/>`, "O-061-5");
-    expect(codes(P(`    let <q:string="" persist="session" key="r7"/>\n    let <page:int=1 reset-on=[@q]/>`, `        <p>x</p>`))).toEqual([]);
+    expect(codes(P(`    let <q:string="" persist="session" key="r7"/>\n    let <_page:int=1 reset-on=[@q]/>`, `        <p>x</p>`))).toEqual([]);
   });
 
   test("`persist=` on a user declaration's own opener and on its field (§6.14.1 r3, O-061-9)", () => {

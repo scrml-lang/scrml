@@ -744,7 +744,7 @@ Engines have a temporal vocabulary for "fire a transition after N ms." Two scope
 
 **`<onTimeout after=DURATION to=.Variant/>`** — per-state-child timer. Self-closing. Lives inside a state-child body; fires after the duration if that state is still current. The `to=` target is validated against the state-child's `rule=` (must be in set, or `rule=*`).
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TRAILING] — the bootstrap has no <onTimeout> and no duration literals (5s) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <onTimeout> yet -->
 ```scrml
 <program>
 
@@ -1626,7 +1626,7 @@ Notes:
 
 Derived reactive values are locked declarations whose initializer reads cells. Read them at `@name`. For debouncing, `debounced=DURATION` is an **attribute in the cell's opener** (§6.13); `throttled=` is the sibling.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TRAILING] — the bootstrap has no duration literals (debounced=300ms) and no .reduce(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no .reduce(…) yet -->
 ```scrml
 <program>
 

@@ -38,14 +38,14 @@ const js = (src) => {
 
 describe("`(not to T)` on a program cell compiles (red on base: E-PARSE-TYPE + E-PARSE-TAG)", () => {
   const OK = {
-    letInt: `let <m:(not to int)=not/>`,
-    lockedInt: `<m:(not to int)=not/>`,
-    lockedValue: `<m:(not to int)=5/>`,
-    users: `type User:struct = { id: int }\n<users:(not to User[])=not/>`,
-    struct: `type S:struct = { id: int }\nlet <s:(not to S)=not/>`,
-    spaces: `let <m:(  not   to   int  )=not/>`,
-    newline: `let <m:(not\n    to int)=not/>`,
-    seeded: `let <a:int=1/>\nlet <m:(not to int)=(@a + 1)/>`,
+    letInt: `let <_m:(not to int)=not/>`,
+    lockedInt: `<_m:(not to int)=not/>`,
+    lockedValue: `<_m:(not to int)=5/>`,
+    users: `type User:struct = { id: int }\n<_users:(not to User[])=not/>`,
+    struct: `type S:struct = { id: int }\nlet <_s:(not to S)=not/>`,
+    spaces: `let <_m:(  not   to   int  )=not/>`,
+    newline: `let <_m:(not\n    to int)=not/>`,
+    seeded: `let <a:int=1/>\nlet <_m:(not to int)=(@a + 1)/>`,
   };
   for (const [name, decl] of Object.entries(OK)) test(name, () => expect(codes(P(decl))).toEqual([]));
 });
@@ -180,7 +180,7 @@ function cnt(id: int) -> int {
   const r = ?{\`SELECT count(*) AS n FROM t WHERE id = \${id}\`}.get() !{ _ :> { return 0; } };
   return 1;
 }
-let <m:(not to int)=(cnt(@u) !{ _ :> not })/>
+let <_m:(not to int)=(cnt(@u) !{ _ :> not })/>
 <main><p>x</p></main>
 </program>
 `;
@@ -193,7 +193,7 @@ let <m:(not to int)=(cnt(@u) !{ _ :> not })/>
     expect(codes(SRC.replace("(not to int)", "int | not"))).toEqual(["E-VALUE-SERVER-CALL"]);
   });
   test("a DERIVED `(not to T)` cell that waits keeps E-VALUE-SERVER-CALL (§13.9.1: a derived cell cannot be a pending cell; ruling S475 item 7)", () => {
-    expect(codes(SRC.replace("let <m:", "<m:"))).toEqual([U, "E-VALUE-SERVER-CALL"]);
+    expect(codes(SRC.replace("let <_m:", "<_m:"))).toEqual([U, "E-VALUE-SERVER-CALL"]);
   });
 });
 

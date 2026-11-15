@@ -43,7 +43,7 @@ const EVERY_FACT = {
     // s444: a removal, an element-field write, a filter shape (lambda), a host call, a bind, a Star
     "    type Row:struct = { let qty: int }",
     "    <rows:Row[free, append, remove]=([{ qty: 1 }])/>",
-    "    let <t:number=0/>",
+    "    let <_t:number=0/>",
     "    let <who:string=\"\"/>",
     "    <card title:string=\"T\"/>",
     "    renders <b>${title}</b>",
@@ -51,7 +51,7 @@ const EVERY_FACT = {
     "        @rows.pop();",
     "        @rows[0].qty = 2;",
     "        @rows = @rows.filter(r => r.qty > 0);",
-    "        @t = Date.now();",
+    "        @_t = Date.now();",
     "    }",
     "    function bump(k: int) -> int {",
     "        let a = k + 1;",

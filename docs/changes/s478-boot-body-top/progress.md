@@ -88,3 +88,14 @@ Conformance vs 47d1250cb: PASS 422→437, FAIL 142→118, UNSUPPORTED 665→674.
   re-bound to a same-named file-scope name. Gap g-boot-nested-logic-statements-s478 text corrected.
 - LOW-7: `${ type … }` is a declaration only in a type-declaration shape (`type Name =` / `:` / `<`); a binding
   named `type` interpolates again.
+
+## Owner rulings S478 (body-top owner questions) — on s478-boot-body-top
+- Ruling 1: the INTERIM own-line display-literal test is kept as-is.
+- Ruling 3 (cases, not compiler): declared-prose-renders + ctrl-012-default-logic-prose-neg `dom` re-pinned to §4.18.5
+  (no formatting whitespace between display literals) — impl#1 PASS→XFAIL on both, carried gap
+  g-impl1-body-top-display-literal-formatting-whitespace-s478 (signatures recorded); both ctrl-012 `if (1)` cases →
+  `if (true)` (keeps each case's point; impl#1 still PASS); forms/validator-applies-* reads moved into `<p>${…}</p>`
+  (impl#1 still PASS). Bootstrap: all PASS except forms/validator-applies-typed-clean, now twin-extra-error
+  E-VALIDATOR-DEAD (validators on cells no form input binds) — a separate question, not the no-effect one.
+- Ruling 4: `Counter;` at a bare-run body top is E-STMT-NO-EFFECT (message names the declared forms) + E-SCOPE-001;
+  elsewhere withoutRefusedNoEffect still drops it (g-boot-body-top-lone-name-no-effect-s478 resolved).

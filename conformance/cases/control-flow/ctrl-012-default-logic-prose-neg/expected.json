@@ -15,6 +15,14 @@
       "E-",
       "W-"
     ],
-    "dom": "<p>Welcome to the dashboard.</p> if you want the archive, ask an admin. Items for sale (all of them) ship on Friday. <h1>Hi</h1>"
+    "dom": "<p>Welcome to the dashboard.</p>if you want the archive, ask an admin.Items for sale (all of them) ship on Friday.<h1>Hi</h1>"
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-body-top-display-literal-formatting-whitespace-s478",
+      "fails": {
+        "runtime": "sha256:0f5da76cf9409306"
+      }
+    }
   }
 }

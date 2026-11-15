@@ -132,7 +132,7 @@ function load() {
 
 **Tier 2 — engines.** An engine is a state machine over an enum. It is a declaration marked `single`, and its name is its variable (`<door:Door=.Closed single>` owns `@door`). Each state is a child element, and `rule=` lists the states it may move to:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TRAILING] — the bootstrap has no <onTimeout> and no duration literals (1s) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <onTimeout> yet -->
 <!-- snippet: docs/readme-snippets/nerdme/engine.scrml -->
 ```scrml
 // NERDME.md "Engines, matches & iteration" (Tier 2) — ruled; spec-ahead on the bootstrap (<onTimeout>).

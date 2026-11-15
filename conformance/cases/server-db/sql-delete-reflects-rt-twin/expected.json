@@ -43,7 +43,7 @@
       }
     ],
     "state": {
-      "remaining": 2
+      "_remaining": 2
     }
   },
   "xfail": {

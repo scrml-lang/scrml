@@ -34,8 +34,8 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 | status | rows |
 |---|---:|
 | BUILT | 321 |
-| PARTIAL | 155 |
-| REFUSED-LOUD | 305 |
+| PARTIAL | 157 |
+| REFUSED-LOUD | 303 |
 | DEFERRED-RULED | 59 |
 | N/A | 221 |
 | SILENT-ACCEPT | 15 |
@@ -231,7 +231,7 @@ SILENT rows carrying a gap id: 46 of 46.
 | §6.10.6 | `server` modifier | REFUSED-LOUD | `s6-8/server` | — | (P1) |
 | §6.11 | Validity surface stub | N/A | stub that points to §55 (another part); check.scrml C14 exists | — | (P1) |
 | §6.12.1 | `protect=` on `<db>` (security) | REFUSED-LOUD | `s6-8/protect` gives E-BOOTSTRAP-UNSUPPORTED "a confidentiality control is refused, never ignored" | — | (P1) Correct fail-closed posture |
-| §6.13 | `debounced=` / `throttled=` | REFUSED-LOUD | `debounced=300` and `="300ms"` give E-BOOTSTRAP-UNSUPPORTED (`s6-8/debounced2`, `debounced3`). The canonical literal `debounced=300ms` gives generic E-PARSE-TRAILING (`s6-8/debounced`). | — | (P1) E-DEBOUNCED-WITH-DERIVED, E-REACTIVITY-ATTR-CONFLICT moot |
+| §6.13 | `debounced=` / `throttled=` | PARTIAL | S478 (s478-boot-durations): on a program cell BUILT — literal DURATION folded to ms (analyze `durationOf`, E-SYNTAX-DURATION), E-REACTIVITY-ATTR-CONFLICT, E-DEBOUNCED-WITH-SERVER, E-DEBOUNCED-WITH-DERIVED (`timingPass`); runtime debounce + leading/trailing throttle (`runtime.js` `timed`); m4/durations-s478.test.js; conformance reactive/debounce-*, throttle-*, reactivity-attr-conflict | g-boot-timing-compositions-s478 | (P1) Refused by name: a computed DURATION, a user-declaration field, and the persist= / db / pending / request / reset-on / reset(@x) compositions (server-origin bypass, cancel, flush-on-leave, §6.8.2) |
 | §6.14.1 / 6.14.2 | `persist=` | BUILT | `rt.persisted` (`s6-8/persist`); check.scrml C17; slice-m4/persist.test.js | — | (P1) |
 | §6.14.3 | Privacy errors | PARTIAL | E-PERSIST-WITH-SERVER is in analyze.scrml. E-PERSIST-REVEALED and E-PERSIST-LIN have 0 hits, but they are unreachable: `reveal`/§14.8.9 and `lin` cells do not exist on the bootstrap. | — | (P1) UNVERIFIED that they are unreachable in every path |
 | §6.14.4 | `prepaint` / `hold=` | REFUSED-LOUD | `s6-8/prepaint`, `s6-8/hold` | — | (P1) |
@@ -1167,7 +1167,7 @@ SILENT rows carrying a gap id: 46 of 46.
 | §51.0.N | `history` on composite state-children | REFUSED-LOUD | `p51-history.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 carries it. Refusal landed 086f8f209; NO GAP for the feature. |
 | §51.0.O | `internal:rule=` | REFUSED-LOUD | `p51-history.scrml` (second error) | g-boot-o5-engine-features-unbuilt-s473 | (P5) as 51.0.N |
 | §51.0.Q | hierarchy / nested engines / parent-rule cascade | REFUSED-LOUD | `p51-nested.scrml` → E-BOOTSTRAP-UNSUPPORTED *"a declaration inside markup is not in bootstrap slice M2"* | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5: a nested engine is an enum-valued child field. Child-field graphs are BUILT (`<card>`'s `status`); a declaration in a state-child body and the cascade are not. NO GAP. |
-| §51.0.R | `<onIdle>` | REFUSED-LOUD | `p51-onidle.scrml` → E-BOOTSTRAP-UNSUPPORTED | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 carries it. NO GAP. |
+| §51.0.R | `<onIdle>` | PARTIAL | S478 (s478-boot-durations): `ADeclChild.Idle` at a value's root — E-IDLE-DUPLICATE, E-IDLE-INVALID-VARIANT, E-IDLE-MISPLACED (analyze `graphOf` / `idleWatchOf`, resolveElem); runtime watchdog `idleWatch` (armed at construction, re-armed on each committed transition, fires through the `rule=` edge check); m4/durations-s478.test.js; conformance engine/onidle-* | g-boot-timing-compositions-s478, g-boot-idle-unreachable-target-s478 | (P5) a computed `after=${…}<unit>` (§51.12.3.1) and `<onIdle>` on a derived value are refused by name; an `after=` above 2147483647 ms is refused by name; the handled-message reset (§51.0.S) is moot (message dispatch is not built) |
 | §51.0.S | `accepts=` + `(state × message)` arms | REFUSED-LOUD | `p51-accepts.scrml` → E-BOOTSTRAP-UNSUPPORTED *"`accepts` in a declaration opener"* | g-boot-o5-engine-features-unbuilt-s473 | (P5) O5 (2ii) KEEPS it. NO GAP. |
 | §51.1 | legacy overview | N/A | prose | — | (P5) |
 | §51.2 | type-level `transitions {}` block | N/A | `p51-transitions.scrml` → E-PARSE-TYPE ×4 + E-PARSE-ITEM | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P5) Generic parse codes. Whether §66 keeps the type-level form is unruled: Questionable Q3. **S473 D8: type-level `transitions {}` dropped (field `rule=` supersedes it)** (ruling:user-voice-scrml.md S473 "your recs on all"). · S473 D28: named refusal (refusals.scrml; slice-m4/named-refusals-s473.test.js) |

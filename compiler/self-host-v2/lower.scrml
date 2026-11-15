@@ -30,7 +30,7 @@
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist, Timing,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
@@ -816,6 +816,7 @@ ${
     fn lowerValue(c: LC, v: AAttrValue) -> Expr | not {
         return match v {
             .Quoted(v: s) :> litStr(s)
+            .Dur(text: s) :> litStr(s)
             .Bare(e: e) :> lowerExpr(c, e)
             .Paren(e: e) :> lowerExpr(c, e)
             .NoValue :> not
@@ -2106,7 +2107,7 @@ ${
             let init: Expr = Expr.Lit(Literal.Absent)
             if (j == 0 || j == 3) init = Expr.Lit(Literal.Bool(false))
             out = out.concat([{ sym: s, ty: tys[j], init: init, mode: FieldMode.Let, role: FieldRole.Child,
-                                grants: { replace: true, edits: [] }, graph: not, exported: false, wcap: rq.wcaps[j], vals: [], persist: not }])
+                                grants: { replace: true, edits: [] }, graph: not, exported: false, wcap: rq.wcaps[j], vals: [], persist: not, timing: not }])
             j = j + 1
         }
         return out
@@ -2312,6 +2313,7 @@ ${
     fn quotedText(v: AAttrValue) -> string {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> ""
             .Bare(e: e) :> ""
             .Paren(e: e) :> ""
@@ -2332,6 +2334,7 @@ ${
             .Paren(e: e) :> block(handlerStmt(c, e))
             .Braced(b: b) :> bracedHandlerBlock(c, b)
             .Quoted(v: s) :> block([])
+            .Dur(text: s) :> block([])
             .NoValue :> block([])
         }
         return cpsBody(b0, [])     // s454 (U1b): a handler that suspends — explicit continuations
@@ -2467,7 +2470,7 @@ ${
         return {
             sym: f.sym, ty: f.ty, init: init, mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
-            persist: persistOf(c.t, f.sym),
+            persist: persistOf(c.t, f.sym), timing: timingOf(c.t, f.sym),
         }
     }
 
@@ -2475,6 +2478,14 @@ ${
     fn persistOf(t: Tables, s: Sym) -> Persist | not {
         for (const p of t.persists) {
             if (p.sym.id == s.id) return p.persist
+        }
+        return not
+    }
+
+    // s478 — the field's accepted `debounced=` / `throttled=` (§6.13; analyze timingPass).
+    fn timingOf(t: Tables, s: Sym) -> Timing | not {
+        for (const x of t.timings) {
+            if (x.sym.id == s.id) return x.timing
         }
         return not
     }
@@ -4153,6 +4164,7 @@ ${
                 const v: AAttrValue = a.value
                 return match v {
                     .Quoted(v: s) :> s
+                    .Dur(text: s) :> s
                     .NoValue :> ""
                     .Bare(e: x) :> ""
                     .Paren(e: x) :> ""

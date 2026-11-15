@@ -61,9 +61,10 @@ const with_ = (decls) => `${W}\n${decls}`;
 describe("S449 item 3 — every position class: a writer is an error at the SOURCE; its write-free twin is clean", () => {
   // [label, src(writer?) , the position's name in the message]
   const CASES = [
-    ["a program cell's `let` initializer", (w) => P(with_(`    let <b:int=(${w}(1))/>`), ""), "the initializer of `@b`"],
-    ["a derived formula (a locked cell reading cells)", (w) => P(with_(`    <d:int=(@a + ${w}(1))/>`), ""), "the formula of derived `@d`"],
-    ["a locked initializer calling a function (a call may read cells: a formula, §66.9)", (w) => P(with_(`    <k:int=(${w}(1))/>`), ""), "the formula of derived `@k`"],
+    // s478: the program renders the cell (it reads every cell it declares, §34 E-DG-002)
+    ["a program cell's `let` initializer", (w) => P(with_(`    let <b:int=(${w}(1))/>`), `        <p>\${@b}</p>`), "the initializer of `@b`"],
+    ["a derived formula (a locked cell reading cells)", (w) => P(with_(`    <d:int=(@a + ${w}(1))/>`), `        <p>\${@d}</p>`), "the formula of derived `@d`"],
+    ["a locked initializer calling a function (a call may read cells: a formula, §66.9)", (w) => P(with_(`    <k:int=(${w}(1))/>`), `        <p>\${@k}</p>`), "the formula of derived `@k`"],
     ["a user declaration's attribute-field default (locked, calling a function: a formula)", (w) => P(with_(`    <card title:string=(${w}s())/>\n    renders <b>\${title}</b>`), `        <card/>`), "the formula of derived `@card.title`"],
     ["a user declaration's `let` field (a seed)", (w) => P(with_(`    <box:struct> let <k:int=(${w}(1))/> </>\n    renders <div>\${k}</div>`), ""), "the initializer of `@box.k`"],
     ["a user declaration's child field", (w) => P(with_(`    <panel title:string>\n        let <page:int=(${w}(1))/>\n    </>\n    renders <div>\${page}</div>`), `        <panel title="p"/>`), "the initializer of `@panel.page`"],

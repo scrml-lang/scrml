@@ -24,6 +24,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -42,7 +43,8 @@ const $ = (sel) => document.querySelector(sel);
 let k = 0;
 const load = (src) => loadProgram(clean(src).core, "s473xl-" + k++, []);
 
-const prog = (decls, body) => `<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): ERR's `@n` is declared only when the case names it (errProg writes and renders it)
+const prog = (decls, body) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`, ["    let <n:int=0/>"]);
 const ZS = `    <zs:int[]=([3, 4, 5])/>`;
 const fnProg = (b) => prog(`${ZS}\n    function f(ys: int[]) -> int {\n${b}\n    }`, `        <p id="o">\${f(@zs)}</p>`);
 const fnCodes = (b) => codes(fnProg(b));

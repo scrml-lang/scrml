@@ -2,5 +2,5 @@
 ${
     <age pattern(/^[0-9]+$/)> = 25
 }
-${ @age }
+<p>${ @age }</p>
 </program>

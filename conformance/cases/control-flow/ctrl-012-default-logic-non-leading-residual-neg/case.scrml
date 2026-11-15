@@ -1,6 +1,6 @@
 <program>
 <p>Welcome to the dashboard.</p>
-if (1) { }
+if (true) { }
 <page>
   <h1>Hi</h1>
 </page>
