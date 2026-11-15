@@ -148,6 +148,7 @@ function heldTransport(srv) {
   globalThis.fetch = (p, init) => new Promise((resolve, reject) => {
     const h = { signal: init.signal ?? null, aborted: false, body: init.body };
     h.go = () => b(p, init).then(resolve, reject);
+    h.fail = () => reject(new TypeError("network down"));   // a transport failure (the call's `fail`)
     if (h.signal) {
       h.signal.addEventListener("abort", () => {
         h.aborted = true;
@@ -268,17 +269,24 @@ describe("item 2 — `reset(@x)` then a write: the later write wins (§13.9.4 ru
 });
 
 // ---------------------------------------------------------------------------------------------
-// Item 2, fix round 1 (S239 review of c277009c9, F1 / F2) — a reset dated OLDER than the newest
-// start is the older start under rule 1 (§13.9.4 rule 3, ⚑ PA reading's companion): it neither
-// cancels the newer run nor lands over it, and start stamps never decrease.
-// Scenarios are the reviewer's probes P1 / P2 (~/.cache/scrml/review/s478-1852/p/item2.test.js).
-// Red on c277009c9: P2 settled "d" (b's older write over the dependency's newer run, nothing in
-// flight); P1 settled "a" (the reset's load landed over b's newer write via the settle bypass).
+// Item 2, fix round 2 (PA decision on #1852 round 2) — the run a reset triggers starts WHEN THE
+// RESET EXECUTES ("the reset's load starts at the reset", RULED S478): a fresh start stamp, so a
+// reset always starts a new run, the most recent start — it supersedes every earlier load and
+// write (S475 rules: a READ transport is aborted, a WRITE run completes and is discarded) and is
+// never skipped. An author write later in the reset's own continuation is dated at the reset and
+// wins the tie (ruling 2). Start stamps never decrease (§13.9.4 rule 3, ⚑ PA reading).
+// Round 1 dated a continuation's reset at its wait and SKIPPED it when a newer start existed —
+// red on c890b7260: P1 "b", N5 "b" (server "b+", no reload), N3 stuck `not`, N4 no WRITE call.
+// Scenarios are the reviewer's probes (~/.cache/scrml/review/s478-1852/p/r1-*.test.js).
 // ---------------------------------------------------------------------------------------------
 const ROWS4 = { users: [{ id: 1, name: "a" }, { id: 2, name: "b" }, { id: 3, name: "c" }, { id: 4, name: "d" }] };
 const APPN = (btns) => `<program db="./app.db">
     type User:struct = { id: int, name: string }
     let <userId:int=1/>
+    function save(id: int) -> int {
+        ${SQ}\`UPDATE users SET name = name || '+' WHERE id = \${id}\`}.run() !{ _ :> { return 0; } };
+        return 1;
+    }
     function loadName(id: int) -> string {
         const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
         return u.name;
@@ -291,16 +299,7 @@ ${Object.entries(btns).map(([id, h]) => `        <button id="${id}" onclick={ ${
     </main>
 </program>
 `;
-async function mountedN(btns) {
-  const r = compile(APPN(btns));
-  expect(check(r.core)).toEqual([]);
-  const { srv } = await serve(r.core, await realDb(DDL, ROWS4));
-  const held = heldTransport(srv);
-  const { rt } = await loadProgram(r.core, "s478-r1-" + k++);
-  await settle(5);
-  await held[0].go();
-  await settle();
-  expect(shown()).toBe("a");
+function sampler(rt, held) {
   // the pending cell's supersede record (runtime Cell.pend: its { load, wrote } start stamps)
   const prog = instancesOf(rt, "program")[0];
   const cell = prog.fields[prog.decl.fields.indexOf("who")];
@@ -309,7 +308,19 @@ async function mountedN(btns) {
   sample();
   const tap = async (id) => { click(document.querySelector("#" + id)); await settle(5); sample(); };
   const release = async (i) => { await held[i].go(); await settle(); sample(); };
-  return { rt, held, tap, release, stamps };
+  return { tap, release, stamps };
+}
+async function mountedN(btns) {
+  const r = compile(APPN(btns));
+  expect(check(r.core)).toEqual([]);
+  const { srv } = await serve(r.core, await realDb(DDL, ROWS4));
+  const held = heldTransport(srv);
+  const { rt } = await loadProgram(r.core, "s478-r2-" + k++);
+  await settle(5);
+  await held[0].go();
+  await settle();
+  expect(shown()).toBe("a");
+  return { rt, held, ...sampler(rt, held) };
 }
 function expectMonotonic(stamps) {
   for (let i = 1; i < stamps.length; i++) {
@@ -318,30 +329,29 @@ function expectMonotonic(stamps) {
   }
 }
 
-describe("item 2 r1 — a reset dated older than the newest start is superseded (F1 / F2)", () => {
-  test("P2 (F1): a's continuation resets after a newer dependency run started — that run wins, not b's older write (red on c277009c9: \"d\")", async () => {
+describe("item 2 r2 — a reset's run starts when the reset executes (never skipped)", () => {
+  test("P2: a's continuation resets after a dependency run started — the reset is the newest start; b's older write is discarded", async () => {
     const { rt, held, tap, release, stamps } = await mountedN({
       a: `const n = loadName(3) !{ _ :> "?" }; reset(@who);`,
       b: `@who = loadName(4) !{ _ :> not };`,
       dep: `@userId = 2;`,
     });
     await tap("a");                                  // held[1]: a's wait
-    await tap("b");                                  // held[2]: b's wait (newer)
-    await tap("dep");                                // held[3]: the dependency's run (newest)
+    await tap("b");                                  // held[2]: b's wait
+    await tap("dep");                                // held[3]: the dependency's run
     expect(held.length).toBe(4);
-    await release(1);                                // a's continuation: its reset is dated at a's wait — older
-    expect(held.length).toBe(4);                     // not issued: no second load
-    expect(held[3].aborted).toBe(false);             // the newer dependency run is not cancelled
-    await release(2);                                // b's older write lands: discarded
+    await release(1);                                // a's continuation: its reset starts now (held[4])
+    expect(held.length).toBe(5);
+    expect(held[3].aborted).toBe(true);              // the older READ run is superseded
+    await release(2);                                // b's write started before the reset: discarded
     expect(cells(rt).who).toBe("a");
-    await release(3);                                // the dependency run lands
-    expect(cells(rt).who).toBe("b");                 // current against @userId = 2
+    await release(4);                                // the reset's load (against @userId = 2)
+    expect(cells(rt).who).toBe("b");
     expect(shown()).toBe("b");
-    expect(held.every((h) => !h.aborted)).toBe(true);
     expectMonotonic(stamps);
   });
 
-  test("P1 (F2): b's newer write lands, then a's continuation resets and writes — b's write stands (red on c277009c9: \"a\")", async () => {
+  test("P1: b's write lands, then a's continuation resets and writes — a's write after its own reset wins (ruling 2; red on c890b7260: \"b\")", async () => {
     const { rt, held, tap, release, stamps } = await mountedN({
       a: `const n = loadName(3) !{ _ :> "?" }; reset(@who); @who = n;`,
       b: `@who = loadName(2) !{ _ :> not };`,
@@ -350,11 +360,12 @@ describe("item 2 r1 — a reset dated older than the newest start is superseded 
     await tap("b");                                  // held[2]: b's wait (newer)
     await release(2);                                // b's write lands
     expect(cells(rt).who).toBe("b");
-    await release(1);                                // a's continuation: its reset and its write are older
-    expect(held.length).toBe(3);                     // the reset is not issued
-    expect(cells(rt).who).toBe("b");
+    await release(1);                                // a's continuation: reset (held[3]), then its write
+    expect(held.length).toBe(4);                     // the reset IS issued …
+    expect(held[3].aborted).toBe(true);              // … and the write after it in a's continuation supersedes it
+    expect(cells(rt).who).toBe("c");
     await settle();
-    expect(shown()).toBe("b");
+    expect(shown()).toBe("c");
     expectMonotonic(stamps);
   });
 
@@ -366,18 +377,120 @@ describe("item 2 r1 — a reset dated older than the newest start is superseded 
       dep: `@userId = 2;`,
     });
     await tap("a");                                  // held[1]: a's wait
-    await tap("rs");                                 // held[2]: a sync reset — the newest start
+    await tap("rs");                                 // held[2]: a sync reset
     await tap("dep");                                // held[3]: the dependency run supersedes it
     await tap("w");                                  // a sync write supersedes the dependency run
     expect(held.length).toBe(4);
     expect(cells(rt).who).toBe("z");
-    await release(1);                                // a's older reset + write: superseded, not issued
-    expect(held.length).toBe(4);
-    expect(cells(rt).who).toBe("z");
-    await tap("rs");                                 // held[4]: a newer reset re-runs the load
+    await release(1);                                // a's reset starts now (held[4]); a's write after it wins
     expect(held.length).toBe(5);
-    await release(4);
+    expect(held[4].aborted).toBe(true);
+    expect(cells(rt).who).toBe("c");
+    await tap("rs");                                 // held[5]: a newer reset re-runs the load
+    expect(held.length).toBe(6);
+    await release(5);
     expect(cells(rt).who).toBe("b");
+    expectMonotonic(stamps);
+  });
+
+  test("a reset after an await always issues a load, even with a newer load and a newer write in between", async () => {
+    const { rt, held, tap, release, stamps } = await mountedN({
+      a: `const n = loadName(3) !{ _ :> "?" }; reset(@who);`,
+      w: `@who = "z";`,
+      dep: `@userId = 2;`,
+    });
+    await tap("a");                                  // held[1]: a's wait
+    await tap("dep");                                // held[2]: a newer dependency run
+    await tap("w");                                  // a newer write lands (supersedes held[2])
+    expect(cells(rt).who).toBe("z");
+    await release(1);                                // a's continuation resets: a load is issued
+    expect(held.length).toBe(4);
+    expect(held[3].aborted).toBe(false);
+    await release(3);
+    expect(cells(rt).who).toBe("b");                 // the reload's value, current against @userId = 2
+    expectMonotonic(stamps);
+  });
+
+  test("N5 save-then-refresh: `save(2); reset(@who)` with a dependency load released before the save commits — the reset reloads \"b+\" (red on c890b7260: \"b\", no reload)", async () => {
+    const { rt, held, tap, release, stamps } = await mountedN({
+      a: `const ok = save(2) !{ _ :> 0 }; reset(@who);`,
+      dep: `@userId = 2;`,
+    });
+    await tap("a");                                  // held[1]: the save
+    await tap("dep");                                // held[2]: the dependency's load
+    await release(2);                                // the load reads row 2 before the save commits
+    expect(cells(rt).who).toBe("b");
+    await release(1);                                // the save commits; its continuation resets
+    expect(held.length).toBe(4);                     // the reload is issued
+    await release(3);
+    expect(cells(rt).who).toBe("b+");                // the server's current value
+    expect(shown()).toBe("b+");
+    expectMonotonic(stamps);
+  });
+
+  test("N3 retry after a failed load: the continuation's reset reloads (red on c890b7260: stuck `not`, UI loading)", async () => {
+    const { rt, held, tap, release, stamps } = await mountedN({
+      a: `const n = loadName(3) !{ _ :> "?" }; reset(@who);`,
+      dep: `@userId = 2;`,
+    });
+    await tap("a");                                  // held[1]: a's wait
+    await tap("dep");                                // held[2]: the dependency's load
+    held[2].fail();                                  // the load fails: the cell settles `not`
+    await settle();
+    expect(cells(rt).who).toBe(null);
+    expect(document.querySelector("#wait")).not.toBeNull();
+    await release(1);                                // a's continuation: the retry reset
+    expect(held.length).toBe(4);
+    await release(3);
+    expect(cells(rt).who).toBe("b");
+    expect(shown()).toBe("b");
+    expectMonotonic(stamps);
+  });
+});
+
+// N4 — a WRITE-class pending cell (§6.7.7.1: its load writes, so a superseded run's call completes
+// and is discarded — never suppressed). A continuation's reset after a newer write still sends the
+// call, and its result is the newest start.
+const APPW = `<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function bumpName(id: int) -> string {
+        ${SQ}\`UPDATE users SET name = name || '+' WHERE id = \${id}\`}.run() !{ _ :> { return "?"; } };
+        const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    function peek(id: int) -> string {
+        const u: User = ${SQ}\`SELECT id, name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "?"; } };
+        return u.name;
+    }
+    <who:(not to string)=(bumpName(1) !{ _ :> not })/>
+    <main>
+        <button id="a" onclick={ const n = peek(3) !{ _ :> "?" }; reset(@who); }>a</button>
+        <button id="w" onclick={ if (@who is given) { @who = "z"; } }>w</button>
+        <p id="who" if=@who>${D}@who}</p>
+    </main>
+</program>
+`;
+describe("item 2 r2 — a WRITE-class pending cell's reset is never suppressed", () => {
+  test("N4: a continuation reset after a newer write sends the WRITE call, and its result lands (red on c890b7260: no call)", async () => {
+    const r = compile(APPW);
+    expect(check(r.core)).toEqual([]);
+    const { srv } = await serve(r.core, await realDb(DDL, ROWS4));
+    const held = heldTransport(srv);
+    const { rt } = await loadProgram(r.core, "s478-r2w-" + k++);
+    await settle(5);
+    await held[0].go();
+    await settle();
+    expect(shown()).toBe("a+");
+    const { tap, release, stamps } = sampler(rt, held);
+    await tap("a");                                  // held[1]: a's wait
+    await tap("w");                                  // a newer write lands
+    expect(cells(rt).who).toBe("z");
+    await release(1);                                // a's continuation resets: the WRITE call is sent
+    expect(held.length).toBe(3);
+    expect(held[2].aborted).toBe(false);
+    await release(2);
+    expect(cells(rt).who).toBe("a++");               // the reset is the newest start: its result lands
+    expect(shown()).toBe("a++");
     expectMonotonic(stamps);
   });
 });
