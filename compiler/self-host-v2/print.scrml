@@ -2896,7 +2896,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
-            .Run(body: b) :> runJs(ctx, b)
+            .Run(body: b, hoist: hs) :> runJs(ctx, b, hs)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
@@ -3077,8 +3077,13 @@ ${
     // source order"): `rt.run(scope$, (task$) => { … })` — run NOW, as the scope's
     // holes are wired in document order, in a task the scope owns (a Suspend in
     // the body is cancelled when the scope is destroyed), as a handler's body runs.
-    fn runJs(ctx: Ctx, body: Block) -> Rendered {
-        return only([sexpr(rtCall(ctx, "run", [scopeVar(), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))])
+    // s478-boot-run-locals — `hoist`: the body's top-level locals (file-scope, §7.6; §35.2.2
+    // "a single binding at the common ancestor scope"): `let name;` in the scope's render,
+    // before the run — the body assigns each, and the later views read that binding.
+    fn runJs(ctx: Ctx, body: Block, hoist: Sym[]) -> Rendered {
+        let out: JsStmt[] = []
+        for (const h of hoist) { out = out.concat([JsStmt.SDecl(symName(ctx, h))]) }
+        return only(out.concat([sexpr(rtCall(ctx, "run", [scopeVar(), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))]))
     }
 
     fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
