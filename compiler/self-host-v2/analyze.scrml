@@ -3370,12 +3370,26 @@ ${
         for (const it of items) {
             const p: AProgram | not = programOfItem(it)
             if (p is given) {
-                st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
+                // s478: the refusal only for a nested program §4.12.2 does not
+                // already reject — one with an attribute error stops the build
+                // on that error (its one root cause), and is never built
+                const sa: AS = nestedProgramAttrDiags(file, p, st)
+                if (!errorSince(sa, st.diags.length)) st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
                 st = nestedProgramAttrDiags(file, p, st)
                 st = nestedProgramDiags(file, p.items, st)
             }
         }
         return st
+    }
+
+    // s478 — did an Error-severity diagnostic join `st` after its first `n`?
+    fn errorSince(st: AS, n: int) -> boolean {
+        let i: int = n
+        while (i < st.diags.length) {
+            if (st.diags[i].severity == Severity.Error) return true
+            i = i + 1
+        }
+        return false
     }
 
     fn nestedProgramAttrDiags(file: string, p: AProgram, st0: AS) -> AS {

@@ -17,6 +17,11 @@ Branch `s478-boot-parser-smalls` from origin/main af7fe4bab. Base conformance JS
   newline-terminated `type Id = int` (§7.2.2 rule 1 — an alias is not a `type … = { … }` item, so
   it takes `;`). `type E : error` NOT built (owner question). `body-top/declaration-trailing-tokens-rejected`
   is the body-top lane's (program-level reader).
-- [ ] C15 nested `<program>` diagnostics
+- [x] C15 nested `<program>` through markup — parse.scrml `markupProgram` (hoisted via MP.hoist;
+  file-top-level wrapped program still E-PARSE-PROGRAM), analyze.scrml `nestedProgramDiags` (no
+  refusal beside a §4.12.2 Error); slice-m4/nested-program-markup-s478.test.js; program-shape.test.js
+  pins updated. `program-nested-auth-through-div-pos` PASS; `program-nested-lifecycle-attr-neg`
+  UNSUPPORTED (workers unbuilt, honest); `program-nested-app-attr-pos` still FAIL on the worker body
+  `when message(d) { … }` → E-PARSE-ITEM (parseLogicItem — body-top lane / §43 workers; not touched).
 - [ ] C13 cascades
 - [ ] C19 misc

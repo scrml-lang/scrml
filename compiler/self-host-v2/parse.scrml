@@ -9459,7 +9459,38 @@ ${
         return match k {
             .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
             .IsElem :> elemNode(finishElem(ro.o, ro.mp))
-            .IsProgram :> elemNode(finishElem(ro.o, mDiag(ro.mp, "E-PARSE-PROGRAM", "`<program>` inside markup", ro.o.start, ro.mp.pos)))
+            .IsProgram :> markupProgram(ro.o, ro.mp)
+        }
+    }
+
+    // s478 — a `<program>` inside markup (§4.12: "A `<program>` element MAY
+    // appear as a child of another `<program>` element — directly or through
+    // intervening markup"; "Wrapper markup … never changes a program's role").
+    // It is read as a program (programItem, its body a nested program's) and
+    // HOISTED (MP.hoist) into the item list of the body the markup stands in,
+    // where the program's role is decided as for a direct child: in a
+    // `<program>` / `<page>` / nested body it is a nested program (analyze
+    // nestedProgramDiags: §4.12.2's attribute codes, then the refusal); at the
+    // file top level (a `<div>`-wrapped top-level program, which §4.12 makes
+    // THE top-level program) parseMarkupItemsIn refuses it (E-PARSE-PROGRAM,
+    // as before). It renders nothing where it stands.
+    fn markupProgram(o: Opener, mp: MP) -> RNodeOne {
+        const rp: RMItems = programItem(o, programOpenerDiags(o, mp, false), false)
+        const m: MP = rp.mp
+        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, ns: m.ns }
+        const n: ANode = { nid: mh.nid, span: mkSpan(o.start, mh.pos), k: ANodeK.Text("") }
+        return { n: n, mp: mBump(mh) }
+    }
+
+    fn isProgramItemK(k: AItemK) -> boolean {
+        return match k {
+            .ProgramItem(p: p) :> true
+            .ConstItem(c: c) :> false
+            .DeclItem(d: d) :> false
+            .ImportItem(i: i) :> false
+            .TypeItem(t: t) :> false
+            .FnItem(f: f) :> false
+            .MarkupItem(n: n) :> false
         }
     }
 
@@ -9971,8 +10002,18 @@ ${
                 const r: RMItems = parseMarkupItem(m, ctx)
                 // s472: the `<db>`-body items read inside this item (MP.hoist)
                 // join this item list, right after it
-                out = out.concat(r.items).concat(r.mp.hoist)
+                out = out.concat(r.items)
                 m = noHoist(r.mp)
+                for (const h of r.mp.hoist) {
+                    // s478: a markup-wrapped `<program>` (markupProgram) at the file top
+                    // level is the file's top-level program (§4.12), which the bootstrap
+                    // reads only unwrapped — refused, as before
+                    if (ctx == "" && isProgramItemK(h.k)) {
+                        m = mDiag(m, "E-PARSE-PROGRAM", "`<program>` inside markup", h.span.start, h.span.end)
+                    } else {
+                        out = out.concat([h])
+                    }
+                }
                 if (m.pos == before) m = mAdv(m, 1)
             }
         }
