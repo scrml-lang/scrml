@@ -303,9 +303,21 @@ ${
         // (parse.scrml lifeRefusal, analyze.scrml lifeCellWhy); it resolves to
         // Core `Type.Maybe(T)` — "no new runtime representation" (§13.9.2).
         TLife(pre: AType, post: AType),
+        // s478 (s478-boot-refinement) — a refinement type `base(pred)` (§53.2.1:
+        // `inline-predicate = base-type "(" predicate-expr ")"`). `base` is the
+        // base type (TName); `pred` the predicate text as written. The parser
+        // judges it where it is declared (E-CONTRACT-002 / -003, §53.11) and decides
+        // its zone (§53.4); a REPORTED refinement carries `pred` "" — the typer
+        // does not trust it (no second report). Any other resolves as its base —
+        // "the constrained type is a subtype of the base type" (§53.3.4).
+        TRefine(base: AType, pred: string),
     }
 
-    export type ATypeField:struct = { nid: int, span: ASpan, isLet: boolean, name: string, ty: AType }
+    // s478 — `vals`: the validator words written after a struct / variant field's
+    // type (`role: Role req`, `role: Role oneOf([.A, .B]) req` — §55.1 / §53.6.1
+    // "the shared validator core vocabulary … MAY appear in refinement-type
+    // position"), in source order; analyze judges them (fieldDefsOf).
+    export type ATypeField:struct = { nid: int, span: ASpan, isLet: boolean, name: string, ty: AType, vals: string[] }
     export type AVariant:struct   = { nid: int, span: ASpan, name: string, fields: ATypeField[] }
     export type ATypeBody:enum = {
         EnumBody(variants: AVariant[]),

@@ -231,7 +231,7 @@ Conversions that can fail or lose information are spelled out. Text becomes a nu
 
 The type annotation **is** the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
-<!-- gate: spec-ahead [E-DECL-STATE-CHILD, E-PARSE-CLOSER, E-PARSE-DECL-BODY×10, E-PARSE-TAG×8, E-PARSE-UNCLOSED, E-SCOPE-001(discount), E-STATE-UNDECLARED(@email)] — the bootstrap has no refinement types (number(>0 && <10000), string(email)) in an opener, a struct field or a parameter yet; the first opener's parse failure cascades through the file -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4] — the bootstrap reads refinement types (number(>0 && <10000), string(email)) but judges them only at compile time on a fixed declaration with a literal value; a refinement on a struct field, a parameter or a writable cell needs the runtime check it does not build yet (g-boot-refinement-runtime-checks-s478) -->
 <!-- snippet: docs/readme-snippets/nerdme/refinement.scrml -->
 ```scrml
 // NERDME.md "Runtime type validation" — ruled; spec-ahead on the bootstrap (no refinement types yet).
@@ -282,7 +282,7 @@ Built-in named shapes (the SPEC §53.6.1 registry): `email`, `url`, `uuid`, `pho
 
 One struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-PARSE-EXPECTED×2, E-PARSE-TYPE×9, E-TYPE-UNKNOWN(), E-TYPE-UNKNOWN()] — the bootstrap has no refinement types on struct fields (string(email)), no <schema> and no <formFor> / <tableFor> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×8] — the bootstrap refuses refinement types on struct fields (string(email): their construction check is not built, g-boot-refinement-runtime-checks-s478) and has no <schema> and no <formFor> / <tableFor> yet -->
 <!-- snippet: docs/readme-snippets/nerdme/type-derived.scrml -->
 ```scrml
 // NERDME.md "Type-derived apps" — ruled; spec-ahead on the bootstrap (no refinement types, <schema>, <formFor>, <tableFor>).

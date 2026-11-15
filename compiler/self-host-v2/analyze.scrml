@@ -960,7 +960,7 @@ ${
         let fs: ATypeField[] = []
         if (field != "") {
             const at: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName(ty) }
-            fs = [{ nid: -1, span: mkSpan(0, 0), isLet: false, name: field, ty: at }]
+            fs = [{ nid: -1, span: mkSpan(0, 0), isLet: false, name: field, ty: at, vals: [] }]
         }
         return { nid: -1, span: mkSpan(0, 0), name: name, fields: fs }
     }
@@ -973,7 +973,7 @@ ${
         let fs: ATypeField[] = []
         for (const f of fields) {
             const ty: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName("string") }
-            fs = fs.concat([{ nid: -1, span: mkSpan(0, 0), isLet: false, name: f, ty: ty }])
+            fs = fs.concat([{ nid: -1, span: mkSpan(0, 0), isLet: false, name: f, ty: ty, vals: [] }])
         }
         return { nid: -1, span: mkSpan(0, 0), name: name, fields: fs }
     }
@@ -1036,6 +1036,7 @@ ${
             .TSeq(elem: e) :> aliasCycles(te, s, e, seen)
             .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
             .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
+            .TRefine(base: b, pred: p) :> aliasCycles(te, s, b, seen)
         }
     }
 
@@ -1729,7 +1730,21 @@ ${
             .TSeq(elem: e, grants: gs) :> resolveSeqType(te, at, e, gs, st)
             .TMaybe(inner: i) :> resolveMaybe(te, i, st)
             .TLife(pre: f, post: x) :> resolveLife(te, f, x, st)
+            .TRefine(base: b, pred: p) :> resolveRefine(te, b, p, st)
         }
+    }
+
+    // s478 (s478-boot-refinement) — a refinement type `base(pred)` (§53.2.1) is its
+    // base type: "The constrained type is a subtype of the base type" (§53.3.4). The
+    // parser judged the refinement where it is declared and decided its zone
+    // (parse.scrml refineDecl): a refinement that stands here was proven at compile
+    // time (§53.4.2, the static zone — no runtime check) or refused by name. A
+    // REPORTED one (E-CONTRACT-001 / -002 / -003, `pred` "") is untrusted: no second
+    // report on a value written against it.
+    fn resolveRefine(te: TypeEnv, base: AType, pred: string, st: AS) -> RType {
+        const r: RType = resolveType(te, base, st)
+        if (pred == "") return { t: r.t, st: r.st, unresolved: true }
+        return r
     }
 
     fn resolveMaybe(te: TypeEnv, inner: AType, st: AS) -> RType {
@@ -1763,6 +1778,7 @@ ${
             .TSeq(elem: e) :> ""
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
+            .TRefine(base: b, pred: p) :> ""
         }
     }
 
@@ -1778,6 +1794,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> presenceLife(f, x)
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -2106,10 +2123,59 @@ ${
                 st = rm.st
             }
             if (unresolved) st = badField(st, fsym.id)     // r8: never checked against
+            const vwhy: string = fieldValsWhy(f.name, f.vals, rt.t)
+            if (!unresolved && vwhy != "") st = addDiag(st, te.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", vwhy)
             out = out.concat([{ sym: fsym, ty: rt.t, grants: fieldDefGrants(payload, f.isLet || seqReplace(f.ty), typeEdits(rt.t)) }])
             i = i + 1
         }
         return { fs: out, st: st }
+    }
+
+    // s478 (s478-boot-refinement) — why the validator words written after field
+    // `name`'s type (`role: Role req`) are not in the bootstrap, "" when they are.
+    // §53.6.1: the shared validator vocabulary "MAY appear in refinement-type
+    // position … A value that doesn't satisfy the predicate cannot inhabit the
+    // type". §55.1: `req` is "Non-empty value (`""` fails; absence value `not`
+    // fails — §42)". A value of an enum, a struct, a host handle, `int`, `number` or
+    // `bool` is never `""` and never `not`, so on such a field `req` holds for every
+    // value of the type: it constrains nothing and needs no check. Every other
+    // word, and `req` on a field that can hold `""` / `not` / an empty tape, is a
+    // check at every construction of the value (E-CONTRACT-001 / -001-RT) that the
+    // bootstrap does not build yet — refused by name (INTERIM,
+    // g-boot-refinement-runtime-checks-s478); an enum subset (`oneOf([.A, .B])`,
+    // §53.15) also narrows match exhaustiveness (§18.8.1), not built either.
+    fn fieldValsWhy(name: string, vals: string[], t: Type) -> string {
+        // S239 review of #1888 (LOW-3): `req` written twice (`role: Role req req`)
+        // says nothing twice — refused by name, as on a cell opener (repeatedWordDiags;
+        // every other validator word is refused below whatever its count)
+        let seen: string[] = []
+        for (const w of vals) {
+            if (w == "req" && seen.indexOf(w) >= 0) return "`" + w + "` is written twice on the field `" + name + "` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no code for a repeated validator word, so it is refused: write it once"
+            seen = seen.concat([w])
+        }
+        for (const v of vals) {
+            if (v != "req" || !reqHoldsFor(t)) {
+                let what: string = "the validator `" + v + "` on the field `" + name + "`"
+                if (v == "req") what = "`req` on the field `" + name + "` (of type `" + typeName(t) + "`, which can hold `\"\"` or `not`)"
+                let subset: string = ""
+                if (v == "oneOf" || v == "notIn") subset = " — an enum subset (§53.15) also narrows `match` exhaustiveness (§18.8.1)"
+                return what + " is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at run time)" + subset + "; the bootstrap does not build that check yet (INTERIM, g-boot-refinement-runtime-checks-s478)"
+            }
+        }
+        return ""
+    }
+
+    // Does `req` (§55.1: not `""`, not `not`) hold for every value of `t`?
+    fn reqHoldsFor(t: Type) -> boolean {
+        return match t {
+            .Int :> true
+            .Num :> true
+            .Bool :> true
+            .Named(sym: s) :> true
+            .Str :> false
+            .Seq(elem: e) :> false
+            .Maybe(inner: i) :> false
+        }
     }
 
     // ---- lookups over the global shape ------------------------------------------
@@ -3095,6 +3161,7 @@ ${
             .TName(name: n) :> false
             .TMaybe(inner: x) :> false
             .TLife(pre: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -3110,6 +3177,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: x) :> false
             .TLife(pre: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -6982,6 +7050,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -7159,6 +7228,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
         if (!isStamp) return st
         const own: AAttrValue = d.own
@@ -7312,6 +7382,7 @@ ${
             .TSeq(elem: e) :> ""
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
+            .TRefine(base: b, pred: p) :> ""
         }
     }
 
@@ -9481,6 +9552,7 @@ ${
         return match k {
             .TMaybe(inner: i) :> " — for the absent case, `return not;`"
             .TLife(pre: f, post: x) :> ""
+            .TRefine(base: b, pred: p) :> ""
             .TName(name: x) :> ""
             .TSeq(elem: e) :> ""
         }
@@ -9493,6 +9565,7 @@ ${
             .TSeq(elem: e) :> typeText(e) + "[…]"
             .TMaybe(inner: i) :> typeText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeText(f) + " to " + typeText(x) + ")"
+            .TRefine(base: b, pred: p) :> typeText(b) + "(" + p + ")"
         }
     }
 
@@ -13610,6 +13683,7 @@ ${
             .TName(name: n) :> []
             .TMaybe(inner: i) :> []
             .TLife(pre: f, post: x) :> []
+            .TRefine(base: b, pred: p) :> []
         }
     }
 
@@ -13631,6 +13705,7 @@ ${
             .TSeq(elem: e, grants: gs) :> gs.length > 0 || lifeTapeGranted(e)
             .TMaybe(inner: i) :> lifeTapeGranted(i)
             .TLife(pre: f, post: x) :> lifeTapeGranted(x)
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -13642,6 +13717,7 @@ ${
             .TName(name: n) :> false
             .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
             .TLife(pre: f, post: x) :> seqReplace(x)
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -16261,7 +16337,11 @@ ${
         }
         const r1: RSym = mint(st, "subject")
         const r2: RSym = mint(r1.st, "arm")
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused,
+        // s478 (s478-boot-refinement) — a refused SUBJECT (E-TYPE-024, E-TYPE-VARIANT, …:
+        // `sk.code`) refuses the match's coverage too: it was never judged, so the typer does
+        // not widen the value by `not` (typePlain coverageRefused — one report per construct;
+        // before, `return match p { … }` over a struct `p` was also E-TYPE-031 `string | not`).
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused || sk.code != "",
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
         if (!exh && result is given) result = Type.Maybe(unMaybe(result))
         return plain(result, st)
@@ -17176,6 +17256,7 @@ ${
             .TSeq(elem: e) :> false
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
+            .TRefine(base: b, pred: p) :> false
         }
     }
 
@@ -39143,7 +39224,7 @@ ${
                 if (ct is given) {
                     const rt: RTy = typeAType(ct, sp, next)
                     next = rt.next
-                    fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "c" + i, ty: rt.ty }])
+                    fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "c" + i, ty: rt.ty, vals: [] }])
                     props = props.concat([{ nid: next + 1, span: sp, spread: false, name: "c" + i, value: { nid: next + 2, span: sp, k: AExprK.Name("#w" + lastWriteOf(pl.cells, c)) } }])
                     next = next + 3
                 }
@@ -39154,7 +39235,7 @@ ${
             if (rty is given && rv2 is given) {
                 const rt2: RTy = typeAType(rty, sp, next)
                 next = rt2.next
-                fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "r", ty: rt2.ty }])
+                fields = fields.concat([{ nid: next, span: sp, isLet: false, name: "r", ty: rt2.ty, vals: [] }])
                 props = props.concat([{ nid: next + 1, span: sp, spread: false, name: "r", value: rv2 }])
                 next = next + 2
             }
@@ -39269,11 +39350,17 @@ ${
             .TSeq(elem: e, grants: gs) :> seqAType(copyAType(e, next), t.span, gs)
             .TMaybe(inner: i) :> maybeAType(copyAType(i, next), t.span)
             .TLife(pre: f, post: x) :> lifeAType(copyAType(f, next), x, t.span)
+            .TRefine(base: b, pred: p) :> refineAType(copyAType(b, next), p, t.span)
         }
     }
 
     fn maybeAType(r: RTy, sp: ASpan) -> RTy {
         return { ty: { nid: r.next, span: sp, k: ATypeK.TMaybe(r.ty) }, next: r.next + 1 }
+    }
+
+    // s478: `base(pred)` copied — the base (already copied, `rb`), then the node.
+    fn refineAType(rb: RTy, pred: string, sp: ASpan) -> RTy {
+        return { ty: { nid: rb.next, span: sp, k: ATypeK.TRefine(rb.ty, pred) }, next: rb.next + 1 }
     }
 
     // s475: `(A to B)` copied — A (already copied, `rf`), then B, then the node.
