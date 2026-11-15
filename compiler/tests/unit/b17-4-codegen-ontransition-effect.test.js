@@ -33,7 +33,7 @@
  *   §B17.4.24 Initial-state-firing decision: hooks do NOT fire on engine init (Decision 5)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import {
   engineHookFiringFunctionName,
   engineHasHooks,
@@ -50,6 +50,29 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { generateClientJs } from "../../src/codegen/emit-client.ts";
 import { makeCompileContext } from "../../src/codegen/context.ts";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
+import { resetCodegenModuleState } from "../../src/codegen/index.ts";
+import { setLogProductionStrip } from "../../src/codegen/emit-expr.ts";
+
+// ---------------------------------------------------------------------------
+// Isolation (S478, s478-hook-shards, g-hook-single-shard-test-pollution-s477).
+//
+// This file calls the emitters DIRECTLY (emitEngineHookFiringFunction, generateClientJs), not through runCG,
+// so it inherits whatever codegen module state the last compile in this `bun test` process left behind.
+// runCG sets that state at the head of each compile and leaves the last file's values in place, so in one
+// process, after another test file, two flags change what `log(...)` in a hook body lowers to:
+//   - emit-expr `_logShadowedInFile` — left TRUE by a compile whose file declares `function log`
+//     (enum-subset-match-exhaustiveness-da-b2, gauntlet-s19/match-exhaustiveness, gauntlet-s28/error-arm-scope,
+//     s441-review-r5);
+//   - emit-expr `_logProductionStrip` — left TRUE by a `production: true` compile (print-builtin-compile §E).
+// Either one turns `log("entered")` into `(void 0)` and fails §B17.4.5 / §B17.4.7 — found by running
+// `bun test <F> <this file>` for every test file F (S478). Each test therefore starts from the state a fresh
+// runCG would install: resetCodegenModuleState() (the per-file flags, the chunk-namespace token, …) plus the
+// compile-wide log() strip OFF — a development build, which is what these assertions describe.
+// ---------------------------------------------------------------------------
+beforeEach(() => {
+  resetCodegenModuleState();
+  setLogProductionStrip(false);
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

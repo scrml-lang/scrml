@@ -19,7 +19,9 @@
 //   2. LINK ORDER (analyze's contract: every file after the files it imports,
 //      the entry last) built from that sorted list — at each step the first
 //      file, in path order, whose imports are all placed; an import cycle
-//      places the first unplaced file in path order;
+//      places the first unplaced file in path order — so the later phases have
+//      a total order — and is REPORTED (s478: `importCycles`, E-IMPORT-002 in
+//      analyze checkImports, §21.3);
 //   3. the files parsed in link order, node ids running through them — the
 //      same id numbering a driver that listed the files in link order gets.
 // An import edge is a `from` that RESOLVES to a path in the set (`importTarget`,
@@ -39,7 +41,7 @@
 // absolute path, a working directory, a clock, or an environment.
 // =============================================================================
 ${
-    import { AItem, AItemK, AImport, AProgram, FileAst, Diag, stdlibPathPrefix } from "./ast.scrml"
+    import { AItem, AItemK, AImport, ALink, AProgram, ASpan, FileAst, Diag, stdlibPathPrefix } from "./ast.scrml"
     import { Parsed, parseFile } from "./parse.scrml"
 
     export type Source:struct = { path: string, src: string }
@@ -161,10 +163,46 @@ ${
     // declaration (§21.3.1) is not one — it names a host-language module, never
     // a scrml file — so it links nothing and supplies no stdlib module
     // (`hostImportsOfItems`; analyze checkImports judges it).
+    // s478: an export list (AImport.re other than Import) is not an import: a re-export binds
+    // nothing in its file's scope (`reexportsOfItems`, `localExportsOfItems`).
     export fn importsOfItems(items: AItem[]) -> AImport[] {
         let out: AImport[] = []
         for (const imp of allImportsOfItems(items)) {
-            if (imp.host is not) out = out.concat([imp])
+            if (imp.host is not && imp.re == ALink.Import) out = out.concat([imp])
+        }
+        return out
+    }
+
+    // s478 (s478-boot-modules) — every RE-EXPORT in `items` (`export { … } from
+    // "…"`, `export * from "…"`, §21.4), a `<program>`'s own included.
+    export fn reexportsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const imp of allImportsOfItems(items)) {
+            if (imp.host is not && (imp.re == ALink.Reexport || imp.re == ALink.ReexportAll)) out = out.concat([imp])
+        }
+        return out
+    }
+
+    // s478 — every local export list (`export { a, b as c };`, no `from`) in `items`.
+    export fn localExportsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const imp of allImportsOfItems(items)) {
+            if (imp.re == ALink.ExportList) out = out.concat([imp])
+        }
+        return out
+    }
+
+    // s478 — every statement in `items` that LINKS a module: an import and a
+    // re-export alike, in source order. §21.4: "A re-export (named, renamed
+    // `export { a as b } from`, or `export * from`) SHALL link its source module
+    // exactly as an `import` of that specifier does (§21.3)"; "Re-export edges,
+    // named and `export *` alike, are edges of the import graph". The link order,
+    // the cycle check and a driver's module closure (slice-m2/lowered.js
+    // `importFroms`) read this; scope binding reads `importsOfItems`.
+    export fn linkFromsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const imp of allImportsOfItems(items)) {
+            if (imp.host is not && imp.re != ALink.ExportList) out = out.concat([imp])
         }
         return out
     }
@@ -217,10 +255,10 @@ ${
     // `frontEndStdlib` throws on one). Structural — never a scan of the source.
     export fn isStdlibPath(path: string) -> boolean { return inStdlib(path) }
 
-    // The paths (in the set `paths`) the file `f` imports.
+    // The paths (in the set `paths`) the file `f` imports or (s478) re-exports from.
     fn importedPaths(f: FileAst, paths: string[]) -> string[] {
         let out: string[] = []
-        for (const imp of importsOfItems(f.items)) {
+        for (const imp of linkFromsOfItems(f.items)) {
             const p: string = importTarget(f.path, imp.from, paths)
             if (p != "" && p != f.path && out.indexOf(p) < 0) out = out.concat([p])
         }
@@ -271,6 +309,97 @@ ${
             if (d != entry && placed.indexOf(d) < 0) return false
         }
         return true
+    }
+
+    // ---- s478: import cycles (E-IMPORT-002) ---------------------------------------
+    // SPEC §21.3: "Circular imports SHALL be a compile error (E-IMPORT-002). The
+    // compiler SHALL detect cycles in the import graph before any stage runs and
+    // report all files in the cycle." §21.4: "Re-export edges, named and
+    // `export *` alike, are edges of the import graph, so a cycle closed by a
+    // re-export SHALL be a compile error (E-IMPORT-002, §21.3)." Every cycle is
+    // one: §21.3 names no cycle that is allowed (the entry's own included, and a
+    // file importing itself — a cycle of one file). The link order above still
+    // places a cyclic file (path order) so the later phases have a total order to
+    // run in; the cycle is REPORTED — analyze checkImports turns each entry here
+    // into the diagnostic (before s478 it was broken silently,
+    // g-boot-import-cycle-unreported-s473). An edge is a `linkFromsOfItems`
+    // statement that resolves (`importTarget`) to a file in the set.
+    // One ImportCycle per file that lies on a cycle: `at` the first statement of
+    // `file` whose target is the next file of the shortest cycle through it;
+    // `cycle` that cycle, from `file` back to `file`. A function of the file set.
+    export type ImportCycle:struct = { file: string, at: ASpan, cycle: string[] }
+
+    export fn importCycles(files: FileAst[]) -> ImportCycle[] {
+        let paths: string[] = []
+        for (const f of files) { paths = paths.concat([f.path]) }
+        let deps: int[][] = []
+        for (const f of files) { deps = deps.concat([edgeIndexes(f, paths)]) }
+        let out: ImportCycle[] = []
+        let i: int = 0
+        while (i < files.length) {
+            const c: int[] = cycleThrough(deps, i)
+            if (c.length > 0) {
+                let next: int = c[0]
+                if (c.length > 1) next = c[1]
+                let names: string[] = []
+                for (const j of c) { names = names.concat([paths[j]]) }
+                out = out.concat([{ file: paths[i], at: edgeSpan(files[i], paths, paths[next]), cycle: names.concat([paths[i]]) }])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // The indexes (into `paths`) of the files `f` links, itself included.
+    fn edgeIndexes(f: FileAst, paths: string[]) -> int[] {
+        let out: int[] = []
+        for (const imp of linkFromsOfItems(f.items)) {
+            const p: string = importTarget(f.path, imp.from, paths)
+            if (p != "") {
+                const k: int = paths.indexOf(p)
+                if (out.indexOf(k) < 0) out = out.concat([k])
+            }
+        }
+        return out
+    }
+
+    // The span of the first statement of `f` that links `target`.
+    fn edgeSpan(f: FileAst, paths: string[], target: string) -> ASpan {
+        for (const imp of linkFromsOfItems(f.items)) {
+            if (importTarget(f.path, imp.from, paths) == target) return imp.span
+        }
+        return { start: 0, end: 0 }
+    }
+
+    // The shortest cycle through `s` (breadth first): its files from `s` on,
+    // without the closing `s`; empty when `s` is on no cycle. `parents[k]` is
+    // the queue position `queue[k]` was first reached from.
+    fn cycleThrough(deps: int[][], s: int) -> int[] {
+        let queue: int[] = [s]
+        let parents: int[] = [-1]
+        let head: int = 0
+        while (head < queue.length) {
+            const u: int = queue[head]
+            for (const v of deps[u]) {
+                if (v == s) return pathTo(queue, parents, head)
+                if (queue.indexOf(v) < 0) {
+                    queue = queue.concat([v])
+                    parents = parents.concat([head])
+                }
+            }
+            head = head + 1
+        }
+        return []
+    }
+
+    fn pathTo(queue: int[], parents: int[], at: int) -> int[] {
+        let out: int[] = []
+        let k: int = at
+        while (k >= 0) {
+            out = [queue[k]].concat(out)
+            k = parents[k]
+        }
+        return out
     }
 
     // ---- 3. the parse phase --------------------------------------------------------

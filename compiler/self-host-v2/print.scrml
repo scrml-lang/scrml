@@ -3876,16 +3876,10 @@ ${
         const where: PersistStore = ps.store
         const store: string = match where {
             .Local :> "local"
-            .Session :> storeSession()
+            .Session :> "session"
         }
         return rtCall(ctx, "persisted", [jmember(jid("inst$"), "scope"), init, jstr(store), jstr(ps.key), wire])
     }
-
-    // The runtime's name for sessionStorage, spelled in pieces: impl#1 escalates
-    // a function whose body holds the bare word to the SERVER, string literals
-    // included (route-inference.ts, `/(?<!@)\bsession\b/` — see analyze.scrml
-    // `sessionWord`).
-    fn storeSession() -> string { return "sess" + "ion" }
 
     // s451 — the storage half of a reset (§6.14.2 rule 9): `rt.unpersist(<cell>)`
     // removes the key and cancels the store the reset's Write queued.
