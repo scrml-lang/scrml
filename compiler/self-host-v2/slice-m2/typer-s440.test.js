@@ -502,8 +502,11 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
     expect(inApp(CELLS + "    function f() { @n = @n + 1;\n @r = @r * 2 + @n;\n @s = @s + \"x\";\n @b = @n < 3 && @r >= 0.5;\n @n = @n % 2;\n @n = -@n; }")).toEqual([]);
   });
   test("Rule C — an operation whose span holds a parser error is not judged (the shape of conformance channel/watches-derived-const-ok)", () => {
-    // `const <threshold> = …` misparses as `(const < threshold) > <error>`: the outer `>` would see a bool operand
-    const src = "<program>\n  ${ @maxTotal = 5 }\n  <main>\n    ${ const <threshold> = @maxTotal * 2 }\n  </main>\n</program>\n";
+    // `(@maxTotal < 3) > #`: the outer `>` would see a bool operand, but its right operand is a parse error.
+    // (s478: the shape this pinned before — `${ const <threshold> = @maxTotal * 2 }` in `<main>`, which
+    // misparsed as `(const < threshold) > <error>` — is now read as the logic block it is, a declaration
+    // there, and refused by name: s478-boot-nested-logic.)
+    const src = "<program>\n  let <maxTotal:int=5/>\n  <main>\n    <p>${ (@maxTotal < 3) > # }</p>\n  </main>\n</program>\n";
     const cs = codes([{ path: "case.scrml", src }]);
     expect(cs).toContain("E-PARSE-EXPR");
     expect(cs).not.toContain("E-OPERATOR-OPERAND-TYPE");

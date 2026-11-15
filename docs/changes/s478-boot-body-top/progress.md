@@ -48,5 +48,19 @@ while still rejecting (E-PARSE-ITEM −822 → the real diagnostics behind it).
 - forms/validator-applies-*: `${ @age }` at a body top is a statement list → E-STMT-NO-EFFECT (S447 reading 7).
 - body-top/lone-identifier-is-code: C1 + g-boot-body-top-lone-name-no-effect-s478.
 
-## Next
-- (d) C10 nested `${ … }` statement blocks in markup — second branch.
+## PR 1
+https://github.com/scrml-lang/scrml/pull/1876 (branch s478-boot-body-top, (a)+(b)+(c), merged with origin/main 47d1250cb).
+Conformance vs 47d1250cb: PASS 422→437, FAIL 142→118, UNSUPPORTED 665→674.
+
+## (d) — branch s478-boot-nested-logic (from PR 1)
+- parse.scrml `nestedLogicAhead` / `parseNestedLogic` — a `${ … }` in a free-text markup body that starts with a
+  declaration is a logic block (a statements-only block is left to its element — a `<timer>` / `<poll>` body names
+  its own refusal; first cut also took a top-level `;` and pre-empted that refusal, request-refs-s475): its fn / type / const items are hoisted (MP.hoist) to file
+  scope (§7.6 S439 #12); the block renders nothing and does not split the text around it. Statements / import /
+  export / declarations there are refused by name (INTERIM, g-boot-nested-logic-statements-s478).
+- Conformance h5 vs h4: FAIL→UNSUPPORTED 3 (block-047, both cleanup cases), UNSUPPORTED→FAIL 1
+  (server-fn/e-route-004-pos: now reaches the `cb: fn()` parameter, reported E-STRUCT-FUNCTION-FIELD by the refusal
+  table instead of E-ROUTE-004 — g-boot-fn-type-param-labelled-struct-field-s478). PASS 437, FAIL 116, UNSUPPORTED 676.
+- `;`-only (C1): server-fn/{branch-declared-server-fn-routes-to-server (runtime), e-route-003-neg, e-route-004-neg}
+  PASS once `;` is inserted (15 of the cluster in all).
+- Tests: slice-m4/nested-logic-s478.test.js (6).
