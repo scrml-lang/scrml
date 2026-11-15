@@ -852,6 +852,9 @@ ${
         // re-derived from the whole file each time, read once here
         singles: string[],      // the program's cells declared `single` (singleCells)
         hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
+        // s478 (review-followups-2): the import graph's cycles (link.scrml importCycles — a
+        // function of the file set), computed once: onCommonCycle asks per read
+        cycles: ImportCycle[],
     }
 
     // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
@@ -7569,7 +7572,8 @@ ${
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
-                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files) }
+                             succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
+                             cycles: importCycles(files) }
         return { g: g, st: st }
     }
 
@@ -8501,7 +8505,7 @@ ${
             // (E-IMPORT-002)") reported at the cycle (checkImports). That report owns it: the
             // read itself is one the rule this message states allows ("in a file this one
             // imports"), so it is not reported again. The compile still fails (E-IMPORT-002).
-            if (!kc.ready && kc.file != env.file && onCommonCycle(env.g.files, env.file, kc.file)) return plain(kc.annot, st)
+            if (!kc.ready && kc.file != env.file && onCommonCycle(env.g.cycles, env.file, kc.file)) return plain(kc.annot, st)
             if (!kc.ready) return diagX(env, e, "E-SCOPE-001", "`" + name + "` is read before it is initialized — a file-scope constant's initializer reads only the constants initialized before it (declared earlier in this file, or in a file this one imports)", st)
             return plain(kc.ty, addName(st, e.nid, NameFact.NConst(kc.sym)))
         }
@@ -24549,7 +24553,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps }
+                 singles: g.singles, hostImps: g.hostImps, cycles: g.cycles }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -24599,9 +24603,11 @@ ${
         if (ty is not) ty = ri.x.ty
         if (ty is not) {
             // (not when binding the initializer already failed — that report owns it: no cascade;
-            // s478: nor when the constant's file lies on an import cycle — a read of a constant
-            // the cycle left uninitialized has no type, and E-IMPORT-002 (§21.3) owns that)
-            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length && !onCommonCycle(g.files, c.file, c.file)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
+            // s478: nor when the initializer reads a constant the import cycle left uninitialized
+            // — that read has no type, and E-IMPORT-002 (§21.3) owns it: cycleUntypedRead, the
+            // same reader/declarer pair resolveName lets through, not "the file is on a cycle" —
+            // or a constant whose type is unknown already, whose own report owns it)
+            if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length && !cycleUntypedRead(g, c.file, c.init)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of the file-scope constant `" + c.name + "` is not known from its initializer — write it: `const " + c.name + ": T = …;`")
             return { c: constAs(c, not, true, false), st: st }
         }
         return { c: constAs(c, ty, true, true), st: st }
@@ -24766,11 +24772,62 @@ ${
     // file that exports it), else `not`.
     // s478: do `a` and `b` lie on one import cycle (link.scrml importCycles — the cycles
     // checkImports reports E-IMPORT-002 for)?
-    fn onCommonCycle(files: FileAst[], a: string, b: string) -> boolean {
-        for (const c of importCycles(files)) {
+    fn onCommonCycle(cycles: ImportCycle[], a: string, b: string) -> boolean {
+        for (const c of cycles) {
             if (c.cycle.indexOf(a) >= 0 && c.cycle.indexOf(b) >= 0) return true
         }
         return false
+    }
+
+    // s478 (review-followups-2): does the initializer `e` (read in `file`) owe its unknown type
+    // to a read another report owns — a constant of another file on a common import cycle
+    // that is not initialized yet (resolveName lets that read through: E-IMPORT-002, §21.3,
+    // owns it), or an initialized constant whose own type is unknown (constValue: its own
+    // refusal, its initializer's error, or that cycle owns it — always an Error, no cascade)?
+    // `e` is an initializer constBlocker passed: names, literals, members, operators.
+    fn cycleUntypedRead(g: Globals, file: string, e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> cycleUntypedName(g, file, n)
+            .Member(obj: o, name: n) :> cycleUntypedRead(g, file, o)
+            .Unary(op: o, e: x) :> cycleUntypedRead(g, file, x)
+            .Binary(op: o, l: l, r: r) :> cycleUntypedRead(g, file, l) || cycleUntypedRead(g, file, r)
+            .Ternary(test: t, yes: y, no: n) :> cycleUntypedRead(g, file, t) || cycleUntypedRead(g, file, y) || cycleUntypedRead(g, file, n)
+            .Template(quasis: q, slots: ss) :> cycleUntypedAny(g, file, ss)
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Call(callee: c) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    fn cycleUntypedAny(g: Globals, file: string, es: AExpr[]) -> boolean {
+        for (const x of es) {
+            if (cycleUntypedRead(g, file, x)) return true
+        }
+        return false
+    }
+
+    fn cycleUntypedName(g: Globals, file: string, name: string) -> boolean {
+        const kc: ConstInfo | not = constNamed(g, file, name)
+        if (kc is not) return false
+        if (!kc.ready) return kc.file != file && onCommonCycle(g.cycles, file, kc.file)
+        return kc.ty is not
     }
 
     fn constNamed(g: Globals, file: string, name: string) -> ConstInfo | not {
@@ -45321,7 +45378,7 @@ ${
         // SHALL detect cycles in the import graph before any stage runs and report all files in
         // the cycle." One report per file on a cycle (link.scrml importCycles), at its statement
         // that closes it; re-export edges are edges of the graph (§21.4).
-        for (const c of importCycles(files)) {
+        for (const c of g.cycles) {
             st = addDiag(st, c.file, c.at, "E-IMPORT-002", cycleWhy(c))
         }
         return st

@@ -276,7 +276,15 @@ ${
     // =========================================================================
     // The token-level parser state: a value threaded through every function.
     // =========================================================================
-    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string, ns: PNs }
+    // s478 (review-followups-2): `inFn` — the tokens being read are inside the body of a
+    // function DECLARATION (§19.16.3 rule 4), and not in a non-function body nested in one
+    // (a `when` / effect body, an arrow body; markup — handlers — is read from its own MP).
+    // Set by parseFnDecl; bareBlock reads it to name a `defer` there (§19.16.2 vs §19.16.3).
+    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string, ns: PNs, inFn: boolean }
+
+    fn withInFn(tp: TP, v: boolean) -> TP {
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: v }
+    }
 
     type RExpr:struct  = { e: AExpr, tp: TP }
     type RExprs:struct = { es: AExpr[], tp: TP }
@@ -299,16 +307,16 @@ ${
 
     fn adv(tp: TP) -> TP {
         if (tp.i >= tp.toks.length - 1) return tp
-        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn bumpId(tp: TP) -> TP {
-        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn diagAt(tp: TP, code: string, msg: string, t: PTok) -> TP {
         const d: Diag = newDiag(code, msg, tp.file, mkSpan(t.start, t.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn atEnd(tp: TP) -> boolean { return cur(tp).cls == TC.End }
@@ -788,7 +796,7 @@ ${
         if (t.cls == TC.TChunk) what = "a template"
         const msg: string = "add `;` to the line above, or join the lines — the next line starts with " + what + ", which would continue the expression above it (a call, an index or a tagged template); scrml refuses that reading rather than guess (§7.2.2 rule 5)"
         const d: Diag = newDiag("E-STMT-SPLIT-CONTINUATION", msg, tp.file, mkSpan(last.end, last.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // s462 — W-IS-SOME-DEPRECATED (§42.2.2a, Info; one per site): the
@@ -797,7 +805,7 @@ ${
     fn someLint(tp: TP, isTok: PTok, someTok: PTok) -> TP {
         const msg: string = "`x is some` is the soft-deprecated spelling of `x is given` (§42.2.2a). Write `is given` — it means the same and compiles to the same program. `scrml fix` rewrites it (rule `is-some`)."
         const d: Diag = newDiag("W-IS-SOME-DEPRECATED", msg, tp.file, mkSpan(isTok.start, someTok.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn handledExpr(tp: TP, start: int, subject: AExpr, how: AHow) -> RExpr {
@@ -1081,14 +1089,14 @@ ${
             } else if (last && sawNot && g.names.length == 1 && subj != "" && g.names[0] == subj) {
                 const msg: string = "the presence arm `given " + g.written + " :>` is deprecated (§42.2.3). Write `else :>` — after the `not :>` arm it takes the same present case and narrows `" + g.written + "` the same way. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
                 const d: Diag = newDiag("W-GIVEN-PRESENCE-DEPRECATED", msg, t.file, mkSpan(g.start, g.sepEnd))
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
                 // s478 r1 (review LOW-1): the deprecation is the site's one diagnostic (§42.2.3, the
                 // W-GIVEN-ARROW-LEGACY row) — a `=>` / `->` head adds no W-MATCH-ARROW-LEGACY
                 legacyOff = legacyOff.concat([g.idx])
             } else {
                 const msg: string = "a `given " + g.written + " :>` arm other than the last arm after a `not :>` arm naming the subject itself is a presence guard between patterns, which is not in the bootstrap yet (§42.2.3). Test presence before the match (`if (" + g.names[0] + " is given) { … }`), or, over a `T | not` subject, write `not :>` then `else :>`."
                 const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", msg, t.file, mkSpan(g.start, g.sepEnd))
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
                 // the refused match keeps one arm — this one's, as a placeholder —
                 // so no other arm's coverage (or its absence) reports anything, nor its body
                 return refusedArm(arms[g.idx], t)
@@ -1140,7 +1148,7 @@ ${
     fn missingArmComma(tp: TP, at: int) -> TP {
         const msg: string = "Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2)."
         const d: Diag = newDiag("E-MATCH-ARM-SEPARATOR", msg, tp.file, mkSpan(at, at))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // s452 — W-ARM-PIPE-LEGACY (§19.4.5, Info; one per arm): the `|`-led `!{}`
@@ -1158,7 +1166,7 @@ ${
         if (tp.i > from) end = tp.toks[tp.i - 1].end
         const msg: string = "Arm '| " + written + " :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '" + canonical + " :>'. Run 'scrml fix' to rewrite every site (§19.4.5)."
         const d: Diag = newDiag("W-ARM-PIPE-LEGACY", msg, tp.file, mkSpan(pipe.start, end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // The source text of tokens `from` up to (not including) `to`, with a
@@ -1351,7 +1359,7 @@ ${
             }
         }
         const end: int = armEnd(tp)
-        const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
+        const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn }
         // §18.2 `leave-stmt` (S462, ruling dpa-068 W1): `arm-body ::= expression |
         // block-body | leave-stmt`. A bare `fail <variant>` / `return [expr]` arm is
         // a one-statement block — it leaves the function exactly as `{ fail … }` /
@@ -1365,7 +1373,7 @@ ${
             let ft: TP = rf.tp
             if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `" + kw + "`", cur(ft))
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
-            return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file, ns: tp.ns } }
+            return { body: AArmBody.ArmBlock(fb), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn } }
         }
         // s478 — §19.16.2: "`defer` in … a single-statement (unbraced) `match` /
         // `!{}` arm … — not a stage-1 defer site" (E-DEFER-UNSUPPORTED-SITE): the
@@ -1375,14 +1383,14 @@ ${
         if (deferAhead(sub)) {
             const dt: TP = diagAt(sub, "E-DEFER-UNSUPPORTED-SITE", "a `defer` that is the whole unbraced body of an arm has no written block to belong to (§19.16.2) — brace the arm (`.V :> { defer …; }`) or move the `defer` to the enclosing block", cur(sub))
             const rd: RExpr = mkE(dt, cur(sub).start, AExprK.Recovered)
-            return { body: AArmBody.ArmExpr(rd.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rd.tp.nid, diags: rd.tp.diags, file: tp.file, ns: tp.ns } }
+            return { body: AArmBody.ArmExpr(rd.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rd.tp.nid, diags: rd.tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn } }
         }
         // `break` / `continue` are leave statements too (§18.2), but the bootstrap
         // has no loops for them to leave.
         if (isWord(sub, "break") || isWord(sub, "continue")) {
             const bt: TP = diagAt(sub, "E-BOOTSTRAP-UNSUPPORTED", "a `" + cur(sub).text + "` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap", cur(sub))
             const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
-            return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: tp.ns } }
+            return { body: AArmBody.ArmExpr(rb.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn } }
         }
         // s478 — §18.0 / §34 E-MATCH-ARM-MARKUP-IN-VALUE: "A JS-style value-match
         // arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element"
@@ -1392,7 +1400,7 @@ ${
             const x: PTok = cur(st)
             st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
         }
-        return { body: AArmBody.ArmExpr(r.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file, ns: tp.ns } }
+        return { body: AArmBody.ArmExpr(r.e), lifted: false, bare: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn } }
     }
 
     // s469 — an arm's `{ … }` block (§18.5, RULED S469 "block arms yield with
@@ -1421,7 +1429,7 @@ ${
                 // reading as the split `return` in parseStmt)
                 if (peekAt(t, 1).line != kw.line && !tk(peekAt(t, 1), "}") && !tk(peekAt(t, 1), ";")) {
                     const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
-                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns }
+                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns, inFn: t.inFn }
                 }
                 const v: RExpr = parseAssign(adv(t))
                 let t2: TP = v.tp
@@ -1583,7 +1591,7 @@ ${
     // One entry of armObjectShape's list: its first three top-level tokens.
     fn objEntryOk(tp: TP, ai: int, bi: int, ci: int, cnt: int) -> boolean {
         const a: PTok = tp.toks[ai]
-        if (isSpread({ toks: tp.toks, i: ai, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })) return true
+        if (isSpread({ toks: tp.toks, i: ai, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn })) return true
         if (cnt == 1) return isShorthandName(a)
         const b: PTok = tp.toks[bi]
         const colon: boolean = b.cls == TC.Punct && tk(b, ":") && !tk(tp.toks[bi + 1], ">")
@@ -2258,7 +2266,7 @@ ${
         } else if (!named) {
             ds = ds.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", markupValueRefusal(), tp.file, mkSpan(t.start, t.end))])
         }
-        const t2: TP = { toks: tp.toks, i: tp.i, nid: rn.mp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns }
+        const t2: TP = { toks: tp.toks, i: tp.i, nid: rn.mp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn }
         return mkE(adv(t2), t.start, AExprK.Recovered)
     }
 
@@ -2530,7 +2538,7 @@ ${
                     const close: PTok = cur(t)
                     if (close.v != "") {
                         const d: Diag = newDiag("E-PARSE-TEMPLATE", "this template slot cannot be read one way — " + close.v + " — so where it ends is not known, and it is refused (§14.13.3). Compute the value into a local first and put the local in the slot", t.file, mkSpan(open.start, close.end))
-                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
                     }
                     t = adv(t)
                     if (cur(t).cls != TC.TChunk) {
@@ -2675,8 +2683,8 @@ ${
         const t: TP = adv(tp)
         if (isP(t, "{")) {
             const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function with a braced body is not in the bootstrap — write an expression body", cur(t))
-            const b: RBlock = parseBlock(d)
-            return mkE(b.tp, start, AExprK.Recovered)
+            const b: RBlock = parseBlock(withInFn(d, false))   // §19.16.3 rule 4: an arrow body is no defer site
+            return mkE(withInFn(b.tp, tp.inFn), start, AExprK.Recovered)
         }
         const body: RExpr = parseAssign(t)
         return mkE(body.tp, start, AExprK.Lambda(params, body.e))
@@ -2937,7 +2945,7 @@ ${
         let from: int = s.span.start
         if (i0 >= 0 && tp.toks[i0].cls == TC.TChunk && from > 0) from = from - 1
         const d: Diag = newDiag("E-STMT-NO-EFFECT", msg, tp.file, mkSpan(from, s.span.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // A statement-position `match` / `!{}` (the whole expression statement): its
@@ -3034,8 +3042,8 @@ ${
         for (const d of tp.diags) {
             if (d.span.start < b.span.start || d.span.end > b.span.end) kept = kept.concat([d])
         }
-        const rb: RArmBlock = parseArmBlock({ toks: tp.toks, i: i, nid: tp.nid, diags: kept, file: tp.file, ns: tp.ns })
-        return { a: withArmBlock(a, rb.b, rb.lifted, rb.bare), tp: { toks: tp.toks, i: tp.i, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: rb.tp.ns } }
+        const rb: RArmBlock = parseArmBlock({ toks: tp.toks, i: i, nid: tp.nid, diags: kept, file: tp.file, ns: tp.ns, inFn: tp.inFn })
+        return { a: withArmBlock(a, rb.b, rb.lifted, rb.bare), tp: { toks: tp.toks, i: tp.i, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file, ns: rb.tp.ns, inFn: rb.tp.inFn } }
     }
 
     fn withArmBlock(a: AArm, b: ABlock, lifted: boolean, bare: boolean) -> AArm {
@@ -3097,12 +3105,12 @@ ${
         if (i >= tp.toks.length) i = tp.toks.length - 1
         while (i > 0 && tp.toks[i - 1].end > s.span.end) { i = i - 1 }
         if (i > 0 && tp.toks[i - 1].end == s.span.end) {
-            const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns })
-            return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file, ns: tp.ns }
+            const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn })
+            return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn }
         }
         // (fail closed: no token ends where the statement does — report at its end)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;`. In a statement-position `match` / `!{}` an arm's `{ … }` block is a statement list (§7.2.2 rule 1); a `{ e }` brace is its expression only where the arm's value is used (§18.5).", tp.file, mkSpan(s.span.end, s.span.end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn armBlockOf(a: AArm) -> ABlock | not {
@@ -3296,7 +3304,7 @@ ${
         // the S446 reading took it for)
         msg = msg + gluedQHint(tp)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // Does statement `s` end with a `;` (dpa-073 F3 (i))? A block-like statement
@@ -3411,7 +3419,7 @@ ${
         } else {
             ds = ds.concat([newDiag("E-IMPORT-003", "`import` here is inside a function or block — an `import` SHALL be valid only inside a `${ }` logic context at file top level (§41.3, §21.3); move it to the top of the file", tp.file, imp.span)])
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // A block's statements when the region holds them WITHOUT braces (an
@@ -3469,7 +3477,7 @@ ${
             if (nx.line != t.line) {
                 const rt: TP = adv(tp)
                 const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;` after `return` to return nothing, or put the returned value on the `return` line. A `return` followed by a line break is refused for now: dpa-073 F1 reads `return⏎expr;` as returning `expr`, and the bootstrap does not guess which was meant while newline-terminated code is still being migrated.", rt.file, mkSpan(t.end, t.end))
-                const rd: TP = { toks: rt.toks, i: rt.i, nid: rt.nid, diags: rt.diags.concat([d]), file: rt.file, ns: rt.ns }
+                const rd: TP = { toks: rt.toks, i: rt.i, nid: rt.nid, diags: rt.diags.concat([d]), file: rt.file, ns: rt.ns, inFn: rt.inFn }
                 return mkS(rd, start, AStmtK.Return(not))
             }
             const v: RExpr = parseAssign(adv(tp))
@@ -3546,7 +3554,7 @@ ${
             if (prev.code == "E-STMT-MISSING-SEMICOLON" && prev.span.start == before.end) ds = ds.slice(0, ds.length - 1)
         }
         const d: Diag = newDiag("E-STMT-UNEXPECTED-TOKEN", "`else` with no `if` before it — no statement begins with `else`: an `else` continues the `if` statement it follows, `if (c) { … } else { … }` (§17.1.1, §17.6). A `;` after the `if`'s `}` ends the `if`, so an `else` after it has none; remove that `;`, or write the missing `if (…)`", tp.file, mkSpan(t.start, t.end))
-        let rt: TP = adv({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds.concat([d]), file: tp.file, ns: tp.ns })
+        let rt: TP = adv({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn })
         if (isWord(rt, "if")) {
             rt = parseIf(rt).tp
         } else if (isP(rt, "{")) {
@@ -3587,10 +3595,22 @@ ${
         if (!recovering) d0 = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)", t0)
         const rb: RBlock = parseBlock(d0)
         let t: TP = rb.tp
-        for (const s of rb.b.stmts) {
-            if (isDeferStmt(s)) {
-                const d: Diag = newDiag("E-DEFER-UNSUPPORTED-SITE", "a `defer` in a bare `{ … }` block has no block to belong to in stage 1 (§19.16.2) — move the `defer` to the enclosing function body or a braced `if` / loop body", t.file, s.span)
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+        // s478 (review-followups-2): not when recovering — the `{` is then the body of a
+        // construct that failed to parse (often a function's), not a bare block, and a
+        // `defer` in it is judged by nothing here (the error before it is the one cause).
+        // Inside a function declaration's body (TP.inFn) a bare block is §19.16.2's
+        // E-DEFER-UNSUPPORTED-SITE; anywhere else the `defer` is outside any function —
+        // §19.16.3 rule 4: "It is E-DEFER-OUTSIDE-FUNCTION in every other position: … a
+        // `match` / `!{}` arm or bare block at the top level" (§34: "`defer` outside a
+        // function-declaration body (top-level logic, … a `when` body, an `on*=${}` handler
+        // attribute …)").
+        if (!recovering) {
+            for (const s of rb.b.stmts) {
+                if (isDeferStmt(s)) {
+                    let d: Diag = newDiag("E-DEFER-UNSUPPORTED-SITE", "a `defer` in a bare `{ … }` block has no block to belong to in stage 1 (§19.16.2) — move the `defer` to the enclosing function body or a braced `if` / loop body", t.file, s.span)
+                    if (!tp.inFn) d = newDiag("E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) — this bare block is not in one, and a handler, an effect or the program has no single block exit to attach the deferred statement to (§19.16.3 rule 4); move the body into a named function and call it", t.file, s.span)
+                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
+                }
             }
         }
         const re: RExpr = mkE(t, start, AExprK.Recovered)
@@ -3696,9 +3716,9 @@ ${
             const rs: RExprs = parseDepList(adv(t))
             t = rs.tp
         }
-        const body: RBlock = parseBlock(t)
+        const body: RBlock = parseBlock(withInFn(t, false))   // §19.16.3 rule 4: a `when` body is no defer site
         const w: AEffect = { nid: body.tp.nid, span: spanFrom(body.tp, start), deps: ds.es, body: body.b, keyword: true }
-        return { w: w, tp: bumpId(body.tp) }
+        return { w: w, tp: bumpId(withInFn(body.tp, tp.inFn)) }
     }
 
     // `@x` or `(@a, @b, …)` — at least one entry (the keyword form's empty
@@ -3799,9 +3819,9 @@ ${
         } else if (isP(t, ">")) {
             t = adv(t)
             if (tk(cur(t), "$") && isP(adv(t), "{")) {
-                const b: RBlock = parseBlock(adv(t))
+                const b: RBlock = parseBlock(withInFn(adv(t), false))   // §19.16.3 rule 4: an effect body is no defer site
                 body = b.b
-                t = b.tp
+                t = withInFn(b.tp, tp.inFn)
             }
             if (isP(t, "<") && isP(adv(t), "/")) {
                 t = adv(adv(t))
@@ -4073,7 +4093,7 @@ ${
         // newline-terminated corpus is migrated (parseArmBlock's rule)
         if (nx.line != kw.line && !tk(nx, "}") && !tk(nx, ";") && !splitLiftReported(t, kw)) {
             const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
-            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns }
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file, ns: t.ns, inFn: t.inFn }
         }
         if (isRowTok(nx)) {
             const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
@@ -4217,7 +4237,7 @@ ${
                 depth = p.depth
             }
         }
-        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns }
+        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: false }
         return { tp: t, mp: m }
     }
 
@@ -4286,7 +4306,7 @@ ${
                 hoisted = hoisted.concat([it])
             } else {
                 const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", why, t.file, it.span)
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
             }
         }
         const back: MP = backToMarkup(lr.mp, t)
@@ -4344,7 +4364,7 @@ ${
                 depth = p.depth
             }
         }
-        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns }
+        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: false }
         t = expectP(t, "{")
         const rs: RStmt = parseStmt(t)
         t = rs.tp
@@ -4758,7 +4778,7 @@ ${
         }
         if (z.code == "") return { ty: ty, tp: tp }
         const d: Diag = newDiag(z.code, z.msg, tp.file, ty.span)
-        const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
         if (z.reported) return { ty: reportedRefine(ty), tp: t }
         return { ty: ty, tp: t }
     }
@@ -5369,7 +5389,7 @@ ${
         if (names != "" && !bad) {
             const msg: string = "the presence guard `given " + names + " :> { … }` is deprecated (§42.2.3). Write `if (" + tests + ") { … }` — it tests the same thing and narrows the same names inside the block. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
             const d: Diag = newDiag("W-GIVEN-PRESENCE-DEPRECATED", msg, t.file, mkSpan(start, sepEnd))
-            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
         }
         const body: RBlock = parseBlock(t)
         if (cond is given && !bad) return mkS(body.tp, start, AStmtK.If(cond, body.b, not))
@@ -6092,7 +6112,7 @@ ${
         let p: string = pred
         if (j.code != "") {
             const d: Diag = newDiag(j.code, j.msg, t.file, mkSpan(start, close.end))
-            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
             p = ""
         }
         // S239 review of #1888 (LOW-1) — a constraint label `base(pred)[name]`
@@ -6104,7 +6124,7 @@ ${
             const rb: PTok = peekAt(t, 2)
             const d3: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", refLabelMsg(shown, lb.v), t.file, mkSpan(start, rb.end))
             t = adv(adv(adv(t)))
-            if (p != "") t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d3]), file: t.file, ns: t.ns }
+            if (p != "") t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d3]), file: t.file, ns: t.ns, inFn: t.inFn }
             return mkT(t, start, ATypeK.TRefine(base, ""))
         }
         // a tail: a name on the `)`'s line that is no validator word and no keyword
@@ -6118,7 +6138,7 @@ ${
             }
             if (p != "") {
                 const d2: Diag = newDiag("E-CONTRACT-002", "the refinement `" + shown + "` is followed by `" + tokText(t, tailFrom, t.i) + "` — text after a refinement's closing `)` other than one `[label]` is outside the §53.2.1 grammar, so the annotation is malformed (§53.11 E-CONTRACT-002; a malformed predicate \"SHALL NOT be treated as an unrefined annotation\")", t.file, mkSpan(start, last.end))
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d2]), file: t.file, ns: t.ns }
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d2]), file: t.file, ns: t.ns, inFn: t.inFn }
             }
             p = ""
         }
@@ -6152,7 +6172,7 @@ ${
         const sp: ASpan | not = refineInside(ty)
         if (sp is not) return tp
         const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", refBoundaryMsg(typeNameText(ty), where), tp.file, sp)
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // s475 (s475-boot-lifecycle-type) — a lifecycle type `(A to B)` (§14.12) in a
@@ -6247,7 +6267,7 @@ ${
         let why: string = lifeRefusal(fromT, toT, arrow, tokText(r.tp, tp.i, r.tp.i))
         if (why == "") why = "a lifecycle type `" + tokText(r.tp, tp.i, r.tp.i) + "` in a code position (a parameter, a return type, a struct or variant field, a local's annotation) is not in the bootstrap yet — it builds `(not to T)` only as a program cell's declared type, `let <x:(not to T)=not/>` (§14.12.3); write `T | not` here"
         const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", why, r.tp.file, spanFrom(r.tp, start))
-        return { t: r.t, tp: { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: r.tp.diags.concat([d]), file: r.tp.file, ns: r.tp.ns } }
+        return { t: r.t, tp: { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: r.tp.diags.concat([d]), file: r.tp.file, ns: r.tp.ns, inFn: r.tp.inFn } }
     }
 
     // Past the `)` that closes the lifecycle type the reader is inside (depth 1
@@ -6327,7 +6347,7 @@ ${
     fn maybeType(tp: TP, start: int, from: int, inner: AType) -> RType {
         if (seqUnionCheck(inner)) {
             const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", seqUnionReason(tokText(tp, from, tp.i)), tp.file, spanFrom(tp, start))
-            const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+            const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
             return mkT(t, start, inner.k)
         }
         return mkT(tp, start, ATypeK.TMaybe(inner))
@@ -7090,8 +7110,10 @@ ${
             t = rc2.tp
         }
         const n0: int = t.diags.length
-        const body: RBlock = parseBlock(t)
-        t = body.tp
+        // §19.16.3 rule 4: "`defer` SHALL appear only inside the body of a function DECLARATION
+        // … including any block nested in one" — the body is a defer site (TP.inFn, bareBlock)
+        const body: RBlock = parseBlock(withInFn(t, true))
+        t = withInFn(body.tp, tp.inFn)
         // s469 — a declared-return (non-`void`, non-`!`) function whose body ENDS in a
         // pure expression: that is analyze's E-TYPE-043 ("ends in an expression it does
         // not `return`", §17.6) — the primary report, so the tail is not also NO-EFFECT
@@ -7240,7 +7262,7 @@ ${
     // ---- lexing a logic region --------------------------------------------
     fn regionTP(mp: MP, stop: LexStop) -> TP {
         const run: LexRun = lexFrom(mp.src, mp.pos, stop)
-        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
     }
 
     // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
@@ -7254,7 +7276,7 @@ ${
         const d: TP = regionTP(mp, stop)
         if (isStandaloneDisplay(d)) return d
         const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
-        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
     }
 
     fn isStandaloneDisplay(tp: TP) -> boolean {
@@ -7451,7 +7473,7 @@ ${
 
     // The region's tokens all consumed (at its Eof).
     fn endOfRegion(tp: TP) -> TP {
-        return { toks: tp.toks, i: tp.toks.length - 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.toks.length - 1, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // A `;` at the region's statement level (depth 1: directly inside its outer
@@ -7761,7 +7783,7 @@ ${
             if (i < from || d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // `tp` without the E-STMT-NO-EFFECT reports made since it had `from` diagnostics
@@ -7773,7 +7795,7 @@ ${
             if (i < from || d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn parseQuoted(mp: MP, q: string) -> RValue {
@@ -8514,7 +8536,7 @@ ${
                 const last: PTok = r.tp.toks[r.tp.toks.length - 1]
                 const d: Diag = newDiag("E-MULTI-STATEMENT-HANDLER", "a `:`-shorthand body holds ONE expression (§4.14); this one is a `;`-separated statement sequence. Write the statements in the element's body instead of after `:` (the bare-body form, `<tag>…</>`), or name a function and call it", r.tp.file, mkSpan(e.span.start, last.start))
                 const te: TP = endOfRegion(r.tp)
-                t = { toks: te.toks, i: te.i, nid: te.nid, diags: te.diags.concat([d]), file: te.file, ns: te.ns }
+                t = { toks: te.toks, i: te.i, nid: te.nid, diags: te.diags.concat([d]), file: te.file, ns: te.ns, inFn: te.inFn }
                 e = { nid: e.nid, span: mkSpan(e.span.start, last.start), k: AExprK.Recovered }
             } else {
                 t = expectRegionEnd(r.tp)
@@ -8878,10 +8900,10 @@ ${
         }
         const before: int = m.pos
         const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
-        const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file, ns: tp0.ns }
+        const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file, ns: tp0.ns, inFn: tp0.inFn }
         const runEnd: int = lastEnd(tp)
         if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
-        const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file, ns: tp.ns })
+        const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn })
         if (msgArmAt(tp)) {
             // s469: a §51.0.S.2.3 message-arm list (`.Go :> .Loading, …`,
             // newline- or comma-separated) — refused by name, never read
@@ -8984,9 +9006,9 @@ ${
     // ending where the next literal starts.
     fn parseDisplayItem(mp: MP, d: TP) -> RNodes {
         const t0: PTok = d.toks[0]
-        const one: TP = { toks: [t0, endTokAt(d.toks[1])], i: 0, nid: d.nid, diags: mp.diags, file: d.file, ns: d.ns }
+        const one: TP = { toks: [t0, endTokAt(d.toks[1])], i: 0, nid: d.nid, diags: mp.diags, file: d.file, ns: d.ns, inFn: d.inFn }
         const m: MP = displayEscapeDiags(mp, one.toks)
-        const r: RExpr = parseAssign({ toks: one.toks, i: 0, nid: one.nid, diags: m.diags, file: one.file, ns: one.ns })
+        const r: RExpr = parseAssign({ toks: one.toks, i: 0, nid: one.nid, diags: m.diags, file: one.file, ns: one.ns, inFn: one.inFn })
         const back: MP = backToMarkup(m, r.tp)
         return displayNodes(back, r.e, t0.start, one)
     }
@@ -10461,7 +10483,7 @@ ${
             }
         }
         toks = toks.concat([lexed[lexed.length - 1]])
-        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
+        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
         if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end, src)
         return hostBindLine(mp, t0, at, end, src, blockTypes)
     }
@@ -10793,7 +10815,7 @@ ${
     // `}` or a line break. Otherwise `mp.pos` — the run is prose.
     fn dbStatementEnd(mp: MP) -> int {
         const tp0: TP = codeRegionTP(mp, LexStop.CodeBody)
-        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file, ns: mp.ns }
+        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file, ns: mp.ns, inFn: false }
         if (atEnd(tp)) return mp.pos
         const rs: RStmt = parseStmt(tp)
         const t: TP = rs.tp
@@ -10983,7 +11005,7 @@ ${
             } else {
                 const msg: string = "the markup presence guard `given " + gh.written + " :> { … }` (§42.2.3, deprecated) is not in the bootstrap — write `" + interpOpen() + " if (" + gh.names[0] + " is given) { … } }` (its canonical form), or `<p if=" + gh.names[0] + ">…</p>`."
                 const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", msg, t.file, mkSpan(gh.start, gh.sepEnd))
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
             }
         }
         // The guard's body is markup, which the logic lexer does not read (a
@@ -11795,7 +11817,7 @@ ${
     // =========================================================================
     fn bodyTopRun(mp: MP, ctx: string) -> RMItems {
         const run: LexRun = lexFromMode(mp.src, mp.pos, LexStop.CodeBody, false)
-        let t: TP = { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns }
+        let t: TP = { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
         let items: AItem[] = []
         let stmts: AStmt[] = []
         let runStart: int = -1
@@ -11855,7 +11877,7 @@ ${
                     if (stmts.length == 0) runStart = -1
                     if (badStart < 0) badStart = from2
                     badEnd = r.tp.toks[r.tp.i - 1].end
-                    t = { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: chain.diags, file: r.tp.file, ns: r.tp.ns }
+                    t = { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: chain.diags, file: r.tp.file, ns: r.tp.ns, inFn: r.tp.inFn }
                     chainLine = -1
                 } else if (notCode(before, r)) {
                     // not valid code: drop the chain and read its line as display text
@@ -11925,7 +11947,7 @@ ${
             }
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // s478 r1 — the statement just read is literal-only (§40.8), parsed with no
@@ -12029,7 +12051,7 @@ ${
         const text: string = src.substring(start, end).trim()
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a bare run there is code, and this one is not valid code (§40.8, §4.18.7)", tp.file, mkSpan(start, end))
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // §40.8: "A `"..."` is a display-text literal here only when it stands as its
@@ -12086,7 +12108,7 @@ ${
             items = items.concat([{ nid: nid, span: n.span, k: AItemK.MarkupItem(n) }])
             nid = nid + 1
         }
-        let t: TP = adv({ toks: tp.toks, i: tp.i, nid: nid, diags: m.diags, file: tp.file, ns: tp.ns })
+        let t: TP = adv({ toks: tp.toks, i: tp.i, nid: nid, diags: m.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn })
         if (isP(t, ";")) t = adv(t)
         return { items: items, tp: t }
     }

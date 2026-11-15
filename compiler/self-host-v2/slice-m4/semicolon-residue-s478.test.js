@@ -68,6 +68,41 @@ describe("§7.2.2 — a `{` that starts a statement is a bare block, not an obje
     expect(r.diags.some((d) => d.code === "E-TYPE-STRUCT-CONTEXT" || d.code === "E-ASSIGN-POSITION")).toBe(false);
   });
 
+  // s478 (review-followups-2, #1897 F1): recovering, the `{` is that construct's body, not a bare
+  // block — a `defer` at its top is not judged as a bare-block defer.
+  test("recovery: a `defer` at the top of a body whose head failed to parse is no E-DEFER-UNSUPPORTED-SITE", () => {
+    const r = run(`\${ function f(cb: (x: int) => int) -> int { defer log(1); return 1; } }`);
+    expect(r.diags.length).toBeGreaterThan(0);
+    expect(r.diags.some((d) => d.code === "E-DEFER-UNSUPPORTED-SITE")).toBe(false);
+  });
+
+  // #1897 F2 — §19.16.3 rule 4: "`defer` SHALL appear only inside the body of a function
+  // DECLARATION … It is E-DEFER-OUTSIDE-FUNCTION in every other position: … a `match` / `!{}` arm
+  // or bare block at the top level"; §34 E-DEFER-OUTSIDE-FUNCTION: "(top-level logic, … a `when`
+  // body, an `on*=${}` handler attribute …)".
+  test("§19.16.3 — a bare block outside any function: its `defer` is E-DEFER-OUTSIDE-FUNCTION", () => {
+    const deferCodes = (src) => codes(src).filter((c) => c.startsWith("E-DEFER-"));
+    expect(deferCodes(`\${ { defer log(1); } }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    expect(deferCodes(`<button onclick={ { defer log(1); } }>b</button>`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    // a worker's `when message` body (§4.12.4)
+    expect(deferCodes(`<program>\n<program name="w">\nwhen message(d) { { defer send(d); } }\n</program>\n</program>\n`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+  });
+  test("§19.16.3 — a `when` body or a handler inside a function is still outside one", () => {
+    const cs = codes(FN(`        when @trace changes {\n            {\n                defer D("x;");\n            }\n        }`));
+    expect(cs).toContain("E-DEFER-OUTSIDE-FUNCTION");
+    expect(cs).not.toContain("E-DEFER-UNSUPPORTED-SITE");
+  });
+  test("§19.16.2 — inside a function (a loop body, a nested function) it stays E-DEFER-UNSUPPORTED-SITE", () => {
+    expect(codes(`\${ function f() { for (const x of [1]) { { defer log(x); } } } }`)).toContain("E-DEFER-UNSUPPORTED-SITE");
+    const nested = codes(FN(`        function inner() {\n            {\n                defer D("x;");\n            }\n        }\n        inner();`));
+    expect(nested).toContain("E-DEFER-UNSUPPORTED-SITE");
+    expect(nested).not.toContain("E-DEFER-OUTSIDE-FUNCTION");
+    // after a nested function, the enclosing body is still a function body
+    const after = codes(FN(`        function inner() {\n            D("i;");\n        }\n        {\n            defer D("x;");\n        }`));
+    expect(after).toContain("E-DEFER-UNSUPPORTED-SITE");
+    expect(after).not.toContain("E-DEFER-OUTSIDE-FUNCTION");
+  });
+
   test("an object literal in a value position is unchanged", () => {
     expect(codes(`<program>\n    type P:struct = { a: int }\n    function go() -> int {\n        const p: P = { a: 1 };\n        return p.a;\n    }\n    <p>\${go()}</p>\n</program>\n`)).toEqual([]);
   });
