@@ -6730,14 +6730,6 @@ ${
         return "`" + w + "` is written twice on `<" + decl + ">` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no code for a repeated opener word, so it is refused: write it once"
     }
 
-    // s451 — the `persist=` storage value "session", spelled in pieces: impl#1
-    // (which compiles the bootstrap) escalates a function to the SERVER when
-    // its body holds the word `session` ANYWHERE, string literals included —
-    // route-inference.ts SERVER_ONLY_PATTERNS `/(?<!@)\bsession\b/` is
-    // string-blind (the `print(` and `Bun.*` triggers moved to the AST; this
-    // one did not). Dogfood finding, s451.
-    fn sessionWord() -> string { return "sess" + "ion" }
-
     // s451 — the §6.14 opener words: `persist=`, `key=` and `prepaint`.
     fn isPersistWord(w: string) -> boolean {
         return w == "persist" || w == "key" || w == "prepaint"
@@ -6750,7 +6742,7 @@ ${
     // opener is §6.14.4.2 rule 2's error wherever it is written.
     fn persistFieldDiag(file: string, d: ADecl, a: AAttr, st: AS) -> AS {
         if (a.name == "prepaint" && attrNamed(d.mods, "persist") is not) {
-            return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"session\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
         }
         return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + d.name + ">`, a declaration or a field of one, is not in the bootstrap — on a §66 declaration `persist=` governs the shared instance only (§6.14.1 rule 3), and its position there and per-instance keys are OPEN (O-061-9); the bootstrap persists a program cell, `let <x:T=v persist=\"local\" key=\"app.x\"/>`")
     }
@@ -9053,26 +9045,16 @@ ${
     // of a `fn` body — so the spelling is never written whole in one here.)
     fn dateNowText() -> string { return "`Date" + ".now()`" }
 
-    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` names the `fn` that makes the body pure:
-    // the function itself, or — in a nested function — the enclosing `fn` (§48.3: "anywhere
-    // inside a `fn` body, including inside nested closures"), never "a `function` body".
-    // (Built outside resolveHost's match: impl#1 printed this text's "`fn`" as "`function`"
-    // when it stood inline in the match arm.)
-    fn clockInPureText(env: Env) -> string {
-        const tail: string = " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter"
-        const outer: string = env.nest.pureFn
-        if (outer != "" && outer != env.fx.fnName) {
-            return dateNowText() + " is non-deterministic — the nested function `" + env.fx.fnName + "` is inside `fn " + outer + "`, which is pure (nested functions included, §48.3) and cannot call it" + tail
-        }
-        return dateNowText() + " is non-deterministic — `fn " + env.fx.fnName + "` is pure and cannot call it" + tail
-    }
-
+    // s477 fix r1 (F3) — E-FN-004 for `Date.now()` (the `.HostPure` arm below) names the `fn`
+    // that makes the body pure: the function itself, or — in a nested function — the enclosing
+    // `fn` (§48.3: "anywhere inside a `fn` body, including inside nested closures"), never "a
+    // `function` body".
     fn resolveHost(env: Env, e: AExpr, args: AExpr[], st: AS) -> RX {
         if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " takes no argument", st)
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", clockInPureText(env), st)
+            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
@@ -33828,7 +33810,7 @@ ${
         for (const x of es) {
             const n: string = atName(x)
             if (n != "" && isSyncedCell(infos, n)) {
-                st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `@" + d.name + "` lists `@" + n + "`, a `persist=\"local\"` cell another tab can write — whether that cross-tab write is a change that resets `@" + d.name + "` is OPEN (§6.8.4 rule 7, O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync) or drop the entry")
+                st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `@" + d.name + "` lists `@" + n + "`, a `persist=\"local\"` cell another tab can write — whether that cross-tab write is a change that resets `@" + d.name + "` is OPEN (§6.8.4 rule 7, O-061-5); use `persist=\"session\"` (no cross-tab sync) or drop the entry")
             }
         }
         return st
@@ -33855,14 +33837,14 @@ ${
         const km: AAttr | not = attrNamed(d.mods, "key")
         const pp: AAttr | not = attrNamed(d.mods, "prepaint")
         if (pm is not) {
-            if (pp is given) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
-            if (km is given) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"" + sessionWord() + "\"` (§6.14.1)")
+            if (pp is given) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"session\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            if (km is given) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"session\"` (§6.14.1)")
             return { info: not, st: st }
         }
         let ok = true
         const store: PersistStore | not = storeOf(pm.value)
         if (store is not) {
-            st = addDiag(st, prog.file, pm.span, "E-PERSIST-STORAGE-UNKNOWN", "`persist=` takes \"local\" (localStorage) or \"" + sessionWord() + "\" (sessionStorage) — " + storeText(pm.value) + " is neither (§6.14.1 rule 1; \"cookie\" is deferred, and IndexedDB is a planned stdlib addition, not a `persist=` value)")
+            st = addDiag(st, prog.file, pm.span, "E-PERSIST-STORAGE-UNKNOWN", "`persist=` takes \"local\" (localStorage) or \"session\" (sessionStorage) — " + storeText(pm.value) + " is neither (§6.14.1 rule 1; \"cookie\" is deferred, and IndexedDB is a planned stdlib addition, not a `persist=` value)")
             ok = false
         }
         let key: string = ""
@@ -33916,7 +33898,7 @@ ${
             }
         }
         if (store is given && store == PersistStore.Local && (f.graph is given || !grantsAdmit(f.grants, EditKind.Replace))) {
-            return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
+            return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"session\"` (no cross-tab sync)"
         }
         // s469-boot-tape-grants (review r2 H1): the cross-tab value is a whole-value write of a
         // STRUCT too, so it replaces each tape field it changes (§66.12.6 rule 4) — a struct
@@ -33924,7 +33906,7 @@ ${
         // only at run time: refused, as `reset` is (resetTapeProblem, the one reader).
         if (store is given && store == PersistStore.Local) {
             const tp: string = resetTapeProblem(g.types, f.ty, "@" + f.sym.hint)
-            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"" + sessionWord() + "\"` (no cross-tab sync), or grant `replace` on the field's type"
+            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"session\"` (no cross-tab sync), or grant `replace` on the field's type"
         }
         // r8: an unresolved type is never checked against
         if (st.bad.fields.indexOf(f.sym.id) >= 0) return ""
@@ -33951,7 +33933,7 @@ ${
         const s: string | not = quotedOf(v)
         if (s is not) return not
         if (s == "local") return PersistStore.Local
-        if (s == sessionWord()) return PersistStore.Session
+        if (s == "session") return PersistStore.Session
         return not
     }
 

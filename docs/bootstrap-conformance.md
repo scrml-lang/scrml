@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1862 of 1862 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1865 of 1865 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 340 | 18.3% |
+| PASS | 343 | 18.4% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 260 | 14.0% |
+| FAIL | 260 | 13.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 624 | 33.5% |
-| UNSUPPORTED | 638 | 34.3% |
+| UNSUPPORTED | 638 | 34.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 600; of those, 340 hold (56.7%). Runtime half executed on the bootstrap for 124 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 603; of those, 343 hold (56.9%). Runtime half executed on the bootstrap for 126 case(s).
 
-- **Vacuous** passes: 17 of 340 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **323**.
+- **Vacuous** passes: 17 of 343 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **326**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 75 of 260; the other 185 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -127,7 +127,7 @@ NOT-TWINNED by reason (624 cases; a case counts once per distinct reason):
 | forms | 66 | 12 | · | 4 | · | 49 | 1 | · | · |
 | hostmethod | 1 | · | · | 1 | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 62 | 20 | · | 4 | · | 22 | 16 | · | · |
+| lifecycle | 65 | 23 | · | 4 | · | 22 | 16 | · | · |
 | linear | 15 | · | · | 4 | · | · | 11 | · | · |
 | loop | 8 | · | · | 1 | · | 3 | 4 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -1172,7 +1172,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (340)
+### PASS / CODES-ONLY (343)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -1363,7 +1363,10 @@ none
 - `lifecycle/pending-cell-reset-on-cycle-pos` — PASS
 - `lifecycle/pending-cell-reset-on-reloads-rt` — PASS
 - `lifecycle/pending-cell-reset-reloads-rt` — PASS
+- `lifecycle/pending-cell-reset-then-write-wins-rt` — PASS
 - `lifecycle/pending-cell-through-call-reloads-rt` — PASS
+- `lifecycle/pending-cell-write-then-reset-reloads-rt` — PASS
+- `lifecycle/pending-tape-whole-write-not-granted-pos` — PASS
 - `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN
 - `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
