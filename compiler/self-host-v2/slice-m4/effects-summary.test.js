@@ -102,6 +102,7 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
     "        }",
     "    }",
     "    <button onclick=go()>go</button>",
+    "    <p>${@log} ${@n}</p>",
     "</program>",
   ].join("\n");
 

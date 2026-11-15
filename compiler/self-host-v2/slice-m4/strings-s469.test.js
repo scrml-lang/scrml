@@ -18,6 +18,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -32,7 +33,8 @@ const clean = (src) => {
   expect(mods.check.checkCore(r.core)).toEqual([]);
   return r;
 };
-const prog = (decls, body) => `<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the shared-scaffold cells (S, C's T) it names
+const prog = (decls, body) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`, [`    let <s:string="Hi"/>`, `    <xs:int[free, append, write]=([3, 1, 2])/>`, `    <ws:string[]=(["b", "a"])/>`]);
 const $ = (sel) => document.querySelector(sel);
 const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
 let k = 0;
@@ -280,7 +282,8 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(granted.length).toBe(4);                // the four receivers `@xs`
   });
   test("F/U-6: C9 — a PositionWrite's value must be a map / sort / reverse OF THE FIELD (checked in Core)", () => {
-    const src = prog(T + `\n    <ys:int[free, append, write]=([9])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`);
+    // s478: `@ys` is the other field the graft below names; nothing reads it — `_`-named (§34 E-DG-002)
+    const src = prog(T + `\n    <_ys:int[free, append, write]=([9])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`);
     const r = clean(src);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     // graft: the same write with another field's tape as its value
@@ -319,7 +322,8 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(cs).not.toContain("E-TAPE-JS-METHOD");
   });
   test("append / prepend are the grant-named edits, checked against the grants", () => {
-    const g = (decl, body) => codes(prog(decl + `\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>`));
+    // s478: the program renders the sequence its function edits
+    const g = (decl, body) => codes(prog(decl + `\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>\n        <p>\${@xs.length}</p>`));
     expect(g(`    <xs:int[free, append]=([])/>`, `@xs.append(1);`)).toEqual([]);
     expect(g(`    <xs:int[free, append]=([])/>`, `@xs.prepend(1);`)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(g(`    <xs:int[free, prepend]=([])/>`, `@xs.prepend(1);`)).toEqual([]);

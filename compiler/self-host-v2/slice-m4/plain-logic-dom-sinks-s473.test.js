@@ -29,6 +29,7 @@
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -36,19 +37,20 @@ beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 const CODE = "E-LOGIC-EXECUTABLE-SINK";
 const W = "type W:struct = { let innerHTML: string, let outerHTML: string, let srcdoc: string, let onclick: string, let ONCLICK: string, let online: string, let one: string, let once: string, let href: string, let k: string }\n";
 const INIT = `{ innerHTML: "a", outerHTML: "a", srcdoc: "a", onclick: "a", ONCLICK: "a", online: "a", one: "a", once: "a", href: "a", k: "a" }`;
-const P = (body, markup = `        <button onclick=go()>b</button>`, extra = "") => `${W}<program>
+// s478 (E-DG-002): a case's program carries only the scaffold it uses — `tick` when the case calls it,
+// and each cell (`tick` writes `@s`) when something there names it
+const P = (body, markup = `        <button onclick=go()>b</button>`, extra = "") => dropUnnamedScaffold(`${W}<program>
     let <s:string="x"/>
     let <n:int=0/>
     <w:W=(${INIT})/>
-    function tick() { @s = "t"; }
-${extra}    function go() {
+${/\btick\b/.test(body + markup + extra) ? `    function tick() { @s = "t"; }\n` : ""}${extra}    function go() {
         ${body}
     }
     <main>
 ${markup}
     </main>
 </program>
-`;
+`, [`    let <s:string="x"/>`, `    let <n:int=0/>`, `    <w:W=(${INIT})/>`]);
 const run = (src) => frontEnd(mods, [{ path: "s.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 const sinkCount = (src) => codes(src).filter((c) => c === CODE).length;
@@ -60,10 +62,12 @@ function refusedAll(rows) {
     });
   }
 }
+// s478 (E-DG-002): a clean twin's program renders the cells its body writes (`@w`'s field, `@s`)
+const shown = (body) => [/@w\b/.test(body) ? `        <p>\${@w.k}</p>\n` : "", /@s\b/.test(body) ? `        <p>\${@s}</p>\n` : ""].join("");
 function cleanAll(rows) {
   for (const [what, body] of rows) {
     test(`compiles clean: ${what}`, () => {
-      expect(codes(P(body))).toEqual([]);
+      expect(codes(P(body, `        <button onclick=go()>b</button>\n${shown(body)}`))).toEqual([]);
     });
   }
 }

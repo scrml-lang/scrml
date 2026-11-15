@@ -58,7 +58,7 @@
       "fails": {
         "codes": [
           "emitted:E-MARKUP-001=1",
-          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-STATE-UNDECLARED=2",
           "prefix:E-MARKUP-001 (matches forbidden E-*)",
           "prefix:E-STATE-UNDECLARED (matches forbidden E-*)"
         ]

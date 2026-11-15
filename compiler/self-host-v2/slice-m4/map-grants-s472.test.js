@@ -28,6 +28,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -53,8 +54,9 @@ const find = (n, pred, out = []) => {
   return out;
 };
 
+// s478 (E-DG-002): `@shown` is declared only when the case names it (the default markup reads it)
 const prog = (decls, body, markup = `        <p id="o">\${@shown}</p>`) =>
-  `<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n${markup}\n    </main>\n</program>\n`;
+  dropUnnamedScaffold(`<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n${markup}\n    </main>\n</program>\n`, [`    let <shown:string=""/>`]);
 
 // a struct element holding a tape field; `mk` builds a fresh element
 const K = (kids) => `    type K:struct = { name: string, kids: int[${kids}] }\n    fn mk(k: K) -> K {\n        const r: K = { name: k.name + "!", kids: [] };\n        return r;\n    }`;
@@ -115,7 +117,7 @@ describe("a cell's tape written back through map / sort / reverse", () => {
     clean(prog(GR, `        @g = @g;`));
     clean(prog(G("free, append", "write, replace, free, append"), `        @g = [...@g, []];`));
     // granted all the way down: the whole replace is admitted
-    clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`));
+    clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`, showG));
   });
 
   test("deeper levels: a map whose middle tape grants `replace` still replaces the innermost append-only tapes", () => {
@@ -192,7 +194,7 @@ describe("a local, a parameter and a struct field rebound through map", () => {
 // ---------------------------------------------------------------------------
 describe("Core check C3 — a PositionWrite replaces every element (defence in depth)", () => {
   test("a whole Replace `@g = [[]]`, its inner `replace` flipped off in Core: C3 refuses (RULED S472 item 1)", () => {
-    const r = clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`));
+    const r = clean(prog(G("free, append, replace", "write, replace"), `        @g = [[]];`, showG));
     const ws = find(r.core.fns, (n) => n.variant === "Write");
     expect(ws.map((w) => w.data.edit.variant ?? w.data.edit)).toEqual(["Replace"]);
     const core = structuredClone(r.core);

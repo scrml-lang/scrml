@@ -7,6 +7,7 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd, replaceLine } from "./harness.js";
 import { auditFixture } from "./fixtures.js";
 import { loadProgram, click, expectNoPageErrors, instancesOf, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -21,7 +22,8 @@ const withFn = (fn, type) => {
   return s.replace("function record(action: string) {", fn + "\n    function record(action: string) {");
 };
 const rows = () => [...document.querySelectorAll("main > ul > li")].map((li) => li.textContent);
-const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    let <n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): the scaffold cell `@n` is declared only when the case names it
+const P = (decls, main) => dropUnnamedScaffold(`<program>\n    type Phase:enum = { Idle, Loading, Done }\n    let <n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, ["    let <n:int=5/>"]);
 
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {

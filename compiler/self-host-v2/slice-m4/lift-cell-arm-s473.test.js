@@ -11,6 +11,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -24,7 +25,8 @@ const clean = (src) => {
   expect(mods.check.checkCore(r.core)).toEqual([]);
   return r;
 };
-const prog = (decls, body) => `<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the cells of L it names
+const prog = (decls, body) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`, ["    let <x:int=7/>", "    let <s:S=({ n: 2 })/>"]);
 let k = 0;
 const load = (src) => loadProgram(clean(src).core, "s473lift-" + k++, []);
 const $ = (sel) => document.querySelector(sel);

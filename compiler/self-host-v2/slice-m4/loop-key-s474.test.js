@@ -60,7 +60,8 @@ describe("1 — the header `key` parses and compiles to keyed reconciliation", (
     expect(out).toMatch(/it\w*\.get\(\)\.name/);
   });
   test("an unkeyed loop still prints `rt.gather` (positional)", () => {
-    const out = js(prog(`    <xs:int[]=([1, 2])/>\n${ITEMS}`, `        <ul>\${ for (x of @xs) { lift <li>\${x}</li>; } }</ul>`));
+    // s478: the buttons' `@items` is rendered too, so the program reads every cell it declares (§34 E-DG-002)
+    const out = js(prog(`    <xs:int[]=([1, 2])/>\n${ITEMS}`, `        <ul>\${ for (x of @xs) { lift <li>\${x}</li>; } }</ul>\n        <p>\${@items.length}</p>`));
     expect(out).toContain("rt.gather(");
     expect(out).not.toContain("rt.gatherKeyed(");
   });
@@ -166,7 +167,7 @@ describe("3 — W-KEY-001 (the §17.4b header meaning)", () => {
   });
   test("near-misses: keyed; a tape of primitives; a loop that lifts only values", () => {
     expect(codes(prog(ITEMS, `        <ul>\${ for (const it of @items key it.id) { lift <li>\${it.name}</li>; } }</ul>`))).toEqual([]);
-    expect(codes(prog(`    <xs:int[]=([1])/>\n${ITEMS}`, `        <ul>\${ for (x of @xs) { lift <li>\${x}</li>; } }</ul>`))).toEqual([]);
+    expect(codes(prog(`    <xs:int[]=([1])/>\n${ITEMS}`, `        <ul>\${ for (x of @xs) { lift <li>\${x}</li>; } }</ul>\n        <p>\${@items.length}</p>`))).toEqual([]);
     expect(codes(prog(ITEMS, `        <p>\${ for (const it of @items) { lift it.name; } }</p>`))).toEqual([]);
   });
 });

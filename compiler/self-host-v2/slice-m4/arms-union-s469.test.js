@@ -206,18 +206,18 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     return { diags: ast.diags.map((d) => d.code), j };
   };
 
-  test("`<g:Guess | not=.Yes/>` — spaced, then an own value: the type is `Guess | not` (TMaybe), no parse error", () => {
-    const src = prog(`    <g:Guess | not=.Yes/>`);
-    const { diags, j } = declType(src, "g");
+  test("`<_g:Guess | not=.Yes/>` — spaced, then an own value: the type is `Guess | not` (TMaybe), no parse error", () => {
+    const src = prog(`    <_g:Guess | not=.Yes/>`);
+    const { diags, j } = declType(src, "_g");
     expect(diags).toEqual([]);
     expect(j).toContain('"variant":"TMaybe","data":{"inner":{');
     expect(j).toContain('"variant":"TName","data":{"name":"Guess"}');
     expect(codes(src)).toEqual([]);
   });
 
-  test("unspaced `<g:Guess|not=.Yes/>`, reversed `<g:not | Guess/>` and `let <email:string | not=\"\"/>` (the SPEC's example)", () => {
-    expect(codes(prog(`    <g:Guess|not=.Yes/>`))).toEqual([]);
-    expect(codes(prog(`    let <email:string | not=""/>`))).toEqual([]);
+  test("unspaced `<_g:Guess|not=.Yes/>`, reversed `<_g:not | Guess/>` and `let <_email:string | not=\"\"/>` (the SPEC's example)", () => {
+    expect(codes(prog(`    <_g:Guess|not=.Yes/>`))).toEqual([]);
+    expect(codes(prog(`    let <_email:string | not=""/>`))).toEqual([]);
     const rev = declType(prog(`    let <h:not | Guess=.No/>`)).j;
     expect(rev).toContain('"variant":"TMaybe"');
   });
@@ -233,9 +233,9 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     expect(parse(prog(`    let <g:Guess | not/>`)).diags.map((d) => d.code)).not.toContain("E-PARSE-TAG");
   });
 
-  test("the `| not` cell's value is checked against `Guess | not`: `@g = not` is legal, `@g = 5` is E-TYPE-031", () => {
-    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = not; }`))).toEqual([]);
-    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = 5; }`))).toContain("E-TYPE-031");
+  test("the `| not` cell's value is checked against `Guess | not`: `@_g = not` is legal, `@_g = 5` is E-TYPE-031", () => {
+    expect(codes(prog(`    let <_g:Guess | not=.Yes/>\n    function f() { @_g = not; }`))).toEqual([]);
+    expect(codes(prog(`    let <_g:Guess | not=.Yes/>\n    function f() { @_g = 5; }`))).toContain("E-TYPE-031");
   });
 
   test("a union cell renders and narrows (runtime): `if=(@name is given)` follows writes of a value and of `not`", async () => {
@@ -306,9 +306,9 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"))).toBe(true);
     });
     test("a tape alone is unaffected: the granted append compiles, an ungranted shift is E-WRITE-NOT-GRANTED", () => {
-      const ok = `<program>\n${E}\n    <audit:Entry[free, append]=[]/>\n    function add() { @audit.append({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
+      const ok = `<program>\n${E}\n    <_audit:Entry[free, append]=[]/>\n    function add() { @_audit.append({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
       expect(codes(ok)).toEqual([]);
-      expect(codes(ok.replace("function add()", "function bad() { @audit.shift(); }\n    function add()"))).toEqual(["E-WRITE-NOT-GRANTED"]);
+      expect(codes(ok.replace("function add()", "function bad() { @_audit.shift(); }\n    function add()"))).toEqual(["E-WRITE-NOT-GRANTED"]);
     });
     // review r2 (HIGH, pre-existing on main): the CODE-position type parser wrapped a
     // tape in `| not` too. One shared check (parse.scrml seqUnionCheck) now refuses it
@@ -353,7 +353,7 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     });
     test("a non-tape `T | not` in code positions is unaffected, either order", () => {
       expect(codes(inProg(`    function ok(n: int | not) -> not | string { return not; }`))).toEqual([]);
-      expect(codes(inProg(`    type Box:struct = { s: string | not }\n    let <b:Box=({ s: not })/>\n    function w() { @b.s = "x"; }`))).toEqual([]);
+      expect(codes(inProg(`    type Box:struct = { s: string | not }\n    let <_b:Box=({ s: not })/>\n    function w() { @_b.s = "x"; }`))).toEqual([]);
     });
     test("a derived tape's E-DERIVED-WRITE never advises `let` (E-GRANT-LET-ON-SEQUENCE)", () => {
       const src = inProg(`    <src:Entry[free, append]=[]/>\n    <d:Entry[free, append]=(@src)/>\n    function w() { @d = []; }`);
@@ -378,11 +378,11 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     });
   });
 
-  test("`<g:Guess | not=Guess.Yes/>` — the union parses; the qualified value is an opener expression to parenthesize (§66.2.4), and `(Guess.Yes)` is a qualified variant (s469: admitted)", () => {
-    const bare = codes(prog(`    <g:Guess | not=Guess.Yes/>`));
+  test("`<_g:Guess | not=Guess.Yes/>` — the union parses; the qualified value is an opener expression to parenthesize (§66.2.4), and `(Guess.Yes)` is a qualified variant (s469: admitted)", () => {
+    const bare = codes(prog(`    <_g:Guess | not=Guess.Yes/>`));
     expect(bare).not.toContain("E-PARSE-TAG");
     expect(bare).toContain("E-DECL-OPENER-EXPR-UNPARENTHESIZED");
-    const paren = codes(prog(`    <g:Guess | not=(Guess.Yes)/>`));
+    const paren = codes(prog(`    <_g:Guess | not=(Guess.Yes)/>`));
     expect(paren).not.toContain("E-PARSE-TAG");
     expect(paren).toEqual([]);
   });

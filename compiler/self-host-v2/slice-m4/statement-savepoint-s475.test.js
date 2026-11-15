@@ -104,6 +104,7 @@ ${E}
         <button onclick={ @r = oneQuery(1) !{ _ :> 0, }; }>h</button>
         <button onclick={ @r = oneWriteThenFail(1) !{ _ :> 0, }; }>i</button>
         <button onclick={ @r = twoNobatch(1) !{ _ :> 0, }; }>j</button>
+        <p class="read">\${@r}</p>
     </main>
 </program>
 `;
@@ -171,7 +172,7 @@ ${E}
         return 1;
     }
     let <r:int=0/>
-    <main><button onclick={ @r = q(1) !{ _ :> 0, }; }>a</button></main>
+    <main><button onclick={ @r = q(1) !{ _ :> 0, }; }>a</button><p class="read">\${@r}</p></main>
 </program>
 `;
     const { js: j } = await serve(compile(P).core, spyDriver().fn, []);
@@ -351,7 +352,7 @@ ${E}
         return 1;
     }
     let <r:int=0/>
-    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button></main>
+    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(codes(P)).toEqual([]);
@@ -370,7 +371,7 @@ ${E}
         return 1;
     }
     let <r:int=0/>
-    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button></main>
+    <main><button onclick={ @r = g(1) !{ _ :> 0, }; }>a</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(codes(P)).toContain("E-BOOTSTRAP-UNSUPPORTED");

@@ -7,6 +7,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -22,7 +23,8 @@ const clean = (src) => {
   return r;
 };
 const coreOf = (src) => clean(src).core;
-const P = (decls, main) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the cells of the codes scaffold (`D`) it names
+const P = (decls, main) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, ["    let <n:int=0/>", "    <step=1/>", "    <dbl:int=(@n * 2)/>"]);
 const $ = (sel) => document.querySelector(sel);
 const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
 const walkCore = (core, pred) => {
@@ -135,8 +137,8 @@ describe("§6.8.4 — codes", () => {
     }
     expect(diagsOf(P(`${D}\n${page("reset-on=[@dbl]")}`, ""))[0].message).toMatch(/DERIVED/);
     // negative: mutable cells, one or several
-    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, ""))).toEqual([]);
-    expect(codes(P(`${D}\n${page("reset-on=[@query, @n]")}`, ""))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@page}</p>"))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query, @n]")}`, "<p>${@page}</p>"))).toEqual([]);
   });
 
   test("E-RESET-ON-CYCLE — a cell listing itself, a pair, a triangle; the message names the cells (rule 3)", () => {
@@ -149,7 +151,7 @@ describe("§6.8.4 — codes", () => {
     const tri = diagsOf(P(`    let <a:int=0 reset-on=[@c]/>\n    let <b:int=0 reset-on=[@a]/>\n    let <c:int=0 reset-on=[@b]/>`, ""));
     expect(tri.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
     // negative: a chain is legal
-    expect(codes(P(`    let <a:int=0 reset-on=[@b]/>\n    let <b:int=0 reset-on=[@c]/>\n    let <c:int=0/>`, ""))).toEqual([]);
+    expect(codes(P(`    let <a:int=0 reset-on=[@b]/>\n    let <b:int=0 reset-on=[@c]/>\n    let <c:int=0/>`, "<p>${@a}</p>"))).toEqual([]);
   });
 
   test("E-RESET-ON-NOT-WRITABLE — a locked or a derived cell cannot be reset (rule 5)", () => {
@@ -157,8 +159,8 @@ describe("§6.8.4 — codes", () => {
     expect(codes(P(`${D}\n    <twice:int=(@n * 2) reset-on=[@query]/>`, ""))).toEqual(["E-RESET-ON-NOT-WRITABLE"]);
     expect(diagsOf(P(`${D}\n    <frozen:int=1 reset-on=[@query]/>`, ""))[0].message).toMatch(/LOCKED.*make it writable/);
     // negative: a `let` cell, and a sequence whose type grants `replace`
-    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, ""))).toEqual([]);
-    expect(codes(P(`${D}\n    <xs:int[replace]=([1, 2]) reset-on=[@query]/>`, ""))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@page}</p>"))).toEqual([]);
+    expect(codes(P(`${D}\n    <xs:int[replace]=([1, 2]) reset-on=[@query]/>`, "<p>${@xs.length}</p>"))).toEqual([]);
   });
 
   const engine = (rules) => `<program>\n    type Order:enum = { Draft, Placed, Shipped, Delivered }\n    let <customer:int=0/>\n    <order:Order=.Draft single reset-on=[@customer]>\n${rules}\n    </>\n    <main><p>order</p></main>\n</program>\n`;
@@ -170,8 +172,9 @@ describe("§6.8.4 — codes", () => {
     expect(refused[0].message).toContain("`.Delivered` has no `rule=` (no outgoing edge); it does not admit the reset target `.Draft`");
     expect(refused[0].message).not.toContain("`.Placed` has");      // `.Placed` admits `.Draft`
     expect(refused[0].message).not.toContain("`.Draft` has");       // the target needs no self-edge
-    // negative: every non-target state admits `.Draft`
-    expect(codes(engine(`        <Draft rule=.Placed/>\n        <Placed rule=(.Shipped | .Draft)/>\n        <Shipped rule=(.Delivered | .Draft)/>\n        <Delivered rule=.Draft/>`))).toEqual([]);
+    // negative: every non-target state admits `.Draft` (s478: nothing reads the engine here — its `rule=`
+    // edges are the point — so it is `_`-named, §34 E-DG-002)
+    expect(codes(engine(`        <Draft rule=.Placed/>\n        <Placed rule=(.Shipped | .Draft)/>\n        <Shipped rule=(.Delivered | .Draft)/>\n        <Delivered rule=.Draft/>`).replace("<order:", "<_order:"))).toEqual([]);
   });
 
   test("S449 item 3: a reset value that WRITES (an initializer calling a writer) is rejected at the initializer — the reset loop cannot be written", () => {
@@ -190,7 +193,7 @@ describe("§6.8.4 — codes", () => {
     expect(viaDerived.map((d) => d.code)).toEqual([SRC]);
     expect(viaDerived[0].message).toContain("the formula of derived `@d` writes `@q` through a call: `g() → @q`");
     // negative: an initializer that calls a write-free function
-    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1; }\n    let <page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
+    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1; }\n    let <page:int=(one()) reset-on=[@q]/>`, "<p>${@page}</p>"))).toEqual([]);
   });
 
   test("a `reset-on=` on a declaration's field is refused — per-instance resets are OPEN (§6.8.4)", () => {

@@ -9,10 +9,10 @@
         ?{`UPDATE users SET name = 'z' WHERE id = ${id}`}.run() !{ _ :> { return 0; } };
         return 1;
     }
-    let <done:int=0/>
+    let <_done:int=0/>
     <who:(not to string)=(loadName(1) !{ _ :> not })/>
     <main>
-        <button id="rename" onclick={ @done = rename(1) !{ _ :> 0 }; reset(@who); }>rename</button>
+        <button id="rename" onclick={ @_done = rename(1) !{ _ :> 0 }; reset(@who); }>rename</button>
         <p id="who" if=@who>${@who}</p>
         <p id="wait" else>loading</p>
     </main>

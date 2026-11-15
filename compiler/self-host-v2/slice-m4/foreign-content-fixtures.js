@@ -35,15 +35,17 @@ export const COMPONENTS = {
   c_mathUse: [`    <ident n:int/>\n    renders <mi>LOGGED IN</mi>`, `<math><ident n=1 ${G}/></math>`],
 };
 
+// s478 (E-DG-002, a cell nothing reads): the program declares only the cells its shape reads — `@pw`
+// (with the two buttons that set it) when the shape is gated on it, `@ws` when the shape iterates it.
 export function gateProgram(markup, top = "") {
+  const reads = (name) => new RegExp(`@${name}\\b`).test(markup + "\n" + top);
+  const pw = reads("pw");
   return `<program>
-    let <pw:string=""/>
-    <ws:string[]=(["LOGGED IN"])/>
-${top}
+${pw ? `    let <pw:string=""/>\n` : ""}${reads("ws") ? `    <ws:string[]=(["LOGGED IN"])/>\n` : ""}${top}
     <main>
-        <button id="wrong" onclick={ @pw = "wrong"; }>go</button>
+${pw ? `        <button id="wrong" onclick={ @pw = "wrong"; }>go</button>
         <button id="right" onclick={ @pw = "secret"; }>go</button>
-        <div id="out">${markup}</div>
+` : ""}        <div id="out">${markup}</div>
     </main>
 </program>
 `;

@@ -41,7 +41,8 @@ const SAVE = `    type SaveError:enum = {\n        Conflict(current: int)\n     
         ${SQ}\`UPDATE notes SET body = \${text} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage; } };
         return base + 1;
     }`;
-const PDB = (fns, main = "") => `<program db="./app.db">\n    let <status:string=""/>\n${SAVE}\n${fns}\n    <main>\n${main}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): the program renders the cell its handlers write
+const PDB = (fns, main = "") => `<program db="./app.db">\n    let <status:string=""/>\n${SAVE}\n${fns}\n    <main>\n${main}\n        <p id="status">\${@status}</p>\n    </main>\n</program>\n`;
 const BTN = `        <button onclick=save()>s</button>`;
 
 describe("a foreign enum's qualifier on a failable arm is E-TYPE-VARIANT (red on base)", () => {
@@ -112,6 +113,7 @@ describe("the failure's own enum stays accepted (green on base and head)", () =>
     }
     <main>
 ${BTN}
+        <p id="status">\${@status}</p>
     </main>
 </program>
 `)).toEqual([]);

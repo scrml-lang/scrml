@@ -40,7 +40,7 @@
       }
     ],
     "state": {
-      "totals": [
+      "_totals": [
         {
           "region": "east",
           "total": 20

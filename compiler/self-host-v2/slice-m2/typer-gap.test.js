@@ -36,7 +36,7 @@ const SHAPES = [
     // the §34 row E-TYPE-031: "a value is assigned to a position whose declared type it does not satisfy".
     want: ["E-TYPE-031"],
     files: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = \"oops\"; }", "<p>x</p>")],
-    twin: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = 5; }", "<p>x</p>")] },
+    twin: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = 5; }", "<p>${@x}</p>")] },
   { name: "a call with the wrong arity (too few)",
     // RULED S440 #2; §7.3: "A call that passes FEWER is a compile error too, unless each omitted parameter
     // has a default (§7.3.2)." (§34 row E-CALL-ARITY.)
@@ -86,7 +86,7 @@ const SHAPES = [
     // §7.6.1: a file-level cell declaration takes part in file scope "identically to file-level `let`/`const`".
     want: ["E-SCOPE-010"],
     files: () => [LIB(), app("    let <x:int=0/>\n    let <x:int=1/>", "<p>x</p>")],
-    twin: () => [LIB(), app("    let <x:int=0/>\n    let <y:int=1/>", "<p>x</p>")] },
+    twin: () => [LIB(), app("    let <x:int=0/>\n    let <y:int=1/>", "<p>${@x} ${@y}</p>")] },
   { name: "duplicate `as=` names",
     // RULED S440 #5 (i); §66.7.2: "two `as=` handles of the same name in one scope" is `E-HANDLE-REDECLARE`.
     want: ["E-HANDLE-REDECLARE"],
@@ -102,7 +102,7 @@ const SHAPES = [
     // RULED S440 #5 (ii); §66.7.2: "an `as=` handle named like a cell" is `E-HANDLE-REDECLARE`.
     want: ["E-HANDLE-REDECLARE"],
     files: () => [LIB(), app("    let <country:string=\"\"/>", "<dropdown as=country label=\"1\" options=([\"a\"])/>")],
-    twin: () => [LIB(), app("    let <countryName:string=\"\"/>", "<dropdown as=country label=\"1\" options=([\"a\"])/>")] },
+    twin: () => [LIB(), app("    let <countryName:string=\"\"/>", "<dropdown as=country label=\"1\" options=([\"a\"])/><p>${@countryName}</p>")] },
 ];
 
 describe("F-A — value types, arity, redeclaration (M3 item 1), each resolved against the SPEC", () => {
