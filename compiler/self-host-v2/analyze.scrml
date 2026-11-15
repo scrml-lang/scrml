@@ -44,7 +44,7 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
+             DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, Timing, IdleWatch, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
@@ -491,6 +491,7 @@ ${
         resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
         gated: GateInfo[],      // s449: the `<form>` elements that bind a surfaced value (§55.7), and the values that gate each (§55.17.3)
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
+        timings: TimingInfo[],   // s478: the program cells' accepted `debounced=` / `throttled=` (§6.13)
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
         css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
         consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
@@ -2699,7 +2700,22 @@ ${
         if (isProgramAttrName(lower) || lower == "loginredirect" || lower == "sessionexpiry" || (lower != a.name && isControlAttrName(lower))) {
             return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<program>` is a case variant of a `<program>` / scrml attribute name — the bootstrap reads attribute names exactly, so it would be ignored; write the exact name")
         }
-        return addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+        const st1: AS = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+        // r1 F2 — the attribute is ignored, but its value is still a literal DURATION
+        // (`after=5zz`): "A literal-form DURATION that does not parse SHALL produce a
+        // compile error" (§6.13.6) — E-SYNTAX-DURATION, beside the warning.
+        const durText: string = match a.value {
+            .Dur(text: t) :> t
+            .NoValue :> ""
+            .Quoted(v: q) :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+        if (durText == "") return st1
+        const dp: DurParse = durationText(durText)
+        if (dp.why == "") return st1
+        return addDiag(st1, file, a.span, "E-SYNTAX-DURATION", "`" + a.name + "=` on `<program>` is malformed: " + dp.why + ". A DURATION is a literal `Nms` / `Ns` / `Nm` / `Nh` or a computed `" + dollarBrace() + "expr}<unit>` (§6.13.3)")
     }
 
     // §4.12.2's table: what a NESTED `<program>` may carry.
@@ -2742,6 +2758,7 @@ ${
     fn attrValueText(v: AAttrValue) -> string {
         return match v {
             .Quoted(v: s) :> "\"" + s + "\""
+            .Dur(text: s) :> "\"" + s + "\""
             .NoValue :> "no value (a bare attribute)"
             .Bare(e: x) :> "a non-literal value"
             .Paren(e: x) :> "a non-literal value"
@@ -2752,6 +2769,7 @@ ${
     fn quotedAttrText(v: AAttrValue) -> string | not {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> not
             .Bare(e: x) :> not
             .Paren(e: x) :> not
@@ -2834,6 +2852,7 @@ ${
             .Bare(e: e) :> portLiteral(e)
             .Braced(b: b) :> true
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .NoValue :> false
             .Paren(e: x) :> false
         }
@@ -3088,6 +3107,7 @@ ${
             .Bare(e: x) :> capList(x)
             .Paren(e: x) :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .NoValue :> not
             .Braced(b: b) :> not
         }
@@ -3347,6 +3367,7 @@ ${
             .Paren(e: e) :> exprReads(e)
             .NoValue :> []
             .Quoted(v: s) :> []
+            .Dur(text: s) :> []
             .Braced(b: b) :> []
         }
     }
@@ -3431,6 +3452,7 @@ ${
             .Bare(e: e) :> literalType(e)
             .Paren(e: e) :> literalType(e)
             .Quoted(v: s) :> Type.Str
+            .Dur(text: s) :> Type.Str
             .NoValue :> not
             .Braced(b: b) :> not
         }
@@ -3754,6 +3776,7 @@ ${
     fn inferValue(cx: InferCx, v: AAttrValue, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
         return match v {
             .Quoted(v: s) :> rinf(infOk(Type.Str), done)
+            .Dur(text: s) :> rinf(infOk(Type.Str), done)
             .NoValue :> rinf(infOut("it has neither a type nor a value"), done)
             .Braced(b: b) :> rinf(infOut("a `{ … }` block"), done)
             .Bare(e: e) :> inferE(cx, e, stack, ps, done)
@@ -5006,7 +5029,13 @@ ${
         let st: AS = st0
         let children: AStateChild[] = []
         for (const c of body) { children = children.concat(stateChildOf(c)) }
-        if (children.length == 0) return { graph: not, st: st }
+        let idles: AStateChild[] = []
+        for (const c of body) { idles = idles.concat(idleOf(c)) }
+        if (children.length == 0) {
+            // s478: §51.0.R "Placement: ONLY at engine-root scope (sibling of state-children)"
+            for (const x of idles) st = addDiag(st, te.file, x.span, "E-IDLE-MISPLACED", "`<onIdle>` in `" + name + "`, which has no state-children — the watchdog sits at an engine's root, a sibling of its state-children (§51.0.R)")
+            return { graph: not, st: st }
+        }
         const es: Sym | not = isEnumType(g, ty)
         if (es is not) {
             return { graph: not, st: addDiag(st, te.file, children[0].span, "E-DECL-STATE-CHILD", "state-children need an enum-valued field (§66.13.2)") }
@@ -5060,13 +5089,113 @@ ${
                 vi = vi + 1
             }
         }
-        return { graph: { enumSym: es, edges: edges }, st: st }
+        // s478 — the `<onIdle>` watchdog (§51.0.R): "One per engine maximum — multiple
+        // `<onIdle>` declarations fire `E-IDLE-DUPLICATE`"
+        let idle: IdleWatch | not = not
+        let k = 0
+        for (const x of idles) {
+            if (k > 0) {
+                st = addDiag(st, te.file, x.span, "E-IDLE-DUPLICATE", "a second `<onIdle>` in `" + name + "` — an engine has at most one event-timeout watchdog (§51.0.R); remove one or merge them")
+            } else {
+                const rw: RIdle = idleWatchOf(te, g, es, x, st)
+                st = rw.st
+                idle = rw.w
+            }
+            k = k + 1
+        }
+        return { graph: { enumSym: es, edges: edges, idle: idle }, st: st }
+    }
+
+    fn idleOf(c: ADeclChild) -> AStateChild[] {
+        return match c {
+            .Idle(s: s) :> [s]
+            .StateChild(s: x) :> []
+            .ChildField(d: x) :> []
+        }
+    }
+
+    type RIdle:struct = { w: IdleWatch | not, st: AS }
+
+    // §51.0.R `<onIdle after=DURATION to=.Variant/>`: "`after=DURATION` | REQUIRED" ·
+    // "`to=.Variant` | REQUIRED | … MUST be a variant of the engine's `for=` enum" —
+    // E-IDLE-INVALID-VARIANT: "references a variant `X` not in the engine's `for=` enum,
+    // OR the `to=` attribute is missing or malformed" (§34). A missing `after=` has no
+    // named code (refused by name); a malformed one is E-SYNTAX-DURATION (§34: "or other
+    // `after=`-grammar-shaped duration"). Any other attribute, and a body, are refused.
+    fn idleWatchOf(te: TypeEnv, g: TypeInfo[], es: Sym, x: AStateChild, st0: AS) -> RIdle {
+        let st: AS = st0
+        let ok = true
+        let ms: int = 0
+        let to: int = -1
+        let sawAfter = false
+        let sawTo = false
+        for (const a of x.attrs) {
+            if (a.name == "after" && !sawAfter) {
+                sawAfter = true
+                const n0: int = st.diags.length
+                st = durationDiag(te.file, "`<onIdle>`", a, st)
+                if (st.diags.length > n0) {
+                    ok = false
+                } else {
+                    ms = durationOf(a.value).ms
+                }
+            } else if (a.name == "to" && !sawTo) {
+                sawTo = true
+                const names: string[] = ruleNames(a.value)
+                if (names.length == 1 && isSingleVariant(a.value)) to = variantIndex(g, es, names[0])
+                if (to < 0) {
+                    let what: string = "is not a single variant `.X`"
+                    if (names.length == 1 && isSingleVariant(a.value)) what = "names `." + names[0] + "`, which is not a variant of `" + es.hint + "`"
+                    st = addDiag(st, te.file, a.span, "E-IDLE-INVALID-VARIANT", "`<onIdle to=…>` " + what + " — the watchdog's target MUST be a variant of the value's enum (§51.0.R)")
+                    ok = false
+                }
+            } else {
+                st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<onIdle>` is not in the bootstrap — the watchdog reads `after=` and `to=` once each (§51.0.R); the attribute would be ignored")
+                ok = false
+            }
+        }
+        if (!sawTo) {
+            st = addDiag(st, te.file, x.span, "E-IDLE-INVALID-VARIANT", "`<onIdle>` has no `to=` — the watchdog's target variant is REQUIRED (§51.0.R): `<onIdle after=5m to=.Idle/>`")
+            ok = false
+        }
+        if (!sawAfter) {
+            st = addDiag(st, te.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` has no `after=` — the time of silence is REQUIRED (§51.0.R) and the SPEC names no code for its absence: `<onIdle after=5m to=.Idle/>`")
+            ok = false
+        }
+        if (x.body.length > 0) {
+            st = addDiag(st, te.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a body in `<onIdle>` is not in the bootstrap — the watchdog is written self-closing, `<onIdle after=… to=…/>` (§51.0.R)")
+            ok = false
+        }
+        if (!ok) return { w: not, st: st }
+        return { w: { ms: ms, to: to }, st: st }
+    }
+
+    fn isSingleVariant(v: AAttrValue) -> boolean {
+        const e: AExpr | not = match v {
+            .Bare(e: e) :> e
+            .Paren(e: e) :> e
+            .NoValue :> not
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .Braced(b: b) :> not
+        }
+        if (e is not) return false
+        const k: AExprK = e.k
+        return match k {
+            .Variant(name: n) :> true
+            // no-default-arm: one question of the expression — is it a bare `.X`; every other form is not one
+            _ :> false
+        }
     }
 
     // §51.0.J: every `rule=` on a state-child of a DERIVED value.
     fn derivedRules(file: string, body: ADeclChild[], st0: AS) -> AS {
         let st: AS = st0
         for (const c of body) {
+            // s478: §51.0.R "`<onIdle>` is permitted on derived engines … the watchdog can
+            // only fire when the source expression's value reaches the watchdog's `to=`
+            // target" — that firing rule is not built (INTERIM)
+            for (const x of idleOf(c)) st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` on a derived value is not in the bootstrap yet — a derived engine's watchdog fires only when its source reaches the `to=` target (§51.0.R), which is not built; use `let` for a value the watchdog writes")
             for (const sc of stateChildOf(c)) {
                 for (const a of sc.attrs) {
                     if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads cells is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules")
@@ -5080,6 +5209,7 @@ ${
         return match c {
             .StateChild(s: s) :> [s]
             .ChildField(d: d) :> []
+            .Idle(s: x) :> []
         }
     }
 
@@ -5090,6 +5220,7 @@ ${
             .Paren(e: e) :> altNames(e)
             .NoValue :> []
             .Quoted(v: s) :> []
+            .Dur(text: s) :> []
             .Braced(b: b) :> []
         }
     }
@@ -5135,6 +5266,7 @@ ${
         return match c {
             .ChildField(d: d) :> [d]
             .StateChild(s: s) :> []
+            .Idle(s: x) :> []
         }
     }
 
@@ -5313,6 +5445,7 @@ ${
             .Bare(e: e) :> exprName(e)
             .Paren(e: e) :> exprName(e)
             .Quoted(v: s) :> ""
+            .Dur(text: s) :> ""
             .NoValue :> ""
             .Braced(b: b) :> ""
         }
@@ -6900,6 +7033,9 @@ ${
             } else if (isPersistWord(a.name)) {
                 // s451: on a program cell, persistPass reads them (§6.14)
                 if (!cell) st = persistFieldDiag(file, d, a, st)
+            } else if (isTimingWord(a.name)) {
+                // s478: on a program cell, timingPass reads them (§6.13)
+                if (!cell) st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + d.name + ">`, a declaration or a field of one, is not in the bootstrap yet — it times a program cell's writes, `let <x:T=v " + a.name + "=300ms/>` (§6.13); a per-instance timing wrapper is not built")
             } else if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
@@ -6933,6 +7069,7 @@ ${
         const none: boolean = match own {
             .NoValue :> true
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .Bare(e: x) :> false
             .Paren(e: x) :> false
             .Braced(b: b) :> false
@@ -7031,6 +7168,7 @@ ${
             .Paren(e: e) :> foreignsInExpr(e)
             .Braced(b: b) :> foreignsInBlock(b)
             .Quoted(v: s) :> []
+            .Dur(text: s) :> []
             .NoValue :> []
         }
     }
@@ -7062,6 +7200,7 @@ ${
         return match v {
             .NoValue :> false
             .Quoted(v: x) :> true
+            .Dur(text: x) :> true
             .Bare(e: x) :> true
             .Paren(e: x) :> true
             .Braced(b: b) :> true
@@ -10958,6 +11097,7 @@ ${
             .Paren(e: e) :> initialOf(env, g, e)
             .NoValue :> -1
             .Quoted(v: s) :> -1
+            .Dur(text: s) :> -1
             .Braced(b: b) :> -1
         }
     }
@@ -12174,6 +12314,11 @@ ${
         const f: FieldInfo = p.decl.fields[p.idx]
         const cap: Sym | not = f.wcap
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-RESET-ARG", "`reset` takes a whole cell, not a sub-field")
+        // s478 (boot-durations): §6.8.2 "the pending timer SHALL be cancelled before the reset
+        // value is applied" — the cancel-then-apply reset of a timed cell is not built (INTERIM)
+        if (p.decl.sym.id == env.g.program.id && isTimedProgramCell(env.g, f)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset(@" + f.sym.hint + ")` of a `debounced=` / `throttled=` cell is not in the bootstrap yet — the reset SHALL cancel a pending timed write before the reset value is applied (§6.8.2), which the bootstrap does not build. Write the reset value with an ordinary write")
+        }
         // s473: a db cell's initializer is its server load (§8.1.3) — what a reset of it
         // means on the client (the loaded value again, or a new load) is not built: refused
         if (p.decl.sym.id == env.g.program.id && dbCellRecord(env.g, f.nid) is given) {
@@ -17690,6 +17835,7 @@ ${
             .Bare(e: e) :> e
             .Paren(e: x) :> not
             .Quoted(v: x) :> not
+            .Dur(text: x) :> not
             .NoValue :> not
             .Braced(b: x) :> not
         }
@@ -20297,6 +20443,7 @@ ${
     fn staticQuotedText(v: AAttrValue) -> string | not {
         return match v {
             .Quoted(v: s) :> staticQuoted(s)
+            .Dur(text: s) :> staticQuoted(s)
             .NoValue :> not
             .Bare(e: x) :> not
             .Paren(e: x) :> not
@@ -20314,6 +20461,7 @@ ${
             .Braced(b: b) :> true
             .NoValue :> false
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .Bare(e: x) :> false
             .Paren(e: x) :> false
         }
@@ -20425,6 +20573,7 @@ ${
         // text (§4.17); a `<db>` body is a code-default body (§4.18.1).
         let st: AS = st0
         if (!e.star && e.tag != "pre" && e.tag != "code" && e.tag != "db") st = controlFlowInMarkup(env, e.kids, st)
+        if (structuralOwner(e.tag) == "") st = strayDurationDiags(env, e, st)
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return resolveSlot(env, e, st)
@@ -20477,6 +20626,11 @@ ${
         // an element (or a logic body) inside the page is found here, by the
         // page's extent (APage.body).
         if (!e.star && e.tag == "channel" && inPageBody(env.g, env.file, e.span)) return addDiag(st, env.file, e.span, "E-CHANNEL-INSIDE-PAGE", "`<channel>` inside `<page>` — a channel is app-scope shared state, not a per-route declaration (§38.1, §40.8); move it up into the `<program>`, beside the `<page>`")
+        // s478 — §51.0.R "Placement: ONLY at engine-root scope (sibling of state-children).
+        // Inside a state-child body fires `E-IDLE-MISPLACED`"; §4.15: use outside the owning
+        // locus is "the element's specific misplacement code (e.g. `E-IDLE-MISPLACED`)". The
+        // engine-root `<onIdle>` is a declaration child (ADeclChild.Idle), never an element.
+        if (!e.star && e.tag == "onIdle") return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-IDLE-MISPLACED", "`<onIdle>` here is outside an engine's root — the watchdog sits at the value's root, a sibling of its state-children, never inside a state-child body or in markup (§51.0.R); for a per-state timer use `<onTimeout>` (§51.0.M)")
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -20533,6 +20687,7 @@ ${
             .NoValue :> not
             .Paren(e: e) :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .Braced(b: b) :> not
         }
         if (x is not || !isHyphenWordExpr(x)) return st
@@ -20571,6 +20726,28 @@ ${
             i = i + 1
         }
         return addDiag(st, env.file, a.span, "E-ATTR-UNQUOTED-OPERATOR", "`" + a.name + "=…` — this unquoted value is a subtraction (`-` between names), and an unquoted attribute value holds no operator: it is an identifier, a member chain or a call (§5.1, §5.2). Quote a literal (`" + a.name + "=\"a-b\"`) or parenthesize an expression")
+    }
+
+    // s478 (boot-durations) — a DURATION value (`after=5m`, `debounced=300ms`)
+    // on an element: §6.13 times a state CELL's writes and `after=` is the
+    // `<onTimeout>` / `<onIdle>` attribute (§51.0.M, §51.0.R) — on any other
+    // element the SPEC gives the value no meaning (it is no expression, §5.2),
+    // so it is refused by name, never rendered as the attribute text.
+    fn strayDurationDiags(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of e.attrs) {
+            const v: AAttrValue = a.value
+            const t: string = match v {
+                .Dur(text: s) :> s
+                .NoValue :> ""
+                .Quoted(v: s) :> ""
+                .Bare(e: x) :> ""
+                .Paren(e: x) :> ""
+                .Braced(b: b) :> ""
+            }
+            if (t != "") st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=" + t + "` on `<" + e.tag + ">` — a duration is the value of a state cell's `debounced=` / `throttled=` (§6.13) or of `<onTimeout>` / `<onIdle>` `after=` (§51.0.M, §51.0.R); on this element it means nothing. Quote it for an attribute's text: `" + a.name + "=\"" + t + "\"`")
+        }
+        return st
     }
 
     // s473 — an unknown element whose fault is already reported elsewhere (see resolveElem).
@@ -20872,6 +21049,7 @@ ${
         const v: AAttrValue = a.value
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> ""
             .Bare(e: x) :> ""
             .Paren(e: x) :> ""
@@ -21586,6 +21764,7 @@ ${
             .Bare(e: x) :> false
             .Paren(e: x) :> false
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .Braced(b: b) :> false
         }
     }
@@ -22170,6 +22349,7 @@ ${
             .Paren(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
             .Braced(b: b) :> bracedHandler(env, b, st)
             .Quoted(v: s) :> st
+            .Dur(text: s) :> st
             .NoValue :> st
         }
     }
@@ -22179,6 +22359,7 @@ ${
             .Bare(e: e) :> e
             .Paren(e: e) :> e
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .NoValue :> not
             .Braced(b: b) :> not
         }
@@ -22198,6 +22379,7 @@ ${
             if (a.name.toLowerCase() == "rel") {
                 const sheet: boolean = match a.value {
                     .Quoted(v: s) :> s.toLowerCase().indexOf("stylesheet") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .Dur(text: s) :> s.toLowerCase().indexOf("stylesheet") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
                     .NoValue :> false
                     .Bare(e: x) :> true
                     .Paren(e: x) :> true
@@ -22215,6 +22397,7 @@ ${
             .Paren(e: e) :> true
             .Bare(e: e) :> false
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .NoValue :> false
             .Braced(b: b) :> false
         }
@@ -22284,6 +22467,7 @@ ${
             if (a.name.toLowerCase() == "http-equiv") {
                 const r: boolean = match a.value {
                     .Quoted(v: s) :> s.toLowerCase().indexOf("refresh") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
+                    .Dur(text: s) :> s.toLowerCase().indexOf("refresh") >= 0 || s.indexOf("&") >= 0 || s.indexOf("$" + "{") >= 0
                     .NoValue :> false
                     .Bare(e: x) :> true
                     .Paren(e: x) :> true
@@ -22306,6 +22490,7 @@ ${
     fn quotedHasInterp(v: AAttrValue) -> boolean {
         return match v {
             .Quoted(v: s) :> s.indexOf("$" + "{") >= 0
+            .Dur(text: s) :> false            // s478: a DURATION, not a quoted string (durationOf judges `${…}ms`)
             .Bare(e: e) :> false
             .Paren(e: e) :> false
             .NoValue :> false
@@ -22317,6 +22502,7 @@ ${
     fn quotedNoInterp(v: AAttrValue) -> boolean {
         return match v {
             .Quoted(v: s) :> s.indexOf("$" + "{") < 0
+            .Dur(text: s) :> false
             .Bare(e: e) :> false
             .Paren(e: e) :> false
             .NoValue :> false
@@ -22358,6 +22544,7 @@ ${
         const v: AAttrValue = a.value
         const text: string = match v {
             .Quoted(v: q) :> q
+            .Dur(text: q) :> q
             .NoValue :> ""
             .Bare(e: x) :> ""
             .Paren(e: x) :> ""
@@ -22868,6 +23055,7 @@ ${
     fn isStaticAttr(v: AAttrValue) -> boolean {
         return match v {
             .Quoted(v: s) :> true
+            .Dur(text: s) :> true
             .NoValue :> true
             .Bare(e: x) :> false
             .Paren(e: x) :> false
@@ -22955,6 +23143,7 @@ ${
         const v: AAttrValue = a.value
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> ""
             .Bare(e: x) :> exprName(x)
             .Paren(e: x) :> ""
@@ -23051,6 +23240,7 @@ ${
     fn resolveConstructValue(env: Env, v: AAttrValue, t: Type, st: AS) -> AS {
         return match v {
             .Quoted(v: s) :> st
+            .Dur(text: s) :> st
             .Bare(e: e) :> resolveExpr(env, e, t, st).st
             .Paren(e: e) :> resolveExpr(env, e, t, st).st
             .NoValue :> st
@@ -24769,6 +24959,7 @@ ${
             .Bare(e: e) :> not
             .Paren(e: e) :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .NoValue :> not
         }
     }
@@ -27519,6 +27710,7 @@ ${
     fn attrLiteralKind(v: AAttrValue) -> int {
         return match v {
             .Quoted(v: s) :> 1
+            .Dur(text: s) :> 1
             .Bare(e: e) :> literalKind(e)
             .Paren(e: e) :> literalKind(e)
             .NoValue :> -1
@@ -31075,6 +31267,7 @@ ${
             .Paren(e: x) :> typeStmtExpr(env, x, ts)
             .Braced(b: b) :> typeBlock(env, b, ts)
             .Quoted(v: s) :> ts
+            .Dur(text: s) :> ts
             .NoValue :> ts
         }
     }
@@ -31239,6 +31432,7 @@ ${
     fn typeInValue(env: TEnv, v: AAttrValue, ts: TypeState) -> RVT {
         return match v {
             .Quoted(v: s) :> rvt(known(Type.Str), ts)
+            .Dur(text: s) :> rvt(known(Type.Str), ts)
             .Bare(e: x) :> typeExpr(env, x, ts)
             .Paren(e: x) :> typeExpr(env, x, ts)
             .NoValue :> rvt(VType.Unknown, ts)
@@ -32417,6 +32611,7 @@ ${
             .Bare(e: e) :> litKey(e)
             .Paren(e: e) :> litKey(e)
             .Quoted(v: s) :> "s:" + s
+            .Dur(text: s) :> "s:" + s
             .NoValue :> ""
             .Braced(b: b) :> ""
         }
@@ -32469,6 +32664,7 @@ ${
             .Paren(e: e) :> scanExpr(cx, e, acc)
             .Braced(b: b) :> scanBlock(cx, b, acc)
             .Quoted(v: s) :> acc
+            .Dur(text: s) :> acc
             .NoValue :> acc
         }
     }
@@ -32854,6 +33050,7 @@ ${
                 .Paren(e: x) :> readNodesIn(x, true)
                 .Braced(b: b) :> readNodesInBlock(b, true)
                 .Quoted(v: x) :> []
+                .Dur(text: x) :> []
                 .NoValue :> []
             }
             out = out.concat(more)
@@ -33191,6 +33388,7 @@ ${
             .Paren(e: e) :> true
             .Braced(b: b) :> true
             .Quoted(v: s) :> false
+            .Dur(text: s) :> false
             .NoValue :> false
         }
     }
@@ -33532,6 +33730,7 @@ ${
             .Paren(e: e) :> e
             .Braced(b: x) :> not
             .Quoted(v: x) :> not
+            .Dur(text: x) :> not
             .NoValue :> not
         }
     }
@@ -33892,6 +34091,7 @@ ${
             .Paren(e: e) :> not
             .NoValue :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .Braced(b: b) :> not
         }
     }
@@ -33996,6 +34196,7 @@ ${
             .Paren(e: e) :> variantLitName(e.k)
             .NoValue :> ""
             .Quoted(v: s) :> ""
+            .Dur(text: s) :> ""
             .Braced(b: b) :> ""
         }
     }
@@ -34291,9 +34492,221 @@ ${
         return not
     }
 
+    // =========================================================================
+    // s478 (boot-durations) — DURATION values (§6.13.3, §51.12.3, §51.12.3.1).
+    // "| Literal | `300ms`, `2s`, `1m`, `1h` | Constant-folded to integer
+    // milliseconds at compile time." (§6.13.3); "The unit suffix is required"
+    // and "Fractional numbers are permitted (`0.5s` is 500 ms). The compiler
+    // converts to integer milliseconds via `Math.round(n × multiplier)`"
+    // (§51.12.3). "A literal-form DURATION that does not parse SHALL produce a
+    // compile error" (§6.13.6) — E-SYNTAX-DURATION (§34: "neither literal-form
+    // … nor computed-form … parses cleanly"). The computed form `${expr}<unit>`
+    // (§51.12.3.1) is not built: refused by name (computed = true).
+    // A quoted value is read as its text (impl#1's shared parser takes the
+    // attribute's text with the quotes stripped).
+    // =========================================================================
+    type DurParse:struct = { ms: int, why: string, computed: boolean }
+
+    fn durBad(why: string) -> DurParse { return { ms: 0, why: why, computed: false } }
+
+    fn durationOf(v: AAttrValue) -> DurParse {
+        return match v {
+            .Dur(text: s) :> durationText(s)
+            .Quoted(v: s) :> durationText(s)
+            .NoValue :> durBad("it has no value")
+            .Bare(e: x) :> durBad("it is not a duration — write a number with a unit, `300ms` / `2s` / `1m` / `1h`")
+            .Paren(e: x) :> durBad("it is not a duration — write a number with a unit, `300ms` / `2s` / `1m` / `1h` (a computed duration is `" + dollarBrace() + "expr}ms`)")
+            .Braced(b: x) :> durBad("it is not a duration — write a number with a unit, `300ms` / `2s` / `1m` / `1h`")
+        }
+    }
+
+    fn dollarBrace() -> string { return "$" + "{" }
+
+    // The diagnostic a DURATION attribute `a` of `owner` carries (none when it reads).
+    fn durationDiag(file: string, owner: string, a: AAttr, st: AS) -> AS {
+        const dp: DurParse = durationOf(a.value)
+        if (dp.computed) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a computed DURATION `" + a.name + "=" + dollarBrace() + "…}<unit>` (§51.12.3.1) is not in the bootstrap yet — it reads a literal duration, `" + a.name + "=300ms`")
+        if (dp.why != "") return addDiag(st, file, a.span, "E-SYNTAX-DURATION", "`" + a.name + "=` on " + owner + " is malformed: " + dp.why + ". A DURATION is a literal `Nms` / `Ns` / `Nm` / `Nh` or a computed `" + dollarBrace() + "expr}<unit>` (§6.13.3)")
+        // r1 F1 (INTERIM, g-boot-timing-compositions-s478): the runtime arms one
+        // host timer, whose delay is a signed 32-bit millisecond count — a longer
+        // one is clamped to 1 ms, so the timing would silently invert. §51.12.3
+        // states no range, so it is refused by name, giving the maximum.
+        if (dp.ms > maxTimerMs()) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on " + owner + " is longer than the bootstrap's longest timer — " + maxTimerMs() + " ms (about 596h, 24.8 days); a longer one is not in the bootstrap yet. Use at most `" + a.name + "=596h`")
+        return st
+    }
+
+    fn maxTimerMs() -> int { return 2147483647 }
+
+    fn durationText(s: string) -> DurParse {
+        if (s.indexOf(dollarBrace()) == 0) return { ms: 0, why: "", computed: true }
+        let i: int = 0
+        while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { i = i + 1 }
+        if (i == 0) return durBad("`" + s + "` does not begin with a non-negative number")
+        if (i < s.length && s.charAt(i) == ".") {
+            const f0: int = i + 1
+            i = f0
+            while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { i = i + 1 }
+            if (i == f0) return durBad("`" + s + "` has no digit after its `.`")
+        }
+        const unit: string = s.substring(i)
+        let mult: int = 0
+        if (unit == "ms") mult = 1
+        if (unit == "s") mult = 1000
+        if (unit == "m") mult = 60000
+        if (unit == "h") mult = 3600000
+        if (unit == "") return durBad("`" + s + "` has no unit — the unit suffix is required: `ms`, `s`, `m` or `h` (§51.12.3)")
+        if (mult == 0) return durBad("`" + unit + "` in `" + s + "` is not a duration unit — `ms`, `s`, `m` or `h` (§51.12.3)")
+        const n: number = Number(s.substring(0, i))
+        return { ms: Math.floor(n * mult + 0.5), why: "", computed: false }
+    }
+
+    // =========================================================================
+    // s478 (boot-durations) — `debounced=DURATION` / `throttled=DURATION`
+    // (§6.13) on a PROGRAM cell. Codes (§6.13.6):
+    //   E-REACTIVITY-ATTR-CONFLICT — "`debounced=` AND `throttled=` on the same state-decl"
+    //   E-DEBOUNCED-WITH-SERVER    — "on a `<x server>` server-authoritative cell"
+    //   E-DEBOUNCED-WITH-DERIVED   — "on a `const`-derived state-decl" (§66.9: derived = locked + reactive initializer)
+    //   E-SYNTAX-DURATION          — "A literal-form DURATION that does not parse"
+    // Refused by name (E-BOOTSTRAP-UNSUPPORTED, INTERIM — each composition the
+    // SPEC gives a rule the runtime does not build): a computed DURATION
+    // (§51.12.3.1); a field of a user declaration; a locked cell; a
+    // `persist=` cell (its cross-tab sync is a server-origin write that
+    // bypasses the wrapper and cancels a pending write, §6.13.1 / §6.7.7.3
+    // rule 6); a `<db>` cell or a `<request>`'s target or dependency (§6.7.7.3
+    // rules 3, 6, 7 — bypass, cancel, flush on leave); a `reset-on=` target
+    // and a `reset(@x)` of the cell (resolveReset) — "the pending timer SHALL
+    // be cancelled before the reset value is applied" (§6.8.2).
+    // =========================================================================
+    export type TimingInfo:struct = { sym: Sym, timing: Timing }
+    type RTimings:struct = { infos: TimingInfo[], st: AS }
+
+    fn isTimingWord(w: string) -> boolean { return w == "debounced" || w == "throttled" }
+
+    fn timingPass(g: Globals, files: FileAst[], resets: ResetOnInfo[], reqs: ReqFact[], st0: AS) -> RTimings {
+        let st: AS = st0
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return { infos: [], st: st }
+        const p: AProgram | not = prog.p
+        if (p is not) return { infos: [], st: st }
+        const errs: ASpan[] = fileErrs(files, prog.file)
+        let infos: TimingInfo[] = []
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d) && !hasErrIn(errs, d.span)) {
+                    const r: RTiming = timingOf(g, prog, d, resets, reqs, st)
+                    st = r.st
+                    const ti: TimingInfo | not = r.info
+                    if (ti is given) infos = infos.concat([ti])
+                }
+            }
+        }
+        return { infos: infos, st: st }
+    }
+
+    type RTiming:struct = { info: TimingInfo | not, st: AS }
+
+    fn timingOf(g: Globals, prog: DeclSrc, d: ADecl, resets: ResetOnInfo[], reqs: ReqFact[], st0: AS) -> RTiming {
+        let st: AS = st0
+        const db: AAttr | not = attrNamed(d.mods, "debounced")
+        const th: AAttr | not = attrNamed(d.mods, "throttled")
+        let a: AAttr | not = db
+        if (a is not) a = th
+        if (a is not) return { info: not, st: st }
+        let ok = true
+        if (db is given && th is given) {
+            st = addDiag(st, prog.file, th.span, "E-REACTIVITY-ATTR-CONFLICT", "`@" + d.name + "` carries both `debounced=` and `throttled=` — the two describe competing timing rules (debounce coalesces writes; throttle fires leading + trailing); a cell picks one (§6.13.5)")
+            ok = false
+        }
+        if (attrNamed(d.mods, "server") is given) {
+            st = addDiag(st, prog.file, a.span, "E-DEBOUNCED-WITH-SERVER", "`" + a.name + "=` on `@" + d.name + "`, a `server` server-authoritative cell — its writes go through the §52 server-write path, not the client-side timing wrapper; the two do not compose (§6.13.5). Put the timing on a client cell and write the resolved value to the server cell")
+            ok = false
+        }
+        const n0: int = st.diags.length
+        if (db is given) st = durationDiag(prog.file, "`@" + d.name + "`", db, st)
+        if (th is given) st = durationDiag(prog.file, "`@" + d.name + "`", th, st)
+        if (st.diags.length > n0) ok = false
+        const i: int = fieldIndex(prog.info, d.name)
+        if (i < 0) return { info: not, st: st }
+        const f: FieldInfo = prog.info.fields[i]
+        const m: FieldMode = f.mode
+        if (f.wcap is not) {
+            const derived: boolean = match m {
+                .Derived :> true
+                .Locked :> false
+                .Let :> false
+                .Seeded :> false
+            }
+            if (derived) {
+                st = addDiag(st, prog.file, a.span, "E-DEBOUNCED-WITH-DERIVED", "`" + a.name + "=` on `@" + d.name + "`, a derived cell — it is read-only and the timing rule wraps writes; debounce the upstream source instead: `let <source:T=… " + a.name + "=300ms/>` and derive from `@source` (§6.13.4)")
+            } else {
+                st = addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `@" + d.name + "`, a cell no write reaches (it is locked) — §6.13 names a timing rule for a written cell only; make it writable (`let`) or drop `" + a.name + "=`")
+            }
+            ok = false
+        }
+        const why: string = timingCellProblem(g, prog, d, f, i, resets, reqs)
+        if (why != "") {
+            st = addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `@" + d.name + "` — " + why)
+            ok = false
+        }
+        if (!ok) return { info: not, st: st }
+        const dp2: DurParse = durationOf(a.value)
+        return { info: { sym: f.sym, timing: { throttle: th is given, ms: dp2.ms } }, st: st }
+    }
+
+    // Why the bootstrap refuses to time `f` ("" — it does not): each a composition
+    // the SPEC rules and the runtime does not build (INTERIM).
+    fn timingCellProblem(g: Globals, prog: DeclSrc, d: ADecl, f: FieldInfo, idx: int, resets: ResetOnInfo[], reqs: ReqFact[]) -> string {
+        // r1 F5 — §6.13 times a plain state cell's writes; an engine's writes are its
+        // transitions (§51.0.F rule= contract, <onIdle> / <onTimeout> timers) and the SPEC
+        // rules no timing wrapper over them.
+        if (f.graph is given) return "an engine (a value with state-children): its writes are transitions, checked against `rule=` and seen by `<onIdle>` / `<onTimeout>` (§51.0) — §6.13 rules no timing wrapper over them; not built. Time a plain cell and `.advance()` from it"
+        if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
+        if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
+        if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
+        for (const r of reqs) {
+            if (isProgramField(g, r.target, idx)) return "the target of the `<request>`: its settle is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built"
+            for (const dep of r.deps) {
+                if (isProgramField(g, dep, idx)) return "a dependency of a `<request>`: a pending timed write to it SHALL be flushed on page leave and a server-origin write SHALL bypass and cancel it (§6.7.7.3 rules 6–7) — not built"
+            }
+        }
+        for (const ro of resets) {
+            if (ro.target == idx) return "the target of a `reset-on=`: a reset SHALL cancel a pending timed write before the reset value is applied (§6.8.2) — not built"
+        }
+        return ""
+    }
+
+    fn isProgramField(g: Globals, n: NameFact, idx: int) -> boolean {
+        return match n {
+            .NField(decl: ds, inst: x, idx: k) :> ds.id == g.program.id && k == idx
+            .NLocal(sym: x) :> false
+            .NInst(decl: x) :> false
+            .NStruct(owner: x) :> false
+            .NFn(sym: x) :> false
+            .NLength :> false
+            .NSurface(of: x) :> false
+            .NConst(sym: x) :> false
+            .NReq(id: x) :> false
+        }
+    }
+
+    // A program cell carrying `debounced=` / `throttled=` (for resolveReset).
+    fn isTimedProgramCell(g: Globals, f: FieldInfo) -> boolean {
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return false
+        const p: AProgram | not = prog.p
+        if (p is not) return false
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (d.nid == f.nid && (attrNamed(d.mods, "debounced") is given || attrNamed(d.mods, "throttled") is given)) return true
+            }
+        }
+        return false
+    }
+
     fn quotedOf(v: AAttrValue) -> string | not {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .Bare(e: e) :> not
             .Paren(e: e) :> not
             .NoValue :> not
@@ -34304,6 +34717,7 @@ ${
     fn storeText(v: AAttrValue) -> string {
         return match v {
             .Quoted(v: s) :> "\"" + s + "\""
+            .Dur(text: s) :> "\"" + s + "\""
             .Bare(e: e) :> "an unquoted value"
             .Paren(e: e) :> "a computed value"
             .NoValue :> "no value"
@@ -34362,6 +34776,7 @@ ${
             const kids: ANode[] = match ch {
                 .ChildField(d: x) :> []
                 .StateChild(s: s) :> s.body
+                .Idle(s: s) :> s.body
             }
             for (const n of kids) { st = holdInNode(file, n, declared, shadow, st) }
         }
@@ -34720,6 +35135,7 @@ ${
             .Paren(e: e) :> sqlsInExpr(e)
             .Braced(b: b) :> sqlsInBlock(b)
             .Quoted(v: s) :> []
+            .Dur(text: s) :> []
             .NoValue :> []
         }
     }
@@ -35291,6 +35707,7 @@ ${
             acc = match ck {
                 .ChildField(d: cd) :> dbsInDecl(g, file, cd, scope, acc)
                 .StateChild(s: sc) :> dbsInStateChild(g, file, sc, scope, acc)
+                .Idle(s: sc) :> dbsInStateChild(g, file, sc, scope, acc)
             }
         }
         const r: AElem | not = d.renders
@@ -35395,6 +35812,7 @@ ${
     fn quotedValue(v: AAttrValue) -> string | not {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> not
             .Bare(e: x) :> not
             .Paren(e: x) :> not
@@ -39203,7 +39621,7 @@ ${
         return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
                  names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
                  attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing,
-                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: ws }
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: ws }
     }
 
     fn nodeIdx(nodes: Callable[], sym: int) -> int {
@@ -39715,6 +40133,7 @@ ${
             .Paren(e: e) :> planHandlerExpr(cx, e, ps)
             .Braced(b: b) :> planBraced(cx, b, ps)
             .Quoted(v: x) :> ps
+            .Dur(text: x) :> ps
             .NoValue :> ps
         }
     }
@@ -41312,6 +41731,7 @@ ${
                 .Bare(e: x) :> not
                 .Paren(e: x) :> not
                 .Quoted(v: x) :> not
+                .Dur(text: x) :> not
                 .NoValue :> not
             }
             if (b is given) {
@@ -42053,7 +42473,9 @@ ${
         const prr: RPendResets = pendResetDeps(st.reqs, rr.infos)
         st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs }
         const rp: RPersists = persistPass(ra.g, files, st)
-        st = programNoValue(ra.g, rp.st)
+        // s478: `debounced=` / `throttled=` on program cells (§6.13)
+        const rt: RTimings = timingPass(ra.g, files, prr.infos, prr.reqs, rp.st)
+        st = programNoValue(ra.g, rt.st)
         // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
         const css: CssPassR = cssPass(ra.g, keyBase)
         let decls: DeclInfo[] = []
@@ -42069,7 +42491,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [] },
-                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -42089,7 +42511,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
         // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
@@ -42117,7 +42539,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)

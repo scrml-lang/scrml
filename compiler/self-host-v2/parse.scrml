@@ -5732,6 +5732,10 @@ ${
     fn parseAttrValue(mp: MP, handler: boolean, name: string, decl: boolean) -> RValue {
         const c: string = chAt(mp, 0)
         if (c == "\"" || c == "'") return parseQuoted(mp, c)
+        if (!decl && isDurationAttr(name)) {
+            const rd: RValue | not = parseDurationValue(mp, name)
+            if (rd is given) return rd
+        }
         if (c == "$" && chAt(mp, 1) == "{") return parseDollarValue(mp, handler, name, decl)
         if (c == "(") {
             const tp: TP = regionTP(mp, LexStop.Balanced)
@@ -5771,6 +5775,47 @@ ${
         if (wordOperatorAt(r3.tp)) return trailingWordOperator(mp, r3.tp, handler, name)
         const t4: TP = expectRegionEnd(r3.tp)
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    // s478 (boot-durations) — a DURATION value (§6.13.3, §51.12.3, §51.12.3.1):
+    // the value of `debounced=` / `throttled=` (§6.13.1–2) and of `after=`
+    // (§51.0.M `<onTimeout>`, §51.0.R `<onIdle>`). "DURATION SHALL match the
+    // literal-form grammar (`Nms` / `Ns` / `Nm` / `Nh`) OR the computed-form
+    // grammar (`${expr}<unit>`)" (§6.13.6). A number written with letters right
+    // after it — `300ms`, `5m`, and a malformed `300sec` / `5` alike — or a
+    // `${…}` followed by letters is read WHOLE as its text (AAttrValue.Dur); the
+    // analyzer judges it (E-SYNTAX-DURATION for a form that does not parse,
+    // §6.13.6 "SHALL produce a compile error"). Any other value (`=(…)`, a name,
+    // a bare `${…}` with no unit) keeps its expression reading, and the analyzer
+    // refuses it as a duration. Only on an attribute — never a declaration's own
+    // value or a typed attribute's default (`decl`).
+    fn isDurationAttr(name: string) -> boolean {
+        return name == "debounced" || name == "throttled" || name == "after"
+    }
+
+    fn isDigitStr(c: string) -> boolean { return c != "" && c >= "0" && c <= "9" }
+
+    fn parseDurationValue(mp: MP, name: string) -> RValue | not {
+        const c: string = chAt(mp, 0)
+        if (c == "$" && chAt(mp, 1) == "{") {
+            const rv: RValue = parseDollarValue(mp, false, name, false)
+            let k: int = 0
+            while (isIdentStartCh(chAt(rv.mp, k)) || isDigitStr(chAt(rv.mp, k))) { k = k + 1 }
+            if (k == 0) return not
+            const m: MP = mAdv(rv.mp, k)
+            return { v: AAttrValue.Dur(mp.src.substring(mp.pos, m.pos)), mp: m }
+        }
+        let i: int = 0
+        if (c == "-" || c == "+") i = 1
+        if (!isDigitStr(chAt(mp, i)) && !(chAt(mp, i) == "." && isDigitStr(chAt(mp, i + 1)))) return not
+        while (isDigitStr(chAt(mp, i)) || chAt(mp, i) == ".") { i = i + 1 }
+        let j: int = i
+        while (isIdentStartCh(chAt(mp, j)) || isDigitStr(chAt(mp, j))) { j = j + 1 }
+        // a bare number with no unit keeps its number reading (the analyzer:
+        // "The unit suffix is required", §51.12.3)
+        if (j == i) return not
+        const m2: MP = mAdv(mp, j)
+        return { v: AAttrValue.Dur(mp.src.substring(mp.pos, m2.pos)), mp: m2 }
     }
 
     // s478 r1 (#1865 F1) — the bare value's expression stopped at a word operator:
@@ -6508,6 +6553,7 @@ ${
         return match v {
             .NoValue :> false
             .Quoted(v: s) :> true
+            .Dur(text: s) :> true
             .Bare(e: e) :> true
             .Paren(e: e) :> true
             .Braced(b: b) :> true
@@ -6695,6 +6741,7 @@ ${
     fn quotedHasInterp(v: AAttrValue) -> boolean {
         return match v {
             .Quoted(v: x) :> x.indexOf("$" + "{") >= 0
+            .Dur(text: x) :> false            // s478: a computed DURATION `${…}ms` is judged by the analyzer (durationOf)
             .NoValue :> false
             .Bare(e: x) :> false
             .Paren(e: x) :> false
@@ -6726,6 +6773,7 @@ ${
     fn quotedInterpDiag(mp: MP, name: string, v: AAttrValue, sp: ASpan) -> MP {
         const s: string = match v {
             .Quoted(v: x) :> x
+            .Dur(text: x) :> ""                // s478: a DURATION (its `${…}ms` form is durationOf's)
             .NoValue :> ""
             .Bare(e: x) :> ""
             .Paren(e: x) :> ""
@@ -7526,6 +7574,7 @@ ${
             .NoValue :> not
             .Paren(e: e) :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .Braced(b: b) :> not
         }
     }
@@ -7600,6 +7649,7 @@ ${
             .NoValue :> not
             .Paren(e: e) :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .Braced(b: b) :> not
         }
         if (x is not) return mp
@@ -7715,6 +7765,7 @@ ${
         return match v {
             .NoValue :> true
             .Quoted(v: x) :> false
+            .Dur(text: x) :> false
             .Bare(e: x) :> false
             .Paren(e: x) :> false
             .Braced(b: x) :> false
@@ -8267,6 +8318,7 @@ ${
             .Bare(e: e) :> e
             .Paren(e: e) :> e
             .Quoted(v: x) :> not
+            .Dur(text: x) :> not
             .NoValue :> not
             .Braced(b: x) :> not
         }
@@ -8295,6 +8347,7 @@ ${
     fn quotedOwn(v: AAttrValue) -> string {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .Bare(e: x) :> ""
             .Paren(e: x) :> ""
             .NoValue :> ""
@@ -8313,6 +8366,7 @@ ${
             .Bare(e: x) :> 2
             .Paren(e: x) :> 2
             .Quoted(v: x) :> 2
+            .Dur(text: x) :> 2
         }
         if (vk == 0) return "a `<db>` cell with no value (its value is its load, evaluated on the server per request)"
         if (vk == 1) return "a `{…}` value on a `<db>` cell"
@@ -8615,6 +8669,7 @@ ${
     fn quotedOf(v: AAttrValue) -> string | not {
         return match v {
             .Quoted(v: s) :> s
+            .Dur(text: s) :> s
             .NoValue :> not
             .Bare(e: x) :> not
             .Paren(e: x) :> not
@@ -9366,6 +9421,7 @@ ${
             .Bare(e: e) :> arrayEntries(e)
             .NoValue :> not
             .Quoted(v: s) :> not
+            .Dur(text: s) :> not
             .Paren(e: e) :> not
             .Braced(b: b) :> not
         }
@@ -9559,6 +9615,7 @@ ${
             .Bare(e: e) :> checkBareOpenerExpr(mp, e)
             .NoValue :> mp
             .Quoted(v: s) :> mp
+            .Dur(text: s) :> mp
             .Paren(e: e) :> mp
             .Braced(b: b) :> mDiag(mp, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "a declaration's value cannot be a braced block — write an expression, parenthesized (§66.2.4)", b.span.start, b.span.end)
         }
@@ -9702,6 +9759,8 @@ ${
             m = kids.mp
         }
         const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs, body: body }
+        // s478 — `<onIdle …/>` (§51.0.R) is the value's watchdog, not a state-child
+        if (o.name == "onIdle") return { c: ADeclChild.Idle(sc), mp: mBump(m) }
         return { c: ADeclChild.StateChild(sc), mp: mBump(m) }
     }
 
