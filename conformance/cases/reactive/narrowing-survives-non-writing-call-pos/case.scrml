@@ -3,11 +3,11 @@ type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
 ${
-    function bump() { @out = @out + "." }
+    function bump() { @out = @out + "."; }
     function show() {
         if (@user is given) {
-            bump()
-            @out = @user.name
+            bump();
+            @out = @user.name;
         }
     }
 }

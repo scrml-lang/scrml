@@ -23,7 +23,7 @@ ${
     function go() {
         let a = f(1);
         let b = g(1);
-        @trace = @trace + a + ";" + b + ";";
+        @trace = `${@trace}${a};${b};`;
     }
 }
 <program>

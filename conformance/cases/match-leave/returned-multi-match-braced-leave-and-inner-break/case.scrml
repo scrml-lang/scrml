@@ -20,7 +20,7 @@ ${
         const v = match k {
             .A :> { let n = 0; for (const x of [1, 2, 3]) { if (x == 2) { break; } n = n + x; } n; },
             .B :> 0
-        }
+        };
         return v;
     }
     // F7: `?` arms in multi-scrutinee statement and decl matches

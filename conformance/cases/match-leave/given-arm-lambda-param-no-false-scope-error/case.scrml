@@ -4,7 +4,7 @@ ${
     <v> : string = ""
     function go() {
         const xs = ["p", "q"];
-        @v = xs.map((q) => match @k { given q :> "has:" + q  else :> "none" }).join(",")
+        @v = xs.map((q) => match @k { given q :> "has:" + q,  else :> "none" }).join(",");
     }
 }
 <button id="go" onclick=go()>go</>

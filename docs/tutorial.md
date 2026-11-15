@@ -1059,7 +1059,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
 
 `auth="required"` on `<program>` puts every request behind a session check at the server: a request without a signed-in session is redirected to `/login`, and the compiler adds the same check to each server function the program exposes. Anything that must stay private to some users is decided **in a server function**, where the compiler provides a `session` object:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3, E-ERROR-013, E-SCOPE-001(session, session)] — the bootstrap has no auth= and no session yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3, E-ERROR-013] — the bootstrap has no auth= and no session yet -->
 <!-- snippet: docs/tutorial-snippets/09-auth.scrml -->
 ```scrml
 // 09-auth.scrml — sign-in required; admin-only data decided on the server.

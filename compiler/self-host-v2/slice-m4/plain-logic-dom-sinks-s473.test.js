@@ -118,9 +118,9 @@ describe("by name, on any value — innerHTML / outerHTML / srcdoc", () => {
   ]);
 
   notJudgedAll([
-    ["`innerHtml` — names are case-sensitive, as the platform's (an expando)", "document.body.innerHtml = @s;", "E-SCOPE-001"],
-    ["`INNERHTML`", "document.body.INNERHTML = @s;", "E-SCOPE-001"],
-    ["`textContent` (every other member stays open)", "document.body.textContent = @s;", "E-SCOPE-001"],
+    ["`innerHtml` — names are case-sensitive, as the platform's (an expando)", "document.body.innerHtml = @s;", "E-BOOTSTRAP-UNSUPPORTED"], // s478: the untyped `document` root is refused by name (was E-SCOPE-001)
+    ["`INNERHTML`", "document.body.INNERHTML = @s;", "E-BOOTSTRAP-UNSUPPORTED"], // s478: the untyped `document` root is refused by name (was E-SCOPE-001)
+    ["`textContent` (every other member stays open)", "document.body.textContent = @s;", "E-BOOTSTRAP-UNSUPPORTED"], // s478: the untyped `document` root is refused by name (was E-SCOPE-001)
   ]);
 });
 
@@ -141,7 +141,7 @@ describe("on… members — the platform pattern, by type (#1663 F5)", () => {
   ]);
 
   notJudgedAll([
-    ["`ONCLICK` on a host value — not the platform pattern `on[a-z]+`", "document.body.ONCLICK = @s;", "E-SCOPE-001"],
+    ["`ONCLICK` on a host value — not the platform pattern `on[a-z]+`", "document.body.ONCLICK = @s;", "E-BOOTSTRAP-UNSUPPORTED"], // s478: the untyped `document` root is refused by name (was E-SCOPE-001)
   ]);
 });
 
@@ -286,7 +286,7 @@ describe("#1663 re-review N1 — an attribute node bound away from the chain", (
     ["an attribute node passed as an argument", "tick(document.body.attributes[0]);"],
   ]);
   notJudgedAll([
-    ["`attributes.length` is a number", "const c: int = document.body.attributes.length;\n        @n = c;", "E-SCOPE-001"],
+    ["`attributes.length` is a number", "const c: int = document.body.attributes.length;\n        @n = c;", "E-BOOTSTRAP-UNSUPPORTED"], // s478: the untyped `document` root is refused by name (was E-SCOPE-001)
   ]);
 });
 

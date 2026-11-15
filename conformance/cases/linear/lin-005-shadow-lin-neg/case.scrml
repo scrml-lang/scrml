@@ -1,10 +1,10 @@
 ${
     function useToken(t: string | bool) { return t; }
-    let flag = true
-    let token = "t"
+    let flag = true;
+    let token = "t";
     useToken(token)
     if (flag) {
-        let token = 5
+        let token = 5;
         useToken(flag)
     }
 }

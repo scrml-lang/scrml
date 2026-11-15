@@ -4,12 +4,12 @@ ${
 }
 <verdict> = "unset"
 server function check(pw: string, hashes: string[]) {
-  function m(h: string) { return verifyPassword(pw, h) }
-  const r = hashes.some(h => { return m(h) })
+  function m(h: string) { return verifyPassword(pw, h); }
+  const r = hashes.some(h => { return m(h); })
   return r ? "accepted" : "rejected"
 }
 function go() {
-  @verdict = check("x", ["a"]) !{ .Transport(_) :> return }
+  @verdict = check("x", ["a"]) !{ .Transport(_) :> return };
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

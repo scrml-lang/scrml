@@ -5,9 +5,9 @@ type User:struct = { name: string }
 ${
     function show() {
         if (@user is given) {
-            const k = Math.max(1, 2)
-            const t = String(k).trim()
-            @out = @user.name
+            const k = Math.max(1, 2);
+            const t = String(k).trim();
+            @out = @user.name;
         }
     }
 }

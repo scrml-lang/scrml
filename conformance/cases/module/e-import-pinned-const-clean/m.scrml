@@ -1,1 +1,1 @@
-export const appPhase = 1
+export const appPhase = 1;

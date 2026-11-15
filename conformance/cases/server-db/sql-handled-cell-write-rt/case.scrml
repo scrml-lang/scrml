@@ -29,7 +29,7 @@
         @failed = ?{`SELECT id, body FROM gone`}.get() !{
             .QueryFailed(m) :> "failed",
             _ :> not
-        }
+        };
     }
     <button id="a" onclick={ loadHit() !{ .Transport(_) :> return }; }>a</button>
     <button id="b" onclick={ loadMiss() !{ .Transport(_) :> return }; }>b</button>

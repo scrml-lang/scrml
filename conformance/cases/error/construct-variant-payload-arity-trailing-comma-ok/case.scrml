@@ -5,6 +5,6 @@ ${
         fail MyError.NotFound("x",);
     }
 
-    let e = MyError.NotFound("y",)
+    let e = MyError.NotFound("y",);
 }
 <p>x</>

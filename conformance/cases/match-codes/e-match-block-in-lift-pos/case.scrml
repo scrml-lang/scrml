@@ -8,7 +8,7 @@ ${ for (let s of @items) {
       <Open>open</>
       <Closed>closed</>
     </match>
-  </li>
+  </li>;
 } }
 </ul>
 </program>

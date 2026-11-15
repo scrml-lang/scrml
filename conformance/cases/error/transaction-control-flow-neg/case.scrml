@@ -9,18 +9,18 @@
     type M:enum = { A B }
     function suspend(a: number)! -> E {
         transaction {
-            ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run()
-            yield a
+            ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run();
+            yield a;
         }
     }
     function armExit(m: M)! -> E {
         transaction {
-            ?{`UPDATE orders SET name = 'y' WHERE id = 1`}.run()
+            ?{`UPDATE orders SET name = 'y' WHERE id = 1`}.run();
             match m {
-                .A :> { return 5 },
-                .B :> { let y = 1 }
+                .A :> { return 5; },
+                .B :> { let y = 1; }
             }
-            ?{`UPDATE orders SET name = 'after-match' WHERE id = 2`}.run()
+            ?{`UPDATE orders SET name = 'after-match' WHERE id = 2`}.run();
         }
     }
     <p>x</p>

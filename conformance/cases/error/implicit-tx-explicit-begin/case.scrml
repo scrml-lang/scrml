@@ -4,7 +4,7 @@ ${
         let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
         let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all();
         ?{`COMMIT`};
-        return { a, b }
+        return { a, b };
     }
 }
 <p>x</>

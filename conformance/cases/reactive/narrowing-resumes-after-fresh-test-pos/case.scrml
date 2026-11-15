@@ -3,12 +3,12 @@ type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
 ${
-    function clear() { @user = not }
+    function clear() { @user = not; }
     function show() {
         if (@user is given) {
-            clear()
+            clear();
             if (@user is given) {
-                @out = @user.name
+                @out = @user.name;
             }
         }
     }

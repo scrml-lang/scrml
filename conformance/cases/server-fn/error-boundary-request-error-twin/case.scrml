@@ -9,7 +9,7 @@ ${
 }
 <h1 class="eb-header">Profile</>
 <request id="nameLoad" deps=[]>
-    ${ @name = loadName("1") }
+    ${ @name = loadName("1"); }
 </>
 <div class="eb-fallback" if=${<#nameLoad>.error is given}>Could not load profile</>
 <p class="eb-name" if=${<#nameLoad>.data is given}>${@name}</>

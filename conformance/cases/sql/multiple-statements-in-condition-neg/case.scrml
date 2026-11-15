@@ -2,10 +2,10 @@
     // A ;-chained ?{} in an `if` condition — expression text the parser holds unparsed —
     // is read by the same check as a statement-position ?{} (§8.1.2).
     ${
-        function check() {
+        function check()! -> SqlError {
             if (?{`SELECT 1; DELETE FROM log`}.get()) { return 1; }
             return 0;
         }
     }
-    <button onclick=${ check() }>check</button>
+    <button onclick={ check() !{ _ :> return }; }>check</button>
 </program>

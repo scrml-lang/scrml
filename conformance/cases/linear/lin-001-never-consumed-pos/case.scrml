@@ -2,6 +2,6 @@ ${
     function fetchToken() { return "t"; }
     function doWork() { return 1; }
     lin token = fetchToken()
-    let result = doWork()
+    let result = doWork();
 }
 <p>x</>

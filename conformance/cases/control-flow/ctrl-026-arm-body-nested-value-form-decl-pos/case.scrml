@@ -3,20 +3,20 @@ ${
 
     function nestedIfDecl() {
         const label = if (@n > 0) {
-            const inner = if (@n > 3) { lift "deep" } else { lift "shallow" }
-            lift inner
+            const inner = if (@n > 3) { lift "deep"; } else { lift "shallow"; };
+            lift inner;
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }
 
     function nestedIfDeclElseTaken() {
         const label = if (@n > 90) {
-            const inner = if (@n > 3) { lift "deep" } else { lift "shallow" }
-            lift inner
+            const inner = if (@n > 3) { lift "deep"; } else { lift "shallow"; };
+            lift inner;
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }
@@ -24,21 +24,21 @@ ${
     function nestedForDecl() {
         const names = ["ann", "bo"];
         const label = if (@n > 0) {
-            const picked = for (nm of names) { lift nm }
-            lift picked[0]
+            const picked = for (nm of names) { lift nm; };
+            lift picked[0];
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }
 
     function statementThenNestedIfDecl() {
         const label = if (@n > 0) {
-            const first = if (@n > 3) { lift "one" } else { lift "two" }
-            const second = if (@n > 4) { lift "three" } else { lift "four" }
-            lift first + "-" + second
+            const first = if (@n > 3) { lift "one"; } else { lift "two"; };
+            const second = if (@n > 4) { lift "three"; } else { lift "four"; };
+            lift first + "-" + second;
         } else {
-            lift "neg"
+            lift "neg";
         }
         return label
     }

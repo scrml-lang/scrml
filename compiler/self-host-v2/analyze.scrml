@@ -681,7 +681,12 @@ ${
     // join of its lifts', §49.6 rule 2; none at all is E-LOOP-007).
     // s475 r1 — `nsAt`: the value names `m` resolved to a namespace import (resolveNameOf), by file and
     // source offset; analyzeSources re-reads those files with `m.x` there one name (parse.scrml PNs).
-    type NsAt:struct = { file: string, at: int }
+    // s478 — `kw`: the entry is not a namespace name but a KEYWORDLESS declaration (§50.8.5: "the
+    // keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does"),
+    // `at` its statement's offset; the re-read parses that statement as the declaration (parse.scrml PNs.kw).
+    // s478 r1 (MED-2) — a `kw` entry also carries the declared local (`sym`, its Sym id; `name`; `end`, the
+    // statement's end) so analyzeSources can judge it unread (kwUnread). A namespace entry: -1 / "" / 0.
+    type NsAt:struct = { file: string, at: int, kw: boolean, sym: int, name: string, end: int }
     // s475-boot-caller-transport — `tport`: each E-ERROR-010 a `?` on a client server call reported because
     // the enclosing function's enum has no `Transport` (remotePropagate), with that function's Sym id. A
     // client `!` function whose server calls compose (composePass) hands the request's wire failure to ITS
@@ -8327,7 +8332,7 @@ ${
         // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
         // stands only for `m` used as a value.
         if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
             return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
@@ -8369,7 +8374,126 @@ ${
         if (isProgramCtx(env) && runLocalSeenAt(env.g.files, env.file, name, e.span.start)) {
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", runLocalCellReadWhy(name), st)
         }
+        // s478 — every binding of `name` was looked up above (a user binding of a built-in's name
+        // wins, §20.3a / §20.6.7 / §20.7.5), so this is the built-in itself.
+        if (name == "session") return diagX(env, e, "E-SESSION-VALUE", sessionValueWhy(), st)
+        const bu: string = builtinUnbuilt(name)
+        if (bu != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", bu, st)
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st)
+    }
+
+    // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
+    // names of the language the bootstrap does not build yet. Each is refused BY NAME (S473 D30:
+    // "UNSUPPORTED is only for E-BOOTSTRAP-UNSUPPORTED"), never reported as an undeclared name: the
+    // program is not wrong, the bootstrap is incomplete. "" — not such a name.
+    fn builtinUnbuilt(name: string) -> string {
+        return match name {
+            "log" :> "`log(…)` is a language built-in (§20.6: \"`log(...args)` SHALL be a compiler-managed built-in\") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-ins slice"
+            "print" :> "`print(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
+            "println" :> "`println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
+            "navigate" :> "`navigate(…)` is a language built-in (§20.1) that the bootstrap does not build yet"
+            "route" :> "`route` is a language built-in (§20.4, route parameters) that the bootstrap does not build yet"
+            "cleanup" :> "`cleanup(…)` is a language built-in (§6.7.3, scope-exit teardown) that the bootstrap does not build yet"
+            // §21.3.3 "Implementation status": "the bootstrap refuses a bare `window` / `document`
+            // read and an untyped `.js` import outright"; Appendix D lists the three browser roots IN
+            // for a client body (S471), so a use of one is a supported program, refused by name
+            "document" :> domRootRefusal("document")
+            "window" :> domRootRefusal("window")
+            "navigator" :> domRootRefusal("navigator")
+            _ :> ""
+        }
+    }
+
+    fn domRootRefusal(root: string) -> string {
+        return "untyped access through the browser root `" + root + "` is not in the bootstrap (§21.3.3 \"Implementation status\": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` binding (`<host fn=\"setTitle(t: string)\" target=\"document.title = t\"/>`, §21.3.3), or a `ref=` handle"
+    }
+
+    // §34 E-SESSION-VALUE (§20.5): "Bare `session` VALUE-use … read as a first-class value rather
+    // than as the object of a member (`session.userId`), index (`session[\"userId\"]`), or call
+    // (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value".
+    // s478 — `obj.member` where `obj` is the bare name of an unbuilt built-in: its refusal, else "".
+    fn builtinRootRefusal(env: Env, obj: AExpr, member: string) -> string {
+        const n: string = exprName(obj)
+        if (n == "" || !builtinFree(env, n)) return ""
+        if (n == "session") return sessionUnbuilt(member)
+        if (n == "document" || n == "window" || n == "navigator") return builtinUnbuilt(n)
+        return ""
+    }
+
+    fn sessionUnbuilt(member: string) -> string {
+        const what: string = member == "" ? "`session`" : "`session." + member + "`"
+        return what + " — the §20.5 session context (a request-scoped server accessor) is not in the bootstrap yet"
+    }
+
+    fn sessionValueWhy() -> string {
+        return "`session` is a request-scoped accessor, not a value (§20.5) — it cannot be returned, assigned, passed or stored; read a field (`session.userId`) or call an accessor (`session.get(…)`)"
+    }
+
+    // s478 — no binding of `name` is visible here (the lookups resolveNameOf makes before it
+    // reaches a built-in), so `name` is the built-in of that name (§20.3a, §20.6.7, §20.7.5: a
+    // user-declared binding wins).
+    fn builtinFree(env: Env, name: string) -> boolean {
+        if (lookupLocal(env, name) is given) return false
+        if (localFnNamed(env, name) is given) return false
+        if (hostBinding(env.g, env.file, name) is given) return false
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is given) {
+            if (!d.isProgram) {
+                if (fieldIndex(d.info, name) >= 0) return false
+            }
+        }
+        if (isNsBinding(env.g.te.link, env.file, name)) return false
+        if (constNamed(env.g, env.file, name) is given) return false
+        if (fnNamedIn(env, name) is given) return false
+        if (importRefusesName(env.g, env.file, name)) return false
+        if (nsMember(env.g.te.link, env.file, name).ns != "") return false
+        return true
+    }
+
+    // s478 — `cleanup(arg)` (§6.7.3): "The argument to `cleanup()` SHALL be a function expression
+    // (arrow function, named function reference, or `fn`-declared function). It SHALL NOT be a bare
+    // value or a call expression that produces a non-function." A call argument is E-LIFECYCLE-002
+    // (§34: "The `cleanup()` argument is a call expression"); any other non-function shape is
+    // E-LIFECYCLE-004 (§34: "covers non-call non-function shapes (bare values, object literals,
+    // etc.)"). A function argument is the supported form, which the bootstrap does not build yet —
+    // refused by name.
+    fn cleanupNameShape(env: Env, n: string) -> string {
+        if (localFnNamed(env, n) is given) return "fn"
+        if (fnNamedIn(env, n) is given) return "fn"
+        // s478 r1 (LOW-4): a local is a bare value only when its type is KNOWN — the bootstrap's types
+        // (core.scrml Type) hold no function type, so a typed local is never a function. One whose type
+        // is unknown (a local bound to a lambda, `const v = () => 1`) may be the "named function
+        // reference" §6.7.3 admits: refused by name, never E-LIFECYCLE-004
+        const lb: LocalB | not = lookupLocal(env, n)
+        if (lb is given) {
+            if (lb.ty is given) return "value"
+            return "unknown"
+        }
+        if (constNamed(env.g, env.file, n) is given) return "value"
+        return "unknown"
+    }
+
+    fn resolveCleanup(env: Env, e: AExpr, args: AExpr[], st0: AS) -> RX {
+        if (args.length != 1) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`cleanup(…)` takes exactly one argument, a function (§6.7.3 `cleanup-stmt ::= 'cleanup' '(' expression ')'`); " + builtinUnbuilt("cleanup"), resolveExprs(env, args, not, st0))
+        const a: AExpr = args[0]
+        const k: AExprK = a.k
+        const shape: string = match k {
+            .Call(callee: c) :> "call"
+            .Lambda(params: ps) :> "fn"
+            .Name(name: n) :> cleanupNameShape(env, n)
+            .Recovered :> "unknown"
+            .Member(obj: o) :> "unknown"
+            .Index(obj: o) :> "unknown"
+            .Handled(h: h) :> "unknown"
+            .Ternary(test: t) :> "unknown"
+            // no-default-arm: every other form is a literal, operator or constructor value — never a function (§6.7.3)
+            _ :> "value"
+        }
+        if (shape == "fn") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", builtinUnbuilt("cleanup"), st0)
+        const st: AS = resolveExprs(env, args, not, st0)
+        if (shape == "call") return diagX(env, e, "E-LIFECYCLE-002", "the argument of `cleanup(…)` is a call expression — it would run NOW and register its result, not a function (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
+        if (shape == "value") return diagX(env, e, "E-LIFECYCLE-004", "the argument of `cleanup(…)` is not a function — `cleanup()` registers a function to run when the scope is destroyed (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", builtinUnbuilt("cleanup"), st)
     }
 
     fn runLocalFnReadWhy(name: string) -> string {
@@ -8599,7 +8723,7 @@ ${
             if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
         }
         if (isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1 }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
             return diagX(env, e, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; read one of its exported cells: `@" + name + ".name` (§21.3)", sr)
         }
         // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
@@ -8685,6 +8809,9 @@ ${
         // s475 (S3b): `<#id>.loading` / `.data` / `.error` / `.stale` (§6.7.7 Properties)
         const hr: string | not = hashRefId(obj)
         if (hr is given) return resolveReqMember(env, e, hr, name, st0)
+        // s478 — a member of an unbuilt built-in (`session.userId`, `document.title`): one refusal by name
+        const rb: string = builtinRootRefusal(env, obj, name)
+        if (rb != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", rb, st0)
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
@@ -9059,12 +9186,16 @@ ${
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
         const n: string = exprName(callee)
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
+        if (n == "cleanup" && builtinFree(env, n)) return resolveCleanup(env, e, args, st0)   // s478 (§6.7.3)
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
             // s475 (S3b): `<#id>.refetch()` (§6.7.7 Properties)
             if (m is given) {
                 const hr: string | not = hashRefId(m.obj)
                 if (hr is given) return resolveRefetch(env, e, callee, hr, m.method, args, st0)
+                // s478 — a method of an unbuilt built-in (`session.destroy()`, `document.querySelector(…)`)
+                const rb: string = builtinRootRefusal(env, m.obj, m.method)
+                if (rb != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", rb, resolveExprs(env, args, not, st0))
             }
             if (m is given) {
                 // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
@@ -11057,7 +11188,7 @@ ${
         // s475 (g-boot-namespace-cell-read-s475) — `@m` with `m` a namespace import (no nearer binding):
         // recorded as resolveAtOf records a read, so `@m.x = …` is re-read with `m.x` one name.
         if (!namesInstance(env, name) && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1 }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
             return noPlace(addDiag(sr, env.file, t.span, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; write one of its exported cells' fields: `@" + name + ".name.field = …` (§21.3)"))
         }
         // s475 (g-boot-namespace-cell-read-s475) — a whole-value write of an own value declared in ANOTHER
@@ -11118,6 +11249,12 @@ ${
         // position and in expression position alike." (A function-body `const`
         // takes the bootstrap's older E-ASSIGN-CONST, resolveAssign — not changed here.)
         if (constNamed(env.g, env.file, name) is given) return noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-004", "`" + name + "` is a file-scope `const` — an assignment to a `const` variable is a compile error (§50.9); declare a cell (`<" + name + ":T=…/>`) for a value that changes"))
+        // s478 — the root of a write is an unbuilt built-in (`document.title = t`, `session.x = v`)
+        if (builtinFree(env, name)) {
+            if (name == "session") return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", sessionUnbuilt("")))
+            const bu: string = builtinUnbuilt(name)
+            if (bu != "") return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", bu))
+        }
         return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`" + name + "` is not a writable local"))
     }
 
@@ -14846,10 +14983,134 @@ ${
         return { env: env2, st: resolveLocalFns(env2, b, st) }      // s477: in the block's final scope
     }
 
+    // s478 — §50.8.5: "A binding is `const` when it was created WITHOUT `let`. That covers both the
+    // explicit keyword form (`const x = 1`) and the keywordless bare naming statement (`x = 1`), which
+    // declares `x` exactly as `const x = 1` does"; §50.10: "The keywordless bare naming statement
+    // `x = value` declares `x` exactly as `const x = value` does". (§66.9 keeps it among a local's
+    // forms: "a local binding: `let`, `const`, or the keywordless binding (§50.8.5)"; O13 asks only
+    // whether it retires.) A statement `x = e;` whose `x` names nothing in scope is that declaration.
+    // The parser cannot see scope, so analysis finds it (no binding of `x` — keywordlessName) and the
+    // file is re-read with the statement parsed as the declaration (NsAt.kw -> parse.scrml PNs.kw);
+    // this run resolves it as one, so later statements read `x` as the local it is. Without the
+    // re-read (no source) the statement stays an assignment and is refused here — fail closed.
+    fn resolveEvalStmt(env: Env, s: AStmt, e: AExpr, st: AS) -> RB {
+        const kn: string = keywordlessName(env, e)
+        if (kn == "") return keepEnv(env, resolveStmtExpr(withEvalPre(env, e), e, st))
+        const ek: AExprK = e.k
+        const v: AExpr | not = match ek {
+            .Assign(target: t, value: v0) :> v0
+            // no-default-arm: one question of the expression — is it an assignment
+            _ :> not
+        }
+        if (v is not) return keepEnv(env, resolveStmtExpr(withEvalPre(env, e), e, st))
+        const sd: AS = addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: the keywordless declaration `" + kn + " = …` (§50.8.5) was not re-read as a declaration (the front end was not given this file's source) — write `const " + kn + " = …;`")
+        const rl: RB = resolveLocal(env, s, kn, false, not, v, sd)
+        const r2: AS = rl.st
+        const ls: LocalB[] = rl.env.locals
+        let sid: int = -1
+        if (ls.length > 0) sid = ls[ls.length - 1].s.id
+        const at: NsAt = { file: env.file, at: s.span.start, kw: true, sym: sid, name: kn, end: s.span.end }
+        const sr: AS = { facts: r2.facts, diags: r2.diags, nextSym: r2.nextSym, annots: r2.annots, bad: r2.bad, effects: r2.effects, pend: r2.pend, lifts: r2.lifts, nsAt: r2.nsAt.concat([at]), tport: r2.tport, reqs: r2.reqs }
+        return { env: rl.env, st: sr }
+    }
+
+    // The name a keywordless declaration statement declares (§50.8.5), else "": `x = e` — an
+    // unparenthesized statement assignment to a bare name with no binding in scope (builtinFree: no
+    // local, parameter, nested or file-scope function, constant, import, host binding or field). A
+    // name the file declares as a cell ANYWHERE (s478 r1, LOW-9: a program cell or one in nested
+    // markup — `count = 1` there is a typo for `@count = 1`, never a dead const), and the built-in
+    // roots the bootstrap refuses (`session`, `document`, `window`, `navigator`), keep their own reports.
+    fn keywordlessName(env: Env, e: AExpr) -> string {
+        const ek: AExprK = e.k
+        const tn: string = match ek {
+            .Assign(target: t, paren: p, kept: k) :> assignedName(t, p, k)
+            // no-default-arm: one question of the expression — is it an assignment
+            _ :> ""
+        }
+        // s478 r1 (LOW-5): a built-in FUNCTION's name (`log`, `print`, `println`, `navigate`, `route`,
+        // `cleanup`) is declared like any other — §20.6.7: "any in-scope binding named `log` wins", and
+        // `const log = 1` is accepted; only the request accessor and the browser roots keep their reports
+        if (tn == "" || tn == "session" || tn == "document" || tn == "window" || tn == "navigator") return ""
+        if (!builtinFree(env, tn)) return ""
+        // §5.2 "Executable sinks in plain logic (S473)" judges the statement first (`location = data`
+        // is refused there — resolveAssign), so a sink write is never read as a declaration
+        const sw: string = match ek {
+            .Assign(target: t, value: v) :> assignSinkWhy(env, t, v)
+            // no-default-arm: one question of the expression — is it an assignment
+            _ :> ""
+        }
+        if (sw != "") return ""
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is given) {
+            if (fieldIndex(pi, tn) >= 0) return ""
+        }
+        for (const f of env.g.files) {
+            if (f.path == env.file && itemCellNames(f.items).indexOf(tn) >= 0) return ""
+        }
+        return tn
+    }
+
+    // s478 r1 (LOW-9) — every cell name (a lowercase declaration name) written anywhere in `items`:
+    // a program cell, a field of a declaration, a cell in nested markup.
+    fn itemCellNames(items: AItem[]) -> string[] {
+        let out: string[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const ns: string[] = match k {
+                .DeclItem(d: d) :> declCellNames(d)
+                .MarkupItem(n: n) :> nodeCellNames(n)
+                .ProgramItem(p: p) :> itemCellNames(p.items)
+                // no-default-arm: one question of the item — can it hold a cell declaration
+                _ :> []
+            }
+            out = out.concat(ns)
+        }
+        return out
+    }
+
+    fn nodeCellNames(n: ANode) -> string[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> elemCellNames(e)
+            .DeclNode(d: d) :> declCellNames(d)
+            // no-default-arm: one question of the node — can it hold a cell declaration
+            _ :> []
+        }
+    }
+
+    fn elemCellNames(e: AElem) -> string[] {
+        let out: string[] = []
+        for (const c of e.kids) { out = out.concat(nodeCellNames(c)) }
+        return out
+    }
+
+    fn declCellNames(d: ADecl) -> string[] {
+        let out: string[] = []
+        const c0: string = d.name.substring(0, 1)
+        if (c0 >= "a" && c0 <= "z") out = [d.name]
+        for (const ch of d.body) {
+            const k: ADeclChild = ch
+            const ns: string[] = match k {
+                .ChildField(d: f) :> declCellNames(f)
+                // no-default-arm: one question of the child — is it a field declaration
+                _ :> []
+            }
+            out = out.concat(ns)
+        }
+        const r: AElem | not = d.renders
+        if (r is given) out = out.concat(elemCellNames(r))
+        return out
+    }
+
+    fn assignedName(t: AExpr, paren: boolean, kept: boolean) -> string {
+        if (paren || kept) return ""
+        return exprName(t)
+    }
+
     fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(withEvalPre(env, e), e, st))
+            .Eval(e: e) :> resolveEvalStmt(env, s, e, st)
             .Local(name: n, mutable: m, ty: y, init: i) :> resolveLocal(env, s, n, m, y, i, st)
             .Return(e: e) :> keepEnv(env, resolveReturnExpr(env, e, st))
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
@@ -43553,7 +43814,7 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers)
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return r1.tp
+        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withKwUnread(r1.tp, r0)
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -43561,7 +43822,52 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes) }
         let ds: Diag[] = []
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
-        return { files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }
+        return withKwUnread({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, r0)
+    }
+
+    // s478 r1 (MED-2, INTERIM) — a keywordless declaration (§50.8.5) that is never read. The conformance
+    // case linear/must-use-unread-pos asserts E-MU-001 for `unusedThing = 42;` falling out of scope
+    // unread, but the SPEC gives no rule for an unread binding: §34's only E-MU-001 row reads "Must-use:
+    // return value of `!` function not captured" (§35), and §35 never names the code. So the bootstrap
+    // neither builds E-MU-001 for it nor accepts it: it refuses the unread keywordless declaration by
+    // name (S473 D30), naming E-MU-001 — g-boot-kw-unread-must-use-s478 (owner question). Judged from
+    // the FIRST run (r0), where the statement was resolved as the local it declares, so every read of it
+    // is a NameFact NLocal of its Sym; only over a compile with no other Error (like unreadCells: a read
+    // inside a refused construct is never resolved). A `_`-prefixed name is deliberately unread (the
+    // §31.2 / E-DG-002 convention). One that became a file-scope constant (MED-1) is not judged: an
+    // unread file-scope `const` is accepted, and it is that constant.
+    fn withKwUnread(tp: TypedProgram, r0: ARun) -> TypedProgram {
+        if (hasErrorDiag(tp.diags) || parseFailed(tp.files)) return tp
+        let read: int[] = []
+        for (const f of r0.tp.tables.names.facts) {
+            const k: int = nlocalId(f)
+            if (k >= 0) read = read.concat([k])
+        }
+        let out: Diag[] = []
+        let seen: int[] = []
+        for (const a of r0.nsAt) {
+            if (a.kw && a.sym >= 0 && read.indexOf(a.sym) < 0 && seen.indexOf(a.sym) < 0 && a.name.substring(0, 1) != "_" && !fileConstAt(tp.tables.consts, a.file, a.at)) {
+                seen = seen.concat([a.sym])
+                out = out.concat([mkDiag(a.file, mkSpan(a.at, a.end), "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + " = …` declares `" + a.name + "` (the keywordless declaration, §50.8.5) and nothing reads it before its scope ends. Whether an unread binding is E-MU-001 is not settled — §34's E-MU-001 row is \"return value of `!` function not captured\" (§35) — so the bootstrap refuses it rather than accept it. If `" + a.name + "` was meant to be an existing binding, fix the name (a cell is written `@" + a.name + " = …`); otherwise read it, remove it, or name it `_" + a.name + "` if it is deliberately unread")])
+            }
+        }
+        if (out.length == 0) return tp
+        return { files: tp.files, tables: tp.tables, diags: tp.diags.concat(out), infos: tp.infos }
+    }
+
+    fn nlocalId(f: NameFact) -> int {
+        return match f {
+            .NLocal(sym: s) :> s.id
+            // no-default-arm: one question of the fact — is it a local read
+            _ :> -1
+        }
+    }
+
+    fn fileConstAt(cs: ConstInfo[], file: string, at: int) -> boolean {
+        for (const c of cs) {
+            if (c.file == file && c.span.start == at) return true
+        }
+        return false
     }
 
     // s475 r1 — each file with namespace member reads (`at`), re-read from its source with the same
@@ -43576,17 +43882,19 @@ ${
         let changed = false
         for (const f of files) {
             let offs: int[] = []
+            let kws: int[] = []
             for (const a of at) {
-                if (a.file == f.path && offs.indexOf(a.at) < 0) offs = offs.concat([a.at])
+                if (a.file == f.path && a.kw && kws.indexOf(a.at) < 0) kws = kws.concat([a.at])
+                if (a.file == f.path && !a.kw && offs.indexOf(a.at) < 0) offs = offs.concat([a.at])
             }
             let src: string | not = not
             for (const x of srcs) {
                 if (x.path == f.path) src = x.src
             }
-            if (offs.length == 0 || src is not) {
+            if ((offs.length == 0 && kws.length == 0) || src is not) {
                 out = out.concat([f])
             } else {
-                const ns: PNs = { names: nsOfItems(f.items), at: offs }
+                const ns: PNs = { names: nsOfItems(f.items), at: offs, kw: kws }
                 const r: Parsed = parseFileNs(f.path, src, f.first, ns)
                 out = out.concat([r.ast])
                 changed = true
@@ -43770,7 +44078,8 @@ ${
         if (doms.length == 0) return ds
         let out: Diag[] = []
         for (const d of ds) {
-            if (!(d.code == "E-SCOPE-001" && doms.indexOf(d.span.start) >= 0)) out = out.concat([d])
+            // s478: nor also the bootstrap's by-name refusal of the untyped root (builtinUnbuilt)
+            if (!((d.code == "E-SCOPE-001" || d.code == "E-BOOTSTRAP-UNSUPPORTED") && doms.indexOf(d.span.start) >= 0)) out = out.concat([d])
         }
         return out
     }

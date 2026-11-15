@@ -1,10 +1,10 @@
 <program>
 <verdict> = "unset"
-server function isOk(n: int) { return n > 100 }
+server function isOk(n: int) { return n > 100; }
 function go() {
-  function inner(x: int) { return isOk(x) }
-  if (true) { let inner = 5 }
-  @verdict = [1, 2, 3].some(x => inner(x)) ? "accepted" : "rejected"
+  function inner(x: int) { return isOk(x); }
+  if (true) { let inner = 5; }
+  @verdict = [1, 2, 3].some(x => inner(x)) ? "accepted" : "rejected";
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>
