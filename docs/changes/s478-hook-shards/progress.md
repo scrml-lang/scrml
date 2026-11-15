@@ -39,3 +39,19 @@ Gaps: g-hook-single-shard-test-pollution-s477, g-hook-sharded-prepush-exit-s477.
   an exit 0 that has no summary or says RESULT: FAIL.
 - Bite: compiler/tests/unit/hook-prepush-suite-verdict-s478.test.js (runner run for real on a red test and
   on an unhandled error → exit 1; green → exit 0; the hook block run verbatim on every case).
+
+## Bite proof (worktree's own scripts/git-hooks/pre-push, run directly with an update-ref stdin line)
+- Temp file with an `afterAll` unhandled rejection (0 failing tests): pre-push exit 1 —
+  "Tests: 45219 pass, 0 fail, 1 error", "RESULT: FAIL — 1 unhandled error(s) outside any test …",
+  "[s6] (error) Unhandled error between tests in compiler/tests/unit/zz-s478-bite-unhandled.test.js".
+- One assertion in b17-4 changed to a string that cannot match: pre-push exit 1 — "1 fail",
+  "RESULT: FAIL — 1 test(s) failed", the (fail) line.
+- Restored (temp file deleted, assertion back, tree clean): pre-push exit 0 — 45218 pass / 0 fail / 0 error,
+  12 shards, adaptive ceiling 4608–5120 MB, per-shard peaks 859–2747 MB, RESULT: PASS.
+
+## Commits
+- dcf13e661 and earlier on this branch; each through main's pre-commit hook (SCRML_HOOK_SHARD_MEM_MB=4608).
+
+## Seen, not this lane
+- N=4 measuring run, under load: "§3 scrml dev run from the project root > REFERENCING program, missing
+  database …" failed at 30.7 s (a timing failure under CPU load; passed in every other run).
