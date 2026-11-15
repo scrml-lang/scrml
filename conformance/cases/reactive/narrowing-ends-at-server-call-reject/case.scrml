@@ -3,11 +3,11 @@ type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
 ${
-    server function save() -> int { return 1 }
+    server function save() -> int { return 1; }
     function show() {
         if (@user is given) {
-            const r = save()
-            @out = @user.name
+            const r = save();
+            @out = @user.name;
         }
     }
 }

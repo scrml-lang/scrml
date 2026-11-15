@@ -10,19 +10,19 @@ ${
             given n :> 1,
             .A :> 2,
             .B :> 3
-        })
+        });
         @v = match K.A {
             given n :> 1,
             .A :> 2,
             .B :> 3
-        }
-        let ww = 0
+        };
+        let ww = 0;
         ww = match K.A {
             given n :> 1,
             .A :> 2,
             .B :> 3
-        }
-        @w = ww
+        };
+        @w = ww;
     }
 }
 <button id="go" onclick=go()>go</>

@@ -6,8 +6,8 @@ ${
     function show(xs: int[]) {
         if (@user is given) {
             for (const x of xs) {
-                @out = @user.name
-                @user = not
+                @out = @user.name;
+                @user = not;
             }
         }
     }

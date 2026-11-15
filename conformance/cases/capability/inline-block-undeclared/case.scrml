@@ -2,7 +2,7 @@
   export function fetchIt(url: string) {
     const out = _={ in: { url }
       await fetch(url).then(r => r.text())
-    }=
-    return out
+    }=;
+    return out;
   }
 </program>

@@ -5,7 +5,7 @@ ${
   function authenticate(x: string) { return x; }
 }
 <request id="profile">
-  ${ @userId = authenticate(token) }
+  ${ @userId = authenticate(token); }
 </>
 <p>${@userId}</>
 </program>

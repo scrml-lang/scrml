@@ -6,7 +6,7 @@ type Phase:enum = { Idle, Busy }
 <r2> = 0
 ${ function h() { @r2 = 9; } }
 <match on=@ph>
-  <Idle><button onclick=${ (e) => { @r = 1 }; @r2 = 2 }>x</button></>
+  <Idle><button onclick=${ (e) => { @r = 1; }; @r2 = 2 }>x</button></>
   <Busy><p>b</p></>
 </>
 </program>

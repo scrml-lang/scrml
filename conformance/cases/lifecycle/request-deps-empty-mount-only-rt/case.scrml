@@ -4,11 +4,11 @@ ${
     <userId> = 1
     <userData> : User | not = not
     function loadUser(id: number) -> User | not {
-        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not };
     }
 }
 <request id="userReq" deps=[]>
-    ${ @userData = loadUser(@userId) }
+    ${ @userData = loadUser(@userId); }
 </>
 <button id="setid" onclick=${@userId = 2}>user 2</>
 <p id="who">${@userData?.name}</>

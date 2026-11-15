@@ -20,64 +20,64 @@
     // an `if`, and on a binding declared OUTSIDE the loop; unhandled and handled.
     // The hoisted lookup assigns the binding; it is never re-declared.
     function direct(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
-            let row = not
-            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            let row = not;
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function inIf(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
-            let row = not
+            let row = not;
             if (it.on) {
                 row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get();
             }
-            out.push(row is not ? "none" : row.body)
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function outer(items) {
-        let out = []
+        let out = [];
         let row = not;
         for (const it of items) {
-            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function handledDirect(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
-            let row = not
+            let row = not;
             row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
-            out.push(row is not ? "none" : row.body)
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function handledInIf(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
-            let row = not
+            let row = not;
             if (it.on) {
                 row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
             }
-            out.push(row is not ? "none" : row.body)
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function handledGone(items) {
-        let out = []
+        let out = [];
         for (const it of items) {
-            let row = not
+            let row = not;
             if (it.on) {
                 row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not };
             }
-            out.push(row is not ? "none" : row.body)
+            out.push(row is not ? "none" : row.body);
         }
-        return out.join(",")
+        return out.join(",");
     }
     function go() {
         const items = [{ id: 7, on: true }, { id: 8, on: true }];

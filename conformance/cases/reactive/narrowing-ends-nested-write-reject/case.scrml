@@ -5,8 +5,8 @@ type User:struct = { name: string }
 ${
     function show(c: bool) {
         if (@user is given) {
-            if (c) { @user = not }
-            @out = @user.name
+            if (c) { @user = not; }
+            @out = @user.name;
         }
     }
 }

@@ -2,7 +2,7 @@
 ${
     ~acc = []
     fn helper() {
-        lift "from-fn"
+        lift "from-fn";
     }
     helper()
 }

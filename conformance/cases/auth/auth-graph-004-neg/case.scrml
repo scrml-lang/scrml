@@ -2,7 +2,7 @@
 
 type UserRole:enum = { Anonymous, Driver, Admin }
 
-server function checkAdmin() { lift true }
+server function checkAdmin() { lift true; }
 
 <auth check="checkAdmin">
   <section class="p-4">

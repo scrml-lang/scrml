@@ -14,13 +14,13 @@ ${
             }
             let helper = function(v) {
                 if (v > 0) {
-                    return "pos"
+                    return "pos";
                 }
-                return "neg"
-            }
-            @trace = @trace + helper(1) + ";"
+                return "neg";
+            };
+            @trace = @trace + helper(1) + ";";
         }
-        @trace = @trace + "body;"
+        @trace = @trace + "body;";
     }
 }
 <program>
