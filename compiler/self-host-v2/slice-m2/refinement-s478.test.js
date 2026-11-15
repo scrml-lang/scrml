@@ -101,3 +101,53 @@ describe("validator words after a struct field's type (§53.6.1, §55.1)", () =>
     expect(errs(prog("role: Role oneOf([.Admin]) req"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
+
+// S239 review of #1888 — fix round 1.
+describe("S239 review of #1888 (fix round 1)", () => {
+  const prog = (body) => `\${\n${body}\n}\n<program><p>x</p></program>\n`;
+  test("HIGH-1: `.length` counts code points (Appendix D.1; S469 \"code points everywhere\")", () => {
+    expect(errs(fnBody('        const q: string(.length == 1) = "😀";'))).toEqual([]);
+    expect(errs(fnBody('        const q: string(.length == 2) = "😀";'))).toEqual(["E-CONTRACT-001"]);
+    expect(errs(cell('<x:string(.length <= 3)="😀😀😀"/>'))).toEqual([]);
+    expect(errs(cell('<x:string(.length == 4)="a😀b😀"/>'))).toEqual([]);
+  });
+  test("MED-1: a validator word followed by `:` starts the next field (newline and one-line forms)", () => {
+    expect(errs(prog("    type P:struct = {\n        a: int\n        min: int\n    }"))).toEqual([]);
+    expect(errs(prog("    type P:struct = {\n        a: int\n        req: bool\n    }"))).toEqual([]);
+    expect(errs(prog("    type P:struct = {\n        a: string\n        pattern: string\n    }"))).toEqual([]);
+    expect(errs(prog("    type P:struct = { a: int max: int }"))).toEqual([]);
+    expect(errs(prog("    type P:struct = { a: int, max: int }"))).toEqual([]);
+    // the field is a field: it is read back by name
+    expect(errs(prog("    type P:struct = {\n        a: int\n        min: int\n    }\n    fn g(p: P) -> int {\n        return p.min;\n    }"))).toEqual([]);
+    // a validator word with no `:` after it is still a validator
+    expect(errs(prog("    type Role:enum = { Admin, Editor }\n    type P:struct = {\n        role: Role req\n        n: int\n    }"))).toEqual([]);
+  });
+  test("MED-2: a number token that is not a number is E-CONTRACT-002 (§53.11), never NaN", () => {
+    expect(errs(cell("<x:number(!(>1.2.3))=5/>"))).toEqual(["E-CONTRACT-002"]);
+    expect(errs(cell("<x:number(>1.2.3)=5/>"))).toEqual(["E-CONTRACT-002"]);
+    expect(errs(cell("<x:number(!=1..2)=5/>"))).toEqual(["E-CONTRACT-002"]);
+    expect(errs(cell('<x:string(.length != 1.2.3)="a"/>'))).toEqual(["E-CONTRACT-002"]);
+  });
+  test("LOW-1: a constraint label `[name]` (§53.2.3) is refused by name, not read as tape grants (INTERIM)", () => {
+    const one = (src) => {
+      const ds = run(src).filter((d) => d.code.startsWith("E-"));
+      expect([...new Set(ds.map((d) => d.code))]).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(ds[0].message).toContain("constraint label `[valid]`");
+    };
+    one(fnBody("        const q: number(>0)[valid] = 5;"));
+    one(cell("<x:number(>0)[valid]=5/>"));
+    // a grant word in the brackets is a tape's grant, not a label
+    const tape = run(fnBody("        const q: number(>0)[replace] = [];")).filter((d) => d.code.startsWith("E-"));
+    expect(tape.length).toBeGreaterThan(0);
+    expect(tape.every((d) => !d.message.includes("constraint label"))).toBe(true);
+  });
+  test("LOW-2: a bare name as an operand is E-CONTRACT-003 (§53.2.1 \"No external identifiers MAY appear\")", () => {
+    expect(errs(cell("<x:number(<=max)=1/>"))).toEqual(["E-CONTRACT-003"]);
+    expect(errs(cell('<x:string(.length <= max)="a"/>'))).toEqual(["E-CONTRACT-003"]);
+  });
+  test("LOW-3: `req` written twice on a struct field is refused by name", () => {
+    const ds = run(prog("    type Role:enum = { Admin, Editor }\n    type P:struct = { role: Role req req }")).filter((d) => d.code.startsWith("E-"));
+    expect([...new Set(ds.map((d) => d.code))]).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(ds[0].message).toContain("`req` is written twice");
+  });
+});

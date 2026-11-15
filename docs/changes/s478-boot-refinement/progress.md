@@ -35,3 +35,14 @@ Branch `s478-boot-refinement` (from main 6ea07d203). Bootstrap only (`compiler/s
 - corpus (4035 inputs: samples, examples, conformance cases + twins, bootstrap acceptance):
   0 newly-rejecting, 10 newly-accepting (the edited match cases), 148 already-rejecting inputs
   changed error set (parse cascades replaced by E-CONTRACT-* / named refusals).
+
+## Fix round 1 (S239 review of #1888, verdict FIX)
+- merged origin/main 6ea07d203+ (severity.scrml regenerated); main's new `aliasCycles` match gained a `.TRefine` arm (the bundle did not compile without it).
+- HIGH-1: `refLenLit` counts CODE POINTS (`codePointCount`; Appendix D.1, S469). `string(.length == 1) = "😀"` clean, `== 2` E-CONTRACT-001.
+- MED-1: `parseTypeFields` — a validator word followed by `:` is the next field's name (`{ a: int\n min: int }`, `{ a: int max: int }`).
+- MED-2: a number token that is NaN (`1.2.3`, `1..2`) is E-CONTRACT-002 (`refBadNum`; §53.11).
+- LOW-1: a constraint label `base(pred)[name]` (no grant word) is refused by name (INTERIM, g-boot-refinement-label-s478), in a code type and an opener.
+- LOW-2: a bare name as an operand (`<=max`, `.length <= max`, `lo < value < max`) is E-CONTRACT-003 (§53.2.1); the "undecided" owner question is dropped.
+- LOW-3: `req` written twice on a struct field is refused by name (`fieldValsWhy`).
+- LOW-4 filed: g-boot-opener-quoted-value-escapes-dropped-s478 (on base, out of lane).
+- tests: slice-m2/refinement-s478.test.js "S239 review of #1888 (fix round 1)".

@@ -5513,21 +5513,43 @@ ${
         return "EXT:" + name
     }
 
+    // s478 (S239 review of #1888, LOW-2) — a bare name as an operand (`<=max`):
+    // §53.2.1 "No external identifiers MAY appear — if they do, the compiler SHALL
+    // emit `E-CONTRACT-003`"; §53.3.1 the predicate "SHALL NOT access … Any function
+    // parameter or outer binding".
+    fn refIdentMsg(name: string) -> string {
+        return "IDENT:" + name
+    }
+
+    // s478 (S239 review of #1888, MED-2) — a number token (`[0-9.]` run) that is
+    // not a number (`1.2.3`, `1..2`) is malformed: §53.11 "A malformed predicate
+    // SHALL NOT be treated as an unrefined annotation" (E-CONTRACT-002), never NaN.
+    fn refBadNum(v: string) -> boolean {
+        return Number.isNaN(Number(v))
+    }
+
+    fn refBadNumMsg(v: string) -> string {
+        return "`" + v + "` is not a numeric literal"
+    }
+
     fn refSimple(ts: RefTok[], i: int) -> RRef {
         const t: RefTok = refAt(ts, i)
         if (t.k == "ext") return refErr(i, "E-CONTRACT-003", refExtMsg(t.v))
         if (t.k == "op") {
             const n: RefTok = refAt(ts, i + 1)
+            if (n.k == "num" && refBadNum(n.v)) return refErr(i + 1, "E-CONTRACT-002", refBadNumMsg(n.v))
             if (n.k == "num") return refOk(RefPred.PCmp(t.v, Number(n.v)), i + 2)
             if (n.k == "ext") return refErr(i + 1, "E-CONTRACT-003", refExtMsg(n.v))
-            if (n.k == "ident") return refErr(i + 1, "E-BOOTSTRAP-UNSUPPORTED", "the name `" + n.v + "` as a comparison operand (§53.3.1: an inline predicate references only the incoming value — whether this name is an outer binding the bootstrap does not decide)")
+            if (n.k == "ident") return refErr(i + 1, "E-CONTRACT-003", refIdentMsg(n.v))
             return refErr(i + 1, "E-CONTRACT-002", "expected a number after `" + t.v + "`")
         }
         if (t.k == "prop") {
             const o: RefTok = refAt(ts, i + 1)
             const n2: RefTok = refAt(ts, i + 2)
+            if (o.k == "op" && n2.k == "num" && refBadNum(n2.v)) return refErr(i + 2, "E-CONTRACT-002", refBadNumMsg(n2.v))
             if (o.k == "op" && n2.k == "num" && t.v == "length") return refOk(RefPred.PLen(o.v, Number(n2.v)), i + 3)
             if (o.k == "op" && n2.k == "ext") return refErr(i + 2, "E-CONTRACT-003", refExtMsg(n2.v))
+            if (o.k == "op" && n2.k == "ident") return refErr(i + 2, "E-CONTRACT-003", refIdentMsg(n2.v))
             if (o.k == "op" && (n2.k == "num" || n2.k == "str")) return refErr(i, "E-BOOTSTRAP-UNSUPPORTED", "the property comparison `." + t.v + " " + o.v + " " + n2.v + "` (the bootstrap judges `.length` against a number)")
             return refErr(i + 1, "E-CONTRACT-002", "expected a comparison after `." + t.v + "`")
         }
@@ -5538,10 +5560,13 @@ ${
             return refOk(RefPred.PShape(t.v), i + 1)
         }
         if (t.k == "num") {
+            if (refBadNum(t.v)) return refErr(i, "E-CONTRACT-002", refBadNumMsg(t.v))
             const o1: RefTok = refAt(ts, i + 1)
             const vv: RefTok = refAt(ts, i + 2)
             const o2: RefTok = refAt(ts, i + 3)
             const hi: RefTok = refAt(ts, i + 4)
+            if (o1.k == "op" && vv.k == "ident" && vv.v == "value" && o2.k == "op" && hi.k == "num" && refBadNum(hi.v)) return refErr(i + 4, "E-CONTRACT-002", refBadNumMsg(hi.v))
+            if (o1.k == "op" && vv.k == "ident" && vv.v == "value" && o2.k == "op" && hi.k == "ident") return refErr(i + 4, "E-CONTRACT-003", refIdentMsg(hi.v))
             if (o1.k == "op" && vv.k == "ident" && vv.v == "value" && o2.k == "op" && hi.k == "num") {
                 return refOk(RefPred.PAnd(RefPred.PCmp(refFlip(o1.v), Number(t.v)), RefPred.PCmp(o2.v, Number(hi.v))), i + 5)
             }
@@ -5573,6 +5598,10 @@ ${
         const ts: RefTok[] = refToks(pred)
         let r: RRef = refOr(ts, 0)
         if (r.code == "" && r.i < ts.length) r = refErr(r.i, "E-CONTRACT-002", "text is left over after the predicate, at `" + refAt(ts, r.i).v + "`")
+        if (r.code == "E-CONTRACT-003" && r.msg.substring(0, 6) == "IDENT:") {
+            const nm2: string = r.msg.substring(6)
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`), or for a constraint on external state use a `<machine>` guard" }
+        }
         if (r.code == "E-CONTRACT-003") {
             const nm: string = r.msg.substring(4)
             return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). For a constraint on external state use a `<machine>` guard: `<machine name=Range for=" + base + "> { * => * given (value <= @" + nm + ") }`" }
@@ -5639,8 +5668,28 @@ ${
 
     fn refLenLit(op: string, k: number, v: RefLit) -> int {
         if (!v.isStr) return -1
-        if (refCmp(op, v.s.length, k)) return 1
+        if (refCmp(op, codePointCount(v.s), k)) return 1
         return 0
+    }
+
+    // s478 (S239 review of #1888, HIGH-1) — a string's `.length` in CODE POINTS:
+    // Appendix D.1 "A string's `.length` SHALL be its number of code points"; S469
+    // (bryan) "code points everywhere". The host string is UTF-16, so a surrogate
+    // pair (a high unit 0xD800-0xDBFF followed by a low unit 0xDC00-0xDFFF) is ONE
+    // code point; a lone surrogate is one too (it is one code point, U+D800-U+DFFF).
+    fn codePointCount(s: string) -> int {
+        let n: int = 0
+        let i: int = 0
+        while (i < s.length) {
+            const u: int = s.charCodeAt(i)
+            if (u >= 55296 && u <= 56319 && i + 1 < s.length) {
+                const w: int = s.charCodeAt(i + 1)
+                if (w >= 56320 && w <= 57343) i = i + 1
+            }
+            n = n + 1
+            i = i + 1
+        }
+        return n
     }
 
     fn refAnd3(a: int, b: int) -> int {
@@ -5931,6 +5980,18 @@ ${
             t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
             p = ""
         }
+        // S239 review of #1888 (LOW-1) — a constraint label `base(pred)[name]`
+        // (§53.2.3, `named-constraint = inline-predicate "[" identifier "]"`): one
+        // name in brackets that is no grant word (a grant word reads `T[g]`, a tape,
+        // §66.12.2). Refused by name — INTERIM, g-boot-refinement-label-s478.
+        if (isP(t, "[") && peekAt(t, 1).cls == TC.Ident && !isGrantText(peekAt(t, 1).v) && tk(peekAt(t, 2), "]")) {
+            const lb: PTok = peekAt(t, 1)
+            const rb: PTok = peekAt(t, 2)
+            const d3: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", refLabelMsg(shown, lb.v), t.file, mkSpan(start, rb.end))
+            t = adv(adv(adv(t)))
+            if (p != "") t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d3]), file: t.file, ns: t.ns }
+            return mkT(t, start, ATypeK.TRefine(base, ""))
+        }
         // a tail: a name on the `)`'s line that is no validator word and no keyword
         const tail: PTok = cur(t)
         if (tail.cls == TC.Ident && tail.line == close.line && !isValidatorWord(tail.v)) {
@@ -5947,6 +6008,27 @@ ${
             p = ""
         }
         return mkT(t, start, ATypeK.TRefine(base, p))
+    }
+
+    // The §66.12.2 grant words (analyze grantAxis, the retired and renamed
+    // spellings included): `T[g]` with one of these is a tape, not a label.
+    fn isGrantText(w: string) -> boolean {
+        return w == "free" || w == "write" || w == "replace" || w == "append" || w == "pop" || w == "prepend" ||
+               w == "shift" || w == "insert" || w == "remove" || w == "end" || w == "front" || w == "anywhere" || w == "writable"
+    }
+
+    fn isLabelText(w: string) -> boolean {
+        if (w == "" || !isIdentStartCh(w.charAt(0))) return false
+        let i: int = 1
+        while (i < w.length) {
+            if (!isIdentCh(w.charAt(i))) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn refLabelMsg(shown: string, label: string) -> string {
+        return "the constraint label `[" + label + "]` on `" + shown + "` (§53.2.3: \"The name is used in error messages only … If the constraint is violated, the error message SHALL include the label name\") — the bootstrap does not carry a label into its messages yet, so it is refused rather than dropped (INTERIM, g-boot-refinement-label-s478)"
     }
 
     // A refinement anywhere in `ty` (a code type parsed at `start`) that its
@@ -6743,9 +6825,12 @@ ${
                 t = ty.tp
                 // s478 — validator words after the type (`name: string req`, `role: Role
                 // oneOf([.A, .B]) req` — §53.6.1, §41.15.6): read whole (a word, and its
-                // `(…)` arguments), judged by analyze (fieldDefsOf)
+                // `(…)` arguments), judged by analyze (fieldDefsOf).
+                // S239 review of #1888 (MED-1): a validator word FOLLOWED BY `:` is
+                // the next field's NAME (`{ a: int\n min: int }`, `{ a: int max: int }`
+                // — §14.3.2 lets a newline separate fields), never a validator.
                 let vals: string[] = []
-                while ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && isValidatorWord(cur(t).v)) {
+                while ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && isValidatorWord(cur(t).v) && !tk(peekAt(t, 1), ":")) {
                     vals = vals.concat([cur(t).v])
                     t = adv(t)
                     if (isP(t, "(")) t = skipParens(t)
@@ -7895,6 +7980,7 @@ ${
         // … MAY stand bare … A `>` or `/` inside the type's OWN parentheses … does not
         // end the opener" — the predicate runs to the MATCHING `)`.
         if (refinableBase(nm.w) && chAt(m, 0) == "(") {
+            const baseTy: AType = ty
             const rclose: int = lifeCloseCh(mp.src, m.pos)
             if (rclose < 0) {
                 m = mDiag(m, "E-CONTRACT-002", "the inline predicate after `" + nm.w + "` is malformed (an unclosed `(`), so it cannot be enforced (§53.11)", m.pos, m.pos + 1)
@@ -7910,6 +7996,16 @@ ${
                     p = ""
                 }
                 ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TRefine(ty, p) }
+                // S239 review of #1888 (LOW-1) — a constraint label `[name]` (§53.2.3)
+                if (chAt(m, 0) == "[") {
+                    const lclose: int = mp.src.indexOf("]", m.pos)
+                    const lw: string = mp.src.substring(m.pos + 1, lclose)
+                    if (lclose > m.pos && isLabelText(lw) && !isGrantText(lw)) {
+                        m = mAt(m, lclose + 1)
+                        if (p != "") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", refLabelMsg(nm.w + "(" + pred + ")", lw), start, m.pos)
+                        ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TRefine(baseTy, "") }
+                    }
+                }
             }
             m = mBump(m)
         }

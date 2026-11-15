@@ -1031,6 +1031,7 @@ ${
             .TSeq(elem: e) :> aliasCycles(te, s, e, seen)
             .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
             .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
+            .TRefine(base: b, pred: p) :> aliasCycles(te, s, b, seen)
         }
     }
 
@@ -2139,6 +2140,14 @@ ${
     // g-boot-refinement-runtime-checks-s478); an enum subset (`oneOf([.A, .B])`,
     // §53.15) also narrows match exhaustiveness (§18.8.1), not built either.
     fn fieldValsWhy(name: string, vals: string[], t: Type) -> string {
+        // S239 review of #1888 (LOW-3): `req` written twice (`role: Role req req`)
+        // says nothing twice — refused by name, as on a cell opener (repeatedWordDiags;
+        // every other validator word is refused below whatever its count)
+        let seen: string[] = []
+        for (const w of vals) {
+            if (w == "req" && seen.indexOf(w) >= 0) return "`" + w + "` is written twice on the field `" + name + "` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no code for a repeated validator word, so it is refused: write it once"
+            seen = seen.concat([w])
+        }
         for (const v of vals) {
             if (v != "req" || !reqHoldsFor(t)) {
                 let what: string = "the validator `" + v + "` on the field `" + name + "`"
