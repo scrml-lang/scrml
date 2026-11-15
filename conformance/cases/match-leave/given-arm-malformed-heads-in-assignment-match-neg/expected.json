@@ -3,7 +3,7 @@
   "description": "Malformed `given` heads in `@v = match …` arms — a property path, a call, a comparison, a parenthesized name, a rebind — are refused (E-SYNTAX-044 ×4, E-SYNTAX-045), as they are in a statement match (S462 review M1).",
   "language-version": "1.0",
   "spec": "§42.2.3",
-  "rationale": "§42.2.3: \"A `given` head SHALL contain only an identifier-list\"; the same head check now reads expression-position match arms.",
+  "rationale": "§42.2.3: \"A `given` head SHALL contain only an identifier-list\"; the same head check now reads expression-position match arms. S478 (boot-false-positives): `obj` is now a typed local (`type O:struct = { f: number }`, `let obj: O = { f: 1 }`) — the case is about the `given obj.f` head, not about `obj`'s type. The untyped `let obj = { f: 1 }` it had is legal (§7.5.2: \"Where inference is defeated, the resolved type SHALL be `unknown`\" — impl#1 emits W-TYPE-031-UNPROVEN), but the bootstrap has no `unknown` and reported E-TYPE-STRUCT-CONTEXT, an error unrelated to the rule under test (filed g-boot-untyped-local-object-literal-s478).",
   "expect": {
     "codes": [
       "E-SYNTAX-044",

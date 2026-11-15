@@ -1,10 +1,11 @@
 ${
     type K:enum = { A, B }
+    type O:struct = { f: number }
     <v> : number = 0
     function f(x: number) -> number { return x; }
     function go() {
         let n: number | not = 5;
-        let obj = { f: 1 };
+        let obj: O = { f: 1 };
         let c = 1;
         @v = match K.A {
             given obj.f :> 1,
