@@ -623,7 +623,7 @@ ${
             .Slot :> []
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
-            .Run(body: x) :> []
+            .Run(hoist: hs) :> hs                           // s478-boot-run-locals: its top-level locals (declared by runJs)
             .Request(handle: h) :> optSym(h)                // s475 r1: the request's handle (bound by requestJs)
             .ResetOn(triggers: ds) :> []
             .Errors(of: x) :> []
