@@ -1937,11 +1937,14 @@ export function generateLibraryJs(
           blockText = blockText.replace(/const\s*\{[^}]+\}\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
           blockText = blockText.replace(/const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+import\s*\(\s*["'][^"']+["']\s*\)\s*;?/g, "");
           blockText = blockText.trim();
-          // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
-          // Apply per-line, skipping comment lines to avoid mangling English text
-          blockText = blockText.split("\n").map(line =>
-            line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
-          ).join("\n");
+          // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents.
+          // S478 (review F1) — over the WHOLE text, not per line, like rewriteVariantTagReads
+          // below. Both passes fence strings, template text, regex bodies and comments
+          // themselves (rewriteCodeSegments / replaceInCode), so a comment's English is never
+          // touched; read one line at a time, the line that CLOSES a multi-line template literal
+          // or block comment had its closer read as an opener, and the rest of that line was
+          // left unlowered (`is .V` / `is not` / `is some` reached the output raw).
+          blockText = rewriteIsOperator(rewriteNotKeyword(blockText));
           // S470 (review F5) — over the WHOLE text, not per line: a multi-line template
           // literal's content is masked as a literal only when the reader sees its backticks.
           blockText = rewriteVariantTagReads(blockText);
@@ -2147,11 +2150,10 @@ export function generateLibraryJs(
         // Must handle nested braces: ^{ JSON.stringify({ a, b }) } → JSON.stringify({ a, b })
         text = stripInlineMeta(text);
 
-        // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents
-        // Apply per-line, skipping comment lines to avoid mangling English text
-        text = text.split("\n").map(line =>
-          line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
-        ).join("\n");
+        // Rewrite scrml `not`/`is not`/`is some`/`is .Variant` keywords to JS equivalents.
+        // S478 (review F1) — whole text, not per line (see the verbatim-block path above):
+        // the passes fence comments and literals themselves.
+        text = rewriteIsOperator(rewriteNotKeyword(text));
         // S470 (review F5) — whole text (a multi-line template literal stays a literal).
         text = rewriteVariantTagReads(text);
 

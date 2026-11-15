@@ -256,3 +256,103 @@ describe("end to end — match-arm strings compile verbatim (the reported shapes
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// S478 fix round 1 — review F1: the library emitter ran `rewriteIsOperator(rewriteNotKeyword(line))`
+// one LINE at a time. On the line that CLOSES a multi-line template literal or block comment the
+// fence read the closer as an opener, and the rest of that line was left unlowered. The passes
+// now get the whole block; these pin the fence's whole-text reading and the library outcome.
+// ---------------------------------------------------------------------------
+describe("S478 F1 — a multi-line literal / comment closer does not swallow the rest of the line", () => {
+  test("whole text: `is null` after a multi-line template's closer is lowered", () => {
+    expect(rewriteIsOperator("const t = `head\n  tail` ; const ok = h is null")).toBe(
+      "const t = `head\n  tail` ; const ok = h === null",
+    );
+  });
+
+  test("whole text: `is .V` after a multi-line block comment's closer is lowered, comment kept", () => {
+    const out = rewriteIsOperator("/* a\n  b */ const ok = h is .A");
+    expect(out.startsWith("/* a\n  b */ const ok = ")).toBe(true);
+    expect(out).not.toMatch(/\bis\s+\./);
+    expect(out).toContain('=== "A"');
+  });
+
+  test("comments away from the lowered `is .V` survive (only the operand read blanks them)", () => {
+    const src = "// note: u is .A here\nconst m = u is .A // trailing\n/* blk\n is .A */";
+    const out = rewriteIsOperator(src);
+    expect(out.startsWith("// note: u is .A here\nconst m = ")).toBe(true);
+    expect(out.endsWith(" // trailing\n/* blk\n is .A */")).toBe(true);
+    expect(out).toContain('=== "A"');
+  });
+
+  test("a comment between the operand and `is` is still whitespace (review F7 kept)", () => {
+    const out = rewriteIsOperator("const ok = x /* c */ is .A");
+    expect(out).toContain("(x)");
+    expect(out).not.toContain("/* c */");
+  });
+
+  function lib(body, name) {
+    const root = mkdtempSync(join(tmpdir(), "s478-f1-"));
+    try {
+      const file = join(root, `${name}.scrml`);
+      writeFileSync(file, `\${\n${body}\n}\n`);
+      const outDir = join(root, "out");
+      const r = compileScrml({ inputFiles: [file], outputDir: outDir, mode: "library", write: true, log: () => {} });
+      const errors = (r.errors ?? []).filter((e) => e && e.severity !== "warning" && !/^[WI]-/.test(e.code ?? ""));
+      let js = "";
+      try {
+        const art = readdirSync(outDir).find((f) => f.endsWith(".js"));
+        if (art) js = readFileSync(join(outDir, art), "utf8");
+      } catch { /* no artifact */ }
+      return { errors: errors.map((e) => e.code), js };
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  /** Evaluate a library artifact's top-level body (imports stripped, `export` dropped). */
+  function run(js, names) {
+    const body = js.split("\n").filter((l) => !l.startsWith("import ")).join("\n").replace(/\bexport\s+(?=const\b|let\b|function\b)/g, "");
+    return new Function("_scrml_g", `${body}\nreturn { ${names.join(", ")} };`)(globalThis);
+  }
+
+  test("library: `is .V` on a multi-line template's closing line compiles and runs", () => {
+    const { errors, js } = lib("type:enum H { A B }\nexport const msg = `hello\nworld` + (H.A is .A ? \"y\" : \"n\")", "tplv");
+    expect(errors).toEqual([]);
+    expect(run(js, ["msg"]).msg).toBe("hello\nworldy");
+  });
+
+  test("library: `is not` on a multi-line template's closing line (rewriteNotKeyword)", () => {
+    const { errors, js } = lib("const u = not\nexport const m = `a\nb` + (u is not ? \"y\" : \"n\")", "tplnot");
+    expect(errors).toEqual([]);
+    expect(run(js, ["m"]).m).toBe("a\nby");
+  });
+
+  test("library: `is some` on a multi-line template's closing line", () => {
+    const { errors, js } = lib("const u = 1\nexport const m = `a\nb` + (u is some ? \"y\" : \"n\")", "tplsome");
+    expect(errors).toEqual([]);
+    expect(run(js, ["m"]).m).toBe("a\nby");
+  });
+
+  test("library: `is not` / `is .V` on a multi-line block comment's closing line", () => {
+    const a = lib("const u = not\n/* a\n  b */ export const m = u is not", "cmtnot");
+    expect(a.errors).toEqual([]);
+    expect(run(a.js, ["m"]).m).toBe(true);
+    const b = lib("type:enum H { A B }\nconst u = H.B\n/* a\n  b */ export const m = u is .A", "cmtv");
+    expect(b.errors).toEqual([]);
+    expect(b.js).toContain("/* a\n  b */");
+    expect(run(b.js, ["m"]).m).toBe(false);
+  });
+
+  test("library: comment text is never rewritten, and survives a block that lowers `is .V`", () => {
+    const { errors, js } = lib(
+      "type:enum H { A B }\nconst u = H.A\n// note: u is .A not here\nexport const m = u is .A // trailing note\n/* block\n   is .A */\nexport const k = 1",
+      "docs",
+    );
+    expect(errors).toEqual([]);
+    expect(js).toContain("// note: u is .A not here");
+    expect(js).toContain("// trailing note");
+    expect(js).toContain("/* block\n   is .A */");
+    expect(run(js, ["m", "k"])).toEqual({ m: true, k: 1 });
+  });
+});

@@ -1290,12 +1290,20 @@ export function rewriteIsOperator(expr: string): string {
  */
 function rewriteIsVariantWithOperand(expr: string): string {
   if (!/\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*[A-Z]/.test(expr)) return expr;
-  // Review F7 — a comment is whitespace: blanked first, so `x /* c */ is .V` reads its
-  // operand instead of falling to the bare `=== "V"` regexes below.
-  let out = blankComments(expr);
+  // Review F7 — a comment is whitespace: read on a comment-BLANKED copy, so `x /* c */ is .V`
+  // reads its operand instead of falling to the bare `=== "V"` regexes below.
+  // S478 (review F1) — only the READ is blanked: `blankComments` keeps every offset, so the
+  // operand is taken from the blanked copy (a comment inside it is whitespace, as before) and
+  // the splice is made into the ORIGINAL text. A comment anywhere else survives — the library
+  // emitter now hands this pass a whole block, whose doc comments must reach the output.
+  // The two are kept in step: each splice writes the same `text` (comment-free — it is built
+  // from the blanked operand) into both.
+  let out = expr;
+  let read = blankComments(expr);
+  if (read.length !== out.length) return expr;
   let cursor = 0;
   for (let guard = 0; guard < 1000; guard++) {
-    const masked = maskNonCode(out);
+    const masked = maskNonCode(read);
     if (masked === null) return out;
     const re = /\bis\s+(?:[A-Z][A-Za-z0-9_]*\s*)?\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()/g;
     re.lastIndex = cursor;
@@ -1316,11 +1324,12 @@ function rewriteIsVariantWithOperand(expr: string): string {
         while (w >= 0 && /[A-Za-z0-9_$]/.test(masked[w])) w--;
         if (b >= 0 && masked.slice(w + 1, b + 1) === "new") opStart = w + 1;
       }
-      const operand = out.slice(opStart, end + 1).trim();
+      const operand = read.slice(opStart, end + 1).trim();
       // A keyword is not an operand (`return is .V` is not this construct).
       if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(operand) && PAREN_PRECEDING_KEYWORDS.has(operand)) continue;
       const text = lowerVariantCheck(operand, JSON.stringify(m[1]));
       out = out.slice(0, opStart) + text + out.slice(m.index + m[0].length);
+      read = read.slice(0, opStart) + text + read.slice(m.index + m[0].length);
       cursor = opStart + text.length;
       changed = true;
       break;
