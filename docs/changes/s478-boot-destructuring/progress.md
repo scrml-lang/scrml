@@ -25,12 +25,12 @@ annotation on the pattern, `lin` source (inherit-`lin` unruled), `key` clause on
 binder, file-scope / body-top position. Body redeclaring a destructured binder name is E-SCOPE-REDECLARE.
 
 ## Measurements
-- Tests: slice-m4/destructuring-s478.test.js — 26 pass on head, 25/25 (then-existing) red on base.
-- Conformance: PASS 498 → 498, FAIL 36 → 35 (server-db/async-fn-escapes-handler-destructured-scheduler-neg
+- Tests: slice-m4/destructuring-s478.test.js — 26 pass on head, 25/25 (then-existing) red on base; loops-s469.test.js line pinning the old object-binder refusal now pins the tape-binder refusal.
+- Conformance (after merging origin/main 56b90aafd): PASS 518 → 518, FAIL 14 → 13 (server-db/async-fn-escapes-handler-destructured-scheduler-neg
   FAIL → UNSUPPORTED: now stops at its lambda), no PASS→FAIL, no UNSUPPORTED→PASS.
 - Corpus (samples, examples, conformance, acceptance, stdlib, benchmarks; 3211 files, base vs head
   bootstrap, per file): newly-rejecting 0, newly-accepting 0.
 - stdlib/data/transform.scrml first error: now the tape-pattern refusal at `for (const [key, value] of Object.entries(obj))`.
 
 ## Status
-- [x] code + tests  - [x] severity regen  - [x] known-gaps markers  - [ ] hook / CI gates  - [ ] PR
+- [x] code + tests  - [x] severity regen  - [x] known-gaps markers  - [x] hook (55290 pass) + CI checks gates  - [ ] PR
