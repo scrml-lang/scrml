@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§17.1.1",
   "source-test": "compiler/src/ast-builder.js",
-  "rationale": "§17.1.1: `else-if=` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. Here the `else-if=` directly follows the chain-opening `if=` element, satisfying the precondition, so E-CTRL-002 SHALL stay silent. Per §17.1.1 the chain opens with `if=`, continues with `else-if=`, and terminates with `else`.",
+  "rationale": "§17.1.1: `else-if=` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. Here the `else-if=` directly follows the chain-opening `if=` element, satisfying the precondition, so E-CTRL-002 SHALL stay silent. Per §17.1.1 the chain opens with `if=`, continues with `else-if=`, and terminates with `else`. S478 (bootstrap triage C7 / F2): migrated to a twinnable declaration. The legacy inline-typed state-object opener `<wizard { … }` only declared the cell(s) the chain reads; it is now the legacy declaration `<step>: int = 1`, which the `scrml fix` §66 rules twin to a §66 declaration (§66.21 row 1). (A direct §66 `let <x:T=v/>` here makes impl#1's ESM client emit throw — \"The keyword 'let' is reserved\" — so the twinnable legacy declaration keeps both implementations graded.) The if= / else-if= / else chain under test is unchanged.",
   "expect": {
     "codes": [],
     "notCodes": ["E-CTRL-002", "E-CTRL-001", "E-CTRL-003"]

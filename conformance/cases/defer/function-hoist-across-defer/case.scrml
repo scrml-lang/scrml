@@ -2,21 +2,21 @@ ${
     <trace> = ""
 
     function add(s: string) {
-        @trace = @trace + s + ";"
+        @trace = @trace + s + ";";
     }
 
     function f() {
-        add(helper())
-        defer add("D1")
-        add("body")
-        defer add("D2")
+        add(helper());
+        defer add("D1");
+        add("body");
+        defer add("D2");
         function helper() {
-            return "H"
+            return "H";
         }
     }
 
     function go() {
-        f()
+        f();
     }
 }
 <program>

@@ -1,6 +1,7 @@
 // §42.4 statement 10 (S460 "a on F2, go") — an operand of `!` / `&&` in a condition whose type is unresolved.
 <program>
-    function g() { }
+    // `g` returns an `asIs` value (§42.4 statement 5): its return type is neither declared nor inferred.
+    function g() { const v: asIs = true; return v; }
     function pick(ready: bool) -> int {
         if (!g()) { return 1; }
         if (ready && g()) { return 2; }

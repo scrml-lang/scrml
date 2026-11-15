@@ -3,7 +3,7 @@
   "description": "§19.5 `?` SUCCESS unwrap (RT): inner('ok') returns the id (no fail); outer's `inner(id)?` unwraps the success value and binds it to `v`; outer returns it; the `!{}` handler's arms never fire and `r` = 'ok'; the handler lifts @phase = Phase.Ok('ok'). Proves `?` unwraps the success case (not just the error case).",
   "language-version": "1.0",
   "spec": "§19.5.2",
-  "rationale": "§19.5.2 step 1: on a success value, `?` unwraps it and produces the success value. So outer('ok') -> 'ok' through the `?` frame, r = 'ok', @phase lands Phase.Ok('ok'). E-ERROR-* silent (`?` in a `!` fn is legal; handled call).",
+  "rationale": "§19.5.2 step 1: on a success value, `?` unwraps it and produces the success value. So outer('ok') -> 'ok' through the `?` frame, r = 'ok', @phase lands Phase.Ok('ok'). E-ERROR-* silent (`?` in a `!` fn is legal; handled call). S478 (bootstrap triage C12): `Phase` has payload variants, and §14.13.2 refuses one in a text sink — \"**Refused:** a struct, a tape, a tuple, a map or set, a payload enum value, … In markup text, a quoted attribute or a logic template this SHALL be compile error **`E-TEXT-NON-PRIMITIVE`**\". `#out` now renders `label(@phase)`, a `string`; the state assertion is unchanged. The `return }` arm bodies take their `;` (§7.2.2 rules 1 and 8, `return;` returns nothing).",
   "expect": {
     "codes": [],
     "notCodes": [],

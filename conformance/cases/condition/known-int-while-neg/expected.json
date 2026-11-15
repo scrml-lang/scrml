@@ -1,9 +1,9 @@
 {
   "id": "condition-known-int-while-neg",
-  "description": "§49.2.3: `while (k)` on an `int` is E-COND-NOT-BOOLEAN.",
+  "description": "§49.2.3: `for (k)` on an `int` is E-COND-NOT-BOOLEAN. XFAIL on impl#1 for two reasons, both pinned by its signature: it does not build `for (cond)` and refuses it with E-IMPL1-RULED-FORM-UNSUPPORTED (g-impl1-for-cond-unbuilt-s478, the gap named — one gap per implementation), and it has no condition rule, so no E-COND-NOT-BOOLEAN (g-impl1-condition-rule-s460).",
   "language-version": "1.0",
   "spec": "§49.2.3",
-  "rationale": "§49.2.3: \"A bare `bool | not`, any other known type (a number, a string, a sequence …), and a value whose type the compiler cannot resolve are E-COND-NOT-BOOLEAN (§42.4).\" Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "rationale": "§49.2.3: \"A bare `bool | not`, any other known type (a number, a string, a sequence …), and a value whose type the compiler cannot resolve are E-COND-NOT-BOOLEAN (§42.4).\" Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442). S478 (bootstrap triage C12): `while` is retired — §49.4.1: \"A `while` statement SHALL be rejected with **`E-LOOP-WHILE-RETIRED`**, whose fix-it is `for (cond) { … }` (the same head, the keyword renamed)\"; §49.2.3 (S469): the condition rule \"applies to the condition head `for (cond)`\". Migrated to `for (…)`.",
   "expect": {
     "codes": [
       "E-COND-NOT-BOOLEAN"
@@ -14,10 +14,11 @@
   },
   "xfail": {
     "impl1-ts": {
-      "gap": "g-impl1-condition-rule-s460",
+      "gap": "g-impl1-for-cond-unbuilt-s478",
       "fails": {
         "codes": [
           "codeCounts:code 'E-COND-NOT-BOOLEAN' fired 0 time(s), expected exactly 1",
+          "emitted:E-IMPL1-RULED-FORM-UNSUPPORTED=1",
           "missing:E-COND-NOT-BOOLEAN"
         ]
       }

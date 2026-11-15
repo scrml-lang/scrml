@@ -308,7 +308,8 @@ const STATUS = {
   "db-cells/neg-edit-grant": ["PASS", ["E-DB-CELL-EDIT-GRANT"]],
   // s472-boot-db-body-mode (S472 ruling Q3, §4.18.1): a `<db>` body is a code-default ITEM body
   "db-body/fn-and-markup": ["PASS", []],
-  "db-body/neg-statement": ["PASS", ["E-DB-BODY-STATEMENT"]],
+  // s478: its fixture's `function reset()` is also E-RESERVED-IDENTIFIER (§6.8.2) — the case still holds
+  "db-body/neg-statement": ["PASS", ["E-DB-BODY-STATEMENT", "E-RESERVED-IDENTIFIER"]],
   "db-body/neg-prose": ["PASS", ["E-UNQUOTED-DISPLAY-TEXT"]],
   // s471-bootstrap-control-flow-high — §17.1.1 chains and §19.16 `defer` (incl. a loop body, built s471)
   "control-flow/if-chain": ["PASS", []],

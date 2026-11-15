@@ -1,13 +1,25 @@
 {
   "id": "condition-presence-bare-optional-while-pos",
-  "description": "§49.2.3: a `while` condition is a condition (§42.4); `while (a)` on `int | not` is a presence test — admitted.",
+  "description": "§49.2.3: a loop condition is a condition (§42.4); `for (a)` on `int | not` is a presence test — admitted. XFAIL on impl#1: it does not build the condition loop `for (cond)` and refuses it with E-IMPL1-RULED-FORM-UNSUPPORTED (g-impl1-for-cond-unbuilt-s478), so the notCodes pin that refusal as a failure.",
   "language-version": "1.0",
   "spec": "§49.2.3",
-  "rationale": "§49.2.3: a `while` condition \"is a **condition** (§42.4) under the same rule as `if`: a `bool` …, or a bare `T | not` value — a presence test\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "rationale": "§49.2.3: a loop condition (the head of `for (cond)`) \"is a **condition** (§42.4) under the same rule as `if`: a `bool` …, or a bare `T | not` value — a presence test\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442). S478 (bootstrap triage C12): `while` is retired — §49.4.1: \"A `while` statement SHALL be rejected with **`E-LOOP-WHILE-RETIRED`**, whose fix-it is `for (cond) { … }` (the same head, the keyword renamed)\"; §49.2.3 (S469): the condition rule \"applies to the condition head `for (cond)`\". Migrated to `for (…)`.",
   "expect": {
     "codes": [],
     "notCodes": [
-      "E-COND-NOT-BOOLEAN"
+      "E-COND-NOT-BOOLEAN",
+      "E-IMPL1-RULED-FORM-UNSUPPORTED"
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-for-cond-unbuilt-s478",
+      "fails": {
+        "codes": [
+          "emitted:E-IMPL1-RULED-FORM-UNSUPPORTED=1",
+          "forbidden:E-IMPL1-RULED-FORM-UNSUPPORTED"
+        ]
+      }
+    }
   }
 }

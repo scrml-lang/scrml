@@ -342,6 +342,16 @@ describe("helpers", () => {
     expect(legacyMarkers("<p>x</p>")).toEqual(["no-program-root"]);
     expect(legacyMarkers("<program>\n// old form: <n> = 0\n<!-- <engine for=X> -->\n</program>")).toEqual([]);
     expect(legacyMarkers("<program>\n<p>${@a == 1}</p>\n</program>")).toEqual([]);
+    // S478 F2 — the §4.2/§4.3 legacy state-object openers (line-anchored; a `<` comparison is not one)
+    expect(legacyMarkers("<program>\n  < profile else name(string)/>\n</program>")).toEqual(["spaced-state-opener"]);
+    expect(legacyMarkers("<program>\n  <session { loggedIn: bool }\n</program>")).toEqual(["inline-typed-state-opener"]);
+    expect(legacyMarkers("<program>\n${ function f(a: int) -> bool { return a < b; } }\n</program>")).toEqual([]);
+  });
+  test("twinOf: a legacy state-object opener no §66 rule rewrites blocks the twin (NOT-TWINNED, S478 F2)", () => {
+    const tw = twinOf({ source: "<program>\n  < profile name(string)/>\n  <p>x</p>\n</program>\n", auxFiles: {} });
+    expect(tw.candidate).toBe(true);
+    expect(tw.twinned).toBe(false);
+    expect(tw.blockers.some((b) => b.startsWith("case.scrml:2 spaced-state-opener:"))).toBe(true);
   });
   test("codeLiterals reads quoted code literals only", () => {
     expect([...codeLiterals(['diag("E-FOO-1", x) // E-NOT-THIS', "'W-BAR'", '"I-BAZ-QUX"'])].sort()).toEqual(["E-FOO-1", "I-BAZ-QUX"]);

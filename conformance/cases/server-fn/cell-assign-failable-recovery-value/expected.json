@@ -3,7 +3,7 @@
   "description": "§19.4.3 — a VALUE-form recovery arm on a cell-assigned failable SERVER call: `@result = risky(-1) !{ | .Boom(m) :> \"recovered: \" + m }`. The stub answers the Boom envelope; the arm's value lands in @result, and the statement after the handler reads it (`saw recovered: neg`). The server-escalated twin of error/handler-recovery-into-cell (which covers the client-local callee).",
   "language-version": "1.0",
   "spec": "§19.4.3",
-  "rationale": "§19.4.3: a non-escalating arm produces a value that becomes the result of the guarded expression; for `@cell = call() !{…}` that value is written into the cell (never the raw envelope). §13.2: the server call is awaited at its call site, so the recovery happens before the next statement reads @result.",
+  "rationale": "§19.4.3: a non-escalating arm produces a value that becomes the result of the guarded expression; for `@cell = call() !{…}` that value is written into the cell (never the raw envelope). §13.2: the server call is awaited at its call site, so the recovery happens before the next statement reads @result. S478 (bootstrap triage C12): SPEC §19.9.10 (S451/S454): \"A call made on the client whose callee is server-placed is a **failable call** at that site, whether or not the callee is declared `!`. It SHALL be handled exactly as a call to a `!` function (§19.4.3) … An unhandled one SHALL be **E-ERROR-002**\"; its failure set is \"`f`'s declared variants plus ONE wrapper variant `Transport(t: ServerCallError)`; a non-`!` callee fails with `Transport` alone\" (S454 F1). The handler now covers `.Transport`.",
   "expect": {
     "codes": [],
     "notCodes": [],

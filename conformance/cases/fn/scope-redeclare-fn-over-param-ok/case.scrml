@@ -7,17 +7,17 @@ ${
 
     function f(x: int) {
         function x() {
-            return 7
+            return 7;
         }
-        return x()
+        return x();
     }
 
     function g(x: int) {
         defer D("d;");
         function x() {
-            return 8
+            return 8;
         }
-        return x()
+        return x();
     }
 
     function go() {

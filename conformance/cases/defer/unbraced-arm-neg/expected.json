@@ -1,12 +1,12 @@
 {
   "id": "defer-unbraced-arm-neg",
-  "description": "§19.16.2 (S430 round 6) — a `defer` that is the whole UNBRACED body of an `if` (a), an `else` (b) or a loop (l) is E-DEFER-UNSUPPORTED-SITE — three occurrences. For `else` this was load-bearing while the live front-end detached an unbraced `else` arm (g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally, resolved S437), which would have attached the defer to the function block and run it whether or not `c` holds; the rule stands on its own either way.",
+  "description": "§19.16.2 (S430 round 6) — a `defer` that is the whole UNBRACED body of an `if` (a) or an `else` (b) is E-DEFER-UNSUPPORTED-SITE — two occurrences; the loop (l) now has the braced body §49.2.1 requires, a legal defer site. For `else` this was load-bearing while the live front-end detached an unbraced `else` arm (g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally, resolved S437), which would have attached the defer to the function block and run it whether or not `c` holds; the rule stands on its own either way.",
   "language-version": "1.0",
   "spec": "§19.16.2",
   "provenance": "ruling:user-voice-S430-P3",
-  "rationale": "§19.16.2: the unbraced body of an if / else / for / while / do arm is not a stage-1 defer site; it SHALL be a compile error, never silently mis-scoped.",
+  "rationale": "§19.16.2: the unbraced body of an if / else / for / while / do arm is not a stage-1 defer site; it SHALL be a compile error, never silently mis-scoped. S478 (bootstrap triage C12): a loop body is always braced — §49.2.1 (S469): `loop-body ::= '{' loop-statement* '}'` — so `for (…) defer D(…);` is a parse error before it is a defer site, and §49.4.1 retires `while` / `do…while`. The `for` probe is braced (a block-body defer, legal) and the count is 2. §19.16.2's \"UNBRACED body of an `if` / `else` / `for` / `while` / `do` arm\" still lists the loop forms (SPEC text owed).",
   "expect": {
     "codes": ["E-DEFER-UNSUPPORTED-SITE"],
-    "codeCounts": { "E-DEFER-UNSUPPORTED-SITE": 3 }
+    "codeCounts": { "E-DEFER-UNSUPPORTED-SITE": 2 }
   }
 }

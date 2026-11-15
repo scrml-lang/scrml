@@ -1,6 +1,7 @@
 // §42.4 statement 5 (S460) — a call whose return type is neither declared nor inferred, as a bare condition.
 <program>
-    function g() { }
+    // `g` returns an `asIs` value (§42.4 statement 5): its return type is neither declared nor inferred.
+    function g() { const v: asIs = true; return v; }
     function pick() -> int {
         if (g()) { return 1; }
         return 0;

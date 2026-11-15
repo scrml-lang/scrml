@@ -21,6 +21,15 @@ ${
         let v = inner(id)?;
         return v;
     }
+
+    function label(p: Phase) -> string {
+        return match p {
+            .Idle :> "idle",
+            .Missing(id) :> "missing " + id,
+            .TimedOut :> "timed out",
+            .Ok(data) :> "loaded " + data
+        };
+    }
 }
 
 <phase> = Phase.Idle
@@ -28,12 +37,12 @@ ${
 ${
     function handleOk() {
         let r = outer("ok") !{
-            .NotFound(mid) :> { @phase = Phase.Missing(mid); return },
-            .Timeout :> { @phase = Phase.TimedOut; return }
+            .NotFound(mid) :> { @phase = Phase.Missing(mid); return; },
+            .Timeout :> { @phase = Phase.TimedOut; return; }
         };
         @phase = Phase.Ok(r);
     }
 }
 
 <button id="btn-ok" onclick=handleOk()>ok</>
-<div id="out">${@phase}</>
+<div id="out">${label(@phase)}</>

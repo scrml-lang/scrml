@@ -164,10 +164,13 @@ const DOC = `type Phase:enum = { Draft, Live, Gone, Archived }
         <Draft rule=.Live/>
         <Live rule=.Gone/>
         <Gone rule=.Live/>
+        <Archived/>
     </>
 </>
 renders <p class="doc">\${title}: \${phase}</p>
 `;
+// (s478: `<Archived/>` — a graph names every variant, E-ENGINE-STATE-CHILD-MISSING; it is a
+// terminal state no edge reaches, which the unreachable-target test below needs)
 
 function docProgram(fns) {
   return {

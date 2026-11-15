@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/g-fn-shortform-arrow-reject.test.js",
   "spec": "§48.2.1",
-  "rationale": "§48.2.1: `args => expr` is one of the two sanctioned anonymous-callable forms (the plain inline lambda). Only the mixed `fn(args) => expr` is rejected; a bare arrow compiles clean.",
+  "rationale": "§48.2.1: `args => expr` is one of the two sanctioned anonymous-callable forms (the plain inline lambda). Only the mixed `fn(args) => expr` is rejected; a bare arrow compiles clean. S478 (bootstrap triage C12): `doit` returns the mapped tape itself. The earlier `return { d: d }` was an object literal with no struct type to read it against, which §66 refuses (E-TYPE-STRUCT-CONTEXT: a struct literal needs an annotated struct context) — unrelated to the arrow form this case pins.",
   "expect": {
     "codes": [],
     "notCodes": ["E-FN-ARROW-BODY"]

@@ -2,23 +2,23 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function f() {
-        const z = "z;"
-        defer D(z)
+        const z = "z;";
+        defer D(z);
         defer {
-            const q = "q;"
-            D(q)
+            const q = "q;";
+            D(q);
         }
-        defer helper()
-        const q = "other;"
-        D(q)
+        defer helper();
+        const q = "other;";
+        D(q);
         function helper() {
-            D("h;")
+            D("h;");
         }
-        return 1
+        return 1;
     }
 }
 <program>
