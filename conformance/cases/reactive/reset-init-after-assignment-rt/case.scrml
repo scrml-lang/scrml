@@ -1,6 +1,6 @@
 ${
     <ticks> = 0
-    @ticks = @ticks + 1
+    @ticks = @ticks + 1;
     function doReset() {
         reset(@ticks);
     }

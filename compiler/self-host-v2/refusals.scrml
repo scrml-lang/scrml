@@ -88,6 +88,11 @@ ${
         const U: string = "E-BOOTSTRAP-UNSUPPORTED"
         return [
             // ---- not scrml: the SPEC's own code (§7.2.1 the E-*-NOT-IN-SCRML family) ----
+            // s478-boot-semicolon-residue: the block-opening spellings first — a statement-start `{`
+            // is a bare block now (parse.scrml bareBlock), so the misread body's own statement errors
+            // (a missing `;` after `case .A:`) sit on the body's lines, which a row owns only when its
+            // pattern ends at the `{` ("a construct that opens a block … owns the block's lines")
+            row("for await", "§19.9.8", "E-FOR-AWAIT-NOT-IN-SCRML", ["for", "await", "...", "{"], "`for await … of` is not scrml (§19.9.8): there is no `async` / `await`; a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             row("for await", "§19.9.8", "E-FOR-AWAIT-NOT-IN-SCRML", ["for", "await"], "`for await … of` is not scrml (§19.9.8): there is no `async` / `await`; a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             row("try", "§19.1", "E-TRY-NOT-IN-SCRML", ["try", "{"], "`try` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
             row("catch", "§19.1", "E-TRY-NOT-IN-SCRML", ["}", "catch|finally", "...", "{"], "`catch` / `finally` is not scrml (§19.1): there is no `try` / `catch` / `finally` — a failure is a value, handled with `!{}`, `?` or `match` (§19)"),
@@ -96,6 +101,7 @@ ${
             row("async", "§19.9.8", "E-ASYNC-NOT-IN-SCRML", ["async"], "`async` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             row("await", "§19.9.8", "E-AWAIT-NOT-IN-SCRML", ["await"], "`await` is not scrml (§19.9.8): a server call is written plainly and the compiler splits the body around it (§19.9.3)"),
             rowG("class", "§7.2.1", "E-CLASS-NOT-IN-SCRML", ["class", "$w|{"], "lead", "`class` is not scrml (§7.2.1): declare data with `type T:struct` / `type T:enum` and behaviour with functions"),
+            row("switch", "§17", "E-SWITCH-FORBIDDEN", ["switch", "(", "...", ")", "{"], "`switch` is not scrml (§17): branch with `match x { … }` (or `if` / `else`)"),
             row("switch", "§17", "E-SWITCH-FORBIDDEN", ["switch", "("], "`switch` is not scrml (§17): branch with `match x { … }` (or `if` / `else`)"),
             rowG("import(…)", "§21.3.2", "E-DYNAMIC-IMPORT-NOT-IN-SCRML", ["import", "("], "tight", "a dynamic `import(…)` is not scrml (§21.3.2): write a static `import { … } from \"…\"`"),
             rowOn("any", "§14.1.1", "E-TYPE-ANY-FORBIDDEN", [":", "any"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE"], false, "`any` is not a scrml type (§14.1.1): write the type the value has (a union `A | B` when it can be several)"),
@@ -142,6 +148,12 @@ ${
             rowOn("map literal [k: v]", "§59", U, ["[", "$s|$n", ":"], [], false, "maps (§59, O44) are not in the bootstrap"),
             rowOn("fn(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", ["fn", "(", "...", ")", "=>"], [], false, "an anonymous `fn` takes a block body, `fn(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
             rowOn("anonymous fn expression", "§48.2.1", U, ["fn", "("], [], false, "declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
+            // s478-boot-semicolon-residue: `function (…) { … }` as a VALUE (§7.2: logic is
+            // JavaScript; §5.4 / §6.7 name "a function expression" as a value). The bootstrap
+            // reads `function` there as a name and the `{ … }` as an object literal (a cascade).
+            // A nested DECLARATION `function name(…) { … }` (§7.3.1) never matches: a name stands
+            // between `function` and `(`.
+            rowOn("function expression", "§7.2", U, ["function", "(", "...", ")", "{"], [], false, "declare a named function (`function name(…) { … }`, §7.3.1) and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
             rowG("audit @log", "§51.11", U, ["audit", "@"], "lead", ""),
             rowOn("replay()", "§51.14", U, ["replay", "("], ["E-SCOPE-001"], true, ""),
             rowOn("transition()", "§14.12.6.3", U, ["transition", "("], ["E-SCOPE-001"], true, "the bootstrap builds only the presence lifecycle `(not to T)` on a program cell (§14.12.3), which a discrimination transitions — there is no variant lifecycle for `transition()` to advance yet"),

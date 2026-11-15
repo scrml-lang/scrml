@@ -5,8 +5,8 @@ ${
         let out = match name {
             not -> "absent",
             given name -> "hi " + name
-        }
-        return out
+        };
+        return out;
     }
     function go() {
         @a = decl("al");

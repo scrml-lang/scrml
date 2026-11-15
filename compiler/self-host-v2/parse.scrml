@@ -3522,6 +3522,9 @@ ${
             }
             return mkS(mt, start, AStmtK.Eval(rm.e))
         }
+        // s478-boot-semicolon-residue — a `{` that STARTS a statement is a bare block
+        // (bareBlock), never an object literal
+        if (isP(tp, "{")) return bareBlock(tp)
         // s478 — a keywordless declaration analysis proved (PNs.kw, §50.8.5): `x = e;` read as `const x = e;`
         if (kwDeclAhead(tp)) {
             const kinit: RExpr = parseAssign(adv(adv(tp)))
@@ -3563,6 +3566,63 @@ ${
         }
         const re: RExpr = mkE(rt, start, AExprK.Recovered)
         return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    // s478-boot-semicolon-residue — a BARE BLOCK statement, `{ … }` where a
+    // statement stands. SPEC §7.2.2 "Terms": a statement list is the content of
+    // "any `{ … }` block of a statement (`if` / `else` / loop / bare block)" —
+    // so a `{` that starts a statement opens a block, never an object literal
+    // (before this, the bootstrap read it as one: E-TYPE-STRUCT-CONTEXT and a
+    // cascade). The bootstrap does not BUILD a bare block — it has no block
+    // statement (INTERIM, g-boot-bare-block-statement-s478): it is refused by
+    // name (E-BOOTSTRAP-UNSUPPORTED), and its statements are read (so their
+    // own syntax errors report) and dropped (a Recovered node). One rule is
+    // judged before the drop because it holds whatever the bootstrap builds —
+    // §19.16.2 "Not defer sites in stage 1 — E-DEFER-UNSUPPORTED-SITE": "A bare
+    // `{ }` block statement … so a `defer` there has no block to attach to … It
+    // SHALL be a compile error, never silently mis-scoped". The block is block-like (§7.2.2 rule 2, "bare block"): its
+    // `}` ends it, no `;` (a Recovered node is block-like, needsSemi).
+    // Recovery: a `{` on the line of an Error just reported is the body of a
+    // construct that failed to parse (a function head the type reader could
+    // not read, `switch (x) {`), not a bare block the author wrote — it is read
+    // the same way, without the refusal (the error before it is the one root
+    // cause).
+    fn bareBlock(tp: TP) -> RStmt {
+        const t0: PTok = cur(tp)
+        const start: int = t0.start
+        let d0: TP = tp
+        const n: int = tp.diags.length
+        const recovering: boolean = n > 0 && tp.diags[n - 1].severity == Severity.Error && lineAt(tp, tp.diags[n - 1].span.start) == t0.line
+        if (!recovering) d0 = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)", t0)
+        const rb: RBlock = parseBlock(d0)
+        let t: TP = rb.tp
+        for (const s of rb.b.stmts) {
+            if (isDeferStmt(s)) {
+                const d: Diag = newDiag("E-DEFER-UNSUPPORTED-SITE", "a `defer` in a bare `{ … }` block has no block to belong to in stage 1 (§19.16.2) — move the `defer` to the enclosing function body or a braced `if` / loop body", t.file, s.span)
+                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns }
+            }
+        }
+        const re: RExpr = mkE(t, start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    fn isDeferStmt(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: b) :> true
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .Return(e: e) :> false
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+            .For(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
+        }
     }
 
     // s477 — does a nested function declaration start here (§7.3.1)?
@@ -11980,6 +12040,7 @@ ${
         // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
         if (w.w == "server") return logicRegionItem(mp, LexStop.Statement, false)
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
+        if (w.w == "when" && ctx == "nested" && readName(skipTrivia(w.mp)).w == "message") return nestedWhenMessage(mp)
         if (w.w == "when") return logicRegionItem(mp, LexStop.Statement, false)
         if (w.w == "import") return logicRegionItem(mp, LexStop.Line, fileTop)
         // s478 — a `const NAME = …;` / `let NAME …` at a body top is the same item
@@ -11994,6 +12055,39 @@ ${
         if (!fileTop) return bodyTopRun(mp, ctx)
         const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
         return { items: [], mp: skipLineComment(d) }
+    }
+
+    // =========================================================================
+    // s478-boot-semicolon-residue — `when message(data) { … }` in a NESTED
+    // `<program>` body. SPEC §4.12.4: "`when message(data) { ... }` is a
+    // lifecycle hook valid inside worker `<program>` elements"; and it is kept
+    // ("Not retired: the worker / nested-program event hooks `when message(data)
+    // { }`" — §6.7.4 "The retiring keyword form"). Before this it fell to the
+    // logic-item reader as E-PARSE-ITEM ("other statements at logic-block level are not in the bootstrap") — a
+    // parse rejection of valid code.
+    // The bootstrap builds no nested program: analyze (nestedProgramDiags)
+    // reports an error on EVERY nested `<program>` — its §4.12.2 attribute
+    // errors, or else E-BOOTSTRAP-UNSUPPORTED — so the hook is read here (its
+    // binding and its `{ … }` body, whose own syntax errors report) and keeps
+    // no item: nothing of a nested program is ever lowered. Fail-closed by
+    // that analyze rule, not by this reader. Only `ctx == "nested"` reads it;
+    // at a top-level `<program>` body it stays the logic-item reader's (no
+    // SPEC meaning there).
+    // =========================================================================
+    fn nestedWhenMessage(mp: MP) -> RMItems {
+        let t: TP = adv(adv(regionTP(mp, LexStop.Statement)))   // `when` `message`
+        t = expectP(t, "(")
+        if (cur(t).cls == TC.Ident) {
+            t = adv(t)
+            // an annotated binding `data: Job` (a parameter's spelling; §4.12.4 shows only the
+            // bare name, and the hook is never built, so the annotation is read, not judged)
+            if (isP(t, ":")) t = parseType(adv(t)).tp
+        } else {
+            t = diagAt(t, "E-PARSE-EXPECTED", "expected the message binding name in `when message(data) { … }` (§4.12.4)", cur(t))
+        }
+        t = expectP(t, ")")
+        const rb: RBlock = parseBlock(t)
+        return { items: [], mp: backToMarkup(mp, expectRegionEnd(rb.tp)) }
     }
 
     // =========================================================================

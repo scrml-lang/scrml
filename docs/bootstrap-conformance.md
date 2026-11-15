@@ -11,27 +11,27 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 493 | 26.4% |
+| PASS | 498 | 26.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 41 | 2.2% |
+| FAIL | 36 | 1.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
 | UNSUPPORTED | 699 | 37.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 534; of those, 493 hold (92.3%). Runtime half executed on the bootstrap for 161 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 534; of those, 498 hold (93.3%). Runtime half executed on the bootstrap for 162 case(s).
 
-- **Vacuous** passes: 11 of 493 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **482**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 8 of 41; the other 33 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 498 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **487**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 8 of 36; the other 28 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 699.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 329 · FAIL 37 · UNSUPPORTED 508. Twin holds 329 (non-vacuous 321). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 334 · FAIL 32 · UNSUPPORTED 508. Twin holds 334 (non-vacuous 326). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 1 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
 NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
@@ -111,7 +111,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 24 | · | 1 | · | 2 | 9 | · | · |
-| control-flow | 76 | 36 | · | 1 | · | 24 | 15 | · | · |
+| control-flow | 76 | 37 | · | · | · | 24 | 15 | · | · |
 | defer | 51 | 24 | · | 2 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -126,7 +126,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
 | foreign | 16 | 2 | · | · | · | 7 | 7 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
-| forms | 66 | 14 | · | 1 | · | 49 | 2 | · | · |
+| forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 68 | 28 | · | · | · | 22 | 18 | · | · |
@@ -137,11 +137,11 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | match-block | 22 | 6 | · | · | · | 6 | 10 | · | · |
 | match-codes | 25 | 12 | · | 2 | · | · | 11 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 46 | 16 | · | 3 | · | 12 | 15 | · | · |
+| match-leave | 46 | 17 | · | 2 | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 23 | · | 3 | · | 8 | 11 | · | · |
+| module | 45 | 24 | · | 2 | · | 8 | 11 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -157,7 +157,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 91 | 10 | · | 2 | · | 17 | 62 | · | · |
+| server-db | 91 | 11 | · | 1 | · | 17 | 62 | · | · |
 | server-fn | 27 | 8 | · | 4 | · | 7 | 8 | · | · |
 | sql | 20 | 3 | · | 1 | · | 9 | 7 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (41)
+### FAIL (36)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `when` (other statements at logic-block level are not in the bootstrap)
@@ -200,8 +200,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `condition/given-presence-deprecated-arm` (twin · parse-reject)
   - forbidden family E-* fired: E-STMT-MISSING-SEMICOLON
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `control-flow/ctrl-003-extend-past-else-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-CTRL-001
 - `defer/control-flow-inner-loop-ok` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-PARSE-EXPECTED: expected `:`, found `(`
@@ -225,8 +223,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `error/error-008-neg` (twin · parse-reject)
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `forms/validator-applies-typed-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-VALIDATOR-DEAD
 - `linear/lin-001-never-consumed-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -248,14 +244,10 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `match-leave/given-arm-legacy-arrow-keeps-body` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `out`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `match-leave/given-arm-malformed-heads-in-assignment-match-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-STRUCT-CONTEXT
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
-- `module/e-import-002-circular-import-reject` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
@@ -274,8 +266,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-LOCAL: expected a name after `let` / `const`
   - E-PARSE-EXPECTED: expected `=`, found `setTimeout`
   - E-PARSE-TRAILING: unexpected `=` after the expression
-- `server-db/inline-handler-server-call-condition-runtime` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-ERROR-002)
 - `server-fn/branch-declared-server-fn-routes-to-server` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"COMPUTED-IN-THE-BODY"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -305,7 +295,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (493)
+### PASS / CODES-ONLY (498)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -386,6 +376,7 @@ none
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
 - `control-flow/ctrl-002-orphan-else-if-program-pos` — PASS
 - `control-flow/ctrl-003-extend-past-else-neg` — PASS · TWIN
+- `control-flow/ctrl-003-extend-past-else-pos` — PASS · TWIN
 - `control-flow/ctrl-003-extend-past-else-program-pos` — PASS (also emitted, unasserted: E-CTRL-001)
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — PASS · TWIN
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — PASS · TWIN
@@ -557,6 +548,7 @@ none
 - `forms/surface-top-level-validated-neg` — PASS
 - `forms/validator-applies-min-on-string-reject` — PASS · TWIN
 - `forms/validator-applies-pattern-on-number-reject` — PASS · TWIN
+- `forms/validator-applies-typed-clean` — PASS · TWIN
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
 - `hostmethod/substring-match-typed` — PASS · TWIN
@@ -650,6 +642,7 @@ none
 - `match-leave/dpa068-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — PASS · TWIN
 - `match-leave/stmt-arm-braced-break-continue-loop` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -660,6 +653,7 @@ none
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
 - `module/e-import-001-export-inside-logic-clean` — PASS · TWIN · VACUOUS
 - `module/e-import-002-acyclic-import-clean` — PASS · TWIN
+- `module/e-import-002-circular-import-reject` — PASS · TWIN
 - `module/e-import-002-reexport-cycle-named-reject` — PASS · TWIN
 - `module/e-import-002-reexport-cycle-star-reject` — PASS · TWIN
 - `module/e-import-002-reexport-import-cycle-mixed-reject` — PASS · TWIN
@@ -761,6 +755,7 @@ none
 - `refinement/union-unjudgeable-member-pos` — PASS · TWIN
 - `refinement/unknown-shape-boundary-pos` — PASS · TWIN
 - `refinement/unknown-shape-pos` — PASS · TWIN
+- `server-db/inline-handler-server-call-condition-runtime` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/sql-aggregate-group-rt-twin` — PASS
 - `server-db/sql-all-array-shape-rt-twin` — PASS
 - `server-db/sql-delete-reflects-rt-twin` — PASS

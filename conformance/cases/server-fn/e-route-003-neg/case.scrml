@@ -2,7 +2,7 @@
 ${
   type Item:struct = { id: int, name: string }
   server function getItem(id: int) -> Item {
-    return 1
+    return { id: id, name: "x" };
   }
 }
 <li>x</li>
