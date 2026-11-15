@@ -9989,6 +9989,7 @@ ${
         // the pending run of display text, [badStart, badEnd)
         let badStart: int = -1
         let badEnd: int = -1
+        let resume: int = -1
         let going = true
         while (going) {
             const tok: PTok = cur(t)
@@ -10027,7 +10028,19 @@ ${
                 }
                 const before: TP = t
                 const r: RStmt = parseTermStmt(t, hardErrors(t.diags))
-                if (notCode(before, r)) {
+                if (notCode(before, r) && closedLiteralStmt(before, r)) {
+                    // s478 r1 (LOW-2) — a literal-only statement that ended with its own `;`
+                    // (`"a"; @n = 5;` — §40.8: the `"a"` is a code string, since more than `;`
+                    // follows it on its line) is display text up to that `;`; what follows it
+                    // on the line is read as the statements it is
+                    const from2: int = cur(chain).start
+                    stmts = stmts.slice(0, chainLen)
+                    if (stmts.length == 0) runStart = -1
+                    if (badStart < 0) badStart = from2
+                    badEnd = r.tp.toks[r.tp.i - 1].end
+                    t = { toks: r.tp.toks, i: r.tp.i, nid: r.tp.nid, diags: chain.diags, file: r.tp.file, ns: r.tp.ns }
+                    chainLine = -1
+                } else if (notCode(before, r)) {
                     // not valid code: drop the chain and read its line as display text
                     const from: int = cur(chain).start
                     stmts = stmts.slice(0, chainLen)
@@ -10039,7 +10052,15 @@ ${
                         t = adv(t)
                     }
                     const nl: int = mp.src.indexOf("\n", from)
-                    if (nl > from && nl < last) last = nl
+                    if (nl > from && nl < last) {
+                        // s478 r1 (LOW-1) — a token of this line runs past its end (the `'` of
+                        // `Don't panic.` opens a string the lexer reads to the end of the run):
+                        // the display text ends at the line (§4.18.7: "the statements it covers
+                        // raise no other diagnostic"), and the body is read again from the next line
+                        last = nl
+                        resume = nl
+                        going = false
+                    }
                     if (badStart < 0) badStart = from
                     badEnd = last
                     chainLine = -1
@@ -10061,7 +10082,23 @@ ${
         const fr2: RItems = runItem(t, runStart, stmts)
         const fb2: TP = proseDiag(fr2.tp, mp.src, ctx, badStart, badEnd)
         const back: MP = backToMarkup(mp, fb2)
+        if (resume >= 0) return { items: items.concat(fr2.items), mp: mAt(back, resume) }
         return { items: items.concat(fr2.items), mp: mAt(back, cur(fb2).start) }
+    }
+
+    // s478 r1 — the statement just read is literal-only (§40.8), parsed with no
+    // E-PARSE-* error, and ended with its own `;`.
+    fn closedLiteralStmt(before: TP, r: RStmt) -> boolean {
+        if (r.tp.i <= before.i) return false
+        if (!tk(r.tp.toks[r.tp.i - 1], ";")) return false
+        let i: int = before.diags.length
+        while (i < r.tp.diags.length) {
+            if (r.tp.diags[i].code.startsWith("E-PARSE-")) return false
+            i = i + 1
+        }
+        const x: AExpr | not = stmtExpr(r.s)
+        if (x is given) return literalOnly(x)
+        return false
     }
 
     // An item starts at the token (the program-body item reader takes it,
