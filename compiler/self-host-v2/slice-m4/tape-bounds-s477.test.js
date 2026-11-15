@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -62,8 +63,9 @@ const lengthChecks = (core) => find(core, (n) => n.variant === "Prim" && opName(
 const runtimeLength = (core) => find(core, (n) => n && n.variant === "RuntimeLength");
 
 // a program: declarations, a `go()` function body, and markup showing `@shown`
+// s478 (E-DG-002): the shared scaffold `KE`'s cells are declared only when the case names them
 const prog = (decls, body) =>
-  `<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n        <p id="o">\${@shown}</p>\n    </main>\n</program>\n`;
+  dropUnnamedScaffold(`<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n        <p id="o">\${@shown}</p>\n    </main>\n</program>\n`, ["    <k:K=(K.A)/>", "    <c:boolean=(true)/>"]);
 const txt = (x) => `${x}.map(v => \`\${v}\`).join(",")`;
 const show = (x) => `        @shown = ${txt(x)};`;
 
@@ -201,7 +203,8 @@ describe("D — an unprovable write is checked at run time: E-WRITE-INVARIANT-RT
   });
 
   test("the generated code is readable: the bound and the source line are spelled in the call", () => {
-    const r = clean(prog("    <c:int[1..=3, append]=([1])/>", `        @c.append(2);`));
+    // s478: the appended cell is read by nothing here (the printed bound is the point) — `_`-named (§34 E-DG-002)
+    const r = clean(prog("    <_c:int[1..=3, append]=([1])/>", `        @_c.append(2);`));
     const rt = runtimeLength(r.core);
     expect(rt[0].data).toEqual({ min: 1, max: 3, loc: "t.scrml:5" });
   });
@@ -557,7 +560,8 @@ describe("H4 — an edit as a `match` / `!{}` arm's EXPRESSION is checked as in 
     local: (ty, init, ed, arm) => ["", `        let xs: ${ty} = ${init};\n${arm(`xs.${ed}`)}\n        @shown = "unreached";`],
     part: (ty, init, ed, arm) => [`    type P:struct = { n: int, xs: ${ty} }`, `        let b: P = { n: 0, xs: ${init} };\n${arm(`b.xs.${ed}`)}\n        @shown = "unreached";`],
     "parameter part": (ty, init, ed, arm) => [`    type P:struct = { n: int, xs: ${ty} }\n    function grow(b: P) -> int {\n${arm(`b.xs.${ed}`)}\n        return b.xs.length;\n    }`, `        @shown = \`\${grow({ n: 0, xs: ${init} })}\`;`],
-    cell: (ty, init, ed, arm) => [`    <c:${ty}=(${init})/>`, `${arm(`@c.${ed}`)}\n        @shown = "unreached";`],
+    // s478: the trapped cell is read by nothing (the trap is the point) — `_`-named (§34 E-DG-002)
+    cell: (ty, init, ed, arm) => [`    <_c:${ty}=(${init})/>`, `${arm(`@_c.${ed}`)}\n        @shown = "unreached";`],
   };
   // the edit: an end-append, or (for "part insert") an insert at 0
   const EDITS = { append: { grant: "append", ed: (v) => `append(${v})` }, insert: { grant: "insert", ed: (v) => `insert(0, ${v})` } };

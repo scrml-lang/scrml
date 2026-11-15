@@ -16,6 +16,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -26,17 +27,19 @@ const codes = (src) => run(src).diags.map((d) => d.code);
 const msgs = (src) => run(src).diags.map((d) => `${d.code}: ${d.message}`);
 const DOLLAR = "$";
 
-const prog = (body, extra = "") => `<program>
+// s478 (E-DG-002): the case's program carries only the scaffold it uses — `go` when the case calls
+// it, and each cell (`go` writes `@step`) when something there names it
+const prog = (body, extra = "") => dropUnnamedScaffold(`<program>
     let <step:number=1/>
     let <ok:boolean=true/>
     let <label:string="a"/>
-    function go(n: number) { @step = n; }
-${extra}
+${/\bgo\(/.test(body + extra) ? "    function go(n: number) { @step = n; }\n" : ""}${extra}
     <main>
 ${body}
     </main>
 </program>
-`;
+`, SCAFFOLD);
+const SCAFFOLD = ["    let <step:number=1/>", "    let <ok:boolean=true/>", "    let <label:string=\"a\"/>"];
 
 describe("MED — a case variant of a scrml control attribute is refused, never a plain HTML attribute", () => {
   const CASES = [

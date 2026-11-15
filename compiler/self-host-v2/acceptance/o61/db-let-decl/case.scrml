@@ -4,5 +4,5 @@
         let <hits:int=0/>
         <p id="d">in the db block</p>
     </db>
-    <main><p id="s">x</p></main>
+    <main><p id="s">${@hits}</p></main>
 </program>

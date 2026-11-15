@@ -7,6 +7,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2 } from "./harness.js";
 import { frontEnd, readSlice } from "./lowered.js";
+import { dropUnnamedScaffold } from "./scaffold-cells.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
@@ -14,9 +15,10 @@ beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000
 afterEach(() => expectNoPageErrors());
 
 const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdown.scrml") });
+// s478 (E-DG-002): a case's program carries only the shared-scaffold cells (CELLS, O) it names
 const app = (decls, markup) => ({
   path: "app.scrml",
-  src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`,
+  src: dropUnnamedScaffold(`\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`, CELLS + O),
 });
 const run = (files) => frontEnd(mods, files);
 const codes = (files) => run(files).diags.map((d) => d.code);
@@ -29,27 +31,27 @@ const diagsIn = (decls, markup = "<p>x</p>") => run([LIB(), app(decls, markup)])
 // items #1 "a wrong-typed FIELD write is E-TYPE-031 too".
 // ---------------------------------------------------------------------------
 describe("#1 — cell and field writes are type-checked (E-TYPE-031)", () => {
-  const P = "    type P:struct = { let x: int, let s: string }\n    let <pt:P=({ x: 1, s: \"a\" })/>\n";
+  const P = "    type P:struct = { let x: int, let s: string }\n    let <_pt:P=({ x: 1, s: \"a\" })/>\n";
   test("E-TYPE-031 — a string into an `int` cell (the ruling's own example)", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { @x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { @_x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
   });
-  test("E-TYPE-031 — a string into an `int` FIELD of a struct cell (`@pt.x = \"oops\"`)", () => {
-    expect(inApp(P + "    function f() { @pt.x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
+  test("E-TYPE-031 — a string into an `int` FIELD of a struct cell (`@_pt.x = \"oops\"`)", () => {
+    expect(inApp(P + "    function f() { @_pt.x = \"oops\"; }")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a number into a `string` field of a declaration instance (`@country.value = 5`)", () => {
     expect(inApp("    function f() { @country.value = 5; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>")).toEqual(["E-TYPE-031"]);
   });
   test("twins silent — the right type in each position", () => {
-    expect(inApp("    let <x:int=0/>\n    function f() { @x = 7; }")).toEqual([]);
-    expect(inApp(P + "    function f() { @pt.x = 2;\n @pt.s = \"b\"; }")).toEqual([]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { @_x = 7; }")).toEqual([]);
+    expect(inApp(P + "    function f() { @_pt.x = 2;\n @_pt.s = \"b\"; }")).toEqual([]);
     expect(inApp("    function f() { @country.value = \"CA\"; }", "<dropdown as=country label=\"1\" options=([\"a\"])/>")).toEqual([]);
   });
   test("provable-or-silent — an unannotated parameter's value (untyped → Unknown) is never checked", () => {
     // the slice refuses the unannotated parameter itself; the write is not a second report
-    expect(inApp("    let <x:int=0/>\n    function f(a) { @x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
+    expect(inApp("    let <_x:int=0/>\n    function f(a) { @_x = a; }")).toEqual(["E-PARAM-TYPE-REQUIRED"]);   // s473: §7.5's code
   });
   test("the message names the target's declared type and the value's", () => {
-    const d = diagsIn(P + "    function f() { @pt.x = \"oops\"; }");
+    const d = diagsIn(P + "    function f() { @_pt.x = \"oops\"; }");
     expect(d[0].message).toContain("`int`");
     expect(d[0].message).toContain("`string`");
   });
@@ -63,7 +65,7 @@ describe("#2 — call arity (E-CALL-ARITY)", () => {
   const G = "    function g(a: int, b: int) -> int { return a; }\n";
   test("E-CALL-ARITY — an extra argument (statement, value, handler, interpolation)", () => {
     expect(inApp(G + "    function f() { g(1, 2, 3); }")).toEqual(["E-CALL-ARITY"]);
-    expect(inApp(G + "    let <x:int=0/>\n    function f() { @x = g(1, 2, 3); }")).toEqual(["E-CALL-ARITY"]);
+    expect(inApp(G + "    let <_x:int=0/>\n    function f() { @_x = g(1, 2, 3); }")).toEqual(["E-CALL-ARITY"]);
     expect(inApp(G, "<button onclick=g(1, 2, 3)>x</button>")).toEqual(["E-CALL-ARITY"]);
     expect(inApp(G, "<p>${g(1, 2, 3)}</p>")).toEqual(["E-CALL-ARITY"]);
   });
@@ -99,7 +101,7 @@ describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => 
   test("E-EACH-NOT-SEQUENCE — an int, a number, a bool, a string, a struct, an enum, an instance", () => {
     for (const [decls, src] of [
       ["    <n:int=3/>", "@n"], ["    <r:number=0.5/>", "@r"], ["    <b:bool=true/>", "@b"], ["    <s:string=\"ab\"/>", "@s"],
-      ["    type P:struct = { x: int }\n    <pt:P=({ x: 1 })/>", "@pt"], ["    <o:Openness=.Closed/>", "@o"],
+      ["    type P:struct = { x: int }\n    <_pt:P=({ x: 1 })/>", "@_pt"], ["    <o:Openness=.Closed/>", "@o"],
     ]) {
       expect(inApp(decls, `<each in=${src} as c><p>x</p></each>`)).toEqual(["E-EACH-NOT-SEQUENCE"]);
     }
@@ -187,9 +189,9 @@ describe("#5 / #7 — handle names (E-HANDLE-REDECLARE)", () => {
     expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as x>" + DD("pick") + "</each>")).toEqual([]);
   });
   test("r4 (d) twins — a name no visible declaration holds; a declaration visible only in ANOTHER file", () => {
-    expect(inApp("    let <dropdownOpen:bool=false/>", DD("picker"))).toEqual([]);
+    expect(inApp("    let <dropdownOpen:bool=false/>", DD("picker") + "<p if=@dropdownOpen>x</p>")).toEqual([]);
     const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
-    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    let <card:int=0/>\n<main><p>${@card}</p></main>\n</program>\n" }])).toEqual([]);
   });
 });
 
@@ -220,39 +222,39 @@ describe("#6 — a duplicate top-level `function` (E-SCOPE-010)", () => {
 // key in any struct literal (plain, nested, or the spread-override shape) is a compile error".
 // ---------------------------------------------------------------------------
 describe("duplicate struct-literal keys (E-STRUCT-DUPLICATE-KEY)", () => {
-  const P = "    type P:struct = { let x: int, let y: int }\n    let <pt:P=({ x: 1, y: 2 })/>\n";
-  const N = "    type Q:struct = { let a: int }\n    type R:struct = { let q: Q, let b: int }\n    let <r:R=({ q: { a: 1 }, b: 2 })/>\n";
+  const P = "    type P:struct = { let x: int, let y: int }\n    let <_pt:P=({ x: 1, y: 2 })/>\n";
+  const N = "    type Q:struct = { let a: int }\n    type R:struct = { let q: Q, let b: int }\n    let <_r:R=({ q: { a: 1 }, b: 2 })/>\n";
   test("a PLAIN literal written to a cell — the ruling's own `{ x: 5, x: 6, y: 1 }`", () => {
-    expect(inApp(P + "    function f() { @pt = { x: 5, x: 6, y: 1 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp(P + "    function f() { @_pt = { x: 5, x: 6, y: 1 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a NESTED literal", () => {
-    expect(inApp(N + "    function f() { @r = { q: { a: 1, a: 2 }, b: 3 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp(N + "    function f() { @_r = { q: { a: 1, a: 2 }, b: 3 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a literal as a declaration's initializer, and as an annotated local's", () => {
-    expect(inApp("    type P:struct = { x: int, y: int }\n    <pt:P=({ x: 1, x: 2, y: 3 })/>")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp("    type P:struct = { x: int, y: int }\n    <_pt:P=({ x: 1, x: 2, y: 3 })/>")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
     expect(inApp("    type P:struct = { x: int, y: int }\n    function f() { let v: P = { x: 1, y: 2, y: 3 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
   test("a literal with NO struct context still reports its duplicate (beside the context error)", () => {
     expect(inApp("    function f() { let v = { x: 1, x: 2 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-TYPE-STRUCT-CONTEXT"]);
   });
   test("three of one key report twice, at the repeats; the message names the key", () => {
-    const d = diagsIn(P + "    function f() { @pt = { x: 5, y: 1, x: 6, x: 7 }; }");
+    const d = diagsIn(P + "    function f() { @_pt = { x: 5, y: 1, x: 6, x: 7 }; }");
     expect(d.map((x) => x.code)).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
     expect(d[0].message).toContain("`x` is named twice");
   });
   test("twins silent — each key once (plain, nested, initializer)", () => {
-    expect(inApp(P + "    function f() { @pt = { x: 5, y: 1 }; }")).toEqual([]);
-    expect(inApp(N + "    function f() { @r = { q: { a: 1 }, b: 3 }; }")).toEqual([]);
-    expect(inApp("    type P:struct = { x: int, y: int }\n    <pt:P=({ x: 1, y: 3 })/>")).toEqual([]);
+    expect(inApp(P + "    function f() { @_pt = { x: 5, y: 1 }; }")).toEqual([]);
+    expect(inApp(N + "    function f() { @_r = { q: { a: 1 }, b: 3 }; }")).toEqual([]);
+    expect(inApp("    type P:struct = { x: int, y: int }\n    <_pt:P=({ x: 1, y: 3 })/>")).toEqual([]);
   });
   test("the retired bootstrap-local code is gone", () => {
-    expect(inApp(P + "    function f() { @pt = { ...@pt, x: 5, x: 6 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(inApp(P + "    function f() { @_pt = { ...@_pt, x: 5, x: 6 }; }")).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
 });
 
 // A struct cell with `T | not` fields (the slice parses no `T | not` cell opener — S439 M1 — so a
 // `T | not` value reaches a condition through a field, a parameter or an annotated local).
-const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    let <o:O=({ v: \"\", n: 0, f: false })/>\n    let <m:int=0/>\n";
+const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    let <o:O=({ v: \"\", n: 0, f: false })/>\n    let <_m:int=0/>\n";
 const CELLS = "    let <n:int=0/>\n    let <r:number=0.5/>\n    let <s:string=\"\"/>\n    let <b:bool=false/>\n    <xs:int[]=([1])/>\n";
 // a one-declaration library and an app that uses it
 const boxLibS = (decl) => ({ path: "lib/box.scrml", src: decl });
@@ -261,7 +263,7 @@ const boxAppS = (use) => ({ path: "app.scrml", src: `\${ import { box } from "./
 // ---------------------------------------------------------------------------
 // #7 — truthiness (c) + Q1 / Q2: a condition needs a `bool` or a `T | not` presence test.
 // ruling: S440 "#4 = (c) — All conditions require a boolean, or a `T | not` presence test, and the
-// truthiness of numbers and strings goes"; truthiness Q1 "a bare `@x` of type `T | not` IS a presence
+// truthiness of numbers and strings goes"; truthiness Q1 "a bare `@_x` of type `T | not` IS a presence
 // test (§42.4 already says so); the compiler emits an absence check, never JS truthiness"; Q2 "an
 // immediate error wherever the violation is PROVABLE, silence where the type is unknown
 // (provable-or-silent); no §63 window". Code PROPOSED (no SPEC text yet): E-COND-NOT-BOOLEAN.
@@ -286,7 +288,7 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   });
   test("twins silent — a bool cell, a comparison, `&&` of bools, a negated bool", () => {
     expect(inApp(CELLS, "<p if=@b>x</p><p if=(@n > 0)>x</p><p if=(@b && @n > 0)>x</p><p if=(!@b)>x</p>")).toEqual([]);
-    expect(inApp(CELLS + "    function f() { if (@s != \"\") { @b = true; } }")).toEqual([]);
+    expect(inApp(CELLS + "    function f() { if (@s != \"\") { @b = true; } }", "<p if=@b>x</p>")).toEqual([]);
   });
   test("Q1 — a bare `T | not` condition is a PRESENCE TEST: silent, and recorded for lowering", () => {
     const r = run([LIB(), app(O, "<p class=\"v\" if=@o.v>V</p>")]);
@@ -310,17 +312,17 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(d[0].message).toContain("x is given");   // s460: the SPEC spelling (§42.2.4); the old `x != not` advice is gone (E-EQ-002, §45)
     expect(d[0].message).toContain("x == true");
-    expect(inApp(O + "    function f() { if (@o.f) { @m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inApp(O + "    function f() { if (@o.f) { @_m = 1; } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("r4 (a) twins — `@o.f == true`, `@o.f is given`, and a NARROWED `bool | not` (a value test) are legal", () => {
     expect(inApp(O, "<p if=(@o.f == true)>x</p><p if=(@o.f is given)>y</p>")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.f is given) { if (@o.f) { @m = 1; } } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.f is given) { if (@o.f) { @_m = 1; } } }")).toEqual([]);
   });
   test("r4 (b) — a presence test of a CONDITIONAL handle is legal and narrows reads inside (ruled S442)", () => {
-    const S = "    let <show:bool=false/>\n    let <seen:string=\"\"/>\n";
+    const S = "    let <show:bool=false/>\n    let <_seen:string=\"\"/>\n";
     const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
     expect(inApp(S, DDC + "<p if=@color>${@color.value}</p>")).toEqual([]);
-    expect(inApp(S + "    function f() { if (@color) { @seen = @color.value; } }\n    function g() { @seen = @color ? @color.value : \"\"; }", DDC)).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @_seen = @color.value; } }\n    function g() { @_seen = @color ? @color.value : \"\"; }", DDC)).toEqual([]);
   });
   test("the typer's table records a conditional handle read as `T | not` (§66.7.5), an always-mounted one as `T`", () => {
     const r = run([LIB(), app("    let <show:bool=false/>", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div><dropdown as=country label=\"2\" options=([\"a\"])/><p if=@color>x</p><p>${@country.value}</p>")]);
@@ -340,19 +342,19 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(mods.analyze.exprType(t, country.nid).data.t.variant).toBe("Named");
   });
   test("r5 R3 — a REPEATED presence test inside a region that already narrowed the handle stays legal", () => {
-    const S = "    let <show:bool=false/>\n    let <seen:string=\"\"/>\n";
+    const S = "    let <show:bool=false/>\n    let <_seen:string=\"\"/>\n";
     const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
     expect(inApp(S, DDC + "<div if=@color><p if=@color>${@color.value}</p></div>")).toEqual([]);
-    expect(inApp(S + "    function f() { if (@color) { if (@color) { @seen = @color.value; } } }", DDC)).toEqual([]);
-    expect(inApp(S + "    function f() { if (@color) { @seen = @color ? @color.value : \"\"; } }", DDC)).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { if (@color) { @_seen = @color.value; } } }", DDC)).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @_seen = @color ? @color.value : \"\"; } }", DDC)).toEqual([]);
     // twin: an ALWAYS-mounted handle is still not a condition
     expect(inApp(S, "<dropdown as=country label=\"1\" options=([\"a\"])/><div if=@show><p if=@country>x</p></div>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("r4 (b) twins — the S437 rule still binds OUTSIDE the test: a sibling read, an else branch", () => {
-    const S = "    let <show:bool=false/>\n    let <seen:string=\"\"/>\n";
+    const S = "    let <show:bool=false/>\n    let <_seen:string=\"\"/>\n";
     const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
     expect(inApp(S, DDC + "<p if=@color>x</p><p>${@color.value}</p>")).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
-    expect(inApp(S + "    function f() { if (@color) { @seen = \"\"; } else { @seen = @color.value; } }", DDC)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(inApp(S + "    function f() { if (@color) { @_seen = \"\"; } else { @_seen = @color.value; } }", DDC)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
   test("Q1 — a `bool` condition is NOT recorded as a presence test", () => {
     const r = run([LIB(), app(CELLS, "<p if=@b>x</p>")]);
@@ -451,10 +453,10 @@ describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
     expect(inApp(CELLS + "    function f() { @s = @s || \"x\"; }")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("E-OPERATOR-OPERAND-TYPE — a `string | not` under `!` is not a bool even when present (write `x is not`)", () => {
-    expect(inApp(O + "    function f() { if (!@o.v) { @m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(O + "    function f() { if (!@o.v) { @_m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("E-OPERAND-NOT-NARROWED — a `bool | not` under `!`, un-narrowed", () => {
-    expect(inApp(O + "    function f() { if (!@o.f) { @m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (!@o.f) { @_m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a legal `&&` / `||` is a `bool` (Q2 supersedes §45.9's JS operand semantics): into an int cell is E-TYPE-031", () => {
     expect(inApp(CELLS + "    function g() { return true; }\n    function f() { @n = @b || g(); }")).toEqual(["E-TYPE-031"]);
@@ -465,8 +467,8 @@ describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
   });
   test("twins silent — bools; a narrowed `bool | not`; a presence comparison", () => {
     expect(inApp(CELLS + "    function f() { @b = !@b && (@n > 0 || @s == \"\"); }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.f is given && !@o.f) { @m = 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.v is not) { @m = 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.f is given && !@o.f) { @_m = 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.v is not) { @_m = 1; } }")).toEqual([]);
   });
 });
 
@@ -499,7 +501,7 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
     expect(inApp(CELLS + "    function f() { @n = @s + 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("twins silent — int / number arithmetic, string + string, numeric relational, `%`", () => {
-    expect(inApp(CELLS + "    function f() { @n = @n + 1;\n @r = @r * 2 + @n;\n @s = @s + \"x\";\n @b = @n < 3 && @r >= 0.5;\n @n = @n % 2;\n @n = -@n; }")).toEqual([]);
+    expect(inApp(CELLS + "    function f() { @n = @n + 1;\n @r = @r * 2 + @n;\n @s = @s + \"x\";\n @b = @n < 3 && @r >= 0.5;\n @n = @n % 2;\n @n = -@n; }", "<p if=@b>x</p>")).toEqual([]);
   });
   test("Rule C — an operation whose span holds a parser error is not judged (the shape of conformance channel/watches-derived-const-ok)", () => {
     // `const <threshold> = …` misparses as `(const < threshold) > <error>`: the outer `>` would see a bool operand
@@ -519,77 +521,77 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
     // s475 (s475-boot-partial-followups): a base `return 1` beside it makes the call a `Partial`
     // whose proven `int` member IS judged (`@s + g()` may be `string + int`); with no proven
     // branch at all the operand stays silent
-    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return gr(n + 1); } }\n    function f() { @s = @s + g();\n @b = g() < 1; }", "<p if=@b>x</p>")).toEqual([]);
     expect(inApp(CELLS + "    function g() { return gr(1); }\n    function gr(n: int) { if (n > 0) { return 1 + gr(n - 1); } else { return 1; } }\n    function f() { @s = @s + g();\n @b = g() < 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
 });
 
 describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => {
   test("E-OPERAND-NOT-NARROWED — `int | not` under `+` / `>`; `string | not` under `+`", () => {
-    expect(inApp(O + "    function f() { @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n > 0) { @m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { @t = @o.v + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { @_m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n > 0) { @_m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    let <_t:string=\"\"/>\n    function f() { @_t = @o.v + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("E-OPERAND-NOT-NARROWED — a `T | not` PARAMETER and an ANNOTATED local", () => {
     expect(inApp("    function f(a: int | not) -> int { return a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp("    let <m:int=0/>\n    function f() { let a: int | not = 5;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp("    let <_m:int=0/>\n    function f() { let a: int | not = 5;\n @_m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("the message says how to narrow", () => {
-    expect(diagsIn(O + "    function f() { @m = @o.n + 1; }")[0].message).toContain("x is given");   // s460: §42.2.4's spelling
+    expect(diagsIn(O + "    function f() { @_m = @o.n + 1; }")[0].message).toContain("x is given");   // s460: §42.2.4's spelling
   });
   test("narrowed — `if (x is given)`, `x is given && …`, a ternary arm, `if (x)` (a presence test)", () => {
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n + 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n is given && @o.n > 0) { @m = 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { @m = @o.n is given ? @o.n + 1 : 0; }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n) { @m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @_m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is given && @o.n > 0) { @_m = 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { @_m = @o.n is given ? @o.n + 1 : 0; }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n) { @_m = @o.n + 1; } }")).toEqual([]);
   });
   test("narrowed — the `else` of `x is not`, `x is not || …`, after an early `return`, a parameter", () => {
-    expect(inApp(O + "    function f() { if (@o.n is not) { @m = 0; } else { @m = @o.n + 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n is not || @o.n > 0) { @m = 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n is not) { return; }\n @m = @o.n + 1; }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @_m = 0; } else { @_m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is not || @o.n > 0) { @_m = 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { return; }\n @_m = @o.n + 1; }")).toEqual([]);
     expect(inApp("    function f(a: int | not) -> int { if (a is not) { return 0; }\n return a + 1; }")).toEqual([]);
   });
   test("narrowed — an element under `if=(x is given)`: its children and other attributes", () => {
     expect(inApp(O, "<p if=(@o.n is given)>${@o.n + 1}</p>")).toEqual([]);
   });
   test("NOT narrowed — the THEN branch of `x is not`; after a write of the place; outside the `if`", () => {
-    expect(inApp(O + "    function f() { if (@o.n is not) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = not;\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = 1; }\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = not;\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @_m = 1; }\n @_m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O, "<p if=(@o.n is given)>x</p><p>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   const CLEAR = "    let <flag:bool=false/>\n    function clear() { @o = { v: not, n: not, f: not }; }\n";
   test("r2 F1a — a CALL whose callee writes the place drops the narrowing (statement, handler under `if=`, transitive)", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear();\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR, "<button if=(@o.n is given) onclick={ clear(); @m = @o.n + 1; }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function outer() { clear(); }\n    function f() { if (@o.n is given) { outer();\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear();\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR, "<button if=(@o.n is given) onclick={ clear(); @_m = @o.n + 1; }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function outer() { clear(); }\n    function f() { if (@o.n is given) { outer();\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r3 N1 — the right operand of `&&` / `||` is not narrowed across a call in the LEFT operand that writes the place", () => {
-    const CB = "    let <bb:bool=false/>\n    function clearB() -> bool { @o = { v: not, n: not, f: not };\n return true; }\n";
-    expect(inApp(O + CB + "    function f() { if (@o.n is given && clearB() && @o.n + 1 > 0) { @m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CB + "    function f() { @bb = @o.n is given && clearB() && @o.n + 1 > 0; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CB + "    function f() { @bb = @o.n is not || !clearB() || @o.n + 1 > 0; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    const CB = "    let <_bb:bool=false/>\n    function clearB() -> bool { @o = { v: not, n: not, f: not };\n return true; }\n";
+    expect(inApp(O + CB + "    function f() { if (@o.n is given && clearB() && @o.n + 1 > 0) { @_m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @_bb = @o.n is given && clearB() && @o.n + 1 > 0; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @_bb = @o.n is not || !clearB() || @o.n + 1 > 0; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r3 N1 twin — a left-operand call that writes OTHER places keeps the narrowing", () => {
-    const KB = "    let <bb:bool=false/>\n    function keepB() -> bool { @m = 3;\n return true; }\n";
-    expect(inApp(O + KB + "    function f() { @bb = @o.n is given && keepB() && @o.n + 1 > 0; }")).toEqual([]);
-    expect(inApp(O + KB + "    function f() { @bb = @o.n is not || !keepB() || @o.n + 1 > 0; }")).toEqual([]);
+    const KB = "    let <_bb:bool=false/>\n    function keepB() -> bool { @_m = 3;\n return true; }\n";
+    expect(inApp(O + KB + "    function f() { @_bb = @o.n is given && keepB() && @o.n + 1 > 0; }")).toEqual([]);
+    expect(inApp(O + KB + "    function f() { @_bb = @o.n is not || !keepB() || @o.n + 1 > 0; }")).toEqual([]);
   });
-  const XS = "    <xs:O[replace]=([{ v: \"\", n: 0, f: false }])/>\n    function clearXs() { @xs = [{ v: not, n: not, f: not }]; }\n    function other() { @m = 2; }\n";
-  const row = (body) => `<each in=@xs as x><p if=(x.n is given)><button onclick={ ${body};\n @m = x.n + 1; }>b</button></p></each>`;
+  const XS = "    <xs:O[replace]=([{ v: \"\", n: 0, f: false }])/>\n    function clearXs() { @xs = [{ v: not, n: not, f: not }]; }\n    function other() { @_m = 2; }\n";
+  const row = (body) => `<each in=@xs as x><p if=(x.n is given)><button onclick={ ${body};\n @_m = x.n + 1; }>b</button></p></each>`;
   test("r3 N3 — a write of an `<each>` source (direct, or by a callee) drops the row binding's narrowing", () => {
     expect(inApp(O + XS, row("clearXs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + XS, row("@xs = [{ v: not, n: not, f: not }]"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r3 N3 twin — a write elsewhere keeps the row narrowing; the narrowed row read itself is silent", () => {
     expect(inApp(O + XS, row("other()"))).toEqual([]);
-    expect(inApp(O + XS, row("@o.n = not"))).toEqual([]);
+    expect(inApp(O + XS, row("@o.n = not") + "<p if=(@o.n is given)>x</p>")).toEqual([]);
     expect(inApp(O + XS, "<each in=@xs as x><p if=(x.n is given)>${x.n + 1}</p></each>")).toEqual([]);
   });
   test("r5 R1 — N3 at depth: writing the OUTER source of a nested `<each>` drops the inner row's narrowing", () => {
     // s469-boot-tape-grants: `kids` takes `replace` from its type (`let` on a tape field is E-GRANT-LET-ON-SEQUENCE)
-    const G = "    type G:struct = { let name: string, kids: O[replace] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }]; }\n    function other() { @m = 2; }\n";
-    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)><button onclick={ ${body};\n @m = y.n + 1; }>b</button></p></each></each>`;
+    const G = "    type G:struct = { let name: string, kids: O[replace] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }]; }\n    function other() { @_m = 2; }\n";
+    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)><button onclick={ ${body};\n @_m = y.n + 1; }>b</button></p></each></each>`;
     expect(inApp(O + G, nested("clearGs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + G, nested("@gs = []"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twins: a write elsewhere; the narrowed inner read with no write
@@ -597,45 +599,45 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + G, "<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)>${y.n + 1}</p></each></each>")).toEqual([]);
   });
   test("r2 F1a twin — a call whose callee writes OTHER places keeps the narrowing", () => {
-    expect(inApp(O + "    function h() { @m = 2;\n @o.v = \"x\"; }\n    function f() { if (@o.n is given) { h();\n @m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function h() { @_m = 2;\n @o.v = \"x\"; }\n    function f() { if (@o.n is given) { h();\n @_m = @o.n + 1; } }")).toEqual([]);
   });
   test("r2 F1b — a write in a NESTED block un-narrows after it (the if joins its paths); a local too", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = not; }\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { if (@flag) { a = not; }\n @m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { a = not;\n @m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = not; }\n @_m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { if (@flag) { a = not; }\n @_m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { a = not;\n @_m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r2 F1b twin — a nested write that keeps the place present, or a nested block that writes nothing", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = 3; }\n @m = @o.n + 1; } }")).toEqual([]);
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @m = 0; }\n @m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = 3; }\n @_m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @_m = 0; }\n @_m = @o.n + 1; } }")).toEqual([]);
   });
   test("r2 F3 — a write of a PROVABLY present value narrows the place (inside, and after an `if` both paths leave present)", () => {
-    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = 5;\n @m = @o.n + 1; } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n is not) { @o.n = 5; }\n @m = @o.n + 1; }")).toEqual([]);
-    expect(inApp(O + "    function f() { @o.n = 5;\n @m = @o.n + 1; }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = 5;\n @_m = @o.n + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @o.n = 5; }\n @_m = @o.n + 1; }")).toEqual([]);
+    expect(inApp(O + "    function f() { @o.n = 5;\n @_m = @o.n + 1; }")).toEqual([]);
   });
   test("r2 F3 twin — a write of `not` or of a `T | not` value does not narrow", () => {
-    expect(inApp(O + "    function f() { @o.n = not;\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f(k: int | not) { @o.n = k;\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is not) { @m = 0; }\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { @o.n = not;\n @_m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f(k: int | not) { @o.n = k;\n @_m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @_m = 0; }\n @_m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a local joined from `not` and a value: silent where it is PROVABLY present (the write of `5` narrows it)", () => {
-    expect(inApp("    let <m:int=0/>\n    function f() { let a = not;\n a = 5;\n @m = a + 1; }")).toEqual([]);
+    expect(inApp("    let <_m:int=0/>\n    function f() { let a = not;\n a = 5;\n @_m = a + 1; }")).toEqual([]);
   });
   test("r2 follow-through — the joined-local carve-out is gone: a local that MAY still be `not` is reported", () => {
-    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; }\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp("    let <_m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; }\n @_m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twin: both paths leave it present
-    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; } else { a = 6; }\n @m = a + 1; }")).toEqual([]);
+    expect(inApp("    let <_m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; } else { a = 6; }\n @_m = a + 1; }")).toEqual([]);
   });
   test("r2 F2 — a local that COPIES a `T | not` (a place, a `const`, a call) carries a real `| not`: reported", () => {
-    expect(inApp(O + "    function f() { let a = @o.n;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { const z = @o.v;\n @t = z + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function g() -> int | not { return 1; }\n    function f() { let a = g();\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { let a = 5;\n a = @o.n;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    // (r2 F3: `let a = @o.n; a = 5; @m = a + 1` is SILENT — the write of a present `5` narrows `a`)
-    expect(inApp(O + "    function f() { let a = @o.n;\n a = 5;\n @m = a + 1; }")).toEqual([]);
+    expect(inApp(O + "    function f() { let a = @o.n;\n @_m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    let <_t:string=\"\"/>\n    function f() { const z = @o.v;\n @_t = z + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function g() -> int | not { return 1; }\n    function f() { let a = g();\n @_m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { let a = 5;\n a = @o.n;\n @_m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    // (r2 F3: `let a = @o.n; a = 5; @_m = a + 1` is SILENT — the write of a present `5` narrows `a`)
+    expect(inApp(O + "    function f() { let a = @o.n;\n a = 5;\n @_m = a + 1; }")).toEqual([]);
   });
   test("r2 F2 twin — the copy, narrowed, is silent", () => {
-    expect(inApp(O + "    function f() { let a = @o.n;\n if (a is given) { @m = a + 1; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { let a = @o.n;\n if (a is given) { @_m = a + 1; } }")).toEqual([]);
   });
 });
 
@@ -652,8 +654,8 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(d[0].message).toContain("div(a, b, .Mode)");
   });
   test("r1 F3 — one report per mistake: un-narrowed `int | not` operands of `/` are reported, and E-INT-DIVISION waits for them", () => {
-    expect(inApp(O + "    function f() { @m = @o.n / @o.n; }")).toEqual(["E-OPERAND-NOT-NARROWED", "E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n / @o.n; } }")).toEqual(["E-INT-DIVISION"]);
+    expect(inApp(O + "    function f() { @_m = @o.n / @o.n; }")).toEqual(["E-OPERAND-NOT-NARROWED", "E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @_m = @o.n / @o.n; } }")).toEqual(["E-INT-DIVISION"]);
   });
   test("E-INT-DIVISION — `/` on two ints in ANY position (into a number cell, a `-> int` return)", () => {
     expect(inApp(CELLS + "    function f() { @r = @n / 2; }")).toEqual(["E-INT-DIVISION"]);
@@ -666,16 +668,16 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(CELLS + "    function f() { @n = 2.5; }")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — an `int` annotation given a non-integer literal (JS-WAT #44: `<lit>: int = 1.5`, `let k: int = 1.5`)", () => {
-    expect(inApp("    let <q:int=1.5/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_q:int=1.5/>")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function f() { let k: int = 1.5; }")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function f() { let k: int = \"s\"; }")).toEqual(["E-TYPE-031"]);
   });
   test("r2 F4 — a hex / binary / octal literal is an INTEGER literal (`0xE`'s `E` is a digit, not an exponent)", () => {
     // (the slice lexer scans hex only — `0b…` / `0o…` are E-PARSE-TRAILING there; the classifier covers them anyway)
-    expect(inApp("    let <q:int=0xE/>\n    let <pt:int=0XFE/>\n    function f() { @q = 0xFE; }")).toEqual([]);
+    expect(inApp("    let <_q:int=0xE/>\n    let <_pt:int=0XFE/>\n    function f() { @_q = 0xFE; }")).toEqual([]);
     expect(inApp(CELLS + "    function f() { @r = 0xFE / 2; }")).toEqual(["E-INT-DIVISION"]);
     // twin: a real exponent stays a non-integer literal (`1e3` into `int` is bryan's open question — unchanged)
-    expect(inApp("    let <q:int=1e3/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_q:int=1e3/>")).toEqual(["E-TYPE-031"]);
   });
   test("r4 (c) — `int` enforced at RETURNS (ruled S442)", () => {
     expect(inApp(CELLS + "    function h() -> int { return 2.5; }")).toEqual(["E-TYPE-031"]);
@@ -697,14 +699,14 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   });
   test("r4 (c) — `int` enforced at ALL initializers (non-literal local / cell / use-site, struct-literal fields, `int[]` elements)", () => {
     expect(inApp(CELLS + "    function f() { let k: int = @r; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(CELLS + "    let <q:int=(@r)/>")).toEqual(["E-TYPE-031"]);
-    expect(inApp("    type P:struct = { x: int }\n    <pt:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
-    expect(inApp("    <ks:int[]=([1.5])/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    let <_q:int=(@r)/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    type P:struct = { x: int }\n    <_pt:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <_ks:int[]=([1.5])/>")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function f() { let ks: int[] = [1, 2.5]; }")).toEqual(["E-TYPE-031"]);
     expect(codes([boxLibS("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxAppS("<box n=(0.5 * 2)/>")])).toEqual(["E-TYPE-031"]);
   });
   test("r5 R6 — an UN-NARROWED `int | not` into an `int` position is E-TYPE-031 (return, argument, local, cell write)", () => {
-    const d = run([LIB(), app(O + "    function f() { @m = @o.n; }", "<p>x</p>")]).diags;
+    const d = run([LIB(), app(O + "    function f() { @_m = @o.n; }", "<p>x</p>")]).diags;
     expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
     expect(d[0].message).toContain("narrow it first");
     expect(inApp(O + "    function h() -> int { return @o.n; }")).toEqual(["E-TYPE-031"]);
@@ -712,37 +714,37 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function f() { let k: int = @o.n; }")).toEqual(["E-TYPE-031"]);
   });
   test("r5 R6 twins — narrowed, or into `int | not`", () => {
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n;\n let k: int = @o.n; } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @_m = @o.n;\n let k: int = @o.n; } }")).toEqual([]);
     expect(inApp(O + "    function f() { let k: int | not = @o.n; }")).toEqual([]);
   });
   // r6 — RULED S442 (user-voice "`T | not` into `T` is an error for all types": "A `T | not` isn't a `T`"; bryan:
-  // "if the lifecycle says T | not then it can only end as not"). FLIPPED from the r5 twin `@t = @o.v` (was silent).
+  // "if the lifecycle says T | not then it can only end as not"). FLIPPED from the r5 twin `@_t = @o.v` (was silent).
   test("r6 — an UN-NARROWED `T | not` into `T` is E-TYPE-031 for EVERY type (string, bool, struct, enum; write, param, return, arg, local)", () => {
-    const S = "    let <t:string=\"\"/>\n    let <bb:bool=false/>\n    type P:struct = { x: int }\n    type Q:struct = { let p: P | not, let e: Openness | not }\n    let <q:Q=({ p: not, e: not })/>\n    let <pp:P=({ x: 1 })/>\n    let <oo:Openness=.Closed/>\n";
-    expect(inApp(O + S + "    function f() { @t = @o.v; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function f() { @bb = @o.f; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function f() { @pp = @q.p; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function f() { @oo = @q.e; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function f(s: string | not) { @t = s; }")).toEqual(["E-TYPE-031"]);
+    const S = "    let <_t:string=\"\"/>\n    let <_bb:bool=false/>\n    type P:struct = { x: int }\n    type Q:struct = { let p: P | not, let e: Openness | not }\n    let <_q:Q=({ p: not, e: not })/>\n    let <pp:P=({ x: 1 })/>\n    let <oo:Openness=.Closed/>\n";
+    expect(inApp(O + S + "    function f() { @_t = @o.v; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @_bb = @o.f; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @pp = @_q.p; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @oo = @_q.e; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f(s: string | not) { @_t = s; }")).toEqual(["E-TYPE-031"]);
     // every position that takes a `T` — the return / argument / non-literal-initializer positions too
     expect(inApp(O + S + "    function h() -> string { return @o.v; }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + S + "    function g(z: string) { }\n    function f() { g(@o.v); }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + S + "    function f() { let z: string = @o.v; }")).toEqual(["E-TYPE-031"]);
     // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("positions 3-5 stay unchecked for non-int types").
     expect(inApp(O + S + "    function h() -> string { return 5; }\n    function g(z: string) { }\n    function f() { g(5); }")).toEqual(["E-TYPE-031", "E-TYPE-031"]);
-    const d = run([LIB(), app(O + S + "    function f() { @t = @o.v; }", "<p>x</p>")]).diags;
+    const d = run([LIB(), app(O + S + "    function f() { @_t = @o.v; }", "<p>x</p>")]).diags;
     expect(d[0].message).toContain("narrow it first");
   });
   test("r6 — a sequence ELEMENT that may be `not` into a non-optional element type (`[@o.n]` into `int[]`)", () => {
     expect(inApp(O + "    function f() { let ks: int[] = [@o.n]; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + "    <ks:int[free, append]=([])/>\n    function f() { @ks.append(@o.n); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    <_ks:int[free, append]=([])/>\n    function f() { @_ks.append(@o.n); }")).toEqual(["E-TYPE-031"]);
   });
   // (r7 N1: the `(int | not)[]` twin is deleted — the slice parser cannot spell a parenthesized element type,
   // so it checked nothing; the reachable optional-sequence twins are in "r7 B".)
   test("r6 twins — narrowed; `T | not` into `T | not`; `not` into `T | not`", () => {
-    const S = "    let <t:string=\"\"/>\n    type Q:struct = { let v: string | not }\n    let <q:Q=({ v: not })/>\n";
-    expect(inApp(O + S + "    function f() { if (@o.v is given) { @t = @o.v; } }")).toEqual([]);
-    expect(inApp(O + S + "    function f() { @q.v = @o.v;\n @q.v = not; }")).toEqual([]);
+    const S = "    let <_t:string=\"\"/>\n    type Q:struct = { let v: string | not }\n    let <_q:Q=({ v: not })/>\n";
+    expect(inApp(O + S + "    function f() { if (@o.v is given) { @_t = @o.v; } }")).toEqual([]);
+    expect(inApp(O + S + "    function f() { @_q.v = @o.v;\n @_q.v = not; }")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.n is given) { let ks: int[] = [@o.n]; } }")).toEqual([]);
   });
   test("r7 B — an optional-SEQUENCE target still checks its elements (`[@o.n]` into `int[] | not`)", () => {
@@ -757,7 +759,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function h() -> string { return not; }")).toEqual(["E-TYPE-043"]);
     expect(inApp(O + "    function g(z: string) { }\n    function f() { g(not); }")).toEqual(["E-TYPE-041"]);
     expect(inApp(O + "    function f() { let ks: string[] = [not]; }")).toEqual(["E-TYPE-041"]);
-    expect(inApp(O + "    <ks:string[replace]=([])/>\n    function f() { @ks = [not, not]; }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);
+    expect(inApp(O + "    <_ks:string[replace]=([])/>\n    function f() { @_ks = [not, not]; }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);
     expect(inApp(O + "    function g(z: int[]) { }\n    function f() { g([not]); }")).toEqual(["E-TYPE-041"]);
   });
   // r7 A — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus. SPEC §7.5.1: "This section is therefore
@@ -770,7 +772,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + P + "    function g(z: P) { }\n    function f() { g(5); }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + P + "    function g(z: Openness) { }\n    function f() { g(\"x\"); }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + P + "    function h() -> bool { return \"s\"; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + P + "    function h() -> P { return @m; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> P { return @_m; }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + P + "    function h() -> string[] { return [1]; }")).toEqual(["E-TYPE-031"]);
   });
   test("r7 A twins — matching types; an int into a `number` parameter / return; an unknown value is never checked", () => {
@@ -796,22 +798,22 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   });
   test("r8 F1 — an unresolved struct FIELD / declaration field / local annotation is never checked against", () => {
     expect(inApp("    type P:struct = { a: Nope }\n    function f() { let v: P = { a: 1 }; }")).toEqual(["E-TYPE-UNKNOWN"]);
-    expect(inApp("    let <x:Nope=1/>\n    function f() { @x = 2; }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    let <_x:Nope=1/>\n    function f() { @_x = 2; }")).toEqual(["E-TYPE-UNKNOWN"]);
     expect(inApp("    function f() { let a: Nope = 1;\n a = 2; }")).toEqual(["E-TYPE-UNKNOWN"]);
   });
   test("r8 F1 twins — RESOLVED types at the same positions are checked", () => {
     expect(inApp("    function g(k: int) { }\n    function f() { g(\"s\"); }")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function g(k: string) { let n: int = k; }")).toEqual(["E-TYPE-031"]);
     expect(inApp("    type P:struct = { a: int, b: Nope }\n    function f() { let v: P = { a: \"s\", b: 1 }; }")).toEqual(["E-TYPE-UNKNOWN", "E-TYPE-031"]);
-    expect(inApp("    let <x:int=0/>\n    function f() { @x = \"s\"; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_x:int=0/>\n    function f() { @_x = \"s\"; }")).toEqual(["E-TYPE-031"]);
     expect(inApp("    function f() { let a: int = 1;\n a = \"s\"; }")).toEqual(["E-TYPE-031"]);
   });
   // S444 review F1 — a READ of an unresolved declaration cell is unknown too (fieldTypeOf honours
   // FieldInfo.trusted, as structFieldType honours Unresolved.fields).
   test("S444 R1 — reading an unresolved DECLARATION cell is never checked against", () => {
-    expect(inApp("    let <x:Nope=1/>\n    function f() { let n: int = @x; }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    let <_x:Nope=1/>\n    function f() { let n: int = @_x; }")).toEqual(["E-TYPE-UNKNOWN"]);
     // twin: a resolved cell read IS checked
-    expect(inApp("    let <x:string=\"a\"/>\n    function f() { let n: int = @x; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    let <_x:string=\"a\"/>\n    function f() { let n: int = @_x; }")).toEqual(["E-TYPE-031"]);
   });
   // S444 review F2 — "unresolved" means the TYPE did not resolve (a name in it is unknown), not
   // "resolving it reported anything": a bad GRANT word (E-GRANT-UNKNOWN) leaves `int[…]` a real
@@ -867,14 +869,14 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function g(z: int[] | not) { }\n    function f() { g([1, 2]);\n g(not); }")).toEqual([]);
   });
   test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
-    expect(inApp(CELLS + "    let <q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n; }")).toEqual([]);
-    expect(inApp("    let <q:int=2.0/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    let <_q:int=(@n * 2)/>\n    <_ks:int[]=([1, 2])/>\n    function f() { let k: int = @n; }")).toEqual([]);
+    expect(inApp("    let <_q:int=2.0/>")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a non-integer element pushed onto an `int[]`", () => {
-    expect(inApp("    <ks:int[free, append]=([])/>\n    function f() { @ks.append(1.5); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <_ks:int[free, append]=([])/>\n    function f() { @_ks.append(1.5); }")).toEqual(["E-TYPE-031"]);
   });
   test("twins silent — `number / int` is float division; int arithmetic; an int into a number; integer literals", () => {
     expect(inApp(CELLS + "    function f() { @r = @r / 2;\n @r = 7.0 / 2;\n @n = @n * 2 + 1;\n @r = @n; }")).toEqual([]);
-    expect(inApp("    let <q:int=-3/>\n    let <w:number=3/>\n    function f() { let k: int = 4;\n let z: number = 4; }")).toEqual([]);
+    expect(inApp("    let <_q:int=-3/>\n    let <_w:number=3/>\n    function f() { let k: int = 4;\n let z: number = 4; }")).toEqual([]);
   });
 });

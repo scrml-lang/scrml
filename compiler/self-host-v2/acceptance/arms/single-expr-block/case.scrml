@@ -2,7 +2,6 @@
 <program>
     type LoadError:enum = { NotFound(id: string), Timeout }
     let <out:string=""/>
-    let <n:int=0/>
     function load(id: string)! LoadError {
         if (id == "x") fail LoadError.NotFound(id);
         if (id == "y") fail LoadError.Timeout;

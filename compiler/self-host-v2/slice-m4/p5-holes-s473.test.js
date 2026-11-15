@@ -61,7 +61,7 @@ describe("1 — §48.8: an unannotated return type is inferred from the returns 
     expect(diag(src, "E-TYPE-031").message).toContain("T | not");
   });
   test("a lambda's `return` is not the function's (returnSites skips a lambda body)", () => {
-    expect(codes(P("    let <n:int=0/>\n    fn f(xs: int[]) { const ys: int[] = xs.map((x) => x + 1); return ys.length; }\n    function g() { @n = f([1]); }"))).toEqual([]);
+    expect(codes(P("    let <_n:int=0/>\n    fn f(xs: int[]) { const ys: int[] = xs.map((x) => x + 1); return ys.length; }\n    function g() { @_n = f([1]); }"))).toEqual([]);
   });
   test("RUNS: an inferred return written into its own type renders", async () => {
     const { core } = compile(P("    let <n:int=0/>\n    fn f(k: int) { return k * 3; }\n    function g() { @n = f(2); }", "<p id=\"o\">${@n}</p><button id=\"b\" onclick=g()>g</button>"));

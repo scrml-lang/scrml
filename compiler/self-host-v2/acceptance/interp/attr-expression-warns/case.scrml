@@ -3,5 +3,6 @@
     let <s:string="ab"/>
     <main>
         <p id="t" title=("len ${@s}")>x</p>
+        <p id="s">${@s}</p>
     </main>
 </program>

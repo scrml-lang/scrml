@@ -20,6 +20,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -40,7 +41,8 @@ let k = 0;
 const load = (src) => loadProgram(clean(src).core, "s469vf-" + k++, []);
 const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
 
-const prog = (decls, body) => `<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the shared-scaffold cells (ZS, T0's) it names
+const prog = (decls, body) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${body}\n    </main>\n</program>\n`, ["    <zs:int[]=([3, 4, 5])/>", "    <ws:string[]=([\"a\", \"b\"])/>", "    <xs:int[]=([1, 2, 3])/>"]);
 // one function `f(ys)` over the tape `@zs`, shown in `#o`
 const ZS = `    <zs:int[]=([3, 4, 5])/>\n    <ws:string[]=(["a", "b"])/>`;
 const fnProg = (b, ret = "int", sig = "ys: int[]", call = "f(@zs)") => prog(`${ZS}\n    function f(${sig}) -> ${ret} {\n${b}\n    }`, `        <p id="o">\${${call}}</p>`);

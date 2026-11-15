@@ -22,6 +22,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
@@ -59,8 +60,9 @@ const find = (n, pred, out = []) => {
 };
 
 // a program: declarations, a `go()` function body, and markup
+// s478 (E-DG-002): `@shown` is declared only when the case names it (the default markup reads it)
 const prog = (decls, body, markup = `        <p id="o">\${@shown}</p>`) =>
-  `<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n${markup}\n    </main>\n</program>\n`;
+  dropUnnamedScaffold(`<program>\n${decls}\n    let <shown:string=""/>\n    function go() {\n${body}\n    }\n    <main>\n        <button onclick=go()>go</button>\n${markup}\n    </main>\n</program>\n`, [`    let <shown:string=""/>`]);
 const cells = (t) => `    <xs:${t}=(["a", "b", "c"])/>`;
 const showXs = `        <p id="o">\${@xs.join(",")}</p>`;
 
@@ -120,7 +122,7 @@ describe("A — a cell's position write `@xs[i] = v` (§66.12.6 rule 3)", () => 
   test("an element whose struct holds a tape: replacing the element replaces that tape — its own grants (§66.12.6 rule 4)", () => {
     const decls = (g) => `    type K:struct = { name: string, kids: int[${g}] }\n    <ks:K[write]=([{ name: "a", kids: [] }])/>`;
     expect(codes(prog(decls("free, append"), `        @ks[0] = { name: "b", kids: [] };`))).toEqual(["E-WRITE-NOT-GRANTED"]);
-    clean(prog(decls("free, append, replace"), `        @ks[0] = { name: "b", kids: [] };`));
+    clean(prog(decls("free, append, replace"), `        @ks[0] = { name: "b", kids: [] };`, `        <p id="o">\${@ks.length}</p>`));
   });
 
   test("Core check C3 refuses a PositionAt whose field does not grant `write` (defence in depth)", () => {
@@ -254,7 +256,7 @@ describe("B — a write to a part of a local (value semantics; §66.11.4, §66.1
   test("an element that is itself a tape: replacing it needs the INNER tape's `replace` — cell, local, parameter, nested", () => {
     const G = (inner) => `    <g:int[${inner}][write]=([[1, 2]])/>`;
     expect(codes(prog(G("free, append"), `        @g[0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
-    clean(prog(G("free, append, replace"), `        @g[0] = [];`));
+    clean(prog(G("free, append, replace"), `        @g[0] = [];`, `        <p id="o">\${@g.length}</p>`));
     expect(codes(prog(G("free, append"), `        let h: int[free, append][write] = @g;\n        h[0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog("    fn f(h: int[free, append][write]) -> int {\n        h[0] = [];\n        return h[0].length;\n    }", `        @shown = "x";`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(prog("", `        let d: int[free, append][write][write] = [[[1]]];\n        d[0][0] = [];`))).toEqual(["E-WRITE-NOT-GRANTED"]);
@@ -266,7 +268,7 @@ describe("B — a write to a part of a local (value semantics; §66.11.4, §66.1
   });
 
   test("Core check C3 refuses a PositionAt that replaces an inner tape without `replace` (defence in depth)", () => {
-    const r = clean(prog(`    <g:int[free, append, replace][write]=([[1, 2]])/>`, `        @g[0] = [];`));
+    const r = clean(prog(`    <g:int[free, append, replace][write]=([[1, 2]])/>`, `        @g[0] = [];`, `        <p id="o">\${@g.length}</p>`));
     const core = structuredClone(r.core);
     const inner = find(core.decls, (n) => n.variant === "Seq" && (n.data.elem === "Int" || n.data.elem?.variant === "Int") && n.data.grants && n.data.grants.replace === true);
     expect(inner.length).toBeGreaterThan(0);
@@ -289,7 +291,7 @@ describe("C — what stays refused", () => {
 describe("D — a part write in a SERVER function (the server runtime's writePath)", () => {
   test("printed as `rt.writePath(…)` and run by the server artifact: the right value; the trap is a fixed 500", async () => {
     const SA = await import("./server-artifact-harness.js");
-    const src = `<program db="./app.db">\n    let <n:int=0/>\n    server function put(i: int, v: int) -> int {\n        let ys: int[write] = [1, 2, 3];\n        ys[i] = v;\n        return ys[0] + ys[1] + ys[2];\n    }\n    <main>\n        <button id="go" onclick={ @n = put(1, 10) !{ .Transport(t) :> return }; }>go</button>\n    </main>\n</program>\n`;
+    const src = `<program db="./app.db">\n    let <_n:int=0/>\n    server function put(i: int, v: int) -> int {\n        let ys: int[write] = [1, 2, 3];\n        ys[i] = v;\n        return ys[0] + ys[1] + ys[2];\n    }\n    <main>\n        <button id="go" onclick={ @_n = put(1, 10) !{ .Transport(t) :> return }; }>go</button>\n    </main>\n</program>\n`;
     const { core } = SA.compile(src);
     expect(SA.check(core)).toEqual([]);
     const { srv, routes, js } = await SA.serve(core, SA.spyDriver().fn);

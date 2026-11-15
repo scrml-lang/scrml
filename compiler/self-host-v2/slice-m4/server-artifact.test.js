@@ -68,8 +68,8 @@ describe("§13 gate — a server wait is a Core Suspend; `await` is printed ther
   });
 
   test("a server function that waits on nothing is NOT `waits` and is printed as a plain function (async iff Core says it waits)", () => {
-    const src = P(`    let <n:int=0/>\n    server function add(a: int, b: int) -> int { return a + b; }`,
-      `        <button id="go" onclick={ @n = add(1, 2) !{ .Transport(t) :> return }; }>add</button>`);
+    const src = P(`    let <_n:int=0/>\n    server function add(a: int, b: int) -> int { return a + b; }`,
+      `        <button id="go" onclick={ @_n = add(1, 2) !{ .Transport(t) :> return }; }>add</button>`);
     const { core } = compile(src);
     const add = fnNamed(core, "add");
     expect(add.waits).toBe(false);
@@ -227,7 +227,7 @@ describe("§13 gate acceptance — no expressible shape accepts a wrong password
 // =============================================================================
 describe("the route — every path answers; nothing runs on a refused request", () => {
   const SRC = P(`    type E:enum = { NotFoundUser, Invalid(why: string), Boom }
-    let <n:int=0/>
+    let <_n:int=0/>
     type Cnt:struct = { n: int }
     function lookup(id: int, mode: int)! E {
         const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE id = \${id}\`}.get() !{ _ :> { return 0; } };
@@ -239,7 +239,7 @@ describe("the route — every path answers; nothing runs on a refused request", 
     function touch(id: int) {
         ${SQ}\`UPDATE t SET id = id WHERE id = \${id}\`}.run() !{ _ :> { return; } };
     }`,
-    `        <button id="a" onclick={ @n = lookup(1, 0) !{ _ :> return }; }>a</button>
+    `        <button id="a" onclick={ @_n = lookup(1, 0) !{ _ :> return }; }>a</button>
         <button id="b" onclick={ touch(1) !{ .Transport(t) :> return }; }>b</button>`);
   let srv, routes, spy, logs;
   beforeAll(async () => {
@@ -310,11 +310,11 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
   // naming the fix. (impl#1 emits `'%\${t}%'` — the value is dropped silently; reported, not changed.)
   test("a `${…}` inside a SQL string literal, a quoted name or a comment is refused; bound outside the quotes it compiles", () => {
     const at = (sql) => codes(P(`    type Cnt:struct = { n: int }
-    let <n:int=0/>
+    let <_n:int=0/>
     function q(t: string) -> int {
         const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0; } };
         return r.n;
-    }`, `        <button id="go" onclick={ @n = q("a") !{ .Transport(t) :> return }; }>go</button>`));
+    }`, `        <button id="go" onclick={ @_n = q("a") !{ .Transport(t) :> return }; }>go</button>`));
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);   // s473: the S468 code (§8.1)
     expect(at("SELECT COUNT(*) AS n FROM users WHERE \"\${t}\" = 1")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);
     expect(at("SELECT COUNT(*) AS n FROM users -- \${t}\n")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);
@@ -322,12 +322,12 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE \${\"%\" + t + \"%\"}")).toEqual([]);
   });
 
-  const SRC = P(`    let <n:int=0/>
+  const SRC = P(`    let <_n:int=0/>
     type Cnt:struct = { n: int }
     function find(name: string, tag: string) -> int {
         const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users WHERE name = \${name} OR alias = \${name} OR tag = \${tag}\`}.get() !{ _ :> { return 0; } };
         return r.n;
-    }`, `        <button id="go" onclick={ @n = find("x", "y") !{ .Transport(t) :> return }; }>go</button>`);
+    }`, `        <button id="go" onclick={ @_n = find("x", "y") !{ .Transport(t) :> return }; }>go</button>`);
 
   test("the literal runs reach the driver as the template; every value as a bound parameter; a hostile value stays a value", async () => {
     const r0 = compile(SRC);
@@ -348,7 +348,7 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
   });
 
   test("§8.2 — a repeated expression is ONE parameter, evaluated ONCE (a waiting call in a slot runs once)", async () => {
-    const src = P(`    let <n:int=0/>
+    const src = P(`    let <_n:int=0/>
     function stamp(x: string) -> string {
         ${SQ}\`INSERT INTO log (v) VALUES (\${x})\`}.run() !{ _ :> { return x; } };
         return x;
@@ -357,7 +357,7 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
     function twice(a: string) -> int {
         const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE a = \${stamp(a)} OR b = \${stamp(a)}\`}.get() !{ _ :> { return 0; } };
         return r.n;
-    }`, `        <button id="go" onclick={ @n = twice("q") !{ .Transport(t) :> return }; }>go</button>`);
+    }`, `        <button id="go" onclick={ @_n = twice("q") !{ .Transport(t) :> return }; }>go</button>`);
     const r0 = compile(src);
     expect(check(r0.core)).toEqual([]);
     const spy = spyDriver((strings) => (strings[0].startsWith("SELECT") ? [{ n: 0 }] : []));
@@ -374,8 +374,8 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
 // 6. Emission by reach (design §2 "Trigger 5 is emission")
 // =============================================================================
 describe("Trigger 5 is emission — a helper only the server reaches is in server.js and NOT in client.js", () => {
-  const SRC = P(`    let <n:int=0/>
-    let <s:string=""/>
+  const SRC = P(`    let <_n:int=0/>
+    let <_s:string=""/>
     fn norm(x: string) -> string { return x + "!"; }
     fn shared(x: int) -> int { return x * 2; }
     type Cnt:struct = { n: int }
@@ -390,8 +390,8 @@ describe("Trigger 5 is emission — a helper only the server reaches is in serve
         const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users\`}.get() !{ _ :> { return 0; } };
         return helperOnly(r.n + a);
     }`,
-    `        <button id="a" onclick={ @n = viaParam("x") !{ .Transport(t) :> return }; }>a</button>
-        <button id="b" onclick={ @n = load(shared(1)) !{ .Transport(t) :> return }; }>b</button>`);
+    `        <button id="a" onclick={ @_n = viaParam("x") !{ .Transport(t) :> return }; }>a</button>
+        <button id="b" onclick={ @_n = load(shared(1)) !{ .Transport(t) :> return }; }>b</button>`);
 
   test("reached only from a SQL parameter (`norm`) or only from a server function (`helperOnly`): server only; reached from both (`shared`): both (§13.4)", () => {
     const { core } = compile(SRC);
@@ -460,7 +460,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
         const u: User = loadOne() !{ _ :> { return; } };
         @uid = u.id;
         @name = u.name;
-    }`, `        <button id="load" onclick=load()>Load</button>`);
+    }`, `        <button id="load" onclick=load()>Load</button>
+        <p class="read">\${@uid} \${@name}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT)"], { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }] }, ["#load"]);
     expect([state.uid, state.name]).toEqual([1, "Alice"]);
   });
@@ -520,7 +521,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     }
     function onLoad() {
         @totals = regionTotals() !{ .Transport(t) :> return };
-    }`, `        <button id="load" onclick=onLoad()>Region totals</button>`);
+    }`, `        <button id="load" onclick=onLoad()>Region totals</button>
+        <p class="read">\${@totals.length}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE sales (id INTEGER, region TEXT, amount INTEGER)"],
       { sales: [{ id: 1, region: "west", amount: 10 }, { id: 2, region: "east", amount: 20 }, { id: 3, region: "west", amount: 5 }] }, ["#load"]);
     expect(state.totals).toEqual([{ region: "east", total: 20 }, { region: "west", total: 15 }]);
@@ -534,7 +536,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     }
     function onLoad() {
         @top = topTwo() !{ .Transport(t) :> return };
-    }`, `        <button id="load" onclick=onLoad()>Top two</button>`);
+    }`, `        <button id="load" onclick=onLoad()>Top two</button>
+        <p class="read">\${@top.length}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE scores (id INTEGER, player TEXT, points INTEGER)"],
       { scores: [{ id: 1, player: "a", points: 30 }, { id: 2, player: "b", points: 90 }, { id: 3, player: "c", points: 60 }] }, ["#load"]);
     expect(state.top).toEqual([{ player: "b", points: 90 }, { player: "c", points: 60 }]);
@@ -545,7 +548,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     <admins:User[replace]=([])/>
     function loadByRole(role: string) -> User[] {
         return ${SQ}\`SELECT id, name FROM users WHERE role = \${role} ORDER BY id\`}.all() !{ _ :> [] };
-    }`, `        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return }; }>Load admins</button>`);
+    }`, `        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return }; }>Load admins</button>
+        <p class="read">\${@admins.length}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT, role TEXT)"],
       { users: [{ id: 1, name: "Alice", role: "admin" }, { id: 2, name: "Bob", role: "user" }, { id: 3, name: "Carol", role: "admin" }] }, ["#load"]);
     expect(state.admins).toEqual([{ id: 1, name: "Alice" }, { id: 3, name: "Carol" }]);
@@ -559,7 +563,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     }
     function onLoad() {
         @list = booksByAuthor("Ada") !{ .Transport(t) :> return };
-    }`, `        <button id="load" onclick=onLoad()>Load books</button>`);
+    }`, `        <button id="load" onclick=onLoad()>Load books</button>
+        <p class="read">\${@list.length}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE authors (id INTEGER, name TEXT)", "CREATE TABLE books (id INTEGER, title TEXT, author_id INTEGER)"],
       { authors: [{ id: 1, name: "Ada" }], books: [{ id: 1, title: "Notes", author_id: 1 }, { id: 2, title: "Essays", author_id: 1 }] }, ["#load"]);
     expect(state.list).toEqual([{ title: "Notes", author: "Ada" }, { title: "Essays", author: "Ada" }]);
@@ -573,7 +578,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     }
     function onBump() {
         @updated = bump(1, 3) !{ .Transport(t) :> return };
-    }`, `        <button id="go" onclick=onBump()>Bump qty</button>`);
+    }`, `        <button id="go" onclick=onBump()>Bump qty</button>
+        <p class="read">\${@updated.length}</p>`);
     const { state, sql } = await endToEnd(src, ["CREATE TABLE items (id INTEGER, qty INTEGER)"], { items: [{ id: 1, qty: 5 }] }, ["#go"]);
     expect(state.updated).toEqual([{ id: 1, qty: 8 }]);
     expect(await sql.unsafe("SELECT qty FROM items WHERE id = 1")).toEqual([{ qty: 8 }]);
@@ -596,7 +602,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     function onCount() {
         @remaining = countTasks() !{ .Transport(t) :> return };
     }`, `        <button id="del" onclick=onDelete()>Delete task 2</button>
-        <button id="count" onclick=onCount()>Count</button>`);
+        <button id="count" onclick=onCount()>Count</button>
+        <p class="read">\${@remaining}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE tasks (id INTEGER, title TEXT)"], { tasks: [{ id: 1, title: "a" }, { id: 2, title: "b" }, { id: 3, title: "c" }] }, ["#del", "#count"]);
     expect(state.remaining).toBe(2);
   });
@@ -620,7 +627,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     function onCount() {
         @total = countNotes() !{ .Transport(t) :> return };
     }`, `        <button id="add" onclick=onAdd()>Add note</button>
-        <button id="count" onclick=onCount()>Count</button>`);
+        <button id="count" onclick=onCount()>Count</button>
+        <p class="read">\${@inserted.length} \${@total}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)"], { notes: [{ id: 1, body: "first" }] }, ["#add", "#count"]);
     expect(state.inserted).toEqual([{ id: 2, body: "second" }]);
     expect(state.total).toBe(2);
@@ -642,7 +650,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     function onCount() {
         @total = memberCount() !{ .Transport(t) :> return };
     }`, `        <button id="add" onclick=onAdd()>Add duplicate</button>
-        <button id="count" onclick=onCount()>Count</button>`);
+        <button id="count" onclick=onCount()>Count</button>
+        <p class="read">\${@total}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ id: 1, email: "a@x.com" }] }, ["#add", "#count"]);
     expect(state.total).toBe(1);
   });
@@ -655,7 +664,8 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
             _ :> { return "other"; }
         };
         return "ok";
-    }`, `        <button id="add" onclick={ @msg = add("a@x.com") !{ .Transport(t) :> return }; }>Add</button>`);
+    }`, `        <button id="add" onclick={ @msg = add("a@x.com") !{ .Transport(t) :> return }; }>Add</button>
+        <p class="read">\${@msg}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ id: 1, email: "a@x.com" }] }, ["#add"]);
     // S474 #1703 r1 (PA ruling): ConstraintViolation's field is the COLUMN name only
     expect(state.msg).toBe("dup:email");
@@ -672,7 +682,8 @@ describe("client ↔ server — the first call plants the CSRF cookie and is ret
     function count() -> int {
         const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t\`}.get() !{ _ :> { return -1; } };
         return r.n;
-    }`, `        <button id="go" onclick={ @n = count() !{ .Transport(t) :> return }; }>go</button>`);
+    }`, `        <button id="go" onclick={ @n = count() !{ .Transport(t) :> return }; }>go</button>
+        <p class="read">\${@n}</p>`);
     globalThis.document.cookie = "scrml_csrf=; Max-Age=0; Path=/";
     let posts = 0;
     const r0 = compile(src);
@@ -705,20 +716,21 @@ describe("client ↔ server — the first call plants the CSRF cookie and is ret
             .Transport(t) :> { @status = "transport"; return; }
         };
         @status = "saved";
-    }`, `        <button id="go" onclick=go()>go</button>`);
+    }`, `        <button id="go" onclick=go()>go</button>
+        <p class="read">\${@seen} \${@status}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE t (id INTEGER)"], { t: [{ id: 1 }, { id: 2 }, { id: 3 }] }, ["#go"], 10);
     expect(state.status).toBe("conflict");
     expect(state.seen).toBe(3);
   });
 
   test("`defer` in a waiting server function is printed as the function's own `try … finally` — it runs at the real exit, AFTER the awaits (§19.16.2)", async () => {
-    const src = P(`    let <n:int=0/>
+    const src = P(`    let <_n:int=0/>
     fn noop(x: int) -> int { return x; }
     function work() -> int {
         defer noop(1);
         ${SQ}\`INSERT INTO log (v) VALUES ('body')\`}.run() !{ _ :> { return -1; } };
         return 1;
-    }`, `        <button id="go" onclick={ @n = work() !{ .Transport(t) :> return }; }>go</button>`);
+    }`, `        <button id="go" onclick={ @_n = work() !{ .Transport(t) :> return }; }>go</button>`);
     const r0 = compile(src);
     expect(check(r0.core)).toEqual([]);
     const { server } = artifacts(r0.core);

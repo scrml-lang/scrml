@@ -32,8 +32,8 @@
       }
     ],
     "state": {
-      "uid": 1,
-      "name": "Alice"
+      "_uid": 1,
+      "_name": "Alice"
     }
   },
   "xfail": {

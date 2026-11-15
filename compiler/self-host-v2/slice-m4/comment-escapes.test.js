@@ -14,12 +14,14 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program declares the scaffold cell `@n` only when the case names it
+const P = (body, decls = "") => dropUnnamedScaffold(`<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`, ["    let <n:int=5/>"]);
 const W = (inner) => `\n        ${inner}\n        <b>end</b>\n    `;
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
@@ -96,7 +98,7 @@ describe("R1 — a free-text `//` is a comment only at line start or after white
     expect(await html(state('"Ready"// note\n'))).toBe(W("<p>Ready<!--if--></p>"));
   });
   test("twin: in a `<program>` body (default-logic) a `//` right after a `>` is still a comment", () => {
-    const src = `<program>\n    let <n:int=5/>// note </program>\n    <main><b>x</b></main>\n</program>\n`;
+    const src = `<program>\n    let <_n:int=5/>// note </program>\n    <main><b>x</b></main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 });

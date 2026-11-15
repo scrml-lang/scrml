@@ -104,7 +104,8 @@ describe("distinct attributes are not repeats", () => {
 });
 
 describe("a declaration opener: a presence validator is one predicate whatever its argument", () => {
-  const decl = (words) => `<program>\n    let <name:string="" ${words}/>\n    <main><p>x</p></main>\n</program>\n`;
+  // s478 (E-DG-002): the program renders the validated cell, so a legal case reads every cell it declares
+  const decl = (words) => `<program>\n    let <name:string="" ${words}/>\n    <main><p>\${@name}</p></main>\n</program>\n`;
   for (const words of [`req req`, `req req("m")`, `req("m") req`, `req("a") req("b")`]) {
     test(`\`${words}\` → \`req\` is a repeat`, () => {
       const t = twice(decl(words));

@@ -250,7 +250,8 @@ const dbOf = (core, fname) => {
   const db = core.dbs.find((d) => d.sym.id === queryOf(fn).db.id);
   return db && db.target;
 };
-const USE = (f) => `let <n:int=0/>\n    <button onclick={ @n = ${f}() !{ _ :> { 0 } }; }>go</button>`;
+// s478: the call's result lands in a cell nothing reads (the db scoping is the point) — `_`-named (§34 E-DG-002)
+const USE = (f) => `let <_n:int=0/>\n    <button onclick={ @_n = ${f}() !{ _ :> { 0 } }; }>go</button>`;
 
 describe("F1 — a `<db src=>` in a `<page>` is no direct child of `<program>` (§8.1.1 \"Direct child only\")", () => {
   test("control: a `<db>` in a `<div>` does not supply the program — E-SQL-004", () => {

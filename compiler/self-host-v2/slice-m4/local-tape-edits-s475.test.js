@@ -267,6 +267,7 @@ ${body}
     <main>
         <button id="ok" onclick={ @r = book(7) !{ _ :> 9, }; }>ok</button>
         <p id="o">\${@shown}</p>
+        <p id="r">\${@r}</p>
     </main>
 </program>
 `;
@@ -335,7 +336,7 @@ describe("J — a bounded length is read, not refused (O36 RULED S477; review F3
     expect(codes(prog("", `        let xs: int[1..=3, append] = [1];\n        xs.append(2);`))).toEqual([]);
     expect(codes(prog("", `        const xs: int[1..=3] = [1, 2, 3, 4, 5];`))).toEqual(["E-WRITE-INVARIANT"]);
     expect(codes(prog("    fn f(xs: int[1..=3, append]) -> int { return 0; }", ""))).toEqual([]);
-    expect(codes(prog("    <c:int[1..=3, append]=([1])/>", ""))).toEqual([]);
+    expect(codes(prog("    <_c:int[1..=3, append]=([1])/>", ""))).toEqual([]);
     expect(codes(prog("", `        let xs: int[1..=3, free, append] = [1];`))).toEqual(["E-GRANT-UNKNOWN"]);
   });
 

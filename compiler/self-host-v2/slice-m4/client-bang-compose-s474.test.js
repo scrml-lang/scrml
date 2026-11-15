@@ -59,6 +59,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
     <main>
         <button id="ok" onclick={ @r = book(1, 0) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
         <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+        <p class="read">\${@r} \${@status}</p>
     </main>
 </program>
 `;
@@ -156,6 +157,7 @@ ${E}    let <r:int=0/>
     }
     <main>
         <button id="go" onclick={ @r = move(5) !{ .Bad :> 7, _ :> 9, }; }>go</button>
+        <p class="read">\${@r}</p>
     </main>
 </program>
 `;
@@ -199,7 +201,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         charge(a, 0)?;
         return 1;
     }
-    <main><button onclick={ @r = book(1) !{ _ :> 0, }; }>go</button></main>
+    <main><button onclick={ @r = book(1) !{ _ :> 0, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -221,7 +223,7 @@ ${HOLD_CHARGE}    let <s:string=""/>
         charge(a, 0)?;
         @s = title();
     }
-    <main><button onclick={ book(1) !{ _ :> { @s = "f"; }, }; }>go</button></main>
+    <main><button onclick={ book(1) !{ _ :> { @s = "f"; }, }; }>go</button><p class="read">\${@s}</p></main>
 </program>
 `;
     expect(errs(src)).toEqual([]);
@@ -238,7 +240,7 @@ ${HOLD_CHARGE}    let <s:string=""/>
         const y: int = charge(a, 0)?;
         if (y > 0) { @s = title(); }
     }
-    <main><button onclick={ book(1) !{ _ :> { @s = "f"; }, }; }>go</button></main>
+    <main><button onclick={ book(1) !{ _ :> { @s = "f"; }, }; }>go</button><p class="read">\${@s}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -254,7 +256,7 @@ ${HOLD_CHARGE}    let <n:int=4/>
         hold(@n)?;
         charge(@n, 0)?;
     }
-    <main><button id="go" onclick={ book() !{ _ :> { @n = 0; }, }; @r = 1; }>go</button></main>
+    <main><button id="go" onclick={ book() !{ _ :> { @n = 0; }, }; @r = 1; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(errs(src)).toEqual([]);
@@ -288,7 +290,7 @@ ${HOLD_CHARGE}    let <n:int=0/>
         const y: int = charge(a, 0)?;
         @n = x + y;
     }
-    <main><button id="go" onclick={ book(1) !{ _ :> { @n = -1; }, }; @r = 1; }>go</button></main>
+    <main><button id="go" onclick={ book(1) !{ _ :> { @n = -1; }, }; @r = 1; }>go</button><p class="read">\${@r} \${@n}</p></main>
 </program>
 `;
     expect(errs(src)).toEqual([]);
@@ -308,7 +310,7 @@ ${HOLD_CHARGE}    let <n:int=0/>
         const y: int = charge(a, 0)?;
         if (x > 0) { @n = x + y; }
     }
-    <main><button onclick={ book(1) !{ _ :> { @n = -1; }, }; }>go</button></main>
+    <main><button onclick={ book(1) !{ _ :> { @n = -1; }, }; }>go</button><p class="read">\${@n}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -333,7 +335,7 @@ ${HOLD_CHARGE}    let <n:int=0/>
         const y: int = s1(a + 1) !{ _ :> { return 0; } };
         return x + y;
     }
-    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button></main>
+    <main><button onclick={ @r = move(1) !{ _ :> 0, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(errs(src)).toEqual([]);
@@ -362,6 +364,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
     <main>
         <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
         <button id="ok" onclick={ @r = book(1, 0) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
+        <p class="read">\${@r}</p>
     </main>
 </program>
 `;
@@ -409,6 +412,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
     }
     <main>
         <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
+        <p class="read">\${@r}</p>
     </main>
 </program>
 `;
@@ -450,7 +454,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         charge(v, f)?;
         return v;
     }
-    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(errs(src)).toEqual([]);
@@ -466,7 +470,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
 describe("r1 L2 / L3 / L5: the synthesized batch's names", () => {
   test("L2: no diagnostic names `#book` or `book#batch` — it is `book (its composed server batch)`", () => {
     const btn = `        <button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button>`;
-    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    </main>\n</program>\n`;
+    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    <p class="read">\${@s}</p></main>\n</program>\n`;
     const ds = fe(src).diags;
     expect(ds.map((d) => d.code)).toContain("E-SQL-011");
     for (const d of ds) {
@@ -506,7 +510,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         if (t > 0) { charge(a, f)?; }
         return 1;
     }
-    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -521,7 +525,7 @@ ${HOLD_CHARGE}    let <s:string=""/>
         hold(a) !{ .Transport(t) :> { @s = "t"; }, _ :> { @s = "o"; } };
         charge(a, f)?;
     }
-    <main><button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button></main>
+    <main><button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button><p class="read">\${@s}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -546,7 +550,7 @@ ${E}    type C:struct = { c: int }
         if (f > 0) fail .Bad;
         return n;
     }
-    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
   // s475-boot-pg-envelopes: superseded by SPEC §19.10.5 "A composed batch's envelope" (#1732): "that
@@ -576,7 +580,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         if (f > 0) fail .Bad;
         return 3;
     }
-    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     const r = compile(src);
@@ -596,7 +600,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         if (f > 0) fail .Bad;
         return 2;
     }
-    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(warns(src)).toEqual([]);
@@ -617,7 +621,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         if (f > 0) fail .Bad;
         return 1;
     }
-    <main><button onclick={ @r = outer(1, 1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = outer(1, 1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(warns(src)).toEqual([]);
@@ -636,7 +640,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         charge(m, 0)?;
         return 3;
     }
-    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 0) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     const e = errs(src);
@@ -660,7 +664,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
         if (f > 0) fail .Bad;
         return v;
     }
-    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = book(1, 1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `;
     expect(warns(src)).toEqual([]);
@@ -670,7 +674,7 @@ ${HOLD_CHARGE}    let <r:int=0/>
 
   test("N6: the mapped name replaces whole tokens and drops its `()`", () => {
     const btn = `        <button onclick={ book(1, 0) !{ _ :> { @s = "f"; }, }; }>go</button>`;
-    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    </main>\n</program>\n`;
+    const src = `<program db="./a.db">\n${E}    function hold(a: int)! E {\n        ${q("INSERT INTO log (a) VALUES (${a})")}\n        return 1;\n    }\n    <db src="./b.db">\n        function onB(a: int)! E {\n            ${q("INSERT INTO blog (a) VALUES (${a})")}\n            return 1;\n        }\n    </db>\n    let <s:string=""/>\n    function book(a: int, f: int)! E {\n        hold(a)?;\n        onB(a)?;\n    }\n    <main>\n${btn}\n    <p class="read">\${@s}</p></main>\n</program>\n`;
     const m = fe(src).diags.find((d) => d.code === "E-SQL-011").message;
     expect(m).toContain("book (its composed server batch)");
     expect(m).not.toContain("batch)()");
@@ -691,6 +695,7 @@ ${body}
     <main>
         <button id="bad" onclick={ @r = book(1, 1) !{ .Bad :> 7, _ :> 9, }; }>bad</button>
         <button id="ok" onclick={ @r = book(1, 0) !{ .Bad :> 7, _ :> 9, }; }>ok</button>
+        <p class="read">\${@r}</p>
     </main>
 </program>
 `;
@@ -747,7 +752,7 @@ ${E}    type C:struct = { c: int }
         if (title() == "x") fail .Bad;
         return v;
     }
-    <main><button onclick={ @r = look(1) !{ _ :> 9, }; }>go</button></main>
+    <main><button onclick={ @r = look(1) !{ _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `);
     const e = errs(src);
@@ -783,7 +788,7 @@ ${E}    function hold(a: int)! E {
     function book(a: int)! E {
 ${body}
     }
-    <main><button id="go" onclick={ @r = book(5) !{ .Bad :> 7, _ :> 9, }; }>go</button></main>
+    <main><button id="go" onclick={ @r = book(5) !{ .Bad :> 7, _ :> 9, }; }>go</button><p class="read">\${@r}</p></main>
 </program>
 `);
   const ARMS = "            .QueryFailed(m) :> 0,\n            .ConstraintViolation(c) :> 0,\n            .ConnectionLost :> 0,\n            .Transport(t) :> 0,\n";

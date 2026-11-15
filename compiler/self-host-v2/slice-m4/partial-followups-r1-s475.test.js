@@ -16,6 +16,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, warmLoadProgram } from "../slice-m1/load-program.js";
+import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 180000 });
@@ -39,7 +40,8 @@ const DECLS = [
   "    fn uf(q: int) { if (q <= 1) return 1; return q * uf(q - 1); }",
   "    function us(q: int) { if (q <= 1) return \"a\"; return us(q - 1) + \"b\"; }",
 ].join("\n");
-const P = (d, m = "") => `<program>\n${DECLS}\n${d}\n    <main>\n        <button onclick=h()>go</button>\n        <p id="n">\${@n}</p>\n        <p id="m">\${@msg}</p>\n${m}    </main>\n</program>\n`;
+// s478 (E-DG-002): a case's program carries only the DECLS cells it names
+const P = (d, m = "") => dropUnnamedScaffold(`<program>\n${DECLS}\n${d}\n    <main>\n        <button onclick=h()>go</button>\n        <p id="n">\${@n}</p>\n        <p id="m">\${@msg}</p>\n${m}    </main>\n</program>\n`, DECLS);
 
 const RED = {
   // F2 (§48.8) — red on b30d0277f: silent
