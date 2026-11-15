@@ -211,7 +211,9 @@ describe("refusals — each with its §34 code", () => {
   });
   test("what the bootstrap does not iterate, or cannot do in a loop yet, is refused (fail closed)", () => {
     expect(fnCodes(`        let s = 0;\n        for (x of 5) { s = s + 1; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(fnCodes(`        let s = 0;\n        for ({ a } of [{ a: 1 }]) { s = s + a; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s478-boot-destructuring: an OBJECT destructuring binder is BUILT (destructuring-s478.test.js);
+    // a TAPE pattern is still refused by name (g-boot-destructuring-unruled-forms-s478)
+    expect(fnCodes(`        let s = 0;\n        for ([a] of [[1]]) { s = s + a; }\n        return s;`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     // s471: a `defer` in a loop body is BUILT (§19.16.2 "a loop body (once per iteration)") —
     // slice-m4/defer-loop-s471.test.js; no longer a refusal
     expect(fnCodes(`        let s = 0;\n        for (x of [1]) { defer { s = 0; } }\n        return s;`)).toEqual([]);
