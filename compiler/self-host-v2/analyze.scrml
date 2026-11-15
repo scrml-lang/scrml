@@ -25435,27 +25435,41 @@ ${
             }
             if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return out
         }
-        // s478 (s478-boot-bound-branch-static) — a CHOICE value (a ternary / value-`if`,
-        // a value `match`): judged branch by branch, with the same leaf judgement as above.
-        // EVERY branch that yields a value provably outside the bound: whichever runs, the
-        // write breaks the invariant — provable, E-WRITE-INVARIANT (O36). Every branch
-        // proven inside: no run-time check. Anything else (some branches outside, some in
-        // or unknown) depends on which branch runs — not provable, checked at run time.
+        // s478 (s478-boot-bound-branch-static, widened by s478-boot-bound-any-branch) — a
+        // CHOICE value (a ternary / value-`if`, a value `match`, a `!{}` guard's arms) is
+        // judged branch by branch, with the same leaf judgement as above. RULED S478,
+        // Option A (ruling:user-voice-scrml.md S478): "ANY branch whose literal provably
+        // breaks a tape's bound is a compile error (E-WRITE-INVARIANT), judged per branch
+        // the way types already are (E-TYPE-031, `checkLitFields`) … A branch whose length
+        // cannot be proven still traps at run time (O36)." So each value-yielding branch
+        // provably outside the bound is E-WRITE-INVARIANT at that branch; every branch
+        // proven inside needs no run-time check; otherwise the write is checked at run time.
         if (isChoice(x)) {
-            const bv: BranchLens = choiceLengths(env, x, b, out)
-            if (bv.v == 2) return report(out, env, x.span, "E-WRITE-INVARIANT", what + " is a choice whose every branch is a tape of a length outside its type's bound `" + b.min + "..=" + b.max + "` (" + bv.lens.join(", ") + ") — whichever branch runs, the write provably breaks the length invariant (§66.11.2, §66.12.2)")
+            const bv: BranchLens = choiceLengths(env, x, b, out, "")
+            if (bv.bad.length > 0) return reportBadBranches(out, env, bv.bad, what, b)
             if (bv.v == 1) return out
         }
         return recordBound(out, env, x, b)
     }
 
-    // s478 — the length verdict of a value into a bound: `v` 2 = provably outside (`lens`
-    // names each branch's length), 1 = proven inside, 0 = not provable either way.
-    type BranchLens:struct = { v: int, lens: string[] }
+    fn reportBadBranches(ts: TypeState, env: TEnv, bad: BadBranch[], what: string, b: BoundRange) -> TypeState {
+        let out: TypeState = ts
+        for (const bb of bad) {
+            out = report(out, env, bb.span, "E-WRITE-INVARIANT", what + " is a choice, and " + bb.label + " is a tape of length " + bb.len + ", outside its type's bound `" + b.min + "..=" + b.max + "` — that branch provably breaks the length invariant, so the write is refused whatever the other branches hold (§66.11.2, §66.12.2: each branch of a written value is judged on its own)")
+        }
+        return out
+    }
+
+    // s478 — the length verdict of a value into a bound: `v` 2 = provably outside, 1 =
+    // proven inside, 0 = not provable either way, -1 = yields no value (a diverging arm).
+    // `bad` lists every value-yielding LEAF branch provably outside: its span, its length
+    // and the words naming it.
+    type BadBranch:struct = { span: ASpan, len: string, label: string }
+    type BranchLens:struct = { v: int, bad: BadBranch[] }
 
     fn isChoice(x: AExpr) -> boolean {
         if (ternaryBranches(x).length > 0) return true
-        return valueMatchArms(x).length > 0
+        return choiceArms(x).length > 0
     }
 
     // a ternary's two branches, else []
@@ -25490,8 +25504,39 @@ ${
         }
     }
 
-    // a value `match e { … }`'s arms, else [] (a `!{}` guard's value may be the subject's
-    // success value, a `?` the subject's — neither is a choice among written branches)
+    // is this ternary a value-`if` (`if (c) { a } else { b }`)?
+    fn ternaryViaIf(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .Ternary(test: t, yes: y, no: n, viaIf: vi) :> vi
+            .ArrayLit(elems: es) :> false
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Assign(target: t) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: e) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+        }
+    }
+
+    // a value `match e { … }`'s arms, else []
     fn valueMatchArms(x: AExpr) -> AArm[] {
         const h: AHandled | not = handledOf(x.k)
         if (h is not) return []
@@ -25503,47 +25548,94 @@ ${
         }
     }
 
-    fn lengthVerdict(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState) -> BranchLens {
-        if (isNotLit(x)) return { v: 1, lens: [] }
-        if (isChoice(x)) return choiceLengths(env, x, b, ts)
+    // a `!{}` guard's arms, else []. A guard's value may also be its subject's success
+    // value (a `?`'s always is), so its arms alone never prove it inside a bound — but an
+    // arm that yields a value provably outside is a branch that provably breaks it.
+    fn guardArms(x: AExpr) -> AArm[] {
+        const h: AHandled | not = handledOf(x.k)
+        if (h is not) return []
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> []
+            .Guard(arms: a) :> a
+            .MatchOn(arms: a) :> []
+        }
+    }
+
+    fn choiceArms(x: AExpr) -> AArm[] {
+        return valueMatchArms(x).concat(guardArms(x))
+    }
+
+    fn outsideBranch(x: AExpr, len: string, label: string) -> BranchLens {
+        return { v: 2, bad: [{ span: x.span, len: len, label: label }] }
+    }
+
+    fn lengthVerdict(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState, label: string) -> BranchLens {
+        if (isNotLit(x)) return { v: 1, bad: [] }
+        if (isChoice(x)) return choiceLengths(env, x, b, ts, label)
         const n: int = plainArrayLength(x)
         if (n >= 0) {
-            if (n < b.min || n > b.max) return { v: 2, lens: ["" + n] }
-            return { v: 1, lens: [] }
+            if (n < b.min || n > b.max) return outsideBranch(x, "" + n, label)
+            return { v: 1, bad: [] }
         }
         const sr: BoundRange | not = spreadLengthRange(env, x, ts)
         if (sr is given) {
-            if (sr.min > b.max) return { v: 2, lens: ["at least " + sr.min] }
-            if (sr.max >= 0 && sr.max < b.min) return { v: 2, lens: ["at most " + sr.max] }
-            if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return { v: 1, lens: [] }
-            return { v: 0, lens: [] }
+            if (sr.min > b.max) return outsideBranch(x, "at least " + sr.min + " (its plain elements and the declared lengths of its spread operands)", label)
+            if (sr.max >= 0 && sr.max < b.min) return outsideBranch(x, "at most " + sr.max + " (its plain elements and the declared lengths of its spread operands)", label)
+            if (sr.max >= 0 && sr.min >= b.min && sr.max <= b.max) return { v: 1, bad: [] }
+            return { v: 0, bad: [] }
         }
         const d: Type | not = declaredTapeType(env, x, ts)
         if (d is given) {
             const db: BoundRange | not = boundOfType(d)
             if (db is given) {
-                if (db.min >= b.min && db.max <= b.max) return { v: 1, lens: [] }
+                if (db.min >= b.min && db.max <= b.max) return { v: 1, bad: [] }
             }
         }
-        return { v: 0, lens: [] }
+        return { v: 0, bad: [] }
     }
 
-    // A choice's verdict: every branch's. A ternary's two branches; a `match`'s arms, each
-    // its one expression or what its block `lift`s — an arm whose block DIVERGES (`return`,
-    // `fail`, …) yields no value and is skipped; any other arm shape is not provable.
-    fn choiceLengths(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState) -> BranchLens {
+    // the words naming branch `sub` inside the branch `outer` names ("" = the whole value)
+    fn branchLabel(outer: string, sub: string) -> string {
+        if (outer == "") return sub
+        return sub + " of " + outer
+    }
+
+    // A choice's verdict: every branch's. A ternary's two branches (a value-`if`'s `if`
+    // and `else` branches); a `match`'s or a `!{}` guard's arms, each its one expression or
+    // what its block `lift`s — an arm whose block DIVERGES (`return`, `fail`, …) yields no
+    // value and is skipped; any other arm shape is not provable. `bad` gathers every
+    // branch provably outside, at any depth.
+    fn choiceLengths(env: TEnv, x: AExpr, b: BoundRange, ts: TypeState, label: string) -> BranchLens {
         let vs: BranchLens[] = []
-        for (const br of ternaryBranches(x)) {
-            vs = vs.concat([lengthVerdict(env, br, b, ts)])
+        const tb: AExpr[] = ternaryBranches(x)
+        if (tb.length == 2) {
+            let yes: string = "the true branch (after `?`)"
+            let no: string = "the false branch (after `:`)"
+            if (ternaryViaIf(x)) {
+                yes = "the `if` branch"
+                no = "the `else` branch"
+            }
+            vs = vs.concat([lengthVerdict(env, tb[0], b, ts, branchLabel(label, yes))])
+            vs = vs.concat([lengthVerdict(env, tb[1], b, ts, branchLabel(label, no))])
         }
+        let i: int = 0
         for (const a of valueMatchArms(x)) {
-            vs = vs.concat([armVerdict(env, a, b, ts)])
+            i = i + 1
+            vs = vs.concat([armVerdict(env, a, b, ts, branchLabel(label, "arm " + i + " of the `match`"))])
         }
-        let lens: string[] = []
+        const gs: AArm[] = guardArms(x)
+        let j: int = 0
+        for (const a of gs) {
+            j = j + 1
+            vs = vs.concat([armVerdict(env, a, b, ts, branchLabel(label, "arm " + j + " of the `!{}` guard"))])
+        }
+        let bad: BadBranch[] = []
         let all2: boolean = false
         let all1: boolean = false
         let any: boolean = false
         for (const v of vs) {
+            bad = bad.concat(v.bad)
             if (v.v >= 0) {
                 if (!any) {
                     all2 = true
@@ -25552,34 +25644,46 @@ ${
                 }
                 if (v.v != 2) all2 = false
                 if (v.v != 1) all1 = false
-                lens = lens.concat(v.lens)
             }
         }
-        if (any && all2) return { v: 2, lens: lens }
-        if (any && all1) return { v: 1, lens: [] }
-        return { v: 0, lens: [] }
+        if (gs.length > 0) all1 = false
+        if (any && all2) return { v: 2, bad: bad }
+        if (any && all1) return { v: 1, bad: bad }
+        return { v: 0, bad: bad }
     }
 
-    // one arm's verdict; `v` -1 = the arm yields no value (its block diverges)
-    fn armVerdict(env: TEnv, a: AArm, b: BoundRange, ts: TypeState) -> BranchLens {
+    // one arm's value: its one expression, or what its block `lift`s. `v` -1 = the arm
+    // yields no value (its block diverges); 0 = not judgeable (a write, any other shape);
+    // 1 = `e` is the value.
+    type ArmValue:struct = { v: int, e: AExpr | not }
+
+    fn armValueOf(a: AArm) -> ArmValue {
         const body: AArmBody = a.body
         const one: AExpr | not = plainOneExpr(body)
         if (one is given) {
-            if (assignValue(one) is given || isWriteExpr(one)) return { v: 0, lens: [] }
-            return lengthVerdict(env, one, b, ts)
+            if (assignValue(one) is given || isWriteExpr(one)) return { v: 0, e: not }
+            return { v: 1, e: one }
         }
         for (const blk of armBlockOf(body)) {
-            if (blockDiverges(blk)) return { v: -1, lens: [] }
+            if (blockDiverges(blk)) return { v: -1, e: not }
             const n: int = blk.stmts.length
             if (a.lifted && n > 0) {
                 const last: AExpr | not = evalOf(blk.stmts[n - 1])
                 if (last is given) {
-                    if (assignValue(last) is given || isWriteExpr(last)) return { v: 0, lens: [] }
-                    return lengthVerdict(env, last, b, ts)
+                    if (assignValue(last) is given || isWriteExpr(last)) return { v: 0, e: not }
+                    return { v: 1, e: last }
                 }
             }
         }
-        return { v: 0, lens: [] }
+        return { v: 0, e: not }
+    }
+
+    fn armVerdict(env: TEnv, a: AArm, b: BoundRange, ts: TypeState, label: string) -> BranchLens {
+        const av: ArmValue = armValueOf(a)
+        if (av.v == -1) return { v: -1, bad: [] }
+        const e: AExpr | not = av.e
+        if (e is given) return lengthVerdict(env, e, b, ts, label)
+        return { v: 0, bad: [] }
     }
 
     // An array literal holding a spread: the range of lengths it can have — `max` -1 when
@@ -25703,11 +25807,73 @@ ${
             }
             return out
         }
+        // s478 (s478-boot-bound-any-branch, Option A) — a CHOICE (a ternary / value-`if`, a
+        // value `match`) is judged branch by branch: each value-yielding branch on its own,
+        // so a literal branch's elements are checked element by element (E-WRITE-INVARIANT
+        // naming the branch) and a branch that cannot be proven is refused (INTERIM, as above).
+        if (isChoice(x)) {
+            const lv: ChoiceLeaves = choiceLeaves(x, "")
+            if (lv.ok) {
+                let out: TypeState = ts
+                for (const leaf of lv.leaves) {
+                    out = innerBoundValue(env, leaf.e, target, what + "'s " + leaf.label, out)
+                }
+                return out
+            }
+        }
         const d: Type | not = declaredTapeType(env, x, ts)
         if (d is given) {
             if (boundsWithin(d, target)) return ts
         }
         return innerRefusal(ts, env, x, what, target)
+    }
+
+    // s478 — a choice's value-yielding LEAF branches (nested choices flattened; a diverging
+    // arm skipped), each with the words naming it. `ok` false: some arm is not judgeable
+    // (a write, any other shape) or the choice is a `!{}` guard (its value may also be its
+    // subject's success value).
+    type ChoiceLeaf:struct = { e: AExpr, label: string }
+    type ChoiceLeaves:struct = { ok: boolean, leaves: ChoiceLeaf[] }
+
+    fn choiceLeaves(x: AExpr, label: string) -> ChoiceLeaves {
+        if (!isChoice(x)) {
+            let l: string = label
+            if (l == "") l = "value"
+            return { ok: true, leaves: [{ e: x, label: l }] }
+        }
+        if (guardArms(x).length > 0) return { ok: false, leaves: [] }
+        let parts: ChoiceLeaves[] = []
+        const tb: AExpr[] = ternaryBranches(x)
+        if (tb.length == 2) {
+            let yes: string = "true branch (after `?`)"
+            let no: string = "false branch (after `:`)"
+            if (ternaryViaIf(x)) {
+                yes = "`if` branch"
+                no = "`else` branch"
+            }
+            parts = parts.concat([choiceLeaves(tb[0], leafLabel(label, yes))])
+            parts = parts.concat([choiceLeaves(tb[1], leafLabel(label, no))])
+        }
+        let i: int = 0
+        for (const a of valueMatchArms(x)) {
+            i = i + 1
+            const av: ArmValue = armValueOf(a)
+            if (av.v == 0) return { ok: false, leaves: [] }
+            const e: AExpr | not = av.e
+            if (e is given) parts = parts.concat([choiceLeaves(e, leafLabel(label, "arm " + i + " of the `match`"))])
+        }
+        let leaves: ChoiceLeaf[] = []
+        for (const p of parts) {
+            if (!p.ok) return { ok: false, leaves: [] }
+            leaves = leaves.concat(p.leaves)
+        }
+        return { ok: true, leaves: leaves }
+    }
+
+    // `sub` inside `outer` (both bare: "true branch", "arm 2 of the `match`")
+    fn leafLabel(outer: string, sub: string) -> string {
+        if (outer == "") return sub
+        return sub + " of its " + outer
     }
 
     fn innerRefusal(ts: TypeState, env: TEnv, x: AExpr, what: string, target: Type) -> TypeState {
