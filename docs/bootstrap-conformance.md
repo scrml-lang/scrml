@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 469 | 25.1% |
-| CODES-ONLY | 5 | 0.3% |
-| FAIL | 81 | 4.3% |
+| PASS | 475 | 25.4% |
+| CODES-ONLY | 0 | 0.0% |
+| FAIL | 63 | 3.4% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 678 | 36.3% |
+| UNSUPPORTED | 695 | 37.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 555; of those, 474 hold (85.4%). Runtime half executed on the bootstrap for 159 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 538; of those, 475 hold (88.3%). Runtime half executed on the bootstrap for 161 case(s).
 
-- **Vacuous** passes: 11 of 474 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **463**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 21 of 81; the other 60 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 475 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **464**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 17 of 63; the other 46 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 678.
+UNSUPPORTED by reason: bootstrap-unsupported 695.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 305 · FAIL 73 · UNSUPPORTED 496. Twin holds 305 (non-vacuous 298). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 311 · FAIL 59 · UNSUPPORTED 504. Twin holds 311 (non-vacuous 303). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -120,17 +120,17 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | engine | 92 | 18 | · | 2 | · | 50 | 22 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 78 | 43 | · | 5 | · | 5 | 25 | · | · |
+| error | 78 | 43 | · | 2 | · | 5 | 28 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
-| fn | 25 | 15 | · | 2 | · | 1 | 7 | · | · |
-| foreign | 16 | 2 | 4 | 2 | · | 7 | 1 | · | · |
+| fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
+| foreign | 16 | 2 | · | · | · | 7 | 7 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 14 | · | 2 | · | 49 | 1 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 68 | 27 | · | 1 | · | 22 | 18 | · | · |
-| linear | 15 | · | · | 4 | · | · | 11 | · | · |
+| lifecycle | 68 | 28 | · | · | · | 22 | 18 | · | · |
+| linear | 15 | 1 | · | 2 | · | · | 12 | · | · |
 | loop | 8 | 1 | · | 1 | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 30 | · | · | · | 40 | 19 | · | · |
@@ -149,17 +149,17 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
 | parse-variant | 8 | · | · | · | · | · | 8 | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
-| print | 1 | · | 1 | · | · | · | · | · | · |
+| print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 127 | 48 | · | 7 | · | 44 | 28 | · | · |
+| reactive | 127 | 50 | · | 5 | · | 44 | 28 | · | · |
 | refinement | 57 | · | · | 11 | · | 23 | 23 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 10 | · | 2 | · | 17 | 62 | · | · |
-| server-fn | 27 | 8 | · | 8 | · | 7 | 4 | · | · |
-| sql | 20 | 3 | · | 3 | · | 9 | 5 | · | · |
+| server-fn | 27 | 8 | · | 4 | · | 7 | 8 | · | · |
+| sql | 20 | 3 | · | 1 | · | 9 | 7 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | 1 | · | 6 | 20 | · | · |
 
-### FAIL (81)
+### FAIL (63)
 
 - `auth/program-nested-app-attr-pos` (parse-reject)
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `when` (other statements at logic-block level are not in the bootstrap)
@@ -225,30 +225,12 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `error/error-008-neg` (twin · parse-reject)
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `error/handler-exhaustive-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `error/handler-non-exhaustive` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `error/handler-wildcard-escape` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `fn/scope-redeclare-fn-over-param-ok` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
-- `fn/scope-redeclare-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-OPERATOR-OPERAND-TYPE
-- `foreign/foreign-crossing-shadow-in-block-neg` (codes; not in the bootstrap: E-FOREIGN-006)
-  - missing E-FOREIGN-006
-  - severity: E-FOREIGN-006 did not fire (expected error)
-- `foreign/foreign-slice-unparseable-in-block-neg` (codes)
-  - missing E-FOREIGN-007
-  - severity: E-FOREIGN-007 did not fire (expected error)
 - `forms/derived-refinement-type-accepted` (twin · parse-reject)
   - E-PARSE-TAG: unexpected `(` in the tag `<doubled`
   - E-PARSE-DECL-BODY: a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)
   - E-PARSE-CLOSER: `</program>` closes `<doubled>`
 - `forms/validator-applies-typed-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-VALIDATOR-DEAD
-- `lifecycle/cleanup-error-non-function` (codes; not in the bootstrap: E-LIFECYCLE-004)
-  - missing E-LIFECYCLE-004
 - `linear/lin-001-never-consumed-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -256,11 +238,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `linear/must-use-unread-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
-  - missing E-MU-001
-  - severity: E-MU-001 did not fire (expected error)
 - `loop/loop-002-continue-outside` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `continue`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `match-block/member-access-complete-clean` (twin · parse-reject)
@@ -333,11 +310,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/reset-init-after-assignment-rt` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `reactive/s437-r5-template-cell-read-value-attr` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-STYLE-VALUE-NOT-STYLE)
-- `reactive/server-fn-rawvar-read-error` (twin · codes)
-  - missing E-REACTIVE-003
-  - severity: E-REACTIVE-003 did not fire (expected error)
 - `reactive/write-not-in-logic-context-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `reactive/write-not-in-logic-context-pos` (twin · parse-reject)
@@ -409,10 +381,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `server-fn/branch-declared-server-fn-routes-to-server` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `"COMPUTED-IN-THE-BODY"`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `server-fn/e-route-002-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `server-fn/e-route-002-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
 - `server-fn/e-route-003-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `server-fn/e-route-004-neg` (twin · parse-reject)
@@ -420,15 +388,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `server-fn/e-route-004-pos` (twin · codes)
   - missing E-ROUTE-004
   - severity: E-ROUTE-004 did not fire (expected error)
-- `server-fn/e-route-005-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-SCOPE-001
-- `server-fn/session-value-in-tool-neg` (codes; not in the bootstrap: E-SESSION-VALUE)
-  - missing E-SESSION-VALUE
-  - severity: E-SESSION-VALUE did not fire (expected error)
-- `sql/multiple-statements-in-condition-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-ERROR-002
-- `sql/multiple-statements-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-ERROR-002
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -448,7 +407,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (474)
+### PASS / CODES-ONLY (475)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -682,14 +641,12 @@ none
 - `fn/reactive-read-clean` — PASS · TWIN
 - `fn/reactive-write-reject` — PASS · TWIN
 - `fn/return-colon-spelling-neg` — PASS
+- `fn/scope-redeclare-fn-over-param-ok` — PASS · TWIN
+- `fn/scope-redeclare-neg` — PASS · TWIN
 - `fn/scope-redeclare-nested-ok` — PASS · TWIN
 - `fn/sync-decl-clean` — PASS · TWIN
 - `foreign/foreign-inline-no-lang-neg` — PASS
 - `foreign/foreign-lang-in-program-neg` — PASS
-- `foreign/foreign-slice-await-regex-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
-- `foreign/foreign-slice-lexing-regex-quote-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
-- `foreign/foreign-slice-no-free-capture-neg` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
-- `foreign/foreign-slice-sealed-crossings-pos` — CODES-ONLY (also emitted, unasserted: E-SCOPE-001)
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN
 - `forms/checkbox-check` — PASS · TWIN
@@ -705,6 +662,7 @@ none
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
 - `hostmethod/substring-match-typed` — PASS · TWIN
+- `lifecycle/cleanup-error-non-function` — PASS
 - `lifecycle/effect-empty-body-neg` — PASS · TWIN
 - `lifecycle/effect-empty-body-pos` — PASS · TWIN
 - `lifecycle/effect-nested-neg` — PASS · TWIN
@@ -732,6 +690,7 @@ none
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-pos` — PASS · TWIN
 - `lifecycle/when-effect-writes-state-pos` — PASS · TWIN
+- `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS
 - `loop/loop-006-neg` — PASS · TWIN
 - `markup-handler/inline-block-handler-assign-led-order` — PASS · TWIN
 - `markup-handler/inline-block-handler-call-first` — PASS · TWIN
@@ -830,7 +789,6 @@ none
 - `persist/key-required-neg` — PASS
 - `persist/prepaint-without-persist-neg` — PASS
 - `persist/storage-unknown-neg` — PASS
-- `print/tool-println-clean-stdout` — CODES-ONLY · VACUOUS (also emitted, unasserted: E-SCOPE-001)
 - `raw-content/active-html-displays-as-text` — PASS
 - `raw-content/bare-angle-displays` — PASS
 - `raw-content/each-row-raw-body-displays-as-text` — PASS · TWIN
@@ -869,6 +827,8 @@ none
 - `reactive/reset-handler` — PASS · TWIN
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
 - `reactive/reset-reserved-identifier` — PASS · TWIN
+- `reactive/s437-r5-template-cell-read-value-attr` — PASS · TWIN
+- `reactive/server-fn-rawvar-read-error` — PASS · TWIN
 - `reactive/tape-bound-append-rt` — PASS
 - `reactive/tape-bound-append-trap-rt` — PASS
 - `reactive/tape-bound-branch-literal-neg` — PASS
@@ -904,7 +864,7 @@ none
 - `server-fn/e-route-005-pos` — PASS · TWIN
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
-- `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-SCOPE-001)
+- `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
@@ -925,7 +885,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (678)
+### UNSUPPORTED (695)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1127,11 +1087,14 @@ none
 - `error/construct-variant-payload-arity-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `f` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
+- `error/handler-exhaustive-neg` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-guard-in-arrow-rt` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
 - `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/handler-non-exhaustive` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
+- `error/handler-wildcard-escape` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `error/implicit-tx-explicit-begin` — twin · bootstrap-unsupported: Manual transaction control 'BEGIN' in 'manual', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database
 - `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
@@ -1148,13 +1111,19 @@ none
 - `error/transaction-non-failable-fn-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/transaction-stmt-match-arm-fail-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/transaction-top-level-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `fn/dom-mutation-reject` — twin · bootstrap-unsupported: `.createElement(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.re
+- `fn/dom-mutation-reject` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
 - `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
 - `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
 - `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
 - `fn/sql-access-handled-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-in-function-clean` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `foreign/foreign-crossing-shadow-in-block-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-slice-await-regex-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-slice-lexing-regex-quote-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-slice-no-free-capture-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-slice-sealed-crossings-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-slice-unparseable-in-block-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `foreign/foreign-slice-unparseable-neg` — twin · bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
 - `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
@@ -1204,6 +1173,7 @@ none
 - `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
 - `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
+- `linear/must-use-unread-pos` — twin · bootstrap-unsupported: `unusedThing = …` declares `unusedThing` (the keywordless declaration, §50.8.5) and nothing reads it before its scope ends. Whether an unread binding is E-MU-001 is not settled — §34's E-MU-001 row is
 - `loop/loop-001-break-outside` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
@@ -1373,6 +1343,7 @@ none
 - `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/misuse-non-enum-type` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/single-field-payload-bind` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `print/tool-println-clean-stdout` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/cte-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-pa-002-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1490,7 +1461,7 @@ none
 - `server-db/async-call-then-in-handler-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `server-db/async-fn-escapes-as-value-handler-neg` — twin · bootstrap-unsupported: `isOk` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `isOk(…)`
 - `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: untyped access through the browser root `window` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` bin
 - `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
@@ -1549,13 +1520,19 @@ none
 - `server-db/sql-hoisted-loop-unrewritable-site-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-hoisted-loop-write-between-iterations-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
+- `server-fn/e-route-002-neg` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
+- `server-fn/e-route-002-pos` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
 - `server-fn/e-route-003-pos` — twin · bootstrap-unsupported: `snippet type` (§14.9) is not in the bootstrap yet; it is refused here by name rather than misread
+- `server-fn/e-route-005-neg` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
 - `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-fn/session-value-in-tool-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: a client call of `loadRows`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `loadRows` declares none and its returns do not prove one (the t
+- `sql/multiple-statements-in-condition-neg` — twin · bootstrap-unsupported: a `?{}` query that a `!` function propagates implicitly (§19.8.2) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return
 - `sql/one-statement-trailing-semicolon-pos` — twin · bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
+- `sql/prepare-tool-in-block-e-sql-006-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `style/theme-name-collision` — bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
