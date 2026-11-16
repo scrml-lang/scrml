@@ -197,3 +197,78 @@ function go() { @n = f(1); }`)).join("\n")).toContain("E-BOOTSTRAP-UNSUPPORTED")
     expect(codes(prog(`function go() { if (@user is given) { @user.name = "b"; } }`)).length).toBeGreaterThan(0);
   });
 });
+
+// s478 fix round 1 (#1917 review H1) — the receiver is what the binder resolved the step on.
+// The binder resolves `.field` / `.length` from a receiver's declared or init-inferred type; an
+// unannotated `let` rebound to a value of another type (`let u = @user; u = @car`) is flow-typed by
+// the typer as the new type. Before: the read compiled and read a field the value does not have
+// (undefined / a TypeError / NaN or a number written into a `string` / `int` cell at run time) — on
+// BASE already for a non-optional receiver. §7.5.1: a value SHALL satisfy the type of the position
+// it reaches. Now every struct-field / `.length` read is held to it: refused by name, fail closed.
+const HEAD2 = `type User:struct = { name: string }
+type Pet:struct = { name: int }
+type Car:struct = { make: string }
+let <user:User | not=({ name: "ann" })/>
+let <pu:User=({ name: "pat" })/>
+let <pet:Pet | not=({ name: 7 })/>
+let <car:Car | not=({ make: "vw" })/>
+let <pcar:Car=({ make: "vw" })/>
+let <s:string | not="hey"/>
+let <out=""/>
+let <n:int=0/>`;
+const prog2 = (fns, markup = "") => `<program>
+${HEAD2}
+${fns}
+<button id="b" onclick=go()>go</button>
+<p id="o">\${@out}</p>
+<p id="n">\${@n}</p>
+${markup}
+</program>
+`;
+const MISMATCH = "was resolved on the receiver's declared or initial type";
+
+describe("#1917 H1 — a member read through a receiver rebound to another type is refused", () => {
+  const refused = (name, fns) => test(name, () => {
+    const m = msgs(prog2(fns));
+    expect(m.length).toBe(1);
+    expect(m[0]).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(m[0]).toContain(MISMATCH);
+  });
+  refused("untyped-let-car-len: `let u = @user; u = @car` then `u.name.length`",
+    `function go() { let u = @user; u = @car; if (u is given) { @n = u.name.length + 1; } }`);
+  refused("untyped-let-str-len: `let u = @s; u = 5` then `u.length`",
+    `function go() { let u = @s; u = 5; if (u is given) { @n = u.length + 1; } }`);
+  refused("untyped-let-pet: `u = @pet` (a `name: int`) then `@out = u.name`",
+    `function go() { let u = @user; u = @pet; if (u is given) { @out = u.name; } }`);
+  refused("untyped-let-loop-rebind-pet: a rebind in a loop",
+    `function go() { let u = @user; if (u is given) { for (const x of [1, 2]) { @out = @out + u.name; u = @pet; } } }`);
+  refused("preexisting-nonopt-rebind-car: a non-optional receiver (refused on BASE neither)",
+    `function go() { let u = @pu; u = @pcar; @out = u.name; }`);
+  refused("preexisting-str-rebind-int-len: `let u = \"abc\"; u = 5` then `u.length`",
+    `function go() { let u = "abc"; u = 5; @n = u.length + 1; }`);
+
+  test("controls: a local never rebound, or rebound to its own type, still reads (run)", async () => {
+    await run(prog2(`function go() { let u = @user; if (u is given) { @out = u.name; } let v = @pu; v = { name: "q" }; @out = @out + v.name; let w = "abc"; w = "de"; @n = w.length; }`));
+    click($("#b"));
+    expect($("#o").textContent).toBe("annq");
+    expect($("#n").textContent).toBe("2");
+  });
+});
+
+// s478 fix round 1 (#1917 review L1) — a click handler lifted in a loop under an `if=` gate keeps the
+// gate's narrowing (s462 Q18 gateMark). Before: tLoopEnv dropped the gate mark, so the handler's
+// `@user.name` was E-TYPE-046 (fail closed, an over-refusal).
+describe("#1917 L1 — a gated click handler lifted in a loop keeps the gate narrowing (run)", () => {
+  test("`<div if=@user>${ for … { lift <button onclick={ … @user.name; @user = not; }> } }`", async () => {
+    await run(prog(`function go() {}`, `<div if=@user>\${ for (const x of [1, 2]) { lift <button class="q" onclick={ @out = @out + @user.name; @user = not; }>q</button>; } }</div>`));
+    const bs = document.querySelectorAll(".q");
+    expect(bs.length).toBe(2);
+    click(bs[0]);
+    click(bs[1]);
+    expect($("#o").textContent).toBe("ann");
+  });
+
+  test("a loop that writes the gated cell still ends it", () => {
+    expect(codes(prog(`function kill() { @user = not; }\nfunction go() {}`, `<div if=@user>\${ for (const x of [1, 2]) { lift <button class="q" onclick={ @out = @out + @user.name; }>q</button>; kill(); } }</div>`))).toContain("E-TYPE-046");
+  });
+});

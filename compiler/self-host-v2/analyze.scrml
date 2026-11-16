@@ -21713,6 +21713,15 @@ ${
         for (const k of w.narrowed) {
             if (k.indexOf("@") == 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
         }
+        // s478 fix round 1 (#1917 review L1) — a kept cell narrowing keeps its `if=` gate
+        // mark (gateMark, s462 Q18), so a click handler lifted in the loop under that gate
+        // keeps the gate's narrowing (§42.3.5: render-gating removes the subtree and its
+        // listener synchronously on the write that ends the gate's condition). Was: the
+        // mark (`gate:@…`, neither `#` nor `@`) was dropped, and every gated handler in a
+        // loop lost the narrowing. A mark whose cell the loop may write stays dropped.
+        for (const k of env.narrowed) {
+            if (k.indexOf(gateMark("")) == 0 && keep.indexOf(k.substring(gateMark("").length)) >= 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
+        }
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
@@ -30762,12 +30771,125 @@ ${
         // lifecycle `(not to T)` receiver already reported E-TYPE-001 and reads `T`
         // (lifeRead) — "a receiver fires exactly one of the two" (§42.3.5).
         if (maybeDeref(f) && !hasErrIn(env.blame.spans, e.span)) {
+            const om: string = memberRecvMismatch(f, ro.vt)
+            // a receiver that IS `not` here admits `not` (§42.3.5) — E-TYPE-046, not a type mismatch
+            if (om == "not") return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-TYPE-046", absentMemberMsg(obj, nameOfMember(e))))
+            // an unresolved receiver an earlier report accounts for (a refused declaration or
+            // construct it reads) is not reported again (§42.4 statement 6: no cascade)
+            if (om == "unresolved" && (condBlamed(env, obj, ro.ts) || refusedConstRead(env, obj) || refusedName(env, nameFact(env.t.names, obj.nid)))) return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
+            if (om != "") return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-BOOTSTRAP-UNSUPPORTED", recvMismatchMsg(obj, nameOfMember(e), om)))
             const rt: Type | not = knownOf(ro.vt)
             if (rt is given && maybeInner(rt) is given) {
                 return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-TYPE-046", optMemberMsg(obj, nameOfMember(e), rt)))
             }
         }
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
+    }
+
+    // s478 fix round 1 (#1917 review H1) — THE RECEIVER IS WHAT THE BINDER RESOLVED THE
+    // STEP ON. The binder resolves a struct field (`NStruct(owner)`) / `.length`
+    // (`NLength`) from the receiver's declared or init-inferred type; the typer
+    // flow-types the receiver where the access stands (an unannotated `let` rebound to
+    // another type: `let u = @user; u = @car`). The step's meaning is the binder's, so a
+    // receiver the typer does not show to be of that type would read a field of a value
+    // that has none (§7.5.1: a value "SHALL satisfy" the type of the position it reaches;
+    // §42.3.5's narrowing proves presence, not the type). Every member read is held to
+    // it, not only a `T | not` one: for `NStruct(owner)` the receiver (its `T` when it is
+    // `T | not`) SHALL be `owner`; for `NLength` a string or a tape. Anything else —
+    // another type, or a type the typer cannot resolve (`unresolved`, a partial merge) —
+    // is refused by name, fail closed (E-BOOTSTRAP-UNSUPPORTED: the SPEC states no code
+    // for a rebind of an unannotated local to another type). Returns the receiver's type
+    // as shown in the refusal ("" = it matches). One helper, so the `?{}` row receivers
+    // (#1915) reconcile here.
+    fn memberRecvMismatch(f: NameFact | not, vt: VType) -> string {
+        const want: Sym | not = structOwnerOf(f)
+        const isLen: boolean = isLengthFact(f)
+        if (want is not && !isLen) return ""
+        const ts: Type[] = match vt {
+            .Known(t: x) :> [x]
+            .OneOf(ts: xs) :> xs
+            .Absent :> []
+            .Unknown :> []
+            .Partial(ts: xs) :> []
+        }
+        if (ts.length == 0) return vtName(vt)
+        for (const t0 of ts) {
+            const t: Type = unMaybe(t0)
+            if (isLen) {
+                if (!isLengthOf(t)) return typeName(t0)
+            } else {
+                const got: Sym | not = namedOf(t)
+                if (got is not || want is not) return typeName(t0)
+                if (got.id != want.id) return typeName(t0)
+            }
+        }
+        return ""
+    }
+
+    fn structOwnerOf(f: NameFact | not) -> Sym | not {
+        return match f {
+            .NStruct(owner: o) :> o
+            .NLength :> not
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NFn(sym: s) :> not
+            .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
+            .NConst(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn isLengthFact(f: NameFact | not) -> boolean {
+        return match f {
+            .NLength :> true
+            .NStruct(owner: o) :> false
+            .NLocal(sym: s) :> false
+            .NField(decl: d) :> false
+            .NInst(decl: d) :> false
+            .NFn(sym: s) :> false
+            .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
+            .NConst(sym: s) :> false
+            not :> false
+        }
+    }
+
+    // A read of a file-scope constant whose declaration was refused (ConstInfo.ok false: its
+    // type is unresolved because its own report already failed the build).
+    fn refusedConstRead(env: TEnv, x: AExpr) -> boolean {
+        const nf: NameFact | not = nameFact(env.t.names, x.nid)
+        const cs: Sym | not = match nf {
+            .NConst(sym: s) :> s
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NInst(decl: d) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            .NSurface(of: x2) :> not
+            .NReq(id: rq0, sig: rs0) :> not
+            not :> not
+        }
+        if (cs is not) return false
+        for (const c of env.t.consts) {
+            if (c.sym.id == cs.id) return !c.ok
+        }
+        return false
+    }
+
+    fn absentMemberMsg(obj: AExpr, name: string) -> string {
+        const pk: string = placeKey(obj)
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        return shown + " reads a member of a receiver that is `not` at this point (§42.3.5) — narrow it (`if=` / `given` / `is not` / `match`) after giving it a value, or optional-chain the access (`?." + name + "`)"
+    }
+
+    fn recvMismatchMsg(obj: AExpr, name: string, got: string) -> string {
+        const pk: string = placeKey(obj)
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        const r: string = pk == "" ? "its receiver" : "`" + pk + "`"
+        return shown + " — `." + name + "` was resolved on the receiver's declared or initial type, but " + r + " is `" + got + "` here (an unannotated local rebound to a value of another type, or a type the compiler cannot resolve at this point); a member read through it is not in the bootstrap (§7.5.1). Annotate the local with its type (`let u: T = …`), or bind the other value to a fresh name"
     }
 
     // A member step that dereferences its receiver's VALUE (a struct field, `.length`) —
@@ -34277,6 +34399,13 @@ ${
         let renv: TEnv = env
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
         if (bind is given) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
+        // s478 fix round 1 (#1917) — a row over a source whose type is unresolved BECAUSE of an
+        // error already reported (a refused declaration it reads) is blamed (§42.4 statement 6:
+        // no second report at `@.field`, memberRecvMismatch)
+        if (bind is given && inA is given && knownOf(elem) is not) {
+            const ix: AExpr | not = valueExpr(inA.value)
+            if (ix is given && condBlamed(env, ix, ts)) renv = tWithRefused(renv, bind)
+        }
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
         if (keyA is given) {
             // s475 r1 (#1782 review): the attribute key is the header key's rule
