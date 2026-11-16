@@ -267,14 +267,15 @@ describe("3 — the named codes", () => {
 
 // ---------------------------------------------------------------------------
 describe("4 — refused by name, never silently accepted", () => {
-  test("`${(e) => …}` — a handler taking the event object (function values, C2b)", () => {
-    const e = errs(prog(`<button onclick=\${(e) => @last = e.type}>go</>`));
+  // s478 (s478-boot-fn-values): `${(e) => …}` / `${(e) => { … }}` taking the event object are
+  // BUILT — fn-values-s478.test.js runs them. A handler function of two parameters stays refused.
+  test("`${(a, b) => …}` — a handler function of two parameters (function values, C2b)", () => {
+    const e = errs(prog(`<button onclick=\${(a, b) => @last = "x"}>go</>`));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(e[0].message).toContain("event object");
   });
-  // s478 (s478-boot-block-lambda): a braced arrow body is BUILT — block-lambda-s478.test.js runs it.
-  test("`${(e) => { … }}` — a braced handler taking the event object (function values)", () => {
-    const e = errs(prog(`<button onclick=\${(e) => { @last = e.type; }}>go</>`));
+  test("`${(a, b) => { … }}` — a braced handler function of two parameters (function values)", () => {
+    const e = errs(prog(`<button onclick=\${(a, b) => { @last = "x"; }}>go</>`));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(e[0].message).toContain("event object");
   });

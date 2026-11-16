@@ -7904,7 +7904,7 @@ ${
             // §5.2.4: two or more statements in a non-handler `{…}` value
             if (!handler && !decl && isStatementList(tp2, b.b, t3)) return multiStatementValue(mp, backToMarkup(mp, t3), name, "{…}")
             if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
-            return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
+            return { v: AAttrValue.Braced(b.b, ""), mp: backToMarkup(mp, t3) }
         }
         const tp3: TP = withInFn(regionTP(mp, LexStop.BareValue), 2)
         if (atEnd(tp3)) {
@@ -8168,34 +8168,74 @@ ${
                 return { v: AAttrValue.Paren(recoveredAt(m2, start)), mp: mBump(m2) }
             }
             if (oneNameBlock(b.b)) t = dropNoEffect(t, n0)
-            return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t) }
+            return { v: AAttrValue.Braced(b.b, ""), mp: backToMarkup(mp, t) }
         }
         const after: MP = backToMarkup(mp, one.tp)
         if (!handler) return { v: AAttrValue.Paren(one.e), mp: after }
         // s478 (s478-boot-block-lambda) — a BLOCK-bodied handler function that takes no
         // event, `${() => { … }}` / `${function () { … }}`: §5.2.1 "SHALL use the `${...}`
         // expression directly as the event handler" — the listener runs its statements,
-        // the same value as the inline block `name={ … }` (§5.2.4). One that takes the
-        // event object is the function-values slice, refused as the expression form is.
+        // the same value as the inline block `name={ … }` (§5.2.4).
+        // s478 (s478-boot-fn-values) — one that TAKES THE EVENT, `${(e) => { … }}` /
+        // `${(e) => expr}`: §5.2.1 "The expression form is required when: You need the event
+        // object: `onclick=${(e) => handler(e, arg)}`", and §5.2 (S457) "A `${…}` value that IS
+        // a function (`${(e) => …}`, …) is the listener itself and names its own parameter" —
+        // the listener's statements, with `e` bound to the event (Braced's `ev`; what `e` may
+        // be used for is analyze's, resolveEventUse). Built for an ARROW of ONE parameter: a
+        // function expression's parameter SHALL carry `: T` (§7.5) and the event's type is not
+        // a scrml type (§5.2 rule 2: "a parameter whose type is unwritten or is not a scrml
+        // type (`e: Event`)"), and the SPEC does not say what a second parameter of a listener
+        // holds (the platform passes one) — both refused by name.
         const blk: RBlockLam | not = blockLambdaOf(one.e)
         if (blk is given) {
+            if (blk.arity == 1 && !blk.via && !oneNameBlock(blk.body)) return { v: AAttrValue.Braced(blk.body, blk.names[0]), mp: after }
             if (blk.arity > 0) {
-                const mb3: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `" + name + "=" + dollarOpen() + "() => { … }}`, an inline block `" + name + "={ … }` or a call `" + name + "=f(x)`", start, after.pos)
+                const mb3: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", eventFnRefusal(name, blk.arity, blk.via, true), start, after.pos)
                 return { v: AAttrValue.Paren(recoveredAt(mb3, start)), mp: mBump(mb3) }
             }
-            return { v: AAttrValue.Braced(blk.body), mp: after }
+            return { v: AAttrValue.Braced(blk.body, ""), mp: after }
         }
         const lam: RLam | not = lambdaOf(one.e)
         if (lam is not) return { v: AAttrValue.Paren(one.e), mp: after }
-        if (lam.params.length > 0) {
-            const m3: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "(" + lam.params.join(", ") + ") => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `" + name + "=" + dollarOpen() + "() => …}`, an inline block `" + name + "={ … }` or a call `" + name + "=f(x)`", start, after.pos)
+        if (lam.params.length == 1 && !isNameExpr(lam.body)) {
+            // `(e) => expr` — the listener evaluates `expr` (its value is discarded): the one
+            // statement `expr;`, as the block form `(e) => { expr; }` (two fresh node ids)
+            const sn: int = after.nid
+            const bk: ABlock = { nid: sn + 1, span: lam.body.span, stmts: [{ nid: sn, span: lam.body.span, k: AStmtK.Eval(lam.body) }] }
+            return { v: AAttrValue.Braced(bk, lam.params[0]), mp: mBump(mBump(after)) }
+        }
+        if (lam.params.length > 1) {
+            const m3: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", eventFnRefusal(name, lam.params.length, false, false), start, after.pos)
             return { v: AAttrValue.Paren(recoveredAt(m3, start)), mp: mBump(m3) }
         }
         if (isNameExpr(lam.body)) {
-            const m4: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "() => f}` — an arrow handler whose body is a bare name RETURNS the function without calling it, and a function value is not in the bootstrap (g-bootstrap-function-values-slice-s451). Call it — `" + name + "=" + dollarOpen() + "() => f()}` — or wire it directly: `" + name + "=f`", start, after.pos)
+            const m4: MP = mDiag(after, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=" + dollarOpen() + "(…) => f}` — an arrow handler whose body is a bare name RETURNS the function without calling it, and a function value is not in the bootstrap (g-bootstrap-function-values-slice-s451). Call it — `" + name + "=" + dollarOpen() + "() => f()}` — or wire it directly: `" + name + "=f`", start, after.pos)
             return { v: AAttrValue.Paren(recoveredAt(m4, start)), mp: mBump(m4) }
         }
         return { v: AAttrValue.Paren(lam.body), mp: after }
+    }
+
+    // s478 (s478-boot-fn-values) — why a `${…}` handler FUNCTION is refused: built for an
+    // arrow of one parameter, the event (§5.2.1); a block arrow whose body is one bare name
+    // evaluates the function without calling it (`(e) => { f }`).
+    fn eventFnRefusal(name: string, arity: int, via: boolean, block: boolean) -> string {
+        let form: string = "(…) => …"
+        if (block) form = "(…) => { … }"
+        if (via) form = "function (…) { … }"
+        let why: string = "a handler function of " + arity + " parameters — the listener receives ONE argument, the event object, and the SPEC does not say what a second parameter holds (§5.2.1)"
+        if (via) {
+            why = "a function EXPRESSION that takes the event — its parameter SHALL carry `: T` (§7.5), and the event's type is not a scrml type (§5.2 rule 2, `e: Event`); write the arrow form `" + name + "=" + dollarOpen() + "(e) => { … }}`"
+        } else if (arity == 1) {
+            why = "an arrow handler whose body is a bare name evaluates the function without calling it — call it: `" + name + "=" + dollarOpen() + "(e) => { f(); }}`"
+        }
+        return "`" + name + "=" + dollarOpen() + form + "}` — " + why + " (bootstrap: g-bootstrap-function-values-slice-s451)"
+    }
+
+    // s478 (s478-boot-fn-values) — a block lambda's parameter names.
+    fn aparamNames(ps: AParam[]) -> string[] {
+        let out: string[] = []
+        for (const p of ps) { out = out.concat([p.name]) }
+        return out
     }
 
     fn dollarOpen() -> string { return "$" + "{" }
@@ -8245,12 +8285,12 @@ ${
     type RLam:struct = { params: string[], body: AExpr }
 
     // s478 — a block-bodied lambda's arity and body, else `not`.
-    type RBlockLam:struct = { arity: int, body: ABlock }
+    type RBlockLam:struct = { arity: int, body: ABlock, names: string[], via: boolean }
 
     fn blockLambdaOf(e: AExpr) -> RBlockLam | not {
         const k: AExprK = e.k
         return match k {
-            .BlockLambda(params: ps, body: b) :> { arity: ps.length, body: b }
+            .BlockLambda(params: ps, body: b, viaFunction: vf) :> { arity: ps.length, body: b, names: aparamNames(ps), via: vf }
             .Lambda(params: ps) :> not
             .Name(name: n) :> not
             .Recovered :> not
