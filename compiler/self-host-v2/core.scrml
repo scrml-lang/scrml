@@ -246,7 +246,13 @@ ${
     // s469 r3 (F1) — `Unreadable`: what lower makes of a parse placeholder
     // (AExprK.Recovered). Never a program's meaning: checkCore refuses any Core
     // that holds one (C-R1), so a placeholder can never print as a silent `null`.
-    export type HostCall:enum = { DateNow, Unreadable }
+    // s478 (s478-boot-fn-values) — the event object of a `${(e) => …}` listener (§5.2.1):
+    // `EventRead(member)` reads one of its Appendix H `Event` read members whose type is a
+    // scalar (`e.type`, `e.timeStamp`); `EventCall(member)` calls one of its `() -> void`
+    // members (`e.preventDefault()`, `e.stopPropagation()`) — only as an Eval (its value is
+    // discarded). Both stand only in the body of an `On` attribute's handler (check.scrml
+    // C-EV1): the printer names the listener's event argument there.
+    export type HostCall:enum = { DateNow, Unreadable, EventRead(member: string), EventCall(member: string) }
     // s444 — the sequence functions a lambda is admitted as the argument of.
     // Each makes a NEW sequence value (R3: values are immutable).
     // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the

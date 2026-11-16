@@ -8713,6 +8713,7 @@ ${
         if (l is not && (name == "eval" || name == "Function")) return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage("refers to `" + name + "` as a value — a function that runs source text as JavaScript, refused wherever it is called"), st)
         if (l is given) {
             const st2: AS = addName(st, e.nid, NameFact.NLocal(l.s))
+            if (isEventLocal(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + name + "` used as a value"), st2)   // s478 (s478-boot-fn-values)
             if (l.narrowed is given) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
@@ -9289,6 +9290,9 @@ ${
         // s478 — a member of an unbuilt built-in (`session.userId`, `document.title`): one refusal by name
         const rb: string = builtinRootRefusal(env, obj, name)
         if (rb != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", rb, st0)
+        // s478 (s478-boot-fn-values) — a member of the listener's event (§5.2.1)
+        const evl: LocalB | not = eventLocalOf(env, obj)
+        if (evl is given) return resolveEventMember(env, e, obj, evl, name, st0)
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
@@ -9561,10 +9565,22 @@ ${
     // its field's type (the bare-variant position above) and TYPED against it by
     // typeCall (E-TYPE-031, as a `fail`'s payload is — typeFail).
     // =========================================================================
+    // s478 — a refused sink call rooted at the listener's event (`e[k]()`) still records the
+    // event's use (its NLocal fact), so §13.2's after-await rule sees it: "a computed member
+    // access with a non-literal key" is a use other than a plain read of a non-control
+    // property (E-EVENT-CONTROL-AFTER-AWAIT), reported beside the §5.2 sink refusal.
+    fn sinkEventUse(env: Env, callee: AExpr, st0: AS) -> AS {
+        const r: AExpr | not = partRootName(callee)
+        if (r is not) return st0
+        const l: LocalB | not = eventLocalOf(env, r)
+        if (l is not) return st0
+        return addName(st0, r.nid, NameFact.NLocal(l.s))
+    }
+
     fn resolveCallOrConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX {
         // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first
         const sinkC: string = sinkCallWhy(env, callee, args)
-        if (sinkC != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkC), st0)
+        if (sinkC != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkC), sinkEventUse(env, callee, st0))
         const rc: RX | not = resolveConstruct(env, e, callee, args, expected, st0)
         if (rc is given) return rc
         return resolveCall(env, e, callee, args, st0)
@@ -9725,6 +9741,9 @@ ${
                 // s478 — a method of an unbuilt built-in (`session.destroy()`, `document.querySelector(…)`)
                 const rb: string = builtinRootRefusal(env, m.obj, m.method)
                 if (rb != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", rb, resolveExprs(env, args, not, st0))
+                // s478 (s478-boot-fn-values) — a method of the listener's event (§5.2.1)
+                const evl: LocalB | not = eventLocalOf(env, m.obj)
+                if (evl is given) return resolveEventCall(env, e, m, evl, args, st0)
             }
             if (m is given) {
                 // s473 (§21.3.3 rule 15): a method call on a declared `:host` handle is
@@ -11066,7 +11085,7 @@ ${
     // scope. Answers the body's type.
     fn resolveLambda(env: Env, lam: AExpr, ps: string[], ty: Type | not, want: Type | not, st0: AS) -> RX {
         let st: AS = st0
-        let env2: Env = env
+        let env2: Env = sealEvent(env)     // s478 (s478-boot-fn-values)
         let syms: Sym[] = []
         for (const pn of ps) {
             const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn)
@@ -11104,7 +11123,7 @@ ${
     //     closure the bootstrap builds; everything else refused by name.
     fn resolveBlockLambda(env: Env, lam: AExpr, body: ABlock, ty: Type | not, want: Type | not, st0: AS) -> RX {
         let st: AS = st0
-        let env2: Env = env
+        let env2: Env = sealEvent(env)     // s478 (s478-boot-fn-values)
         let syms: Sym[] = []
         const fte: TypeEnv = teAt(env.g.te, env.file)
         const via: boolean = lambdaViaFunction(lam)
@@ -13843,7 +13862,7 @@ ${
         // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first (the
         // edit-call paths below would otherwise take a member call before it)
         const sinkS: string = sinkCallWhy(env, callee, args)
-        if (sinkS != "") return addDiag(st, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkS))
+        if (sinkS != "") return addDiag(sinkEventUse(env, callee, st), env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkS))
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
         // s469: a JavaScript tape method name, or a discarded `sort` / `reverse` (E-TAPE-JS-METHOD)
         const jm: MethodCall | not = memberCall(callee)
@@ -16070,6 +16089,8 @@ ${
             const ix: AExpr | not = s.index
             if (ix is given) st = resolveExpr(env, ix, Type.Int, st).st
         }
+        // s478 (s478-boot-fn-values): a member write on the listener's event (`e.returnValue = …`)
+        if (isEventLocal(l)) return partRefused(env, value, target.span, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + label + " = …`"), st)
         const lt: Type | not = l.ty
         // a position of the local's OWN tape, its type inferred: whatever that type
         // is, inference gives it no grant (§66.12.6 rule 1) — refused as ungranted
@@ -16674,10 +16695,127 @@ ${
     // be E-ERROR-002, exactly like `onclick=risky()`").
     // `onclick={ risky }` is a reference too (S441: "the bare `onclick=risky`,
     // `onclick=${risky}`, or `onclick={ risky }`").
-    fn bracedHandler(env: Env, b: ABlock, st: AS) -> AS {
+    fn bracedHandler(env: Env, b: ABlock, ev: string, st: AS) -> AS {
+        if (ev != "") return eventHandler(env, b, ev, st)
         const r: AExpr | not = blockReference(b)
         if (r is not) return loopChecks(env.file, b, resolveBlock(withLift(env, LiftCtx.NoLift), b, st))   // s469: a handler block is a loop-control boundary (and a `lift` one)
         return handlerReference(env, r, resolveBlock(withFnRef(withLift(env, LiftCtx.NoLift), r.nid), b, st))
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-fn-values) — THE LISTENER'S EVENT: `name=${(e) => …}` (§5.2.1:
+    // "The expression form is required when: You need the event object"; §5.2 S457: "A
+    // `${…}` value that IS a function (`${(e) => …}`, `${fn(e) { … }}`) is the listener
+    // itself and names its own parameter"). The body is resolved as the handler's
+    // statements are, with `e` bound — by SCOPE, so an inner parameter or a block-local of
+    // the same name is another binding (§13.2: "An inner parameter or a block-local binding
+    // that is also named `event` is a different binding").
+    //
+    // What `e` may be used for. Its type is not a scrml type (§5.2 rule 2: "a parameter whose
+    // type is unwritten or is not a scrml type (`e: Event`) … fails closed") and its members
+    // "stay open" and untyped (§21.3.3 rule 16) — open untyped member access is not in the
+    // bootstrap. Built: the members Appendix H gives the `Event` interface itself (every
+    // event has them, whatever its kind — host-surface.scrml is the one table): a `read`
+    // whose type is a scalar (`e.type` H-047 `string`, `e.timeStamp` H-048 `number`), and a
+    // `() -> void` call as a statement (`e.preventDefault()` H-050, `e.stopPropagation()`
+    // H-051). Every other use is refused BY NAME (eventUseWhy) — an alias, an argument, a
+    // computed member, a member of another interface (`e.target`, `e.key`), a use inside a
+    // lambda in the handler — never silently accepted.
+    //
+    // §13.2 E-EVENT-CONTROL-AFTER-AWAIT is the planner's (eventAfterAwait): it needs the
+    // handler's suspension points.
+    // =========================================================================
+    fn eventVia() -> string { return "the handler's event object" }
+    fn eventSealedVia() -> string { return "the handler's event object, captured by a lambda in the handler" }
+
+    fn eventHandler(env: Env, b: ABlock, ev: string, st0: AS) -> AS {
+        const rs: RSym = mint(reservedName(st0, env.file, b.span, ev), ev)
+        const st: AS = addValue(rs.st, b.nid, ValueFact.VLambda([rs.s]))
+        const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia(), foreign: false })
+        return loopChecks(env.file, b, resolveBlock(env2, b, st))
+    }
+
+    fn isEventLocal(l: LocalB) -> boolean { return l.via == eventVia() || l.via == eventSealedVia() }
+
+    // The listener-event local a bare name `obj` resolves to here, else not.
+    fn eventLocalOf(env: Env, obj: AExpr) -> LocalB | not {
+        const n: string = exprName(obj)
+        if (n == "") return not
+        const l: LocalB | not = lookupLocal(env, n)
+        if (l is not) return not
+        if (!isEventLocal(l)) return not
+        return l
+    }
+
+    // A lambda's body sees the handler's event SEALED: §13.2 follows "a function that uses
+    // the event" past the first await, which the bootstrap does not track — refused by name.
+    fn sealEvent(env: Env) -> Env {
+        let ls: LocalB[] = []
+        let any: boolean = false
+        for (const l of env.locals) {
+            if (l.via == eventVia()) {
+                ls = ls.concat([{ name: l.name, s: l.s, ty: l.ty, mutable: l.mutable, narrowed: l.narrowed, nDecl: l.nDecl, fresh: l.fresh, via: eventSealedVia(), foreign: l.foreign }])
+                any = true
+            } else {
+                ls = ls.concat([l])
+            }
+        }
+        if (!any) return env
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: ls, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
+    }
+
+    // §13.2's control members: "`preventDefault`, `stopPropagation`, `stopImmediatePropagation`,
+    // `returnValue`, `cancelBubble`".
+    fn isEventControl(m: string) -> boolean {
+        return m == "preventDefault" || m == "stopPropagation" || m == "stopImmediatePropagation" || m == "returnValue" || m == "cancelBubble"
+    }
+
+    fn eventUseWhy(l: LocalB, what: string) -> string {
+        const built: string = "the listener's event `" + l.name + "` is in the bootstrap only as a read of a scalar member of the `Event` interface (`" + l.name + ".type`, `" + l.name + ".timeStamp`) and a call of `" + l.name + ".preventDefault()` / `" + l.name + ".stopPropagation()` as a statement (Appendix H H-047–H-051)"
+        if (l.via == eventSealedVia()) return what + " inside a lambda in the handler — " + built + ", in the handler's own statements: §13.2 follows a function that uses the event past the handler's first `await`, which the bootstrap does not track yet (g-bootstrap-function-values-slice-s451). Read the member into a `const` before the lambda"
+        return what + " — " + built + ". Any other use (an alias, an argument, a returned or stored event, a computed member `" + l.name + "[k]`, a member of another interface such as `" + l.name + ".target` or `" + l.name + ".key`) is not built yet: the event's members stay open and untyped in logic (§21.3.3 rule 16, §5.2 rule 2), and open, untyped member access is not in the bootstrap (g-bootstrap-function-values-slice-s451)"
+    }
+
+    // A scrml scalar for an Appendix H slot type, else not (an interface, a union, …).
+    fn eventScalar(slot: string) -> Type | not {
+        if (slot == "string") return Type.Str
+        if (slot == "number") return Type.Num
+        if (slot == "int") return Type.Int
+        if (slot == "bool") return Type.Bool
+        return not
+    }
+
+    // The scrml scalar of a built event member read (`e.type`, `e.timeStamp`): its
+    // Appendix H slot type, else not. One lookup for the resolver and the typer.
+    fn eventReadType(name: string) -> Type | not {
+        if (isEventControl(name)) return not
+        const en: HEntry | not = findEntry("Event", name, "read")
+        if (en is given && entryConflict(en) == "") return eventScalar(sigResult(en))
+        return not
+    }
+
+    // `e.m` read.
+    fn resolveEventMember(env: Env, e: AExpr, obj: AExpr, l: LocalB, name: string, st0: AS) -> RX {
+        const st: AS = addName(st0, obj.nid, NameFact.NLocal(l.s))
+        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+        const t: Type | not = eventReadType(name)
+        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name))))
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+    }
+
+    // `e.m(…)`.
+    fn resolveEventCall(env: Env, e: AExpr, m: MethodCall, l: LocalB, args: AExpr[], st0: AS) -> RX {
+        const st: AS = addName(st0, m.obj.nid, NameFact.NLocal(l.s))
+        const what: string = "`" + l.name + "." + m.method + "(…)`"
+        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
+        const en: HEntry | not = findEntry("Event", m.method, "call")
+        if (en is given && entryConflict(en) == "" && sigParams(en).length == 0 && sigResult(en) == "void") {
+            if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", what + " with an argument — Appendix H gives `" + m.method + "` the signature `() -> void` (" + en.id + "); the bootstrap builds the call as written there", resolveExprs(env, args, not, st))
+            if (env.fx.stmtCall != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-TYPE-001", "`" + l.name + "." + m.method + "()` is `void` (Appendix H " + en.id + ": `() -> void`) — it cannot be used as a value (§18.3); call it as a statement"))
+            return plain(not, addValue(st, e.nid, ValueFact.VHost(HostCall.EventCall(m.method))))
+        }
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
     }
 
     // The one name a braced handler body consists of, else not.
@@ -24669,7 +24807,7 @@ ${
         return match v {
             .Bare(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
             .Paren(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
-            .Braced(b: b) :> bracedHandler(env, b, st)
+            .Braced(b: b, ev: ev) :> bracedHandler(env, b, ev, st)
             .Quoted(v: s) :> st
             .Dur(text: s) :> st
             .NoValue :> st
@@ -30101,6 +30239,46 @@ ${
         }
     }
 
+    // s478 — the one type of a host call (valueType, builtinCallType, typeMember):
+    // `Date.now()` is a `number`; an event member read is its Appendix H slot scalar
+    // (eventReadType: `type` string, `timeStamp` number — §5.2.1, H-047/H-048); an event
+    // control call is `void` (`() -> void`, H-049–H-051), never a value — Unknown here
+    // (the resolver already refuses it as a value, E-TYPE-001).
+    fn hostCallType(c: HostCall) -> VType {
+        return match c {
+            .DateNow :> known(Type.Num)
+            .Unreadable :> VType.Unknown
+            .EventRead(member: m) :> eventReadVType(m)
+            .EventCall(member: m2) :> VType.Unknown
+        }
+    }
+
+    fn eventReadVType(m: string) -> VType {
+        const t: Type | not = eventReadType(m)
+        if (t is given) return known(t)
+        return VType.Unknown
+    }
+
+    fn hostFact(f: ValueFact | not) -> HostCall | not {
+        return match f {
+            .VHost(call: c) :> c
+            .VLit(lit: l) :> not
+            .VVariant(enumSym: s) :> not
+            .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
+            .VOp(op: o) :> not
+            .VSeqCall(op: o) :> not
+            .VLambda(params: ps) :> not
+            .VIndex(loc: x) :> not
+            .VAt :> not
+            .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
+            .VToEnum(enumSym: s) :> not
+            .VMethod(op: o) :> not
+            not :> not
+        }
+    }
+
     // The type of a constant the binder resolved. (An operator's type is
     // computed from its operands, typeBinary / typeUnary.)
     fn valueType(f: ValueFact | not) -> VType {
@@ -30110,7 +30288,7 @@ ${
             .VStructOf(ty: s) :> known(Type.Named(s))
             .VConstruct(enumSym: s) :> known(Type.Named(s))
             .VOp(op: o) :> VType.Unknown
-            .VHost(call: c) :> known(Type.Num)
+            .VHost(call: c) :> hostCallType(c)
             .VSeqCall(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
@@ -30726,7 +30904,7 @@ ${
     fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts: TypeState) -> VType {
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         return match f {
-            .VHost(call: c) :> known(Type.Num)
+            .VHost(call: c) :> hostCallType(c)
             .VSeqCall(op: o) :> seqCallType(ts, o, callee, args)
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
@@ -31064,6 +31242,10 @@ ${
         let ts1: TypeState = ts
         if (hasErrIn(env.blame.spans, e.span)) ts1 = quietPlace(ts, obj)
         const ro: RVT = typeExpr(env, obj, ts1)
+        // s478: a host member read (`e.type`, `e.timeStamp`) carries no name fact — its
+        // type is the host call's (hostCallType), not Unknown
+        const hc: HostCall | not = hostFact(vf)
+        if (hc is given) return rvt(hostCallType(hc), ro.ts)
         // s478-boot-sql-row-types — §42.3.5 / §34 E-TYPE-046: the binder resolved a field of a
         // `T | not` local (resolveMember); here the read is judged against the narrowing in force.
         // The receiver must be PROVEN `T` (a narrowed `Known`); anything else — still `T | not`,
@@ -37099,7 +37281,7 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]
+        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop, ""), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
@@ -39339,8 +39521,8 @@ ${
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> elemActions(e, file)
-            .Effect(w: w) :> [{ what: "this `<effect>` body", v: AAttrValue.Braced(w.body), file: file }]
-            .Run(b: b) :> [{ what: "this body-top statement", v: AAttrValue.Braced(b), file: file }]   // s478: planned as a handler block is
+            .Effect(w: w) :> [{ what: "this `<effect>` body", v: AAttrValue.Braced(w.body, ""), file: file }]
+            .Run(b: b) :> [{ what: "this body-top statement", v: AAttrValue.Braced(b, ""), file: file }]   // s478: planned as a handler block is
             .Request(r: r) :> []            // s475: a request body is planned by requestPlan (one suspension, its load)
             .Text(text: s) :> []
             .Interp(e: x) :> []
@@ -43532,11 +43714,129 @@ ${
         return match v {
             .Bare(e: e) :> planHandlerExpr(cx, e, ps)
             .Paren(e: e) :> planHandlerExpr(cx, e, ps)
-            .Braced(b: b) :> planBraced(cx, b, ps)
+            .Braced(b: b, ev: ev) :> planEventBraced(cx, b, ev, ps)
             .Quoted(v: x) :> ps
             .Dur(text: x) :> ps
             .NoValue :> ps
         }
+    }
+
+    // s478 (s478-boot-fn-values) — a `${(e) => …}` listener: its body is planned as a
+    // handler block's, then §13.2's rule on its event after the first `await` is judged.
+    fn planEventBraced(cx: PCx, b: ABlock, ev: string, ps0: PS) -> PS {
+        if (ev == "") return planBraced(cx, b, ps0)
+        const before: int = ps0.plan.at.length
+        const ps: PS = planBlock(cx, b, ps0)
+        return eventAfterAwait(cx, b, before, ps)
+    }
+
+    // §13.2: "After the handler's first `await` (in source order, once the awaited operand has
+    // been evaluated), the handler's event parameter — identified by BINDING, not by name — and
+    // every value derived from it SHALL be usable only for a plain read of a non-control
+    // property (`event.target`, `event.key`, …). Any other use SHALL be a compile error
+    // (`E-EVENT-CONTROL-AFTER-AWAIT`) … "After" is source order". The first await is the
+    // suspension point of this body (the plan's entries from `before` on, and every waiting call
+    // — isAwaitCall) whose expression ends first; the binding is the event's Sym (the VLambda fact on the body). Every use of it
+    // that starts at or after that end and is not the object of a non-control member READ
+    // (not a call's callee, not an assignment's target) is reported. A value derived from the
+    // event, and a function that uses it, are refused by name before this (eventUseWhy), so
+    // the binding's own uses are every use the bootstrap builds.
+    fn eventAfterAwait(cx: PCx, b: ABlock, before: int, ps: PS) -> PS {
+        const evs: int = eventSymOf(cx.t, b)
+        if (evs < 0) return ps
+        let ids: int[] = []
+        let i: int = before
+        while (i < ps.plan.at.length) {
+            ids = ids.concat([ps.plan.at[i].nid])
+            i = i + 1
+        }
+        const all: AExpr[] = allExprsIn(b)
+        let bound: int = -1
+        for (const x of all) {
+            if ((ids.indexOf(x.nid) >= 0 || isAwaitCall(cx, x)) && (bound < 0 || x.span.end < bound)) bound = x.span.end
+        }
+        if (bound < 0 && ids.length > 0) bound = b.span.start     // fail closed: a suspension this walk does not see
+        if (bound < 0) return ps
+        let notRead: int[] = []
+        for (const x of all) {
+            const c: AExpr | not = calleeOf(x.k)
+            if (c is given) notRead = notRead.concat([c.nid])
+            const t: AExpr | not = assignTargetOf(x.k)
+            if (t is given) notRead = notRead.concat([t.nid])
+        }
+        let plainObj: int[] = []
+        for (const x of all) {
+            const m: MethodCall | not = memberCall(x)
+            if (m is given && !isEventControl(m.method) && notRead.indexOf(x.nid) < 0) plainObj = plainObj.concat([m.obj.nid])
+        }
+        let st: AS = ps.st
+        let seen: int[] = []
+        for (const x of all) {
+            if (seen.indexOf(x.nid) < 0 && x.span.start >= bound && plainObj.indexOf(x.nid) < 0 && localSymOfName(cx.t, x.nid) == evs) {
+                seen = seen.concat([x.nid])
+                st = addDiag(st, cx.file, x.span, "E-EVENT-CONTROL-AFTER-AWAIT", "`" + exprName(x) + "` — the handler's event — is used after the handler's first `await` other than by a plain read of a non-control property (§13.2): by then the browser has performed the event's default action and propagated it, so a control call or any other use of the event has no effect. Call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows")
+            }
+        }
+        return { st: st, plan: ps.plan }
+    }
+
+    // A call that waits wherever it stands (§13.2): a client call of a server function, or of a
+    // client function that waits — also when its result is left unhandled (E-ERROR-002), which
+    // the plan does not record as a suspension point; the handler awaits it all the same.
+    fn isAwaitCall(cx: PCx, x: AExpr) -> boolean {
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return false
+        const f: Sym | not = fnSymOf(nameFact(cx.t.names, c.nid))
+        if (f is not) return false
+        const pk: PlaceK = placeOf(cx.s.places, f.id)
+        if (pk == PlaceK.Server || cx.s.inherited.indexOf(f.id) >= 0) return true
+        return waitingClientFn(cx, f.id)
+    }
+
+    // The Sym id the binder minted for a listener's event (eventHandler's VLambda fact on
+    // its body), else -1.
+    fn eventSymOf(t: Tables, b: ABlock) -> int {
+        const f: ValueFact | not = valueFact(t.values, b.nid)
+        const ss: Sym[] = match f {
+            .VLambda(params: ps) :> ps
+            .VIndex(loc: x) :> []
+            .VAt :> []
+            .VTemplate(text: tx) :> []
+            .VPrint(text: tx2) :> []
+            .VToEnum(enumSym: x) :> []
+            .VMethod(op: x) :> []
+            .VLit(lit: l) :> []
+            .VVariant(enumSym: x) :> []
+            .VStructOf(ty: x) :> []
+            .VConstruct(enumSym: x) :> []
+            .VOp(op: x) :> []
+            .VHost(call: x) :> []
+            .VSeqCall(op: x) :> []
+            not :> []
+        }
+        if (ss.length != 1) return -1
+        return ss[0].id
+    }
+
+    // s478 — every expression node of a block, at any depth: nested blocks, handling-form
+    // arms, lambda bodies (a node reached twice is reported once by its caller).
+    fn allExprsIn(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(allExprsOf(e)) }
+            for (const nb of nestedBlocks(s)) { out = out.concat(allExprsIn(nb)) }
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(allExprsIn(kb)) }
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) out = out.concat(allExprsIn(lf.body))
+        }
+        return out
+    }
+
+    fn allExprsOf(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = [e]
+        for (const x of exprKids(e)) { out = out.concat(allExprsOf(x)) }
+        for (const bb of exprBlocksIn(e)) { out = out.concat(allExprsIn(bb)) }
+        return out
     }
 
     fn planBraced(cx: PCx, b: ABlock, ps: PS) -> PS {
