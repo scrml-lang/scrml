@@ -27,7 +27,7 @@ Branch `s478-boot-channel` from `716265978` (includes #1916 `<endpoint>`).
   dedup, strict inbound decode, fixed reconnect, `onclient:*` hooks). Server — `print-server.scrml`
   `channelConsts` + `rt.server(host$, routes, conns, endpoints, [rt.channel(channel$0)])`; the upgrade
   route `/_scrml_ws/<name>` is answered by the existing `fetch` (no second router): §40.2 Origin check,
-  405 / 426 / 404, then `upgrader.upgrade`; `srv.websocket` handlers relay a strictly decoded,
+  403 (Origin) / 404 / 405 / 426, then `upgrader.upgrade` (#1928 r1: the prefix is intercepted only when the program has a channel; `/_scrml_ws` reserved for `<endpoint>`); `srv.websocket` handlers relay a strictly decoded,
   re-encoded `__sync` to the channel's other subscribers (per-channel `[name, topic]` key); any other
   frame closes the sender (1003/1007/1008/1009). `channelRefusal` refuses `watches=` emit, a cell with
   no wire table / persist / timing, a waiting or server-only hook. `scrml-boot dev` routes
@@ -44,3 +44,16 @@ Branch `s478-boot-channel` from `716265978` (includes #1916 `<endpoint>`).
 - [x] CI gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim
 - [x] gap `g-boot-channel-s478` (owner questions); `g-bootstrap-let-decl-in-db-channel-body-refused-s469` narrowed
 - [ ] PR
+
+## Fix round 1 (review ~/.cache/scrml/review/s478-1928/review.md)
+
+- [x] HIGH-1: a channel cell syncs only with `replace` and no `rule=` graph / lifecycle / `replace`-less inner tape (`chSyncWhy`); others refused by name (INTERIM, gap g-boot-channel-capability-sync-s478). Tests: channel-s478 B2, channel-served replace-tape e2e.
+- [x] MED-1: `/_scrml_ws` reserved in endpointPathRefusal; server().fetch intercepts the prefix only when `channels.length > 0`.
+- [x] LOW-1: Origin check first (403 → 404 → 405 → 426), comment made true; test.
+- [x] LOW-7: the createServer channel sentence printed only with a channel.
+- [x] LOW-2..6 filed as gaps.
+- [x] conformance: PASS 601 / UNSUPPORTED 615 / FAIL 17 / CRASH 0 — identical per case to the PR head; vs base 46196f62c the same 12 UNSUPPORTED→PASS, 0 PASS→FAIL (all 12 channel cases still pass)
+- [x] corpus: vs base 0 newly-rejecting; vs PR head the append-tape channel snippets docs/tutorial-snippets/07-channel-chat.scrml and 10-all-together.scrml are refused again (spec-ahead pins restored in docs/tutorial.md and the kickstarter article)
+- [x] LOW-7: the 100 base-PASS cases that print, client + server, are byte-identical to base 46196f62c (24 of them have server artifacts)
+- [x] gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim
+- [ ] hook / push

@@ -1448,7 +1448,14 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
         }
         if (!admitted) return jsonResponse(host, 503, FIXED[503]);
       }
-      if (path.startsWith(CHANNEL_PREFIX)) {
+      // s478 #1928 fix r1 (MED-1): the prefix is intercepted only in a program that HAS channels
+      // (a program without one answers `/_scrml_ws/…` as any other path, unchanged from before
+      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (endpointPathRefusal),
+      // so no endpoint is ever shadowed here. Refusal order (LOW-1): 403 (Origin, §40.2 — first,
+      // before anything about the request is answered), then 404 (no such channel), 405
+      // (non-GET), 426 (no `Upgrade: websocket`); only then the upgrade.
+      if (channels.length > 0 && path.startsWith(CHANNEL_PREFIX)) {
+        if (!originOk(request)) return jsonResponse(host, 403, FIXED[403]);
         const ch = byChannel.get(path);
         if (ch === undefined) return jsonResponse(host, 404, FIXED[404]);
         return upgradeChannel(host, ch, request, upgrader, websocket);
@@ -1536,10 +1543,10 @@ function originOk(request) {
   }
 }
 
+// Called after `fetch` has applied the §40.2 Origin check (403) and found the channel (404):
+// "refused with `403` before the upgrade and before any channel handler runs".
 function upgradeChannel(host, ch, request, upgrader, websocket) {
   if (request.method !== "GET") return jsonResponse(host, 405, FIXED[405], { Allow: "GET" });
-  // §40.2: the Origin check comes first — before the upgrade and before any handler
-  if (!originOk(request)) return jsonResponse(host, 403, FIXED[403]);
   const up = (request.headers.get("Upgrade") ?? "").toLowerCase();
   if (up !== "websocket") return jsonResponse(host, 426, { error: "Upgrade Required" }, { Upgrade: "websocket" });
   if (upgrader === null || upgrader === undefined || typeof upgrader.upgrade !== "function") {

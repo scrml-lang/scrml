@@ -184,19 +184,49 @@ describe("B — refused by name (fail closed — g-boot-channel-s478)", () => {
   test("broadcast() itself (§38.6 fan-out not built)", () => one(prog(`${chan(`name="c"`, `  let <count:int=0/>\n  function tally(d: int) { broadcast({ total: d }); }`)}\n<p>\${@count}</p><button onclick=tally(1)>t</button>`), "`broadcast()` is not in the bootstrap"));
   test("markup in a channel body (§38.2 \"SHALL NOT contain markup that emits HTML\")", () => one(prog(`${chan(`name="c"`, `  let <count:int=0/>\n  <p>hi</p>`)}\n<p>\${@count}</p>`), "§38.2"));
   test("a derived value in a channel body (§38.4 names no sync for a value each client recomputes)", () => one(prog(`let <n:int=1/>\n${chan(`name="c"`, `  <twice:int=(@n * 2)/>`)}\n<p>\${@twice}</p>`), "the derived value `twice`"));
-  test("(not refused) a channel cell with no write capability is not synced — it is never written; an `append` grant is one", () => {
+  test("(not refused) a channel cell with no write capability is not synced — it is never written", () => {
     const locked = fe(prog(`${chan(`name="c"`, `  <count:int=0/>`)}\n<p>\${@count}</p>`));
     expect(locked.diags.map((d) => d.code)).toEqual([]);
     expect(locked.core.channels[0].cells).toEqual([]);
-    const app = fe(prog(`${chan(`name="c"`, `  <xs:string[free, append]=[]/>\n  function add(s: string) { @xs.append(s); }`)}\n<p>\${@xs.length}</p><button onclick=add("a")>a</button>`));
-    expect(app.diags.map((d) => d.code)).toEqual([]);
-    expect(app.core.channels[0].cells.map((c) => c.hint)).toEqual(["xs"]);
   });
   test("a channel in another channel / a nested program / `export <channel>`", () => {
     one(prog(`<channel name="a">\n  <channel name="b"></channel>\n</channel>\n<p>x</p>`), "inside another `<channel>`");
     one(prog(`${chan(`name="c"`).replace("<channel", "export <channel")}\n<p>\${@count}</p>`), "`export <channel>`");
   });
   test("a name= the route cannot carry verbatim", () => one(prog(`${chan(`name="a b"`)}\n<p>\${@count}</p>`), "letters, digits"));
+});
+
+// s478 #1928 fix round 1 (review HIGH-1). A sync frame is the cell's WHOLE value, and the
+// receiving client applies it as a whole-value write — so a cell whose grants forbid one (an
+// append-only / pop-only / bounded-append tape, a `rule=` engine, a lifecycle, a struct holding
+// a tape without `replace`) would let any peer rewrite it past its contract. INTERIM: only a
+// `replace`-granted cell is synced (§66.9 rule 2: "On a scalar, `let` IS the `replace` grant");
+// every other granted cell in a channel body is refused by name (g-boot-channel-capability-sync-s478).
+// RED ON BASE OF THE FIX (f1a5ceb11): each refused shape compiled clean and was synced.
+describe("B2 — a channel cell is synced only when a whole-value write is granted (HIGH-1)", () => {
+  const refusedCell = (body, cell, needle, extra = "") => {
+    const src = prog(`${extra}${chan(`name="c"`, body)}\n<p>x</p>`);
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    const msg = refusals(src).join("\n");
+    expect(msg).toContain("the channel cell `" + cell + "`");
+    expect(msg).toContain(needle);
+    expect(msg).toContain("g-boot-channel-capability-sync-s478");
+  };
+  test("P-append-grant / P-client-append-truncation: an append-only tape", () =>
+    refusedCell(`  <xs:string[free, append]=[]/>\n  function add(s: string) { @xs.append(s); }`, "xs", "not `replace`"));
+  test("P-bounded-tape: a bounded append-only tape", () =>
+    refusedCell(`  <xs:int[1..=3, append]=([1])/>\n  function add() { @xs.append(2); }`, "xs", "not `replace`"));
+  test("GRANT-ONLY-POP: a pop-only tape", () =>
+    refusedCell(`  <xs:int[free, pop]=([1,2,3])/>\n  function drop() { @xs.pop(); }`, "xs", "not `replace`"));
+  test("ENGINE: a `rule=` engine field", () =>
+    refusedCell(`<phase:Phase=.Idle single>\n    <Idle rule=.Loading></>\n    <Loading rule=.Done></>\n    <Done></>\n</>`, "phase", "`rule=` transition graph", `type Phase:enum = { Idle, Loading, Done }\n`));
+  test("a struct whose tape field grants no `replace` (§66.12.6 rule 4)", () =>
+    refusedCell(`  let <s:Box=({ xs: [] })/>`, "s", "tape whose type grants no `replace`", `type Box:struct = { xs: int[] }\n`));
+  test("(synced) `let` scalars and structs, and a `replace`-granted tape (bounded or not)", () => {
+    const r = fe(prog(`type Pt:struct = { x: int, y: int }\n${chan(`name="c"`, `  let <n:int=0/>\n  let <pt:Pt=({ x: 1, y: 2 })/>\n  <xs:int[free, replace]=([])/>\n  <ys:int[0..=2, replace]=([])/>\n  <zs:int[free, replace, append]=([])/>`)}\n<p>\${@n}\${@pt.x}\${@xs.length}\${@ys.length}\${@zs.length}</p>`));
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    expect(r.core.channels[0].cells.map((c) => c.hint)).toEqual(["n", "pt", "xs", "ys", "zs"]);
+  });
 });
 
 // The served halves are channel-served-s478.test.js (it needs Bun's own WebSocket, which the

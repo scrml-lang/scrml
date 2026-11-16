@@ -132,6 +132,47 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
     } finally { bun.stop(true); }
   });
 
+  // s478 #1928 fix r1 (LOW-1): the Origin check is the first answer on the channel prefix —
+  // 403 before 404 (unknown channel), 405 (non-GET) and 426 (no Upgrade)
+  test("refusal order on `/_scrml_ws/`: 403 (cross Origin) before 404 / 405 / 426", async () => {
+    const { srv, bun, base } = await served(SYNC);
+    try {
+      const st = async (path, method, origin) => (await srv.fetch(new Request(`http://${base}${path}`, { method, headers: { Origin: origin } }), null)).status;
+      expect(await st("/_scrml_ws/chat", "POST", "https://evil.example")).toBe(403);
+      expect(await st("/_scrml_ws/other", "GET", "https://evil.example")).toBe(403);
+      expect(await st("/_scrml_ws/chat", "GET", "https://evil.example")).toBe(403);
+      expect(await st("/_scrml_ws/other", "GET", `http://${base}`)).toBe(404);
+      expect(await st("/_scrml_ws/chat", "POST", `http://${base}`)).toBe(405);
+      expect(await st("/_scrml_ws/chat", "GET", `http://${base}`)).toBe(426);
+    } finally { bun.stop(true); }
+  });
+
+  // s478 #1928 fix r1 (MED-1): `/_scrml_ws` is the compiler's channel mount (§38.1: "a
+  // server-side upgrade route at `/_scrml_ws/<name>`") — an `<endpoint>` under it is refused at
+  // compile time, and a program with no channel does not intercept the prefix at all.
+  test("P-endpoint-under-ws-prefix: an `<endpoint>` under `/_scrml_ws` is refused at compile time", () => {
+    const FSP = `type FspMethod:enum = {\n  FleetStatus\n  DeltaSince(seq: int)\n}`;
+    for (const path of ["/_scrml_ws/hook", "/_scrml_ws", "/_scrml_ws/"]) {
+      const src = prog(`${FSP}\n<endpoint path="${path}" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`);
+      const r = frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
+      const es = r.diags.filter((d) => d.severity === "Error");
+      expect(es.length).toBe(1);
+      expect(es[0].message).toContain("`/_scrml_ws/` is where the compiler mounts its channels");
+    }
+  });
+  test("a program with no channel does not intercept `/_scrml_ws/` (no Origin / 405 answer there)", async () => {
+    const FSP = `type FspMethod:enum = {\n  FleetStatus\n}`;
+    const src = prog(`${FSP}\n<endpoint path="/hook" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n</endpoint>`);
+    const r = frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    const { server } = artifacts(r.core);
+    expect(server.js).not.toContain("A program with a §38 channel");   // LOW-7: the channel sentence only with a channel
+    const mod = await loadServer(server.js, r.core);
+    const srv = mod.createServer({ root: "/tmp", log: () => {} });
+    const res = await srv.fetch(new Request("http://127.0.0.1:1/_scrml_ws/x", { method: "POST", headers: { Origin: "https://evil.example" } }), null);
+    expect(res.status).toBe(404);
+  });
+
   test("§40.2: a cross-origin handshake is refused 403 before the upgrade; `Origin: null` too; the server's own origin and no Origin are accepted", async () => {
     const { srv, bun, base } = await served(SYNC);
     try {
@@ -230,6 +271,32 @@ describe("D — the client half (runtime.js `channel`, the call the client artif
       await tick(200);
       expect(t.a.cell.peek()).toBe(9);
     } finally { t.done(); }
+  });
+
+  // s478 #1928 fix r1 (HIGH-1): a `replace`-granted tape is still synced end to end — compiled
+  // from source (the cell's table is the one the client artifact prints), two clients.
+  test("a `replace`-granted tape cell syncs end to end (compiled from source)", async () => {
+    const src = prog(`${chan(`name="tl"`, `  <xs:string[free, replace]=([])/>`)}\n<p>\${@xs.length}</p><button onclick={ @xs = ["a"]; }>a</button>`);
+    const s = await served(src);
+    expect(s.client.js).toContain(`{ key: "xs", cell: program$.fields[`);
+    const table = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
+    expect(s.server.js).toContain(`{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } } }`);
+    const saved = globalThis.location;
+    globalThis.location = { protocol: "http:", host: s.base };
+    const mk = () => {
+      const scope = rt.root.child();
+      const cell = rt.cell([]);
+      rt.channel(scope, { name: "tl", reconnect: 0, cells: [{ key: "xs", cell, table }], open: null, close: null, error: null });
+      return { scope, cell };
+    };
+    const a = mk();
+    const b = mk();
+    try {
+      await tick(200);
+      rt.batch(() => a.cell.set(["one", "two"]));
+      await tick(200);
+      expect(b.cell.peek()).toEqual(["one", "two"]);
+    } finally { a.scope.dispose(); b.scope.dispose(); globalThis.location = saved; s.bun.stop(true); }
   });
 
   test("a value just applied from the wire is not sent back (no echo storm)", async () => {

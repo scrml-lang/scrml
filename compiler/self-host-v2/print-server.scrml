@@ -181,9 +181,13 @@ ${
             serverArgs = serverArgs.concat([JsExpr.JArray(chExprs)])
         }
         inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), serverArgs))])
+        // s478 #1928 fix r1 (LOW-7): the channel sentence only in a program that has a channel — a
+        // program without one prints the comment it printed before channels, byte for byte
+        let csNote: string = "createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2)"
+        if (p.channels.length > 0) csNote = csNote + ". A program with a §38 channel is served by `Bun.serve({ fetch: (req, s) => srv.fetch(req, s), websocket: srv.websocket })`"
         body = body.concat([
             JsStmt.SBlank,
-            JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2). A program with a §38 channel is served by `Bun.serve({ fetch: (req, s) => srv.fetch(req, s), websocket: srv.websocket })`"),
+            JsStmt.SComment(csNote),
             JsStmt.SExportFunc("createServer", ["host$"], inner),
         ])
         return { js: printModule(body), refused: [], routes: routes }

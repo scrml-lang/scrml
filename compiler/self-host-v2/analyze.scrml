@@ -15235,6 +15235,52 @@ ${
         return { ty: { nid: r.next, span: sp, k: ATypeK.TSeq(r.ty, gs) }, next: r.next + 1 }
     }
 
+    // s478 #1928 fix r1 (HIGH-1) — why channel cell `fi` cannot be value-synced, else "" (a reader
+    // function: channelPass asks it, and no grant is read outside this range).
+    // A sync frame is the cell's whole value, applied by each receiving client as a whole
+    // write (§38.4), so the cell must grant `replace` and carry no contract a whole write
+    // may not bypass: a `rule=` graph (§66.13.2), a lifecycle (§66.11.6), or a tape inside
+    // its value whose type grants no `replace` (§66.12.6 rule 4: "a whole-struct write never
+    // gets around a tape field's grants").
+    fn chSyncWhy(g: Globals, fi: FieldInfo) -> string {
+        if (fi.graph is given || hasEditKind(fi.grants.edits, EditKind.Transition)) return "is an engine field with a `rule=` transition graph"
+        if (fi.life) return "carries a lifecycle type (its writes follow the lifecycle's path, §66.11.6)"
+        if (!fi.grants.replace) return "grants only edits (an `append` / `pop` tape grant, a struct field's own `let`), not `replace`"
+        return chInnerContract(g, fi.ty, [], true)
+    }
+
+    // A tape without `replace` inside type `t` (through `| not`, tape elements and struct
+    // fields), else "". `top`: `t` is the cell's own type, whose grants fi.grants carries.
+    fn chInnerContract(g: Globals, t: Type, seen: int[], top: boolean) -> string {
+        return match t {
+            .Seq(elem: e, grants: gs) :> chInnerSeq(g, e, gs, seen, top)
+            .Maybe(inner: i) :> chInnerContract(g, i, seen, top)
+            .Named(sym: s) :> chInnerStruct(g, s, seen)
+            .Int :> ""
+            .Num :> ""
+            .Str :> ""
+            .Bool :> ""
+        }
+    }
+
+    fn chInnerSeq(g: Globals, e: Type, gs: SeqGrants, seen: int[], top: boolean) -> string {
+        if (!top && !gs.replace) return "holds a tape whose type grants no `replace` (§66.12.6 rule 4)"
+        return chInnerContract(g, e, seen, false)
+    }
+
+    fn chInnerStruct(g: Globals, s: Sym, seen: int[]) -> string {
+        if (seen.indexOf(s.id) >= 0) return ""
+        const ti: TypeInfo | not = typeInfoOf(g.types, s)
+        if (ti is not) return ""
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return ""
+        for (const fd of fs) {
+            const r: string = chInnerContract(g, fd.ty, seen.concat([s.id]), false)
+            if (r != "") return r
+        }
+        return ""
+    }
+
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
 
     // =========================================================================
@@ -47290,8 +47336,9 @@ ${
     //  - what the bootstrap does not build, refused by name (INTERIM, gap
     //    g-boot-channel-s478): `auth=`, a reactive / `not` `topic=`, the `onserver:*`
     //    handlers, an `onclient:*` call that binds the event object or passes a
-    //    value, `broadcast()` / `disconnect()` themselves, a channel cell that is not a
-    //    plain `let` cell, markup in a channel body (§38.2: it "SHALL NOT contain
+    //    value, `broadcast()` / `disconnect()` themselves, a channel cell whose grants are not a
+    //    plain whole-value `replace` (chSyncWhy: edit-only tapes, engine / lifecycle
+    //    fields, a tape inside without `replace`), markup in a channel body (§38.2: it "SHALL NOT contain
     //    markup that emits HTML" — no code is named).
     // A clean channel becomes a CoreChannel (print emits the client half, print-server
     // the WebSocket route). `quiet` — the spans of the `broadcast` / `disconnect`
@@ -47409,13 +47456,22 @@ ${
                         cellDecl = true
                         if (watches == "") {
                             // §38.4: "On every local write to a channel-declared cell, the compiler emits
-                            // a sync message" — a cell with a write capability (`let`, or an edit grant
-                            // such as `append`) is synced; one with none is never written, so it has
-                            // nothing to carry (and its peers' frames for it are refused, print-server)
+                            // a sync message" — the message carries the cell's WHOLE value, and a peer's
+                            // frame is applied on the receiving client as a whole-value write. So a cell
+                            // is synced only when a whole-value write is a capability it grants: `replace`
+                            // (§66.9 rule 2: "On a scalar, `let` IS the `replace` grant"), with no
+                            // contract that a whole write may not bypass (s478 #1928 review HIGH-1). One
+                            // with no write capability is never written, so it has nothing to carry (and
+                            // its peers' frames for it are refused, print-server).
                             if (fi.mode == FieldMode.Derived) {
                                 diags = diags.concat([mkDiag(f.path, fi.span, "E-BOOTSTRAP-UNSUPPORTED", "the derived value `" + fi.sym.hint + "` in a `<channel>` body is not in the bootstrap — §38.4 makes \"all three shapes legal\" but names no sync for a value each client recomputes; declare it in the `<program>` body (INTERIM, g-boot-channel-s478)")])
-                            } else if (fi.mode == FieldMode.Let || grantsAny(fi.grants)) {
-                                cells = cells.concat([fi.sym])
+                            } else if (grantsAny(fi.grants)) {
+                                const why: string = chSyncWhy(g, fi)
+                                if (why == "") {
+                                    cells = cells.concat([fi.sym])
+                                } else {
+                                    diags = diags.concat([mkDiag(f.path, fi.span, "E-BOOTSTRAP-UNSUPPORTED", "the channel cell `" + fi.sym.hint + "` " + why + " — the bootstrap syncs a channel cell as its whole value (§38.4), and a peer's frame would be applied as a whole-value write the cell's contract forbids; only a cell that grants `replace` (`let` on a scalar or struct, `[replace]` in a tape type) and carries no `rule=` graph or lifecycle is synced. The capable form — each client enforcing the cell's capability on a received frame (an `append` must extend the current value, a `pop` / `shift` must shrink it, a `rule=` move must be a legal transition) — is not built (INTERIM, g-boot-channel-capability-sync-s478)")])
+                                }
                             }
                         }
                     }
@@ -47938,6 +47994,9 @@ ${
     fn endpointPathRefusal(p: string) -> string {
         if (p.substring(0, 1) != "/") return "it does not begin with `/`"
         if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
+        // s478 #1928 fix r1 (MED-1) — §38.1: "a server-side upgrade route at `/_scrml_ws/<name>`":
+        // the prefix is the compiler's channel mount, reserved like `/_scrml/`
+        if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
         let i = 0
         while (i < p.length) {
             const c: int = p.charCodeAt(i)
