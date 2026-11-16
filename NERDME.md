@@ -282,7 +282,7 @@ Built-in named shapes (the SPEC §53.6.1 registry): `email`, `url`, `uuid`, `pho
 
 One struct type drives the form, the schema, and the table — no schema duplication, no model-to-DTO translation, no view-model boilerplate.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×8] — the bootstrap refuses refinement types on struct fields (string(email): their construction check is not built, g-boot-refinement-runtime-checks-s478) and has no <schema> and no <formFor> / <tableFor> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×8] — the bootstrap refuses refinement types on struct fields (string(email): their construction check is not built, g-boot-refinement-runtime-checks-s478) and has no `schemaFor` <schema> body (§41.15) and no <formFor> / <tableFor> yet -->
 <!-- snippet: docs/readme-snippets/nerdme/type-derived.scrml -->
 ```scrml
 // NERDME.md "Type-derived apps" — ruled; spec-ahead on the bootstrap (no refinement types, <schema>, <formFor>, <tableFor>).

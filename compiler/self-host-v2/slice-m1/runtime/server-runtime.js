@@ -1239,7 +1239,7 @@ export function route(desc, run) {
 // answer, or whose catalogue cannot be read, stays refused and is logged as
 // *could not be checked*, distinct from *undeclared table found*."
 //
-// The bootstrap's tenant set is ALWAYS EMPTY (`<schema>` / `<db tables=>` are
+// The bootstrap's tenant set is ALWAYS EMPTY (a `<schema>` `tenant_id` column and `<db tables=>` are
 // refused at compile), so every `tenant_id` relation is undeclared. Before s473
 // the built server served every tenant's rows to every request. The check runs
 // lazily, before the first request is answered (the factory is synchronous), and
@@ -1308,7 +1308,7 @@ export function tenantGate(host, conns) {
       }
       for (const n of names) {
         found++;
-        once(`t:${where}:${n}`, `scrml server: E-DEPLOY-DB-TENANT-UNDECLARED — the database ${where} has the relation \`${n}\` carrying a \`tenant_id\` column outside the compilation's tenant set (empty on the bootstrap: <schema> / <db tables=> are not in it), so its rows would reach every request. The server answers 503 until it is fixed: declare it in <schema> so the tenant floor scopes it, or rename the column (§14.8.10 item (3))`);
+        once(`t:${where}:${n}`, `scrml server: E-DEPLOY-DB-TENANT-UNDECLARED — the database ${where} has the relation \`${n}\` carrying a \`tenant_id\` column outside the compilation's tenant set (empty on the bootstrap: a <schema> tenant_id column and <db tables=> are refused there), so its rows would reach every request. The server answers 503 until it is fixed: declare it in <schema> so the tenant floor scopes it, or rename the column (§14.8.10 item (3))`);
       }
     }
     count = found;

@@ -1870,6 +1870,7 @@ ${
             .MEach(bind: b, handles: hs) :> lowerElem(c, e)
             .MSlot :> lowerElem(c, e)
             .MDb :> lowerElem(c, e)
+            .MSchema :> []
             .MErrors(of: v, all: a) :> lowerElem(c, e)
             .MStateView(v: v) :> lowerElem(c, e)
             .MInline(v: v) :> lowerElem(c, e)
@@ -2273,6 +2274,7 @@ ${
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
             .MDb :> lowerNodes(c, e.kids)       // s452: a `<db>` state block renders its children in place (§4)
+            .MSchema :> []                       // s478: a `<schema>` declares structure — nothing renders (§39.1)
             .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
