@@ -178,6 +178,68 @@ describe("§42.3.6 typing — the `F | not` result and the per-hop rule (red on 
   });
 });
 
+// s478 fix round 1 (#1927 review) — the presence test closeOpt adds is the receiver's ONE read.
+const HD2 = `type Addr:struct = { city: string }
+type User:struct = { name: string, addr: Addr | not, i: int }
+type Box:struct = { items: string[], i: int }
+let <user:User | not=({ name: "ann", addr: { city: "oslo" }, i: 1 })/>
+let <box:Box | not=({ items: ["a", "b"], i: 1 })/>
+let <out=""/>
+let <k:int=0/>`;
+const prog2 = (fns, markup = "") => `<program>\n${HD2}\n${fns}\n<button id="b" onclick=go()>go</button>\n<p id="o">\${@out}|\${@k}</p>\n${markup}\n</program>\n`;
+
+describe("`lin` receiver — the presence test and the chain's read are one use (#1927 review MED-1; red on head: E-LIN-002)", () => {
+  test("`lin t = @user; t?.name` is one use — clean, and it runs", async () => {
+    await run(prog2(`function go() { lin t = @user; const x: string | not = t?.name; if (x is given) { @out = x; } }`));
+    click($("#b"));
+    expect($("#o").textContent).toBe("ann|0");
+  });
+  test("`t?.length` and the two-hop `t?.addr?.city` are one use each", () => {
+    expect(codes(prog2(`function go() { lin t = "ab"; const n: int | not = t?.length; if (n is given) { @k = n; } }`))).toEqual([]);
+    expect(codes(prog2(`function go() { lin t = @user; const x: string | not = t?.addr?.city; if (x is given) { @out = x; } }`))).toEqual([]);
+  });
+  test("a real second use is still E-LIN-002 — once, at the second use", () => {
+    expect(codes(prog2(`function go() { lin t = @user; const x: string | not = t?.name; const y: string | not = t?.name; }`))).toEqual(["E-LIN-002"]);
+    expect(codes(prog2(`function go() { lin t = @user; const x: string | not = t?.name; const y = t; }`))).toEqual(["E-LIN-002"]);
+    // a hop's argument is not the chain's spine: naming `t` there is a second use
+    expect(codes(prog2(`function go() { lin t = "abc"; const n: string | not = t?.slice(t.length); }`))).toEqual(["E-LIN-002"]);
+  });
+  test("a `lin` in a hop's argument is consumed only where the receiver is present (E-LIN-003)", () => {
+    expect(codes(prog2(`function go() { lin u = 1; const n: string | not = @user?.name.slice(u); }`))).toEqual(["E-LIN-003"]);
+  });
+});
+
+describe("the presence test narrows the chain's spine only — not a hop's argument or index (#1927 review LOW-2; red on head: accepted)", () => {
+  // §42.3.6 "each hop is guarded only against its own receiver"; §42.3.5 "`?.` guards ONLY its immediate receiver"
+  test("a bare `@user.i` in a hop's argument is E-TYPE-046, as it is without the `?.`", () => {
+    expect(codes(prog2(`function go() { const x: string | not = @user?.name.slice(@user.i); }`))).toEqual(["E-TYPE-046"]);
+    expect(codes(prog2(`function go() { const x: string | not = @user.name.slice(@user.i); }`))).toContain("E-TYPE-046");
+  });
+  test("a bare `@box.i` in a hop's index is E-TYPE-046", () => {
+    expect(codes(prog2(`function go() { const x: string | not = @box?.items[@box.i]; }`))).toEqual(["E-TYPE-046"]);
+  });
+  test("the second hop's argument is not narrowed by either test", () => {
+    expect(codes(prog2(`function go() { const x: string | not = @user?.addr?.city.slice(@user.addr.city.length); }`))).toEqual(["E-TYPE-046", "E-TYPE-046"]);
+  });
+  test("the spine reads stay narrowed, and an argument narrowed by an enclosing test is fine (run)", async () => {
+    await run(prog2(`function go() { const x: string | not = @user?.name.slice(1); const y: string | not = @box?.items[0]; if (@user is given) { const z: string | not = @user?.name.slice(@user.i); if (z is given && x is given && y is given) { @out = x + y + z; } } }`));
+    click($("#b"));
+    expect($("#o").textContent).toBe("nnann|0");
+  });
+});
+
+describe("`?.` on an `@.` row read is refused by name — INTERIM g-boot-optional-chain-atitem-s478 (#1927 review LOW-3)", () => {
+  const each = (body) => `<program>\ntype Addr:struct = { city: string }\ntype U:struct = { name: string, addr: Addr | not }\n<us:U[]=([{ name: "a", addr: not }, { name: "b", addr: { city: "x" } }])/>\n<ul id="z">${body}</ul>\n</program>\n`;
+  test("`@.addr?.city` names the refusal (not E-TYPE-046 at a hop the user did not write)", () => {
+    const m = msgs(each(`<each in=@us><li>\${@.addr?.city}</li></each>`));
+    expect(m.length).toBe(1);
+    expect(m[0]).toContain("`?. on an `@.` row read` (§42.3.6) is not in the bootstrap yet");
+  });
+  test("the named row binding is built: `<each in=@us as u>` … `u.addr?.city`", () => {
+    expect(codes(each(`<each in=@us as u><li>\${u.addr?.city}</li></each>`))).toEqual([]);
+  });
+});
+
 describe("refused by name — INTERIM (g-boot-optional-call-s478, g-boot-optional-chain-receiver-s478)", () => {
   test("an optional call `f?.(…)`", () => {
     const m = msgs(prog(`function g() -> int { return 1; }\nfunction go() { @n = g?.(); }`));

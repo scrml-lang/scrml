@@ -28699,6 +28699,8 @@ ${
         if (inner is not) return vt
         const key: string = nKey(env, e)
         if (key != "" && env.narrowed.indexOf(key) >= 0) return known(inner)
+        // s478 (#1927 review LOW-2): an optional chain's test narrows this very spine read only
+        if (key != "" && env.narrowed.indexOf(optSpineKey(key, e.nid)) >= 0) return known(inner)
         return vt
     }
 
@@ -31173,7 +31175,7 @@ ${
             .Call(callee: c, args: args) :> typeCall(env, e, c, args, ts)
             .Unary(op: o, e: x) :> typeUnary(env, e, o, x, ts)
             .Binary(op: o, l: l, r: r) :> typeBinary(env, e, vf, o, l, r, ts)
-            .Ternary(test: x, yes: y, no: n, viaIf: vi) :> typeTernary(env, x, y, n, vi, ts)
+            .Ternary(test: x, yes: y, no: n, viaIf: vi, optChain: oc) :> typeTernary(env, x, y, n, vi, oc, ts)
             .Assign(target: x, value: v, kept: kp) :> typeAssignValue(env, e, x, v, kp, ts)   // s474 (§50, D10)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
@@ -32687,14 +32689,80 @@ ${
     // The test is a condition (checkCond); each arm is typed under its narrowing.
     // s475: `viaIf` — written as a value-form `if` (§17.6), so the condition is
     // named as the author wrote it.
-    fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean, ts: TypeState) -> RVT {
+    // s478 fix round 1 (#1927 review LOW-2): `optChain` — the presence test of an optional chain's
+    // receiver (parse.scrml closeOpt). It narrows the receiver only where the chain's SPINE reads it
+    // (optSpineKeys), not inside a hop's argument or index: §42.3.6 "each hop is guarded only
+    // against its own receiver", §42.3.5 "`?.` guards ONLY its immediate receiver" — so a bare
+    // `@user.i` in `@user?.name.slice(@user.i)` is E-TYPE-046, as it is without the `?.`.
+    fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean, optChain: boolean, ts: TypeState) -> RVT {
         const rt: RVT = typeExpr(env, test, quietCond(env, test, ts))
         const n: Narrowing = condNarrowing(env, test)
         let what = "a ternary test"
         if (viaIf) what = "an `if` condition"
-        const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.yes), test), yes, checkCond(env, test, rt.vt, what, rt.ts))
+        let nyes: string[] = n.yes
+        if (optChain) nyes = optSpineKeys(test, yes, n.yes)
+        const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, nyes), test), yes, checkCond(env, test, rt.vt, what, rt.ts))
         const rn: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.no), test), no, ry.ts)
         return rvt(joinVT(ry.vt, rn.vt), rn.ts)
+    }
+
+    // The narrowing an optional chain's presence test gives its taken arm: each place key `k` the
+    // test proves present, held only at the chain's spine nodes that read that receiver — the
+    // key `k.?<nid>` (narrowRead), a place under `k`, so every way a narrowing of `k` ends
+    // (tUnnarrow, a cell's suspension point) ends it too.
+    fn optSpineKeys(test: AExpr, yes: AExpr, keys: string[]) -> string[] {
+        const rc: AExpr | not = optTestRecv(test)
+        if (rc is not) return []
+        const rk: string = sqlParamKey(rc)
+        if (rk == "") return []
+        const nids: int[] = optSpineNids(yes, rk)
+        let out: string[] = []
+        for (const k of keys) {
+            if (k != "") {
+                for (const id of nids) { out = out.concat([optSpineKey(k, id)]) }
+            }
+        }
+        return out
+    }
+
+    fn optSpineKey(k: string, nid: int) -> string { return k + ".?" + nid }
+
+    // The nodes of an optional chain's spine that read the receiver whose canonical spelling is
+    // `rk`: through a member's object, an index's object, a call's callee, and a nested `?.`
+    // hop's test and chain — never into an index or an argument.
+    fn optSpineNids(e: AExpr, rk: string) -> int[] {
+        if (sqlParamKey(e) == rk) return [e.nid]
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> optSpineNids(o, rk)
+            .Index(obj: o) :> optSpineNids(o, rk)
+            .Call(callee: c) :> optSpineNids(c, rk)
+            .Unary(op: o, e: x) :> optSpineNids(x, rk)
+            .Ternary(test: t, yes: y, optChain: oc) :> optNestedNids(t, y, oc, rk)
+            // no-default-arm: every other form is no spine
+            _ :> []
+        }
+    }
+
+    fn optNestedNids(t: AExpr, y: AExpr, optChain: boolean, rk: string) -> int[] {
+        if (!optChain) return []
+        return optSpineNids(t, rk).concat(optSpineNids(y, rk))
+    }
+
+    // The receiver an optional chain's presence test (`recv is given`) tests.
+    fn optTestRecv(t: AExpr) -> AExpr | not {
+        const k: AExprK = t.k
+        return match k {
+            .Unary(op: o, e: x) :> x
+            // no-default-arm: closeOpt builds the test as `recv is given` only
+            _ :> not
+        }
+    }
+
+    // Do two receivers read the same place (one canonical spelling, analyze sqlParamKey)?
+    fn sameRecv(a: AExpr, b: AExpr) -> boolean {
+        const ka: string = sqlParamKey(a)
+        return ka != "" && ka == sqlParamKey(b)
     }
 
     // s469 — a logic backtick template (SPEC §14.13.3): a `string`, whose every
@@ -42637,7 +42705,7 @@ ${
             .Call(callee: c, args: a) :> AExprK.Call(mExpr(c, m), mExprs(a, m))
             .Unary(op: o, e: x) :> AExprK.Unary(o, mExpr(x, m))
             .Binary(op: o, l: l, r: r) :> AExprK.Binary(o, mExpr(l, m), mExpr(r, m))
-            .Ternary(test: t, yes: y, no: no, viaIf: vi) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m), vi)
+            .Ternary(test: t, yes: y, no: no, viaIf: vi, optChain: oc) :> AExprK.Ternary(mExpr(t, m), mExpr(y, m), mExpr(no, m), vi, oc)
             .Assign(target: t, value: v, paren: p, kept: kp) :> AExprK.Assign(mExpr(t, { strip: m.strip, drop: m.drop, rn: [], rv: [] }), mExpr(v, m), p, kp)
             .ArrayLit(elems: es) :> AExprK.ArrayLit(mExprs(es, m))
             .ObjectLit(props: ps) :> AExprK.ObjectLit(mProps(ps, m))
@@ -46881,7 +46949,7 @@ ${
         return match k {
             .Name(name: n) :> linGo(linUse(cx, e, s))
             .Binary(op: o, l: l, r: r) :> linBinary(cx, e, o, l, r, s)
-            .Ternary(test: t, yes: y, no: n) :> linTernary(cx, e, t, y, n, s)
+            .Ternary(test: t, yes: y, no: n, optChain: oc) :> linTernaryOf(cx, e, t, y, n, oc, s)
             .Handled(h: h) :> linHandled(cx, e, h, s)
             .Lambda(params: lp, body: b) :> linGo(linCapture(cx, e, b, s))
             .BlockLambda(params: lp, body: b) :> linGo(linBlockCapture(cx, e, b, s))   // s478 (§35.6, §35.4.5)
@@ -46967,6 +47035,62 @@ ${
         const pre: LinSt = rl.st
         const rr: LinR = linExpr(cx, r, pre)
         return linMerge(cx, pre, [rr, linGo(linFrom(pre, rr.st))], e.span, "this `&&` / `||` (its right operand runs on one path only)")
+    }
+
+    fn linTernaryOf(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, optChain: boolean, s: LinSt) -> LinR {
+        if (optChain) return linOptTernary(cx, e, t, y, n, [], s)
+        return linTernary(cx, e, t, y, n, s)
+    }
+
+    // s478 fix round 1 (#1927 review MED-1) — an OPTIONAL CHAIN (§42.3.6), which the parser
+    // reads as its receivers' presence tests around the plain chain (`t?.name` is
+    // `t is given ? t.name : not`, parse.scrml closeOpt; the conditional is marked `optChain`).
+    // The receiver is evaluated once — "the remainder of the chain is NOT evaluated" past a `not`
+    // receiver, and a present one is read once — so its test and the chain's read of it are ONE
+    // use of a `lin` binding it names (§35.2: "used exactly once"). The test consumes it; where
+    // the chain's SPINE (the receiver path each hop reads through) reads that receiver again it is
+    // not counted a second time (`recvs`: the receivers the enclosing tests consumed). A hop's
+    // argument or index is not the spine: a `lin` named there is a use of its own (`t?.f(t)` is
+    // two uses, E-LIN-002), on the chain's taken path only (linMerge, as for `? :`).
+    fn linOptTernary(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, recvs: AExpr[], s0: LinSt) -> LinR {
+        const rt: LinR = linOptWalk(cx, t, recvs, s0)
+        if (rt.ends) return rt
+        const pre: LinSt = rt.st
+        let inner: AExpr[] = recvs
+        const rc: AExpr | not = optTestRecv(t)
+        if (rc is given) inner = recvs.concat([rc])
+        const ry: LinR = linOptWalk(cx, y, inner, pre)
+        const rn: LinR = linExpr(cx, n, linFrom(pre, ry.st))
+        return linMerge(cx, pre, [ry, rn], e.span, "this `?.` chain (its hops run only where the receiver is present)")
+    }
+
+    // The spine of an optional chain: a receiver an enclosing test already consumed is skipped;
+    // a member / index / call reads through its object (spine) — an index and the arguments are
+    // ordinary expressions; a nested `?.` test is the next receiver's.
+    fn linOptWalk(cx: LinCx, e: AExpr, recvs: AExpr[], s: LinSt) -> LinR {
+        for (const r of recvs) {
+            if (sameRecv(e, r)) return linGo(s)
+        }
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> linOptWalk(cx, o, recvs, s)
+            .Index(obj: o, idx: i) :> linOptThen(cx, linOptWalk(cx, o, recvs, s), [i])
+            .Call(callee: c, args: a) :> linOptThen(cx, linOptWalk(cx, c, recvs, s), a)
+            .Unary(op: o, e: x) :> linOptWalk(cx, x, recvs, s)
+            .Ternary(test: t, yes: y, no: n, optChain: oc) :> linOptNested(cx, e, t, y, n, oc, recvs, s)
+            // no-default-arm: every other form is no spine — an ordinary expression
+            _ :> linExpr(cx, e, s)
+        }
+    }
+
+    fn linOptThen(cx: LinCx, r: LinR, rest: AExpr[]) -> LinR {
+        if (r.ends) return r
+        return linExprs(cx, rest, r.st)
+    }
+
+    fn linOptNested(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, optChain: boolean, recvs: AExpr[], s: LinSt) -> LinR {
+        if (optChain) return linOptTernary(cx, e, t, y, n, recvs, s)
+        return linTernary(cx, e, t, y, n, s)
     }
 
     fn linTernary(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, s0: LinSt) -> LinR {

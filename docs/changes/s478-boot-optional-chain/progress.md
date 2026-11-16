@@ -17,6 +17,12 @@ Lane: `?.` optional chaining (§42.3.6) on the bootstrap, on #1917's member acce
       g-boot-optional-chain-receiver-s478, g-boot-optional-chain-js-form-s478 (owner Q), g-boot-index-narrowed-optional-s478.
 - [x] Commit e79b4ed0a (hook PASS: 55712 pass / 0 fail); CI checks-job gates run locally: severity --check, types-gate,
       snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim — all exit 0. Conformance re-measured at e79b4ed0a: same delta.
-- [ ] PR (no merge).
+- [x] PR #1927 opened (no merge).
+- [x] Fix round 1 (review ~/.cache/scrml/review/s478-1927/review.md):
+      MED-1 `lin` receiver false E-LIN-002 — ast `Ternary.optChain` marks closeOpt's conditional; analyze linOptTernary /
+      linOptWalk count the presence test and the chain's spine read of the receiver as ONE use (args/indexes still count).
+      LOW-2 narrowing leaked into hop args/indexes — typeTernary narrows only the spine nodes (optSpineKeys, key `k.?<nid>`,
+      narrowRead). LOW-3 `@.`-rooted receiver refused by name (g-boot-optional-chain-atitem-s478). LOW-4/5 filed
+      g-boot-optional-chain-desugar-wording-s478. Tests: +11 in optional-chain-s478.test.js (30 pass).
 
 Scratch: ~/.cache/scrml/review/s478-boot-optional-chain/

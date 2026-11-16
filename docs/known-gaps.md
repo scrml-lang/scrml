@@ -255,11 +255,23 @@ INTERIM. Measured s478-boot-syntax-batch: `resolveMember` looks a field up on `n
 
 INTERIM, fail closed. The callee of `f?.(…)` is a function value that may be `not`; the bootstrap types no `fn | not` value, and a function DECLARATION (never `not`) read through `?.(` would be tested for presence and put a server call in a conditional arm — the s474 H1 shape (`return match check?.(p) { … }`, foreign-content-s474.test.js) that must stay refused. Capable alternative (PERMANENT form): build `?.(` once `fn | not` values type (a callback prop `onGo?.()`, `conformance/cases/components/callback-prop-absence-safe-forms`), refusing `?.(` on a declared function. Corpus: 3 uses (`o?.(`, `h?.onFire(`).
 
-### g-boot-optional-chain-receiver-s478 — the BOOTSTRAP builds `?.` only on a receiver it can test and re-read (a name, `@cell`, `@.`, a `<#id>` reference, a member path / literal index of those); a call result (`f()?.x`), a conditional or another computed receiver is refused by name — `NEW S478 (s478-boot-optional-chain); LOW; open`
+### g-boot-optional-chain-receiver-s478 — the BOOTSTRAP builds `?.` only on a receiver it can test and re-read (a name, `@cell`, a `<#id>` reference, a member path / literal index of those); a call result (`f()?.x`), a conditional or another computed receiver is refused by name — `NEW S478 (s478-boot-optional-chain); LOW; open`
 
 <!-- @gap id=g-boot-optional-chain-receiver-s478 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(optHop / optRecvOk) prov=lane:s478-boot-optional-chain;spec:§42.3.6("When the receiver `expr` is `not`, the access short-circuits … no side effects past the `?.`") -->
 
 INTERIM, fail closed. The desugar evaluates the receiver twice (its presence test, then the chain), so it is built only for a receiver whose evaluation only reads. Capable alternative: bind once (`const u = f(); u?.x` — works today); in the compiler, a single-evaluation form needs either a Core binding node or the literal JS `?.` (g-boot-optional-chain-js-form-s478). Corpus: 0 uses of a `)?.` receiver in samples/examples/conformance/acceptance.
+
+### g-boot-optional-chain-atitem-s478 — the BOOTSTRAP refuses `?.` on an `<each>` row read `@.` / `@.addr` by name: an `@.` path is no place its typer narrows, so the presence test would not reach the hop — `NEW S478 (review of #1927, LOW-3); LOW; open`
+
+<!-- @gap id=g-boot-optional-chain-atitem-s478 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(optHop — optAtItemRooted)+compiler/self-host-v2/analyze.scrml(nKey — `.AtItem :> ""`) prov=lane:s478-boot-optional-chain;review:s478-1927(LOW-3);spec:§42.3.6("Short-circuit is chain-wide from the `?.` point, but each hop is guarded only against its own receiver") -->
+
+INTERIM, fail closed. Before the refusal, `${@.addr?.city}` in an `<each>` row reported E-TYPE-046 at the `.city` hop the user did not write (the desugar's presence test of `@.addr` narrowed nothing — `nKey` gives `@.` no key; `if=(@.addr is given)` … `@.addr.city` fails the same way on main). Capable alternative (works today): name the row — `<each in=@us as u>` … `u.addr?.city`. Fix: give `@.` paths a narrowing key that a write to the `<each>` source ends (the `rows` mechanism the named binding uses), then drop the refusal.
+
+### g-boot-optional-chain-desugar-wording-s478 — two diagnostics on a `?.` chain describe the bootstrap's desugared form, not what the user wrote — `NEW S478 (review of #1927, LOW-4/5); LOW; open`
+
+<!-- @gap id=g-boot-optional-chain-desugar-wording-s478 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(typeMember E-TYPE-046 message; the U1b server-call-in-a-`? :`-branch refusal)+compiler/self-host-v2/lex.scrml(munchQuestion — `c ?.A : .B`) prov=lane:s478-boot-optional-chain;review:s478-1927(LOW-4,LOW-5);spec:§42.3.6("each hop is guarded only against its own receiver") -->
+
+Fail closed; wording only. (1) A server call in a hop's argument (`@user?.name.slice(load())`) is refused as standing "in a branch of `? :`" — the user wrote `?.`, no `? :`. (2) `@user?.name.slice(clear())` reports E-TYPE-046 "`@user.name` reads a member of `@user`" — the receiver is read before `clear()` runs, so by §42.3.6 this is a false positive, the analyzer's existing conservatism (a plain `if (@user is given)` form fails identically). (3) `c ?.A : .B` (a ternary with a variant arm and no space after `?`) lexes `?.` as optional chaining (as in JavaScript) and reports a parse error with no hint to write `? .A`. Fix: carry the `optChain` origin (ast.scrml `Ternary.optChain`) into these messages and word them for `?.`; give the lexer case a tailored hint.
 
 ### g-boot-optional-chain-js-form-s478 — §42.3.6 Codegen says `?.` "SHALL lower to the corresponding JavaScript optional-chaining form"; the BOOTSTRAP prints the presence test and the plain access (`a != null ? a.b : null`) — `NEW S478 (s478-boot-optional-chain); LOW; open — OWNER QUESTION`
 

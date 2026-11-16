@@ -597,7 +597,7 @@ ${
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
-        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false))
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false, false))
     }
 
     // s469 (§49.2.5): `a..b` / `a..=b` is legal ONLY as the whole iterable of a
@@ -751,8 +751,9 @@ ${
     // the chain's end: `(a?.b).c` dereferences the conditional's `F | not`, E-TYPE-046.
     //
     // The receiver is evaluated twice (its test, then the chain), so it is built only for a
-    // receiver whose evaluation does nothing but read: a name, `@cell`, `@.`, a `<#id>`
-    // reference, a member path of those, an index by a literal or such a path. Any other receiver
+    // receiver whose evaluation does nothing but read: a name, `@cell`, a `<#id>`
+    // reference, a member path of those, an index by a literal or such a path (an `<each>` row
+    // read `@.` is refused by name — INTERIM g-boot-optional-chain-atitem-s478). Any other receiver
     // (a call, a conditional …; parentheses alone are grouping) is refused by name — INTERIM,
     // g-boot-optional-chain-receiver-s478 (the capable form binds it once: `const u = f(); u?.x`).
     // (§42.3.6 "Codegen" — "SHALL lower to the corresponding JavaScript optional-chaining form" —
@@ -779,8 +780,15 @@ ${
         const isCall: boolean = peekAt(t, 1).cls == TC.Punct && tk(peekAt(t, 1), "(")
         if (isCall) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?.(…) optional call` (§42.3.6) is not in the bootstrap yet — the bootstrap builds `?.` member and index reads, not a call through a function value that may be `not`; it is refused here by name rather than misread (INTERIM, g-boot-optional-call-s478). Call it plainly (`f(args)`), or narrow the value first (`if (f is given) { f(args) }`)", q)
+        } else if (optAtItemRooted(recv)) {
+            // s478 fix round 1 (#1927 review LOW-3): an `<each>` row read `@.` / `@.addr` is no
+            // place the typer narrows (analyze.scrml nKey: `@.` has no key), so the presence
+            // test would not reach the hop and the user would get E-TYPE-046 at a hop they did
+            // not write — refused by name, INTERIM g-boot-optional-chain-atitem-s478; the named
+            // row binding (`<each in=@xs as u>` … `u.addr?.city`) is built.
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on an `@.` row read` (§42.3.6) is not in the bootstrap yet — it cannot narrow an `<each>` row read `@.` (or a member path of it) by the presence test `?.` makes; it is refused here by name rather than misreported (INTERIM, g-boot-optional-chain-atitem-s478). Name the row: `<each in=@xs as u>` … `u.addr?.city`", q)
         } else if (!optRecvOk(recv)) {
-            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on a computed receiver` (§42.3.6) is not in the bootstrap yet — it builds `?.` on a name, `@cell`, `@.`, a `<#id>` reference, or a member path / literal index of those, whose presence it can test before reading it; it is refused here by name rather than misread (INTERIM, g-boot-optional-chain-receiver-s478). Bind the receiver first: `const r = …; r?.x`", q)
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on a computed receiver` (§42.3.6) is not in the bootstrap yet — it builds `?.` on a name, `@cell`, a `<#id>` reference, or a member path / literal index of those, whose presence it can test before reading it; it is refused here by name rather than misread (INTERIM, g-boot-optional-chain-receiver-s478). Bind the receiver first: `const r = …; r?.x`", q)
         }
         const n: PTok = peekAt(t, 1)
         let out: RExpr = { e: recv, tp: t }
@@ -796,7 +804,7 @@ ${
             const dt: TP = diagAt(t, "E-PARSE-EXPECTED", "expected a field name, `[` or `(` after `?.` (§42.3.6: `recv?.field`, `recv?.[key]`, `recv?.method(args)`)", n)
             return { r: mkE(adv(dt), start, AExprK.Recovered), recv: recv, ok: false }
         }
-        if (isCall || !optRecvOk(recv)) return { r: mkE(out.tp, start, AExprK.Recovered), recv: recv, ok: false }
+        if (isCall || optAtItemRooted(recv) || !optRecvOk(recv)) return { r: mkE(out.tp, start, AExprK.Recovered), recv: recv, ok: false }
         return { r: out, recv: recv, ok: true }
     }
 
@@ -830,6 +838,18 @@ ${
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
             .Foreign(f: x) :> false
+        }
+    }
+
+    // Is the receiver an `<each>` row read `@.`, or a member path / index of one?
+    fn optAtItemRooted(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const ob: AExpr | not = recvObj(e)
+        if (ob is given) return optAtItemRooted(ob)
+        return match k {
+            .AtItem :> true
+            // no-default-arm: one question of the receiver's root — is it `@.`
+            _ :> false
         }
     }
 
@@ -869,7 +889,11 @@ ${
     // The chain `r.e` with its `?.` receivers `opts` (shortest first): each receiver's presence
     // test around the rest, the first receiver's outermost — `opts[0] is given ? (… ? r.e : not) : not`.
     // Each test reads a COPY of its receiver with fresh node ids (a node is typed once; the test
-    // and the chain read the receiver at two places).
+    // and the chain read the receiver at two places). The conditional is marked `optChain`: the
+    // analyzer counts the test and the chain's read of the receiver as ONE use of a `lin` binding
+    // (linOptWalk, #1927 review MED-1), and the test narrows the receiver only where the chain's
+    // SPINE reads it, never inside a hop's argument or index (optSpineKeys — §42.3.6 "each hop is
+    // guarded only against its own receiver", #1927 review LOW-2).
     fn closeOpt(r: RExpr, opts: AExpr[]) -> RExpr {
         let t: TP = r.tp
         let inner: AExpr = r.e
@@ -881,7 +905,7 @@ ${
             t = bumpId(t)
             const none: AExpr = { nid: t.nid, span: r.e.span, k: AExprK.NotLit }
             t = bumpId(t)
-            inner = { nid: t.nid, span: r.e.span, k: AExprK.Ternary(test, inner, none, false) }
+            inner = { nid: t.nid, span: r.e.span, k: AExprK.Ternary(test, inner, none, false, true) }
             t = bumpId(t)
             i = i - 1
         }
@@ -5782,7 +5806,7 @@ ${
                 t = eb.tp
             }
         }
-        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true))
+        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true, false))
     }
 
     // s475 (#1762 review item 2) — at the token after `if`: is the head a BARE
