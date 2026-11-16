@@ -1453,6 +1453,15 @@ ${
                 sawSemi = true
                 done = true
             }
+            // s478-boot-destructuring — a destructuring declaration: its statements (a
+            // declaration is never the arm's value)
+            if (!done && destructDeclAhead(t)) {
+                const rd: RStmts = parseTermStmts(t, b0)
+                stmts = stmts.concat(rd.ss)
+                t = rd.tp
+                done = true
+                if (t.i == before) t = adv(t)
+            }
             if (!done) {
                 // s469 — E-STMT-NO-EFFECT (stmtChecks): every statement but the
                 // block's LAST is a statement in any position; the last is the
@@ -2843,8 +2852,8 @@ ${
                 // an empty statement (a `;` after a block-like statement, `;;`)
                 t = adv(t)
             } else {
-                const r: RStmt = parseTermStmt(t, b0)
-                stmts = stmts.concat([r.s])
+                const r: RStmts = parseTermStmts(t, b0)
+                stmts = stmts.concat(r.ss)
                 t = r.tp
             }
             if (t.i == before) t = adv(t)
@@ -3860,8 +3869,8 @@ ${
     // (E-LOOP-WHILE-RETIRED / E-LOOP-DO-WHILE-RETIRED). A refused loop is read
     // past (its body parsed, so the body's own syntax errors report) and stands
     // as a Recovered statement: nothing downstream types or runs it.
-    // Not in the bootstrap (refused): a destructuring binder, `for-else`
-    // (§17.4a), a `key` clause.
+    // Not in the bootstrap (refused): `for-else` (§17.4a). (s478-boot-destructuring:
+    // an object destructuring binder is built — parseDestructIter.)
     // =========================================================================
     type HeadScan:struct = { semis: int, close: int }
     type RStmts:struct = { ss: AStmt[], tp: TP }
@@ -3928,7 +3937,8 @@ ${
     }
 
     // At `(`: `[let | const] { … } of` / `[let | const] [ … ] of` — a
-    // destructuring binder (§49.2.1 `for-binder`), not in the bootstrap.
+    // destructuring binder (§49.2.1 `for-binder`; s478-boot-destructuring:
+    // parseDestructIter).
     fn destructAhead(tp: TP) -> boolean {
         let k: int = 1
         const a: PTok = peekAt(tp, 1)
@@ -3947,6 +3957,52 @@ ${
         }
         const w: PTok = peekAt(tp, k)
         return isNameTok(w) && w.v == "of"
+    }
+
+    // s478-boot-destructuring — `for ([let | const] { a, b: c } of xs) { … }` (§49.2.1
+    // `for-binder ::= ('let' | 'const')? (Identifier | destructuring-pattern)`; §49.3.5
+    // "A destructuring binder follows §50's destructuring rules"): the binder is a
+    // minted temp holding the element (a keywordless / `const` binder — §50.8.5), and
+    // the body opens with the pattern's locals read off it (parseDestructDecl's
+    // reading; `let` makes the bound names mutable per iteration). A `key` clause on
+    // such a binder is refused by name (INTERIM): it is evaluated where the bound
+    // names are not yet declared.
+    fn parseDestructIter(tp: TP, label: string, start: int) -> RStmt {
+        let t: TP = adv(tp)
+        let mutable = false
+        if (isWord(t, "let")) {
+            mutable = true
+            t = adv(t)
+        } else if (isWord(t, "const")) {
+            t = adv(t)
+        }
+        const pt: PTok = cur(t)
+        const root: string = destructTemp(pt.start)
+        const rp: RDPat = parseDPattern(t, root)
+        t = rp.tp
+        const bind: ABind = { nid: t.nid, span: spanFrom(t, pt.start), name: root }
+        t = bumpId(t)
+        if (isWord(t, "of")) {
+            t = adv(t)
+        } else {
+            const bo: PTok = cur(t)
+            t = diagAt(t, "E-PARSE-EXPECTED", "expected `of` after the destructuring binder, found `" + bo.text + "`", bo)
+        }
+        const src: RSrc = parseIterSrc(t)
+        let ht: TP = src.tp
+        if (isWord(ht, "key")) {
+            const kk: PTok = cur(ht)
+            ht = diagAt(ht, "E-BOOTSTRAP-UNSUPPORTED", "a `key` clause on a destructuring `for` binder is not in the bootstrap yet — bind the element (`for (o of xs) key o.id { … }`) and read its fields in the body", kk)
+            const kx: RExpr = parseAssign(adv(ht))
+            ht = kx.tp
+        }
+        const body: RBlock = parseLoopBody(closeHead(ht))
+        // a refused pattern: the loop stands as a Recovered statement (its body read,
+        // so its own syntax errors report), as a refused head always has (refusedHead)
+        if (rp.bad) return recoveredStmt(body.tp, start)
+        const pre: RStmts = stepStmts(body.tp, rp.steps, mutable, false)
+        const nb: ABlock = { nid: body.b.nid, span: body.b.span, stmts: pre.ss.concat(body.b.stmts) }
+        return forStmt(pre.tp, start, label, AForHead.HIter(bind, false, src.src, not), nb)
     }
 
     fn recoveredStmt(tp: TP, start: int) -> RStmt {
@@ -3984,7 +4040,7 @@ ${
         if (hs.semis == 2) return parseCounted(t, label, start)
         if (hs.semis != 0) return refusedHead(t, "E-PARSE-FOR-HEAD", "a `for` head has no `;` (a condition, or `x of xs`) or exactly two (`init; cond; step`) — this one has " + hs.semis + " (§49.2.4)", kw, start)
         if (binderThen(t, "in") >= 0) return refusedHead(t, "E-CTRL-011", "`for (… in …)` is not a scrml loop — scrml iterates values with `of`: `for (x of xs) { … }` (§17.4, §49.2.4)", kw, start)
-        if (destructAhead(t)) return refusedHead(t, "E-BOOTSTRAP-UNSUPPORTED", "a destructuring `for` binder is not in the bootstrap yet — bind the element and read its fields (`for (o of xs) { … o.id … }`)", kw, start)
+        if (destructAhead(t)) return parseDestructIter(t, label, start)   // s478-boot-destructuring
         if (binderThen(t, "of") >= 0) return parseIterHead(t, label, start)
         // the condition head (§49.3.1); s474: its kept assignments (§50, D10)
         const cond0: RExpr = parseAssign(adv(t))
@@ -4738,6 +4794,14 @@ ${
 
     fn parseLocal(tp: TP) -> RStmt {
         const start: int = cur(tp).start
+        // s478-boot-destructuring — a pattern where ONE statement stands (not a
+        // statement list, whose readers take it through parseTermStmts): read past
+        // whole, refused by name (INTERIM)
+        if (destructDeclAhead(tp)) {
+            const rd: RStmts = parseDestructDecl(tp)
+            const dd: TP = diagAt(rd.tp, "E-BOOTSTRAP-UNSUPPORTED", "a destructuring declaration here (a body top, or where a single statement stands rather than a `{ … }` statement list) is not in the bootstrap yet — destructure inside a function or handler body, or bind the value and read its fields (`const v = …;` then `v.a`)", cur(tp))
+            return recoveredStmt(dd, start)
+        }
         const mutable: boolean = isWord(tp, "let")
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
@@ -4763,6 +4827,258 @@ ${
             aty = rz.ty
         }
         return mkS(t2, start, AStmtK.Local(nameTok.v, mutable, aty, init.e, false))
+    }
+
+    // =========================================================================
+    // s478-boot-destructuring — a destructuring declaration (`const { a, b: c } = e;`)
+    // and a destructuring `for` binder (`for (const { id, name } of xs) { … }`).
+    //
+    // SPEC: §7.2 "All JavaScript that is valid in a Bun execution context is valid
+    // inside `${ }`, except the constructs §7.2.1 excludes" (destructuring is not
+    // excluded; §7.2.1 names `const { class: c } = o` a valid destructuring key);
+    // §49.2.1 `for-binder ::= ('let' | 'const')? (Identifier | destructuring-pattern)`;
+    // §49.3.5 "A destructuring binder follows §50's destructuring rules" — and the
+    // JavaScript meaning of an object binding pattern: the value is evaluated ONCE,
+    // then each property is read from it in order (`const { a } = o` binds what
+    // `o.a` reads). So the declaration is READ AS that: one `const` holding the
+    // value, then one local per bound name holding the member read off it —
+    //     const { a, b: { c } } = e;   ≡   const v = e; const a = v.a;
+    //                                       const w = v.b; const c = w.c;
+    // (`v` / `w` — minted temps `destructured#<offset>`: `#` is spelled by no
+    // identifier, names.scrml sanitize). Each bound name is therefore typed, checked
+    // and lowered exactly as that member read is (a missing field, a read off a
+    // value that is not a struct, a maybe-absent value — the member read's own
+    // codes), and `e` is read once (§35.3 rule 1: a `lin` `e` is ONE consumption;
+    // whether the bound names inherit `lin` is unruled — analyze refuses a
+    // destructured `lin` binding by name, linLocal). `let { … }` makes the bound
+    // names mutable; the temps are always `const`. In a `for` head the binder is
+    // the temp and the bound names open the body.
+    //
+    // Built: shorthand `{ a }`, rename `{ a: x }` (any name as the key, §7.2.1's
+    // `{ class: c }`), a nested object pattern `{ a: { b } }`, `{}`.
+    // Refused by name (E-BOOTSTRAP-UNSUPPORTED, INTERIM — the SPEC gives no scrml
+    // reading of them): a default `{ a = 1 }`, a rest `{ ...r }`, a computed /
+    // string / number key, a type annotation on the pattern, a TAPE pattern
+    // `[x, y]` (owner question: an index read `t[i]` traps out of range,
+    // §66.12.8, where JavaScript's pattern yields undefined), a pattern where one
+    // statement stands, at file scope, and a `key` clause on a destructuring
+    // `for` binder. A refused pattern still declares its names (no use cascades);
+    // nothing downstream types or runs them (a Recovered initializer).
+    // =========================================================================
+    type DStep:struct = { dst: string, src: string, key: string, span: ASpan, leaf: boolean }
+    type RDPat:struct = { steps: DStep[], tp: TP, bad: boolean }
+
+    fn destructTemp(at: int) -> string { return "destructured#" + at }
+
+    // At `let` / `const`: a pattern next.
+    fn destructDeclAhead(tp: TP) -> boolean {
+        if (!isWord(tp, "let") && !isWord(tp, "const")) return false
+        const o: PTok = peekAt(tp, 1)
+        return o.cls == TC.Punct && (tk(o, "{") || tk(o, "["))
+    }
+
+    // A statement-list reader's one statement — or, for a destructuring
+    // declaration, its statements — each with its terminator (parseTermStmt).
+    fn parseTermStmts(tp: TP, d0: int) -> RStmts {
+        if (destructDeclAhead(tp)) {
+            const r: RStmts = parseDestructDecl(tp)
+            return { ss: r.ss, tp: termAfter(r.tp, r.ss[r.ss.length - 1], d0) }
+        }
+        const r1: RStmt = parseTermStmt(tp, d0)
+        return { ss: [r1.s], tp: r1.tp }
+    }
+
+    fn synE(tp: TP, sp: ASpan, k: AExprK) -> RExpr {
+        const e: AExpr = { nid: tp.nid, span: sp, k: k }
+        return { e: e, tp: bumpId(tp) }
+    }
+
+    fn synS(tp: TP, sp: ASpan, k: AStmtK) -> RStmt {
+        const s: AStmt = { nid: tp.nid, span: sp, k: k }
+        return { s: s, tp: bumpId(tp) }
+    }
+
+    // At `let` / `const` before a pattern: the declaration's statements (never empty).
+    fn parseDestructDecl(tp: TP) -> RStmts {
+        const start: int = cur(tp).start
+        const mutable: boolean = isWord(tp, "let")
+        let t: TP = adv(tp)
+        const root: string = destructTemp(cur(t).start)
+        const rp: RDPat = parseDPattern(t, root)
+        t = rp.tp
+        let bad: boolean = rp.bad
+        if (isP(t, ":")) {
+            const ct: PTok = cur(t)
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a type annotation on a destructuring pattern is not in the bootstrap yet — annotate the value instead: `const v: T = …;`, then destructure `v`", ct)
+            const ty: RType = parseTypeAt(adv(t), true)
+            t = ty.tp
+            bad = true
+        }
+        t = expectP(t, "=")
+        const init: RExpr = parseAssign(t)
+        t = init.tp
+        const whole: ASpan = spanFrom(t, start)
+        // (refused: the value is still read — its own checks, a `lin` it consumes —
+        // and the bound names declared with Recovered values)
+        const r0: RStmt = synS(t, whole, AStmtK.Local(root, false, not, init.e, false))
+        const rs: RStmts = stepStmts(r0.tp, rp.steps, mutable, bad)
+        return { ss: [r0.s].concat(rs.ss), tp: rs.tp }
+    }
+
+    // One local per step, in order: a bound name (`leaf`, mutable under `let`) or a
+    // nested pattern's temp, holding the member `key` read off `src` (a Recovered
+    // placeholder when the pattern was refused).
+    fn stepStmts(tp: TP, steps: DStep[], mutable: boolean, bad: boolean) -> RStmts {
+        let t: TP = tp
+        let out: AStmt[] = []
+        for (const st of steps) {
+            const ie: RExpr = stepInit(t, st, bad)
+            const ls: RStmt = synS(ie.tp, st.span, AStmtK.Local(st.dst, mutable && st.leaf, not, ie.e, false))
+            out = out.concat([ls.s])
+            t = ls.tp
+        }
+        return { ss: out, tp: t }
+    }
+
+    fn stepInit(tp: TP, st: DStep, bad: boolean) -> RExpr {
+        if (bad) return synE(tp, st.span, AExprK.Recovered)
+        const ob: RExpr = synE(tp, st.span, AExprK.Name(st.src))
+        return synE(ob.tp, st.span, AExprK.Member(ob.e, st.key))
+    }
+
+    // At `{` / `[`: a pattern whose properties are read off `src`.
+    fn parseDPattern(tp: TP, src: string) -> RDPat {
+        if (isP(tp, "{")) return parseObjPattern(tp, src)
+        const o: PTok = cur(tp)
+        const d: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a tape destructuring pattern `[x, y]` is not in the bootstrap yet — whether a pattern longer than the tape traps like an index read (§66.12.8) or binds `not` is unruled; read the elements by index: `const x = t[0];`", o)
+        const sk: RDPat = skipPatternElem(d, src, true)
+        return { steps: sk.steps, tp: sk.tp, bad: true }
+    }
+
+    // A refused element (or a whole refused `[ … ]` pattern when `whole`): read past
+    // it — to the next `,` / closer at its own depth — keeping each name it binds
+    // (a name followed by `,`, `}`, `]` or `=`, not a key before `:`), so a use of
+    // one does not cascade.
+    fn skipPatternElem(tp: TP, src: string, whole: boolean) -> RDPat {
+        let t: TP = tp
+        let depth: int = 0
+        let steps: DStep[] = []
+        let going = true
+        while (going) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.End) {
+                going = false
+            } else if (x.cls == TC.Punct && (tk(x, "{") || tk(x, "[") || tk(x, "("))) {
+                depth = depth + 1
+                t = adv(t)
+            } else if (x.cls == TC.Punct && (tk(x, "}") || tk(x, "]") || tk(x, ")"))) {
+                if (depth == 0) {
+                    going = false
+                } else {
+                    depth = depth - 1
+                    t = adv(t)
+                    if (whole && depth == 0) going = false
+                }
+            } else if (depth == 0 && !whole && x.cls == TC.Punct && tk(x, ",")) {
+                going = false
+            } else {
+                const nx: PTok = peekAt(t, 1)
+                const named: boolean = x.cls == TC.Ident || x.cls == TC.Variant
+                if (named && nx.cls == TC.Punct && (tk(nx, ",") || tk(nx, "}") || tk(nx, "]") || tk(nx, "="))) {
+                    steps = steps.concat([{ dst: x.v, src: src, key: x.v, span: mkSpan(x.start, x.end), leaf: true }])
+                }
+                t = adv(t)
+            }
+        }
+        return { steps: steps, tp: t, bad: true }
+    }
+
+    fn parseObjPattern(tp: TP, src: string) -> RDPat {
+        let t: TP = adv(tp)
+        let steps: DStep[] = []
+        let bad = false
+        let going = !isP(t, "}") && !atEnd(t)
+        while (going) {
+            const k: PTok = cur(t)
+            if (isSpread(t)) {
+                const dr: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a rest element `...name` in a destructuring pattern is not in the bootstrap yet — it would bind a struct of the remaining fields, which has no declared type; read the fields you need", k)
+                const sr: RDPat = skipPatternElem(dr, src, false)
+                steps = steps.concat(sr.steps)
+                t = sr.tp
+                bad = true
+            } else if (isP(t, "[") || k.cls == TC.Str || k.cls == TC.Num) {
+                const dk: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a computed, string or number key in a destructuring pattern is not in the bootstrap yet — a struct field is a name: write `{ field: x }`", k)
+                let kt: TP = adv(dk)
+                if (isP(dk, "[")) {
+                    const sk: RDPat = skipPatternElem(dk, src, true)
+                    kt = sk.tp
+                }
+                const sr: RDPat = skipPatternElem(kt, src, false)
+                steps = steps.concat(sr.steps)
+                t = sr.tp
+                bad = true
+            } else if (!isNameTok(k)) {
+                const dp: TP = diagAt(t, "E-STMT-PATTERN-PROPERTY", "expected a property name in an object-destructuring pattern, found `" + k.text + "`", k)
+                const sr: RDPat = skipPatternElem(dp, src, false)
+                steps = steps.concat(sr.steps)
+                t = sr.tp
+                bad = true
+            } else {
+                t = adv(t)
+                if (isP(t, ":")) {
+                    t = adv(t)
+                    const v: PTok = cur(t)
+                    if (isP(t, "{")) {
+                        const sub: string = destructTemp(v.start)
+                        steps = steps.concat([{ dst: sub, src: src, key: k.v, span: mkSpan(k.start, k.end), leaf: false }])
+                        const r: RDPat = parseObjPattern(t, sub)
+                        steps = steps.concat(r.steps)
+                        t = r.tp
+                        if (r.bad) bad = true
+                    } else if (isP(t, "[")) {
+                        const r2: RDPat = parseDPattern(t, src)
+                        steps = steps.concat(r2.steps)
+                        t = r2.tp
+                        bad = true
+                    } else if (v.cls == TC.Ident) {
+                        steps = steps.concat([{ dst: v.v, src: src, key: k.v, span: mkSpan(k.start, v.end), leaf: true }])
+                        t = adv(t)
+                    } else {
+                        const db: TP = diagAt(t, "E-STMT-BINDING-NAME", "expected a name to bind the field `" + k.v + "` to, found `" + v.text + "`", v)
+                        const sr: RDPat = skipPatternElem(db, src, false)
+                        steps = steps.concat(sr.steps)
+                        t = sr.tp
+                        bad = true
+                    }
+                } else if (k.cls != TC.Ident) {
+                    t = diagAt(t, "E-STMT-BINDING-NAME", "`" + k.v + "` is a keyword and cannot be bound as a name — rename it: `{ " + k.v + ": name }`", k)
+                    bad = true
+                } else {
+                    steps = steps.concat([{ dst: k.v, src: src, key: k.v, span: mkSpan(k.start, k.end), leaf: true }])
+                }
+                if (isP(t, "=")) {
+                    const dd: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a default value in a destructuring pattern (`{ " + k.v + " = … }`) is not in the bootstrap yet — a struct field is always present; read it, or test an optional field after the declaration", cur(t))
+                    const sr: RDPat = skipPatternElem(dd, src, false)
+                    t = sr.tp
+                    bad = true
+                }
+            }
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, "}")) going = false
+            } else {
+                going = false
+            }
+            if (atEnd(t)) going = false
+        }
+        if (isP(t, "}")) {
+            t = adv(t)
+        } else {
+            const u: PTok = cur(t)
+            t = diagAt(t, "E-STMT-UNCLOSED-PATTERN", "expected `}` to close an object-destructuring pattern, found `" + u.text + "`", u)
+            bad = true
+        }
+        return { steps: steps, tp: t, bad: bad }
     }
 
     // s478 — the zone of a local's top refinement (parseLocal): a `const` whose
@@ -5089,6 +5405,11 @@ ${
     fn parseBlockOrStmt(tp: TP) -> RBlock {
         if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
+        if (destructDeclAhead(tp)) {
+            const rd: RStmts = parseTermStmts(tp, hardErrors(tp.diags))
+            const bd: ABlock = { nid: rd.tp.nid, span: spanFrom(rd.tp, start), stmts: rd.ss }
+            return { b: bd, tp: bumpId(rd.tp) }
+        }
         const s: RStmt = parseTermStmt(tp, hardErrors(tp.diags))
         const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [bareDefer(s.s)] }
         return { b: b, tp: bumpId(s.tp) }
@@ -5166,6 +5487,11 @@ ${
         }
         const arrayLead: boolean = isP(t, "[")
         const bodyStart: int = cur(t).start
+        if (destructDeclAhead(t)) {
+            const rd: RStmts = parseTermStmts(t, hardErrors(t.diags))
+            const bd: ABlock = { nid: rd.tp.nid, span: spanFrom(rd.tp, bodyStart), stmts: rd.ss }
+            return mkS(bumpId(rd.tp), start, AStmtK.Defer(bd, false, false))
+        }
         const r: RStmt = parseTermStmt(t, hardErrors(t.diags))
         const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
         return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
@@ -6498,8 +6824,8 @@ ${
                 t = adv(t)
             } else {
                 const before: int = t.i
-                const r: RStmt = parseTermStmt(t, b0)
-                stmts = stmts.concat([r.s])
+                const r: RStmts = parseTermStmts(t, b0)
+                stmts = stmts.concat(r.ss)
                 t = r.tp
                 if (t.i == before) t = adv(t)
             }
@@ -6546,6 +6872,7 @@ ${
             return { items: [], tp: skipToLineEnd(dc) }
         }
         const d0: int = hardErrors(tp.diags)
+        if (destructDeclAhead(tp)) return refusedDestructItem(tp, d0, "a file-scope destructuring `const` (`const { a } = …;` at the top level of a logic block)")
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
         const c: AConst | not = constOfStmt(r.s, exported)
@@ -6616,10 +6943,20 @@ ${
     fn refusedLetItem(tp: TP, start: int) -> RItems {
         const kw: PTok = cur(tp)
         const d0: int = hardErrors(tp.diags)
+        if (destructDeclAhead(tp)) return refusedDestructItem(tp, d0, "a destructuring `let` at the top level of a logic block (module-level mutable state, as a file-scope `let` is)")
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
         const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per request) is not settled (§12 places functions, not bindings), so the bootstrap does not build it. Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
         return { items: [], tp: d }
+    }
+
+    // s478-boot-destructuring — a destructuring declaration as a logic-block item: read
+    // past whole (its own pattern / value errors kept), refused by name (INTERIM).
+    fn refusedDestructItem(tp: TP, d0: int, what: string) -> RItems {
+        const kw: PTok = cur(tp)
+        const rd: RStmts = parseDestructDecl(tp)
+        const t: TP = termAfter(rd.tp, rd.ss[rd.ss.length - 1], d0)
+        return { items: [], tp: diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", what + " is not in the bootstrap yet — destructure inside a function or handler body, or bind the value and read its fields (`const v = …;` then `v.a`)", kw) }
     }
 
     // Skip the rest of the current token's line (error recovery).
