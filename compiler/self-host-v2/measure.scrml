@@ -94,6 +94,7 @@ ${
             .InitOf(decl: x) :> "InitOf"
             .Host(call: x) :> "Host"
             .Lambda(params: x) :> "Lambda"
+            .BlockLambda(params: x) :> "BlockLambda"
             .SeqCall(op: x) :> "SeqCall"
             .Refetch(req: rf0) :> "Refetch"
             .Validity(of: x) :> "Validity"

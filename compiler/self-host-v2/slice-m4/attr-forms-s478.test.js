@@ -272,10 +272,11 @@ describe("4 — refused by name, never silently accepted", () => {
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(e[0].message).toContain("event object");
   });
-  test("`${() => { … }}` — a braced arrow body", () => {
-    const e = errs(prog(`<button onclick=\${() => { @count = 1; }}>go</>`));
+  // s478 (s478-boot-block-lambda): a braced arrow body is BUILT — block-lambda-s478.test.js runs it.
+  test("`${(e) => { … }}` — a braced handler taking the event object (function values)", () => {
+    const e = errs(prog(`<button onclick=\${(e) => { @last = e.type; }}>go</>`));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("braced body");
+    expect(e[0].message).toContain("event object");
   });
   test("`${() => f}` — an arrow returning a function", () => {
     const e = errs(prog(`<button onclick=\${() => track}>go</>`));

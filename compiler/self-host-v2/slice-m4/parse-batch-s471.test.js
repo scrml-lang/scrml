@@ -97,8 +97,12 @@ describe("a runaway display-text literal recovers at the body's closer (§4.18.3
   test("F1: `\"x </> y\" + String.raw`z`` → E-UNQUOTED-DISPLAY-TEXT (base), no E-CTX-001", () => {
     expect(codes(stY('"x </> y" + String.raw`z`'))).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
   });
-  test("F1: `\"x </> y\" + ((q) => { return q; })(\"z\")` → E-UNQUOTED-DISPLAY-TEXT (base)", () => {
-    expect(codes(stY('"x </> y" + ((q) => { return q; })("z")'))).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+  // s478-boot-block-lambda: a braced arrow body PARSES now (§7.2), so nothing else in this run fails —
+  // the closed literal is content and the verdict is the expression-bodied IIFE's own (a call of a
+  // value that is no name is refused, fail closed); never a runaway re-read (no E-UNQUOTED-DISPLAY-TEXT).
+  test("F1: `\"x </> y\" + ((q) => { return q; })(\"z\")` → the IIFE's own verdict, as `((q) => q)(\"z\")`", () => {
+    expect(codes(stY('"x </> y" + ((q) => { return q; })("z")'))).toEqual(["E-LOGIC-EXECUTABLE-SINK"]);
+    expect(codes(stY('"x </> y" + ((q) => q)("z")'))).toEqual(["E-LOGIC-EXECUTABLE-SINK"]);
   });
   test("F1: `\"x </> ${@y}\" + \"q\"` → E-BOOTSTRAP-UNSUPPORTED (base — an honest refusal never triggers)", () => {
     expect(codes(stY('"x </> ${@y}" + "q"'))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
