@@ -5244,8 +5244,16 @@ ${
     // source", §53.4.5 "The check SHALL be emitted at the assignment site" (lower.scrml
     // localRefineCheck — checked as the local binds, before any later statement).
     fn localRefine(tp: TP, ty: AType, init: AExpr, mutable: boolean, name: string) -> RLocalRefine {
-        let z: RefZone = refineFixedZone(ty, refLitOf(init), "the local `" + name + "`")
-        if (!mutable && z.code == "E-BOOTSTRAP-UNSUPPORTED") z = { code: "", msg: "", reported: false }
+        // Review #1911 HIGH-1: only a local in a BODY (tp.inFn 1 / 2) is lowered by
+        // lowerStmt .Local, where localRefineCheck builds the check. A `const` at file
+        // scope (tp.inFn 0 — top-level logic, any `${ }` region outside a body) is a
+        // §7.6 file-scope constant, lowered by the constant path (lower.scrml coreConsts),
+        // which builds no check — so there it stays refused by name (INTERIM), never
+        // admitted unchecked (§53.11 "The compiler SHALL emit a runtime check for every
+        // boundary-zone assignment that it cannot statically elide").
+        const where: string = tp.inFn == 0 ? "the file-scope constant `" + name + "`" : "the local `" + name + "`"
+        let z: RefZone = refineFixedZone(ty, refLitOf(init), where)
+        if (!mutable && tp.inFn != 0 && z.code == "E-BOOTSTRAP-UNSUPPORTED") z = { code: "", msg: "", reported: false }
         if (mutable && z.code != "E-CONTRACT-001") {
             z = { code: "E-BOOTSTRAP-UNSUPPORTED", msg: refBoundaryMsg(typeNameText(ty), "on the `let` local `" + name + "` — each later assignment to it is a boundary-zone write"), reported: false }
         }

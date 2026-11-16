@@ -2899,6 +2899,23 @@ function refineHolds(node, v) {
   }
 }
 
+// Review #1911 LOW-1: is every node of the spec one this runtime reads — a known
+// combinator, comparison operator, number and shape? A spec with ANY node it does
+// not read is refused whole (refineCheck traps), so no composition — a `!` above an
+// unread node included — can turn "cannot judge" into an admit (§53.11: a runtime
+// check "SHALL NOT admit values it cannot judge").
+const _SCRML_REFINE_OPS = { ">": 1, ">=": 1, "<": 1, "<=": 1, "==": 1, "!=": 1 };
+function refineKnown(node) {
+  switch (node.k) {
+    case "&": case "|": return refineKnown(node.l) && refineKnown(node.r);
+    case "!": return refineKnown(node.x);
+    case "c": case "l":
+      return Object.prototype.hasOwnProperty.call(_SCRML_REFINE_OPS, node.op) && !Number.isNaN(node.n);
+    case "s": return Object.prototype.hasOwnProperty.call(_SCRML_REFINE_SHAPES, node.name);
+    default: return false;
+  }
+}
+
 function refineText(node) {
   switch (node.k) {
     case "&": return refineText(node.l) + " && " + refineText(node.r);
@@ -2920,7 +2937,9 @@ function refineFailing(node, v) {
 
 function refineBaseHolds(base, v) {
   if (base === "number") return typeof v === "number" && !Number.isNaN(v);
-  if (base === "int" || base === "integer") return Number.isInteger(v);
+  // Review #1911 LOW-2: an `int` is a SAFE integer — ±(2^53−1), the range
+  // E-INT-CONVERSION-RT holds (§41.18, §19.17) — not any integral double (2^53+1, 1e300).
+  if (base === "int" || base === "integer") return Number.isSafeInteger(v);
   if (base === "string") return typeof v === "string";
   return false;
 }
@@ -2937,7 +2956,7 @@ export function refineCheck(v, base, spec, shown, what, at) {
   const st = { i: 0 };
   const toks = String(spec).split(" ");
   const node = refineParse(toks, st);
-  const whole = st.i === toks.length;
+  const whole = st.i === toks.length && refineKnown(node);
   if (whole && refineBaseHolds(base, v) && refineHolds(node, v)) return v;
   let failing;
   if (!whole) failing = "(a predicate the runtime does not read)";

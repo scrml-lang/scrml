@@ -313,8 +313,84 @@ describe("A — a SERVER function's refined parameter is checked on the server, 
     const path = h.pathOf(routes, "save");
     expect((await h.post(srv, path, [5])).status).toBe(200);
     expect(spy.calls.length).toBe(1);
-    expect((await h.post(srv, path, [500])).status).toBe(500);
-    expect((await h.post(srv, path, [0])).status).toBe(500);
+    // Review #1911 MED-1: "the §53.9.4 `E-CONTRACT-001-RT` 400" (§52.13) — naming the
+    // constraint and the parameter, never the value or the server source location
+    for (const bad of [500, 0, 9007199254740993, 1e300]) {
+      const res = await h.post(srv, path, [bad]);
+      expect(res.status).toBe(400);
+      expect(res.json).toEqual({ error: "E-CONTRACT-001-RT: Value constraint violated at runtime.", constraint: "int(>0 && <=100)", parameter: "parameter `n` of `save`" });
+      expect(res.text).not.toContain("app.scrml");
+    }
     expect(spy.calls.length).toBe(1);      // nothing reached the database
+  });
+
+  test("a trap inside the body — not the route's own parameter check — stays a 500 (Review #1911 MED-1)", async () => {
+    const h = await import("./server-artifact-harness.js");
+    h.mods();
+    const SQ = "?" + "{";
+    const src = `<program db="./app.db">
+    function save(n: int) -> int {
+        ${SQ}\`INSERT INTO t (n) VALUES (\${n})\`}.run() !{ _ :> { return 0; } };
+        const m: int(>0) = n;
+        return m;
+    }
+    let <n:int=0/>
+    <button onclick={ @n = save(5) !{ .Transport(t) :> return }; }>save</button>
+</program>
+`;
+    const r = h.compile(src);
+    expect(h.check(r.core)).toEqual([]);
+    const spy = h.spyDriver();
+    const { srv, routes } = await h.serve(r.core, spy.fn);
+    const res = await h.post(srv, h.pathOf(routes, "save"), [-5]);
+    expect(res.status).toBe(500);
+    expect(res.json).toEqual({ error: "Internal Server Error" });
+  });
+});
+
+describe("D — a file-scope `const` is not built: refused by name, never admitted unchecked (Review #1911 HIGH-1)", () => {
+  // §53.11: "The compiler SHALL emit a runtime check for every boundary-zone assignment that it
+  // cannot statically elide." A file-scope constant (§7.6) is lowered by the constant path, which
+  // builds no check — so a refinement on one whose value is not a literal stays refused.
+  const cases = {
+    "a constant reference": "${ const M: int = 0 - 5;\nconst K: int(>0) = M; }\n<p id=\"z\">${K}</p>\n",
+    "an expression": "${ const K: int(>0) = 0 - 5; }\n<p id=\"z\">${K}</p>\n",
+    "a negation": "${ const M: int = 5;\nconst K: int(>0) = -M; }\n<p id=\"z\">${K}</p>\n",
+    "an undecided `url` literal": "${ const K: string(url) = \"javascript:alert(1)\"; }\n<a id=\"z\" href=${K}>x</a>\n",
+    "a string concatenation into `url`": "${ const A: string = \"javascript:\";\nconst K: string(url) = A + \"alert(1)\"; }\n<p id=\"z\">${K}</p>\n",
+    "an `email` from a constant": "${ const A: string = \"nope\";\nconst K: string(email) = A; }\n<p id=\"z\">${K}</p>\n",
+    "a `url` constant a function also reads": "${ const A: string = \"javascript:\";\nconst K: string(url) = A + \"alert(1)\";\nfunction show(u: string(url)) -> string { return u; } }\n<p id=\"z\">${K}</p>\n",
+    "a `${ }` block nested in markup": "<div>${ const M: int = 0 - 5;\nconst K: int(>0) = M; }\n<p id=\"z\">${K}</p></div>\n",
+  };
+  const prog = (body) => "<program>\n" + body + "</program>\n";
+  for (const [name, src] of Object.entries(cases)) {
+    test(name, () => {
+      const es = errs(prog(src));
+      expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(es[0].message).toContain("the file-scope constant `K`");
+    });
+  }
+  test("a literal that satisfies it is still the static zone (clean)", () => {
+    clean(prog("${ const K: int(>0) = 5; }\n<p id=\"z\">${K}</p>\n"));
+  });
+});
+
+describe("E — the runtime check itself (runtime.js refineCheck)", () => {
+  let rt;
+  beforeAll(async () => { rt = await import("../slice-m1/runtime/runtime.js"); });
+  const traps = (v, base, spec) => {
+    try { rt.refineCheck(v, base, spec, "T", "w", "a"); return false; } catch (e) { return e.code === "E-CONTRACT-001-RT"; }
+  };
+  test("a spec with ANY node it does not read admits nothing — under `!` too (Review #1911 LOW-1)", () => {
+    for (const spec of ["! s nosuch", "! c ~ 3", "! c > x", "| s email ! s nosuch", "! ! ! s nosuch", "! & c > 0 s nosuch", "! l ~ 2", "?", "! ?"]) {
+      expect([spec, traps(5, "number", spec), traps("x", "string", spec)]).toEqual([spec, true, true]);
+    }
+    expect(traps(5, "number", "! c < 0")).toBe(false);       // a spec it reads still admits
+  });
+  test("`int` is a SAFE integer (Review #1911 LOW-2)", () => {
+    expect(traps(9007199254740991, "int", "c > 0")).toBe(false);
+    for (const v of [9007199254740992, 9007199254740993, 1e20, 1e300, -9007199254740992, 1.5, NaN, Infinity]) {
+      expect([v, traps(v, "int", "c != 0")]).toEqual([v, true]);
+    }
   });
 });
