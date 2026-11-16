@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 574 | 30.7% |
+| PASS | 589 | 31.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 17 | 0.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 642 | 34.4% |
+| UNSUPPORTED | 627 | 33.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 591; of those, 574 hold (97.1%). Runtime half executed on the bootstrap for 190 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 606; of those, 589 hold (97.2%). Runtime half executed on the bootstrap for 197 case(s).
 
-- **Vacuous** passes: 13 of 574 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **561**.
+- **Vacuous** passes: 13 of 589 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **576**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 17; the other 11 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 642.
+UNSUPPORTED by reason: bootstrap-unsupported 627.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 378 · FAIL 14 · UNSUPPORTED 482. Twin holds 378 (non-vacuous 368). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 393 · FAIL 14 · UNSUPPORTED 467. Twin holds 393 (non-vacuous 383). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 4 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 7 | · | · | · | 1 | 1 | · | · |
-| reactive | 127 | 54 | · | 1 | · | 44 | 28 | · | · |
+| reactive | 127 | 69 | · | 1 | · | 44 | 13 | · | · |
 | refinement | 57 | 17 | · | 1 | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
@@ -228,7 +228,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (574)
+### PASS / CODES-ONLY (589)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -697,6 +697,21 @@ none
 - `reactive/multi-cell-interp` — PASS · TWIN
 - `reactive/name-collides-state-neg` — PASS · TWIN
 - `reactive/name-collides-state-pos` — PASS · TWIN
+- `reactive/narrowing-ends-at-server-call-reject` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
+- `reactive/narrowing-ends-callee-write-reject` — PASS · TWIN
+- `reactive/narrowing-ends-direct-write-reject` — PASS · TWIN
+- `reactive/narrowing-ends-loop-write-reject` — PASS · TWIN
+- `reactive/narrowing-ends-nested-write-reject` — PASS · TWIN
+- `reactive/narrowing-gated-handler-keeps-rt` — PASS · TWIN
+- `reactive/narrowing-gated-handler-nested-gates-pos` — PASS · TWIN
+- `reactive/narrowing-gated-handler-other-cell-reject` — PASS · TWIN
+- `reactive/narrowing-gated-handler-write-inside-reject` — PASS · TWIN
+- `reactive/narrowing-resumes-after-fresh-test-pos` — PASS · TWIN
+- `reactive/narrowing-show-gated-handler-reject` — PASS · TWIN
+- `reactive/narrowing-survives-exiting-branch-write-pos` — PASS · TWIN
+- `reactive/narrowing-survives-non-writing-call-pos` — PASS · TWIN
+- `reactive/narrowing-survives-write-after-loop-pos` — PASS · TWIN
+- `reactive/narrowing-sync-callback-keeps-pos` — PASS · TWIN
 - `reactive/no-write-attr-neg` — PASS
 - `reactive/no-write-attr-pos` — PASS
 - `reactive/no-write-derived-neg` — PASS
@@ -805,7 +820,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (642)
+### UNSUPPORTED (627)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1266,26 +1281,11 @@ none
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: raw SQL DDL (`CREATE …`, SQL `--` / `/* */` comments) in `<schema>` is not in the bootstrap (INTERIM) — its §39.2 head checks (E-SCHEMA-012…015) and the §14.8.9 / §14.8.10 floors that read raw declara
 - `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
-- `reactive/narrowing-ends-at-server-call-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-ends-callee-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `clear(…)`
-- `reactive/narrowing-ends-direct-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-ends-loop-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-ends-nested-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `function-typed parameter` (§15.11.5) is not in the bootstrap yet; it is refused here by name rather than misread — function types are not in the bootstrap's type grammar yet; call the function where 
-- `reactive/narrowing-gated-handler-keeps-rt` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-gated-handler-nested-gates-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-gated-handler-other-cell-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-gated-handler-write-inside-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-not-inherited-by-lambda-reject` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `reactive/narrowing-resumes-after-fresh-test-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-show-gated-handler-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
-- `reactive/narrowing-survives-exiting-branch-write-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-survives-non-writing-call-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-survives-other-cell-write-pos` — twin · bootstrap-unsupported: `?. optional chaining` (§42.3.6) is not in the bootstrap yet; it is refused here by name rather than misread — test presence first: `if (x is given) { … x.f … }` (§42.2)
-- `reactive/narrowing-survives-write-after-loop-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-sync-callback-keeps-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/no-write-unproven-pos` — bootstrap-unsupported: `one` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `one(…)`
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` /
 - `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
