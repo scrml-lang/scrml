@@ -280,9 +280,22 @@ ${
     // function DECLARATION (§19.16.3 rule 4), and not in a non-function body nested in one
     // (a `when` / effect body, an arrow body; markup — handlers — is read from its own MP).
     // Set by parseFnDecl; bareBlock reads it to name a `defer` there (§19.16.2 vs §19.16.3).
-    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string, ns: PNs, inFn: boolean }
+    // s478 (review-followups-3): three states, not two — 0 (top-level logic), 1 (a function
+    // declaration's body), 2 (a text-lowered body: a `when` / effect /
+    // arrow body, an attribute value — handler — or anything nested in one). A function
+    // DECLARED in a lowered body is no defer site either — §19.16.3 rule 4: "a `defer`
+    // inside a function or arrow DECLARED in a `when` body or a handler attribute is
+    // rejected too" (E-DEFER-OUTSIDE-FUNCTION) — so parseFnDecl keeps 2 (fnBodyInFn).
+    // (One int field, not a second flag: every TP literal copies it unchanged.)
+    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string, ns: PNs, inFn: int }
 
-    fn withInFn(tp: TP, v: boolean) -> TP {
+    // A function declaration's body: a defer site (1) unless declared in a lowered body (2).
+    fn fnBodyInFn(outer: int) -> int {
+        if (outer == 2) return 2
+        return 1
+    }
+
+    fn withInFn(tp: TP, v: int) -> TP {
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: v }
     }
 
@@ -2692,7 +2705,7 @@ ${
         const t: TP = adv(tp)
         if (isP(t, "{")) {
             const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function with a braced body is not in the bootstrap — write an expression body", cur(t))
-            const b: RBlock = parseBlock(withInFn(d, false))   // §19.16.3 rule 4: an arrow body is no defer site
+            const b: RBlock = parseBlock(withInFn(d, 2))   // §19.16.3 rule 4: an arrow body is no defer site
             return mkE(withInFn(b.tp, tp.inFn), start, AExprK.Recovered)
         }
         const body: RExpr = parseAssign(t)
@@ -3617,7 +3630,11 @@ ${
             for (const s of rb.b.stmts) {
                 if (isDeferStmt(s)) {
                     let d: Diag = newDiag("E-DEFER-UNSUPPORTED-SITE", "a `defer` in a bare `{ … }` block has no block to belong to in stage 1 (§19.16.2) — move the `defer` to the enclosing function body or a braced `if` / loop body", t.file, s.span)
-                    if (!tp.inFn) d = newDiag("E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) — this bare block is not in one, and a handler, an effect or the program has no single block exit to attach the deferred statement to (§19.16.3 rule 4); move the body into a named function and call it", t.file, s.span)
+                    if (tp.inFn == 0) d = newDiag("E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) — this bare block is not in one, and a handler, an effect or the program has no single block exit to attach the deferred statement to (§19.16.3 rule 4); move the body into a named function and call it", t.file, s.span)
+                    // §19.16.3 rule 4: "a `defer` inside a function or arrow DECLARED in a
+                    // `when` body or a handler attribute is rejected too — declare the
+                    // function outside the body and call it"
+                    if (tp.inFn == 2) d = newDiag("E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) that is not itself inside a `when` / effect / arrow body or a handler attribute — this bare block is in one (§19.16.3 rule 4); declare the function outside that body and call it", t.file, s.span)
                     t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
                 }
             }
@@ -3725,7 +3742,7 @@ ${
             const rs: RExprs = parseDepList(adv(t))
             t = rs.tp
         }
-        const body: RBlock = parseBlock(withInFn(t, false))   // §19.16.3 rule 4: a `when` body is no defer site
+        const body: RBlock = parseBlock(withInFn(t, 2))   // §19.16.3 rule 4: a `when` body is no defer site
         const w: AEffect = { nid: body.tp.nid, span: spanFrom(body.tp, start), deps: ds.es, body: body.b, keyword: true }
         return { w: w, tp: bumpId(withInFn(body.tp, tp.inFn)) }
     }
@@ -3828,7 +3845,7 @@ ${
         } else if (isP(t, ">")) {
             t = adv(t)
             if (tk(cur(t), "$") && isP(adv(t), "{")) {
-                const b: RBlock = parseBlock(withInFn(adv(t), false))   // §19.16.3 rule 4: an effect body is no defer site
+                const b: RBlock = parseBlock(withInFn(adv(t), 2))   // §19.16.3 rule 4: an effect body is no defer site
                 body = b.b
                 t = withInFn(b.tp, tp.inFn)
             }
@@ -4293,7 +4310,7 @@ ${
                 depth = p.depth
             }
         }
-        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: false }
+        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: 0 }
         return { tp: t, mp: m }
     }
 
@@ -4420,7 +4437,7 @@ ${
                 depth = p.depth
             }
         }
-        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: false }
+        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: 0 }
         t = expectP(t, "{")
         const rs: RStmt = parseStmt(t)
         t = rs.tp
@@ -4904,9 +4921,19 @@ ${
         const mutable: boolean = isWord(tp, "let")
         let t: TP = adv(tp)
         const root: string = destructTemp(cur(t).start)
+        const n0: int = t.diags.length
         const rp: RDPat = parseDPattern(t, root)
         t = rp.tp
         let bad: boolean = rp.bad
+        if (rp.bad && hasCodeFrom(t, n0, "E-STMT-UNCLOSED-PATTERN")) {
+            // s478 (review-followups-3): an unclosed pattern has no `=` to read — the
+            // declaration is skipped to its `;` (the one report stands; no cascade)
+            t = skipToStmtEnd(t)
+            const rv: RExpr = synE(t, spanFrom(t, start), AExprK.Recovered)
+            const rr: RStmt = synS(rv.tp, spanFrom(rv.tp, start), AStmtK.Local(root, false, not, rv.e, false))
+            const rrs: RStmts = stepStmts(rr.tp, rp.steps, mutable, true)
+            return { ss: [rr.s].concat(rrs.ss), tp: rrs.tp }
+        }
         if (isP(t, ":")) {
             const ct: PTok = cur(t)
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a type annotation on a destructuring pattern is not in the bootstrap yet — annotate the value instead: `const v: T = …;`, then destructure `v`", ct)
@@ -4968,6 +4995,14 @@ ${
             const x: PTok = cur(t)
             if (x.cls == TC.End) {
                 going = false
+            } else if (depth == 0 && x.cls == TC.Punct && tk(x, ";")) {
+                // s478 (review-followups-3): a pattern never holds a depth-0 `;` — an
+                // unclosed `{ id = p;` stops at the statement's end, not the file's
+                going = false
+            } else if (x.cls == TC.At) {
+                // `@name` binds nothing (§6.1.2) — its name is not kept as a local
+                t = adv(t)
+                if (cur(t).cls == TC.Ident) t = adv(t)
             } else if (x.cls == TC.Punct && (tk(x, "{") || tk(x, "[") || tk(x, "("))) {
                 depth = depth + 1
                 t = adv(t)
@@ -4993,6 +5028,55 @@ ${
         return { steps: steps, tp: t, bad: true }
     }
 
+    fn hasCodeFrom(tp: TP, from: int, code: string) -> boolean {
+        let i: int = from
+        while (i < tp.diags.length) {
+            if (tp.diags[i].code == code) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    // Error recovery: to the statement's depth-0 `;` (left for the caller), the end, or
+    // the closer of the enclosing block (not consumed).
+    fn skipToStmtEnd(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        let going = true
+        while (going) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.End) {
+                going = false
+            } else if (x.cls == TC.Punct && (tk(x, "{") || tk(x, "[") || tk(x, "("))) {
+                depth = depth + 1
+                t = adv(t)
+            } else if (x.cls == TC.Punct && (tk(x, "}") || tk(x, "]") || tk(x, ")"))) {
+                if (depth == 0) {
+                    going = false
+                } else {
+                    depth = depth - 1
+                    t = adv(t)
+                }
+            } else if (depth == 0 && x.cls == TC.Punct && tk(x, ";")) {
+                going = false
+            } else {
+                t = adv(t)
+            }
+        }
+        return t
+    }
+
+    // s478 (review-followups-3) — §6.1.2: "`@varname` SHALL NOT be a DESTRUCTURING TARGET
+    // (`const { @varname } = o`, `const { k: @varname } = o`, …) — same code" (E-OBJECT-
+    // SHORTHAND-CELL). At the `@`: the one report; the caller skips the element, and
+    // skipPatternElem keeps no local for the name after `@` (no E-NAME-COLLIDES-STATE).
+    fn cellTargetDiag(tp: TP, at: PTok) -> TP {
+        const nm: PTok = peekAt(tp, 1)
+        let n: string = "name"
+        if (nm.cls == TC.Ident) n = nm.v
+        return diagAt(tp, "E-OBJECT-SHORTHAND-CELL", "`@" + n + "` cannot be a destructuring target — it is a cell read, not a name a pattern binds (§6.1.2); bind a local, then write the cell: `const { " + n + " } = …;` then `@" + n + " = " + n + ";`", at)
+    }
+
     fn parseObjPattern(tp: TP, src: string) -> RDPat {
         let t: TP = adv(tp)
         let steps: DStep[] = []
@@ -5016,6 +5100,11 @@ ${
                 const sr: RDPat = skipPatternElem(kt, src, false)
                 steps = steps.concat(sr.steps)
                 t = sr.tp
+                bad = true
+            } else if (k.cls == TC.At) {
+                const sc: RDPat = skipPatternElem(cellTargetDiag(t, k), src, false)
+                steps = steps.concat(sc.steps)
+                t = sc.tp
                 bad = true
             } else if (!isNameTok(k)) {
                 const dp: TP = diagAt(t, "E-STMT-PATTERN-PROPERTY", "expected a property name in an object-destructuring pattern, found `" + k.text + "`", k)
@@ -5043,6 +5132,11 @@ ${
                     } else if (v.cls == TC.Ident) {
                         steps = steps.concat([{ dst: v.v, src: src, key: k.v, span: mkSpan(k.start, v.end), leaf: true }])
                         t = adv(t)
+                    } else if (v.cls == TC.At) {
+                        const sv: RDPat = skipPatternElem(cellTargetDiag(t, v), src, false)
+                        steps = steps.concat(sv.steps)
+                        t = sv.tp
+                        bad = true
                     } else {
                         const db: TP = diagAt(t, "E-STMT-BINDING-NAME", "expected a name to bind the field `" + k.v + "` to, found `" + v.text + "`", v)
                         const sr: RDPat = skipPatternElem(db, src, false)
@@ -7449,7 +7543,7 @@ ${
         const n0: int = t.diags.length
         // §19.16.3 rule 4: "`defer` SHALL appear only inside the body of a function DECLARATION
         // … including any block nested in one" — the body is a defer site (TP.inFn, bareBlock)
-        const body: RBlock = parseBlock(withInFn(t, true))
+        const body: RBlock = parseBlock(withInFn(t, fnBodyInFn(tp.inFn)))
         t = withInFn(body.tp, tp.inFn)
         // s469 — a declared-return (non-`void`, non-`!`) function whose body ENDS in a
         // pure expression: that is analyze's E-TYPE-043 ("ends in an expression it does
@@ -7599,7 +7693,7 @@ ${
     // ---- lexing a logic region --------------------------------------------
     fn regionTP(mp: MP, stop: LexStop) -> TP {
         const run: LexRun = lexFrom(mp.src, mp.pos, stop)
-        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: 0 }
     }
 
     // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
@@ -7613,7 +7707,7 @@ ${
         const d: TP = regionTP(mp, stop)
         if (isStandaloneDisplay(d)) return d
         const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
-        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
+        return { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: 0 }
     }
 
     fn isStandaloneDisplay(tp: TP) -> boolean {
@@ -7655,7 +7749,7 @@ ${
         }
         if (c == "$" && chAt(mp, 1) == "{") return parseDollarValue(mp, handler, name, decl)
         if (c == "(") {
-            const tp: TP = regionTP(mp, LexStop.Balanced)
+            const tp: TP = withInFn(regionTP(mp, LexStop.Balanced), 2)   // an attribute value is a lowered body (§19.16.3 rule 4)
             // §5.2.4: "in a `(…)` value … it detects statements separated by a
             // statement-level `;`" — a non-handler value is ONE expression
             if (!handler && parenHasStatements(tp)) return multiStatementValue(mp, backToMarkup(mp, endOfRegion(tp)), name, "(…)")
@@ -7664,7 +7758,7 @@ ${
             return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) }
         }
         if (c == "{") {
-            const tp2: TP = regionTP(mp, LexStop.Balanced)
+            const tp2: TP = withInFn(regionTP(mp, LexStop.Balanced), 2)
             const n0: int = tp2.diags.length
             const b: RBlock = parseBlock(tp2)
             let t3: TP = expectRegionEnd(b.tp)
@@ -7673,7 +7767,7 @@ ${
             if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
             return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
         }
-        const tp3: TP = regionTP(mp, LexStop.BareValue)
+        const tp3: TP = withInFn(regionTP(mp, LexStop.BareValue), 2)
         if (atEnd(tp3)) {
             const d: MP = mDiag(mp, "E-PARSE-ATTR", "expected an attribute value after `=`", mp.pos, mp.pos + 1)
             return { v: AAttrValue.NoValue, mp: d }
@@ -7891,7 +7985,7 @@ ${
     //     E-DECL-OPENER-EXPR-UNPARENTHESIZED.
     fn parseDollarValue(mp: MP, handler: boolean, name: string, decl: boolean) -> RValue {
         const start: int = mp.pos
-        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        const tp: TP = withInFn(regionTP(mAdv(mp, 1), LexStop.Balanced), 2)   // §19.16.3 rule 4: a handler is a lowered body
         if (decl) {
             const md: MP = withDiagsOf(backToMarkup(mp, endOfRegion(tp)), mp.diags)
             const m: MP = mDiag(md, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value is a literal or a plain `@ref` written bare, or any other expression PARENTHESIZED — `=(…)`, not `=" + dollarOpen() + "…}` (§66.2.4)", start, md.pos)
@@ -10953,7 +11047,7 @@ ${
             }
         }
         toks = toks.concat([lexed[lexed.length - 1]])
-        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
+        const t0: TP = { toks: toks, i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: 0 }
         if (isWord(t0, "type")) return hostTypeLine(mp, t0, at, end, src)
         return hostBindLine(mp, t0, at, end, src, blockTypes)
     }
@@ -11285,7 +11379,7 @@ ${
     // `}` or a line break. Otherwise `mp.pos` — the run is prose.
     fn dbStatementEnd(mp: MP) -> int {
         const tp0: TP = codeRegionTP(mp, LexStop.CodeBody)
-        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file, ns: mp.ns, inFn: false }
+        const tp: TP = { toks: tp0.toks, i: 0, nid: mp.nid, diags: [], file: mp.file, ns: mp.ns, inFn: 0 }
         if (atEnd(tp)) return mp.pos
         const rs: RStmt = parseStmt(tp)
         const t: TP = rs.tp
@@ -12287,7 +12381,7 @@ ${
     // =========================================================================
     fn bodyTopRun(mp: MP, ctx: string) -> RMItems {
         const run: LexRun = lexFromMode(mp.src, mp.pos, LexStop.CodeBody, false)
-        let t: TP = { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: false }
+        let t: TP = { toks: nsToks(mp.ns, toPToks(run.tokens)), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file, ns: mp.ns, inFn: 0 }
         let items: AItem[] = []
         let stmts: AStmt[] = []
         let runStart: int = -1
