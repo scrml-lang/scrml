@@ -156,7 +156,28 @@ describe("refused by name (INTERIM) — each ONE report, no cascade on the names
   });
   test("a malformed pattern is the §34 pattern codes", () => {
     expect(codes(prog(`${P1}\n        const { 1 } = p;\n        @out = 1;`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(prog(`${P1}\n        const { @x } = p;\n        @out = 1;`))).toContain("E-STMT-PATTERN-PROPERTY");
+    expect(codes(prog(`${P1}\n        const { -x } = p;\n        @out = 1;`))).toContain("E-STMT-PATTERN-PROPERTY");
     expect(codes(prog(`${P1}\n        const { id: 2 } = p;\n        @out = 1;`))).toContain("E-STMT-BINDING-NAME");
+  });
+  // s478 (review-followups-3) — §6.1.2: "`@varname` SHALL NOT be a DESTRUCTURING TARGET
+  // (`const { @varname } = o`, `const { k: @varname } = o`, …) — same code" (E-OBJECT-SHORTHAND-CELL).
+  // The one report: the name after `@` is not kept as a local (no E-NAME-COLLIDES-STATE).
+  test("a cell as a destructuring target is E-OBJECT-SHORTHAND-CELL, alone", () => {
+    expect(codes(prog(`${P1}\n        const { @out } = p;`))).toEqual(["E-OBJECT-SHORTHAND-CELL"]);
+    expect(codes(prog(`${P1}\n        const { id: @out } = p;`))).toEqual(["E-OBJECT-SHORTHAND-CELL"]);
+    expect(codes(prog(`${P1}\n        const { id, inner: { z: @out } } = p;\n        @out = id;`))).toEqual(["E-OBJECT-SHORTHAND-CELL"]);
+    expect(msgs(prog(`${P1}\n        const { @out } = p;`))[0]).toContain("`@out = out;`");
+  });
+  // An unclosed pattern stops at the statement's `;` (a pattern never holds a depth-0 `;`):
+  // the declaration is skipped, the rest of the function is not read as pattern tokens.
+  test("an unclosed pattern is a bounded report, not a file-long cascade", () => {
+    const a = codes(prog(`${P1}\n        const { id = p;\n        @out = 1;`));
+    expect(a).toContain("E-STMT-UNCLOSED-PATTERN");
+    expect(a.length).toBeLessThanOrEqual(6);
+    for (const c of ["E-SCOPE-001", "E-ASSIGN-CONST", "E-STMT-MISSING-SEMICOLON", "E-PARSE-EXPECTED"]) expect(a).not.toContain(c);
+    const b = codes(prog(`${P1}\n        const { id, name\n        @out = 1;`));
+    expect(b).toContain("E-STMT-UNCLOSED-PATTERN");
+    expect(b.length).toBeLessThanOrEqual(5);
+    expect(b).not.toContain("E-ASSIGN-POSITION");
   });
 });
