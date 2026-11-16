@@ -23,3 +23,14 @@ Branch `s478-boot-member-access` (from origin/main 213dd1203). Scratch: `~/.cach
 - [x] L2: conformance case narrowing-ends-at-server-call-reject handles the server call (`!{ _ :> 0 }`).
 - [x] Conformance vs base 552→567 PASS (0 PASS→FAIL); vs PR head 566→567 (FAIL→PASS L2 case).
       Corpus (3176 files): 0 newly-rejecting / 0 changed code sets vs base and vs PR head.
+
+## Merge origin/main (250b2bcbf: #1915 typed `?{}` rows, #1916 `<endpoint>`)
+- [x] analyze.scrml typeMember: ONE check — memberRecvMismatch (receiver must be Named(owner) /
+      string-or-tape on every struct-field / `.length` read) subsumes #1915's owner check
+      (local-only, `T | not`-only); #1915's helpers structOwnerOf (dup), isLocalFact, memberNameOf dropped.
+- [x] resolveMember: #1915's local-only `T | not` struct-field step was dead behind this branch's
+      general one (any receiver) — removed with isLocalNameRead.
+- [x] severity.scrml = main's (gen --check current).
+- [x] Tests: member-access / sql-row-types (incl. SQLite runtime) / endpoint 104 pass; self-host-v2 7900/0.
+- [x] Probes: #1915 p2/p3 identical to #1915 r1; #1917 p2/p4/p5 identical to pre-merge 7ea5be33d.
+- [x] Conformance vs main 569→584 PASS (+15, 0 PASS→FAIL, CRASH 0). Corpus 0 newly-rejecting.

@@ -3878,6 +3878,14 @@ ${
     // s454 (U1b) — the types a shipped built-in enum's payloads NAME (the
     // client-call failure enum's `Transport(t: ServerCallError)` names the
     // built-in `ServerCallError`, which then ships too).
+    fn isStructTypeDef(td: TypeDef) -> boolean {
+        return match td {
+            .HostDef(sym: x) :> false
+            .StructDef(sym: x) :> true
+            .EnumDef(sym: x) :> false
+        }
+    }
+
     fn isHostTypeDef(td: TypeDef) -> boolean {
         return match td {
             .HostDef(sym: x) :> true
@@ -4547,7 +4555,9 @@ ${
         }
         for (const ti of t.types) {
             const ts: Sym = typeDefSym(ti.def)
-            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def))) types = types.concat([ti.def])
+            // s478-boot-sql-row-types: a `?{}` row struct (analyze rowTypes — the one StructDef of the
+            // built-in file) ships always: field reads name its columns (print memberAt)
+            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def)) || isStructTypeDef(ti.def)) types = types.concat([ti.def])
             if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts
             if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts
         }
@@ -4570,8 +4580,8 @@ ${
         const consts: CoreConst[] = coreConsts(t)
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
         return { core: core, diags: tp.diags }
     }
 

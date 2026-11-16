@@ -1252,6 +1252,8 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
   let current: CompileResult | null = null;
   let assets: Set<string> = new Set();
   let server: { fetch(req: Request): Promise<Response> } | null = null;
+  // the §61 endpoint paths of the current build (its server manifest's `endpoints`)
+  let endpointPaths: Set<string> = new Set();
   let generation = 0;
   const clients = new Set<ReadableStreamDefaultController>();
   const watchers = new Map<string, ReturnType<typeof watch>>();
@@ -1282,8 +1284,12 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     assets = devClientAssets(r);
     generation++;
     server = null;
+    endpointPaths = new Set();
     if (r.server) {
       const mod = await import(pathToFileURL(join(r.outDir, "program.server.js")).href + "?v=" + generation);
+      // s478 review #1916 M2: an `<endpoint>` is mounted at its author-declared `path=` (§61.7),
+      // outside `/_scrml/` — the dev server hands those exact paths to the program's server
+      for (const e of mod.manifest?.endpoints ?? []) if (typeof e?.path === "string") endpointPaths.add(e.path);
       // `dev: true` — this is the DEV build (S474 ruling 2 as amended, "capability over limitation"
       // item 3): a failed query's driver text stays in the failure the client receives. A deployed
       // `compile` output is served by its own host, which does not pass it: production, blanked.
@@ -1326,6 +1332,7 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
         });
         return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
       }
+      if (server !== null && endpointPaths.has(url.pathname)) return server.fetch(req);
       if (url.pathname.startsWith("/_scrml/")) {
         // s472 (boot-math-port): a stdlib host module the CLIENT imports is a static file (SPEC §21.3.1)
         // — admitted by the §47.13 policy as a client asset (a host file only the server imports is
