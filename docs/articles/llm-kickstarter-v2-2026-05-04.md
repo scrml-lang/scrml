@@ -2132,7 +2132,7 @@ Sidecars (SPEC §23.4 / §43.2 — a nested `<program name="..." lang="python">`
 
 When you need the SERVER to push updates to the CLIENT without bidirectional channel overhead (live counters, progress bars, log streams), use a `server function*` generator. The compiler emits a `text/event-stream` GET route + an `EventSource`-based client stub.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4, E-PARAM-TYPE-REQUIRED(liveCount), E-PARSE-EXPECTED, E-PARSE-FN, E-SCOPE-001(liveCount, yield), E-STMT-MISSING-SEMICOLON] — the bootstrap has no generator functions (server function*, yield) and cannot follow scrml:time imports yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×5, E-PARAM-TYPE-REQUIRED(liveCount), E-PARSE-FN] — the bootstrap has no generator functions (server function*, yield — a `yield` is refused by name since s478-boot-syntax-batch, which replaced its undeclared-name cascade) and cannot follow scrml:time imports yet -->
 ```scrml
 <program>
 

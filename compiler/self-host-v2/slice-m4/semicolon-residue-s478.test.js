@@ -5,9 +5,9 @@
 // 1. A bare `{ … }` block statement. §7.2.2 "Terms": a statement list is the content of "any
 //    `{ … }` block of a statement (`if` / `else` / loop / bare block)"; rule 2 lists "bare block"
 //    among the block-like statements. The bootstrap read a statement-start `{` as an object
-//    literal (E-TYPE-STRUCT-CONTEXT + a cascade). It now reads it as a block, refused by name
-//    (E-BOOTSTRAP-UNSUPPORTED — INTERIM, g-boot-bare-block-statement-s478), and judges the one
-//    rule that holds whatever it builds: §19.16.2 "A bare `{ }` block statement … so a `defer`
+//    literal (E-TYPE-STRUCT-CONTEXT + a cascade). It now reads it as a block — refused by name
+//    until s478-boot-syntax-batch BUILT it (g-boot-bare-block-statement-s478, resolved;
+//    syntax-batch-s478.test.js runs it) — and judges the one rule that holds whatever it builds: §19.16.2 "A bare `{ }` block statement … so a `defer`
 //    there has no block to attach to … It SHALL be a compile error" (E-DEFER-UNSUPPORTED-SITE).
 // 2. A `function (…) { … }` expression (§7.2: logic is JavaScript; §5.4 / §6.7 name "a function
 //    expression" as a value). It was read as a name `function` and an object literal; it is now
@@ -31,34 +31,31 @@ const FN = (body) =>
   `<program>\n    let <trace=""/>\n    function D(s: string) {\n        @trace = @trace + s;\n    }\n    function go() {\n${body}\n    }\n    <button id="go" onclick=go()>Go</button>\n    <p id="out">\${@trace}</p>\n</program>\n`;
 
 describe("§7.2.2 — a `{` that starts a statement is a bare block, not an object literal", () => {
-  test("refused by name, once; no object-literal cascade", () => {
+  test("built (s478-boot-syntax-batch): no refusal, no object-literal cascade", () => {
     const r = run(FN(`        {\n            D("a;");\n            D("b;");\n        }\n        D("c;");`));
     const cs = r.diags.map((d) => d.code).filter((c) => c !== "E-DG-002");
-    expect(cs).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d.message).toContain("bare `{ … }` block statement");
-    expect(d.message).toContain("§7.2.2");
+    expect(cs).toEqual([]);
   });
 
   test("block-like: no `;` is owed after its `}` (§7.2.2 rule 2)", () => {
-    expect(codes(FN(`        { D("a;"); } D("c;");`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(FN(`        { D("a;"); } D("c;");`))).toEqual([]);
   });
 
   test("its statements are still read: a missing `;` inside reports", () => {
-    expect(codes(FN(`        {\n            D("a;")\n        }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-STMT-MISSING-SEMICOLON"]);
+    expect(codes(FN(`        {\n            D("a;")\n        }`))).toEqual(["E-STMT-MISSING-SEMICOLON"]);
   });
 
   test("§19.16.2 — a `defer` at the block's top is E-DEFER-UNSUPPORTED-SITE, spanning the `defer`", () => {
     const src = FN(`        {\n            defer D("x;");\n            D("b;");\n        }`);
     const r = run(src);
     const cs = r.diags.map((d) => d.code).filter((c) => c !== "E-DG-002");
-    expect(cs).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-DEFER-UNSUPPORTED-SITE"]);
+    expect(cs).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
     const d = r.diags.find((x) => x.code === "E-DEFER-UNSUPPORTED-SITE");
     expect(src.slice(d.span.start, d.span.end)).toStartWith("defer D(\"x;\")");
   });
 
   test("a `defer` inside a braced `if` inside the block belongs to that `if` — no defer code", () => {
-    expect(codes(FN(`        {\n            if (true) {\n                defer D("x;");\n            }\n        }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(FN(`        {\n            if (true) {\n                defer D("x;");\n            }\n        }`))).toEqual([]);
   });
 
   test("recovery: a `{` on the line of an error just reported is that construct's body — no bare-block refusal", () => {

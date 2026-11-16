@@ -336,10 +336,13 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
     // s452: `| _ e :>` is the whole-error binder (§18.6.1) — error-rulings.test.js
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" };\n    }`))).toEqual(["W-ARM-PIPE-LEGACY"]);
   });
-  test("`transaction { … }` names unit U1e", () => {
+  // s478 (s478-boot-syntax-batch): `transaction { … }` is BUILT as a savepoint of its function's
+  // envelope (§8.9.2 "Amendment S474" item 3) — one in a `!` function with NO envelope (it reaches no
+  // query) is refused by name (syntax-batch-s478.test.js covers the built block)
+  test("`transaction { … }` in a `!` function that reaches no query is refused by name", () => {
     const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1;\n        }\n    }`);
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("U1e");
+    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("runs in no transaction of its own");
   });
 });
 

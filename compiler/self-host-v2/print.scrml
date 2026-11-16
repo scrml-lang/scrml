@@ -1238,13 +1238,37 @@ ${
         return sexpr(jmcall(jid("defers$"), "push", [JsExpr.JArrow([], blockJs(ctx, body))]))
     }
 
+    // s478 (s478-boot-syntax-batch) — an `if`; a bare block (its test the literal `true`); or a
+    // `transaction { … }` block (`tx`, core.scrml): its statements run under a savepoint of the
+    // function's envelope on `tx` (server-runtime.js `txBlock` / `txEnd`, §19.10.3) —
+    //   if (true) {
+    //     const tx$ = await rt.txBlock(db$N);
+    //     let txOk$ = false;
+    //     try { … ; txOk$ = true; } finally { await rt.txEnd(tx$, txOk$); }
+    //   }
+    // `txOk$` is set only after the block's last statement, so normal completion alone releases
+    // the savepoint; a `fail` / `return` / `break` / `continue` out of it, or a host error, reaches
+    // the `finally` with it false and rolls the savepoint back before the exit proceeds (a
+    // `return`'s value is computed first — §19.10.3 "the return expression SHALL be evaluated
+    // before the rollback"). A `defer` in the block runs in the block's own `finally`, inside it,
+    // before the release or rollback (§19.10.3, `defer` × `transaction`). Printed only in a SERVER
+    // body (printProgram refuses a client function holding one; check.scrml C-TX4).
+    fn ifStmtJs(ctx: Ctx, c: Expr, t: Block, e: Block | not, tx: Sym | not) -> JsStmt[] {
+        if (tx is not) return [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
+        const open: JsStmt = JsStmt.SConst("tx$", JsExpr.JAwait(rtCall(ctx, "txBlock", [jid(dbVarName(tx))])))
+        const flag: JsStmt = JsStmt.SLet("txOk$", JsExpr.JBool(false))
+        const done: JsStmt = JsStmt.SAssign(jid("txOk$"), JsExpr.JBool(true))
+        const end: JsStmt = sexpr(JsExpr.JAwait(rtCall(ctx, "txEnd", [jid("tx$"), jid("txOk$")])))
+        return [JsStmt.SIf(JsExpr.JBool(true), [open, flag, JsStmt.STry(blockJs(ctx, t).concat([done]), [end])], [])]
+    }
+
     fn stmtJs(ctx: Ctx, s: Stmt, assigned: int[]) -> JsStmt[] {
         return match s {
             .Let(sym: sym, init: init) :> letStmtsJs(ctx, sym, init, assigned)                 // s476: + an owned local's flag
             .Assign(local: l, value: v, path: pa) :> assignStmtsJs(ctx, l, v, pa)            // s476: an owned local's edit in place
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
             .Commit(writes: ws) :> commitJs(ctx, ws)
-            .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
+            .If(cond: c, thenB: t, elseB: e, tx: tx) :> ifStmtJs(ctx, c, t, e, tx)
             .Return(e: e) :> [returnJs(ctx, exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
             .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
@@ -4401,6 +4425,58 @@ ${
         return out
     }
 
+    fn holdsTxBlock(f: Fn) -> boolean {
+        for (const n of allNodes(Node.NFn(f))) {
+            if (nodeIsTxBlock(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsTxBlock(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> stmtTxOf(s) is given
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn stmtTxOf(s: Stmt) -> Sym | not {
+        return match s {
+            .If(cond: c, tx: tx) :> tx
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
+        }
+    }
+
     fn holdsQuery(p: CoreProgram) -> boolean {
         for (const n of allNodes(Node.NProgram(p))) {
             if (nodeIsQuery(n)) return true
@@ -4534,6 +4610,11 @@ ${
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
         let clientFns: Fn[] = []
         for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) clientFns = clientFns.concat([f]) }
+        // s478 (s478-boot-syntax-batch): a `transaction { … }` block runs only inside a server
+        // function's envelope (§19.10.3) — a client function holding one is never printed
+        for (const tf of clientFns) {
+            if (holdsTxBlock(tf)) return { js: "", html: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: " + tf.sym.hint + "() holds a `transaction { … }` block and is printed in the client artifact — a block runs only inside a server function's transaction (§19.10.3); the Core is ill-formed (check.scrml C-TX4)"], routes: [] }
+        }
         // s472 (boot-math-port): the host modules those functions call, imported beside the runtime
         body = body.slice(0, 2).concat(hostImports(p, clientFns)).concat(body.slice(2))
         if (clientFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("functions")])

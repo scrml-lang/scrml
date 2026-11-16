@@ -682,9 +682,9 @@ ${
         const t: LS = lowerStmts(cx, nodesAt(n, "consequent"))
         const alt: IVal = getVal(n, "alternate")
         const why: string[] = why0.concat(c.why).concat(t.why)
-        if (!carries(alt)) return stmtsOf(cx, [Stmt.If(c.e, block(t.stmts), not)], why)
+        if (!carries(alt)) return stmtsOf(cx, [Stmt.If(c.e, block(t.stmts), not, not)], why)
         const e: LS = lowerStmts(cx, nodesIn(valList(alt)))
-        return stmtsOf(cx, [Stmt.If(c.e, block(t.stmts), block(e.stmts))], why.concat(e.why))
+        return stmtsOf(cx, [Stmt.If(c.e, block(t.stmts), block(e.stmts), not)], why.concat(e.why))
     }
 
     fn returnStmt(cx: Cx, n: INode) -> LS {

@@ -363,7 +363,7 @@ ${
                 Stmt.Let(sC, Expr.Handle(InstRef.Alias(hColor))),
                 Stmt.If(prim1(PrimOp.IsSome, Expr.Local(sC)),
                     block([Stmt.Write(wValue, InstRef.Narrowed(sC), EditKind.Replace, litStr(""), Check.Static)]),
-                    not),
+                    not, not),
             ]),
         }
 

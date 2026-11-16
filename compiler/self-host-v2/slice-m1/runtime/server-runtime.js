@@ -737,6 +737,55 @@ async function savepoint(tx, run) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// s478 (s478-boot-syntax-batch) — THE `transaction { … }` BLOCK (SPEC §19.10.2 / §19.10.3), printed
+// by print.scrml txBlockJs inside the body of the `!` function's envelope:
+//
+//   {
+//     const tx$ = await rt.txBlock(db$1);
+//     let txOk$ = false;
+//     try { … the block's statements …; txOk$ = true; }
+//     finally { await rt.txEnd(tx$, txOk$); }
+//   }
+//
+// §19.10.3: "`transaction { }` is syntactic sugar. The compiler SHALL emit `?{BEGIN}` at the start of
+// the block, `?{COMMIT}` at the end of normal completion, and `?{ROLLBACK}` before any `fail`
+// statement within the block. (S474: inside an open envelope, those three are the savepoint, its
+// release and its rollback-to …)" and "Only normal completion COMMITs (S453). A `return`, or a
+// `break` / `continue` whose target is outside the `transaction` block, SHALL roll the transaction
+// back before the exit proceeds … the return expression SHALL be evaluated before the rollback".
+// `txOk$` is set by the block's last statement only, so every other ending — a `fail` (a returned
+// failure), a `return`, a `break` / `continue` out, a host error or a query's propagated error —
+// reaches the `finally` with it false: ROLLBACK TO (then RELEASE) the block's savepoint, and the exit
+// proceeds (a `return`'s value is computed before the `finally` runs). Normal completion: RELEASE.
+// The block's savepoint shares the transaction's counter and nesting stack with nested `!` calls and
+// statement savepoints (`innermost`), so an overlap is a broken transaction, never a wrong release.
+// The block runs only inside its function's envelope (check.scrml C-TX4; analyze refuses a block in a
+// function without one): with no open transaction on `conn` in this scope, it THROWS before any
+// statement of the block runs — never runs them without their rollback.
+export async function txBlock(conn) {
+  const tx = ownTx(conn);
+  if (tx === null) throw new Error(`scrml server: a \`transaction { … }\` block on ${conn.desc.driver}:${conn.desc.file} ran outside its function's transaction — refused, nothing in it was run`);
+  if (tx.broken) throw brokenError(conn);
+  tx.seq = tx.seq + 1;
+  const name = "scrml_sp_" + tx.seq;
+  await control(tx, "SAVEPOINT " + name);
+  tx.stack.push(name);
+  return { tx, name };
+}
+
+export async function txEnd(h, ok) {
+  const { tx, name } = h;
+  if (!ok) {
+    await undoSavepoint(tx, name);
+    return;
+  }
+  if (tx.broken) throw brokenError(tx.conn);
+  innermost(tx, name);
+  await control(tx, "RELEASE SAVEPOINT " + name);
+  tx.stack.pop();
+}
+
 // s475 — THE STATEMENT SAVEPOINT. SPEC §8.9.2 "Amendment S474" item 4: "Inside an envelope, a `?{}`
 // whose failure is handled where it is written (a `!{}` on the query, or a `match` on its result,
 // §19.8.3) SHALL run under a statement savepoint of its own. When the query fails, the handler runs
