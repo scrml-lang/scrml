@@ -92,6 +92,18 @@ describe("§7.2.2 — a `{` that starts a statement is a bare block, not an obje
     expect(cs).toContain("E-DEFER-OUTSIDE-FUNCTION");
     expect(cs).not.toContain("E-DEFER-UNSUPPORTED-SITE");
   });
+  // s478 (review-followups-3, #1902 LOW) — §19.16.3 rule 4: "a `defer` inside a function or arrow
+  // DECLARED in a `when` body or a handler attribute is rejected too — declare the function
+  // outside the body and call it" (E-DEFER-OUTSIDE-FUNCTION, not §19.16.2's code).
+  test("§19.16.3 — a function DECLARED in a `when` / handler / arrow body is still outside one", () => {
+    const deferCodes = (src) => codes(src).filter((c) => c.startsWith("E-DEFER-"));
+    const G = `function g() -> int { { defer log(1); } return 1; }`;
+    expect(deferCodes(`let <c:int=0/>\n\${ function f() -> int { when @c changes { ${G} } return 1; } }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    expect(deferCodes(`let <c:int=0/>\n\${ when @c changes { ${G} } }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    expect(deferCodes(`<button onclick={\n function g() {\n {\n defer log(1);\n }\n }\n g();\n }>b</button>`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    expect(deferCodes(`\${ const h = (x) => {\n function g() {\n {\n defer log(1);\n }\n }\n };\n }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+    expect(deferCodes(`let <c:int=0/>\n\${ when @c changes {\n function g() {\n {\n defer log(1);\n }\n }\n } }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+  });
   test("§19.16.2 — inside a function (a loop body, a nested function) it stays E-DEFER-UNSUPPORTED-SITE", () => {
     expect(codes(`\${ function f() { for (const x of [1]) { { defer log(x); } } } }`)).toContain("E-DEFER-UNSUPPORTED-SITE");
     const nested = codes(FN(`        function inner() {\n            {\n                defer D("x;");\n            }\n        }\n        inner();`));

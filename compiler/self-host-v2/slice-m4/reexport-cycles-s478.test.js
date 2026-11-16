@@ -324,11 +324,11 @@ describe("§21.3 E-IMPORT-002: every import cycle is reported, at every file in 
     expect(at(r)).toEqual([["E-IMPORT-002", "a.scrml"], ["E-IMPORT-002", ENTRY]]);
   });
   // #1895 LOW-1: the cycle set is computed once per run (Globals.cycles), not per read.
-  test("a ring of 120 files each reading the next: reported, and in linear-ish time", () => {
+  test("a ring of 200 files each reading the next: reported, and in linear-ish time", () => {
     const nm = (i) => `f${String(i).padStart(3, "0")}.scrml`;
     const fs = [];
-    for (let i = 0; i < 120; i++) {
-      const nx = (i + 1) % 120;
+    for (let i = 0; i < 200; i++) {
+      const nx = (i + 1) % 200;
       let b = `    import { c${nx}_0 } from "./${nm(nx)}";\n`;
       for (let j = 0; j < 5; j++) b += `    export const c${i}_${j} = c${nx}_0 + ${j};\n`;
       fs.push(mod(nm(i), b));
@@ -336,8 +336,8 @@ describe("§21.3 E-IMPORT-002: every import cycle is reported, at every file in 
     const t0 = performance.now();
     const r = prog([...fs, app(`import { c0_0 } from "./f000.scrml";`, `<p>\${c0_0}</p>`)]);
     const ms = performance.now() - t0;
-    expect(errs(r).filter((d) => d.code === "E-IMPORT-002").length).toBe(120);
-    expect(ms).toBeLessThan(2500);   // was ≈3000ms+ (importCycles per read); ≈150ms now
+    expect(errs(r).filter((d) => d.code === "E-IMPORT-002").length).toBe(200);
+    expect(ms).toBeLessThan(15000);  // ring 200: base (importCycles per read) ≥20s locally; ≈500ms locally, 3.4s on the CI slices runner — margin both ways
   });
   test("control: an acyclic diamond of imports is clean", () => {
     const BASE = mod("base.scrml", `    export const V = "v";`);
