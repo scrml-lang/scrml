@@ -1061,6 +1061,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
@@ -1328,6 +1329,7 @@ ${
             .InitOf(decl: x) :> "Expr.InitOf"
             .Host(call: x) :> "Expr.Host"
             .Lambda(params: x) :> "Expr.Lambda"
+            .BlockLambda(params: x) :> "Expr.BlockLambda"
             .SeqCall(op: x) :> "Expr.SeqCall"
             .Refetch(req: rf0) :> "Expr.Refetch"
             .Validity(of: x) :> "Expr.Validity"

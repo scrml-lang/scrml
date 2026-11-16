@@ -108,12 +108,16 @@ describe("§7.2.2 — a `{` that starts a statement is a bare block, not an obje
   });
 });
 
-describe("§7.2 — a `function (…) { … }` expression is refused by name", () => {
+// s478-boot-block-lambda: a function expression is now PARSED (a BlockLambda, §7.2) and built as a
+// tape method's callback (block-lambda-s478.test.js); bound by `let` it is a function value the
+// bootstrap does not build — refused by name at the value, still with no cascade.
+describe("§7.2 — a `function (…) { … }` expression bound by `let` is refused by name", () => {
   test("one E-BOOTSTRAP-UNSUPPORTED naming the construct; no `function`-is-not-declared cascade", () => {
     const r = run(FN(`        let helper = function(v) {\n            return "pos";\n        };\n        @trace = helper(1);`));
     const cs = r.diags.map((d) => d.code).filter((c) => c !== "E-DG-002");
-    expect(cs).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED").message).toContain("`function expression` (§7.2)");
+    // the value, and the call through the local that holds it — each refused by name (function values)
+    expect([...new Set(cs)]).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("function expression `function (x: T) { … }`, §7.2"))).toBe(true);
   });
 
   test("a nested function DECLARATION (§7.3.1) is untouched", () => {
