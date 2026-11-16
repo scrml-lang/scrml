@@ -151,6 +151,24 @@ describe("B — refused by name where the SPEC is silent (fail closed)", () => {
     expect(refusals(src).join()).toContain("has no proven type");
   });
 
+  test("review #1916 L1: a payload field named `tag` — the wire `tag` key carries the variant, so the field could never carry a value", () => {
+    const t = `type M:enum = {\n  Go(tag: string)\n}`;
+    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
+    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <_ : { ok: true }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
+    // another field name is not refused
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, `type M:enum = {\n  Go(label: string)\n}`))).toEqual([]);
+  });
+
+  test("review #1916 L2: a `__proto__` / `constructor` / `prototype` key in an arm's object literal (it would answer 500 on every request)", () => {
+    for (const k of ["__proto__", "constructor", "prototype"]) {
+      for (const lit of [`{ ${k}: 1 }`, `{ ok: true, inner: { ${k}: "x" } }`]) {
+        const src = prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go : ${lit}>\n</endpoint>`, `type M:enum = { Go }`);
+        expect(refusals(src).join()).toContain("prototype machinery");
+      }
+    }
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go : { proto: 1, ctor: 2 }>\n</endpoint>`, `type M:enum = { Go }`))).toEqual([]);
+  });
+
   test("an accepts= enum declared in another file", () => {
     const files = [
       { path: "types.scrml", src: `\${ export type FspMethod:enum = { Ping, Pong } }\n` },
@@ -223,6 +241,35 @@ describe("C — the route, served (§61.3 / §61.5 / §61.7)", () => {
     // a key that is neither `tag` nor a payload field — refused (fail closed; owner question)
     expect(await kind(body({ tag: "DeltaSince", seq: 1, extra: true }))).toBe("InvalidPayload");
     expect(await kind('{"tag":"FleetStatus","__proto__":{"x":1}}')).toBe("InvalidPayload");
+  });
+
+  test("review #1916 M1 / §61.7 (\"A JSON-body + bearer-token endpoint is CSRF-exempt by construction\"): a request whose media type is not application/json is 415 and no arm runs", async () => {
+    const { send } = await served(prog(`function record(p: string) -> string { return p; }\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { ran: record(prompt) }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`));
+    const payload = body({ tag: "Dispatch", prompt: "rm", project: "atlas" });
+    for (const headers of [{}, { "Content-Type": "text/plain" }, { "Content-Type": "text/plain;charset=UTF-8" }, { "Content-Type": "application/x-www-form-urlencoded" }, { "Content-Type": "multipart/form-data; boundary=x" }, { "Content-Type": "application/jsonx" }, { "Content-Type": "application/json-patch+json" }, { "Content-Type": "application/json, text/plain" }, { "Content-Type": "" }]) {
+      const r = await send("/fsp", "POST", payload, headers);
+      expect([r.status, r.headers.get("Content-Type")]).toEqual([415, "application/json"]);
+      expect(r.json.error.kind).toBe("UnsupportedMediaType");
+      expect(typeof r.json.error.message).toBe("string");
+    }
+    for (const ct of ["application/json", "application/json;charset=utf-8", "application/json; charset=UTF-8", "APPLICATION/JSON", "Application/Json ; charset=utf-8"]) {
+      const r = await send("/fsp", "POST", payload, { "Content-Type": ct });
+      expect([r.status, r.json]).toEqual([200, { ran: "rm" }]);
+    }
+    // the method check still comes first: a browser's CORS preflight (OPTIONS) is 405, so it fails
+    expect((await send("/fsp", "OPTIONS", "", {})).status).toBe(405);
+  });
+
+  test("review #1916 L6: a request-supplied tag or key echoed in a 400 message is clipped to 64 characters", async () => {
+    const { send } = await served(SRC);
+    const long = "Q".repeat(100000);
+    let r = await send("/fsp", "POST", body({ tag: long }));
+    expect(r.json.error.kind).toBe("UnknownVariant");
+    expect(r.json.error.message).toContain("Q".repeat(64) + "…");
+    expect(r.json.error.message).not.toContain("Q".repeat(65));
+    r = await send("/fsp", "POST", body({ tag: "FleetStatus", [long]: 1 }));
+    expect(r.json.error.kind).toBe("InvalidPayload");
+    expect(r.json.error.message).not.toContain("Q".repeat(65));
   });
 
   test("§61.7: the handler is mounted at path= FOR method= — another method is 405 naming the served ones; another path 404", async () => {

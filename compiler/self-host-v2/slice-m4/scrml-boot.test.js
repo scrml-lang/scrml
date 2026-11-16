@@ -151,6 +151,46 @@ describe("scrml-boot dev — compile, serve, recompile on save", () => {
   }, { timeout: 120000 });
 });
 
+describe("scrml-boot dev — a §61 <endpoint> is served at its path= (review #1916 M2)", () => {
+  test("POST to the endpoint path reaches the program's server, not the static fallback", async () => {
+    const dir = join(tmp, "dev-endpoint");
+    const src = join(dir, "app.scrml");
+    Bun.spawnSync(["mkdir", "-p", dir]);
+    await Bun.write(src, `<program>\ntype M:enum = {\n  Ping\n}\n<p>hi</p>\n<endpoint path="/fsp" method="POST" accepts=M>\n  <Ping : { pong: true }>\n</endpoint>\n</program>\n`);
+    const p = Bun.spawn(["bun", CLI, "dev", src, "--port", "0"], {
+      cwd: ROOT, env: { ...process.env, SCRML_BOOT_CACHE_DIR: cache, NO_COLOR: "1" }, stdout: "pipe", stderr: "pipe",
+    });
+    const reader = p.stderr.getReader();
+    let log = "";
+    const until = async (re) => {
+      const end = Date.now() + 60000;
+      while (!re.test(log)) {
+        if (Date.now() > end) throw new Error("dev server: timed out waiting for " + re + "\n" + log);
+        const { value, done } = await reader.read();
+        if (done) throw new Error("dev server exited:\n" + log);
+        log += new TextDecoder().decode(value);
+      }
+      return re.exec(log);
+    };
+    try {
+      const port = (await until(/http:\/\/127\.0\.0\.1:(\d+)\//))[1];
+      const at = `http://127.0.0.1:${port}/fsp`;
+      const ok = await Bun.fetch(at, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tag: "Ping" }) });
+      expect([ok.status, await ok.json()]).toEqual([200, { pong: true }]);
+      // the server's own answers, not the static "not found": 415 for a non-JSON body, 405 for another method
+      const plain = await Bun.fetch(at, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ tag: "Ping" }) });
+      expect([plain.status, (await plain.json()).error.kind]).toEqual([415, "UnsupportedMediaType"]);
+      expect((await Bun.fetch(at, { method: "OPTIONS" })).status).toBe(405);
+      // the page is still served statically, and another path still 404s
+      expect(await (await Bun.fetch(`http://127.0.0.1:${port}/`)).text()).toContain("hi");
+      expect((await Bun.fetch(`http://127.0.0.1:${port}/fsp/x`)).status).toBe(404);
+    } finally {
+      p.kill();
+      await p.exited;
+    }
+  }, { timeout: 120000 });
+});
+
 describe("scrml-boot — the bundle cache key", () => {
   test("is a function of the inputs' CONTENT: same content same key, one changed byte a new key", async () => {
     const { bundleKey } = await import(CLI);

@@ -45699,7 +45699,12 @@ ${
         for (const v of vs) {
             let fi = 0
             for (const fd of v.fields) {
-                if (!isWirePrim(fd.ty)) {
+                if (fd.sym.hint == "tag") {
+                    // review #1916 L1: §41.13 / §61.3 — the request's `tag` key names the
+                    // variant ("a JSON object whose `tag` field names the variant"), so a
+                    // payload field of that name can never carry a value of its own
+                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value; rename the field (INTERIM — the SPEC names no code for it, g-boot-endpoint-s478)")])
+                } else if (!isWirePrim(fd.ty)) {
                     out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` is of a type the bootstrap's `<endpoint>` request decode does not read — it decodes `int`, `number`, `string` and `bool` fields (§41.13: parseVariant \"does NOT auto-recurse into payload fields whose type is itself an enum\"; INTERIM, g-boot-endpoint-s478)")])
                 } else if (bound.indexOf(k) < 0 && !plainFieldType(src, v.sym.hint, fi)) {
                     out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` has a written type the bootstrap checks only on a parameter — bind it in the `<" + v.sym.hint + "(…)>` arm (its refinement is then checked before the arm runs, §61.3 / §53); INTERIM, g-boot-endpoint-s478")])
@@ -45936,6 +45941,12 @@ ${
             if (p.spread || !isIdentifierText(p.name)) {
                 ok = false
                 diags = diags.concat([mkDiag(file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "this entry of an `<endpoint>` arm's object literal is not a `name: value` field — the bootstrap builds the arm's result as a struct, one field per name (INTERIM, g-boot-endpoint-s478)")])
+            } else if (p.name == "__proto__" || p.name == "constructor" || p.name == "prototype") {
+                // review #1916 L2: the arm's answer is built and encoded as a JS object, where
+                // these keys name the object's prototype machinery, not a field — refused at
+                // compile time rather than answering 500 on every request
+                ok = false
+                diags = diags.concat([mkDiag(file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "the key `" + p.name + "` in an `<endpoint>` arm's object literal — the bootstrap builds the arm's result as a JS object, where `" + p.name + "` names the object's prototype machinery rather than a field, so the answer could not be serialized (§61.5); rename the key (INTERIM, g-boot-endpoint-s478)")])
             } else if (inner is given) {
                 const r: REpStruct = epStruct(tp, file, inner, name + "#" + p.name, nid)
                 nid = r.nid

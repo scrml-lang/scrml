@@ -1448,7 +1448,29 @@ function decodeFailure(host, kind, message) {
   return jsonResponse(host, 400, { error: { kind, message } });
 }
 
+// review #1916 M1: §61.7 exempts an endpoint from CSRF because it is "JSON-body +
+// bearer-token" ("A JSON-body + bearer-token endpoint is **CSRF-exempt by
+// construction** (dpa-002)"). The JSON half is enforced here: a request whose media
+// type is not `application/json` is refused 415 before its body is read, so no arm
+// runs. A browser cannot send that media type cross-origin without a CORS preflight,
+// and the preflight (OPTIONS) is answered 405, so a page the operator visits cannot
+// drive an endpoint as a CORS simple request (`text/plain`, a form, multipart).
+// The media type is the header up to its first `;` (RFC 9110 §8.3.1: parameters such
+// as `charset` follow), compared case-insensitively (type and subtype are
+// case-insensitive, §8.3.1).
+function isJsonMediaType(ct) {
+  if (typeof ct !== "string") return false;
+  const semi = ct.indexOf(";");
+  return (semi < 0 ? ct : ct.slice(0, semi)).trim().toLowerCase() === "application/json";
+}
+
+// review #1916 L6: a request-supplied name echoed in an error message is clipped
+const clip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
+
 async function handleEndpoint(host, ep, request) {
+  if (!isJsonMediaType(request.headers.get("Content-Type"))) {
+    return jsonResponse(host, 415, { error: { kind: "UnsupportedMediaType", message: "the request Content-Type must be application/json" } });
+  }
   let text;
   try { text = await request.text(); } catch { return decodeFailure(host, "Malformed", "the request body could not be read"); }
   let v;
@@ -1457,9 +1479,9 @@ async function handleEndpoint(host, ep, request) {
   if (!own(v, "tag") || typeof v.tag !== "string") return decodeFailure(host, "MissingDiscriminator", "request body is missing the variant discriminator field 'tag'");
   let variant;
   for (const x of ep.desc.variants) if (x.name === v.tag) variant = x;
-  if (variant === undefined) return decodeFailure(host, "UnknownVariant", `request body names an unknown variant '${v.tag}' of ${ep.desc.type}`);
+  if (variant === undefined) return decodeFailure(host, "UnknownVariant", `request body names an unknown variant '${clip(v.tag)}' of ${ep.desc.type}`);
   for (const k of Object.keys(v)) {
-    if (k !== "tag" && !variant.fields.includes(k)) return decodeFailure(host, "InvalidPayload", `request payload field '${k}' is not a field of variant '${variant.name}'`);
+    if (k !== "tag" && !variant.fields.includes(k)) return decodeFailure(host, "InvalidPayload", `request payload field '${clip(k)}' is not a field of variant '${variant.name}'`);
   }
   const args = [];
   for (let i = 0; i < variant.fields.length; i++) {

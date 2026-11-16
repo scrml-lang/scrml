@@ -32,6 +32,14 @@ Branch `s478-boot-endpoint` from `720ea381d`.
 - [x] conformance: 539 → 556 PASS (+17, all `endpoint/*`), 0 PASS→FAIL
 - [x] CI checks-job gates (types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim) clean
 - [x] corpus: 0 newly-rejecting (only `examples/33-endpoint.scrml` + `protect/endpoint-multikey-arm-response` hold `<endpoint>`; the example now compiles, the protect case stays refused for its raw DDL)
-- [ ] PR
+- [x] PR #1916
+- [x] review fix round 1 (review ~/.cache/scrml/review/s478-1916/review.md):
+  - M1: 415 `UnsupportedMediaType` unless the request media type is `application/json` (§61.7's CSRF exemption is for a "JSON-body + bearer-token" endpoint); OPTIONS stays 405
+  - M2: `scrml-boot dev` hands the manifest's endpoint paths to the program's server
+  - L1: a payload field named `tag` refused (E-BOOTSTRAP-UNSUPPORTED, INTERIM; owner question 8)
+  - L2: `__proto__` / `constructor` / `prototype` keys in an arm's object literal refused
+  - L6: an echoed tag / key clipped to 64 chars
+  - filed g-boot-wire-int-decode-unsafe-s478 (L3), g-boot-server-no-body-ceiling-s478 (L8); impl#1 media-type parity = owner question 7
+  - conformance 556 PASS (same set), 0 PASS→FAIL; severity / CI gates clean
 
 ## Owner questions — see docs/known-gaps.md `g-boot-endpoint-s478`
