@@ -695,7 +695,10 @@ ${
     // callers instead (§19.9.5: "Its client call fails with … the function's declared error variants … plus
     // `Transport(t: ServerCallError)`"), so analyzeRun drops these reports for it (dropTransportDiags).
     type TportAt:struct = { fnSym: int, d: Diag }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[], reqs: ReqFact[] }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[], reqs: ReqFact[], rets: LamRet[] }
+    // s478 (s478-boot-block-lambda) — one `return` value of a block lambda (`lam`: its nid): its
+    // resolved type, read by resolveLambda for the lambda's value type (a map's element type).
+    type LamRet:struct = { lam: int, ty: Type | not }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -737,11 +740,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -792,38 +795,38 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // =========================================================================
@@ -3042,6 +3045,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -3309,6 +3313,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -3348,6 +3353,7 @@ ${
             .Spread(e: x) :> { name: "", ok: false }
             .Index(obj: o) :> { name: "", ok: false }
             .Lambda(params: ps) :> { name: "", ok: false }
+            .BlockLambda(params: ps) :> { name: "", ok: false }
             .Sql(q: q) :> { name: "", ok: false }
             .Handled(h: x) :> { name: "", ok: false }
             .Template(quasis: qs) :> { name: "", ok: false }
@@ -3389,6 +3395,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: x) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -3435,6 +3442,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -3467,6 +3475,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -3570,6 +3579,7 @@ ${
             .Spread(e: x) :> exprReads(x)
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
+            .BlockLambda(params: ps2, body: b) :> blocksReads([b])          // s478: a block lambda reads what its statements read
             .Sql(q: q) :> ["?{}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Handled(h: h) :> listReads(handledKids(h)).concat(blocksReads(exprBlocks(e)))      // s451 (Ue): the subject and the arms' values; r2 (N1): the arm blocks
             .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
@@ -3662,6 +3672,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -3986,6 +3997,7 @@ ${
             .Spread(e: sx) :> rinf(infOut("a spread"), done)
             .Index(obj: ix) :> rinf(infOut("an index `[…]`"), done)
             .Lambda(params: lp) :> rinf(infOut("a function value"), done)
+            .BlockLambda(params: lp) :> rinf(infOut("a function value"), done)
             .Sql(q: q) :> rinf(infOut("a query"), done)
             .Handled(h: x) :> rinf(infOut("a handled failable value"), done)
             .Template(quasis: qs) :> rinf(infOk(Type.Str), done)      // s469: a template is a `string` (§14.13.3); its slots are typed where it is resolved
@@ -4603,6 +4615,7 @@ ${
     fn isLambdaK(k: AExprK) -> boolean {
         return match k {
             .Lambda(params: lp) :> true
+            .BlockLambda(params: lp) :> true
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -5026,6 +5039,7 @@ ${
             .Spread(e: sx) :> -1
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
+            .BlockLambda(params: lp) :> -1
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
@@ -5065,6 +5079,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -5511,6 +5526,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -5739,6 +5755,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -6995,6 +7012,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -8035,7 +8053,7 @@ ${
         for (const x of exprKids(e)) {
             if (exprClock(x)) return true
         }
-        for (const b of exprBlocks(e)) {
+        for (const b of exprBlocksIn(e)) {
             if (blockClock(b)) return true
         }
         return false
@@ -8072,6 +8090,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: ix) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -8140,9 +8159,9 @@ ${
     // inside a `fn` body, including inside nested closures").
     // s477 fix r1 (F3) — `pureFn`: the name of the `fn` a NESTED body is inside ("" in a
     // file-level body, or outside every `fn`), so a purity report names the `fn` that makes it pure.
-    type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[], pureFn: string }
+    type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[], pureFn: string, lam: int, lamWant: Type | not }   // s478: `lam` — the nid of the block lambda whose body this is (-1: none), its `return`s' expected type `lamWant`
 
-    fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [], pureFn: "" } }
+    fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [], pureFn: "", lam: -1, lamWant: not } }
 
     fn withNest(env: Env, n: NestCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -8270,6 +8289,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -8436,6 +8456,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -8566,6 +8587,7 @@ ${
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` outside a tape value (a call argument, `f(...xs)`) is not in the bootstrap — rest parameters are not parsed (gap g-boot-call-spread-s477); pass the tape itself, or spread it into a tape value (`[...xs, e]`)", st)
             .Index(obj: o, idx: ix) :> resolveIndexRead(env, e, o, ix, st)   // s469 (§49.13)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
+            .BlockLambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` / `.every` / `.sort`) or as an event handler that takes no event (`onclick=" + "$" + "{() => { … }}`) — function values elsewhere (bound by `const`, passed to a function, returned) are the function-values slice (g-bootstrap-function-values-slice-s451). Declare a named function (§7.3.1) and call it", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
@@ -8680,7 +8702,7 @@ ${
         // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
         // stands only for `m` used as a value.
         if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
             return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
@@ -8837,6 +8859,7 @@ ${
         const shape: string = match k {
             .Call(callee: c) :> "call"
             .Lambda(params: ps) :> "fn"
+            .BlockLambda(params: ps) :> "fn"
             .Name(name: n) :> cleanupNameShape(env, n)
             .Recovered :> "unknown"
             .Member(obj: o) :> "unknown"
@@ -9049,6 +9072,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -9140,7 +9164,7 @@ ${
             if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
         }
         if (isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
             return diagX(env, e, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; read one of its exported cells: `@" + name + ".name` (§21.3)", sr)
         }
         // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
@@ -9487,6 +9511,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -10651,6 +10676,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -10682,6 +10708,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -10916,6 +10943,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -10965,18 +10993,349 @@ ${
             if (ty is given) st = addAnnot(st, rs.s, ty)
             env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
         }
+        const blk: ABlock | not = lambdaBlock(lam)
+        if (blk is given) return resolveBlockLambda(env, lam, blk, ty, want, st0)
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
         const b: AExpr | not = lambdaBody(lam)
         if (b is not) return plain(not, st)
         return resolveExpr(env2, b, want, st)
     }
 
-    fn isLambda(e: AExpr) -> boolean { return lambdaBody(e) is given }
+    // s478 (s478-boot-block-lambda) — a BLOCK-bodied lambda as a tape method's callback
+    // (the one position the bootstrap builds a function value in, as the expression
+    // form). §7.2: "All JavaScript that is valid in a Bun execution context is valid
+    // inside `${ }`, except the constructs §7.2.1 excludes" — `(x) => { … }` and
+    // `function (x: T) { … }` are not excluded.
+    //   - Parameters: an arrow's are bare — §7.5 "The parameters of a lambda written
+    //     directly as the callback argument of a tape method … take their types from the
+    //     tape's element type and MAY be written bare". A function expression's carry
+    //     `: T` — §7.5 "Every parameter of a `function` / `fn` declaration or expression —
+    //     named or anonymous … SHALL carry `: T`" (E-PARAM-TYPE-REQUIRED); a written type
+    //     other than the element type is E-TYPE-031.
+    //   - The body is resolved as statements in the scope of the lambda's position; its
+    //     `return`s are the lambda's own (Env.nest.lam): each is checked against `want`
+    //     (a filter's / some's / every's `bool`), and their one type is the lambda's
+    //     value type (a map's element type).
+    //   - Every path returns a value (a callback that falls off its end would hand the
+    //     tape method JavaScript's `undefined`, which scrml has no value for).
+    //   - What the body may hold is lamBodyCheck's: the statements whose meaning inside a
+    //     closure the bootstrap builds; everything else refused by name.
+    fn resolveBlockLambda(env: Env, lam: AExpr, body: ABlock, ty: Type | not, want: Type | not, st0: AS) -> RX {
+        let st: AS = st0
+        let env2: Env = env
+        let syms: Sym[] = []
+        const fte: TypeEnv = teAt(env.g.te, env.file)
+        const via: boolean = lambdaViaFunction(lam)
+        for (const p of lambdaAParams(lam)) {
+            const rs: RSym = mint(reservedName(st, env.file, lam.span, p.name), p.name)
+            st = rs.st
+            syms = syms.concat([rs.s])
+            let pty: Type | not = ty
+            if (p.lin) st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter on a function expression is not in the bootstrap (INTERIM) — §35.2.1 allows it; the bootstrap does not count a closure's own `lin` parameters. Drop `lin`")
+            const at: AType | not = p.ty
+            if (via && at is not) {
+                st = addDiag(st, env.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` of this function expression has no type — every parameter of a `function` declaration or expression carries `: T` (§7.5, S469): write `" + p.name + ": Type`, or write the callback as an arrow `(" + p.name + ") => { … }`, whose parameters a tape method types (§7.5)")
+            }
+            if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
+                const rt: RType = resolveType(fte, at, st)
+                st = rt.st
+                if (!rt.unresolved) {
+                    if (ty is given && !sameType(rt.t, ty)) {
+                        st = addDiag(st, env.file, at.span, "E-TYPE-031", "the parameter `" + p.name + "` is declared `" + typeName(rt.t) + "`, and the tape method passes it the tape's elements, which are `" + typeName(ty) + "` (§7.5.1)")
+                    }
+                    pty = rt.t
+                }
+            }
+            if (pty is given) st = addAnnot(st, rs.s, pty)
+            env2 = withLocal(env2, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+        }
+        st = addValue(st, lam.nid, ValueFact.VLambda(syms))
+        st = lamBodyCheck(env, body, [], st)
+        if (!exits(body)) st = addDiag(st, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "this callback's body can reach its end without a `return` — a tape method's callback gives a value on every path (falling off the end would give JavaScript's `undefined`, which is no scrml value). End every path with `return …;`")
+        const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: want }), noFailCtx())
+        const n0: int = st.rets.length
+        st = resolveBlock(lenv, body, st)
+        // the lambda's value type: its returns' joined type (`not` when they share none or one is unknown)
+        let rty: Type | not = not
+        let first = true
+        let same = true
+        let i: int = n0
+        while (i < st.rets.length) {
+            const r: LamRet = st.rets[i]
+            if (r.lam == lam.nid) {
+                const t: Type | not = r.ty
+                if (first) {
+                    rty = t
+                    first = false
+                } else if (t is not || rty is not) {
+                    same = false
+                } else {
+                    const j: Type | not = joinType(rty, t)     // fix round 1: joined as the typer's lambdaValueType
+                    if (j is not) {
+                        same = false
+                    } else {
+                        rty = j
+                    }
+                }
+            }
+            i = i + 1
+        }
+        if (!same) rty = not
+        return plain(rty, st)
+    }
+
+    fn lambdaAParams(e: AExpr) -> AParam[] {
+        const k: AExprK = e.k
+        return match k {
+            .BlockLambda(params: ps) :> ps
+            .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
+            .HashRef(id: hr0) :> []
+            .Foreign(f: fb0) :> []
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: x) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps2) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+        }
+    }
+
+    fn lambdaViaFunction(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .BlockLambda(params: ps, viaFunction: vf) :> vf
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: x) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps2) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+        }
+    }
+
+    // s478 — what a block lambda's body may hold, statement by statement (`own`: the `let`
+    // locals the body itself declared, in scope here). BUILT: `const` / `let` locals, an
+    // assignment to one of the body's own `let` locals, `if` / `else`, and `return <value>`.
+    // Each other statement is refused by name, INTERIM unless the SPEC rules it out — the
+    // language allows it in a closure body; this compiler does not build its meaning there yet:
+    //   - `defer`: §19.16.3 rule 4 — "the body of an arrow function or function expression"
+    //     is not a defer site (E-DEFER-OUTSIDE-FUNCTION, the SPEC's stage-1 rule).
+    //   - a write to anything the body did not declare (a cell, a captured local, a part of
+    //     a value): a callback runs inside the tape method, wherever and however often the
+    //     method calls it — §35.6's design rationale ("The compiler cannot statically
+    //     determine how many times or when the closure will be called"); its writes are not
+    //     tracked (narrowing, write sets, the derived graph) as a statement's are.
+    //   - loops, `break` / `continue`, `lift`, `fail`, `given`, effects, nested function
+    //     declarations, `lin` locals, an expression statement (a call run for its effect).
+    // Inside every expression: a handling form (`?`, `!{}`, `match` on a failable), a `?{}`
+    // query and a `_={ … }=` foreign block are refused.
+    fn lamBodyCheck(env: Env, b: ABlock, own0: string[], st0: AS) -> AS {
+        let st: AS = st0
+        let own: string[] = own0
+        for (const s of b.stmts) {
+            for (const x of stmtExprs(s)) { st = lamExprCheck(env, x, own, st) }
+            const k: AStmtK = s.k
+            const why: string = match k {
+                .Local(name: n, mutable: m, lin: ln) :> lamLocalWhy(ln)
+                .Return(e: x) :> lamReturnWhy(x)
+                .If(cond: c) :> ""
+                .Eval(e: x) :> lamEvalWhy(x, own)
+                .Given(name: n) :> "a `given` statement"
+                .EffectStmt(w: w) :> "an effect"
+                .Defer(body: d) :> "defer"
+                .Fail(f: x) :> "a `fail` (a callback is no failable function)"
+                .For(f: lf) :> "a loop"
+                .Break(label: x) :> "a `break`"
+                .Continue(label: x) :> "a `continue`"
+                .Lift(what: x) :> "a `lift`"
+                .LocalFn(f: x) :> "a nested function declaration"
+            }
+            if (why == "defer") {
+                st = addDiag(st, env.file, s.span, "E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function DECLARATION (`function` / `fn`) — the body of an arrow function or function expression is not a defer site (§19.16.3 rule 4); move the body into a named function and call it")
+            } else if (why != "") {
+                st = addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", why + " in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it; this compiler builds a callback body of `const` / `let` locals, assignments to the body's own `let` locals, `if` / `else` and `return <value>`). Move the work into a named function the callback calls, or into the statement around the call")
+            }
+            const nb: string[] = lamOwnAfter(k, own)
+            own = nb
+            for (const kb of stmtKidBlocks(s)) { st = lamBodyCheck(env, kb, own, st) }
+        }
+        return st
+    }
+
+    fn lamLocalWhy(isLin: boolean) -> string {
+        if (isLin) return "a `lin` local"
+        return ""
+    }
+
+    fn lamReturnWhy(e: AExpr | not) -> string {
+        if (e is not) return "a `return` with no value (a tape method's callback gives a value)"
+        return ""
+    }
+
+    // An expression statement: only `x = v` whose `x` is one of the body's own `let` locals
+    // (a condition head's kept assignment is lamExprCheck's, by the same rule).
+    fn lamEvalWhy(e: AExpr, own: string[]) -> string {
+        const t: AExpr | not = assignedTarget(e)
+        if (t is not) return "an expression statement (a call run for its effect)"
+        if (lamOwnTarget(t, own)) return ""
+        return "a write to something the callback body did not declare (a cell, a captured local, or a part of a value)"
+    }
+
+    // A §50.4.2 kept condition-head assignment's target (`if ((n = v) is not)`), else `not`
+    // (a statement's assignment is lamEvalWhy's; one in any other value position is
+    // E-ASSIGN-POSITION's, the resolver's).
+    fn keptTarget(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, kept: kp) :> keptOrNot(t, kp)
+            // no-default-arm: one question of the expression — is it a kept assignment
+            _ :> not
+        }
+    }
+
+    fn keptOrNot(t: AExpr, kp: boolean) -> AExpr | not {
+        if (kp) return t
+        return not
+    }
+
+    // An assignment's target is one of the body's own `let` locals (a plain name).
+    fn lamOwnTarget(t: AExpr, own: string[]) -> boolean {
+        const n: string = exprName(t)
+        return n != "" && atName(t) == "" && own.indexOf(n) >= 0
+    }
+
+    // The body's own `let` names in scope after `k` (a `let` adds its name; a `const` of the
+    // same name shadows it, so it is no longer an own `let`).
+    fn lamOwnAfter(k: AStmtK, own: string[]) -> string[] {
+        return match k {
+            .Local(name: n, mutable: m) :> lamOwnWith(own, n, m)
+            .Return(e: x) :> own
+            .If(cond: c) :> own
+            .Eval(e: x) :> own
+            .Given(name: n) :> own
+            .EffectStmt(w: w) :> own
+            .Defer(body: d) :> own
+            .Fail(f: x) :> own
+            .For(f: lf) :> own
+            .Break(label: x) :> own
+            .Continue(label: x) :> own
+            .Lift(what: x) :> own
+            .LocalFn(f: x) :> own
+        }
+    }
+
+    fn lamOwnWith(own: string[], n: string, mutable: boolean) -> string[] {
+        let out: string[] = []
+        for (const o of own) {
+            if (o != n) out = out.concat([o])
+        }
+        if (mutable) out = out.concat([n])
+        return out
+    }
+
+    // Inside a callback body's expressions: no handling form, query or foreign block (a
+    // nested lambda's own body is judged when it is resolved), and no §50.4.2 kept
+    // condition-head assignment (`if ((n = v) is not)`, an operand of `&&`, …) to anything
+    // but one of the body's own `let` locals (`own`) — lamEvalWhy's rule for a statement. INTERIM: a
+    // write to a captured local or a cell from inside a callback runs whenever, and however
+    // often, the tape method calls back (§35.6's rationale), and the enclosing function's
+    // narrowing does not see it (s478 fix round 1: `if (n is given) { xs.some(x => { if ((n =
+    // not) is not) … }); n + 1 }` compiled and computed `not + 1`).
+    fn lamExprCheck(env: Env, e: AExpr, own: string[], st0: AS) -> AS {
+        let st: AS = st0
+        const at: AExpr | not = keptTarget(e)
+        // a cell target keeps the condition head's own refusal (a CELL as the target of a
+        // condition-head assignment is not built anywhere) — one report per fault
+        if (at is given && !atRooted(at) && !lamOwnTarget(at, own)) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the tape method may call the callback any number of times, and the enclosing function does not track the write). Assign only the callback's own `let` locals; make the write in the statement around the call")
+        if (handledOf(e.k) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handling form (`?`, `!{ … }`, `match`) in the body of a block-bodied callback is not in the bootstrap (INTERIM). Handle the value in the statement around the call, or write the choice as `if` / `else`")
+        if (sqlOfK(e.k) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `?{}` query in the body of a callback is not in the bootstrap (INTERIM — a query is a wait, §13.8, and an awaited combinator is not built, §13.2). Run the query in the statement around the call")
+        if (foreignOf(e) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `_={ … }=` foreign block in the body of a callback is not in the bootstrap (INTERIM). Bind its value in the statement around the call")
+        for (const x of exprKids(e)) { st = lamExprCheck(env, x, own, st) }
+        return st
+    }
+
+    fn isLambda(e: AExpr) -> boolean { return lambdaBody(e) is given || lambdaBlock(e) is given }
+
+    // s478 — the parameter names of a block lambda (its AParams).
+    fn paramNames(ps: AParam[]) -> string[] {
+        let out: string[] = []
+        for (const p of ps) { out = out.concat([p.name]) }
+        return out
+    }
+
+    // s478 — a block lambda's body, else `not`.
+    fn lambdaBlock(e: AExpr) -> ABlock | not {
+        const k: AExprK = e.k
+        return match k {
+            .BlockLambda(params: ps, body: b) :> b
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps2) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+        }
+    }
 
     fn lambdaParams(e: AExpr) -> string[] {
         const k: AExprK = e.k
         return match k {
             .Lambda(params: ps) :> ps
+            .BlockLambda(params: ps) :> paramNames(ps)
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -11008,6 +11367,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .Lambda(params: ps, body: b) :> b
+            .BlockLambda(params: ps) :> not                                  // s478: its body is a block (lambdaBlock)
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -11088,6 +11448,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -11119,6 +11480,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -11319,6 +11681,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -11563,6 +11926,7 @@ ${
             .Spread(e: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "a write THROUGH a cell's tape position (`@xs[i][j] = v`, `@xs[i].a.b = v`) is not in the bootstrap yet — Core writes a cell tape's position (`@xs[i] = v`, s472) and one field of its element (`@xs[i].f = v`, dpa-052 Q3)"))
             .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .BlockLambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Template(quasis: qs) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
@@ -11612,7 +11976,7 @@ ${
         // s475 (g-boot-namespace-cell-read-s475) — `@m` with `m` a namespace import (no nearer binding):
         // recorded as resolveAtOf records a read, so `@m.x = …` is re-read with `m.x` one name.
         if (!namesInstance(env, name) && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1, kw: false, sym: -1, name: "", end: 0 }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
             return noPlace(addDiag(sr, env.file, t.span, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; write one of its exported cells' fields: `@" + name + ".name.field = …` (§21.3)"))
         }
         // s475 (g-boot-namespace-cell-read-s475) — a whole-value write of an own value declared in ANOTHER
@@ -12043,7 +12407,7 @@ ${
         for (const x of exprKids(e)) {
             if (exprCalls(x)) return true
         }
-        for (const b of exprBlocks(e)) {
+        for (const b of exprBlocksIn(e)) {
             if (blockCalls(b)) return true
         }
         return false
@@ -12071,6 +12435,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -12243,6 +12608,7 @@ ${
             .ArrayLit(elems: es) :> sinkElems(es)
             .ObjectLit(props: ps) :> sinkProps(ps)
             .Lambda(params: lp) :> sinkV(7, "", not, not)
+            .BlockLambda(params: lp) :> sinkV(7, "", not, not)
             .Spread(e: x) :> sinkV(8, "", x, not)
             .Call(callee: c) :> sinkV(9, "", c, not)
             .At(name: n) :> sinkV(10, n, not, not)
@@ -12486,6 +12852,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -13122,6 +13489,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps2) :> false
+            .BlockLambda(params: ps2) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -13185,6 +13553,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -13268,6 +13637,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -13378,6 +13748,7 @@ ${
             .Spread(e: x) :> resolveExpr(env, e, not, st).st
             .Index(obj: o) :> resolveExpr(env, e, not, st).st
             .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
+            .BlockLambda(params: ps2) :> resolveExpr(env, e, not, st).st
             .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
             .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, not, st).st   // s451 (Ue)
             .Template(quasis: qs) :> resolveExpr(env, e, not, st).st
@@ -13451,6 +13822,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -13934,6 +14306,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -14529,6 +14902,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -14560,6 +14934,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -14592,6 +14967,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -14623,6 +14999,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -14753,6 +15130,7 @@ ${
             .ObjectLit(props: ps) :> false
             .Spread(e: x) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -15190,6 +15568,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -15221,6 +15600,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Spread(e: x) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -15336,6 +15716,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Spread(e: x) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -15426,6 +15807,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Spread(e: x) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -15460,6 +15842,7 @@ ${
             .ObjectLit(props: ps) :> []
             .Spread(e: x) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -15707,7 +16090,7 @@ ${
         let sid: int = -1
         if (ls.length > 0) sid = ls[ls.length - 1].s.id
         const at: NsAt = { file: env.file, at: s.span.start, kw: true, sym: sid, name: kn, end: s.span.end }
-        const sr: AS = { facts: r2.facts, diags: r2.diags, nextSym: r2.nextSym, annots: r2.annots, bad: r2.bad, effects: r2.effects, pend: r2.pend, lifts: r2.lifts, nsAt: r2.nsAt.concat([at]), tport: r2.tport, reqs: r2.reqs }
+        const sr: AS = { facts: r2.facts, diags: r2.diags, nextSym: r2.nextSym, annots: r2.annots, bad: r2.bad, effects: r2.effects, pend: r2.pend, lifts: r2.lifts, nsAt: r2.nsAt.concat([at]), tport: r2.tport, reqs: r2.reqs, rets: r2.rets }
         return { env: rl.env, st: sr }
     }
 
@@ -16761,6 +17144,7 @@ ${
             .Spread(e: sx) :> litOf(0, "")
             .Index(obj: ix) :> litOf(0, "")
             .Lambda(params: lp) :> litOf(0, "")
+            .BlockLambda(params: lp) :> litOf(0, "")
             .Sql(q: q) :> litOf(0, "")
             .Handled(h: hx) :> litOf(0, "")
             .Template(quasis: qs) :> litOf(0, "")
@@ -17246,7 +17630,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -17340,7 +17724,7 @@ ${
     }
 
     fn withTport(st: AS, fnSym: int, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]), reqs: st.reqs }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]), reqs: st.reqs, rets: st.rets }
     }
 
     // `!{}` / `match` on the call: the arms resolve against the CLIENT set (the
@@ -17435,6 +17819,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -18409,7 +18794,7 @@ ${
     }
 
     fn addReq(st: AS, r: ReqFact) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs.concat([r]) }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs.concat([r]), rets: st.rets }
     }
 
     // The body's shape (§6.7.7 grammar `lin-declaration* assignment-expression`).
@@ -18547,6 +18932,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .Sql(q: x) :> not
             .Handled(h: x) :> not
             .Template(quasis: x) :> not
@@ -18975,7 +19361,7 @@ ${
                 ds = ds.concat([d])
             }
         }
-        st = { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        st = { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
         let deps: NameFact[] = []
         for (const at of atNodesIn(rhs)) {
             const rd: RDep = inferredDep(env, at, tname, st)
@@ -19100,6 +19486,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .Sql(q: x) :> not
             .Handled(h: x) :> not
             .Template(quasis: x) :> not
@@ -19194,7 +19581,7 @@ ${
             if (o is given && hashRefId(o) is given) out = [e]
         }
         for (const k of exprKids(e)) { out = out.concat(readNodesIn(k, reqs)) }
-        for (const b of exprBlocks(e)) { out = out.concat(readNodesInBlock(b, reqs)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(readNodesInBlock(b, reqs)) }
         return out
     }
 
@@ -19244,6 +19631,13 @@ ${
         // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
         // anywhere else a `return` operand is a value position
         let renv: Env = withPre(withWholeAt(env, e.nid, "a `return` operand"), e.nid)
+        // s478: in a block lambda's body a `return` is the LAMBDA's value (its type recorded
+        // for resolveLambda) — never the enclosing function's
+        if (env.nest.lam >= 0) {
+            const lr: RX = resolveExpr(renv, e, env.nest.lamWant, st)
+            const s1: AS = lr.st
+            return { facts: s1.facts, diags: s1.diags, nextSym: s1.nextSym, annots: s1.annots, bad: s1.bad, effects: s1.effects, pend: s1.pend, lifts: s1.lifts, nsAt: s1.nsAt, tport: s1.tport, reqs: s1.reqs, rets: s1.rets.concat([{ lam: env.nest.lam, ty: lr.x.ty }]) }
+        }
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
         // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
         // type is the enclosing function's declared return type — §18.5 reads an object
@@ -20404,6 +20798,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
@@ -20435,6 +20830,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
@@ -20747,6 +21143,8 @@ ${
             }
             if (hit) acc = { writes: acc.writes, reads: acc.reads.concat([{ nid: e.nid, start: e.span.start }]), opaque: acc.opaque }
         }
+        // s478: a block lambda's body is statements this walk does not read — never guess
+        if (lambdaBlock(e) is given) acc = { writes: acc.writes, reads: acc.reads, opaque: true }
         for (const x of exprKids(e)) { acc = copyReadsIn(st, sym, x, acc) }
         return acc
     }
@@ -21004,6 +21402,7 @@ ${
             .ObjectLit(props: ps) :> false
             .Spread(e: x) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -22049,6 +22448,7 @@ ${
             .Spread(e: s) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Handled(h: h) :> false
         }
         if (!binary) return st
@@ -24649,6 +25049,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -25030,6 +25431,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
@@ -25069,6 +25471,7 @@ ${
             .Spread(e: x) :> e
             .Index(obj: o) :> e
             .Lambda(params: x) :> e
+            .BlockLambda(params: x) :> e
             .Sql(q: x) :> e
             .Handled(h: x) :> e
         }
@@ -25100,6 +25503,7 @@ ${
             .Spread(e: x) :> "a spread"
             .Index(obj: o) :> "an index read"
             .Lambda(params: x) :> "a function value"
+            .BlockLambda(params: x) :> "a function value"
             .Sql(q: x) :> "a query (`?{ … }`)"
             .Handled(h: x) :> "a `match` or a handling form"
             .Binary(op: o) :> "a pipe (`|>`, a call)"
@@ -25152,6 +25556,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
@@ -25205,6 +25610,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .Sql(q: x) :> false
             .Handled(h: x) :> false
         }
@@ -25288,7 +25694,7 @@ ${
     fn resolveFnBody(env0: Env, fs: FnSrc, st0: AS) -> AS {
         let st: AS = st0
         const g: Globals = env0.g
-        let env: Env = withNest(env0, { fns: env0.nest.fns, top: topLocalFns(fs.f.body), caps: env0.nest.caps, pureCaps: env0.nest.pureCaps, pureFn: env0.nest.pureFn })
+        let env: Env = withNest(env0, { fns: env0.nest.fns, top: topLocalFns(fs.f.body), caps: env0.nest.caps, pureCaps: env0.nest.pureCaps, pureFn: env0.nest.pureFn, lam: -1, lamWant: not })
         const fte: TypeEnv = teAt(g.te, fs.info.file)
         for (const p of fs.f.params) {
             const rs: RSym = mint(reservedName(st, fs.info.file, p.span, p.name), p.name)
@@ -25371,7 +25777,7 @@ ${
         }
         const e2: Env = { g: env.g, file: env.file, ctx: env.ctx, locals: locals, rows: env.rows,
                           handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
-        return withNest(e2, { fns: fns, top: env.nest.top, caps: env.nest.caps, pureCaps: env.nest.pureCaps, pureFn: env.nest.pureFn })
+        return withNest(e2, { fns: fns, top: env.nest.top, caps: env.nest.caps, pureCaps: env.nest.pureCaps, pureFn: env.nest.pureFn, lam: env.nest.lam, lamWant: env.nest.lamWant })
     }
 
     // s477 — each nested function declaration of block `b`, resolved in `env`:
@@ -25432,7 +25838,7 @@ ${
         if (pureFn == "" && env.host == HostCtx.HostPure) pureFn = env.fx.fnName      // the `fn` this nested body is in
         if (f.pure) pureFn = ""                                                        // a nested `fn` is pure itself: the report names it
         const env0: Env = { g: env.g, file: env.file, ctx: CtxK.InFn, locals: env.locals, rows: [], handles: env.handles, inRenders: false, narrows: [], present: [],
-                            host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: { fns: env.nest.fns, top: [], caps: caps, pureCaps: pureCaps, pureFn: pureFn } }
+                            host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: { fns: env.nest.fns, top: [], caps: caps, pureCaps: pureCaps, pureFn: pureFn, lam: -1, lamWant: not } }
         return resolveFnBody(env0, fs, st)
     }
 
@@ -25523,7 +25929,7 @@ ${
         let out: AExpr[] = []
         if (exprName(e) != "") out = [e]
         for (const x of exprKids(e)) { out = out.concat(nameExprsInExpr(x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(nameExprsIn(b)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(nameExprsIn(b)) }
         return out
     }
 
@@ -26998,6 +27404,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -27066,6 +27473,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -27098,6 +27506,7 @@ ${
             .Spread(e: sx) :> noNarrowing()
             .Index(obj: ix) :> noNarrowing()
             .Lambda(params: lp) :> noNarrowing()
+            .BlockLambda(params: lp) :> noNarrowing()
             .Sql(q: q) :> noNarrowing()
             .Handled(h: x) :> noNarrowing()
             .Template(quasis: qs) :> noNarrowing()
@@ -27230,6 +27639,7 @@ ${
             .Spread(e: x) :> [x]
             .Index(obj: o, idx: i) :> [o, i]
             .Lambda(params: lp, body: b) :> [b]
+            .BlockLambda(params: lp) :> []                                   // s478: its body is a BLOCK — lamBlocks, never exprBlocks (its returns are its own)
             .Sql(q: q) :> q.params
             .Handled(h: h) :> handledKids(h)      // s451 (Ue): the subject, then each expression arm (block arms: exprBlocks)
             .Template(quasis: qs, slots: ss) :> ss      // s469: the slots, left to right
@@ -27284,6 +27694,20 @@ ${
 
     // s451 (Ue) — the statement BLOCKS directly inside an expression: a
     // handling form's block arms (no other expression holds statements).
+    // s478 (s478-boot-block-lambda) — a block-bodied lambda's body, else nothing. It is
+    // NOT one of exprBlocks: a walk that reads control flow (returns, loop control,
+    // defers, definite exits) stops at a lambda — its `return`s are its own, like a
+    // nested function's (§7.3.1). A walk of what is TEXTUALLY inside an expression (its
+    // reads, calls, writes, queries, foreign blocks, clock reads, waits — exprBlocksIn)
+    // enters it, as it enters a nested function's body.
+    fn lamBlocks(e: AExpr) -> ABlock[] {
+        const b: ABlock | not = lambdaBlock(e)
+        if (b is not) return []
+        return [b]
+    }
+
+    fn exprBlocksIn(e: AExpr) -> ABlock[] { return exprBlocks(e).concat(lamBlocks(e)) }
+
     fn exprBlocks(e: AExpr) -> ABlock[] {
         const h: AHandled | not = handledOf(e.k)
         if (h is not) return []
@@ -27305,7 +27729,7 @@ ${
     fn exprEffects(e: AExpr) -> string[] {
         let out: string[] = ownEffect(e)
         for (const x of exprKids(e)) { out = out.concat(exprEffects(x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(blockEffects(b, [])) }    // s451 (Ue): an arm block's writes
+        for (const b of exprBlocksIn(e)) { out = out.concat(blockEffects(b, [])) }    // s451 (Ue): an arm block's writes
         return out
     }
 
@@ -27338,6 +27762,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -27635,7 +28060,7 @@ ${
     fn tArgsUnnarrow(env: TEnv, e: AExpr) -> TEnv {
         let effs: string[] = []
         for (const x of exprKids(e)) { effs = effs.concat(exprEffects(x)) }
-        for (const b of exprBlocks(e)) { effs = effs.concat(blockEffects(b, [])) }
+        for (const b of exprBlocksIn(e)) { effs = effs.concat(blockEffects(b, [])) }
         return tUnnarrowEffects(env, effs)
     }
 
@@ -27662,6 +28087,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -27821,6 +28247,7 @@ ${
             .Spread(e: e) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: h) :> []
             .Template(quasis: qs) :> []
@@ -27853,6 +28280,7 @@ ${
             .Spread(e: e) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
@@ -28069,6 +28497,7 @@ ${
             .Spread(e: e) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: h) :> false
             .Template(quasis: qs) :> false
@@ -29395,6 +29824,7 @@ ${
             .Spread(e: sx) :> -1
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
+            .BlockLambda(params: lp) :> -1
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
@@ -29519,6 +29949,7 @@ ${
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
             .Index(obj: o, idx: i) :> typeIndexRead(env, vf, o, i, ts)   // s469 (§49.13)
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
+            .BlockLambda(params: ps2, body: b) :> typeBlockLambda(env, e, b, ts)   // s478
             .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
             .Template(quasis: qs, slots: ss) :> typeTemplate(env, ss, ts)   // s469 (§14.13.3)
             .HashRef(id: hr0) :> rvt(VType.Unknown, ts)
@@ -29538,6 +29969,21 @@ ${
             env2 = tWithLocal(env2, s, vt)
         }
         return rvt(VType.Unknown, typeExpr(env2, body, ts).ts)
+    }
+
+    // s478 (s478-boot-block-lambda) — a block lambda's body, typed as a function body of its
+    // own: its parameters are locals (their types as resolveBlockLambda recorded them), and its
+    // `return`s are checked against nothing here (fret `not`) — what they must be is its
+    // position's (predicateCheck / comparatorCheck; a map's element type is their one type).
+    fn typeBlockLambda(env: TEnv, e: AExpr, body: ABlock, ts: TypeState) -> RVT {
+        let env2: TEnv = withRet(env, not)
+        for (const s of lambdaSyms(valueFact(env.t.values, e.nid))) {
+            const a: Type | not = annotOf(env.t, s)
+            let vt: VType = VType.Unknown
+            if (a is given) vt = known(a)
+            env2 = tWithLocal(env2, s, vt)
+        }
+        return rvt(VType.Unknown, typeBlock(env2, body, ts))
     }
 
     fn lambdaSyms(f: ValueFact | not) -> Sym[] {
@@ -29642,14 +30088,73 @@ ${
 
     fn comparatorCheck(env: TEnv, f: ValueFact | not, args: AExpr[], ts: TypeState) -> TypeState {
         if (isPredFact(f) && args.length == 1) return predicateCheck(env, f, args[0], ts)
+        if (isSeqFact(f, SeqFn.Map) && args.length == 1 && isLambda(args[0])) return mapValuesCheck(env, args[0], ts)
         if (!isSortByFact(f) || args.length != 1) return ts
-        const body: AExpr | not = lambdaBody(args[0])
-        if (body is not) return ts
+        let ts1: TypeState = ts
+        for (const body of lambdaValues(args[0])) { ts1 = comparatorValueCheck(env, body, ts1) }   // s478: each `return` of a block body
+        return ts1
+    }
+
+    fn comparatorValueCheck(env: TEnv, body: AExpr, ts: TypeState) -> TypeState {
         const bt: Type | not = knownOf(exprType0(ts, body.nid))
         if (bt == Type.Int || bt == Type.Num) return ts
         if (hasErrIn(env.errs, body.span)) return ts
         if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the comparator of `.sort(…)` returns a value whose type the compiler cannot resolve — it must return a number (negative: `a` first; positive: `b` first; zero: keep their order)")
         return report(ts, env, body.span, "E-TYPE-031", "the comparator of `.sort(…)` must return a number (negative: `a` first; positive: `b` first; zero: keep their order), and this one returns `" + typeName(bt) + "` (S440 #10)")
+    }
+
+    // s478 — the values a lambda gives: its expression body, or each `return` operand of its
+    // block body (its own — a nested lambda's are that lambda's, returnSites does not enter one).
+    fn lambdaValues(lam: AExpr) -> AExpr[] {
+        const body: AExpr | not = lambdaBody(lam)
+        if (body is given) return [body]
+        const blk: ABlock | not = lambdaBlock(lam)
+        if (blk is not) return []
+        let out: AExpr[] = []
+        for (const r of returnSites(blk)) {
+            const x: AExpr | not = r.e
+            if (x is given) out = out.concat([x])
+        }
+        return out
+    }
+
+    // s478 — the one known type of a lambda's values, joined as an `if` / ternary's branches
+    // are (joinVT — §17.6.4 "When an if-as-expression has no `else` arm, the false-path
+    // result is `not`" and the value is `number | not`: `T` joined with `not` is `T | not`; int and number share `number`, the
+    // arithmetic join); `not` when one is unknown or they share no type (mapValuesCheck
+    // reports that, E-TYPE-031).
+    fn lambdaValueType(ts: TypeState, lam: AExpr) -> Type | not {
+        return knownOf(lambdaValuesVT(ts, lam))
+    }
+
+    fn lambdaValuesVT(ts: TypeState, lam: AExpr) -> VType {
+        let out: VType = VType.Unknown
+        let first = true
+        for (const v of lambdaValues(lam)) {
+            const t: VType = exprType0(ts, v.nid)
+            if (first) {
+                out = t
+                first = false
+            } else {
+                out = joinVT(out, t)
+            }
+        }
+        return out
+    }
+
+    // s478 fix round 1 — a `.map(…)` callback's values must share one type: its value is the
+    // new tape's element type, and a callback giving `"a"` on one path and `x: int` on
+    // another makes no `T[]` (§34 E-TYPE-031: "a value is assigned to a position whose
+    // declared type it does not satisfy" — the mapped tape's one element position). Values
+    // that join (joinVT: one type, int with number, `T` with `not`) pass; a choice of types
+    // that share none is refused — an expression body's ternary as a block body's returns.
+    fn mapValuesCheck(env: TEnv, lam: AExpr, ts: TypeState) -> TypeState {
+        const vt: VType = lambdaValuesVT(ts, lam)
+        const xs: Type[] = oneOfMembers(vt)
+        if (xs.length == 0) return ts
+        if (hasErrIn(env.errs, lam.span)) return ts
+        if (typedErrIn(ts, lam.span)) return ts
+        return report(ts, env, lam.span, "E-TYPE-031", "the callback of `.map(…)` gives values of more than one type (" + oneOfName(xs) + "), which share no type — the mapped tape has one element type (§7.5); give one type on every path (convert, or map to an enum)")
     }
 
     // s475 — the predicate of `xs.some(x => b)` / `xs.every(x => b)` is a `bool`
@@ -29658,8 +30163,12 @@ ${
     // s475 r1 (#1812 review F8, gap g-boot-filter-predicate-not-bool-checked-s475): `xs.filter(x => b)`'s
     // too — scrml has no truthiness (§42.4), so a non-`bool` predicate is no condition.
     fn predicateCheck(env: TEnv, f: ValueFact | not, lam: AExpr, ts: TypeState) -> TypeState {
-        const body: AExpr | not = lambdaBody(lam)
-        if (body is not) return ts
+        let ts1: TypeState = ts
+        for (const body of lambdaValues(lam)) { ts1 = predicateValueCheck(env, f, body, ts1) }   // s478: each `return` of a block body
+        return ts1
+    }
+
+    fn predicateValueCheck(env: TEnv, f: ValueFact | not, body: AExpr, ts: TypeState) -> TypeState {
         const bt: Type | not = knownOf(exprType0(ts, body.nid))
         if (bt == Type.Bool) return ts
         if (hasErrIn(env.errs, body.span)) return ts
@@ -29821,9 +30330,8 @@ ${
         // (mappedType, as the resolver reads it) — so a method on it (`.includes`) has a typed receiver
         if (o == SeqFn.Map) {
             if (args.length != 1) return VType.Unknown
-            const body: AExpr | not = lambdaBody(args[0])
-            if (body is not) return VType.Unknown
-            const mt: Type | not = mappedType(rt, knownOf(exprType0(ts, body.nid)))
+            if (!isLambda(args[0])) return VType.Unknown
+            const mt: Type | not = mappedType(rt, lambdaValueType(ts, args[0]))   // s478: a block body's returns
             if (mt is not) return VType.Unknown
             return known(mt)
         }
@@ -30379,6 +30887,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x2) :> []
             .Template(quasis: qs) :> []
@@ -30429,6 +30938,7 @@ ${
             .Spread(e: sx) :> ts
             .Index(obj: ix) :> ts
             .Lambda(params: lp) :> ts
+            .BlockLambda(params: lp) :> ts
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
             .Template(quasis: qs) :> ts
@@ -30531,6 +31041,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x2) :> false
             .Template(quasis: qs) :> false
@@ -30585,6 +31096,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -31769,6 +32281,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -31801,6 +32314,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -32000,6 +32514,7 @@ ${
             .Spread(e: x) :> typeExpr(env, e, ts).ts
             .Index(obj: o) :> typeExpr(env, e, ts).ts
             .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
+            .BlockLambda(params: ps2) :> typeExpr(env, e, ts).ts
             .Sql(q: q) :> typeExpr(env, e, ts).ts
             .Handled(h: x) :> typeExpr(env, e, ts).ts
             .Template(quasis: qs) :> typeExpr(env, e, ts).ts
@@ -32053,6 +32568,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -32338,6 +32854,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -32765,6 +33282,7 @@ ${
             .Spread(e: x) :> ts
             .Index(obj: o) :> ts
             .Lambda(params: ps2) :> ts
+            .BlockLambda(params: ps2) :> ts
             .Sql(q: q) :> ts
             .Handled(h: x) :> checkLitList(env, handledArmValueExprs(x), ts)     // s477 r1: a `match` / `!{}` arm's value is written too
             .Template(quasis: qs) :> ts
@@ -33935,7 +34453,7 @@ ${
         if (c is given) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc1))
         let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc1)))
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
-        for (const b of exprBlocks(e)) { acc = scanBlock(cx, b, acc) }      // s451 (Ue): an arm block
+        for (const b of exprBlocksIn(e)) { acc = scanBlock(cx, b, acc) }      // s451 (Ue): an arm block
         return acc
     }
 
@@ -34172,6 +34690,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -34204,6 +34723,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -34237,6 +34757,7 @@ ${
             .ObjectLit(props: ps) :> ""
             .Spread(e: x) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -34358,6 +34879,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -34389,6 +34911,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -34422,6 +34945,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs) :> ""
@@ -35090,7 +35614,7 @@ ${
         const c: Sym | not = callSym(t, e)
         if (c is given) out = out.concat([c.id])
         for (const x of exprKids(e)) { out = out.concat(calledSyms(t, x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(calledSymsBlock(t, b)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(calledSymsBlock(t, b)) }
         return out
     }
 
@@ -35415,7 +35939,7 @@ ${
         const s: Sym | not = fnSymOf(nameFact(names, e.nid))
         if (s is given) out = [s.id]
         for (const k of exprKids(e)) { out = out.concat(fnSymsIn(names, k)) }
-        for (const b of exprBlocks(e)) { out = out.concat(fnSymsInBlock(names, b)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(fnSymsInBlock(names, b)) }
         return out
     }
 
@@ -35440,7 +35964,7 @@ ${
             const u: string = callThroughValue(names, k)
             if (u != "") return u
         }
-        for (const b of exprBlocks(e)) {
+        for (const b of exprBlocksIn(e)) {
             const u: string = callThroughValueBlock(names, b)
             if (u != "") return u
         }
@@ -35960,6 +36484,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -36955,7 +37480,7 @@ ${
         let out: ASpan[] = []
         if (isLambdaK(e.k)) out = [e.span]
         for (const x of exprKids(e)) { out = out.concat(repeatsInExpr(x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(repeatsInBlock(b)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(repeatsInBlock(b)) }
         return out
     }
 
@@ -36987,7 +37512,7 @@ ${
         let out: ASpan[] = []
         if (foreignOf(e) is given) out = [e.span]
         for (const x of exprKids(e)) { out = out.concat(foreignsInExpr(x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(foreignsInBlock(b)) }
+        for (const b of exprBlocksIn(e)) { out = out.concat(foreignsInBlock(b)) }
         return out
     }
 
@@ -37012,7 +37537,7 @@ ${
         const q: ASql | not = sqlOfK(e.k)
         if (q is given) out = [{ nid: e.nid, span: e.span, q: q }]
         for (const x of exprKids(e)) { out = out.concat(sqlsInExpr(x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(sqlsInBlock(b)) }   // s451 (Ue): an arm block
+        for (const b of exprBlocksIn(e)) { out = out.concat(sqlsInBlock(b)) }   // s451 (Ue): an arm block
         return out
     }
 
@@ -37060,6 +37585,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
         }
     }
 
@@ -37091,6 +37617,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
         }
     }
 
@@ -37148,7 +37675,7 @@ ${
         if (what != "") return [{ what: what, span: e.span }]
         let out: CellUse[] = []
         for (const x of exprKids(e)) { out = out.concat(readsInExpr(t, x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(readsInBlock(t, b)) }   // s451 (Ue): an arm block
+        for (const b of exprBlocksIn(e)) { out = out.concat(readsInBlock(t, b)) }   // s451 (Ue): an arm block
         return out
     }
 
@@ -37234,7 +37761,7 @@ ${
         if (hb != "") return [{ what: "the `<host>` binding `" + hb + "`", span: e.span }]
         let out: CellUse[] = []
         for (const x of exprKids(e)) { out = out.concat(domsInExpr(t, x)) }
-        for (const b of exprBlocks(e)) { out = out.concat(domsInBlock(t, b)) }   // s451 (Ue): an arm block
+        for (const b of exprBlocksIn(e)) { out = out.concat(domsInBlock(t, b)) }   // s451 (Ue): an arm block
         return out
     }
 
@@ -38676,6 +39203,7 @@ ${
             .Spread(e: sx) :> a
             .Index(obj: ix) :> a
             .Lambda(params: lp) :> a
+            .BlockLambda(params: lp) :> a
             .Sql(q: q) :> a
             .Template(quasis: qs) :> a
             .HashRef(id: hr0) :> a
@@ -38733,6 +39261,7 @@ ${
             .ObjectLit(props: ps) :> -1
             .Spread(e: sx) :> -1
             .Lambda(params: lp) :> -1
+            .BlockLambda(params: lp) :> -1
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
             .Template(quasis: qs) :> -1
@@ -39094,7 +39623,7 @@ ${
             }
             if (!drop) out = out.concat([d])
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // Why callable i's server calls need composing ("" — they do not): two or more
@@ -39793,6 +40322,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -40481,6 +41011,7 @@ ${
             .Spread(e: x) :> AExprK.Spread(mExpr(x, m))
             .Index(obj: o, idx: i) :> AExprK.Index(mExpr(o, m), mExpr(i, m))
             .Lambda(params: ps, body: b) :> AExprK.Lambda(ps, mExpr(b, m))
+            .BlockLambda(params: ps, body: b, viaFunction: vf) :> AExprK.BlockLambda(ps, mBlock(b, m), vf)   // s478: its statements, as an arm block's
             .Sql(q: q) :> AExprK.Sql({ chunks: q.chunks, params: mExprs(q.params, m), mode: q.mode, nobatch: q.nobatch, handled: q.handled })
             .Handled(h: h) :> AExprK.Handled({ subject: mExpr(h.subject, m), how: mHow(h.how, m) })
             .Template(quasis: qs, slots: ss) :> AExprK.Template(qs, mExprs(ss, m))
@@ -41077,7 +41608,7 @@ ${
             }
         }
         if (!dropped) return st
-        return { facts: st.facts, diags: keep, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: keep, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // §13.7 "the fix: a value position cannot wait for the server; load the value with a
@@ -41805,7 +42336,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -42166,6 +42697,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -42198,6 +42730,7 @@ ${
             .ObjectLit(props: ps) :> []
             .Spread(e: x) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -42229,6 +42762,7 @@ ${
             .ObjectLit(props: ps) :> false
             .Spread(e: x) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -42281,6 +42815,19 @@ ${
             .Defer(body: b) :> []
             .Fail(f: f) :> failExprs(f)
         }
+    }
+
+    // s478 — every expression of a block-bodied lambda's statements, at any depth of its
+    // own blocks (a nested lambda's body is reached through that lambda, as a child).
+    fn lamBodyExprs(bs: ABlock[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const b of bs) {
+            for (const s of b.stmts) {
+                out = out.concat(stmtExprs(s))
+                out = out.concat(lamBodyExprs(stmtKidBlocks(s)))
+            }
+        }
+        return out
     }
 
     fn maybeExprList(e: AExpr | not) -> AExpr[] {
@@ -42343,6 +42890,7 @@ ${
             .Binary(op: o, l: l, r: r) :> planBinary(cx, o, l, r, pos, ps)
             .Ternary(test: t, yes: y, no: n) :> planTernary(cx, t, y, n, pos, ps)
             .Lambda(params: lp, body: b) :> planExpr(cx, b, { refused: "a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)
+            .BlockLambda(params: lp, body: b) :> planKids(cx, lamBodyExprs([b]), { refused: "a lambda (`xs.map(x => { … })`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)   // s478: as the expression lambda
             .Handled(h: h) :> planHandledArms(cx, h, pos, ps)
             .Template(quasis: qs, slots: ss) :> planKids(cx, ss, pos, ps)
             .HashRef(id: hr0) :> { found: false, ps: ps }
@@ -42417,6 +42965,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
             .Template(quasis: qs) :> false
@@ -42595,6 +43144,7 @@ ${
             .ObjectLit(props: ps) :> ""
             .Assign(target: t) :> ""
             .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
             .Template(quasis: qs, slots: ss) :> keyOfList("tpl(" + JSON.stringify(qs) + "|", ss)
@@ -42700,6 +43250,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> distinctSqlParams(q.params)
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -43900,7 +44451,7 @@ ${
         for (const x of exprKids(e)) {
             if (exprWaits(t, x)) return true
         }
-        for (const b of exprBlocks(e)) {
+        for (const b of exprBlocksIn(e)) {
             for (const s of b.stmts) {
                 if (stmtWaits(t, s)) return true
             }
@@ -44276,7 +44827,7 @@ ${
         if (id >= 0 && ids.indexOf(id) >= 0) return [{ id: id, span: e.span }]
         let out: LinSeen[] = []
         for (const x of exprKids(e)) { out = out.concat(seenExpr(t, x, ids)) }
-        return out.concat(seenBlocks(t, exprBlocks(e), ids))
+        return out.concat(seenBlocks(t, exprBlocksIn(e), ids))
     }
 
     fn linParamSym(f: BindFact | not) -> Sym | not {
@@ -44580,6 +45131,7 @@ ${
             .Ternary(test: t, yes: y, no: n) :> linTernary(cx, e, t, y, n, s)
             .Handled(h: h) :> linHandled(cx, e, h, s)
             .Lambda(params: lp, body: b) :> linGo(linCapture(cx, e, b, s))
+            .BlockLambda(params: lp, body: b) :> linGo(linBlockCapture(cx, e, b, s))   // s478 (§35.6, §35.4.5)
             .Sql(q: q) :> linSql(cx, e, q, s)
             .Call(callee: c, args: a) :> linCall(cx, c, a, s)
             .Assign(target: t, value: v) :> linAssign(cx, t, v, s)
@@ -44767,6 +45319,31 @@ ${
         return s
     }
 
+    // s478 (s478-boot-block-lambda) — a BLOCK-bodied closure. §35.6: "Capturing a `lin`
+    // variable in a closure (arrow function expression or `function` expression) SHALL
+    // count as one consumption of that `lin` variable"; §35.4.5: "Two appearances of one
+    // `lin` variable in one closure body SHALL be E-LIN-002, whatever the branching inside
+    // the body." Every name in the body (its nested lambdas' included) is counted against
+    // the outer `lin` bindings: one or more is the one consumption, at the lambda; two or
+    // more is also E-LIN-002. (A `lin` declared IN the body is refused by resolveLambda.)
+    fn linBlockCapture(cx: LinCx, lam: AExpr, body: ABlock, s0: LinSt) -> LinSt {
+        let s: LinSt = s0
+        let ids: int[] = []
+        for (const x of nameExprsIn(body)) { ids = ids.concat([localSymOfName(cx.t, x.nid)]) }
+        let i: int = 0
+        while (i < s.vars.length) {
+            const v: LinVar = s.vars[i]
+            let n: int = 0
+            for (const id of ids) {
+                if (id == v.id) n = n + 1
+            }
+            if (n >= 2) s = linDiag(cx, s, "E-LIN-002", lam.span, "`lin` variable `" + v.name + "` appears " + n + " times in this closure body — the capture is its one consumption (§35.6), so each further appearance is another use; two appearances in one closure body are E-LIN-002 whatever the branching (§35.4.5). Name it once (bind it to a local inside the body only if that local is the one use)")
+            if (n >= 1) s = linConsume(cx, s, i, lam.span)
+            i = i + 1
+        }
+        return s
+    }
+
     // §19.8.2: in a `!` function an unhandled `?{}` propagates its failure —
     // a path that leaves the function.
     fn linSql(cx: LinCx, e: AExpr, q: ASql, s0: LinSt) -> LinR {
@@ -44819,6 +45396,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .Sql(q: x) :> false
             .Handled(h: x) :> false
             .Template(quasis: x) :> false
@@ -45044,7 +45622,7 @@ ${
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, routeBase: string, allow: boolean, carriers: int[]) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [] }
         const ra0: RGlobals = phaseA(files, entry, routeBase, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)

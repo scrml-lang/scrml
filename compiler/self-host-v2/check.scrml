@@ -197,6 +197,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -381,6 +382,7 @@ ${
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
             .SeqCall(op: x) :> -1
             .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1
@@ -1188,6 +1190,7 @@ ${
             .VariantOf(enumSym: x) :> ""
             .Host(call: x) :> ""
             .Lambda(params: x) :> ""
+            .BlockLambda(params: x) :> ""
             .SeqCall(op: x) :> ""
         }
     }
@@ -1269,6 +1272,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -1295,6 +1299,7 @@ ${
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
             .SeqCall(op: x) :> -1
             .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1
@@ -1320,6 +1325,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -1397,6 +1403,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -1543,6 +1550,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
@@ -1569,6 +1577,7 @@ ${
             .InitOf(decl: x) :> "(not a cell read)"
             .Host(call: x) :> "(not a cell read)"
             .Lambda(params: x) :> "(not a cell read)"
+            .BlockLambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
             .Refetch(req: rf0) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
@@ -2742,6 +2751,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
@@ -2865,6 +2875,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -3450,6 +3461,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
@@ -3615,6 +3627,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -3712,6 +3725,219 @@ ${
             if (what != "") out = out.concat(["C-N1: " + who + " holds " + what])
         }
         return out
+    }
+
+    // s478 — C-L1: a BLOCK lambda's body (Expr.BlockLambda, a tape method's callback) is
+    // ordinary statements that end in its own Returns — analyze builds one of Lets,
+    // Assigns of its own locals, Ifs and Returns. Nothing in it waits, fails, writes a cell,
+    // defers, loops or lifts: each would be judged against, or continue, the ENCLOSING
+    // function, and the tape method may run the callback any number of times.
+    // An Assign / Assigned in it writes a local the body itself declared (a Let of its own,
+    // at any depth of its blocks): a write to a captured local or a cell would happen
+    // whenever, and however often, the tape method calls back — untracked by the enclosing
+    // function's narrowing (s478 fix round 1).
+    fn checkBlockLambda(b: Block) -> string[] {
+        let out: string[] = []
+        const ns: Node[] = allNodes(Node.NBlock(b))
+        let own: int[] = []
+        for (const n of ns) { own = own.concat(lambdaLetIds(n)) }
+        for (const n of ns) {
+            const what: string = lambdaForbidden(n)
+            if (what != "") out = out.concat(["C-L1: a block lambda holds " + what])
+            const w: int = lambdaWrittenId(n)
+            if (w >= 0 && own.indexOf(w) < 0) out = out.concat(["C-L1: a block lambda writes a local it did not declare"])
+        }
+        return out
+    }
+
+    fn lambdaLetIds(n: Node) -> int[] {
+        return match n {
+            .NStmt(s: s) :> lambdaLetIdsStmt(s)
+            .NExpr(e: x) :> []
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NView(v: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn lambdaLetIdsStmt(s: Stmt) -> int[] {
+        return match s {
+            .Let(sym: x) :> [x.id]
+            .Assign(local: x) :> []
+            .If(cond: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .Write(cap: x) :> []
+            .Commit(writes: x) :> []
+            .ResetSurface(of: x) :> []
+            .Defer(body: x) :> []
+            .Unpersist(decl: x) :> []
+            .Attempt(result: x) :> []
+            .Loop(label: x) :> []
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
+            .Gather(g: x) :> []
+            .Lift(into: x) :> []
+            .LocalFn(f: x) :> []
+            .Suspend(bind: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
+            .Fail(err: x) :> []
+        }
+    }
+
+    // The local an Assign statement or an Assigned expression writes, else -1.
+    fn lambdaWrittenId(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> lambdaWrittenIdStmt(s)
+            .NExpr(e: x) :> lambdaWrittenIdExpr(x)
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn lambdaWrittenIdStmt(s: Stmt) -> int {
+        return match s {
+            .Assign(local: x) :> x.id
+            .Let(sym: x) :> -1
+            .If(cond: x) :> -1
+            .Return(e: x) :> -1
+            .Eval(e: x) :> -1
+            .Write(cap: x) :> -1
+            .Commit(writes: x) :> -1
+            .ResetSurface(of: x) :> -1
+            .Defer(body: x) :> -1
+            .Unpersist(decl: x) :> -1
+            .Attempt(result: x) :> -1
+            .Loop(label: x) :> -1
+            .Break(target: x) :> -1
+            .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
+            .Suspend(bind: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
+            .Fail(err: x) :> -1
+        }
+    }
+
+    fn lambdaWrittenIdExpr(e: Expr) -> int {
+        return match e {
+            .Assigned(local: x) :> x.id
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
+            .Refetch(req: x) :> -1
+            .Lit(lit: x) :> -1
+            .Local(sym: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Validity(of: x) :> -1
+            .Foreign(slice: x) :> -1
+        }
+    }
+
+    fn lambdaForbidden(n: Node) -> string {
+        return match n {
+            .NStmt(s: s) :> lambdaForbiddenStmt(s)
+            .NExpr(e: x) :> lambdaForbiddenExpr(x)
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> "a function"
+            .NServerFn(f: x) :> "a server function"
+            .NBlock(b: x) :> ""
+            .NPlace(pl: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NView(v: x) :> "a view"
+            .NAttr(a: x) :> "a markup attribute"
+        }
+    }
+
+    fn lambdaForbiddenExpr(e: Expr) -> string {
+        return match e {
+            .ServerCall(fn: x) :> "a server call"
+            .Query(q: x) :> "a query"
+            .Refetch(req: x) :> "a refetch"
+            .Lit(lit: x) :> ""
+            .Local(sym: x) :> ""
+            .Read(place: x) :> ""
+            .Call(callee: x) :> ""
+            .Prim(op: x) :> ""
+            .Match(scrut: x) :> ""
+            .ArrayOf(elems: x) :> ""
+            .StructOf(ty: x) :> ""
+            .VariantOf(enumSym: x) :> ""
+            .Handle(inst: x) :> ""
+            .Assigned(local: x) :> ""
+            .InitOf(decl: x) :> ""
+            .Host(call: x) :> ""
+            .Lambda(params: x) :> ""
+            .BlockLambda(params: x) :> ""
+            .SeqCall(op: x) :> ""
+            .Validity(of: x) :> ""
+            .Foreign(slice: x) :> "a foreign block"
+        }
+    }
+
+    fn lambdaForbiddenStmt(s: Stmt) -> string {
+        const nf: string = nestedForbiddenStmt(s)
+        if (nf != "") return nf
+        return match s {
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .Write(cap: x) :> "a Write"
+            .Commit(writes: x) :> "a Commit"
+            .ResetSurface(of: x) :> "a ResetSurface"
+            .Defer(body: x) :> "a Defer"
+            .Unpersist(decl: x) :> "an Unpersist"
+            .Attempt(result: x) :> "an Attempt"
+            .Loop(label: x) :> "a Loop"
+            .Break(target: x) :> "a Break"
+            .Continue(target: x) :> "a Continue"
+            .Gather(g: x) :> "a Gather"
+            .Lift(into: x) :> "a Lift"
+            .LocalFn(f: x) :> "a nested function"
+            .Suspend(bind: x) :> "a Suspend"
+            .Join(k: x) :> "a Join"
+            .Jump(k: x) :> "a Jump"
+            .Fail(err: x) :> "a Fail"
+        }
     }
 
     fn nestedForbidden(n: Node) -> string {
@@ -4652,6 +4878,7 @@ ${
             .InitOf(decl: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .BlockLambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Refetch(req: rf0) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
@@ -4743,6 +4970,7 @@ ${
             .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .BlockLambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Refetch(req: rf0) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -4792,6 +5020,7 @@ ${
             .InitOf(decl: x) :> bad
             .Host(call: x) :> bad
             .Lambda(params: x) :> bad
+            .BlockLambda(params: x) :> bad
             .Refetch(req: rf0) :> bad
             .Validity(of: x) :> bad
             .ServerCall(fn: x) :> bad
@@ -4970,6 +5199,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
@@ -5260,6 +5490,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -5297,6 +5528,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -5415,6 +5647,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -5574,6 +5807,7 @@ ${
             .VariantOf(enumSym: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -5610,6 +5844,7 @@ ${
             .Assigned(local: x) :> []
             .Host(call: c) :> unreadableHost(c)
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps, body: b) :> checkBlockLambda(b)     // s478 (C-L1)
             .SeqCall(op: o) :> []
             .Refetch(req: rf0) :> checkRefetch(p, rf0)
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
@@ -5730,6 +5965,7 @@ ${
             .VariantOf(enumSym: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not

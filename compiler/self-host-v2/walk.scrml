@@ -276,6 +276,7 @@ ${
             .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Host(call: c) :> []
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
+            .BlockLambda(params: ps, body: b) :> [Node.NBlock(b)]     // s478: its body's statements
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
             .Refetch(req: rf0) :> []
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
@@ -527,6 +528,7 @@ ${
     fn exprBinds(e: Expr) -> Sym[] {
         return match e {
             .Lambda(params: ps) :> ps
+            .BlockLambda(params: ps) :> ps
             .Lit(lit: x) :> []
             .Local(sym: x) :> []
             .Read(place: x) :> []
@@ -691,6 +693,7 @@ ${
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
             .SeqCall(op: x) :> -1
             .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1

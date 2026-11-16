@@ -305,6 +305,13 @@ ${
         // s444: a function value — its parameters are binder-minted locals;
         // the body is ONE expression. Only as a SeqCall's argument.
         Lambda(params: Sym[], body: Expr),
+        // s478 (s478-boot-block-lambda) — a BLOCK-bodied function value, `x => { … }` /
+        // `function (x) { … }` (§7.2: "All JavaScript that is valid in a Bun execution
+        // context is valid inside `${ }`"). Its parameters are binder-minted locals; its
+        // body is a statement block whose Returns are its OWN (the function's value),
+        // never the enclosing function's. Only as a SeqCall's argument, as Lambda;
+        // check.scrml C-L1 says what the body may hold.
+        BlockLambda(params: Sym[], body: Block),
         // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
         // s449: a read of the validity surface (§55.5 / §55.6) — read-only.

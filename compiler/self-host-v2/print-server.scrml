@@ -343,6 +343,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -491,6 +492,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -591,6 +593,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -661,6 +664,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false

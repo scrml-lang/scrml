@@ -200,6 +200,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -233,6 +234,7 @@ ${
             .InitOf(decl: x) :> op
             .Host(call: x) :> op
             .Lambda(params: x) :> op
+            .BlockLambda(params: x) :> op
             .SeqCall(op: x) :> op
             .Refetch(req: rf0) :> op
             .Validity(of: x) :> op
@@ -296,6 +298,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
@@ -449,6 +452,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -553,6 +557,7 @@ ${
             .Spread(e: sx) :> missing()
             .Index(obj: o, idx: ix) :> indexExpr(c, e, o, ix)    // s469 (§49.13)
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
+            .BlockLambda(params: lp, body: lb) :> blockLambdaExpr(c, valueFact(c.t.values, e.nid), lb)   // s478
             .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
             .Handled(h: h) :> handledRead(c, e)
             .Template(quasis: qs, slots: ss) :> templateExpr(c, e, qs, ss)   // s469 (§14.13.3)
@@ -626,6 +631,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: x) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -637,6 +643,31 @@ ${
     fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
         return match f {
             .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VIndex(loc: x) :> missing()
+            .VAt :> missing()
+            .VTemplate(text: tx) :> missing()
+            .VPrint(text: tx2, newline: nl2) :> missing()
+            .VToEnum(enumSym: x) :> missing()
+            .VMethod(op: x) :> missing()
+            .VLit(lit: l) :> missing()
+            .VVariant(enumSym: x) :> missing()
+            .VStructOf(ty: x) :> missing()
+            .VConstruct(enumSym: x) :> missing()
+            .VOp(op: x) :> missing()
+            .VHost(call: x) :> missing()
+            .VSeqCall(op: x) :> missing()
+            not :> missing()
+        }
+    }
+
+    // s478 (s478-boot-block-lambda) — a block-bodied function value: its parameters are the
+    // binder's minted locals, its body lowered as statements (its Returns its own). The
+    // lowering context's substitution and snapshot carry in, as an expression body's do;
+    // Tier-0 rows do not (a callback body holds no `lift` — analyze refused one).
+    fn blockLambdaExpr(c: LC, f: ValueFact | not, body: ABlock) -> Expr {
+        const bc: LC = { t: c.t, file: c.file, subst: c.subst, snap: c.snap, rows: [] }
+        return match f {
+            .VLambda(params: ps) :> Expr.BlockLambda(ps, lowerBlock(bc, body))
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
@@ -788,6 +819,7 @@ ${
             .InitOf(decl: d) :> missing()
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
+            .BlockLambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Refetch(req: rf0) :> missing()
             .Validity(of: x) :> missing()
@@ -1413,6 +1445,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -1590,6 +1623,7 @@ ${
             .InitOf(decl: x) :> missing()
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
+            .BlockLambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Refetch(req: rf0) :> missing()
             .Validity(of: x) :> missing()
@@ -1606,6 +1640,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -3299,6 +3334,7 @@ ${
             .Spread(e: x) :> noCall()
             .Index(obj: o) :> noCall()
             .Lambda(params: ps) :> noCall()
+            .BlockLambda(params: ps) :> noCall()
             .Sql(q: x) :> noCall()
             .Handled(h: x) :> noCall()
             .Template(quasis: qs) :> noCall()
@@ -3558,6 +3594,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -3592,6 +3629,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
             .Sql(q: q) :> not
         }
     }
@@ -3623,6 +3661,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
         }
     }
 
@@ -3810,6 +3849,7 @@ ${
             .Binary(op: o, l: l, r: r) :> [l, r]
             .Ternary(test: t) :> [t]
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Handled(h: h) :> [h.subject]
             .Template(quasis: qs, slots: ss) :> ss
             .HashRef(id: hr0) :> []
@@ -3871,6 +3911,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: lp) :> []
+            .BlockLambda(params: lp) :> []
             .Sql(q: q) :> distinctSqlParams(q.params)     // s468 (U1c): a query's distinct values (§8.2), evaluated before it waits
             .Handled(h: x) :> []
             .Template(quasis: qs) :> []
@@ -3947,6 +3988,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .BlockLambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
             .Template(quasis: qs) :> not
@@ -3979,6 +4021,7 @@ ${
             .Spread(e: y) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .BlockLambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: y) :> ""
             .Template(quasis: qs) :> ""
@@ -4849,6 +4892,7 @@ ${
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .Lambda(params: x) :> []
+            .BlockLambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Refetch(req: rf0) :> []
             .Validity(of: x) :> []
