@@ -4642,7 +4642,7 @@ ${
     }
 
     // (C-S4: every routed type has a descriptor, so `null` here is unreachable on a checked Core.)
-    fn wireOrNull(p: CoreProgram, t: Type) -> JsExpr {
+    export fn wireOrNull(p: CoreProgram, t: Type) -> JsExpr {
         const wt: WireTable | not = wireBuild(p, t).table
         if (wt is given) return wireTableJs(wt)
         return JsExpr.JNull

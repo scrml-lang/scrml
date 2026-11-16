@@ -1364,7 +1364,7 @@ If the user's prompt mentions auth, real-time, reactive state, schema, multi-pag
 
 This is the **first recipe to reach for** when the UI has more than one mode, lifecycle phase, or screen state. If you're writing more than two booleans that gate the same UI, you want an engine.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-TAG×4, E-TYPE-031] — the bootstrap has no <db tables=> or <match> block element and cannot construct a payload variant (LoadPhase.Loaded(rows)); it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Row's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-TYPE-031] — the bootstrap has no <db tables=>; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Row's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 ```scrml
 <program db="items.db">
 

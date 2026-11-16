@@ -105,10 +105,9 @@ let <phase:Load=.Idle/>
 
 When each variant needs its own markup, the `<match>` element renders one child per variant:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG×4] — the bootstrap has no <match> block element and cannot construct a payload variant (Load.Loaded(2)) as a value yet -->
 <!-- snippet: docs/readme-snippets/nerdme/match-block.scrml -->
 ```scrml
-// NERDME.md "Engines, matches & iteration" (Tier 1, the <match> element) — ruled; spec-ahead on the bootstrap.
+// NERDME.md "Engines, matches & iteration" (Tier 1, the <match> element) — ruled.
 <program>
 
 type Load:enum = { Idle, Loading, Loaded(rows: int), Failed(msg: string) }
@@ -522,7 +521,7 @@ scrml is converging on its spec. Some features are specified but not built; some
 
 ### Not in the bootstrap yet
 
-The bootstrap refuses each of these with `E-BOOTSTRAP-UNSUPPORTED` or a parse error; it never silently accepts them. From the programs on this page: the `<match>` element, `<each>`'s `<empty>`, building a payload variant (`Load.Loaded(2)`) as a value, `<onTimeout>` and duration literals, refinement types, `eq(…)` and other validators beyond `req` / `length` / `min` / `max` / a plain `pattern`, `<schema>`, `<formFor>` / `<tableFor>`, `navigate()` and `<outlet>`, `<channel>`, nested `<program>`, `^{}`, at-rule blocks (`@media`, …) inside `#{}`, `lin`, the `~` accumulator, `bind:value` to a number cell, and `auth=`. Two SPEC checks are not refusals yet, so the bootstrap silently accepts what they would refuse: a local shadowing a state name (`E-NAME-COLLIDES-STATE`), and the compile-time `rule=` check on an engine write. The README keeps the current list under [Using the bootstrap compiler](./README.md#using-the-bootstrap-compiler).
+The bootstrap refuses each of these with `E-BOOTSTRAP-UNSUPPORTED` or a parse error; it never silently accepts them. From the programs on this page: `<each>`'s `<empty>`, `<onTimeout>` and duration literals, refinement types, `eq(…)` and other validators beyond `req` / `length` / `min` / `max` / a plain `pattern`, `<schema>`, `<formFor>` / `<tableFor>`, `navigate()` and `<outlet>`, `<channel>`, nested `<program>`, `^{}`, at-rule blocks (`@media`, …) inside `#{}`, `lin`, the `~` accumulator, `bind:value` to a number cell, and `auth=`. Two SPEC checks are not refusals yet, so the bootstrap silently accepts what they would refuse: a local shadowing a state name (`E-NAME-COLLIDES-STATE`), and the compile-time `rule=` check on an engine write. The README keeps the current list under [Using the bootstrap compiler](./README.md#using-the-bootstrap-compiler).
 
 ### Specified, not built by either compiler
 

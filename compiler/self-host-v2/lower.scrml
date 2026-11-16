@@ -42,7 +42,7 @@ ${
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact, ReqSig, reqSigIndex,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, MatchBlock, MatchBlockArm, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact, ReqSig, reqSigIndex,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
@@ -1870,6 +1870,7 @@ ${
             .MEach(bind: b, handles: hs) :> lowerElem(c, e)
             .MSlot :> lowerElem(c, e)
             .MDb :> lowerElem(c, e)
+            .MMatch(m: m) :> [matchView(c, m)]
             .MSchema :> []
             .MErrors(of: v, all: a) :> lowerElem(c, e)
             .MStateView(v: v) :> lowerElem(c, e)
@@ -2274,6 +2275,7 @@ ${
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
             .MDb :> lowerNodes(c, e.kids)       // s452: a `<db>` state block renders its children in place (§4)
+            .MMatch(m: m) :> condWrap(c, e, [matchView(c, m)])   // s478: §17.1.2 `<match if=…>` — no arm is dispatched while false
             .MSchema :> []                       // s478: a `<schema>` declares structure — nothing renders (§39.1)
             .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
@@ -2327,6 +2329,52 @@ ${
             arms = arms.concat([{ test: variantIs(c, read, v.enumSym, a.variant), body: lowerNodes(c, a.body) }])
         }
         return View.Cond(arms)
+    }
+
+    // s478 — a block-form `<match for=Type on=expr>` (SPEC §18.0.1): "It produces
+    // UI fragments based on the variant of an enum-typed reactive cell." The same
+    // View.Cond a `<*f/>` state view lowers to (stateView): one arm per `<match>`
+    // arm in source order, shown while the subject holds that variant (variantIs);
+    // the wildcard `<_>` is a `true` arm (the runtime's `cond` renders the FIRST arm
+    // whose test holds — analyze refused an arm after the wildcard, E-SYNTAX-010).
+    // A payload arm's binders ("`<Ready(rows)>` binds `rows` for that arm's body")
+    // are each the ROW of a one-row `<each>` over that payload field — the list
+    // `[field k]` while the subject holds the arm's variant, else `[]` — so a binder
+    // is a row cell: a new payload value of the same variant updates it in place,
+    // and a body never reads a binder of a variant the subject has left (the row
+    // is gone before it could). The arms mount inside a
+    // `<div data-scrml-match-mount>` (the mount the conformance cases observe).
+    fn matchView(c: LC, m: MatchBlock) -> View {
+        const read: Expr = lowerExpr(c, m.on)
+        let arms: CondArm[] = []
+        for (const a of m.arms) {
+            let test: Expr = Expr.Lit(Literal.Bool(true))
+            if (a.variant >= 0) test = variantIs(c, read, m.es, a.variant)
+            arms = arms.concat([{ test: test, body: matchArmViews(c, read, m.es, a) }])
+        }
+        return View.El("div", [Attr.Static("data-scrml-match-mount", "")], [View.Cond(arms)])
+    }
+
+    // The arm body inside one `<each>` per named binder, the first binder outermost.
+    fn matchArmViews(c: LC, read: Expr, es: Sym, a: MatchBlockArm) -> View[] {
+        let views: View[] = lowerNodes(c, a.elem.kids)
+        let k: int = a.elem.binds.length - 1
+        while (k >= 0) {
+            const b: ABind = a.elem.binds[k]
+            const s: Sym | not = letSym(bindFact(c.t.binds, b.nid))
+            if (s is given && b.name != "_" && a.variant >= 0) {
+                views = [View.Each(payloadField(read, es, a.variant, a.proj, k), s, not, [], views)]
+            }
+            k = k - 1
+        }
+        return views
+    }
+
+    // `[field k]` of the subject while it holds variant `idx`, else `[]`.
+    fn payloadField(read: Expr, es: Sym, idx: int, proj: Sym[], k: int) -> Expr {
+        const yes: MatchArm = { pat: Pattern.PVariant(es, idx, proj), body: Expr.ArrayOf([Expr.Local(proj[k])]) }
+        const no: MatchArm = { pat: Pattern.PWild, body: Expr.ArrayOf([]) }
+        return Expr.Match(read, [yes, no])
     }
 
     // s469 (g-bootstrap-rule-transition-into-payload-variant-s469): "the cell is
@@ -4532,8 +4580,8 @@ ${
         const consts: CoreConst[] = coreConsts(t)
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
         return { core: core, diags: tp.diags }
     }
 
