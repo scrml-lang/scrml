@@ -271,6 +271,7 @@ ${
             "E-LOOP-DO-WHILE-RETIRED" :> Severity.Error
             "E-LOOP-WHILE-RETIRED" :> Severity.Error
             "E-MARKUP-001" :> Severity.Error
+            "E-MARKUP-STATEMENT-NOT-RENDERED" :> Severity.Error
             "E-MATCH-012" :> Severity.Error
             "E-MATCH-ARM-MARKUP-IN-VALUE" :> Severity.Error
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
