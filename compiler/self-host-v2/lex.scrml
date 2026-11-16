@@ -540,7 +540,10 @@ ${
     fn munchQuestion(cur: Cursor) -> Scan {
         const c1: int = peekCode(cur, 1)
         if (c1 == 63) return op(cur, 2, TokenKind.NullishCoalesce)  // ??
-        if (c1 == 46) return op(cur, 2, TokenKind.OptionalChain)    // ?.
+        // s478: `?.` is optional chaining only when no digit follows (`c ?.5 : 1` is a conditional
+        // whose operand is `.5` — the ECMAScript OptionalChainingPunctuator rule, §7.2)
+        const c2: int = peekCode(cur, 2)
+        if (c1 == 46 && !(c2 >= 48 && c2 <= 57)) return op(cur, 2, TokenKind.OptionalChain)    // ?.
         return op(cur, 1, TokenKind.Question)                       // ?
     }
 

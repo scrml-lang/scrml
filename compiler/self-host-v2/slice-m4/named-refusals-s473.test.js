@@ -78,7 +78,9 @@ const CASES = [
   ["^{ } in logic", P(`    let <count:int=0/>\n    function bump() { ^{ emit("x"); } @count = @count + 1; }`), UNS],
   ["use foreign:", P(`    use foreign:ml { predict }`), UNS],
   ["use", `use scrml:ui\n<program>\n<main><p>x</p></main>\n</program>\n`, UNS],
-  ["?. optional chaining", P(`    type U:struct = { name: string }\n    let <u:U | not=not/>\n    function f() -> string { return @u?.name; }`), UNS],
+  // s478 (s478-boot-optional-chain): `?.` member reads are BUILT (§42.3.6); the optional CALL stays refused
+  // by name (parse.scrml optHop; this row re-labels it; a computed receiver: optional-chain-s478.test.js)
+  ["?.(…) optional call", P(`    let <n:int=0/>\n    function g() -> int { return 1; }\n    function f() { @n = g?.(); }`), UNS],
   ["word-form `or`", P(`    let <n:int=0/>\n    let <b:bool=false/>\n    function f() { @b = @n > 1 or @n < 0; }`), UNS],
   ["map literal [:]", P(`    let <m:[string: int]=[:]/>`), UNS],
   ["map type [K: V]", P(`    type T:struct = { m: [string: int] }`), UNS],
