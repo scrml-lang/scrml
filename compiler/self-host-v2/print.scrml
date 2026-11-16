@@ -412,6 +412,7 @@ ${
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
+            .BlockLambda(params: ps, body: b) :> JsExpr.JArrow(symNames(ctx, ps), blockJs(lambdaCtx(ctx, b), b))   // s478
             .SeqCall(op: o, seq: sq, f: f) :> seqCallJs(ctx, o, exprJs(ctx, sq), exprJs(ctx, f))
             .Refetch(req: rf0) :> refetchJs(ctx, rf0)
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
@@ -1803,6 +1804,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: x) :> not
             .Validity(of: x) :> not
@@ -1829,6 +1831,7 @@ ${
             .InitOf(decl: x) :> ownKids(Node.NExpr(e))
             .Host(call: x) :> ownKids(Node.NExpr(e))
             .Lambda(params: x) :> ownKids(Node.NExpr(e))
+            .BlockLambda(params: x) :> ownKids(Node.NExpr(e))
             .Refetch(req: x) :> ownKids(Node.NExpr(e))
             .Validity(of: x) :> ownKids(Node.NExpr(e))
             .ServerCall(fn: x) :> ownKids(Node.NExpr(e))
@@ -1894,6 +1897,7 @@ ${
     fn lambdaArity(e: Expr) -> int {
         return match e {
             .Lambda(params: ps) :> ps.length
+            .BlockLambda(params: ps) :> ps.length
             .Lit(lit: x) :> -1
             .Local(sym: x) :> -1
             .Read(place: x) :> -1
@@ -1934,6 +1938,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .Refetch(req: x) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
@@ -1965,6 +1970,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: x) :> not
             .Validity(of: x) :> not
@@ -2635,6 +2641,7 @@ ${
             .VariantOf(enumSym: x) :> 1
             .Host(call: x) :> 1
             .Lambda(params: x) :> 1
+            .BlockLambda(params: x) :> 1
             .SeqCall(op: x) :> 1
             .Refetch(req: rf0) :> 1
             .Validity(of: x) :> 1
@@ -3034,6 +3041,7 @@ ${
             .InitOf(decl: x) :> -1
             .Host(call: x) :> -1
             .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
             .SeqCall(op: x) :> -1
             .Refetch(req: rf0) :> -1
             .Validity(of: x) :> -1
@@ -3312,6 +3320,7 @@ ${
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .Lambda(params: x) :> []
+            .BlockLambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Refetch(req: rf0) :> []
             .Validity(of: x) :> []
@@ -3554,6 +3563,7 @@ ${
             .Assigned(local: x) :> []
             .Host(call: c) :> []
             .Lambda(params: ps) :> []
+            .BlockLambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Refetch(req: rf0) :> []
             .Validity(of: x) :> []
@@ -4203,6 +4213,14 @@ ${
     // stands at the top of a function body, so no row, loop or Tier-0 context
     // reaches it. Its shared-instance reads use the enclosing function's
     // prologue locals (sharedRefs walks into it).
+    // s478 (s478-boot-block-lambda) — the context a block lambda's body prints in: the
+    // enclosing one's names and bindings (it closes over them), but its Returns are plain
+    // `return`s of the lambda (never a waiting function's `ret$` continuation), and the
+    // locals it owns are its own.
+    fn lambdaCtx(ctx: Ctx, b: Block) -> Ctx {
+        return { p: ctx.p, pix: ctx.pix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns, owned: ownedLocals(b) }
+    }
+
     fn localFnJs(ctx: Ctx, f: Fn) -> JsStmt {
         const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared, rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: "", server: ctx.server, tier0: not, cycles: [], ns: ctx.ns, owned: ownedLocals(f.body) }
         let params: string[] = []
@@ -4356,6 +4374,7 @@ ${
             .InitOf(decl: x) :> false
             .Host(call: x) :> false
             .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Refetch(req: rf0) :> false
             .Validity(of: x) :> false
@@ -4610,6 +4629,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not
@@ -4730,6 +4750,7 @@ ${
             .InitOf(decl: x) :> not
             .Host(call: x) :> not
             .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Refetch(req: rf0) :> not
             .Validity(of: x) :> not

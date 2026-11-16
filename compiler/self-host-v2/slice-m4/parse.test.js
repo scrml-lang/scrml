@@ -112,8 +112,31 @@ describe("expressions: spread elements, index, arrow functions", () => {
     expect(exprOf("(a + 1);").k.variant).toBe("Binary");
   });
 
-  test("an arrow function with a braced body is reported, not guessed", () => {
-    expect(codes("${ function f() { const v = x => { return 1; } } }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s478 (s478-boot-block-lambda): §7.2 "All JavaScript that is valid in a Bun execution context is
+  // valid inside `${ }`, except the constructs §7.2.1 excludes" — a braced arrow body and a function
+  // expression are not excluded. Both parse to a BlockLambda (its body a statement block); analyze
+  // judges where one may stand.
+  test("an arrow function with a braced body is a BlockLambda (its body a statement block)", () => {
+    expect(codes("${ function f() { const v = x => { return 1; }; } }")).toEqual([]);
+    const e = exprOf("(a, b) => { const c = a; return c; };");
+    expect(e.k.variant).toBe("BlockLambda");
+    expect(e.k.data.params.map((p) => p.name)).toEqual(["a", "b"]);
+    expect(e.k.data.params.map((p) => p.ty ?? null)).toEqual([null, null]);
+    expect(e.k.data.body.stmts.map((s) => s.k.variant)).toEqual(["Local", "Return"]);
+    expect(e.k.data.viaFunction).toBe(false);
+  });
+
+  test("`function (v: int) { … }` where a value stands is a BlockLambda written as a function expression", () => {
+    const e = exprOf("function (v: int) { return v; };");
+    expect(e.k.variant).toBe("BlockLambda");
+    expect(e.k.data.viaFunction).toBe(true);
+    expect(e.k.data.params.map((p) => [p.name, p.ty.k.data.name])).toEqual([["v", "int"]]);
+    expect(codes("${ function f() { const v = function (v: int) { return v; }; } }")).toEqual([]);
+  });
+
+  test("a function expression's name or return annotation is refused by name (INTERIM), the body still read", () => {
+    expect(codes("${ function f() { const v = function g(v: int) { return v; }; } }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes("${ function f() { const v = function (v: int) -> int { return v; }; } }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
 

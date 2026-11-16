@@ -160,12 +160,9 @@ ${
             rowOn("map literal [k: v]", "§59", U, ["[", "$s|$n", ":"], [], false, "maps (§59, O44) are not in the bootstrap"),
             rowOn("fn(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", ["fn", "(", "...", ")", "=>"], [], false, "an anonymous `fn` takes a block body, `fn(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
             rowOn("anonymous fn expression", "§48.2.1", U, ["fn", "("], [], false, "declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
-            // s478-boot-semicolon-residue: `function (…) { … }` as a VALUE (§7.2: logic is
-            // JavaScript; §5.4 / §6.7 name "a function expression" as a value). The bootstrap
-            // reads `function` there as a name and the `{ … }` as an object literal (a cascade).
-            // A nested DECLARATION `function name(…) { … }` (§7.3.1) never matches: a name stands
-            // between `function` and `(`.
-            rowOn("function expression", "§7.2", U, ["function", "(", "...", ")", "{"], [], false, "declare a named function (`function name(…) { … }`, §7.3.1) and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
+            // s478-boot-block-lambda: a function EXPRESSION `function (…) { … }` is BUILT
+            // (parse.scrml parseFnExpr, §7.2) — the s478-boot-semicolon-residue row that refused
+            // it here is retired.
             rowG("audit @log", "§51.11", U, ["audit", "@"], "lead", ""),
             rowOn("replay()", "§51.14", U, ["replay", "("], ["E-SCOPE-001"], true, ""),
             rowOn("transition()", "§14.12.6.3", U, ["transition", "("], ["E-SCOPE-001"], true, "the bootstrap builds only the presence lifecycle `(not to T)` on a program cell (§14.12.3), which a discrimination transitions — there is no variant lifecycle for `transition()` to advance yet"),

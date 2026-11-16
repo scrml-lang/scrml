@@ -79,6 +79,13 @@ ${
         Spread(e: AExpr),
         Index(obj: AExpr, idx: AExpr),
         Lambda(params: string[], body: AExpr),
+        // s478 (s478-boot-block-lambda) — a BLOCK-bodied arrow `(a, b) => { … }`, or a
+        // function expression `function (a, b) { … }` (`viaFunction`): §7.2 "All
+        // JavaScript that is valid in a Bun execution context is valid inside `${ }`,
+        // except the constructs §7.2.1 excludes" — neither is excluded. The body's
+        // `return`s are the function's own. Where one may stand, and what its body may
+        // hold, is analyze's (resolveLambda).
+        BlockLambda(params: string[], body: ABlock, viaFunction: boolean),
         // s451 (U1a) — a `?{ `…` }` SQL context (§8.1, §44.8), its call chain
         // absorbed (ASql). Placement, the database, the failable rule and the
         // query's facts are analyze's.
@@ -642,6 +649,7 @@ ${
             .Spread(e: s) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .BlockLambda(params: ps) :> false
             .Handled(h: h) :> false
         }
     }
@@ -690,6 +698,7 @@ ${
             .Spread(e: x) :> hv(-1, "")
             .Index(obj: x) :> hv(-1, "")
             .Lambda(params: ps) :> hv(-1, "")
+            .BlockLambda(params: ps) :> hv(-1, "")
             .Sql(q: q) :> hv(-1, "")
             .Handled(h: x) :> hv(-1, "")
             .Template(quasis: qs) :> hv(-1, "")
