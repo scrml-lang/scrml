@@ -25,8 +25,10 @@ const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\
 // inside markup, as here, is E-STRUCTURAL-ELEMENT-MISPLACED (§4.15) — still never an HTML element.
 // s478: `onIdle` left it — `<onIdle>` at an engine's root is built (durations-s478.test.js); in
 // markup, as here, it is E-IDLE-MISPLACED (§51.0.R, §4.15 "the element's specific misplacement code").
+// s478: `schema` left it — `<schema>` (§39) is read (schema-s478.test.js); in markup, as here, it
+// is E-SCHEMA-003 (§39.3) — still never an HTML element.
 const STRUCTURAL = [
-  "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
+  "poll", "timer", "timeout", "machine", "errorBoundary", "channel", "onchange", "auth",
   "engine", "onTransition", "onTimeout", "match", "empty", "render", "outlet", "column",
   "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
