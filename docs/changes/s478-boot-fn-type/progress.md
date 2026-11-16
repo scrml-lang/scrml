@@ -61,3 +61,21 @@ Scratch: `~/.cache/scrml/review/s478-boot-fn-type/`.
   severity.scrml current (no new code).
 - Gaps: g-bootstrap-function-values-slice-s451 PARTLY BUILT note; residue + 6 owner questions
   `g-boot-fn-values-residue-s478`.
+
+## Fix round 1 (#1929 review)
+
+- H1 (HIGH): a function value inherited a rebound `let` local's narrowing (`x = not; f()` read
+  `null`). typeLambda / typeBlockLambda now take tFnValueEnv (= tDeferEnv's rule) for a function
+  VALUE: only a never-rebound local (parameter, `const`, unassigned `let`) keeps its narrowing;
+  §42.3.5 "Captured LOCALS keep their narrowing unless written (by the closure or after)". A
+  parameter cannot be rebound (E-ASSIGN-CONST). Tape callbacks unchanged. Tests: 3 new in
+  fn-type-s478 (H1 probes → E-OPERAND-NOT-NARROWED / E-TYPE-046; parameter E-ASSIGN-CONST; const /
+  param / unassigned-let / tape-callback narrowing still run, happy-dom). 41/41; the H1 test is red
+  without the fix.
+- L1 (refinement erased in a function value's type), L2 (no `() => void` arrow form): named in
+  g-boot-fn-values-residue-s478. L3 (pure `fn` returns an impure value): added to owner question 2.
+  L4 (E-TYPE-031 argument wording, pre-existing shared text): left.
+- Conformance vs 46196f62c: PASS 589 → 592, FAIL 17, CRASH 0, PASS→FAIL 0. Corpus (2861 files):
+  newly rejecting 0 vs base and vs the pre-fix head; 105 clean files byte-identical.
+- Gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor,
+  gen-md-shim — green.

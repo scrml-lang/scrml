@@ -31683,7 +31683,7 @@ ${
         const vf: ValueFact | not = valueFact(env.t.values, e.nid)
         const ft: Type | not = lambdaFnTy(vf)
         let env2: TEnv = env
-        if (ft is given) env2 = tDropCellNarrowing(env, false)
+        if (ft is given) env2 = tFnValueEnv(env)
         for (const s of lambdaSyms(vf)) {
             const a: Type | not = annotOf(env.t, s)
             let vt: VType = VType.Unknown
@@ -31715,7 +31715,7 @@ ${
             const parts: FnTypeParts | not = fnTypeOf(ft)
             let rt: Type | not = not
             if (parts is given) rt = parts.ret
-            env2 = withRet(tDropCellNarrowing(env, false), rt)
+            env2 = withRet(tFnValueEnv(env), rt)
         }
         for (const s of lambdaSyms(vf)) {
             const a: Type | not = annotOf(env.t, s)
@@ -31726,6 +31726,21 @@ ${
         const ts2: TypeState = typeBlock(env2, body, ts)
         if (ft is given) return rvt(known(ft), ts2)
         return rvt(VType.Unknown, ts2)
+    }
+
+    // s478 (s478-boot-fn-type, #1929 review H1) — the narrowing a function VALUE's body
+    // inherits. §42.3.5: "A lambda / function expression created inside a narrowed scope does
+    // NOT inherit the narrowing of reactive cells — it re-tests … Captured LOCALS keep their
+    // narrowing unless written (by the closure or after)." A function value runs AFTER later
+    // statements of its creator (`x = not; f()`, or returned out of it), so "written after" is
+    // any write of the local at all — a deferred body's rule (tDeferEnv): only a local that is
+    // never rebound (a parameter, a `const`, a `let` with no assignment anywhere) keeps its
+    // narrowing; a rebound local's, a place under a local, and every cell's are dropped. A
+    // synchronous tape callback (`.map` / `.filter`, no fnTy — the §42.3.5 exempt list) is not
+    // a function value and keeps tDropCellNarrowing's rule. Fail closed: a dropped narrowing
+    // makes a read in the body unproven, never silently `T`.
+    fn tFnValueEnv(env: TEnv) -> TEnv {
+        return tDeferEnv(env)
     }
 
     fn lambdaFnTy(f: ValueFact | not) -> Type | not {

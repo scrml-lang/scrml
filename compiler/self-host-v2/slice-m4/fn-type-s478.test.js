@@ -245,6 +245,45 @@ describe("§6.7.4 rule 4 / §42.3.5 — what a call through a value may do is no
 `;
     expect(codes(src)).toEqual(["E-OPERAND-NOT-NARROWED", "E-OPERAND-NOT-NARROWED"]);
   });
+  // #1929 review H1 — §42.3.5: "Captured LOCALS keep their narrowing unless written (by the closure
+  // or after)." A function value runs after later statements of its creator, so a rebound `let`
+  // local's narrowing ends at the value's creation (it read `null` at run time before this fix).
+  test("NEGATIVE (H1): a function value does not inherit a rebound `let` local's narrowing", () => {
+    const AP = APPLY;
+    for (const [fns, code] of [
+      [`    function go() { let x: int | not = 3; if (x is given) { const f: () => int = () => x + 1; x = not; @out = f(); } }`, "E-OPERAND-NOT-NARROWED"],
+      [`${AP}\n    function go() { let x: int | not = 3; if (x is given) { const f: (y: int) => int = (y: int) => x * y; x = not; @out = apply(f, 2); } }`, "E-OPERAND-NOT-NARROWED"],
+      [`${AP}\n    function go() { let x: int | not = 3; if (x is given) { let g: (y: int) => int = (y: int) => y; g = (y) => x * y; x = not; @out = apply(g, 2); } }`, "E-OPERAND-NOT-NARROWED"],
+      [`    function go() { let x: string | not = "ab"; if (x is given) { const f: () => int = () => { const k: int = x.length; return k; }; x = not; @out = f(); } }`, "E-TYPE-046"],
+      [`    function go() { let x: string | not = "a"; if (x is given) { const f: () => int = () => x.length; x = not; @out = f(); } }`, "E-TYPE-046"],
+      [`    function mk(p: int | not) -> () => int { let x: int | not = p; if (x is given) { const f: () => int = () => x + 1; x = not; return f; } return () => 0; }\n    function go() { const f = mk(4); @out = f(); }`, "E-OPERAND-NOT-NARROWED"],
+      [`    function k(p: int | not) -> int { let x: int | not = p; if (x is given) { const f: () => int = () => x * 2; x = not; return f(); } return 0; }\n    function go() { @out = k(4); }`, "E-OPERAND-NOT-NARROWED"],
+    ]) {
+      expect(codes(P(fns))).toContain(code);
+    }
+  });
+  test("a parameter cannot be rebound (E-ASSIGN-CONST), so its narrowing reaches a function value", () => {
+    expect(codes(P(`    function k(p: int | not) -> int { if (p is given) { const f: () => int = () => p * 2; p = not; return f(); } return 0; }\n    function go() { @out = k(4); }`))).toContain("E-ASSIGN-CONST");
+  });
+  test("a `const` local's / a parameter's / a never-rebound `let`'s narrowing still reaches a function value; a tape callback keeps a local's", async () => {
+    await run(P(`    function k(p: int | not) -> int { if (p is given) { const f: () => int = () => p * 2; return f(); } return 0; }
+    function go() {
+        const x: int | not = 3;
+        let y: int | not = 5;
+        let z: int | not = 7;
+        const s: string | not = "ab";
+        if (x is given && y is given && z is given && s is given) {
+            const f: () => int = () => x + y;
+            const g: () => int = () => { const n: int = s.length; return n; };
+            const t: int[] = [1, 2];
+            const u: int[] = t.map((v) => v + z);
+            z = not;
+            @out = f() + g() + k(4) + u[1];
+        }
+    }`));
+    click($("#b"));
+    expect($("#o").textContent).toBe("27");
+  });
 });
 
 describe("never silently accepted — where a function value may not stand (§14.3 R2′)", () => {
