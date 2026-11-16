@@ -1054,6 +1054,8 @@ ${
             if (nodeIsSql(n)) out = out.concat(["C-S2: a `?{}` query in client code (" + where + ") — a query stands only in a server function"])
             // s477 (C-F1): a foreign slice runs server-side only (§23.2.4: "the opaque slice is emitted server-side ONLY")
             if (nodeForeign(n) is given) out = out.concat(["C-F1: a foreign slice in client code (" + where + ") — a foreign slice stands only in a server-side body"])
+            // s478 (C-P1): a Print writes host stdout, "a server-only resource" (§20.7.3)
+            if (nodeIsPrint(n)) out = out.concat(["C-P1: a `print` / `println` in client code (" + where + ") — host stdout is a server-only resource (§20.7.3); a Print stands only in a server-side body"])
             // (s454: C-S3's plain-call rule is checkClientCalls' — a Fn only client
             // code reaches; a declaration's own nodes are client code by construction)
             const callee: Sym | not = nodeCallee(n)
@@ -1212,6 +1214,23 @@ ${
             .NEdit(k: x) :> not
             .NView(v: x) :> not
             .NAttr(a: x) :> not
+        }
+    }
+
+    // s478 (C-P1) — a `print` / `println` write (Prim Print).
+    fn nodeIsPrint(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprIsPrint(e)
+            // no-default-arm: one question of the node — is it an expression that writes stdout
+            _ :> false
+        }
+    }
+
+    fn exprIsPrint(e: Expr) -> boolean {
+        return match e {
+            .Prim(op: o) :> o == PrimOp.Print
+            // no-default-arm: one question of the expression — is it a Print
+            _ :> false
         }
     }
 
