@@ -819,6 +819,14 @@ ${
 
     fn noProj() -> SqlProj { return { ok: false, table: "", star: false, cols: [] } }
 
+    // s478-boot-sql-row-types fix r1 (#1915 review L1) — a BARE `current_timestamp` /
+    // `current_date` / `current_time` item is the SQLite keyword (the current date / time as
+    // TEXT), never a column of that name, so it is not the column's value: fail closed (the
+    // query stays untyped). (`t.current_timestamp` names the column, and stays typed.)
+    fn isTimeKeyword(w: string) -> boolean {
+        return w == "CURRENT_TIMESTAMP" || w == "CURRENT_DATE" || w == "CURRENT_TIME"
+    }
+
     export fn rowProjection(chunks: string[]) -> SqlProj {
         const sc: SScan = scanSql(chunks)
         const ts: STok[] = sc.toks
@@ -864,7 +872,7 @@ ${
                     star = true
                 } else if (n == 3 && isWord(item[0]) && item[0].text == table && isP(item[1], ".") && isP(item[2], "*")) {
                     star = true
-                } else if (n == 1 && isWord(item[0]) && !isClauseWord(item[0].w)) {
+                } else if (n == 1 && isWord(item[0]) && !isClauseWord(item[0].w) && !isTimeKeyword(item[0].w)) {
                     cols = cols.concat([item[0].text])
                 } else if (n == 3 && isWord(item[0]) && item[0].text == table && isP(item[1], ".") && isWord(item[2])) {
                     cols = cols.concat([item[2].text])

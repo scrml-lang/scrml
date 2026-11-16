@@ -36,3 +36,25 @@ bootstrap (§39.11, §14.8).
   loses one E-BOOTSTRAP-UNSUPPORTED.
 - CI checks: types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim,
   lint-no-default-arm — all exit 0 after the pin updates.
+
+## Fix round 1 (#1915 review — H1, H2, H3, L1, M1)
+
+- H1 `analyze.scrml` typeMember: E-TYPE-046's "proven" now requires the narrowed receiver to BE the
+  field's owner struct (`knownOf(ro.vt)` is `Named(owner)`); a LOCAL receiver is judged on every
+  struct-field read (a rebinding can widen its typer type away from the binder's).
+- H2 `analyze.scrml` resolveHandled (binder, `sqlArmsAdmitted`): a handled `?{}` is its row type only
+  when every arm is `not` (`.get()`), `[]` (`.all()` / bare) or leaves; else untyped. Typer
+  `sqlArmsCheck` (typeLocal, unannotated local): an arm yielding other than the success type is
+  E-TYPE-031 (§19.8.3 item 1 + S475 amendment "E-TYPE-001 / E-TYPE-031 at the position").
+- H3 `analyze.scrml` resolveLocal (`sqlInitRow`): an unannotated `let` from a row-typed `?{}` records
+  the row type as its annotation — every rebinding is checked (E-TYPE-031), object literals field
+  by field.
+- L1 `sql.scrml` rowProjection: a bare `current_timestamp` / `current_date` / `current_time` item
+  fails closed (the SQLite keyword, not the column); `t.current_timestamp` stays typed.
+- M1 known-gaps g-boot-sql-row-field-types-owner-s478: the trust assumption (no DDL, non-STRICT
+  affinity) added to the text.
+- Tests: `slice-m4/sql-row-types-s478.test.js` 42 pass (21 new: H1/H2/H3/L1 compile tests, the
+  review's runtime repros refused, 4 runtime tests incl. a failing-query database).
+- Conformance 539/11/683/0 CRASH — identical buckets to base; 1 more code inside UNSUPPORTED
+  (`server-db/sql-hoisted-loop-unbindable-key-rt`: `.get() !{ … :> "QF", _ :> "other" }` into an
+  undeclared const — E-TYPE-031 per §19.8.3 S475). Corpus (3157 files): 0 newly rejecting vs base.

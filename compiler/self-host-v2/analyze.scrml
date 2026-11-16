@@ -16780,6 +16780,14 @@ ${
         // of `?` / `!{}` on success, as a declared `-> T` is for any other callee
         let sty: Type | not = rs.x.ty
         if (sty is not && f is given) sty = armWant(env.g, f, not)
+        // s478-boot-sql-row-types fix r1 (#1915 review H2) — a handled `?{}` is its row type only
+        // when every arm yields a value of the success type or leaves. §19.8.3 item 1: "For a `?{}`
+        // the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not`
+        // yields a value; `.all()` yields `Row[]`, so `_ :> []` does." The binder reads the arms
+        // syntactically (sqlArmsAdmitted); any other arm leaves the value untyped here (fail closed:
+        // a member read of it is refused by name), and the typer reports the arm (typeLocal,
+        // sqlArmsCheck — E-TYPE-031) where the position has no declared type.
+        if (sqlOfK(subj.k) is given && sty is given && !isMatchHow(how) && !sqlArmsAdmitted(handledArms(h), sty)) sty = not
         return match how {
             .Propagate :> plain(sty, propagate(env, e, subj, failable, err, stmt, st))
             .Guard(arms: arms) :> plain(sty, guarded(env, e, subj, arms, failable, err, false, stmt, armWant(env.g, f, expected), st))
@@ -16813,6 +16821,27 @@ ${
         if (r is given) return r
         if (!f.failable) return not
         return succOf(g, f)
+    }
+
+    // s478-boot-sql-row-types fix r1 (H2) — every arm of a `!{}` on a row-typed `?{}` is, as
+    // written, `not` (the success type `Row | not`), `[]` (a `Row[]`), or a block that leaves on
+    // every path (§19.8.3 item 2). An arm the binder cannot read as one of these — any other
+    // value, a `lift`ed block — is not admitted here.
+    fn sqlArmsAdmitted(arms: AArm[], rt: Type) -> boolean {
+        for (const a of arms) {
+            const one: AExpr | not = plainOneExpr(a.body)
+            let ok = false
+            if (one is given) {
+                if (isNotLit(one) && maybeInner(rt) is given) ok = true
+                if (isEmptyTapeLit(one) && seqElem(rt) is given) ok = true
+            } else {
+                for (const b of armBlockOf(a.body)) {
+                    if (blockDiverges(b)) ok = true
+                }
+            }
+            if (!ok) return false
+        }
+        return true
     }
 
     fn isMatchHow(h: AHow) -> boolean {
@@ -19987,8 +20016,33 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
+        // s478-boot-sql-row-types fix r1 (#1915 review H3) — an unannotated `let` initialized from
+        // a row-typed `?{}` takes that row type as its DECLARED type: every rebinding is checked
+        // against it as an annotation's is (typeAssign — §66.1 rule 5: "every cell and field write
+        // is type-checked against the target's declared type"), so `b = 5`, `b = { id: "1", body: 5 }`
+        // or `b = a` of another row struct is E-TYPE-031 (§14.8.1: "The generated types are
+        // **nominal**"). Scoped to `?{}` initializers: an unannotated `let` is otherwise still
+        // the join of what it is given (§42.3.1).
+        const srt: Type | not = sqlInitRow(env, init)
+        if (annot is not && mutable && srt is given && ri.x.ty is given) st = addAnnot(st, rs.s, srt)
         const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "", foreign: fi is given && annot is not }
         return { env: withLocal(env, l), st: st }
+    }
+
+    // s478-boot-sql-row-types fix r1 (H3) — the row type of a `?{}` initializer (bare, or under a
+    // `!{}` / `?`), else not.
+    fn sqlInitRow(env: Env, init: AExpr) -> Type | not {
+        if (sqlOfK(init.k) is given) return rowOfSite(env.g.rows, init.nid)
+        const k: AExprK = init.k
+        const h: AHandled | not = match k {
+            .Handled(h: x) :> x
+            // no-default-arm: one question of the expression — is it a handling form
+            _ :> not
+        }
+        if (h is not) return not
+        if (sqlOfK(h.subject.k) is not) return not
+        if (isMatchHow(h.how)) return not
+        return rowOfSite(env.g.rows, h.subject.nid)
     }
 
     fn resolveIf(env: Env, c: AExpr, t: ABlock, el: ABlock | not, st0: AS) -> AS {
@@ -30728,22 +30782,51 @@ ${
         // `T | not` local (resolveMember); here the read is judged against the narrowing in force.
         // The receiver must be PROVEN `T` (a narrowed `Known`); anything else — still `T | not`,
         // or a type the typer could not prove — is E-TYPE-046 (fail closed).
+        // s478-boot-sql-row-types fix r1 (#1915 review H1): PROVEN means the narrowed receiver IS
+        // the field's owner struct (`Type.Named(owner)`) — not merely "cannot be `not`". The binder
+        // took the field from the local's type where it was declared; a rebinding (`b = 5`, `b = m`
+        // of another struct, `b = a` of a narrower projection) or a `!{}` arm of another type leaves
+        // a typer type that is not the owner, and reading the owner's field off it would read a
+        // field that is not there. A LOCAL receiver is judged on every struct-field read (its typer
+        // type may have been widened away from the binder's by a rebinding); any other receiver
+        // only when its type admits `not` (as before).
         const ut: Type | not = knownOf(nameType(env, nameFact(env.t.names, obj.nid)))
-        if (isStructField(f) && ut is given && maybeInner(ut) is given) {
+        const fo: Sym | not = structOwnerOf(f)
+        // (a bare local NAME — `b.f`; the `@.` of an `<each>` is the row the list renders, typed by
+        // its list, and stays judged as before)
+        const localRecv: boolean = exprName(obj) != "" && isLocalFact(nameFact(env.t.names, obj.nid))
+        if (fo is given && (localRecv || (ut is given && maybeInner(ut) is given))) {
             const nt: Type | not = knownOf(ro.vt)
             let proven = false
-            if (nt is given) proven = maybeInner(nt) is not
+            if (nt is given) {
+                const ns: Sym | not = namedOf(nt)
+                if (ns is given) proven = ns.id == fo.id
+            }
             if (!proven && !hasErrIn(env.blame.spans, e.span)) {
-                return rvt(VType.Unknown, report(ro.ts, env, e.span, "E-TYPE-046", "`" + exprLabel(obj) + "` may be `not` here (its type is `" + typeName(ut) + "`), so its field `" + memberNameOf(e) + "` cannot be read — narrow it first: `if (" + exprLabel(obj) + " is not) return …;`, `" + exprLabel(obj) + " is not ? … : " + exprLabel(obj) + "." + memberNameOf(e) + "`, or `match` (§42.3.5)"))
+                let shown: string = "not proven"
+                if (ut is given) shown = "`" + typeName(ut) + "`"
+                let why: string = "may be `not` here (its type is " + shown + ")"
+                if (nt is given && maybeInner(nt) is not) why = "is not proven to be `" + fo.hint + "` here (its type is `" + typeName(nt) + "`)"
+                if (nt is not && (ut is not || maybeInner(ut) is not)) why = "is not proven to be `" + fo.hint + "` here (its type is " + shown + " — a rebinding or a handler arm of another type widened it)"
+                return rvt(VType.Unknown, report(ro.ts, env, e.span, "E-TYPE-046", "`" + exprLabel(obj) + "` " + why + ", so its field `" + memberNameOf(e) + "` cannot be read — narrow it first: `if (" + exprLabel(obj) + " is not) return …;`, `" + exprLabel(obj) + " is not ? … : " + exprLabel(obj) + "." + memberNameOf(e) + "`, or `match` (§42.3.5)"))
             }
         }
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
 
-    fn isStructField(f: NameFact | not) -> boolean {
+    // The owner struct of a struct field read (NStruct), else not.
+    fn structOwnerOf(f: NameFact | not) -> Sym | not {
         return match f {
-            .NStruct(owner: o, idx: x) :> true
-            // no-default-arm: one question of the fact — is it a struct field read
+            .NStruct(owner: o, idx: x) :> o
+            // no-default-arm: one question of the fact — the struct a field read reads from
+            _ :> not
+        }
+    }
+
+    fn isLocalFact(f: NameFact | not) -> boolean {
+        return match f {
+            .NLocal(sym: s) :> true
+            // no-default-arm: one question of the fact — is it a local read
             _ :> false
         }
     }
@@ -32887,7 +32970,51 @@ ${
             ts2 = boundValue(env, init, annot, "`" + name + "`", checkNotElems(env, init, annot, checkLitFields(env, init, ts2)))
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
-        return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
+        return keepTEnv(tWithLocal(env, sym, r.vt), contribute(sqlArmsCheck(env, init, r.ts), sym, r.vt))
+    }
+
+    // s478-boot-sql-row-types fix r1 (#1915 review H2) — a `!{}` on a row-typed `?{}` whose value
+    // lands in a position with no declared type (an unannotated local): §19.8.3 item 1 (S475) —
+    // each arm yields "the call's success type where the position has none", and "For a `?{}`
+    // the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not`
+    // yields a value; `.all()` yields `Row[]`, so `_ :> []` does." An arm that yields anything
+    // else is E-TYPE-031 ("An arm that yields a value of the WRONG type is not E-ERROR-012: it is
+    // the existing type error"). Admitted: `not` into `Row | not`, `[]` into `Row[]`, a value
+    // of the same row type, and an arm that leaves (it yields no value). An arm whose value the
+    // typer cannot prove is refused too (fail closed).
+    fn sqlArmsCheck(env: TEnv, init: AExpr, ts0: TypeState) -> TypeState {
+        const k: AExprK = init.k
+        const h: AHandled | not = match k {
+            .Handled(h: x) :> x
+            // no-default-arm: one question of the expression — is it a handling form
+            _ :> not
+        }
+        if (h is not) return ts0
+        if (isMatchHow(h.how)) return ts0
+        const subj: AExpr = h.subject
+        if (sqlOfK(subj.k) is not) return ts0
+        const rt: Type | not = rowOfSite(env.t.rows, subj.nid)
+        if (rt is not) return ts0
+        let ts: TypeState = ts0
+        for (const a of handledArms(h)) {
+            const one: AExpr | not = plainOneExpr(a.body)
+            for (const av of armValues(ts, a.body, one, a.lifted)) {
+                let ok = false
+                if (isAbsentVT(av) && maybeInner(rt) is given) ok = true
+                if (isEmptyTapeLit(one) && seqElem(rt) is given) ok = true
+                const at: Type | not = knownOf(av)
+                if (at is given) {
+                    if (fitsType(at, rt) == Verdict.Fits) ok = true
+                }
+                if (!ok) {
+                    let shown: string = "a value the compiler cannot type"
+                    if (at is given) shown = shownT(env, at)
+                    if (isAbsentVT(av)) shown = "`not`"
+                    ts = report(ts, env, a.span, "E-TYPE-031", "this arm of the handler on the `?{}` query yields " + shown + ", but the handled value lands where no type is declared, so each arm must yield the query's success type " + shownT(env, rt) + " or leave (`return` / `fail`) — §19.8.3 item 1: \"For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not` yields a value; `.all()` yields `Row[]`, so `_ :> []` does\". Yield that, leave, or declare the local's type")
+                }
+            }
+        }
+        return ts
     }
 
     // s478 — the refinement standing at the top of a `const` local's written type
