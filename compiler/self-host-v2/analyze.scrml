@@ -48,7 +48,7 @@ ${
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool, CoreEndpoint, CoreEpArm,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, Diag, ASql, ASqlMode,
@@ -550,9 +550,9 @@ ${
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
     // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[] }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [], tool: not, endpoints: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -9989,6 +9989,315 @@ ${
         return out
     }
 
+    // =========================================================================
+    // s478 (s478-boot-syntax-batch) — THE `transaction { … }` BLOCK (§19.10.2): where it may
+    // stand (§19.10.4). The block itself is an `if` whose test is the literal `true`
+    // (IfForm.Transaction, parse.scrml); its commit-or-rollback is the printer's (Core If `tx`,
+    // print.scrml txBlockJs). This pass judges every function body (g.fns) — a nested
+    // function's, a lambda's and an effect's body each as its own, never as the `!` function's
+    // (§19.10.4: "A `fail` or `?` inside a function declared within the block returns from that
+    // function, not from the block, and does not roll the block back"):
+    //  - "`transaction { }` SHALL be valid only inside `!` functions. A `transaction` block
+    //    outside a `!` function — in a function not declared `!`, or at the top level of a `${}`
+    //    logic block, outside any function (S453) — SHALL be a compile error (E-ERROR-001
+    //    applies -- `fail` inside the transaction requires `!`)". (The top level — a block in no
+    //    function body — is the parser's: parse.scrml parseStmt.)
+    //  - "A `transaction` inside another `transaction` SHALL be a compile error: E-ERROR-007 --
+    //    `Nested 'transaction' blocks are not supported yet. Move the inner block into a function
+    //    the outer block calls (it runs as a savepoint), or use '?{SAVEPOINT name}' …
+    //    '?{RELEASE name}' inside the block.`"
+    //  - "Inside a `transaction` block in a function, a `fail` or `?` within an arm of a
+    //    statement-position `match` — at any depth in the block, including inside a loop or
+    //    `if` — SHALL be a compile error: E-TRANSACTION-CONTROL-FLOW."; "Conversely, a
+    //    `transaction` block placed inside an arm of a statement-position `match` in a function
+    //    (at any depth within the arm) SHALL also be E-TRANSACTION-CONTROL-FLOW".
+    //  - "Inside a function, a `return`, or a `break` / `continue` whose target is outside the
+    //    `transaction` block, written inside an arm of a `match` — statement- OR
+    //    expression-position, at any depth within the arm — SHALL be a compile error:
+    //    E-TRANSACTION-CONTROL-FLOW." "An exit whose target is inside the arm (a `break` of a
+    //    loop declared there) never crosses the arm boundary and is unaffected."
+    // (The bootstrap lowers a statement `match` inline — an if chain, lower.scrml — so the
+    // impl#1 IIFE defect these limbs guard against does not arise here; they are the SPEC's
+    // SHALLs and are enforced as written. The `yield` and `navigate()` limbs need no check yet:
+    // the bootstrap builds neither — `yield` is a reserved word, `navigate(…)` a named refusal —
+    // so a block holding one is already refused. Whoever builds them owes this pass their limb.)
+    //
+    // `fx`: the body's function is declared `!`. `tx`: inside a transaction block of this body.
+    // `loops`: the labels of the loops entered since the innermost transaction block opened
+    // ("" for an unlabeled one — a `break` / `continue` with no label targets the innermost).
+    // `stmtArm`: inside an arm of a statement-position `match` of this body. `stmtArmTx` /
+    // `armTx`: inside such an arm (any `match` arm, for `armTx`) that is itself inside the
+    // transaction block.
+    type TxCx:struct = { file: string, fname: string, fx: boolean, tx: boolean, loops: string[], stmtArm: boolean, stmtArmTx: boolean, armTx: boolean }
+
+    fn txRulesPass(g: Globals) -> Diag[] {
+        let out: Diag[] = []
+        for (const fs of g.fns) {
+            const cx: TxCx = { file: fs.info.file, fname: fs.info.name, fx: fs.info.failable, tx: false, loops: [], stmtArm: false, stmtArmTx: false, armTx: false }
+            out = out.concat(txBlock(cx, fs.f.body))
+        }
+        return out
+    }
+
+    // a body of its own (a nested function, a lambda, an effect): not `!`, in no block
+    fn txOwnBody(cx: TxCx, name: string) -> TxCx {
+        return { file: cx.file, fname: name, fx: false, tx: false, loops: [], stmtArm: false, stmtArmTx: false, armTx: false }
+    }
+
+    fn txBlock(cx: TxCx, b: ABlock) -> Diag[] {
+        let out: Diag[] = []
+        for (const s of b.stmts) { out = out.concat(txStmt(cx, s)) }
+        return out
+    }
+
+    fn txMaybe(cx: TxCx, b: ABlock | not) -> Diag[] {
+        if (b is not) return []
+        return txBlock(cx, b)
+    }
+
+    fn txExprs(cx: TxCx, es: AExpr[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const e of es) { out = out.concat(txExpr(cx, e)) }
+        return out
+    }
+
+    fn txFlow(cx: TxCx, span: ASpan, what: string) -> Diag {
+        return mkDiag(cx.file, span, "E-TRANSACTION-CONTROL-FLOW", what + " in '" + cx.fname + "' (§19.10.4) — move it out of the arm: let the `match` pick a VALUE and act after it, or use an `if` / `else if` chain")
+    }
+
+    fn txStmt(cx: TxCx, s: AStmt) -> Diag[] {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: t, elseB: e, form: fm) :> txIf(cx, c, t, e, fm)
+            .Eval(e: e) :> txEval(cx, e)
+            .Local(name: n, init: i) :> txExpr(cx, i)
+            .Return(e: e) :> txReturn(cx, s, e)
+            .Given(name: n, subject: x, body: b) :> txExpr(cx, x).concat(txBlock(cx, b))
+            .For(f: lf) :> txExprs(cx, forHeadExprs(lf)).concat(txBlock(cx, forInitBlock(lf))).concat(txBlock(txLoop(cx, lf.label), lf.body))
+            .Break(label: l) :> txJump(cx, s, l, "break")
+            .Continue(label: l) :> txJump(cx, s, l, "continue")
+            .Lift(what: w) :> txExprs(cx, liftExprs(w))
+            .LocalFn(f: f) :> txBlock(txOwnBody(cx, f.name), f.body)
+            .EffectStmt(w: w) :> txBlock(txOwnBody(cx, cx.fname), w.body)
+            .Defer(body: b) :> txBlock(cx, b)
+            .Fail(f: f) :> txFail(cx, s, f)
+        }
+    }
+
+    fn txLoop(cx: TxCx, label: string) -> TxCx {
+        if (!cx.tx) return cx
+        return { file: cx.file, fname: cx.fname, fx: cx.fx, tx: cx.tx, loops: cx.loops.concat([label]), stmtArm: cx.stmtArm, stmtArmTx: cx.stmtArmTx, armTx: cx.armTx }
+    }
+
+    // s478: a bare block and a transaction block always run their statements (their test is the
+    // literal `true`) — a path through one leaves when its statements leave
+    fn isBareForm(fm: IfForm) -> boolean {
+        return match fm {
+            .Bare :> true
+            .Written :> false
+            .Transaction :> false
+        }
+    }
+
+    fn isTxForm(fm: IfForm) -> boolean {
+        return match fm {
+            .Transaction :> true
+            .Written :> false
+            .Bare :> false
+        }
+    }
+
+    fn txIf(cx: TxCx, c: AExpr, t: ABlock, e: ABlock | not, fm: IfForm) -> Diag[] {
+        if (!isTxForm(fm)) return txExpr(cx, c).concat(txBlock(cx, t)).concat(txMaybe(cx, e))
+        let out: Diag[] = []
+        if (!cx.fx) {
+            out = out.concat([mkDiag(cx.file, c.span, "E-ERROR-001", "a `transaction { … }` block in function '" + cx.fname + "', which is not declared as failable — a `transaction` block is valid only inside a `!` function (§19.10.4): its commit-or-rollback promise is a failure-handling promise, and outside a `!` function a failure inside it has nowhere to go. Add '!' to the function signature: 'function " + cx.fname + "(...)! ErrorType' (§19.3.3)")])
+        } else if (cx.tx) {
+            out = out.concat([mkDiag(cx.file, c.span, "E-ERROR-007", "Nested 'transaction' blocks are not supported yet. Move the inner block into a function the outer block calls (it runs as a savepoint), or use '?{SAVEPOINT name}' … '?{RELEASE name}' inside the block.")])
+        } else if (cx.stmtArm) {
+            out = out.concat([txFlow(cx, c.span, "a `transaction` block inside an arm of a statement-position `match` — its `fail` / `?` would roll the transaction back but leave only the arm, so the failure would be swallowed and the statements after the `match` would run —")])
+        }
+        const inner: TxCx = { file: cx.file, fname: cx.fname, fx: cx.fx, tx: true, loops: [], stmtArm: cx.stmtArm, stmtArmTx: false, armTx: false }
+        return out.concat(txBlock(inner, t))
+    }
+
+    fn txReturn(cx: TxCx, s: AStmt, e: AExpr | not) -> Diag[] {
+        let out: Diag[] = []
+        if (e is given) out = txExpr(cx, e)
+        if (cx.armTx) out = out.concat([txFlow(cx, s.span, "a `return` inside a `match` arm, inside a `transaction` block,")])
+        return out
+    }
+
+    fn txJump(cx: TxCx, s: AStmt, label: string, kw: string) -> Diag[] {
+        if (!cx.armTx) return []
+        // the target is inside the block when its loop was entered after the block opened
+        let inside = false
+        if (label == "") inside = cx.loops.length > 0
+        if (label != "") inside = cx.loops.indexOf(label) >= 0
+        if (inside) return []
+        return [txFlow(cx, s.span, "a `" + kw + "` whose loop is outside the `transaction` block, inside a `match` arm in the block,")]
+    }
+
+    fn txFail(cx: TxCx, s: AStmt, f: AFail) -> Diag[] {
+        let out: Diag[] = txExprs(cx, failExprs(f))
+        if (cx.stmtArmTx) out = out.concat([txFlow(cx, s.span, "a `fail` inside an arm of a statement-position `match`, inside a `transaction` block,")])
+        return out
+    }
+
+    fn isPropagateHow(how: AHow) -> boolean {
+        return match how {
+            .Propagate :> true
+            .Guard(arms: a) :> false
+            .MatchOn(arms: a) :> false
+        }
+    }
+
+    // an expression statement: a `match` there is a statement-position `match`
+    fn txEval(cx: TxCx, e: AExpr) -> Diag[] {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given && isMatchHow(h.how)) return txHandled(cx, h, true)
+        return txExpr(cx, e)
+    }
+
+    fn txHandled(cx: TxCx, h: AHandled, stmt: boolean) -> Diag[] {
+        let out: Diag[] = txExpr(cx, h.subject)
+        let ac: TxCx = cx
+        if (isMatchHow(h.how)) {
+            // a jump to a loop entered inside the block (before the arm, or in it) stays in the
+            // block: `loops` carries on into the arm
+            ac = { file: cx.file, fname: cx.fname, fx: cx.fx, tx: cx.tx, loops: cx.loops, stmtArm: cx.stmtArm || stmt,
+                   stmtArmTx: cx.stmtArmTx || (stmt && cx.tx), armTx: cx.armTx || cx.tx }
+        }
+        for (const a of handledArms(h)) {
+            const b: AArmBody = a.body
+            out = out.concat(txExprs(ac, armExprOf(b)))
+            for (const blk of armBlockOf(b)) { out = out.concat(txBlock(ac, blk)) }
+        }
+        return out
+    }
+
+    fn txExpr(cx: TxCx, e: AExpr) -> Diag[] {
+        const lb: ABlock | not = lambdaBlock(e)
+        if (lb is given) return txBlock(txOwnBody(cx, cx.fname), lb)
+        const le: AExpr | not = lambdaBody(e)
+        if (le is given) return txExpr(txOwnBody(cx, cx.fname), le)
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) {
+            if (!isPropagateHow(h.how)) return txHandled(cx, h, false)
+            let out: Diag[] = txExpr(cx, h.subject)
+            if (cx.stmtArmTx) out = out.concat([txFlow(cx, e.span, "a `?` propagation (sugar for `fail`, §19.5.2) inside an arm of a statement-position `match`, inside a `transaction` block,")])
+            return out
+        }
+        return txExprs(cx, exprKids(e))
+    }
+
+    // s478 (s478-boot-syntax-batch) — THE DATABASE A `transaction` BLOCK RUNS ON (placePass, after
+    // envelopePass). §19.10.3: "`transaction { }` is syntactic sugar. The compiler SHALL emit
+    // `?{BEGIN}` at the start of the block, `?{COMMIT}` at the end of normal completion, and
+    // `?{ROLLBACK}` before any `fail` statement within the block. (S474: inside an open envelope,
+    // those three are the savepoint, its release and its rollback-to (§8.5.3, §8.9.2 "Amendment
+    // S474" item 3). Outside one, where the block is the outermost transaction on its connection,
+    // they are the top-level statements written here.)" The bootstrap builds the block INSIDE ITS
+    // FUNCTION'S ENVELOPE — the savepoint form — on the envelope's database: every `!` server body
+    // whose transitive query set is non-empty has one (§8.9.2 "Amendment S474" item 1), so a block
+    // whose function reaches a query is always inside one. A `!` function the compiler gave NO
+    // envelope (it reaches no query, it is client-placed, or its envelope was refused — reported
+    // where it was) is REFUSED by name, fail closed (INTERIM, g-boot-transaction-block-no-envelope-s478,
+    // owner question): §19.10.3 does not say what a block with no database to roll back means —
+    // which connection its BEGIN opens when the function reaches none, or how a client-placed
+    // function's block could roll back writes its server calls already committed.
+    export type TxAt:struct = { nid: int, db: Sym }
+
+    export fn txAtOf(t: Tables, nid: int) -> Sym | not {
+        for (const x of t.server.txs) {
+            if (x.nid == nid) return x.db
+        }
+        return not
+    }
+
+    type RTxPlace:struct = { txs: TxAt[], st: AS }
+
+    fn txPlacePass(g: Globals, envs: Envelope[], st0: AS) -> RTxPlace {
+        let st: AS = st0
+        let txs: TxAt[] = []
+        for (const fs of g.fns) {
+            if (fs.info.failable) {
+                const blocks: TxSite[] = txSitesIn(fs.f.body)
+                if (blocks.length > 0) {
+                    let db: Sym | not = not
+                    for (const e of envs) {
+                        if (e.fn.id == fs.info.sym.id) db = e.db
+                    }
+                    if (db is given) {
+                        for (const b of blocks) { txs = txs.concat([{ nid: b.nid, db: db }]) }
+                    } else {
+                        for (const b of blocks) {
+                            st = addDiag(st, fs.info.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "this `transaction { … }` block (§19.10.2) is in '" + fs.info.name + "', which runs in no transaction of its own: the bootstrap builds the block as a savepoint inside its function's implicit per-handler transaction (§19.10.3, §8.9.2 'Amendment S474' items 1 and 3), and '" + fs.info.name + "' has none — it reaches no `?{}` query, or it is placed on the client, where no transaction can hold a server's writes. §19.10.3 does not say what the block rolls back then, so it is refused rather than compiled as a plain block. Put the queries the block should hold inside it, in a `!` server function")
+                        }
+                    }
+                }
+            }
+        }
+        return { txs: txs, st: st }
+    }
+
+    // The transaction blocks of a function's OWN body (not a nested function's, a lambda's or an
+    // effect's — txRulesPass refuses a block there, E-ERROR-001).
+    type TxSite:struct = { nid: int, span: ASpan }
+
+    fn txSitesIn(b: ABlock) -> TxSite[] {
+        let out: TxSite[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const here: TxSite[] = match k {
+                .If(cond: c, form: fm) :> isTxForm(fm) ? [{ nid: s.nid, span: c.span }] : []
+                .Eval(e: x) :> []
+                .Local(name: x) :> []
+                .Return(e: x) :> []
+                .Given(name: x) :> []
+                .For(f: x) :> []
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
+                .Lift(what: x) :> []
+                .LocalFn(f: x) :> []
+                .EffectStmt(w: x) :> []
+                .Defer(body: x) :> []
+                .Fail(f: x) :> []
+            }
+            out = out.concat(here)
+            const own: boolean = match k {
+                .LocalFn(f: x) :> false
+                .EffectStmt(w: x) :> false
+                .If(cond: x) :> true
+                .Eval(e: x) :> true
+                .Local(name: x) :> true
+                .Return(e: x) :> true
+                .Given(name: x) :> true
+                .For(f: x) :> true
+                .Break(label: x) :> true
+                .Continue(label: x) :> true
+                .Lift(what: x) :> true
+                .Defer(body: x) :> true
+                .Fail(f: x) :> true
+            }
+            if (own) {
+                for (const kb of stmtKidBlocks(s)) { out = out.concat(txSitesIn(kb)) }
+                for (const e of stmtExprs(s)) {
+                    for (const ab of exprBlocksDeep(e)) { out = out.concat(txSitesIn(ab)) }
+                }
+            }
+        }
+        return out
+    }
+
+    // the arm blocks of the handling forms inside an expression, at any depth — not a lambda's body
+    fn exprBlocksDeep(e: AExpr) -> ABlock[] {
+        if (lambdaBlock(e) is given || lambdaBody(e) is given) return []
+        let out: ABlock[] = exprBlocks(e)
+        for (const x of exprKids(e)) { out = out.concat(exprBlocksDeep(x)) }
+        return out
+    }
+
     // s469 — bryan's ruling "Always explicit" (#1471 round 2): no implicit tail return anywhere;
     // a declared-return function (`-> T | not` included) `return`s on every path — `return not;`
     // written out; a function with no return type returns nothing, and if any path of it returns
@@ -10231,7 +10540,7 @@ ${
         return match k {
             .Return(e: x) :> x is given || bareOk
             .Fail(f: x) :> true
-            .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb, bareOk) && elseLeavesAll(t, el, bareOk)
+            .If(cond: c, thenB: tb, elseB: el, form: fm) :> isTxForm(fm) || isBareForm(fm) ? fallsNever(t, tb, bareOk) : fallsNever(t, tb, bareOk) && elseLeavesAll(t, el, bareOk)
             .Eval(e: x) :> matchLeavesAll(t, x, bareOk)
             .Given(name: n) :> false
             .For(f: lf) :> loopNeverCompletes(lf)
@@ -28368,7 +28677,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Return(e: e) :> true
-            .If(cond: c, thenB: t, elseB: el) :> bothExit(t, el)
+            .If(cond: c, thenB: t, elseB: el, form: fm) :> isTxForm(fm) || isBareForm(fm) ? exits(t) : bothExit(t, el)
             .Eval(e: e) :> false
             .Local(name: n) :> false
             .Given(name: n) :> false
@@ -39609,6 +39918,9 @@ ${
         // s474 (U1e): the implicit per-handler transactions, built (envelopePass)
         const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
         st = ep.st
+        // s478 (s478-boot-syntax-batch): each `transaction { … }` block's database — its function's envelope's
+        const tp0: RTxPlace = txPlacePass(g, ep.envs, st)
+        st = tp0.st
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there,
         // or a `<schema>` block declares for it (s478 — schemaDbs)
         creates = creates.concat(schemaDbs(g, rd.scopes))
@@ -39622,7 +39934,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [], tool: toolFact(g), endpoints: [] }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [] }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -42047,7 +42359,7 @@ ${
             .Eval(e: e) :> AStmtK.Eval(mExpr(e, m))
             .Local(name: n, mutable: mu, ty: ty, init: i, lin: l) :> AStmtK.Local(n, mu, ty, mExpr(i, m), l)
             .Return(e: e) :> AStmtK.Return(mMaybe(e, m))
-            .If(cond: c, thenB: tb, elseB: eb) :> AStmtK.If(mExpr(c, m), mBlock(tb, m), mMaybeBlock(eb, m))
+            .If(cond: c, thenB: tb, elseB: eb, form: fm) :> AStmtK.If(mExpr(c, m), mBlock(tb, m), mMaybeBlock(eb, m), fm)
             .Given(name: n, subject: x, body: b) :> AStmtK.Given(n, mExpr(x, m), mBlock(b, m))
             .EffectStmt(w: w) :> k
             .Defer(body: b, arrayLead: al, bare: br) :> AStmtK.Defer(mBlock(b, m), al, br)
@@ -47388,7 +47700,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(css.diags).concat(styleOverlaps(ra.g))
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g))
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link)
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
@@ -47422,7 +47734,7 @@ ${
         // s478 (s478-boot-endpoint): the §61 `<endpoint>` declarations
         const eps: REps = endpointPass(ra.g, files)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes,
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes, txs: pp.facts.txs,
                                   reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,

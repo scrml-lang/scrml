@@ -221,11 +221,20 @@ ${
     // pendFiles does (it has no `id`, no signals and no reachable controls).
     export type ARequest:struct = { nid: int, span: ASpan, attrs: AAttr[], body: ABlock, opener: ASpan, pend: int }
 
+    export type IfForm:enum = { Written, Bare, Transaction }
+
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
         Local(name: string, mutable: boolean, ty: AType | not, init: AExpr, lin: boolean), // let / const [: T]; s471: `lin` (§35.2 — immutable, linear)
         Return(e: AExpr | not),
-        If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
+        // s478 (s478-boot-syntax-batch) — `form`: how the statement was WRITTEN. `Written` an
+        // `if` (§17.1); `Bare` a bare `{ … }` block statement (§7.2.2 "Terms": a statement list
+        // is the content of "any `{ … }` block of a statement (`if` / `else` / loop / bare
+        // block)"), read as the scope of a branch whose test is the literal `true` — the JS
+        // block statement's scope exactly; `Transaction` a `transaction { … }` block (§19.10.2),
+        // the same scope, plus the commit-or-rollback of §19.10.3 (analyze judges where one may
+        // stand; lower makes it a Core If whose `tx` names the database).
+        If(cond: AExpr, thenB: ABlock, elseB: ABlock | not, form: IfForm),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
         // s449: an effect written where a STATEMENT stands (a function or
         // handler body, another effect's body). Parsed so analyze can name it

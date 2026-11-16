@@ -122,15 +122,17 @@ describe("rule 10 — `fail` / `defer` / `transaction` are keywords at statement
     expect(codes(G(`        @_s = fail;`))).toEqual(["E-SCOPE-001"]);
   });
 
-  test("`defer⏎stmt` defers it (runtime); `transaction⏎{ … }` is the (refused) `transaction` block", async () => {
+  // s478 (s478-boot-syntax-batch): `transaction { … }` is BUILT (§19.10.2); in this non-`!` function
+  // it is §19.10.4's E-ERROR-001 — read as the block, never as a name and an object literal
+  test("`defer⏎stmt` defers it (runtime); `transaction⏎{ … }` is the `transaction` block", async () => {
     const r = clean(P(`    function go() {\n        @_s = @_s + "a";\n        defer\n            @_s = @_s + "1";\n        @_s = @_s + "b";\n    }`, `        <button onclick=go()>go</button>\n        <p id="s">\${@_s}</p>`));
     await loadProgram(r.core, "tr-defer" + k++);
     click(btn("go"));
     expect($("#s").textContent).toBe("ab1");
     const t = P(fn(`        transaction\n        {\n            @_n = 1;\n        }`));
     const ds = run(t).diags;
-    expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(ds[0].message).toContain("`transaction { … }` (§19.10) is not in the bootstrap");
+    expect(ds.map((d) => d.code)).toEqual(["E-ERROR-001"]);
+    expect(ds[0].message).toContain("a `transaction { … }` block in function 'f'");
   });
 });
 

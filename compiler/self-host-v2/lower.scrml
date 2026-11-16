@@ -35,7 +35,7 @@ ${
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
              CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml"
     import { partsText } from "./css.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, AParam, AFn,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              mkSpan } from "./ast.scrml"
@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf } from "./analyze.scrml"
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -898,7 +898,7 @@ ${
             .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
             .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(removalPre(c, i)).concat(letStmt(c, s, i)).concat(localRefineCheck(c, s, i))
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat(removalPre(c, e)).concat([Stmt.Return(returnValue(c, e))])
-            .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
+            .If(cond: x, thenB: t, elseB: el, form: fm) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el), txOfIf(c, s, fm))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
             .For(f: lf) :> joinMark(c, s).concat(loopStmts(c, lf))   // s469 (§49; a bound loop, §49.6); s471: a loop that waits — its exit join
             .Break(label: x) :> jumpStmts(c, s, true)
@@ -1200,12 +1200,29 @@ ${
         }
     }
 
+    // s478 (s478-boot-syntax-batch) — a Core If's `tx`: a `transaction { … }` block runs on its
+    // function's envelope database (analyze.scrml txPlacePass, §19.10.3); an `if` and a bare block
+    // on none. A block analyze placed no database for was refused there (E-BOOTSTRAP-UNSUPPORTED or
+    // E-ERROR-001, so no Core is built); if one reaches here anyway its `tx` names no database —
+    // check.scrml C-TX4 refuses the Core, so it can never print as a plain block (fail closed).
+    fn txOfIf(c: LC, s: AStmt, fm: IfForm) -> Sym | not {
+        const isTx: boolean = match fm {
+            .Transaction :> true
+            .Written :> false
+            .Bare :> false
+        }
+        if (!isTx) return not
+        const db: Sym | not = txAtOf(c.t, s.nid)
+        if (db is given) return db
+        return { id: -1, hint: "a transaction block analyze placed on no database" }
+    }
+
     // L11: `given c = @h :> { … }` → Let c = Handle(h); If(IsSome(c), { … }).
     fn givenStmts(c: LC, s: AStmt, body: ABlock) -> Stmt[] {
         const f: BindFact | not = bindFact(c.t.binds, s.nid)
         return match f {
             .BGiven(sym: sym, inst: i) :> [Stmt.Let(sym, Expr.Handle(i))].concat(joinMark(c, s)).concat([
-                Stmt.If(Expr.Prim(PrimOp.IsSome, [Expr.Local(sym)]), lowerBlock(c, body), not),
+                Stmt.If(Expr.Prim(PrimOp.IsSome, [Expr.Local(sym)]), lowerBlock(c, body), not, not),
             ])
             .BBind(sym: x) :> []
             .BParam(sym: x) :> []
@@ -3313,7 +3330,7 @@ ${
         while (k >= 0) {
             const a: AArm = arms[k]
             const test: Expr = Expr.Prim(PrimOp.EqPrim, [Expr.Local(m.pick), Expr.Lit(Literal.Int(k))])
-            chain = block([Stmt.If(test, plainArmBlock(c, m, a), chain)])
+            chain = block([Stmt.If(test, plainArmBlock(c, m, a), chain, not)])
             k = k - 1
         }
         let out: Stmt[] = [Stmt.Let(m.scrut, lowerExpr(c, subj)), Stmt.Let(m.pick, Expr.Match(Expr.Local(m.scrut), picks))]
@@ -4212,7 +4229,7 @@ ${
                 if (ip is given) {
                     const body: Stmt[] = cpsStmts(ss.slice(i + 2), tail)
                     const jump: Stmt[] = [Stmt.Jump(jk)]
-                    return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)))])
+                    return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)), ip.tx)])
                 }
                 // s471 — a loop that waits (§49.12.7): the rest of the block is its
                 // EXIT continuation; every path through the body that falls off its
@@ -4225,11 +4242,24 @@ ${
                 }
             }
             const ip2: IfParts | not = ifParts(s)
+            // s478 (s478-boot-syntax-batch) — a `transaction { … }` block (an If with `tx`) that waits
+            // and is NOT given a Join: the rest of the block is NEVER moved into it. Its statements
+            // are its own continuation owner (its waits continue inside it — it is printed only in a
+            // server body, natively, print.scrml ifStmtJs), and what follows it — the enclosing
+            // block's rest and its `tail` (`return` of a waiting function, a waiting loop's
+            // `continue`) — runs AFTER it. Moving the tail into it would turn the function's end or
+            // the loop's next iteration into an exit OUT of the block, rolling back a block that
+            // completed normally (§19.10.3: "Only normal completion COMMITs"). check.scrml C12 reads
+            // such a block's statements as a tail block of their own.
+            if (ip2 is given && ip2.tx is given && holdsSuspension([s])) {
+                const txIf: Stmt = Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, [])), ip2.elseB, ip2.tx)
+                return ss.slice(0, i).concat([txIf]).concat(cpsStmts(ss.slice(i + 1), tail))
+            }
             if (ip2 is given && i == ss.length - 1 && holdsSuspension([s])) {
                 // the last statement: its branches end the block — each gets the tail
                 let eb: Block | not = not
                 if (ip2.elseB is given || tail.length > 0) eb = block(cpsStmts(elseStmts(ip2.elseB), tail))
-                return ss.slice(0, i).concat([Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, tail)), eb)])
+                return ss.slice(0, i).concat([Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, tail)), eb, ip2.tx)])
             }
             i = i + 1
         }
@@ -4244,7 +4274,7 @@ ${
     }
 
     type SuspendParts:struct = { bind: Sym, on: Expr, then: Block }
-    type IfParts:struct = { cond: Expr, thenB: Block, elseB: Block | not }
+    type IfParts:struct = { cond: Expr, thenB: Block, elseB: Block | not, tx: Sym | not }
 
     fn suspendParts(s: Stmt) -> SuspendParts | not {
         return match s {
@@ -4274,7 +4304,7 @@ ${
 
     fn ifParts(s: Stmt) -> IfParts | not {
         return match s {
-            .If(cond: c, thenB: t, elseB: e) :> { cond: c, thenB: t, elseB: e }
+            .If(cond: c, thenB: t, elseB: e, tx: x) :> { cond: c, thenB: t, elseB: e, tx: x }
             .Suspend(bind: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not

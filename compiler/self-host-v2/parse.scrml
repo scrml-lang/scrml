@@ -46,7 +46,7 @@
 ${
     import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, Diag, ASql, ASqlMode,
@@ -3513,11 +3513,26 @@ ${
         if (isWord(tp, "fail")) return bareFail(tp)    // s469 (§7.2.2 rule 10: reserved here)
         // s469 (§7.2.2 rule 10): `transaction` before `{`, on its line or the next
         if (isWord(tp, "transaction") && tk(peekAt(tp, 1), "{")) {
-            // s451 (Ue): §19.10.2 — refused, never read as a name + a block
-            const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` function whose transitive query set holds two or more queries they already run in one transaction, rolled back on a `fail` or an error", t)
-            const rb: RBlock = parseBlock(adv(dt))
-            const re: RExpr = mkE(rb.tp, start, AExprK.Recovered)
-            return mkS(re.tp, start, AStmtK.Eval(re.e))
+            // s478 (s478-boot-syntax-batch): §19.10.2 "The `transaction` keyword provides a
+            // scoped alternative that auto-rolls-back on `fail`" — BUILT. Read as a block
+            // (IfForm.Transaction: the scope of a branch whose test is the literal `true`,
+            // spanning the keyword); where it may stand (§19.10.4) is analyze's
+            // (transactionDiags), its commit-or-rollback the printer's (Core If `tx`).
+            // §19.10.4: "A `transaction` block outside a `!` function — … or at the top level of a
+            // `${}` logic block, outside any function (S453) — SHALL be a compile error (E-ERROR-001
+            // applies …)". In no function body (TP.inFn 0: top-level logic, a handler attribute) the
+            // block is refused here and its statements read and dropped (a Recovered node), so the
+            // one root cause is reported once; inside a function body analyze judges it
+            // (txRulesPass: the function, a nested function, a lambda or an effect body).
+            if (tp.inFn == 0) {
+                const dt: TP = diagAt(tp, "E-ERROR-001", "a `transaction { … }` block outside any function — a `transaction` block is valid only inside a `!` function (§19.10.4): its commit-or-rollback promise is a failure-handling promise, and at the top level of a logic block (or in a handler) a failure inside it has nowhere to go. Move the block into a function declared with '!' — 'function save(...)! ErrorType { transaction { … } }' — and call it", t)
+                const rb0: RBlock = parseBlock(adv(dt))
+                const re: RExpr = mkE(rb0.tp, start, AExprK.Recovered)
+                return mkS(re.tp, start, AStmtK.Eval(re.e))
+            }
+            const rb: RBlock = parseBlock(adv(tp))
+            const yes: AExpr = { nid: rb.tp.nid, span: mkSpan(t.start, t.end), k: AExprK.Bool(true) }
+            return mkS(bumpId(rb.tp), start, AStmtK.If(yes, rb.b, not, IfForm.Transaction))
         }
         // s469 — `lift` (§49.6.2): a statement; which bound loop it appends to
         // — and whether one encloses it — is analyze's (resolveLift). An arm
@@ -3649,28 +3664,34 @@ ${
     // "any `{ … }` block of a statement (`if` / `else` / loop / bare block)" —
     // so a `{` that starts a statement opens a block, never an object literal
     // (before this, the bootstrap read it as one: E-TYPE-STRUCT-CONTEXT and a
-    // cascade). The bootstrap does not BUILD a bare block — it has no block
-    // statement (INTERIM, g-boot-bare-block-statement-s478): it is refused by
-    // name (E-BOOTSTRAP-UNSUPPORTED), and its statements are read (so their
-    // own syntax errors report) and dropped (a Recovered node). One rule is
-    // judged before the drop because it holds whatever the bootstrap builds —
-    // §19.16.2 "Not defer sites in stage 1 — E-DEFER-UNSUPPORTED-SITE": "A bare
-    // `{ }` block statement … so a `defer` there has no block to attach to … It
-    // SHALL be a compile error, never silently mis-scoped". The block is block-like (§7.2.2 rule 2, "bare block"): its
-    // `}` ends it, no `;` (a Recovered node is block-like, needsSemi).
+    // cascade). s478 (s478-boot-syntax-batch) BUILDS it: §7.2 "All JavaScript that
+    // is valid in a Bun execution context is valid inside `${ }`, except the
+    // constructs §7.2.1 excludes" — a block statement is not excluded, so it is
+    // the JavaScript block: its statements run once, in order, and a name it
+    // declares is in scope from its declaration to the block's `}` and NOT after
+    // it. It is read as an `if` whose test is the literal `true` (IfForm.Bare):
+    // the same scope, the same statements, every pass's `if`-body rules for
+    // free (and printed `if (true) { … }`, the same JavaScript scope). One rule is
+    // judged here because it holds whatever the bootstrap builds — §19.16.2
+    // "Not defer sites in stage 1 — E-DEFER-UNSUPPORTED-SITE": "A bare `{ }`
+    // block statement … so a `defer` there has no block to attach to … It
+    // SHALL be a compile error, never silently mis-scoped". The block is
+    // block-like (§7.2.2 rule 2, "bare block"): its `}` ends it, no `;`; what
+    // follows that `}` is the next statement, as after an `if` (§7.2.2: "A pure
+    // expression after a block-like `}` … E-STMT-NO-EFFECT, on the next line or
+    // (after an `if` / `for` / `given` / `defer` `}`) the same line" — PA ruling
+    // S478: on trailing tokens §7.2.2 governs over §40.8).
     // Recovery: a `{` on the line of an Error just reported is the body of a
     // construct that failed to parse (a function head the type reader could
     // not read, `switch (x) {`), not a bare block the author wrote — it is read
-    // the same way, without the refusal (the error before it is the one root
+    // and dropped (a Recovered node; the error before it is the one root
     // cause).
     fn bareBlock(tp: TP) -> RStmt {
         const t0: PTok = cur(tp)
         const start: int = t0.start
-        let d0: TP = tp
         const n: int = tp.diags.length
         const recovering: boolean = n > 0 && tp.diags[n - 1].severity == Severity.Error && lineAt(tp, tp.diags[n - 1].span.start) == t0.line
-        if (!recovering) d0 = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)", t0)
-        const rb: RBlock = parseBlock(d0)
+        const rb: RBlock = parseBlock(tp)
         let t: TP = rb.tp
         // s478 (review-followups-2): not when recovering — the `{` is then the body of a
         // construct that failed to parse (often a function's), not a bare block, and a
@@ -3694,8 +3715,13 @@ ${
                 }
             }
         }
-        const re: RExpr = mkE(t, start, AExprK.Recovered)
-        return mkS(re.tp, start, AStmtK.Eval(re.e))
+        if (recovering) {
+            const re: RExpr = mkE(t, start, AExprK.Recovered)
+            return mkS(re.tp, start, AStmtK.Eval(re.e))
+        }
+        // the test: the literal `true`, spanning the block's `{`
+        const yes: AExpr = { nid: t.nid, span: mkSpan(t0.start, t0.end), k: AExprK.Bool(true) }
+        return mkS(bumpId(t), start, AStmtK.If(yes, rb.b, not, IfForm.Bare))
     }
 
     fn isDeferStmt(s: AStmt) -> boolean {
@@ -4538,7 +4564,7 @@ ${
         return match k {
             .Lift(what: w) :> withStmtK(s, AStmtK.Lift(fillLift(w, rows)))
             .LocalFn(f: x) :> s                  // s477: a nested function's body is not the loop's row scope
-            .If(cond: c, thenB: tb, elseB: el) :> withStmtK(s, AStmtK.If(c, fillRowsBlock(tb, rows), fillRowsMaybe(el, rows)))
+            .If(cond: c, thenB: tb, elseB: el, form: fm) :> withStmtK(s, AStmtK.If(c, fillRowsBlock(tb, rows), fillRowsMaybe(el, rows), fm))
             .Given(name: n, subject: sub, body: b) :> withStmtK(s, AStmtK.Given(n, sub, fillRowsBlock(b, rows)))
             .For(f: lf) :> withStmtK(s, AStmtK.For(fillRowsFor(lf, rows)))
             .Defer(body: b, arrayLead: a, bare: br) :> withStmtK(s, AStmtK.Defer(fillRowsBlock(b, rows), a, br))
@@ -5388,12 +5414,12 @@ ${
             if (isWord(t, "if")) {
                 const inner: RStmt = parseIfAs(t)
                 const eb: ABlock = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
-                return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb))
+                return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb, IfForm.Written))
             }
             const elseB: RBlock = parseBlockOrStmt(t)
-            return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b))
+            return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b, IfForm.Written))
         }
-        return mkS(t, start, AStmtK.If(cond.e, thenB.b, not))
+        return mkS(t, start, AStmtK.If(cond.e, thenB.b, not, IfForm.Written))
     }
 
     // =========================================================================
@@ -5877,7 +5903,7 @@ ${
             // A refused head with no block: nothing to guard; the line's rest parses on.
             const empty: ABlock = { nid: t.nid, span: mkSpan(start, start), stmts: [] }
             const none0: RExpr = mkE(bumpId(t), start, AExprK.NotLit)
-            return mkS(none0.tp, start, AStmtK.If(none0.e, empty, not))
+            return mkS(none0.tp, start, AStmtK.If(none0.e, empty, not, IfForm.Written))
         }
         if (names != "" && !bad) {
             const msg: string = "the presence guard `given " + names + " :> { … }` is deprecated (§42.2.3). Write `if (" + tests + ") { … }` — it tests the same thing and narrows the same names inside the block. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
@@ -5885,10 +5911,10 @@ ${
             t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
         }
         const body: RBlock = parseBlock(t)
-        if (cond is given && !bad) return mkS(body.tp, start, AStmtK.If(cond, body.b, not))
+        if (cond is given && !bad) return mkS(body.tp, start, AStmtK.If(cond, body.b, not, IfForm.Written))
         // A refused head (E-SYNTAX-044 above): keep the block, under a test that never holds.
         const none: RExpr = mkE(body.tp, start, AExprK.NotLit)
-        return mkS(none.tp, start, AStmtK.If(none.e, body.b, not))
+        return mkS(none.tp, start, AStmtK.If(none.e, body.b, not, IfForm.Written))
     }
 
     // =========================================================================

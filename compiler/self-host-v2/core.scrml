@@ -591,7 +591,17 @@ ${
         Assign(local: Sym, value: Expr, path: PathStep[]),
         Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
         Commit(writes: Stmt[]),
-        If(cond: Expr, thenB: Block, elseB: Block | not),
+        // s478 (s478-boot-syntax-batch) — `tx`: not, an `if` (or a bare block, whose test is
+        // the literal `true`). Given: a `transaction { … }` block (§19.10.2; its test the literal
+        // `true`, `elseB` not) on database `tx`, which runs `thenB` inside a savepoint of the
+        // enclosing function's envelope on that database (§19.10.3: "inside an open envelope,
+        // those three are the savepoint, its release and its rollback-to"): RELEASE on normal
+        // completion only; ROLLBACK TO (then RELEASE) when the block is left by a `fail`, a
+        // `return`, a `break` / `continue` out of it, or a host error (§19.10.3 "Only normal
+        // completion COMMITs"). It stands only in a function that has an Envelope on `tx`
+        // (check.scrml C-TX4); the server printer prints it (print.scrml txBlockJs), the
+        // client printer refuses it.
+        If(cond: Expr, thenB: Block, elseB: Block | not, tx: Sym | not),
         Return(e: Expr),
         Eval(e: Expr),
         Suspend(bind: Sym, on: Expr, then: Block),
