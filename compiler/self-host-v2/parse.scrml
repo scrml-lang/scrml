@@ -53,7 +53,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
-    import { SchemaErr, SchemaRead, readSchemaBody, schemaCloseAt } from "./schema.scrml"
+    import { SchemaErr, SchemaRead, SchemaTable, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
 
@@ -2271,7 +2271,7 @@ ${
         const t: PTok = cur(tp)
         // the element's own reader, over the file's offsets (the span is padded to
         // its offset, so every diagnostic it reports is at its place in the file)
-        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, ns: tp.ns }
+        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, tables: [], ns: tp.ns }
         const rn: RNodeOne = parseMarkupNode(m0)
         let ds: Diag[] = rn.mp.diags
         // text the token holds past the element the reader read (the lexer's extent
@@ -4439,7 +4439,7 @@ ${
             }
         }
         const back: MP = backToMarkup(lr.mp, t)
-        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, ns: back.ns }
+        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, tables: back.tables, ns: back.ns }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(m) }
     }
@@ -7700,7 +7700,7 @@ ${
     // read in a `<db>` body (parseDbBody), waiting for the nearest item list
     // (parseMarkupItems drains them into the program body or the file top);
     // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], schemaN: int, ns: PNs }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], schemaN: int, tables: SchemaTable[], ns: PNs }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -7726,7 +7726,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -7741,20 +7741,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -7859,7 +7859,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -8093,7 +8093,7 @@ ${
     }
 
     fn withDiagsOf(mp: MP, ds: Diag[]) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn recoveredAt(mp: MP, start: int) -> AExpr {
@@ -9291,7 +9291,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -10881,6 +10881,7 @@ ${
 
     fn finishSchema(o: Opener, mp: MP) -> RElem {
         let m: MP = mp
+        const d0: int = mp.diags.length
         const tagEnd: int = o.start + 7
         const why: string = " — §39.3: \"The `<schema>` block takes no attributes\" (its database is the enclosing `<program>`'s); the bootstrap refuses it rather than ignore it"
         for (const a of o.attrs) { m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<schema>`" + why, a.span.start, a.span.end) }
@@ -10888,7 +10889,7 @@ ${
         if (o.typed.length > 0 || hasOwn(o.own) || o.ty is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a typed or valued `<schema …>` opener is a declaration, not the §39 schema block" + why, o.start, tagEnd)
         if (o.short is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body on `<schema>` — §39.2: the body is table declarations, between `<schema>` and its closer", o.start, tagEnd)
         if (m.schemaN > 0) m = mDiag(m, "E-SCHEMA-002", "a second `<schema>` block in this file — §39.3: \"A file SHALL NOT contain more than one `<schema>` block\"; declare every table in the first one", o.start, tagEnd)
-        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN + 1, ns: m.ns }
+        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN + 1, tables: m.tables, ns: m.ns }
         if (o.selfClosing || o.short is given) return elemFrom(o, [], m)
         const close: int = schemaCloseAt(m.src, m.pos)
         const bodyEnd: int = close < 0 ? m.src.length : close
@@ -10899,6 +10900,18 @@ ${
             return elemFrom(o, [], mAt(m, bodyEnd))
         }
         const closer: int = m.src.indexOf(">", close)
+        // s478-boot-sql-row-types — the declared tables, kept for the §39.11 row types
+        // ("The compiler generates struct types for each table in `<schema>` before running
+        // the `<db>` type inference pass (§14.8)"). Fail closed: only the file's FIRST
+        // `<schema>`, and only when reading it raised nothing above a warning (a refused or
+        // broken column, an attribute) — a schema the bootstrap did not read whole types no row.
+        let clean = m.schemaN == 1
+        let di: int = 0
+        for (const d of m.diags) {
+            if (di >= d0 && d.code.substring(0, 2) != "W-") clean = false
+            di = di + 1
+        }
+        if (clean) m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN, tables: rs.tables, ns: m.ns }
         return elemFrom(o, [], mAt(m, closer + 1))
     }
 
@@ -10915,7 +10928,7 @@ ${
             const fid: int = fnIdOfItem(it.k)
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, schemaN: r.mp.schemaN, ns: r.mp.ns }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, schemaN: r.mp.schemaN, tables: r.mp.tables, ns: r.mp.ns }
         return { e: r.e, mp: m }
     }
 
@@ -11407,7 +11420,7 @@ ${
             }
         }
         ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)))
-        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
         return { items: [it], mp: m }
     }
 
@@ -11650,7 +11663,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -11826,7 +11839,7 @@ ${
             k = k + 1
         }
         if (depth > 0) t = diagAt(t, "E-PARSE-UNCLOSED", "`" + interpOpen() + "` is never closed", cur(tp))
-        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(m) }
     }
@@ -11864,7 +11877,7 @@ ${
     fn markupProgram(o: Opener, mp: MP) -> RNodeOne {
         const rp: RMItems = programItem(o, programOpenerDiags(o, mp, false), false)
         const m: MP = rp.mp
-        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN, ns: m.ns }
+        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN, tables: m.tables, ns: m.ns }
         const n: ANode = { nid: mh.nid, span: mkSpan(o.start, mh.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(mh) }
     }
@@ -12473,7 +12486,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -12894,7 +12907,7 @@ ${
     // body's own reader parseDisplayItem) — as markup items, and its `;`.
     fn bodyTopDisplay(mp: MP, tp: TP) -> RItems {
         const lit: PTok = cur(tp)
-        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
         const d: TP = regionTP(at, LexStop.Line)
         let nodes: ANode[] = []
         let m: MP = at
@@ -13084,7 +13097,7 @@ ${
     }
 
     fn withPage(mp: MP, pg: APage) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), eps: mp.eps, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns }
     }
 
     // A `<page>` opener carries plain attributes only (the §40.8 per-route set —
@@ -13208,7 +13221,7 @@ ${
                                 arms: arms, top: ctx == "program", lowered: false }
         // the placeholder item endpointDesugar replaces (an empty text run renders nothing)
         const n: ANode = { nid: m.nid, span: ep.span, k: ANodeK.Text("") }
-        const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), schemaN: m.schemaN, ns: m.ns }
+        const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), schemaN: m.schemaN, tables: m.tables, ns: m.ns }
         return mItem(mBump(withEp), o.start, AItemK.MarkupItem(n))
     }
 
@@ -13401,7 +13414,7 @@ ${
                     n = n + 1
                 }
                 const back: MP = backToMarkup(at, t)
-                const ended: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: at.diags, file: back.file, hoist: back.hoist, dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, ns: back.ns }
+                const ended: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: at.diags, file: back.file, hoist: back.hoist, dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, tables: back.tables, ns: back.ns }
                 if (n >= 2) {
                     m = mDiag(ended, "E-ENDPOINT-MULTI-STATEMENT-ARM", "the `<" + name + ">` arm of this `<endpoint>` has a multi-statement body — an arm body is a single value-expression (the value the compiler envelopes as the JSON response, §61.5); multi-statement handler bodies are a future wave (§61.10). Reduce the arm to one expression, or move the logic into a function and call it: `<" + name + " : compute(…)>`", armStart, ended.pos)
                 } else {
@@ -13645,13 +13658,13 @@ ${
     // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
     // offsets its first analysis proved, PNs.at).
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, ns: ns }
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, tables: [], ns: ns }
         const r0: RMItems = parseMarkupItems(m0, "")
         const r1: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
         // s478 (s478-boot-endpoint): each `<endpoint>`'s arms, as server functions (endpointDesugar)
         const dz: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
         const m1: MP = r1.mp
-        const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, schemaN: m1.schemaN, ns: m1.ns } }
+        const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, schemaN: m1.schemaN, tables: m1.tables, ns: m1.ns } }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
@@ -13659,7 +13672,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, first: firstId, tables: r.mp.tables }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).

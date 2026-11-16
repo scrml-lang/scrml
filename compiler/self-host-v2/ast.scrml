@@ -26,6 +26,7 @@
 ${
     import { Severity, severityOf } from "./severity.scrml"
     import { ComplexSel } from "./core.scrml"
+    import { SchemaTable } from "./schema.scrml"
 
     export type ASpan:struct = { start: int, end: int }
 
@@ -619,7 +620,9 @@ ${
     export type AEndpoint:struct = { nid: int, span: ASpan, opener: ASpan, path: string, method: string, accepts: string, acceptsSpan: ASpan,
                                      arms: AEpArm[], top: boolean, lowered: boolean }
 
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], first: int }
+    // s478-boot-sql-row-types — `tables`: the file's `<schema>` tables (§39.11), read whole
+    // (parse.scrml finishSchema keeps them only when the first `<schema>` read clean); [] none.
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], first: int, tables: SchemaTable[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)
