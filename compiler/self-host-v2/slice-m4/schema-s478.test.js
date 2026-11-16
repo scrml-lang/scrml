@@ -152,9 +152,9 @@ describe("refused by name — never read past silently", () => {
   };
   test("a `tenant_id` column (§14.8.10 floor not built)", () => refused("        assets {\n            id: integer primary key\n            tenant_id: text\n        }", "tenant"));
   test("a `boolean` column (§39.4 coercion not built)", () => refused("        flags {\n            id: integer primary key\n            on: boolean\n        }", "coercion"));
-  test("raw `CREATE TABLE` DDL, bare or `?{}`-wrapped", () => {
-    refused("        CREATE TABLE users (id INTEGER PRIMARY KEY)", "raw SQL DDL");
-    refused("        ?{`CREATE TABLE users (id INTEGER PRIMARY KEY)`}", "raw SQL DDL");
+  test("raw DDL beyond `CREATE TABLE` (s478-boot-schema-ddl reads a plain CREATE TABLE — schema-ddl-s478.test.js)", () => {
+    refused("        CREATE VIEW v AS SELECT 1", "not a `CREATE TABLE`");
+    refused("        ?{`ALTER TABLE users ADD COLUMN x TEXT`}", "not a `CREATE TABLE`");
     // §39.2: the floors read a commented-out `CREATE TABLE` as a declaration
     refused(USERS + "\n        // CREATE TABLE assets (id INTEGER, tenant_id TEXT)", "commented-out one included");
   });

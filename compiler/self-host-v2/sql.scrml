@@ -175,6 +175,31 @@ ${
         return { toks: toks, broken: false }
     }
 
+    // s478-boot-schema-ddl — the SAME whitelist scanner, for the `<schema>` raw
+    // `CREATE TABLE` reader (schema.scrml readDdl). One literal run, its tokens
+    // as plain records (`kind`: "word" / "punct" / "str" / "qname" / "num"; `w`
+    // upper-cased, `text` as written). `broken`: scanRun could not read the
+    // text with certainty (a comment, a backslash or prefixed string, an
+    // unclosed quote, a character or operator outside the whitelist) — the
+    // caller fails closed on it.
+    export type DdlTok:struct = { kind: string, w: string, text: string }
+    export type DdlScan:struct = { toks: DdlTok[], broken: boolean }
+
+    export fn ddlScan(s: string) -> DdlScan {
+        const r: SScan = scanRun(s)
+        let out: DdlTok[] = []
+        for (const t of r.toks) {
+            let k: string = "punct"
+            if (t.k == SK.Word) k = "word"
+            if (t.k == SK.Str) k = "str"
+            if (t.k == SK.QName) k = "qname"
+            if (t.k == SK.Num) k = "num"
+            if (t.k == SK.Value) k = "value"
+            out = out.concat([{ kind: k, w: t.w, text: t.text }])
+        }
+        return { toks: out, broken: r.broken }
+    }
+
     // The end (one past the closing quote) of a quoted run starting at `i`; a
     // doubled quote is an escaped one (SQL `'it''s'`). -1: never closed.
     type StrEnd:struct = { end: int }
