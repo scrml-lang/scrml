@@ -49,7 +49,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql, ASqlMode,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
@@ -2271,7 +2271,7 @@ ${
         const t: PTok = cur(tp)
         // the element's own reader, over the file's offsets (the span is padded to
         // its offset, so every diagnostic it reports is at its place in the file)
-        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], schemaN: 0, ns: tp.ns }
+        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, ns: tp.ns }
         const rn: RNodeOne = parseMarkupNode(m0)
         let ds: Diag[] = rn.mp.diags
         // text the token holds past the element the reader read (the lexer's extent
@@ -4439,7 +4439,7 @@ ${
             }
         }
         const back: MP = backToMarkup(lr.mp, t)
-        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, schemaN: back.schemaN, ns: back.ns }
+        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, ns: back.ns }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(m) }
     }
@@ -7700,7 +7700,7 @@ ${
     // read in a `<db>` body (parseDbBody), waiting for the nearest item list
     // (parseMarkupItems drains them into the program body or the file top);
     // `dbFns` — which `<db>` each such function was declared in (FileAst.dbFns).
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], schemaN: int, ns: PNs }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], schemaN: int, ns: PNs }
 
     type RNodes:struct  = { nodes: ANode[], mp: MP }
     type RMItems:struct = { items: AItem[], mp: MP }
@@ -7726,7 +7726,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
         return { n: n, mp: mBump(m) }
@@ -7741,20 +7741,20 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -7859,7 +7859,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1]
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -8093,7 +8093,7 @@ ${
     }
 
     fn withDiagsOf(mp: MP, ds: Diag[]) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn recoveredAt(mp: MP, start: int) -> AExpr {
@@ -9219,7 +9219,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -10751,7 +10751,7 @@ ${
         if (o.typed.length > 0 || hasOwn(o.own) || o.ty is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a typed or valued `<schema …>` opener is a declaration, not the §39 schema block" + why, o.start, tagEnd)
         if (o.short is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body on `<schema>` — §39.2: the body is table declarations, between `<schema>` and its closer", o.start, tagEnd)
         if (m.schemaN > 0) m = mDiag(m, "E-SCHEMA-002", "a second `<schema>` block in this file — §39.3: \"A file SHALL NOT contain more than one `<schema>` block\"; declare every table in the first one", o.start, tagEnd)
-        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, schemaN: m.schemaN + 1, ns: m.ns }
+        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN + 1, ns: m.ns }
         if (o.selfClosing || o.short is given) return elemFrom(o, [], m)
         const close: int = schemaCloseAt(m.src, m.pos)
         const bodyEnd: int = close < 0 ? m.src.length : close
@@ -10778,7 +10778,7 @@ ${
             const fid: int = fnIdOfItem(it.k)
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }])
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, schemaN: r.mp.schemaN, ns: r.mp.ns }
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, schemaN: r.mp.schemaN, ns: r.mp.ns }
         return { e: r.e, mp: m }
     }
 
@@ -11270,7 +11270,7 @@ ${
             }
         }
         ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)))
-        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
         return { items: [it], mp: m }
     }
 
@@ -11513,7 +11513,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\""
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end))
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length))
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -11689,7 +11689,7 @@ ${
             k = k + 1
         }
         if (depth > 0) t = diagAt(t, "E-PARSE-UNCLOSED", "`" + interpOpen() + "` is never closed", cur(tp))
-        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(m) }
     }
@@ -11727,7 +11727,7 @@ ${
     fn markupProgram(o: Opener, mp: MP) -> RNodeOne {
         const rp: RMItems = programItem(o, programOpenerDiags(o, mp, false), false)
         const m: MP = rp.mp
-        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, schemaN: m.schemaN, ns: m.ns }
+        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, schemaN: m.schemaN, ns: m.ns }
         const n: ANode = { nid: mh.nid, span: mkSpan(o.start, mh.pos), k: ANodeK.Text("") }
         return { n: n, mp: mBump(mh) }
     }
@@ -12336,7 +12336,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -12757,7 +12757,7 @@ ${
     // body's own reader parseDisplayItem) — as markup items, and its `;`.
     fn bodyTopDisplay(mp: MP, tp: TP) -> RItems {
         const lit: PTok = cur(tp)
-        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, schemaN: mp.schemaN, ns: mp.ns }
+        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
         const d: TP = regionTP(at, LexStop.Line)
         let nodes: ANode[] = []
         let m: MP = at
@@ -12837,6 +12837,8 @@ ${
         // §38.1 / §34: "A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE`"
         // — one report: the element is read (so its closer is found) and dropped.
         if (!o.star && o.name == "channel" && ctx == "page") return channelInPage(o, letOnNonDecl(ro.mp, o, isLet))
+        // s478 (s478-boot-endpoint) — §61 `<endpoint>` at an item position (endpointItem)
+        if (!o.star && o.name == "endpoint" && !isDeclOpener(o)) return endpointItem(o, letOnNonDecl(ro.mp, o, isLet), exported, ctx)
         const k: TagKind = tagKind(o)
         const od: Opener = isLet ? withLet(o) : o
         return match k {
@@ -12945,7 +12947,7 @@ ${
     }
 
     fn withPage(mp: MP, pg: APage) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), schemaN: mp.schemaN, ns: mp.ns }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), eps: mp.eps, schemaN: mp.schemaN, ns: mp.ns }
     }
 
     // A `<page>` opener carries plain attributes only (the §40.8 per-route set —
@@ -12979,6 +12981,515 @@ ${
     }
 
     // =========================================================================
+    // s478 (s478-boot-endpoint) — §61 `<endpoint>`, the typed inbound route.
+    // §61.2: "endpoint-decl ::= '<endpoint' endpoint-attrs '>' endpoint-arm+
+    // '</endpoint>'" — "An `<endpoint>` declaration SHALL carry a `path=` (a
+    // string-literal URL), a `method=` (a recognized HTTP method literal), and an
+    // `accepts=` (a §14 / §53 `:enum` type-ref). A missing `path=` is
+    // `E-ENDPOINT-PATH-MISSING`; a `method=` that is not a recognized HTTP method
+    // is `E-ENDPOINT-METHOD-INVALID`". §34's E-ENDPOINT-METHOD-INVALID row: "— or
+    // omits `method=` entirely (a missing method literal is reported here too) …
+    // The value may be a quoted string-literal or a bareword"; E-ENDPOINT-ACCEPTS-
+    // MISSING: "An `<endpoint>` declaration (SPEC §61.3) has no `accepts=` enum
+    // type". The opener and its arms are read here and recorded (MP.eps →
+    // FileAst.eps); the item list gets a placeholder that endpointDesugar replaces
+    // with the arms' server functions once the whole file — and so the `accepts=`
+    // enum, which may be declared after the endpoint — has been read.
+    // =========================================================================
+    fn endpointItem(o: Opener, mp: MP, exported: boolean, ctx: string) -> RMItems {
+        let m: MP = mp
+        const tagEnd: int = o.start + 9
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<endpoint>`", o.start, tagEnd)
+        // §61.2 — the declaration's place. The SPEC names none beyond "a
+        // scrml-defined structural element (§4.15 / §24.4)", and the bootstrap
+        // serves the routes of the top-level `<program>` only: anywhere else it is
+        // refused by name (INTERIM — g-boot-endpoint-s478 owner question 4)
+        if (ctx != "program") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " is not in the bootstrap — it serves an `<endpoint>` written directly in the top-level `<program>` body only (§61.2 names no other place; INTERIM)", o.start, tagEnd)
+        for (const v of o.vals) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", v.span.start, v.span.end)
+        }
+        for (const ta of o.typed) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the typed attribute `" + ta.name + ":…` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", ta.span.start, ta.span.end)
+        }
+        let path: string = ""
+        let method: string = ""
+        let accepts: string = ""
+        let acceptsSpan: ASpan = mkSpan(o.start, tagEnd)
+        let sawPath = false
+        let sawMethod = false
+        let sawAccepts = false
+        for (const a of o.attrs) {
+            if (a.name == "path") {
+                sawPath = true
+                const pv: string | not = epQuotedOf(a.value)
+                if (pv is given) {
+                    path = pv
+                } else {
+                    // §61.2: `path-attr ::= 'path=' string-literal`
+                    m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`path=` on `<endpoint>` is a string literal (§61.2 `path-attr ::= 'path=' string-literal` — the author-stable contract URL, §61.7); write it quoted, `path=\"/…\"`", a.span.start, a.span.end)
+                }
+            } else if (a.name == "method") {
+                sawMethod = true
+                const mv: string = methodWordOf(a.value)
+                if (isEndpointMethod(mv)) {
+                    method = mv
+                } else {
+                    m = mDiag(m, "E-ENDPOINT-METHOD-INVALID", "`method=` on `<endpoint>` is not a recognized HTTP method — it is one of GET, POST, PUT, PATCH, DELETE (§61.7, the §60.2 set)", a.span.start, a.span.end)
+                }
+            } else if (a.name == "accepts") {
+                sawAccepts = true
+                acceptsSpan = a.span
+                const nv: string = bareNameOf(a.value)
+                if (nv != "") {
+                    accepts = nv
+                } else {
+                    m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=` on `<endpoint>` names an `:enum` type (§61.2 `accepts-attr ::= 'accepts=' enum-type-ref`) — write the bare type name, `accepts=MyEnum`", a.span.start, a.span.end)
+                }
+            } else if (a.name == "csrf") {
+                // §61.7: "`<endpoint>` SHALL NOT carry a `csrf=` attribute" (no code named)
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`csrf=` on `<endpoint>` — §61.7: \"`<endpoint>` SHALL NOT carry a `csrf=` attribute and SHALL NOT be routed through the §12 CSRF gate\" (a JSON + bearer endpoint is CSRF-exempt by construction); remove it", a.span.start, a.span.end)
+            } else {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", a.span.start, a.span.end)
+            }
+        }
+        if (!sawPath) m = mDiag(m, "E-ENDPOINT-PATH-MISSING", "`<endpoint>` has no `path=` — the author-stable URL a foreign client connects to is required (§61.7)", o.start, tagEnd)
+        if (!sawMethod) m = mDiag(m, "E-ENDPOINT-METHOD-INVALID", "`<endpoint>` has no `method=` — it is one of GET, POST, PUT, PATCH, DELETE (§61.7)", o.start, tagEnd)
+        if (!sawAccepts) m = mDiag(m, "E-ENDPOINT-ACCEPTS-MISSING", "`<endpoint>` has no `accepts=` — the request body decodes into that `:enum` type (§61.3); without it there is nothing to decode or dispatch", o.start, tagEnd)
+        const opener: ASpan = mkSpan(o.start, m.pos)
+        let arms: AEpArm[] = []
+        const sh: ANode[] | not = o.short
+        if (sh is given) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body on `<endpoint>` — its body is its per-variant arms (§61.2)", o.start, tagEnd)
+        } else if (o.selfClosing) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a self-closing `<endpoint/>` has no arms — §61.2: `endpoint-arm+` (one per variant of the `accepts=` enum)", o.start, tagEnd)
+        } else {
+            const ra: REpArms = endpointArms(m)
+            arms = ra.arms
+            m = ra.mp
+        }
+        const ep: AEndpoint = { nid: m.nid, span: mkSpan(o.start, m.pos), opener: opener, path: path, method: method, accepts: accepts, acceptsSpan: acceptsSpan,
+                                arms: arms, top: ctx == "program", lowered: false }
+        // the placeholder item endpointDesugar replaces (an empty text run renders nothing)
+        const n: ANode = { nid: m.nid, span: ep.span, k: ANodeK.Text("") }
+        const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), schemaN: m.schemaN, ns: m.ns }
+        return mItem(mBump(withEp), o.start, AItemK.MarkupItem(n))
+    }
+
+    fn endpointPlaceWhy(ctx: string) -> string {
+        if (ctx == "page") return "inside a `<page>`"
+        if (ctx == "nested") return "inside a nested `<program>`"
+        return "outside a `<program>`"
+    }
+
+    fn epQuotedOf(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> not
+            .Dur(text: s) :> not
+            .Bare(e: e) :> not
+            .Paren(e: e) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn bareNameOf(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> exprNameOf(e)
+            .Quoted(v: s) :> ""
+            .NoValue :> ""
+            .Dur(text: s) :> ""
+            .Paren(e: e) :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    fn exprNameOf(e: AExpr) -> string {
+        return match e.k {
+            .Name(name: n) :> n
+            // no-default-arm: one question of an expression — is it a bare name
+            _ :> ""
+        }
+    }
+
+    // §34 E-ENDPOINT-METHOD-INVALID: "The value may be a quoted string-literal or a bareword"
+    fn methodWordOf(v: AAttrValue) -> string {
+        const q: string | not = epQuotedOf(v)
+        if (q is given) return q
+        return bareNameOf(v)
+    }
+
+    // §61.7: "`method=` declares the HTTP method (`GET` / `POST` / `PUT` / `PATCH` / `DELETE`)"
+    export fn isEndpointMethod(w: string) -> boolean {
+        return w == "GET" || w == "POST" || w == "PUT" || w == "PATCH" || w == "DELETE"
+    }
+
+    type REpArms:struct = { arms: AEpArm[], mp: MP }
+    type REpArm:struct = { arm: AEpArm, mp: MP }
+
+    // The arms, to the `</endpoint>` (or `</>`) closer. §61.2: "each arm is a
+    // state-child named for a variant of the `accepts=` enum". Anything else in the
+    // body is refused by name and skipped to the next tag.
+    fn endpointArms(mp: MP) -> REpArms {
+        let m: MP = mp
+        let out: AEpArm[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<endpoint>` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                m = parseCloser(m, "endpoint")
+                going = false
+            } else if (chAt(m, 0) == "<" && isNameStart(chAt(m, 1))) {
+                const before: int = m.pos
+                const r: REpArm = endpointArm(m)
+                out = out.concat([r.arm])
+                m = r.mp
+                if (m.pos == before) m = mAdv(m, 1)
+            } else {
+                const from: int = m.pos
+                let to: int = m.src.indexOf("<", from + 1)
+                if (to < 0) to = m.src.length
+                m = mAt(mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "an `<endpoint>` body holds its per-variant arms only (`<Variant : expr>`, `<Variant(a, b) : expr>`, `<Variant/>`, `<_ : expr>` — §61.2); this content is not an arm", from, to), to)
+            }
+        }
+        return { arms: out, mp: m }
+    }
+
+    // One arm: `<V : expr>`, `<V(a, b) : expr>`, `<V/>`, `<V(a)>expr</>`, `<_ : expr>`
+    // (§61.2 — the `:`-shorthand, the bare body and the self-closing no-op).
+    fn endpointArm(mp: MP) -> REpArm {
+        const start: int = mp.pos
+        const nm: RWord = readName(mAdv(mp, 1))
+        let m: MP = nm.mp
+        let binds: ABind[] = []
+        let parens = false
+        if (chAt(m, 0) == "(") {
+            parens = true
+            m = mAdv(m, 1)
+            let more = true
+            while (more) {
+                m = skipSpace(m)
+                if (chAt(m, 0) == ")") {
+                    m = mAdv(m, 1)
+                    more = false
+                } else if (isNameStart(chAt(m, 0))) {
+                    const bw: RWord = readName(m)
+                    binds = binds.concat([{ nid: m.nid, span: mkSpan(m.pos, bw.mp.pos), name: bw.w }])
+                    m = skipSpace(mBump(bw.mp))
+                    if (chAt(m, 0) == ",") m = mAdv(m, 1)
+                } else {
+                    const bad: int = m.pos
+                    let to: int = m.src.indexOf(")", bad)
+                    const gt: int = m.src.indexOf(">", bad)
+                    if (to < 0 || (gt >= 0 && gt < to)) to = gt - 1
+                    if (to < bad) to = bad
+                    m = mAt(mDiag(m, "E-PARSE-TAG", "an `<endpoint>` arm binds its variant's payload positionally, one name per field (`<" + nm.w + "(a, b) …>`, §61.2 / §51.0.B.1)", bad, to + 1), to + 1)
+                    more = false
+                }
+            }
+        }
+        const atBody: MP = skipSpace(m)
+        let body: AExpr | not = not
+        let selfClosing = false
+        if (chAt(atBody, 0) == ":" && atBody.pos > m.pos) {
+            const rs: RNodes = parseShorthand(atBody, nm.w)
+            m = rs.mp
+            const one: AExpr | not = soleInterp(rs.nodes)
+            if (one is given) {
+                body = one
+            } else {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's body is display text or markup — an arm body is the value the compiler envelopes as the JSON response (§61.5), and the bootstrap builds a value expression only", start, m.pos)
+            }
+        } else if (mLooking(atBody, "/>")) {
+            selfClosing = true
+            m = mAdv(atBody, 2)
+        } else if (chAt(atBody, 0) == ">") {
+            const rb: REpBody = endpointBareBody(mAdv(atBody, 1), nm.w, start)
+            body = rb.e
+            m = rb.mp
+        } else {
+            const bad2: int = atBody.pos
+            let to2: int = atBody.src.indexOf(">", bad2)
+            if (to2 < 0) to2 = atBody.src.length - 1
+            m = mAt(mDiag(atBody, "E-PARSE-TAG", "unexpected `" + chAt(atBody, 0) + "` in the `<endpoint>` arm `<" + nm.w + "` — an arm is `<Variant : expr>`, `<Variant(a, b) : expr>`, `<Variant/>` or `<Variant>expr</>` (§61.2)", bad2, bad2 + 1), to2 + 1)
+        }
+        const arm: AEpArm = { nid: m.nid, span: mkSpan(start, m.pos), variant: nm.w, parens: parens, binds: binds, body: body, selfClosing: selfClosing, fn: "" }
+        return { arm: arm, mp: mBump(m) }
+    }
+
+    fn soleInterp(ns: ANode[]) -> AExpr | not {
+        if (ns.length != 1) return not
+        return match ns[0].k {
+            .Interp(e: e) :> e
+            // no-default-arm: one question of a node — is it one value expression
+            _ :> not
+        }
+    }
+
+    type REpBody:struct = { e: AExpr | not, mp: MP }
+
+    // A bare arm body `<V>…</>` (§61.2 "a code-default body, for a multi-statement
+    // handler"). §61.10: "A MULTI-statement bare body … is NOT yet lowered … → the
+    // clean `E-ENDPOINT-MULTI-STATEMENT-ARM` Error". ONE expression is the arm's
+    // value; two or more statements is that Error (the statements are read only to
+    // count them — their own diagnostics are not kept: the arm is refused whole); a
+    // single non-expression statement, an empty body or markup in the body has no
+    // value to envelope and is refused by name.
+    fn endpointBareBody(mp: MP, name: string, armStart: int) -> REpBody {
+        let m: MP = mp
+        let body: AExpr | not = not
+        const at: MP = skipTrivia(m)
+        if (mLooking(at, "</") || (chAt(at, 0) == "<" && isNameStart(chAt(at, 1))) || atInterp(at)) {
+            m = mDiag(at, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's bare body holds no value expression (empty, markup, or a `${…}` block) — an arm body is the one value the compiler envelopes as the JSON response (§61.5); write `<" + name + " : expr>`, or `<" + name + "/>` for the 204 no-op arm", armStart, at.pos)
+        } else {
+            const tp0: TP = codeRegionTP(at, LexStop.CodeBody)
+            const one: RExpr = parseAssign(tp0)
+            let t1: TP = one.tp
+            while (isP(t1, ";")) { t1 = adv(t1) }
+            if (atEnd(t1) && t1.diags.length == tp0.diags.length) {
+                body = one.e
+                m = backToMarkup(at, t1)
+            } else {
+                // count the statements (on a scratch read)
+                let t: TP = tp0
+                let n: int = 0
+                while (!atEnd(t) && n < 64) {
+                    const i0: int = t.i
+                    const rs: RStmt = parseStmt(t)
+                    t = rs.tp
+                    while (isP(t, ";")) { t = adv(t) }
+                    if (t.i == i0) t = adv(t)
+                    n = n + 1
+                }
+                const back: MP = backToMarkup(at, t)
+                const ended: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: at.diags, file: back.file, hoist: back.hoist, dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, schemaN: back.schemaN, ns: back.ns }
+                if (n >= 2) {
+                    m = mDiag(ended, "E-ENDPOINT-MULTI-STATEMENT-ARM", "the `<" + name + ">` arm of this `<endpoint>` has a multi-statement body — an arm body is a single value-expression (the value the compiler envelopes as the JSON response, §61.5); multi-statement handler bodies are a future wave (§61.10). Reduce the arm to one expression, or move the logic into a function and call it: `<" + name + " : compute(…)>`", armStart, ended.pos)
+                } else {
+                    m = mDiag(ended, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's bare body is one statement that is not an expression — an arm body is the one value the compiler envelopes as the JSON response (§61.5); write `<" + name + " : expr>`", armStart, ended.pos)
+                }
+            }
+        }
+        m = skipTrivia(m)
+        if (mLooking(m, "</")) return { e: body, mp: parseCloser(m, name) }
+        // markup (or anything else) after the value: refused, read to the arm's closer
+        const from: int = m.pos
+        const rest: RNodes = parseKids(m, name)
+        return { e: not, mp: mDiag(rest.mp, "E-BOOTSTRAP-UNSUPPORTED", "an `<endpoint>` arm's bare body is ONE value expression (§61.2, §61.5) — this content follows it", from, rest.mp.pos) }
+    }
+
+    // ---- the desugar (after the whole file is read) --------------------------
+    // §61.2: "The arm form **reuses** the `<match>` block-form arm grammar (§18.0.1)
+    // and the §51.0.B.1 payload-binding surface — each arm is a state-child named
+    // for a variant of the `accepts=` enum, with the variant's payload destructured
+    // into per-arm locals"; §61.6: "An `<endpoint>` declaration SHALL emit a server
+    // route-handler mounted at `path=` for `method=`". Each arm with a body becomes
+    //   server function endpoint#<k>#<Variant>(<binder>: <field type>, …) { return <body> }
+    // in place of the endpoint (the program's scope): its binders are its
+    // parameters in declaration order, typed by the enum's payload fields (each type
+    // copied with fresh node ids), so the arm's scope, typing, placement and
+    // lowering are a server function's. Only when `accepts=` names an `:enum`
+    // declared in THIS file (the parser cannot see another file's types); analyze
+    // judges every other case (endpointPass). An arm naming no variant, a repeated
+    // variant, or binders that do not match the payload is not desugared —
+    // analyze reports it. A `_` binder is a parameter no source can name.
+    type RDesugar:struct = { items: AItem[], eps: AEndpoint[], nid: int }
+
+    fn endpointDesugar(items: AItem[], eps: AEndpoint[], nid0: int) -> RDesugar {
+        if (eps.length == 0) return { items: items, eps: eps, nid: nid0 }
+        let nid: int = nid0
+        let outEps: AEndpoint[] = []
+        let repl: EpRepl[] = []
+        let k: int = 0
+        for (const ep of eps) {
+            const vs: AVariant[] | not = enumVariantsNamed(items, ep.accepts)
+            let fns: AItem[] = []
+            let arms: AEpArm[] = []
+            let lowered = false
+            if (vs is given && ep.top) {
+                lowered = true
+                let seen: string[] = []
+                for (const a of ep.arms) {
+                    let fnName: string = ""
+                    const v: AVariant | not = variantNamed(vs, a.variant)
+                    const fresh: boolean = seen.indexOf(a.variant) < 0
+                    seen = seen.concat([a.variant])
+                    const body: AExpr | not = a.body
+                    let fields: ATypeField[] = []
+                    let known = a.variant == "_"
+                    if (v is given) {
+                        fields = v.fields
+                        known = true
+                    }
+                    const fits: boolean = !a.parens || (a.variant != "_" && a.binds.length == fields.length)
+                    if (known && fresh && fits && body is given) {
+                        fnName = "endpoint#" + k + "#" + a.variant
+                        let params: AParam[] = []
+                        let j: int = 0
+                        for (const b of a.binds) {
+                            const ct: RClone = cloneType(fields[j].ty, nid)
+                            nid = ct.nid
+                            let pn: string = b.name
+                            if (pn == "_") pn = "_#" + j
+                            params = params.concat([{ nid: nid, span: b.span, name: pn, ty: ct.t, lin: false }])
+                            nid = nid + 1
+                            j = j + 1
+                        }
+                        const ret: AStmt = { nid: nid, span: body.span, k: AStmtK.Return(body) }
+                        const blk: ABlock = { nid: nid + 1, span: body.span, stmts: [ret] }
+                        const f: AFn = { nid: nid + 2, span: a.span, exported: false, pure: false, name: fnName, params: params, ret: not, body: blk,
+                                         server: true, failable: false, err: not }
+                        fns = fns.concat([{ nid: nid + 3, span: a.span, k: AItemK.FnItem(f) }])
+                        nid = nid + 4
+                    }
+                    arms = arms.concat([{ nid: a.nid, span: a.span, variant: a.variant, parens: a.parens, binds: a.binds, body: a.body, selfClosing: a.selfClosing, fn: fnName }])
+                }
+            } else {
+                arms = ep.arms
+            }
+            outEps = outEps.concat([{ nid: ep.nid, span: ep.span, opener: ep.opener, path: ep.path, method: ep.method, accepts: ep.accepts, acceptsSpan: ep.acceptsSpan,
+                                      arms: arms, top: ep.top, lowered: lowered }])
+            repl = repl.concat([{ at: ep.nid, items: fns }])
+            k = k + 1
+        }
+        return { items: replaceEpItems(items, repl), eps: outEps, nid: nid }
+    }
+
+    type EpRepl:struct = { at: int, items: AItem[] }
+
+    // The placeholder MarkupItem of each endpoint (its node id is the endpoint's) → its functions.
+    fn replaceEpItems(items: AItem[], repl: EpRepl[]) -> AItem[] {
+        let out: AItem[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const p: AProgram | not = programOfItem(k)
+            const at: int = epPlaceholderAt(k)
+            let done = false
+            if (p is given) {
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: replaceEpItems(p.items, repl) }) }])
+                done = true
+            }
+            if (!done && at >= 0) {
+                for (const r of repl) {
+                    if (r.at == at) {
+                        out = out.concat(r.items)
+                        done = true
+                    }
+                }
+            }
+            if (!done) out = out.concat([it])
+        }
+        return out
+    }
+
+    fn programOfItem(k: AItemK) -> AProgram | not {
+        return match k {
+            .ProgramItem(p: p) :> p
+            // no-default-arm: one question of an item — is it a program
+            _ :> not
+        }
+    }
+
+    // The node id of an endpoint placeholder item (an empty Text MarkupItem), -1 otherwise.
+    fn epPlaceholderAt(k: AItemK) -> int {
+        return match k {
+            .MarkupItem(n: n) :> textPlaceholderNid(n)
+            // no-default-arm: one question of an item — is it a markup placeholder
+            _ :> -1
+        }
+    }
+
+    fn textPlaceholderNid(n: ANode) -> int {
+        return match n.k {
+            .Text(text: t) :> emptyTextNid(t, n.nid)
+            // no-default-arm: one question of a node — is it an empty text run
+            _ :> -1
+        }
+    }
+
+    fn emptyTextNid(t: string, nid: int) -> int {
+        if (t == "") return nid
+        return -1
+    }
+
+    // The variants of the `:enum` named `name` declared in `items` (a program's
+    // items included); `not` when no such enum is declared here.
+    fn enumVariantsNamed(items: AItem[], name: string) -> AVariant[] | not {
+        if (name == "") return not
+        for (const it of items) {
+            const k: AItemK = it.k
+            const p: AProgram | not = programOfItem(k)
+            if (p is given) {
+                const inner: AVariant[] | not = enumVariantsNamed(p.items, name)
+                if (inner is given) return inner
+            }
+            const td: ATypeDecl | not = typeDeclOfItem(k)
+            if (td is given && td.name == name) return enumBodyOf(td.body)
+        }
+        return not
+    }
+
+    fn typeDeclOfItem(k: AItemK) -> ATypeDecl | not {
+        return match k {
+            .TypeItem(t: t) :> t
+            // no-default-arm: one question of an item — is it a type declaration
+            _ :> not
+        }
+    }
+
+    fn enumBodyOf(b: ATypeBody) -> AVariant[] | not {
+        return match b {
+            .EnumBody(variants: vs) :> vs
+            // no-default-arm: one question of a type body — is it an enum's
+            _ :> not
+        }
+    }
+
+    fn variantNamed(vs: AVariant[], name: string) -> AVariant | not {
+        for (const v of vs) {
+            if (v.name == name) return v
+        }
+        return not
+    }
+
+    type RClone:struct = { t: AType, nid: int }
+
+    // `t` with fresh node ids (the payload field's type, written again as a parameter's).
+    fn cloneType(t: AType, nid0: int) -> RClone {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> { t: { nid: nid0, span: t.span, k: ATypeK.TName(n) }, nid: nid0 + 1 }
+            .TSeq(elem: e, grants: g) :> cloneSeq(t.span, e, g, nid0)
+            .TMaybe(inner: i) :> cloneMaybe(t.span, i, nid0)
+            .TLife(pre: a, post: b) :> cloneLife(t.span, a, b, nid0)
+            .TRefine(base: b, pred: p) :> cloneRefine(t.span, b, p, nid0)
+        }
+    }
+
+    fn cloneSeq(sp: ASpan, e: AType, g: string[], nid0: int) -> RClone {
+        const r: RClone = cloneType(e, nid0)
+        return { t: { nid: r.nid, span: sp, k: ATypeK.TSeq(r.t, g) }, nid: r.nid + 1 }
+    }
+
+    fn cloneMaybe(sp: ASpan, i: AType, nid0: int) -> RClone {
+        const r: RClone = cloneType(i, nid0)
+        return { t: { nid: r.nid, span: sp, k: ATypeK.TMaybe(r.t) }, nid: r.nid + 1 }
+    }
+
+    fn cloneLife(sp: ASpan, a: AType, b: AType, nid0: int) -> RClone {
+        const ra: RClone = cloneType(a, nid0)
+        const rb: RClone = cloneType(b, ra.nid)
+        return { t: { nid: rb.nid, span: sp, k: ATypeK.TLife(ra.t, rb.t) }, nid: rb.nid + 1 }
+    }
+
+    fn cloneRefine(sp: ASpan, b: AType, p: string, nid0: int) -> RClone {
+        const r: RClone = cloneType(b, nid0)
+        return { t: { nid: r.nid, span: sp, k: ATypeK.TRefine(r.t, p) }, nid: r.nid + 1 }
+    }
+
+    // =========================================================================
     // Entry.
     // =========================================================================
     export type Parsed:struct = { ast: FileAst, diags: Diag[], nextId: int }
@@ -12997,9 +13508,13 @@ ${
     // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
     // offsets its first analysis proved, PNs.at).
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], schemaN: 0, ns: ns }
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], schemaN: 0, ns: ns }
         const r0: RMItems = parseMarkupItems(m0, "")
-        const r: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
+        const r1: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
+        // s478 (s478-boot-endpoint): each `<endpoint>`'s arms, as server functions (endpointDesugar)
+        const dz: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
+        const m1: MP = r1.mp
+        const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, schemaN: m1.schemaN, ns: m1.ns } }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
@@ -13007,7 +13522,7 @@ ${
         // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
         // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
         for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, pages: r.mp.pages, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src), dbFns: r.mp.dbFns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, first: firstId }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 
     // The offset where each line of `src` starts (s454 — FileAst.lines).

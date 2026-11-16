@@ -1116,7 +1116,19 @@ ${
         // s477 — §64: the program is a `kind="tool"` (a plain runnable module, no page,
         // no client — print-server.scrml printTool), and its entry; `not` for a web application.
         tool: CoreTool | not,
+        // s478 (s478-boot-endpoint) — §61: the program's `<endpoint>` routes (CoreEndpoint).
+        endpoints: CoreEndpoint[],
     }
+
+    // s478 (s478-boot-endpoint) — one §61 `<endpoint>`: the author-stable `path` and
+    // `method` it is mounted at (§61.7), the `accepts` enum its request body decodes
+    // into (§61.3), and one arm per variant it names (§61.4) — `variant` "_" for the
+    // wildcard `<_>`. An arm's `fn` is the server function its body was desugared to
+    // (parse.scrml endpointDesugar), called with the variant's payload fields in
+    // declaration order when `arity` > 0 (its binders), or with none; `not` for the
+    // self-closing no-op arm (§61.5: 204).
+    export type CoreEpArm:struct = { variant: string, fn: Sym | not, arity: int }
+    export type CoreEndpoint:struct = { path: string, method: string, accepts: Sym, arms: CoreEpArm[], file: string }
 
     // s477 — §64.2 / §64.3: `main` the entry function (a ServerFn — every `function`
     // of a tool runs in process); `exits` — it declares a numeric return, so the
