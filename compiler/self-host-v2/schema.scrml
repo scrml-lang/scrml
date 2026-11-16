@@ -52,7 +52,9 @@ ${
     fn LB() -> string { return "{" }
 
     // A declared column / table (absolute source offsets of the name).
-    export type SchemaCol:struct = { name: string, ty: string, pk: boolean, start: int, end: int }
+    // `nn`: the column carries `not null` (§38.5.2) — s478-boot-sql-row-types reads it for the
+    // §14.8.3 nullability of the column's generated field type.
+    export type SchemaCol:struct = { name: string, ty: string, pk: boolean, nn: boolean, start: int, end: int }
     export type SchemaRef:struct = { col: string, table: string, target: string, targetCol: string, start: int, end: int }
     export type SchemaTable:struct = { name: string, cols: SchemaCol[], start: int, end: int }
     // A finding: its code, message and absolute source span.
@@ -455,6 +457,7 @@ ${
             errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", i, ne)])
         }
         let pk = false
+        let nn = false
         let pks: int = 0
         let refs: SchemaRef[] = []
         let k: int = skip(s, te, to)
@@ -467,9 +470,9 @@ ${
                 if (c == "}") {
                     going = false
                 } else if (c == ",") {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
                 } else if (!isWordStart(c)) {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
                 } else {
                     const we: int = wordEnd(s, k, to)
                     const w: string = s.substring(k, we)
@@ -483,19 +486,20 @@ ${
                         if (pks > 1) errs = errs.concat([refuse("column `" + table + "." + name + "` says `primary key` twice", k, wordEnd(s, after, to))])
                         k = skip(s, wordEnd(s, after, to), to)
                     } else if (w == "not" && wordAt(s, after, to) == "null") {
+                        nn = true
                         k = skip(s, wordEnd(s, after, to), to)
                     } else if (w == "unique") {
                         k = after
                     } else if (w == "default") {
                         if (ch(s, after) != "(") {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
                         }
                         const pe: int = parenEnd(s, after, to)
                         if (pe < 0) {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
                         }
                         if (s.substring(after + 1, pe).trim() == "") {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
                         }
                         const why: string = defaultRefusal(s, after + 1, pe)
                         if (why != "") errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)])
@@ -514,23 +518,23 @@ ${
                         if (ok && tail < to && isWordCh(ch(s, tail))) ok = false
                         if (!ok) {
                             const shown: string = s.substring(k, runEnd(s, tb, to)).trim()
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
                         }
                         refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }])
                         k = skip(s, tail, to)
                     } else if (w == "rename") {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
                     } else if (isSharedCore(w)) {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
                     } else if (w == "immutable") {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
                     } else {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
                     }
                 }
             }
         }
-        return { col: { name: name, ty: ty, pk: pk, start: i, end: ne }, refs: refs, errs: errs, next: k, stop: false }
+        return { col: { name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs: refs, errs: errs, next: k, stop: false }
     }
 
     // ---- a table --------------------------------------------------------------

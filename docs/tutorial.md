@@ -157,7 +157,7 @@ The bootstrap compiles this program today.
 
 A counter in memory is gone the moment you refresh the page. Let's persist it. scrml has a built-in database layer — no `npm install better-sqlite3`, no Prisma, no schema files in a separate directory. You name the database file with `db=` on `<program>`, declare its shape in a `<schema>` block (a direct child of `<program>`), and write parameterized SQL with `?{}`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no typed ?{} rows yet (a row's `.value` is refused) and cannot decode `loadCount`'s answer, which declares no success type -->
+<!-- gate: spec-ahead [E-TYPE-031] — the bootstrap types the ?{} row from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit the `(not to int)` cell (owner question g-boot-sql-row-field-types-owner-s478) -->
 <!-- snippet: docs/tutorial-snippets/02b-counter-persisted.scrml -->
 ```scrml
 // 02b-counter-persisted.scrml — counter that survives a refresh.
@@ -1105,7 +1105,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-STATE-UNDECLARED(@saved, @saved)] — the bootstrap has no <channel>, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-STATE-UNDECLARED(@saved, @saved), E-TYPE-031] — the bootstrap has no <channel>; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Note's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.

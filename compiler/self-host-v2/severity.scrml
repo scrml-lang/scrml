@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 378 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 379 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -427,6 +427,7 @@ ${
             "E-TYPE-041" :> Severity.Error
             "E-TYPE-043" :> Severity.Error
             "E-TYPE-044" :> Severity.Error
+            "E-TYPE-046" :> Severity.Error
             "E-TYPE-080" :> Severity.Error
             "E-TYPE-082" :> Severity.Error
             "E-TYPE-ANY-FORBIDDEN" :> Severity.Error
