@@ -51,7 +51,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
@@ -62,7 +62,8 @@ ${
     import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
     import { PNs, Parsed, parseFileNs, nsOfItems, RefineTop, refineTopOf, refineSpec, refineLitVerdict, refineLitFailMsg } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
+    import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, SqlProj, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff, rowProjection } from "./sql.scrml"
+    import { SchemaTable, SchemaCol } from "./schema.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
@@ -512,6 +513,8 @@ ${
         // colour: a server or split function, or one that reaches one) — known before the typer, which
         // admits a pending cell's handled waiting write by it (checkWrite, §13.9.4); [] until the summary
         waits: int[],
+        // s478-boot-sql-row-types: each typed `?{}` site's result type (rowTypes) — the typer's
+        rows: RowOf[],
     }
 
     // s474 r1 (#1715 review F7): `file` binds the user type `sym` (declared `orig` in
@@ -870,6 +873,8 @@ ${
         // s478 (review-followups-2): the import graph's cycles (link.scrml importCycles — a
         // function of the file set), computed once: onCommonCycle asks per read
         cycles: ImportCycle[],
+        // s478-boot-sql-row-types: each typed `?{}` site's result type (rowTypes)
+        rows: RowOf[],
     }
 
     // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
@@ -7793,8 +7798,13 @@ ${
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
                              succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
-                             printCalls: pscan.calls, cycles: importCycles(files) }
-        return { g: g, st: st }
+                             printCalls: pscan.calls, cycles: importCycles(files), rows: [] }
+        // s478-boot-sql-row-types: the §39.11 / §14.8 row types, once every function is known
+        const rw: RRows = rowTypes(g, files, st)
+        const g2: Globals = { program: g.program, entry: g.entry, te: g.te, types: g.types.concat(rw.types), decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
+                              errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: g.consts, succs: g.succs,
+                              singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: rw.rows }
+        return { g: g2, st: rw.st }
     }
 
     // s475 (s475-boot-handled-landing-check) — every failable function's success
@@ -9325,6 +9335,35 @@ ${
                 }
             }
         }
+        // s478-boot-sql-row-types — a field of a `T | not` LOCAL whose `T` is a struct (a `.get()`
+        // row, `Row | not`, §14.8.7; a `P | not` parameter). §42.3.5 / §34 E-TYPE-046: a member access
+        // on a receiver whose type admits `not` "without optional-chaining … or narrowing (`if=` /
+        // `given` / `is not` / `match`, §42.3.5) is compile error E-TYPE-046". The binder reads no
+        // narrowing, so it resolves the field here and the TYPER — which does (narrowRead: `if (r is
+        // not) return …`, `r is not ? … : r.f`, `r is given && r.f`) — judges the read: a receiver not
+        // narrowed to `T` there is E-TYPE-046 (typeMember). Only a bare local / parameter name (the
+        // typer's narrowing keys a local by its Sym); a cell, a call result, a chain stay refused by
+        // name below (g-bootstrap-method-receiver-narrowing-blind-s469 keeps them).
+        if (t is given && isLocalNameRead(st, obj)) {
+            const mi: Type | not = maybeInner(t)
+            if (mi is given) {
+                const ms: Sym | not = namedOf(mi)
+                if (ms is given) {
+                    const mti: TypeInfo | not = typeInfoOf(env.g.types, ms)
+                    if (mti is given) {
+                        const mfs: FieldDef[] | not = structFieldDefs(mti.def)
+                        if (mfs is given) {
+                            let mi2 = 0
+                            for (const mfd of mfs) {
+                                if (mfd.sym.hint == name) return plain(mfd.ty, addName(st, e.nid, NameFact.NStruct(ms, mi2)))
+                                mi2 = mi2 + 1
+                            }
+                            return diagX(env, e, "E-SCOPE-001", shownStruct(env, ms) + " has no field `" + name + "`", st)
+                        }
+                    }
+                }
+            }
+        }
         // s473 (§21.3.3 rule 15): a declared `:host` handle is closed
         if (t is given) {
             // s473-host-allowlist-b (rule 16 as amended): a DOM element type's members stay OPEN
@@ -9335,6 +9374,23 @@ ${
         const via: string = viaText(env, obj)
         if (via != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on `" + exprName(obj) + "` — " + via, st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
+    }
+
+    // s478-boot-sql-row-types — is `e` a bare name the binder resolved to a local (or a parameter)?
+    fn isLocalNameRead(st: AS, e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const isName: boolean = match k {
+            .Name(name: n) :> true
+            // no-default-arm: one question of the expression — is it a bare name
+            _ :> false
+        }
+        if (!isName) return false
+        const f: NameFact | not = nameFactIn(st, e.nid)
+        return match f {
+            .NLocal(sym: s) :> true
+            // no-default-arm: one question of the fact — is it a local read
+            _ :> false
+        }
     }
 
     // s444 Phase B — the synthesized validity-surface properties (§55.5–§55.7).
@@ -18453,6 +18509,206 @@ ${
         return blockDiverges(el)
     }
 
+    // =========================================================================
+    // s478-boot-sql-row-types — THE ROW TYPE OF A `?{}` (§39.11, §14.8, §8.3).
+    //   §39.11: "The compiler generates struct types for each table in `<schema>`
+    //     before running the `<db>` type inference pass (§14.8)"; "If the database
+    //     file is absent, the compiler uses `<schema>` alone to generate types".
+    //   §14.8.7: "A `?{ SELECT id, email FROM users }` context produces a value
+    //     whose type is a struct containing only the selected columns … The
+    //     chained method wraps the row: `.get()` produces `Row | not`, `.all()`
+    //     (or a bare `?{}`) produces `Row[]` (§8.3)"; "`SELECT *` over a single
+    //     table expands to that table's generated type".
+    //   §8.3 / §44.3: `.run()` → `void` (no row — not typed here).
+    //   Field types — §39.4 maps each column type to its SQLite affinity, §14.8.3
+    //     maps the affinity to a scrml type: `integer` (INTEGER) and `real` (REAL)
+    //     → `number`, `text` and `timestamp` (TEXT) → `string`; `blob` → `bytes`,
+    //     which the bootstrap has no type for (fail closed — a projection with one
+    //     stays untyped); `boolean` is refused where it is declared (schema.scrml).
+    //   Nullability — §14.8.3: "A `ColumnDef` with `nullable: true` SHALL produce
+    //     a field type of `T | not`". A `<schema>` column is nullable unless it
+    //     carries `not null` (§38.5.2) or is an `integer primary key` ("an alias
+    //     for the `rowid`. The compiler SHALL use this semantics directly",
+    //     §38.5.1 — a rowid is never NULL). Any other `primary key` without `not
+    //     null` stays `T | not`: SQLite admits NULL there.
+    //   Identity — §14.8.1: "The generated types are **nominal**". One struct per
+    //     (file, table, projected columns in written order): `SELECT *` and a list
+    //     naming every column in declared order are the table's generated type
+    //     (named by §14.8.2's PascalCase); any other projection is its own struct.
+    //     A row struct is never width-subtyped into a user `:struct` (§14.8.8 is
+    //     not built — a row passed where a declared struct is expected is a
+    //     mismatch). The generated name is not put in scope (§14.8.4): a row type
+    //     cannot be written in source in the bootstrap (gap
+    //     g-boot-sql-row-type-names-s478).
+    // FAILS CLOSED — a site stays untyped (VType.Unknown; a member read of its
+    // value is refused by name, as before) unless: its file's FIRST `<schema>`
+    // read clean (parse.scrml finishSchema); the site is in a function whose
+    // nearest database scope (dbsPass) is the database of the top-level
+    // `<program>` that holds that `<schema>`; the text is one provable
+    // single-table SELECT (sql.scrml rowProjection); the table is declared there
+    // (exact spelling); every projected column is one of its columns (exact
+    // spelling) of a typed column type.
+    // =========================================================================
+    export type RowOf:struct = { nid: int, ty: Type }
+    type RRows:struct = { types: TypeInfo[], rows: RowOf[], st: AS }
+    type RowKey:struct = { key: string, sym: Sym }
+
+    fn rowTypes(g: Globals, files: FileAst[], st0: AS) -> RRows {
+        let any = false
+        for (const f0 of files) {
+            if (f0.tables.length > 0) any = true
+        }
+        if (!any) return { types: [], rows: [], st: st0 }
+        const rd: RDbs = dbsPass(g, files, st0)        // only its scopes are read: its findings are the later dbsPass's
+        let st: AS = st0
+        let types: TypeInfo[] = []
+        let rows: RowOf[] = []
+        let keys: RowKey[] = []
+        for (const f of files) {
+            const sdb: int = schemaDbId(g, f, rd.scopes)
+            if (f.tables.length > 0 && sdb >= 0) {
+                for (const fs of g.fns) {
+                    if (fs.info.file == f.path && fnDbId(rd, fs.f.nid) == sdb) {
+                        for (const site of sqlsInBlock(fs.f.body)) {
+                            const pr: SqlProj = rowProjection(site.q.chunks)
+                            const cols: SchemaCol[] | not = projectedCols(f.tables, pr)
+                            const mode: ASqlMode = site.q.mode
+                            if (cols is given && mode != ASqlMode.SqlRun) {
+                                const key: string = f.path + "|" + pr.table + "|" + colNames(cols).join(",")
+                                let sym: Sym | not = not
+                                for (const rk of keys) {
+                                    if (rk.key == key) sym = rk.sym
+                                }
+                                if (sym is not) {
+                                    const tbl: SchemaTable = tableNamed(f.tables, pr.table)
+                                    let hint: string = rowTypeName(pr.table)
+                                    if (colNames(cols).join(",") != colNames(tbl.cols).join(",")) hint = hint + "{" + colNames(cols).join(", ") + "}"
+                                    const rs: RSym = mint(st, hint)
+                                    st = rs.st
+                                    let fields: FieldDef[] = []
+                                    for (const c of cols) {
+                                        const rf: RSym = mint(st, c.name)
+                                        st = rf.st
+                                        fields = fields.concat([{ sym: rf.s, ty: colType(c), grants: noGrants() }])
+                                    }
+                                    types = types.concat([{ nid: -1, span: mkSpan(tbl.start, tbl.end), name: hint, file: builtinFile(), exported: false, def: TypeDef.StructDef(rs.s, fields) }])
+                                    keys = keys.concat([{ key: key, sym: rs.s }])
+                                    sym = rs.s
+                                }
+                                if (sym is given) {
+                                    // `.all()` / a bare `?{}`: `Row[]` — written with no grant (§66.12.1)
+                                    let ty: Type = Type.Seq(Type.Named(sym), fixedSeq())
+                                    // `.get()`: `Row | not`
+                                    if (mode == ASqlMode.SqlGet) ty = Type.Maybe(Type.Named(sym))
+                                    rows = rows.concat([{ nid: site.nid, ty: ty }])
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return { types: types, rows: rows, st: st }
+    }
+
+    // The database (its Sym id) of the top-level `<program>` of `f` that holds its
+    // `<schema>`, else -1.
+    fn schemaDbId(g: Globals, f: FileAst, scopes: ScopeDb[]) -> int {
+        for (const it of f.items) {
+            const p: AProgram | not = programOfK(it.k)
+            if (p is given) {
+                if (holdsSchema(g, f.path, p.items)) {
+                    const sd: ScopeDb | not = scopeDbOf(scopes, p.nid)
+                    if (sd is given) {
+                        const d: Db | not = sd.db
+                        if (d is given) return d.sym.id
+                    }
+                }
+            }
+        }
+        return -1
+    }
+
+    // The database (its Sym id) of a function's nearest database scope, else -1.
+    fn fnDbId(rd: RDbs, fnid: int) -> int {
+        const sc: int = fnScope(rd.fns, fnid)
+        if (sc < 0) return -1
+        const sd: ScopeDb | not = scopeDbOf(rd.scopes, sc)
+        if (sd is not) return -1
+        const d: Db | not = sd.db
+        if (d is not) return -1
+        return d.sym.id
+    }
+
+    // The columns a projection names, each a declared column of a typed type; else not.
+    fn projectedCols(tables: SchemaTable[], pr: SqlProj) -> SchemaCol[] | not {
+        if (!pr.ok) return not
+        let found = false
+        for (const t of tables) {
+            if (t.name == pr.table) found = true
+        }
+        if (!found) return not
+        const tbl: SchemaTable = tableNamed(tables, pr.table)
+        let out: SchemaCol[] = []
+        if (pr.star) {
+            out = tbl.cols
+        } else {
+            for (const n of pr.cols) {
+                let hit: SchemaCol | not = not
+                for (const c of tbl.cols) {
+                    if (c.name == n) hit = c
+                }
+                if (hit is not) return not
+                out = out.concat([hit])
+            }
+        }
+        for (const c2 of out) {
+            if (!colTyped(c2.ty)) return not
+        }
+        return out
+    }
+
+    fn tableNamed(tables: SchemaTable[], name: string) -> SchemaTable {
+        for (const t of tables) {
+            if (t.name == name) return t
+        }
+        return tables[0]
+    }
+
+    fn colNames(cs: SchemaCol[]) -> string[] {
+        let out: string[] = []
+        for (const c of cs) { out = out.concat([c.name]) }
+        return out
+    }
+
+    fn colTyped(ty: string) -> boolean {
+        return ty == "integer" || ty == "real" || ty == "text" || ty == "timestamp"
+    }
+
+    // §39.4 → §14.8.3: INTEGER / REAL → `number`, TEXT → `string`; nullable → `T | not`.
+    fn colType(c: SchemaCol) -> Type {
+        let t: Type = Type.Str
+        if (c.ty == "integer" || c.ty == "real") t = Type.Num
+        if (c.nn || (c.pk && c.ty == "integer")) return t
+        return Type.Maybe(t)
+    }
+
+    // §14.8.2: split on `_`, capitalize the first letter of each segment, concatenate.
+    fn rowTypeName(table: string) -> string {
+        let out: string = ""
+        for (const seg of table.split("_")) {
+            out = out + seg.substring(0, 1).toUpperCase() + seg.substring(1)
+        }
+        return out
+    }
+
+    fn rowOfSite(rows: RowOf[], nid: int) -> Type | not {
+        for (const r of rows) {
+            if (r.nid == nid) return r.ty
+        }
+        return not
+    }
+
     // §19.8.3 (R11) / §19.8.2 — a `?{}` no handling form takes. In a function
     // body: outside a `!` function E-ERROR-002; inside one it propagates
     // implicitly ("The `?{}` expression behaves as if it were a `!` function
@@ -18462,11 +18718,12 @@ ${
     // (U1d / E-VALUE-SERVER-CALL) — placePass's.
     fn resolveSql(env: Env, e: AExpr, q: ASql, stmt: boolean, st0: AS) -> RX {
         const st: AS = resolveExprs(env, q.params, not, st0)
-        if (!env.fx.inFn || q.handled) return plain(not, st)
+        const rt: Type | not = rowOfSite(env.g.rows, e.nid)     // s478-boot-sql-row-types (§14.8.7)
+        if (!env.fx.inFn || q.handled) return plain(rt, st)
         if (env.fx.defer) return plain(not, addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "this `?{}` query is failable and stands in a deferred statement — handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3); an enclosing `!` does not cover it"))
         if (!env.fx.failable) return plain(not, addDiag(st, env.file, e.span, "E-ERROR-002", "this `?{}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). (\"No row\" is not a failure: `.get()` returns `not`, `.all()` `[]`.)"))
         if (!stmt && env.fx.whole != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `?{}` query that a `!` function propagates implicitly (§19.8.2) " + ue2Reason()))
-        return plain(not, propagationFact(env, e, env.g.sqlErrorSym, stmt, st))
+        return plain(rt, propagationFact(env, e, env.g.sqlErrorSym, stmt, st))
     }
 
     // §19.3 — `fail …`. §19.3.3: "`fail` SHALL be valid only inside a function
@@ -25363,7 +25620,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles }
+                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: g.rows }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -29760,7 +30017,7 @@ ${
     // 5); the unproven branch stays provable-or-silent.
     fn checkPartial(env: TEnv, xs: Type[], target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         for (const x of xs) {
-            if (mayBeNot(x, target) || fitsType(x, target) == Verdict.Fails) {
+            if (mayBeNot(x, target) || (fitsType(x, target) == Verdict.Fails && !rowFits(env.t.types, x, target))) {
                 return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value may be " + shownT(env, x) + " — one of its branches (or arms) is " + shownT(env, x) + ", and each branch is the value when it is taken, so each must fit (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
             }
         }
@@ -29771,7 +30028,7 @@ ${
     // taken, so each must fit (§66.1 rule 5; §17.6's union rule).
     fn checkOneOf(env: TEnv, xs: Type[], target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         for (const x of xs) {
-            if (mayBeNot(x, target) || fitsType(x, target) == Verdict.Fails) {
+            if (mayBeNot(x, target) || (fitsType(x, target) == Verdict.Fails && !rowFits(env.t.types, x, target))) {
                 return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value may be " + shownT(env, x) + " — it is one of " + oneOfName(xs) + " (a choice whose branches have different types: each branch is the value when it is taken, and each must fit; §66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
             }
         }
@@ -29783,7 +30040,73 @@ ${
             return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value is " + shownT(env, x) + " — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x is given) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
         }
         if (fitsType(x, target) != Verdict.Fails) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value is " + shownT(env, x) + " (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)) + sameNameNote(env, target, x))
+        if (rowFits(env.t.types, x, target)) return ts          // s478-boot-sql-row-types (§14.8.8)
+        return report(ts, env, span, "E-TYPE-031", what + " expects " + shownT(env, target) + ", and this value is " + shownT(env, x) + " (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)) + sameNameNote(env, target, x) + rowNote(env.t.types, x, target))
+    }
+
+    // s478-boot-sql-row-types — §14.8.8: "A source type `S` is *width-subtype-assignable* to a
+    // declared `:struct` target `T` iff: for **every** field `f: Tf` in `T`, `S` has a field `f` whose
+    // type is assignable to `Tf`. **EXTRA fields in `S` are allowed**"; "The rule applies **ONLY**
+    // when: the SOURCE is a SQL-projection-row type (… or its per-item element after the consumer
+    // iterates a `Row[]` / unwraps a `Row | not`), **and** the TARGET is a developer-declared
+    // `:struct` used as a prop / annotation contract". Built here for the EXACT case only: the row
+    // projects precisely the struct's fields (no extra column), each of a type that fits. A row with
+    // an extra column stays refused (INTERIM, g-boot-sql-row-width-extra-s478): the §57 codec
+    // refuses an undeclared key ("An undeclared own key is refused, not dropped"), so passing the row
+    // on as the struct would fail on the wire — the extra-column case needs a projection the
+    // bootstrap does not build. Through `T | not` and `T[]` element-wise (the unwrapped / iterated
+    // row of the rule). A row type is a struct the bootstrap synthesized (rowTypes: built-in file).
+    fn rowFits(types: TypeInfo[], v: Type, target: Type) -> boolean {
+        const ti: Type | not = maybeInner(target)
+        const vi: Type | not = maybeInner(v)
+        if (ti is given) {
+            if (vi is given) return rowFits(types, vi, ti)
+            return rowFits(types, v, ti)
+        }
+        if (vi is given) return false
+        const te: Type | not = seqElem(target)
+        if (te is given) {
+            const ve: Type | not = seqElem(v)
+            if (ve is not) return false
+            return rowFits(types, ve, te)
+        }
+        const rs: Sym | not = namedOf(v)
+        const us: Sym | not = namedOf(target)
+        if (rs is not || us is not) return false
+        const rfs: FieldDef[] | not = rowFieldsOf(types, rs)
+        if (rfs is not) return false
+        const uti: TypeInfo | not = typeInfoOf(types, us)
+        if (uti is not) return false
+        if (uti.file == builtinFile()) return false
+        const ufs: FieldDef[] | not = structFieldDefs(uti.def)
+        if (ufs is not) return false
+        if (ufs.length != rfs.length) return false
+        for (const uf of ufs) {
+            let ok = false
+            for (const rf of rfs) {
+                if (rf.sym.hint == uf.sym.hint && fitsType(rf.ty, uf.ty) == Verdict.Fits) ok = true
+            }
+            if (!ok) return false
+        }
+        return true
+    }
+
+    // The fields of a synthesized row struct (a StructDef of the built-in file), else not.
+    fn rowFieldsOf(types: TypeInfo[], s: Sym) -> FieldDef[] | not {
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return not
+        if (ti.file != builtinFile()) return not
+        return structFieldDefs(ti.def)
+    }
+
+    fn rowNote(types: TypeInfo[], x: Type, target: Type) -> string {
+        let v: Type = unMaybe(x)
+        const ve: Type | not = seqElem(v)
+        if (ve is given) v = unMaybe(ve)
+        const rs: Sym | not = namedOf(v)
+        if (rs is not) return ""
+        if (rowFieldsOf(types, rs) is not) return ""
+        return " — a `?{}` row fits a declared struct (§14.8.8) in the bootstrap only when it projects exactly that struct's fields, each of a fitting type (a column `integer` / `real` is `number`, and one without `not null` is `T | not`, §14.8.3); a row with an extra column is not passed on as the struct (g-boot-sql-row-width-extra-s478)"
     }
 
     // s472 r1 (F4): two different types that print alike (`Color` from two files —
@@ -29999,8 +30322,15 @@ ${
             .Template(quasis: qs, slots: ss) :> typeTemplate(env, ss, ts)   // s469 (§14.13.3)
             .HashRef(id: hr0) :> rvt(VType.Unknown, ts)
             .Foreign(f: fb0) :> typeForeign(env, fb0, ts)                  // s473 (§23.2.4a)
-            .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
+            .Sql(q: q) :> rvt(sqlVType(env, e), typeExprList(env, q.params, ts))   // s478-boot-sql-row-types: the row type (§14.8.7), else Unknown
         }
+    }
+
+    // s478-boot-sql-row-types — a `?{}`'s type: its row type where rowTypes proved one.
+    fn sqlVType(env: TEnv, e: AExpr) -> VType {
+        const t: Type | not = rowOfSite(env.t.rows, e.nid)
+        if (t is not) return VType.Unknown
+        return known(t)
     }
 
     // s444 — a lambda: its body typed with its parameters bound (their types
@@ -30394,7 +30724,37 @@ ${
         let ts1: TypeState = ts
         if (hasErrIn(env.blame.spans, e.span)) ts1 = quietPlace(ts, obj)
         const ro: RVT = typeExpr(env, obj, ts1)
+        // s478-boot-sql-row-types — §42.3.5 / §34 E-TYPE-046: the binder resolved a field of a
+        // `T | not` local (resolveMember); here the read is judged against the narrowing in force.
+        // The receiver must be PROVEN `T` (a narrowed `Known`); anything else — still `T | not`,
+        // or a type the typer could not prove — is E-TYPE-046 (fail closed).
+        const ut: Type | not = knownOf(nameType(env, nameFact(env.t.names, obj.nid)))
+        if (isStructField(f) && ut is given && maybeInner(ut) is given) {
+            const nt: Type | not = knownOf(ro.vt)
+            let proven = false
+            if (nt is given) proven = maybeInner(nt) is not
+            if (!proven && !hasErrIn(env.blame.spans, e.span)) {
+                return rvt(VType.Unknown, report(ro.ts, env, e.span, "E-TYPE-046", "`" + exprLabel(obj) + "` may be `not` here (its type is `" + typeName(ut) + "`), so its field `" + memberNameOf(e) + "` cannot be read — narrow it first: `if (" + exprLabel(obj) + " is not) return …;`, `" + exprLabel(obj) + " is not ? … : " + exprLabel(obj) + "." + memberNameOf(e) + "`, or `match` (§42.3.5)"))
+            }
+        }
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
+    }
+
+    fn isStructField(f: NameFact | not) -> boolean {
+        return match f {
+            .NStruct(owner: o, idx: x) :> true
+            // no-default-arm: one question of the fact — is it a struct field read
+            _ :> false
+        }
+    }
+
+    fn memberNameOf(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o, name: n) :> n
+            // no-default-arm: one question of the expression — its member name
+            _ :> ""
+        }
     }
 
     fn typePropValues(env: TEnv, ps: AProp[], ts0: TypeState) -> TypeState {
@@ -31887,7 +32247,13 @@ ${
             // s475 r1 (#1777 review F1): a block arm with statements yields what it
             // `lift`s (§18.5, S469 — `{ const z = "q"; lift z; }`); each lifted
             // value joins, as the one expression of `e` / `{ e }` does
-            for (const av of armValues(ts, body, one, a.lifted)) {
+            for (const av0 of armValues(ts, body, one, a.lifted)) {
+                // s478-boot-sql-row-types — an EMPTY tape literal arm (`_ :> []`) has no element
+                // to type it; it is a value of the success type when that is a tape: §19.8.3
+                // item 1 "For a `?{}` the success type is the terminator's (§44.3): … `.all()`
+                // yields `Row[]`, so `_ :> []` does" (a value of any tape type).
+                let av: VType = av0
+                if (isUnknownVT(av0) && isEmptyTapeLit(one) && seqOfVT(rs.vt)) av = rs.vt
                 if (first) {
                     vt = av
                     first = false
@@ -31899,6 +32265,30 @@ ${
         if (how == AHow.Propagate) return rvt(rs.vt, ts)
         if (first) return rvt(VType.Unknown, ts)         // a `match` with no value arm
         return rvt(vt, ts)
+    }
+
+    fn isUnknownVT(v: VType) -> boolean {
+        return match v {
+            .Unknown :> true
+            // no-default-arm: one question of the type — is it unproven
+            _ :> false
+        }
+    }
+
+    fn isEmptyTapeLit(e: AExpr | not) -> boolean {
+        if (e is not) return false
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es.length == 0
+            // no-default-arm: one question of the expression — is it `[]`
+            _ :> false
+        }
+    }
+
+    fn seqOfVT(v: VType) -> boolean {
+        const t: Type | not = knownOf(v)
+        if (t is not) return false
+        return seqElem(t) is given
     }
 
     // s475 r1 (#1777 review F1) — the value a handler arm yields, already typed:
@@ -40593,7 +40983,7 @@ ${
         for (const f of files) {
             const r: RItems = pendItems(f.items, pend, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first, tables: f.tables }])
         }
         return { files: out, next: next }
     }
@@ -40638,7 +41028,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first, tables: f.tables }])
         }
         return out
     }
@@ -42157,7 +42547,7 @@ ${
         return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
                  names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
                  attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing,
-                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: ws }
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: ws, rows: t.rows }
     }
 
     fn nodeIdx(nodes: Callable[], sym: int) -> int {
@@ -45755,7 +46145,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [], refines: [] },
-                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [], rows: ra.g.rows }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -45775,7 +46165,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows }
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st)
         // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
@@ -45803,7 +46193,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows }
         const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t))
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
