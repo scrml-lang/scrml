@@ -9529,6 +9529,20 @@ ${
             if (lty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
             return plain(Type.Int, lst)
         }
+        // s478 (s478-boot-member-access) — `.length` of a `string | not` / `T[] | not`
+        // receiver. §42.3.5: "A member access whose receiver's static type admits `not`
+        // … SHALL be compile error E-TYPE-046 UNLESS the access is made absence-safe";
+        // "Inside the narrowed scope `recv` is `T` and bare `.field` access is safe."
+        // Resolved as the length of the present value; the TYPER (typeMember) holds the
+        // receiver to a narrowing and reports E-TYPE-046 where it is not narrowed.
+        if (name == "length" && ro.x.inst is not && lty is given) {
+            const lin: Type | not = maybeInner(lty)
+            if (lin is given && isLengthOf(lin)) {
+                const mst: AS = addName(st, e.nid, NameFact.NLength)
+                if (lin == Type.Str) return plain(Type.Int, addValue(mst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
+                return plain(Type.Int, mst)
+            }
+        }
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
         if (inst is given && iDecl is given) {
@@ -9567,17 +9581,19 @@ ${
                     }
                 }
             }
-        }
-        // s478-boot-sql-row-types — a field of a `T | not` LOCAL whose `T` is a struct (a `.get()`
-        // row, `Row | not`, §14.8.7; a `P | not` parameter). §42.3.5 / §34 E-TYPE-046: a member access
-        // on a receiver whose type admits `not` "without optional-chaining … or narrowing (`if=` /
-        // `given` / `is not` / `match`, §42.3.5) is compile error E-TYPE-046". The binder reads no
-        // narrowing, so it resolves the field here and the TYPER — which does (narrowRead: `if (r is
-        // not) return …`, `r is not ? … : r.f`, `r is given && r.f`) — judges the read: a receiver not
-        // narrowed to `T` there is E-TYPE-046 (typeMember). Only a bare local / parameter name (the
-        // typer's narrowing keys a local by its Sym); a cell, a call result, a chain stay refused by
-        // name below (g-bootstrap-method-receiver-narrowing-blind-s469 keeps them).
-        if (t is given && isLocalNameRead(st, obj)) {
+            // s478 (s478-boot-member-access) — a field of a `S | not` receiver, `S` a struct
+            // (`<user>: User | not`, a `User | not` local or parameter). §42.3.5: "A member
+            // access whose receiver's static type admits `not` (a plain-optional `T | not` /
+            // `T?` receiver) SHALL be compile error E-TYPE-046 UNLESS the access is made
+            // absence-safe by one of: … 2. Narrowing `recv` from `T | not` to `T` in an
+            // enclosing scope … Inside the narrowed scope `recv` is `T` and bare `.field`
+            // access is safe." The field resolves on `S` (the same struct step a present
+            // receiver takes); the TYPER, which owns narrowing (narrowRead), reports
+            // E-TYPE-046 where the receiver is still `S | not` (typeMember). The field's type
+            // is its declared type — per hop (§42.3.5 "The rule is per-hop"): an optional
+            // field stays `F | not` and a further member of it is judged again. (Merge of
+            // #1915: this also resolves a `.get()` row local, `Row | not` (§14.8.7) — #1915's
+            // local-only copy of this step is folded in here; the typer judges both.)
             const mi: Type | not = maybeInner(t)
             if (mi is given) {
                 const ms: Sym | not = namedOf(mi)
@@ -9586,10 +9602,10 @@ ${
                     if (mti is given) {
                         const mfs: FieldDef[] | not = structFieldDefs(mti.def)
                         if (mfs is given) {
-                            let mi2 = 0
-                            for (const mfd of mfs) {
-                                if (mfd.sym.hint == name) return plain(mfd.ty, addName(st, e.nid, NameFact.NStruct(ms, mi2)))
-                                mi2 = mi2 + 1
+                            let mx = 0
+                            for (const fd of mfs) {
+                                if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(ms, mx)))
+                                mx = mx + 1
                             }
                             return diagX(env, e, "E-SCOPE-001", shownStruct(env, ms) + " has no field `" + name + "`", st)
                         }
@@ -9607,23 +9623,6 @@ ${
         const via: string = viaText(env, obj)
         if (via != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on `" + exprName(obj) + "` — " + via, st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
-    }
-
-    // s478-boot-sql-row-types — is `e` a bare name the binder resolved to a local (or a parameter)?
-    fn isLocalNameRead(st: AS, e: AExpr) -> boolean {
-        const k: AExprK = e.k
-        const isName: boolean = match k {
-            .Name(name: n) :> true
-            // no-default-arm: one question of the expression — is it a bare name
-            _ :> false
-        }
-        if (!isName) return false
-        const f: NameFact | not = nameFactIn(st, e.nid)
-        return match f {
-            .NLocal(sym: s) :> true
-            // no-default-arm: one question of the fact — is it a local read
-            _ :> false
-        }
     }
 
     // s444 Phase B — the synthesized validity-surface properties (§55.5–§55.7).
@@ -22839,7 +22838,7 @@ ${
     }
 
     fn typeFor(env: TEnv, s: AStmt, f: AFor, ts0: TypeState) -> RTEnv {
-        const entry: TEnv = tDeferEnv(env)
+        const entry: TEnv = tLoopEnv(env, f)
         const h: AForHead = f.head
         const ts: TypeState = match h {
             .HForever :> typeBlock(entry, f.body, ts0)
@@ -22847,7 +22846,44 @@ ${
             .HCounted(init: i, cond: c, step: sp) :> typeCounted(entry, i, c, sp, f.body, ts0)
             .HIter(bind: b, src: src, key: ky) :> typeIter(entry, b, src, ky, f.body, ts0)
         }
-        return keepTEnv(tDeferEnv(env), ts)
+        return keepTEnv(entry, ts)
+    }
+
+    // s478 (s478-boot-member-access) — the narrowings in force in a loop's body (every
+    // iteration) and after it. §42.3.5: "A write to the narrowed place — direct, in a
+    // nested block, or by a call that writes it or whose write set cannot be determined
+    // — ends the narrowing from that point". An iteration runs after the previous
+    // one's writes, so a place the loop (its head or body) may write is not narrowed in
+    // it, nor after it; a place it writes nowhere keeps its narrowing (the case
+    // reactive/narrowing-survives-write-after-loop-pos). Was: every cell narrowing
+    // dropped at a loop (tDeferEnv — sound, but it refused a member read of a cell the
+    // loop never writes). Locals keep tDeferEnv's rule (never rebound — their write
+    // keys are spelled names, not the `#id` keys they are narrowed by). Fail closed: a
+    // `?{}` in the loop (a suspension point, §42.3.5) drops every cell narrowing, and
+    // a call whose write set is unknown (`*`) or of a nested function does too
+    // (tUnnarrowEffects).
+    fn tLoopEnv(env: TEnv, f: AFor) -> TEnv {
+        const base: TEnv = tDeferEnv(env)
+        if (sqlsInBlock(f.body).length > 0) return base
+        const effs: string[] = exprsEffects(forExprs(f)).concat(blockEffects(f.body, []))
+        let w: TEnv = tUnnarrowEffects(env, effs)
+        for (const k of effs) {
+            if (k.indexOf("()") != 0) w = tUnnarrow(w, k)
+        }
+        let keep: string[] = base.narrowed
+        for (const k of w.narrowed) {
+            if (k.indexOf("@") == 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
+        }
+        // s478 fix round 1 (#1917 review L1) — a kept cell narrowing keeps its `if=` gate
+        // mark (gateMark, s462 Q18), so a click handler lifted in the loop under that gate
+        // keeps the gate's narrowing (§42.3.5: render-gating removes the subtree and its
+        // listener synchronously on the write that ends the gate's condition). Was: the
+        // mark (`gate:@…`, neither `#` nor `@`) was dropped, and every gated handler in a
+        // loop lost the narrowing. A mark whose cell the loop may write stays dropped.
+        for (const k of env.narrowed) {
+            if (k.indexOf(gateMark("")) == 0 && keep.indexOf(k.substring(gateMark("").length)) >= 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     fn typeLoopCond(env0: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
@@ -32067,66 +32103,199 @@ ${
         // type is the host call's (hostCallType), not Unknown
         const hc: HostCall | not = hostFact(vf)
         if (hc is given) return rvt(hostCallType(hc), ro.ts)
-        // s478-boot-sql-row-types — §42.3.5 / §34 E-TYPE-046: the binder resolved a field of a
-        // `T | not` local (resolveMember); here the read is judged against the narrowing in force.
-        // The receiver must be PROVEN `T` (a narrowed `Known`); anything else — still `T | not`,
-        // or a type the typer could not prove — is E-TYPE-046 (fail closed).
-        // s478-boot-sql-row-types fix r1 (#1915 review H1): PROVEN means the narrowed receiver IS
-        // the field's owner struct (`Type.Named(owner)`) — not merely "cannot be `not`". The binder
-        // took the field from the local's type where it was declared; a rebinding (`b = 5`, `b = m`
-        // of another struct, `b = a` of a narrower projection) or a `!{}` arm of another type leaves
-        // a typer type that is not the owner, and reading the owner's field off it would read a
-        // field that is not there. A LOCAL receiver is judged on every struct-field read (its typer
-        // type may have been widened away from the binder's by a rebinding); any other receiver
-        // only when its type admits `not` (as before).
-        const ut: Type | not = knownOf(nameType(env, nameFact(env.t.names, obj.nid)))
-        const fo: Sym | not = structOwnerOf(f)
-        // (a bare local NAME — `b.f`; the `@.` of an `<each>` is the row the list renders, typed by
-        // its list, and stays judged as before)
-        const localRecv: boolean = exprName(obj) != "" && isLocalFact(nameFact(env.t.names, obj.nid))
-        if (fo is given && (localRecv || (ut is given && maybeInner(ut) is given))) {
-            const nt: Type | not = knownOf(ro.vt)
-            let proven = false
-            if (nt is given) {
-                const ns: Sym | not = namedOf(nt)
-                if (ns is given) proven = ns.id == fo.id
-            }
-            if (!proven && !hasErrIn(env.blame.spans, e.span)) {
-                let shown: string = "not proven"
-                if (ut is given) shown = "`" + typeName(ut) + "`"
-                let why: string = "may be `not` here (its type is " + shown + ")"
-                if (nt is given && maybeInner(nt) is not) why = "is not proven to be `" + fo.hint + "` here (its type is `" + typeName(nt) + "`)"
-                if (nt is not && (ut is not || maybeInner(ut) is not)) why = "is not proven to be `" + fo.hint + "` here (its type is " + shown + " — a rebinding or a handler arm of another type widened it)"
-                return rvt(VType.Unknown, report(ro.ts, env, e.span, "E-TYPE-046", "`" + exprLabel(obj) + "` " + why + ", so its field `" + memberNameOf(e) + "` cannot be read — narrow it first: `if (" + exprLabel(obj) + " is not) return …;`, `" + exprLabel(obj) + " is not ? … : " + exprLabel(obj) + "." + memberNameOf(e) + "`, or `match` (§42.3.5)"))
+        // s478 (s478-boot-member-access) — §42.3.5: "A member access whose receiver's
+        // static type admits `not` (a plain-optional `T | not` / `T?` receiver) SHALL be
+        // compile error E-TYPE-046 UNLESS the access is made absence-safe by … Narrowing
+        // `recv`". The binder resolves a struct field / `.length` of a `T | not` receiver
+        // on `T`; here the receiver's type is read where the access stands — narrowed
+        // (narrowRead: `T`) or not (`T | not`). Every way a narrowing ends (§42.3.5: a
+        // write, a call that may write it, a suspension point, a function body / handler
+        // created in the narrowed scope) is the narrowing machinery's, unchanged. A
+        // lifecycle `(not to T)` receiver already reported E-TYPE-001 and reads `T`
+        // (lifeRead) — "a receiver fires exactly one of the two" (§42.3.5).
+        if (maybeDeref(f) && !hasErrIn(env.blame.spans, e.span)) {
+            const om: string = memberRecvMismatch(f, ro.vt)
+            // a receiver that IS `not` here admits `not` (§42.3.5) — E-TYPE-046, not a type mismatch
+            if (om == "not") return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-TYPE-046", absentMemberMsg(obj, nameOfMember(e))))
+            // an unresolved receiver an earlier report accounts for (a refused declaration or
+            // construct it reads) is not reported again (§42.4 statement 6: no cascade)
+            if (om == "unresolved" && (condBlamed(env, obj, ro.ts) || refusedConstRead(env, obj) || refusedName(env, nameFact(env.t.names, obj.nid)))) return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
+            if (om != "") return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-BOOTSTRAP-UNSUPPORTED", recvMismatchMsg(obj, nameOfMember(e), om)))
+            const rt: Type | not = knownOf(ro.vt)
+            if (rt is given && maybeInner(rt) is given) {
+                return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-TYPE-046", optMemberMsg(obj, nameOfMember(e), rt)))
             }
         }
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
 
-    // The owner struct of a struct field read (NStruct), else not.
+    // s478 fix round 1 (#1917 review H1) — THE RECEIVER IS WHAT THE BINDER RESOLVED THE
+    // STEP ON. The binder resolves a struct field (`NStruct(owner)`) / `.length`
+    // (`NLength`) from the receiver's declared or init-inferred type; the typer
+    // flow-types the receiver where the access stands (an unannotated `let` rebound to
+    // another type: `let u = @user; u = @car`). The step's meaning is the binder's, so a
+    // receiver the typer does not show to be of that type would read a field of a value
+    // that has none (§7.5.1: a value "SHALL satisfy" the type of the position it reaches;
+    // §42.3.5's narrowing proves presence, not the type). Every member read is held to
+    // it, not only a `T | not` one: for `NStruct(owner)` the receiver (its `T` when it is
+    // `T | not`) SHALL be `owner`; for `NLength` a string or a tape. Anything else —
+    // another type, or a type the typer cannot resolve (`unresolved`, a partial merge) —
+    // is refused by name, fail closed (E-BOOTSTRAP-UNSUPPORTED: the SPEC states no code
+    // for a rebind of an unannotated local to another type). Returns the receiver's type
+    // as shown in the refusal ("" = it matches). One helper: the `?{}` row receivers
+    // (#1915 review H1 — a `let` row rebound to an `int`, another struct, a narrower
+    // projection; a `!{}` arm of another type) are this same check — the receiver must be
+    // the field's owner struct (`Named(owner)`), judged on every struct-field read, local
+    // or not. A merely-not-`not` receiver of the wrong type is refused by name here; a
+    // receiver that is or may be `not` is E-TYPE-046 (§42.3.5).
+    fn memberRecvMismatch(f: NameFact | not, vt: VType) -> string {
+        const want: Sym | not = structOwnerOf(f)
+        const isLen: boolean = isLengthFact(f)
+        if (want is not && !isLen) return ""
+        const ts: Type[] = match vt {
+            .Known(t: x) :> [x]
+            .OneOf(ts: xs) :> xs
+            .Absent :> []
+            .Unknown :> []
+            .Partial(ts: xs) :> []
+        }
+        if (ts.length == 0) return vtName(vt)
+        for (const t0 of ts) {
+            const t: Type = unMaybe(t0)
+            if (isLen) {
+                if (!isLengthOf(t)) return typeName(t0)
+            } else {
+                const got: Sym | not = namedOf(t)
+                if (got is not || want is not) return typeName(t0)
+                if (got.id != want.id) return typeName(t0)
+            }
+        }
+        return ""
+    }
+
     fn structOwnerOf(f: NameFact | not) -> Sym | not {
         return match f {
-            .NStruct(owner: o, idx: x) :> o
-            // no-default-arm: one question of the fact — the struct a field read reads from
-            _ :> not
+            .NStruct(owner: o) :> o
+            .NLength :> not
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NFn(sym: s) :> not
+            .NSurface(of: x) :> not
+            .NReq(id: rq0, sig: rs0) :> not
+            .NConst(sym: s) :> not
+            not :> not
         }
     }
 
-    fn isLocalFact(f: NameFact | not) -> boolean {
+    fn isLengthFact(f: NameFact | not) -> boolean {
         return match f {
-            .NLocal(sym: s) :> true
-            // no-default-arm: one question of the fact — is it a local read
-            _ :> false
+            .NLength :> true
+            .NStruct(owner: o) :> false
+            .NLocal(sym: s) :> false
+            .NField(decl: d) :> false
+            .NInst(decl: d) :> false
+            .NFn(sym: s) :> false
+            .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
+            .NConst(sym: s) :> false
+            not :> false
         }
     }
 
-    fn memberNameOf(e: AExpr) -> string {
+    // A read of a file-scope constant whose declaration was refused (ConstInfo.ok false: its
+    // type is unresolved because its own report already failed the build).
+    fn refusedConstRead(env: TEnv, x: AExpr) -> boolean {
+        const nf: NameFact | not = nameFact(env.t.names, x.nid)
+        const cs: Sym | not = match nf {
+            .NConst(sym: s) :> s
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NInst(decl: d) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            .NSurface(of: x2) :> not
+            .NReq(id: rq0, sig: rs0) :> not
+            not :> not
+        }
+        if (cs is not) return false
+        for (const c of env.t.consts) {
+            if (c.sym.id == cs.id) return !c.ok
+        }
+        return false
+    }
+
+    fn absentMemberMsg(obj: AExpr, name: string) -> string {
+        const pk: string = placeKey(obj)
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        return shown + " reads a member of a receiver that is `not` at this point (§42.3.5) — narrow it (`if=` / `given` / `is not` / `match`) after giving it a value, or optional-chain the access (`?." + name + "`)"
+    }
+
+    fn recvMismatchMsg(obj: AExpr, name: string, got: string) -> string {
+        const pk: string = placeKey(obj)
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        const r: string = pk == "" ? "its receiver" : "`" + pk + "`"
+        return shown + " — `." + name + "` was resolved on the receiver's declared or initial type, but " + r + " is `" + got + "` here (an unannotated local rebound to a value of another type, or a type the compiler cannot resolve at this point); a member read through it is not in the bootstrap (§7.5.1). Annotate the local with its type (`let u: T = …`), or bind the other value to a fresh name"
+    }
+
+    // A member step that dereferences its receiver's VALUE (a struct field, `.length`) —
+    // the steps §42.3.5 holds to a present receiver.
+    fn maybeDeref(f: NameFact | not) -> boolean {
+        return match f {
+            .NStruct(owner: o) :> true
+            .NLength :> true
+            .NLocal(sym: s) :> false
+            .NField(decl: d) :> false
+            .NInst(decl: d) :> false
+            .NFn(sym: s) :> false
+            .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
+            .NConst(sym: s) :> false
+            not :> false
+        }
+    }
+
+    fn nameOfMember(e: AExpr) -> string {
         const k: AExprK = e.k
         return match k {
             .Member(obj: o, name: n) :> n
-            // no-default-arm: one question of the expression — its member name
-            _ :> ""
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
+            .Foreign(f: fb0) :> ""
         }
+    }
+
+    // §42.3.5: "E-TYPE-046 message names the possibly-`not` receiver and steers to the two
+    // resolutions: optional-chain the access (`recv?.field`) to propagate absence, or narrow
+    // the receiver (`if=` / `given` / `is not` / `match`) to prove presence."
+    fn optMemberMsg(obj: AExpr, name: string, rt: Type) -> string {
+        const pk: string = placeKey(obj)
+        const r: string = pk == "" ? "this receiver" : "`" + pk + "`"
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        return shown + " reads a member of " + r + ", which is `" + typeName(rt) + "` — it may be `not` here: it is not narrowed at this point, or its narrowing has ended (a write to it, a call that may write it, a server call or other suspension point, or a function body / event handler created after the test — re-test it there) (§42.3.5). Optional-chain the access (`" + (pk == "" ? "recv" : pk) + "?." + name + "`) to propagate absence, or narrow the receiver (`if=` / `given` / `is not` / `match`) to prove presence"
     }
 
     fn typePropValues(env: TEnv, ps: AProp[], ts0: TypeState) -> TypeState {
@@ -35713,6 +35882,13 @@ ${
         let renv: TEnv = env
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
         if (bind is given) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
+        // s478 fix round 1 (#1917) — a row over a source whose type is unresolved BECAUSE of an
+        // error already reported (a refused declaration it reads) is blamed (§42.4 statement 6:
+        // no second report at `@.field`, memberRecvMismatch)
+        if (bind is given && inA is given && knownOf(elem) is not) {
+            const ix: AExpr | not = valueExpr(inA.value)
+            if (ix is given && condBlamed(env, ix, ts)) renv = tWithRefused(renv, bind)
+        }
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
         if (keyA is given) {
             // s475 r1 (#1782 review): the attribute key is the header key's rule

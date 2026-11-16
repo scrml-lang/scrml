@@ -225,7 +225,10 @@ describe("the opener's paren matcher skips `[…]` and strings: a malformed life
 describe("the s473 probes (docs/changes/s473-spec-coverage/probes/part-2/s14a/b3/)", () => {
   const PROBES = {
     // lc-cell names its cell `p` (E-DECL-ELEMENT-NAME-COLLIDES) and reads `.length` off a `string | not`
-    "lc-cell": [`<program>\n    let <p:(not to string)=not/>\n    function f() -> int { return @p.length; }\n    <p>\${f()}</p>\n</program>`, ["E-DECL-ELEMENT-NAME-COLLIDES", U]],
+    // s478 (s478-boot-member-access): `.length` of a `T | not` receiver is built — this one is a
+    // lifecycle cell read before it is discriminated, E-TYPE-001 (§13.9.3; §42.3.5: "a receiver fires
+    // exactly one of the two"), no longer the bootstrap's refusal
+    "lc-cell": [`<program>\n    let <p:(not to string)=not/>\n    function f() -> int { return @p.length; }\n    <p>\${f()}</p>\n</program>`, ["E-DECL-ELEMENT-NAME-COLLIDES", "E-TYPE-001"]],
     "lc-variant-cell": [`<program>\n    type Ph:enum = { Idle, Done }\n    let <p:(.Idle to .Done)=.Idle/>\n    <p>\${@p}</p>\n</program>`, [U, "E-DECL-ELEMENT-NAME-COLLIDES"]],
     "lc-legacy": [`<program>\n    type User:struct = { id: int, hash: (not -> string) }\n    <p>hi</p>\n</program>`, [U]],
     "lc-param": [`<program>\n    type User:struct = { id: int }\n    function f(u: (not to User)) -> int { return u.id; }\n    <p>hi</p>\n</program>`, [U, U]],
