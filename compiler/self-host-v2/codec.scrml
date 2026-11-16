@@ -105,6 +105,21 @@ ${
         return -1
     }
 
+    // s478 — a function type at any depth (a struct or variant field's type is never one:
+    // analyze refuses a function type there).
+    fn holdsFn(t: Type) -> boolean {
+        return match t {
+            .Fn(params: ps) :> true
+            .Maybe(inner: i) :> holdsFn(i)
+            .Seq(elem: e) :> holdsFn(e)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: s) :> false
+        }
+    }
+
     fn reach(p: CoreProgram, t: Type, acc: Sym[]) -> Sym[] {
         return match t {
             .Int :> acc
@@ -114,6 +129,7 @@ ${
             .Maybe(inner: i) :> reach(p, i, acc)
             .Seq(elem: e) :> reach(p, e, acc)
             .Named(sym: s) :> reachNamed(p, s, acc)
+            .Fn(params: ps) :> acc
         }
     }
 
@@ -157,6 +173,7 @@ ${
             .Maybe(inner: i) :> WireTy.WMaybe(wireTy(syms, unMaybe(i)))
             .Seq(elem: e, grants: g) :> WireTy.WSeq(wireTy(syms, e), wireBound(g))
             .Named(sym: s) :> WireTy.WRef(symIndex(syms, s))
+            .Fn(params: ps) :> WireTy.WInt
         }
     }
 
@@ -168,6 +185,7 @@ ${
             .Num :> t
             .Str :> t
             .Bool :> t
+            .Fn(params: ps) :> t
             .Named :> t
             .Seq :> t
         }
@@ -242,6 +260,10 @@ ${
     // Entry.
     // -------------------------------------------------------------------------
     export fn wireBuild(p: CoreProgram, t: Type) -> WireBuild {
+        // s478 (s478-boot-fn-type) — §14.3 (S474, PERMANENT): "a closure cannot be serialized —
+        // its code and captured environment have no wire form". A function type anywhere in a
+        // wire type has no table (analyze refuses it before; this is the backstop).
+        if (holdsFn(t)) return { table: not, why: ["a function value has no wire form — a closure cannot be serialized (§14.3)"] }
         const syms: Sym[] = reach(p, t, [])
         let defs: WireDef[] = []
         let why: string[] = []

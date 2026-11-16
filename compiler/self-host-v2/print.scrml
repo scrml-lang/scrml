@@ -402,6 +402,8 @@ ${
             .Local(sym: s) :> localRead(ctx, s)
             .Read(place: pl) :> placeJs(ctx, pl)
             .Call(callee: f, args: args) :> callJs(ctx, f, args)
+            .FnRef(fn: f) :> jid(symName(ctx, f))      // s478 (s478-boot-fn-type): the function itself (never a waiting one, check.scrml C-FV2)
+            .CallV(f: f, args: args) :> jcall(exprJs(ctx, f), exprsJs(ctx, args))   // s478: a synchronous call through a function value
             .Prim(op: op, args: args) :> primJs(ctx, op, exprsJs(ctx, args))
             .Match(scrut: s, arms: arms) :> matchJs(ctx, s, arms)
             .ArrayOf(elems: es) :> JsExpr.JArray(exprsJs(ctx, es))
@@ -1894,6 +1896,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .VariantOf(enumSym: x) :> not
@@ -1921,6 +1925,8 @@ ${
             .Lit(lit: x) :> ownKids(Node.NExpr(e))
             .Read(place: x) :> ownKids(Node.NExpr(e))
             .Call(callee: x) :> ownKids(Node.NExpr(e))
+            .FnRef(fn: x) :> ownKids(Node.NExpr(e))
+            .CallV(f: x) :> ownKids(Node.NExpr(e))
             .Match(scrut: x) :> ownKids(Node.NExpr(e))
             .ArrayOf(elems: x) :> ownKids(Node.NExpr(e))
             .StructOf(ty: x) :> ownKids(Node.NExpr(e))
@@ -2000,6 +2006,8 @@ ${
             .Local(sym: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
@@ -2029,6 +2037,8 @@ ${
             .Local(sym: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Match(scrut: x) :> false
             .VariantOf(enumSym: x) :> false
             .Handle(inst: x) :> false
@@ -2059,6 +2069,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
@@ -2732,6 +2744,8 @@ ${
             .Local(sym: x) :> 1
             .Read(place: x) :> 1
             .Call(callee: x) :> 1
+            .FnRef(fn: x) :> 1
+            .CallV(f: x) :> 1
             .Prim(op: x) :> 1
             .Match(scrut: x) :> 1
             .ArrayOf(elems: x) :> 1
@@ -3129,6 +3143,8 @@ ${
             .Lit(lit: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
@@ -3392,6 +3408,8 @@ ${
             .Local(sym: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -3475,6 +3493,8 @@ ${
             .Lit(lit: x) :> []
             .Local(sym: x) :> []
             .Call(callee: x) :> []
+            .FnRef(fn: x) :> []
+            .CallV(f: x) :> []
             .Prim(op: x) :> []
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
@@ -3719,6 +3739,8 @@ ${
             .Local(sym: s) :> []
             .Read(place: pl) :> []
             .Call(callee: c) :> []
+            .FnRef(fn: x) :> []
+            .CallV(f: x) :> []
             .Prim(op: o) :> []
             .Match(scrut: s) :> []
             .ArrayOf(elems: es) :> []
@@ -4321,6 +4343,7 @@ ${
             .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostDescJs(ctx, i, depth + 1) }])
             .Seq(elem: e) :> JsExpr.JObject([{ key: "k", value: jstr("tape") }, { key: "elem", value: hostDescJs(ctx, e, depth + 1) }])
             .Named(sym: s) :> hostNamedDesc(ctx, s, depth)
+            .Fn(params: ps) :> hostKind("unchecked")   // unreachable: analyze refuses a function type in a host binding (resolveType)
         }
     }
 
@@ -4365,6 +4388,7 @@ ${
             .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostTypeJs(i) }])
             .Named(sym: s) :> hostKind("unchecked")
             .Seq(elem: e) :> hostKind("unchecked")
+            .Fn(params: ps) :> hostKind("unchecked")   // unreachable: analyze refuses a function type in a host binding (resolveType)
         }
     }
 
@@ -4581,6 +4605,8 @@ ${
             .Local(sym: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -4841,6 +4867,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -4956,6 +4984,8 @@ ${
     fn exprPlainCallee(e: Expr) -> Sym | not {
         return match e {
             .Call(callee: f) :> f
+            .FnRef(fn: f) :> f      // s478: a function named as a value is reached as if called (its artifact must hold it)
+            .CallV(f: x) :> not
             .ServerCall(fn: x) :> not
             .Query(q: x) :> not
             .Foreign(slice: fsl0) :> not

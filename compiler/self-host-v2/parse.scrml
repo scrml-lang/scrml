@@ -2119,6 +2119,10 @@ ${
         if (isP(tp, "(")) {
             const ps: string[] | not = lambdaParams(tp)
             if (ps is given) return parseLambda(skipParams(tp), start, ps)
+            // s478 (s478-boot-fn-type) — an arrow that WRITES its parameters' types,
+            // `(x: int, y: string) => …` (§7.5 S469: "A standalone lambda (`const f = (x) =>
+            // …`) must annotate its parameters"): read as a declaration's parameters are
+            if (typedArrowAhead(tp)) return parseTypedLambda(tp, start)
             const inner: RExpr = parseAssign(adv(tp))
             return { e: parenMark(inner.e), tp: expectP(inner.tp, ")") }
         }
@@ -2698,6 +2702,33 @@ ${
         return names
     }
 
+    // s478 (s478-boot-fn-type) — `(` [`lin`] name `:` … `)` `=>`: an arrow with written
+    // parameter types.
+    fn typedArrowAhead(tp: TP) -> boolean {
+        const a: PTok = peekAt(tp, 1)
+        let named: boolean = a.cls == TC.Ident && tk(peekAt(tp, 2), ":")
+        if (a.cls == TC.Keyword && a.v == "lin" && peekAt(tp, 2).cls == TC.Ident && tk(peekAt(tp, 3), ":")) named = true
+        if (!named) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return tk(peekAt(tp, close + 1), "=>")
+    }
+
+    fn parseTypedLambda(tp: TP, start: int) -> RExpr {
+        const rp: RParams = parseParamList(adv(tp), false)
+        const t: TP = expectP(rp.tp, ")")
+        let names: string[] = []
+        for (const p of rp.ps) { names = names.concat([p.name]) }
+        const at: TP = adv(t)       // past `=>`
+        if (isP(at, "{")) {
+            // §19.16.3 rule 4: an arrow body is no defer site (analyze reports one)
+            const b: RBlock = parseBlock(withInFn(at, 2))
+            return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, false))
+        }
+        const body: RExpr = parseAssign(at)
+        return mkE(body.tp, start, AExprK.Lambda(names, body.e, rp.ps))
+    }
+
     // Past a lambda's `( … )` (lambdaParams said it is one), at its `=>`.
     fn skipParams(tp: TP) -> TP {
         let t: TP = adv(tp)
@@ -2720,7 +2751,7 @@ ${
             return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, false))
         }
         const body: RExpr = parseAssign(t)
-        return mkE(body.tp, start, AExprK.Lambda(params, body.e))
+        return mkE(body.tp, start, AExprK.Lambda(params, body.e, []))
     }
 
     // s478 — an arrow's bare parameters as AParams (no type: the position fixes
@@ -5943,6 +5974,7 @@ ${
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
         if (lifeAhead(tp)) return parseLifeType(tp)
+        if (fnTypeAhead(tp)) return parseFnType(tp)        // s478 (s478-boot-fn-type)
         let t: TP = tp
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
@@ -6530,6 +6562,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> p != ""
+            .TFn(params: ps) :> false
         }
     }
 
@@ -6541,12 +6574,24 @@ ${
             .TMaybe(inner: i) :> refineInside(i)
             .TLife(pre: f, post: x) :> not      // a lifecycle refuses a refinement in it by name (lifeRefineWhy)
             .TRefine(base: b, pred: p) :> refineSpanIf(t, p)
+            .TFn(params: ps, ret: r) :> refineInFn(ps, r)
         }
     }
 
     fn refineSpanIf(t: AType, p: string) -> ASpan | not {
         if (p == "") return not
         return t.span
+    }
+
+    // s478 (s478-boot-fn-type) — a standing refinement in a function type's parameter or return
+    // type: refused where the function type stands, as in any other position it reaches unproven.
+    fn refineInFn(ps: AType[], ret: AType | not) -> ASpan | not {
+        for (const p of ps) {
+            const s: ASpan | not = refineInside(p)
+            if (s is given) return s
+        }
+        if (ret is not) return not
+        return refineInside(ret)
     }
 
     // Base name and predicate of a refinement node (`base` "" when `t` is none).
@@ -6557,6 +6602,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> typeNameText(b)
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -6567,6 +6613,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> p
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -6578,6 +6625,7 @@ ${
             .TMaybe(inner: i) :> t
             .TLife(pre: f, post: x) :> t
             .TRefine(base: b, pred: p) :> { nid: t.nid, span: t.span, k: ATypeK.TRefine(b, "") }
+            .TFn(params: ps) :> t
         }
     }
 
@@ -6764,6 +6812,73 @@ ${
     // A malformed inside is E-PARSE-TYPE; the reader resumes after the `)`.
     // At `(`, A, then the glyph `to` or `->`: the head of a lifecycle type. Any
     // other `(` (a function type `(T, U) -> R`, …) keeps its old reading.
+    // s478 (s478-boot-fn-type) — a FUNCTION type: `(` … `)` `=>` R (§7.5: "the spelling is the
+    // §15.11.4 signature type, `f: (x: int) => int`"; §15.11.4 `fn-prop-decl ::= identifier ':'
+    // '(' param-type-list ')' '=>' return-type`). At a `(` whose matching `)` is followed by `=>`
+    // (a lifecycle `(A to B)` is lifeAhead's, tested first). The lexer reads `=>` as one token.
+    fn fnTypeAhead(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return tk(peekAt(tp, close + 1), "=>")
+    }
+
+    // The offset (from `tp`, at a `(`) of the `)` that closes it, else -1 (a `{`, `}` or `;`
+    // before it, or the end of input: no parameter list).
+    fn parenClose(tp: TP) -> int {
+        let k: int = 1
+        let depth: int = 1
+        while (k < 4096) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.End) return -1
+            if (tk(x, "{") || tk(x, "}") || tk(x, ";")) return -1
+            if (tk(x, "(") || tk(x, "[")) depth = depth + 1
+            if (tk(x, ")") || tk(x, "]")) {
+                depth = depth - 1
+                if (depth == 0) {
+                    if (tk(x, ")")) return k
+                    return -1
+                }
+            }
+            k = k + 1
+        }
+        return -1
+    }
+
+    // `(T1, T2) => R` / `(a: T1, b: T2) => R` / `() => void`. A parameter's written NAME is
+    // read past (it is no part of the type); `lin` on one is refused by name — a function type
+    // that carries a `lin` parameter is not in the bootstrap (INTERIM: §35.2.1 lin parameters
+    // are built on a declaration's own parameters only). `void` as the return: a function that
+    // gives no value. A failable function type has no spelling in the SPEC (§19.4.4 puts `!` in
+    // a function's type signature but names no type syntax): nothing is read for it here.
+    fn parseFnType(tp: TP) -> RType {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let ps: AType[] = []
+        while (!isP(t, ")") && !atEnd(t)) {
+            const lt: PTok = cur(t)
+            if (lt.cls == TC.Keyword && lt.v == "lin") {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter in a function type is not in the bootstrap (INTERIM — §35.2.1 builds `lin` on a declaration's own parameters; a function TYPE does not carry it). Drop `lin` here, or call the function by its name", lt)
+                t = adv(t)
+            }
+            if ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && tk(peekAt(t, 1), ":")) t = adv(adv(t))
+            const r: RType = parseTypeBody(t)
+            ps = ps.concat([r.t])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else if (!isP(t, ")")) {
+                t = diagAt(t, "E-PARSE-TYPE", "expected `,` or `)` in a function type's parameter list, found `" + cur(t).text + "`", cur(t))
+                while (!isP(t, ")") && !atEnd(t)) { t = adv(t) }
+            }
+        }
+        t = expectP(t, ")")
+        t = expectP(t, "=>")
+        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not))
+        const rr: RType = parseTypeBody(t)
+        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t))
+    }
+
     fn lifeAhead(tp: TP) -> boolean {
         if (!isP(tp, "(")) return false
         const a: PTok = peekAt(tp, 1)
@@ -6916,6 +7031,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -6950,6 +7066,7 @@ ${
             .TMaybe(inner: i) :> grantedSeq(i)
             .TLife(pre: f, post: x) :> grantedSeq(x)
             .TRefine(base: b, pred: p) :> grantedSeq(b)
+            .TFn(params: ps) :> false
         }
     }
 
@@ -8455,6 +8572,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -8698,6 +8816,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> true
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -8791,6 +8910,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -8801,6 +8921,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -8811,6 +8932,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -11497,7 +11619,17 @@ ${
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
             .TRefine(base: b, pred: p) :> typeNameText(b) + "(" + p + ")"
+            .TFn(params: ps, ret: r) :> fnTypeText(ps, r)
         }
+    }
+
+    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`
+    fn fnTypeText(ps: AType[], ret: AType | not) -> string {
+        let parts: string[] = []
+        for (const p of ps) { parts = parts.concat([typeNameText(p)]) }
+        let r: string = "void"
+        if (ret is given) r = typeNameText(ret)
+        return "(" + parts.join(", ") + ") => " + r
     }
 
     // ---- the target checks (rules 4, 5, 6, 8, 11) — the target's view is ast.scrml hostView / hostTargetParts ----
@@ -13681,6 +13813,7 @@ ${
             .TMaybe(inner: i) :> cloneMaybe(t.span, i, nid0)
             .TLife(pre: a, post: b) :> cloneLife(t.span, a, b, nid0)
             .TRefine(base: b, pred: p) :> cloneRefine(t.span, b, p, nid0)
+            .TFn(params: ps, ret: r) :> cloneFnType(t.span, ps, r, nid0)
         }
     }
 
@@ -13703,6 +13836,20 @@ ${
     fn cloneRefine(sp: ASpan, b: AType, p: string, nid0: int) -> RClone {
         const r: RClone = cloneType(b, nid0)
         return { t: { nid: r.nid, span: sp, k: ATypeK.TRefine(r.t, p) }, nid: r.nid + 1 }
+    }
+
+    // s478 (s478-boot-fn-type)
+    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, nid0: int) -> RClone {
+        let nid: int = nid0
+        let out: AType[] = []
+        for (const p of ps) {
+            const r: RClone = cloneType(p, nid)
+            out = out.concat([r.t])
+            nid = r.nid
+        }
+        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not) }, nid: nid + 1 }
+        const rr: RClone = cloneType(ret, nid)
+        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t) }, nid: rr.nid + 1 }
     }
 
     // =========================================================================

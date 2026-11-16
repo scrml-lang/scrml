@@ -266,6 +266,8 @@ ${
             .Local(sym: sym) :> []
             .Read(place: place) :> [Node.NPlace(place)]
             .Call(callee: callee, args: args) :> exprNodes(args)
+            .FnRef(fn: f) :> []
+            .CallV(f: f, args: args) :> [Node.NExpr(f)].concat(exprNodes(args))
             .Prim(op: op, args: args) :> exprNodes(args)
             .Match(scrut: scrut, arms: arms) :> [Node.NExpr(scrut)].concat(armNodes(arms))
             .ArrayOf(elems: elems) :> exprNodes(elems)
@@ -533,6 +535,8 @@ ${
             .Local(sym: x) :> []
             .Read(place: x) :> []
             .Call(callee: x) :> []
+            .FnRef(fn: x) :> []
+            .CallV(f: x) :> []
             .Prim(op: x) :> []
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []
@@ -684,6 +688,8 @@ ${
             .Local(sym: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1

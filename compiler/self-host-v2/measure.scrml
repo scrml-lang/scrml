@@ -84,6 +84,8 @@ ${
             .Local(sym: x) :> "Local"
             .Read(place: x) :> "Read"
             .Call(callee: x) :> "Call"
+            .FnRef(fn: x) :> "FnRef"
+            .CallV(f: x) :> "CallV"
             .Prim(op: x) :> "Prim"
             .Match(scrut: x) :> "Match"
             .ArrayOf(elems: x) :> "ArrayOf"
