@@ -125,7 +125,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, ob, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkRefetchPositions(p)).concat(checkLocalsBound(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p)).concat(checkJumps(p)).concat(checkGathers(p)).concat(checkHostFns(p)).concat(checkDbLoads(p)).concat(checkEnvelopes(p)).concat(checkTxBlocks(p)).concat(checkRefetchPositions(p)).concat(checkLocalsBound(p))
     }
 
     // =========================================================================
@@ -284,6 +284,174 @@ ${
             }
         }
         return out
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-syntax-batch — SPEC §19.10.2 / §19.10.3) — THE `transaction { … }`
+    // BLOCKS (Stmt.If with `tx` given). Each:
+    //   C-TX4 stands in the body of a Fn or ServerFn that has an Envelope ON `tx` — the block is
+    //         a savepoint of that envelope's transaction (§19.10.3 "inside an open envelope,
+    //         those three are the savepoint, its release and its rollback-to"); its test is the
+    //         literal `true` (it is a block, never a choice: an `else` the continuation pass gave
+    //         it — a Jump — never runs, and the printer prints none). Anywhere else —
+    //         a declaration's code, a function with no envelope or one on another database — the
+    //         block would run with nothing to roll back, so the Core is refused, never printed.
+    // =========================================================================
+    fn checkTxBlocks(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const d of p.decls) {
+            for (const n of allNodes(Node.NDecl(d))) {
+                if (txOfNode(n) is given) out = out.concat(["C-TX4: a transaction block stands outside every function body (in " + d.sym.hint + ")"])
+            }
+        }
+        for (const f of p.fns) { out = out.concat(txBlocksIn(p, f.sym, allNodes(Node.NFn(f)))) }
+        for (const sf of p.server) { out = out.concat(txBlocksIn(p, sf.sym, allNodes(Node.NServerFn(sf)))) }
+        return out
+    }
+
+    fn txBlocksIn(p: CoreProgram, fsym: Sym, ns: Node[]) -> string[] {
+        let out: string[] = []
+        let envDb: int = -1
+        for (const e of p.envelopes) {
+            if (e.fn.id == fsym.id) envDb = e.db.id
+        }
+        for (const n of ns) {
+            const tx: Sym | not = txOfNode(n)
+            if (tx is given) {
+                if (envDb < 0) out = out.concat(["C-TX4: " + fsym.hint + "() holds a transaction block but has no transaction envelope"])
+                if (envDb >= 0 && tx.id != envDb) out = out.concat(["C-TX4: " + fsym.hint + "()'s transaction block is on a database its envelope is not"])
+                if (!txShaped(n)) out = out.concat(["C-TX4: " + fsym.hint + "()'s transaction block has a test other than `true`"])
+            }
+        }
+        return out
+    }
+
+    fn txOfNode(n: Node) -> Sym | not {
+        return match n {
+            .NStmt(s: s) :> txOfStmt(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn txOfStmt(s: Stmt) -> Sym | not {
+        return match s {
+            .If(cond: c, tx: tx) :> tx
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
+        }
+    }
+
+    // the block's test is the literal `true`
+    fn txShaped(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> txShapedStmt(s)
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn txShapedStmt(s: Stmt) -> boolean {
+        return match s {
+            .If(cond: c) :> isTrueLit(c)
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+            .Gather(g: x) :> false
+            .Lift(into: x) :> false
+            .LocalFn(f: x) :> false
+        }
+    }
+
+    fn isTrueLit(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: l) :> isTrueLiteral(l)
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .Refetch(req: x) :> false
+            .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
+            .Assigned(local: x) :> false
+            .Foreign(slice: x) :> false
+        }
+    }
+
+    fn isTrueLiteral(l: Literal) -> boolean {
+        return match l {
+            .Bool(v: v) :> v
+            .Int(v: x) :> false
+            .Num(v: x) :> false
+            .Str(v: x) :> false
+            .Variant(enumSym: x) :> false
+            .Absent :> false
+        }
     }
 
     // =========================================================================
@@ -2985,7 +3153,10 @@ ${
             .Gather(g: g) :> tailBlock(g.body, false, [], where)
             .Lift(into: x) :> []
             .LocalFn(f: x) :> []                                 // s477: never a continuation (C-N1: its body holds no Suspend / Join / Jump)
-            .If(thenB: t, elseB: el) :> ifTails(b, i, t, el, tail, last, joins, where)
+            // s478: a transaction block (`tx`) is a continuation owner of its own — its statements a
+            // tail block wherever it stands (lower.scrml cpsStmts never moves what follows it into
+            // it; it is printed only in a server body, natively)
+            .If(thenB: t, elseB: el, tx: tx) :> tx is given ? ifTails(b, i, t, el, true, true, joins, where) : ifTails(b, i, t, el, tail, last, joins, where)
             .Attempt(ok: ok, arms: arms) :> attemptTails(ok, arms, where)
             .Defer(body: d) :> tailBlock(d, false, [], where)
             .Commit(writes: ws) :> []
@@ -5824,6 +5995,8 @@ ${
     fn unreadableHost(c: HostCall) -> string[] {
         return match c {
             .DateNow :> []
+            .EventRead(member: m) :> []
+            .EventCall(member: m) :> []
             .Unreadable :> ["C-R1: a parse placeholder (an expression the parser could not read) reached Core — a compiler defect; nothing is printed"]
         }
     }

@@ -599,6 +599,9 @@ ${
     fn hostJs(c: HostCall) -> JsExpr {
         return match c {
             .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+            // s478 (s478-boot-fn-values) — the listener's event argument (handlerParams)
+            .EventRead(member: m) :> jmember(jid(eventVar()), m)
+            .EventCall(member: m) :> jcall(jmember(jid(eventVar()), m), [])
             // unreachable (checkCore C-R1 refuses it before printing); if ever printed
             // it fails loudly (a ReferenceError), never as a silent value
             .Unreadable :> jcall(jid("scrml$unreadableExpression"), [])
@@ -1238,13 +1241,37 @@ ${
         return sexpr(jmcall(jid("defers$"), "push", [JsExpr.JArrow([], blockJs(ctx, body))]))
     }
 
+    // s478 (s478-boot-syntax-batch) — an `if`; a bare block (its test the literal `true`); or a
+    // `transaction { … }` block (`tx`, core.scrml): its statements run under a savepoint of the
+    // function's envelope on `tx` (server-runtime.js `txBlock` / `txEnd`, §19.10.3) —
+    //   if (true) {
+    //     const tx$ = await rt.txBlock(db$N);
+    //     let txOk$ = false;
+    //     try { … ; txOk$ = true; } finally { await rt.txEnd(tx$, txOk$); }
+    //   }
+    // `txOk$` is set only after the block's last statement, so normal completion alone releases
+    // the savepoint; a `fail` / `return` / `break` / `continue` out of it, or a host error, reaches
+    // the `finally` with it false and rolls the savepoint back before the exit proceeds (a
+    // `return`'s value is computed first — §19.10.3 "the return expression SHALL be evaluated
+    // before the rollback"). A `defer` in the block runs in the block's own `finally`, inside it,
+    // before the release or rollback (§19.10.3, `defer` × `transaction`). Printed only in a SERVER
+    // body (printProgram refuses a client function holding one; check.scrml C-TX4).
+    fn ifStmtJs(ctx: Ctx, c: Expr, t: Block, e: Block | not, tx: Sym | not) -> JsStmt[] {
+        if (tx is not) return [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
+        const open: JsStmt = JsStmt.SConst("tx$", JsExpr.JAwait(rtCall(ctx, "txBlock", [jid(dbVarName(tx))])))
+        const flag: JsStmt = JsStmt.SLet("txOk$", JsExpr.JBool(false))
+        const done: JsStmt = JsStmt.SAssign(jid("txOk$"), JsExpr.JBool(true))
+        const end: JsStmt = sexpr(JsExpr.JAwait(rtCall(ctx, "txEnd", [jid("tx$"), jid("txOk$")])))
+        return [JsStmt.SIf(JsExpr.JBool(true), [open, flag, JsStmt.STry(blockJs(ctx, t).concat([done]), [end])], [])]
+    }
+
     fn stmtJs(ctx: Ctx, s: Stmt, assigned: int[]) -> JsStmt[] {
         return match s {
             .Let(sym: sym, init: init) :> letStmtsJs(ctx, sym, init, assigned)                 // s476: + an owned local's flag
             .Assign(local: l, value: v, path: pa) :> assignStmtsJs(ctx, l, v, pa)            // s476: an owned local's edit in place
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
             .Commit(writes: ws) :> commitJs(ctx, ws)
-            .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
+            .If(cond: c, thenB: t, elseB: e, tx: tx) :> ifStmtJs(ctx, c, t, e, tx)
             .Return(e: e) :> [returnJs(ctx, exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
             .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
@@ -3322,8 +3349,75 @@ ${
     // element's scope cancels it; a second event does not cancel the first
     // (design §2.3 reading — supersede is `<request>` semantics, not a handler's).
     fn handlerParams(body: Block) -> string[] {
+        if (usesEvent(body)) return ["task$", eventVar()]
         if (suspends(body)) return ["task$"]
         return []
+    }
+
+    // s478 (s478-boot-fn-values) — the listener's event argument: rt.on calls a handler
+    // `(task, event)`. `$`-suffixed, so no minted name is it (names.scrml).
+    fn eventVar() -> string { return "event$" }
+
+    // Does a handler body read or call the listener's event (HostCall EventRead / EventCall)?
+    fn usesEvent(b: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(b))) {
+            if (nodeIsEventHost(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsEventHost(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: x) :> exprIsEventHost(x)
+            .NStmt(s: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsEventHost(e: Expr) -> boolean {
+        return match e {
+            .Host(call: c) :> isEventCall(c)
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .Refetch(req: x) :> false
+            .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
+            .Assigned(local: x) :> false
+            .Foreign(slice: x) :> false
+        }
+    }
+
+    fn isEventCall(c: HostCall) -> boolean {
+        return match c {
+            .EventRead(member: m) :> true
+            .EventCall(member: m) :> true
+            .DateNow :> false
+            .Unreadable :> false
+        }
     }
 
     fn attrJs(ctx: Ctx, a: Attr, node: JsExpr) -> JsStmt[] {
@@ -4401,6 +4495,58 @@ ${
         return out
     }
 
+    fn holdsTxBlock(f: Fn) -> boolean {
+        for (const n of allNodes(Node.NFn(f))) {
+            if (nodeIsTxBlock(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsTxBlock(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> stmtTxOf(s) is given
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn stmtTxOf(s: Stmt) -> Sym | not {
+        return match s {
+            .If(cond: c, tx: tx) :> tx
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
+        }
+    }
+
     fn holdsQuery(p: CoreProgram) -> boolean {
         for (const n of allNodes(Node.NProgram(p))) {
             if (nodeIsQuery(n)) return true
@@ -4534,6 +4680,11 @@ ${
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
         let clientFns: Fn[] = []
         for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) clientFns = clientFns.concat([f]) }
+        // s478 (s478-boot-syntax-batch): a `transaction { … }` block runs only inside a server
+        // function's envelope (§19.10.3) — a client function holding one is never printed
+        for (const tf of clientFns) {
+            if (holdsTxBlock(tf)) return { js: "", html: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: " + tf.sym.hint + "() holds a `transaction { … }` block and is printed in the client artifact — a block runs only inside a server function's transaction (§19.10.3); the Core is ill-formed (check.scrml C-TX4)"], routes: [] }
+        }
         // s472 (boot-math-port): the host modules those functions call, imported beside the runtime
         body = body.slice(0, 2).concat(hostImports(p, clientFns)).concat(body.slice(2))
         if (clientFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("functions")])
@@ -4642,7 +4793,7 @@ ${
     }
 
     // (C-S4: every routed type has a descriptor, so `null` here is unreachable on a checked Core.)
-    fn wireOrNull(p: CoreProgram, t: Type) -> JsExpr {
+    export fn wireOrNull(p: CoreProgram, t: Type) -> JsExpr {
         const wt: WireTable | not = wireBuild(p, t).table
         if (wt is given) return wireTableJs(wt)
         return JsExpr.JNull

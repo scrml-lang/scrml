@@ -6,7 +6,7 @@ ${
     server function save() -> int { return 1; }
     function show() {
         if (@user is given) {
-            const r = save();
+            const r = save() !{ _ :> 0 };
             @out = @user.name;
         }
     }

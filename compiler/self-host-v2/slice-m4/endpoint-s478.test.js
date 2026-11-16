@@ -1,0 +1,346 @@
+// endpoint-s478.test.js — s478-boot-endpoint: SPEC §61 `<endpoint>`, the typed INBOUND route a
+// foreign client calls, built by the bootstrap.
+//
+//   A. the declaration's compile-time diagnostics (§61.2 / §61.3 / §61.4 / §61.7 / §61.9 / §61.10 and
+//      the reused §18.0.1 arm-validity codes);
+//   B. what the bootstrap refuses by name (fail closed where the SPEC is silent — g-boot-endpoint-s478);
+//   C. the route, SERVED: the program is compiled from source, its server artifact printed
+//      (print-server.scrml) and loaded, and requests are sent the way a foreign client sends them —
+//      no CSRF pair (§61.7: "SHALL NOT be routed through the §12 CSRF gate").
+//      §61.3 decode failures → 400 `{ error: { kind, message } }`; §61.5 success → 200 + the arm's
+//      value, a self-closing arm → 204; method / path matching (§61.7).
+//   D. §61.6: the client artifact holds nothing of an endpoint.
+
+import { describe, test, expect, beforeAll } from "bun:test";
+import { mods, compile, artifacts, serve, plainRequest, spyDriver } from "./server-artifact-harness.js";
+import { frontEnd } from "./harness.js";
+
+beforeAll(() => { mods(); }, { timeout: 300000 });
+
+const fe = (src) => frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
+const errs = (src) => fe(src).diags.filter((d) => d.severity === "Error");
+const codes = (src) => [...new Set(errs(src).map((d) => d.code))].sort();
+const refusals = (src) => errs(src).filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").map((d) => d.message);
+
+const FSP_TYPE = `type FspMethod:enum = {
+  FleetStatus
+  Dispatch(prompt: string, project: string)
+  DeltaSince(seq: int)
+}`;
+const prog = (body, types = FSP_TYPE) => `<program>\n${types}\n${body}\n</program>\n`;
+const ARMS3 = `  <FleetStatus : { active: 3 }>
+  <Dispatch(prompt, project) : { accepted: true, project: project }>
+  <DeltaSince(seq) : { since: seq }>`;
+const ep = (attrs, arms = ARMS3) => prog(`<endpoint ${attrs}>\n${arms}\n</endpoint>`);
+
+async function served(src, opts = {}) {
+  const r = compile(src);
+  const { server, client } = artifacts(r.core);
+  expect(server.refused).toEqual([]);
+  const logs = [];
+  const { srv } = await serve(r.core, spyDriver(), logs, opts);
+  const send = async (path, method, body, headers = { "Content-Type": "application/json" }) => {
+    const res = await srv.fetch(plainRequest(path, method, headers, body));
+    const text = await res.text();
+    let json;
+    try { json = text === "" ? undefined : JSON.parse(text); } catch { json = undefined; }
+    return { status: res.status, text, json, headers: res.headers };
+  };
+  return { send, server, client, logs, srv };
+}
+
+describe("A — §61 compile-time diagnostics", () => {
+  test("a canonical endpoint compiles clean", () => {
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`))).toEqual([]);
+  });
+
+  test("§61.7 / §34: a missing path= is E-ENDPOINT-PATH-MISSING", () => {
+    expect(codes(ep(`method="POST" accepts=FspMethod`))).toEqual(["E-ENDPOINT-PATH-MISSING"]);
+  });
+
+  test("§61.7 / §34: a method= outside GET/POST/PUT/PATCH/DELETE, or none, is E-ENDPOINT-METHOD-INVALID", () => {
+    expect(codes(ep(`path="/fsp" method="HEAD" accepts=FspMethod`))).toEqual(["E-ENDPOINT-METHOD-INVALID"]);
+    expect(codes(ep(`path="/fsp" method="post" accepts=FspMethod`))).toEqual(["E-ENDPOINT-METHOD-INVALID"]);
+    expect(codes(ep(`path="/fsp" accepts=FspMethod`))).toEqual(["E-ENDPOINT-METHOD-INVALID"]);
+    // the bareword form is accepted (§34: "The value may be a quoted string-literal or a bareword")
+    for (const m of ["GET", "POST", "PUT", "PATCH", "DELETE"]) expect(codes(ep(`path="/fsp" method=${m} accepts=FspMethod`))).toEqual([]);
+  });
+
+  test("§61.3 / §34: a missing accepts= is E-ENDPOINT-ACCEPTS-MISSING", () => {
+    expect(codes(ep(`path="/fsp" method="POST"`))).toEqual(["E-ENDPOINT-ACCEPTS-MISSING"]);
+  });
+
+  test("§61.3: accepts= naming a struct or a primitive is E-ENDPOINT-ACCEPTS-NOT-ENUM; an undeclared name is E-TYPE-UNKNOWN-NAME (no double report)", () => {
+    const s = prog(`<endpoint path="/x" method="POST" accepts=Req>\n  <Whatever : { ok: true }>\n</endpoint>`, `type Req:struct = { id: number }`);
+    expect(codes(s)).toEqual(["E-ENDPOINT-ACCEPTS-NOT-ENUM"]);
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=number>\n  <Whatever : { ok: true }>\n</endpoint>`, ""))).toEqual(["E-ENDPOINT-ACCEPTS-NOT-ENUM"]);
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=Nope>\n  <Whatever : { ok: true }>\n</endpoint>`, ""))).toEqual(["E-TYPE-UNKNOWN-NAME"]);
+  });
+
+  test("§61.4: a variant with no arm is E-ENDPOINT-NOT-EXHAUSTIVE; a wildcard <_> covers the rest", () => {
+    const missing = ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>`);
+    expect(codes(missing)).toEqual(["E-ENDPOINT-NOT-EXHAUSTIVE"]);
+    expect(errs(missing)[0].message).toContain("Dispatch, DeltaSince");
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>\n  <_ : { fallback: true }>`))).toEqual([]);
+  });
+
+  test("§61.4 / §34: a dead arm is E-MATCH-SUBSET-DEAD-ARM, a duplicate E-TYPE-023, an arm after <_> E-SYNTAX-010 — no E-ENDPOINT-* code", () => {
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, ARMS3 + `\n  <Bogus : { x: 1 }>`))).toEqual(["E-MATCH-SUBSET-DEAD-ARM"]);
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>\n` + ARMS3))).toEqual(["E-TYPE-023"]);
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <_ : { all: true }>\n  <FleetStatus : { active: 3 }>`))).toEqual(["E-SYNTAX-010"]);
+  });
+
+  test("§18.7: binders that do not match the payload are E-TYPE-021", () => {
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt) : { p: prompt }>\n  <DeltaSince(seq) : { since: seq }>`))).toEqual(["E-TYPE-021"]);
+  });
+
+  test("§61.10: a multi-statement bare body is E-ENDPOINT-MULTI-STATEMENT-ARM; a single-expression bare body compiles", () => {
+    const multi = ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { ok: true }>\n  <DeltaSince(seq)>\n    seq\n    { since: seq }\n  </>`);
+    expect(codes(multi)).toEqual(["E-ENDPOINT-MULTI-STATEMENT-ARM"]);
+    const one = ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { ok: true }>\n  <DeltaSince(seq)>\n    { since: seq }\n  </>`);
+    expect(codes(one)).toEqual([]);
+  });
+
+  test("§61.1: an arm body is compiler-owned code — an undeclared name is E-SCOPE-001; its binders and module functions are in scope", () => {
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`, `  <FleetStatus : { v: nope }>\n  <Dispatch(prompt, project) : { ok: true }>\n  <DeltaSince(seq) : { since: seq }>`))).toContain("E-SCOPE-001");
+    const withFn = prog(`function label(p: string, q: string) -> string { return p + "@" + q; }\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { echo: label(prompt, project) }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`);
+    expect(codes(withFn)).toEqual([]);
+  });
+
+  test("§61.7: a csrf= attribute is refused (\"SHALL NOT carry a `csrf=` attribute\"), as is any other attribute", () => {
+    expect(refusals(ep(`path="/fsp" method="POST" accepts=FspMethod csrf="off"`)).join()).toContain("SHALL NOT carry a `csrf=`");
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod auth="x"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("B — refused by name where the SPEC is silent (fail closed)", () => {
+  test("two endpoints at one path and method", () => {
+    const two = prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>`);
+    expect(refusals(two).join()).toContain("two endpoints mounted at one path and method");
+    // one path, two methods: each is its own route
+    const both = prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp" method="PUT" accepts=FspMethod>\n${ARMS3}\n</endpoint>`);
+    expect(codes(both)).toEqual([]);
+  });
+
+  test("a path= that is not a plain absolute path, or under /_scrml/", () => {
+    for (const p of ["fsp", "/_scrml/call/1", "/_scrml", "/a?b=1", "/a#x", "/a/../b", "/a//b", "/users/:id", "/a%20b", "/ünï"]) {
+      expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    }
+    for (const p of ["/", "/fsp/", "/api/v1/fleet-status", "/a.b_c~d"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
+  });
+
+  test("an endpoint outside the top-level <program> body, or inside markup", () => {
+    expect(codes(`${FSP_TYPE}\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<program></program>\n`)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(prog(`<div><endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint></div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  test("a payload field the request decode does not read (an enum-typed field, §41.13 no auto-recursion)", () => {
+    const t = `type Kind:enum = { A, B }\ntype M:enum = {\n  Go(k: Kind)\n}`;
+    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(k) : { ok: true }>\n</endpoint>`, t)).join()).toContain("does not read");
+  });
+
+  test("a refined payload field (a variant field's refinement is not checked by the bootstrap — g-boot-refinement-runtime-checks-s478)", () => {
+    const t = `type M:enum = {\n  Since(seq: int(>0))\n}`;
+    const unbound = refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Since : { ok: true }>\n</endpoint>`, t)).join();
+    expect(unbound).toContain("checks only on a parameter");
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Since(seq) : { since: seq }>\n</endpoint>`, t))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  test("an arm with no value (a call of a function that returns nothing) is refused (§61.5 names no response for it)", () => {
+    const src = prog(`function note(t: string) { const u: string = t; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : note(t)>\n</endpoint>`, `type M:enum = {\n  Go(t: string)\n}`);
+    expect(refusals(src).join()).toContain("has no proven type");
+  });
+
+  test("review #1916 L1: a payload field named `tag` — the wire `tag` key carries the variant, so the field could never carry a value", () => {
+    const t = `type M:enum = {\n  Go(tag: string)\n}`;
+    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
+    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <_ : { ok: true }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
+    // another field name is not refused
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, `type M:enum = {\n  Go(label: string)\n}`))).toEqual([]);
+  });
+
+  test("review #1916 L2: a `__proto__` / `constructor` / `prototype` key in an arm's object literal (it would answer 500 on every request)", () => {
+    for (const k of ["__proto__", "constructor", "prototype"]) {
+      for (const lit of [`{ ${k}: 1 }`, `{ ok: true, inner: { ${k}: "x" } }`]) {
+        const src = prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go : ${lit}>\n</endpoint>`, `type M:enum = { Go }`);
+        expect(refusals(src).join()).toContain("prototype machinery");
+      }
+    }
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go : { proto: 1, ctor: 2 }>\n</endpoint>`, `type M:enum = { Go }`))).toEqual([]);
+  });
+
+  test("an accepts= enum declared in another file", () => {
+    const files = [
+      { path: "types.scrml", src: `\${ export type FspMethod:enum = { Ping, Pong } }\n` },
+      { path: "app.scrml", src: `<program>\n\${ import { FspMethod } from "./types.scrml" }\n<endpoint path="/x" method="POST" accepts=FspMethod>\n  <Ping : { a: 1 }>\n  <Pong : { b: 2 }>\n</endpoint>\n</program>\n` },
+    ];
+    const r = frontEnd(mods(), files, "app.scrml");
+    expect(r.diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").map((d) => d.message).join()).toContain("declared outside this file");
+  });
+});
+
+describe("C — the route, served (§61.3 / §61.5 / §61.7)", () => {
+  const SRC = prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>
+  <FleetStatus : { jsonrpc: "2.0", result: { active: 3, idle: 1 } }>
+  <Dispatch(prompt, project) : { jsonrpc: "2.0", result: { accepted: true, project: project, prompt: prompt } }>
+  <DeltaSince(seq) : { jsonrpc: "2.0", result: { since: seq, count: 0 } }>
+  <Halt : { jsonrpc: "2.0", error: { code: -32000, message: "service halted" } }>
+  <Ping/>
+</endpoint>`, `type FspMethod:enum = {
+  FleetStatus
+  Dispatch(prompt: string, project: string)
+  DeltaSince(seq: int)
+  Halt
+  Ping
+}`);
+  const body = (o) => JSON.stringify(o);
+
+  test("§61.5: each variant dispatches to its arm; the value is the JSON body, 200 application/json — no CSRF pair needed", async () => {
+    const { send } = await served(SRC);
+    let r = await send("/fsp", "POST", body({ tag: "FleetStatus" }));
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("application/json");
+    expect(r.json).toEqual({ jsonrpc: "2.0", result: { active: 3, idle: 1 } });
+    r = await send("/fsp", "POST", body({ tag: "Dispatch", prompt: "scale", project: "atlas" }));
+    expect([r.status, r.json]).toEqual([200, { jsonrpc: "2.0", result: { accepted: true, project: "atlas", prompt: "scale" } }]);
+    r = await send("/fsp", "POST", body({ tag: "DeltaSince", seq: 42 }));
+    expect([r.status, r.json]).toEqual([200, { jsonrpc: "2.0", result: { since: 42, count: 0 } }]);
+    // an author-modelled error result is a value: 200, verbatim (§61.5)
+    r = await send("/fsp", "POST", body({ tag: "Halt" }));
+    expect([r.status, r.json]).toEqual([200, { jsonrpc: "2.0", error: { code: -32000, message: "service halted" } }]);
+  });
+
+  test("§61.5: a self-closing <Variant/> arm answers 204 with no body", async () => {
+    const { send } = await served(SRC);
+    const r = await send("/fsp", "POST", body({ tag: "Ping" }));
+    expect([r.status, r.text]).toEqual([204, ""]);
+  });
+
+  test("§61.3: a decode failure is 400 { error: { kind, message } } and no arm runs", async () => {
+    const { send } = await served(SRC);
+    const kind = async (raw) => {
+      const r = await send("/fsp", "POST", raw);
+      expect(r.status).toBe(400);
+      expect(r.headers.get("Content-Type")).toBe("application/json");
+      expect(typeof r.json.error.message).toBe("string");
+      return r.json.error.kind;
+    };
+    expect(await kind("not json")).toBe("Malformed");
+    expect(await kind("")).toBe("Malformed");
+    expect(await kind("null")).toBe("Malformed");
+    expect(await kind("[1]")).toBe("Malformed");
+    expect(await kind('"FleetStatus"')).toBe("Malformed");
+    expect(await kind(body({ not_a_tag: 1 }))).toBe("MissingDiscriminator");
+    expect(await kind(body({ tag: 7 }))).toBe("MissingDiscriminator");
+    expect(await kind(body({ tag: "Teleport" }))).toBe("UnknownVariant");
+    expect(await kind(body({ tag: "toString" }))).toBe("UnknownVariant");
+    expect(await kind(body({ tag: "DeltaSince", seq: "soon" }))).toBe("InvalidPayload");
+    expect(await kind(body({ tag: "DeltaSince", seq: 1.5 }))).toBe("InvalidPayload");
+    expect(await kind(body({ tag: "DeltaSince" }))).toBe("InvalidPayload");
+    expect(await kind(body({ tag: "Dispatch", prompt: "p", project: null }))).toBe("InvalidPayload");
+    // a key that is neither `tag` nor a payload field — refused (fail closed; owner question)
+    expect(await kind(body({ tag: "DeltaSince", seq: 1, extra: true }))).toBe("InvalidPayload");
+    expect(await kind('{"tag":"FleetStatus","__proto__":{"x":1}}')).toBe("InvalidPayload");
+  });
+
+  test("review #1916 M1 / §61.7 (\"A JSON-body + bearer-token endpoint is CSRF-exempt by construction\"): a request whose media type is not application/json is 415 and no arm runs", async () => {
+    const { send } = await served(prog(`function record(p: string) -> string { return p; }\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { ran: record(prompt) }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`));
+    const payload = body({ tag: "Dispatch", prompt: "rm", project: "atlas" });
+    for (const headers of [{}, { "Content-Type": "text/plain" }, { "Content-Type": "text/plain;charset=UTF-8" }, { "Content-Type": "application/x-www-form-urlencoded" }, { "Content-Type": "multipart/form-data; boundary=x" }, { "Content-Type": "application/jsonx" }, { "Content-Type": "application/json-patch+json" }, { "Content-Type": "application/json, text/plain" }, { "Content-Type": "" }]) {
+      const r = await send("/fsp", "POST", payload, headers);
+      expect([r.status, r.headers.get("Content-Type")]).toEqual([415, "application/json"]);
+      expect(r.json.error.kind).toBe("UnsupportedMediaType");
+      expect(typeof r.json.error.message).toBe("string");
+    }
+    for (const ct of ["application/json", "application/json;charset=utf-8", "application/json; charset=UTF-8", "APPLICATION/JSON", "Application/Json ; charset=utf-8"]) {
+      const r = await send("/fsp", "POST", payload, { "Content-Type": ct });
+      expect([r.status, r.json]).toEqual([200, { ran: "rm" }]);
+    }
+    // the method check still comes first: a browser's CORS preflight (OPTIONS) is 405, so it fails
+    expect((await send("/fsp", "OPTIONS", "", {})).status).toBe(405);
+  });
+
+  test("review #1916 L6: a request-supplied tag or key echoed in a 400 message is clipped to 64 characters", async () => {
+    const { send } = await served(SRC);
+    const long = "Q".repeat(100000);
+    let r = await send("/fsp", "POST", body({ tag: long }));
+    expect(r.json.error.kind).toBe("UnknownVariant");
+    expect(r.json.error.message).toContain("Q".repeat(64) + "…");
+    expect(r.json.error.message).not.toContain("Q".repeat(65));
+    r = await send("/fsp", "POST", body({ tag: "FleetStatus", [long]: 1 }));
+    expect(r.json.error.kind).toBe("InvalidPayload");
+    expect(r.json.error.message).not.toContain("Q".repeat(65));
+  });
+
+  test("§61.7: the handler is mounted at path= FOR method= — another method is 405 naming the served ones; another path 404", async () => {
+    const { send } = await served(SRC);
+    for (const m of ["GET", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "post"]) {
+      const r = await send("/fsp", m, m === "GET" || m === "HEAD" ? "" : body({ tag: "FleetStatus" }));
+      expect(r.status).toBe(405);
+      expect(r.headers.get("Allow")).toBe("POST");
+    }
+    expect((await send("/fsp/", "POST", body({ tag: "FleetStatus" }))).status).toBe(404);
+    expect((await send("/FSP", "POST", body({ tag: "FleetStatus" }))).status).toBe(404);
+    expect((await send("/fsp/x", "POST", body({ tag: "FleetStatus" }))).status).toBe(404);
+    // the query string is not part of the path
+    expect((await send("/fsp?x=1", "POST", body({ tag: "FleetStatus" }))).status).toBe(200);
+  });
+
+  test("§61.7: two endpoints at one path, two methods — each its own handler; Allow names both", async () => {
+    const { send } = await served(prog(`<endpoint path="/q" method="POST" accepts=Q>\n  <Ping : { via: "post" }>\n</endpoint>\n<endpoint path="/q" method="DELETE" accepts=Q>\n  <Ping : { via: "delete" }>\n</endpoint>`, `type Q:enum = { Ping }`));
+    expect((await send("/q", "POST", body({ tag: "Ping" }))).json).toEqual({ via: "post" });
+    expect((await send("/q", "DELETE", body({ tag: "Ping" }))).json).toEqual({ via: "delete" });
+    const r = await send("/q", "PUT", body({ tag: "Ping" }));
+    expect([r.status, r.headers.get("Allow")]).toEqual([405, "POST, DELETE"]);
+  });
+
+  test("§61.3: a GET endpoint decodes the request body like any other — none is Malformed (400)", async () => {
+    const { send } = await served(prog(`<endpoint path="/q" method=GET accepts=Q>\n  <Ping : { pong: true }>\n</endpoint>`, `type Q:enum = { Ping }`));
+    expect((await send("/q", "GET", "")).json.error.kind).toBe("Malformed");
+    expect((await send("/q", "GET", body({ tag: "Ping" }))).json).toEqual({ pong: true });
+  });
+
+  test("§61.4: the wildcard arm takes every variant without an arm — after its payload decodes", async () => {
+    const { send } = await served(prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <_ : { fallback: true }>\n</endpoint>`));
+    expect((await send("/fsp", "POST", body({ tag: "DeltaSince", seq: 4 }))).json).toEqual({ fallback: true });
+    expect((await send("/fsp", "POST", body({ tag: "DeltaSince", seq: "x" }))).json.error.kind).toBe("InvalidPayload");
+    expect((await send("/fsp", "POST", body({ tag: "FleetStatus" }))).json).toEqual({ active: 3 });
+  });
+
+  test("an arm returning a declared struct through a function, and a string", async () => {
+    const { send } = await served(prog(`type Out:struct = { n: int, s: string }\nfunction mk(t: string) -> Out { return { n: 2, s: t }; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : mk(t)>\n  <Name(t) : t>\n</endpoint>`, `type M:enum = {\n  Go(t: string)\n  Name(t: string)\n}`));
+    expect((await send("/x", "POST", body({ tag: "Go", t: "a" }))).json).toEqual({ n: 2, s: "a" });
+    expect((await send("/x", "POST", body({ tag: "Name", t: "b" }))).json).toBe("b");
+  });
+
+  test("an arm calling a server-side function, beside a client-called server function's own route", async () => {
+    const src = `<program>
+type M:enum = {
+  Echo(text: string)
+}
+function shout(t: string) -> string { return t + "!"; }
+server function ping() -> string { return "pong"; }
+let <reply:string=""/>
+<button onclick=\${ @reply = ping() !{ .Transport(t) :> "down" } }>go</button>
+<endpoint path="/echo" method="POST" accepts=M>
+  <Echo(text) : { said: shout(text) }>
+</endpoint>
+</program>
+`;
+    const { send, server } = await served(src);
+    expect(server.routes.length).toBe(1);
+    expect((await send("/echo", "POST", body({ tag: "Echo", text: "hi" }))).json).toEqual({ said: "hi!" });
+    // the compiler-internal route still demands its CSRF pair (§12) — the endpoint did not open it
+    expect((await send(server.routes[0].path, "POST", "[]")).status).toBe(403);
+  });
+});
+
+describe("D — §61.6: no client half", () => {
+  test("the client artifact holds no endpoint function, route or decode; the server manifest lists the endpoint", () => {
+    const r = compile(ep(`path="/fsp" method="POST" accepts=FspMethod`));
+    const { client, server } = artifacts(r.core);
+    expect(client.js).not.toContain("endpoint");
+    expect(client.js).not.toContain("/fsp");
+    expect(server.js).toContain(`endpoints: [{ path: "/fsp", method: "POST" }]`);
+  });
+});

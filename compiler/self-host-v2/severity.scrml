@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 370 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 382 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -163,6 +163,12 @@ ${
             "E-EFFECT-NO-DEPS" :> Severity.Error
             "E-EFFECT-WRITE-UNPROVEN" :> Severity.Error
             "E-EFFECT-WRITES-STATE" :> Severity.Error
+            "E-ENDPOINT-ACCEPTS-MISSING" :> Severity.Error
+            "E-ENDPOINT-ACCEPTS-NOT-ENUM" :> Severity.Error
+            "E-ENDPOINT-METHOD-INVALID" :> Severity.Error
+            "E-ENDPOINT-MULTI-STATEMENT-ARM" :> Severity.Error
+            "E-ENDPOINT-NOT-EXHAUSTIVE" :> Severity.Error
+            "E-ENDPOINT-PATH-MISSING" :> Severity.Error
             "E-ENGINE-MOUNT-NOT-ENGINE" :> Severity.Error
             "E-ENGINE-STATE-CHILD-MISSING" :> Severity.Error
             "E-ENUM-VARIANT-CASE" :> Severity.Error
@@ -174,6 +180,7 @@ ${
             "E-ERROR-002" :> Severity.Error
             "E-ERROR-003" :> Severity.Error
             "E-ERROR-004" :> Severity.Error
+            "E-ERROR-007" :> Severity.Error
             "E-ERROR-009" :> Severity.Error
             "E-ERROR-010" :> Severity.Error
             "E-ERROR-011" :> Severity.Error
@@ -183,6 +190,7 @@ ${
             "E-ERROR-015" :> Severity.Error
             "E-ERRORS-001" :> Severity.Error
             "E-ERRORS-002" :> Severity.Error
+            "E-EVENT-CONTROL-AFTER-AWAIT" :> Severity.Error
             "E-EXPORT-001" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
@@ -276,6 +284,7 @@ ${
             "E-MATCH-NOT-EXHAUSTIVE" :> Severity.Error
             "E-MATCH-ON-REQUIRED" :> Severity.Error
             "E-MATCH-ONTRANSITION-FORBIDDEN" :> Severity.Error
+            "E-MATCH-SUBSET-DEAD-ARM" :> Severity.Error
             "E-MD-IN-LOGIC-NOMINAL" :> Severity.Error
             "E-META-008" :> Severity.Error
             "E-MULTI-STATEMENT-HANDLER" :> Severity.Error
@@ -407,6 +416,7 @@ ${
             "E-TOOL-006" :> Severity.Error
             "E-TOOL-SERVE-MISPLACED" :> Severity.Error
             "E-TOOL-SERVE-PORT-INVALID" :> Severity.Error
+            "E-TRANSACTION-CONTROL-FLOW" :> Severity.Error
             "E-TRY-NOT-IN-SCRML" :> Severity.Error
             "E-TX-CLIENT-MULTI-CALL" :> Severity.Error
             "E-TX-FAIL-AFTER-COMMIT" :> Severity.Error
@@ -420,9 +430,11 @@ ${
             "E-TYPE-041" :> Severity.Error
             "E-TYPE-043" :> Severity.Error
             "E-TYPE-044" :> Severity.Error
+            "E-TYPE-046" :> Severity.Error
             "E-TYPE-080" :> Severity.Error
             "E-TYPE-082" :> Severity.Error
             "E-TYPE-ANY-FORBIDDEN" :> Severity.Error
+            "E-TYPE-UNKNOWN-NAME" :> Severity.Error
             "E-UNQUOTED-DISPLAY-TEXT" :> Severity.Error
             "E-VALIDATOR-DEAD" :> Severity.Error
             "E-VALIDITY-NO-SURFACE" :> Severity.Error

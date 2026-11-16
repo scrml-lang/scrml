@@ -246,7 +246,13 @@ ${
     // s469 r3 (F1) — `Unreadable`: what lower makes of a parse placeholder
     // (AExprK.Recovered). Never a program's meaning: checkCore refuses any Core
     // that holds one (C-R1), so a placeholder can never print as a silent `null`.
-    export type HostCall:enum = { DateNow, Unreadable }
+    // s478 (s478-boot-fn-values) — the event object of a `${(e) => …}` listener (§5.2.1):
+    // `EventRead(member)` reads one of its Appendix H `Event` read members whose type is a
+    // scalar (`e.type`, `e.timeStamp`); `EventCall(member)` calls one of its `() -> void`
+    // members (`e.preventDefault()`, `e.stopPropagation()`) — only as an Eval (its value is
+    // discarded). Both stand only in the body of an `On` attribute's handler (check.scrml
+    // C-EV1): the printer names the listener's event argument there.
+    export type HostCall:enum = { DateNow, Unreadable, EventRead(member: string), EventCall(member: string) }
     // s444 — the sequence functions a lambda is admitted as the argument of.
     // Each makes a NEW sequence value (R3: values are immutable).
     // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the
@@ -585,7 +591,17 @@ ${
         Assign(local: Sym, value: Expr, path: PathStep[]),
         Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
         Commit(writes: Stmt[]),
-        If(cond: Expr, thenB: Block, elseB: Block | not),
+        // s478 (s478-boot-syntax-batch) — `tx`: not, an `if` (or a bare block, whose test is
+        // the literal `true`). Given: a `transaction { … }` block (§19.10.2; its test the literal
+        // `true`, `elseB` not) on database `tx`, which runs `thenB` inside a savepoint of the
+        // enclosing function's envelope on that database (§19.10.3: "inside an open envelope,
+        // those three are the savepoint, its release and its rollback-to"): RELEASE on normal
+        // completion only; ROLLBACK TO (then RELEASE) when the block is left by a `fail`, a
+        // `return`, a `break` / `continue` out of it, or a host error (§19.10.3 "Only normal
+        // completion COMMITs"). It stands only in a function that has an Envelope on `tx`
+        // (check.scrml C-TX4); the server printer prints it (print.scrml txBlockJs), the
+        // client printer refuses it.
+        If(cond: Expr, thenB: Block, elseB: Block | not, tx: Sym | not),
         Return(e: Expr),
         Eval(e: Expr),
         Suspend(bind: Sym, on: Expr, then: Block),
@@ -1116,7 +1132,19 @@ ${
         // s477 — §64: the program is a `kind="tool"` (a plain runnable module, no page,
         // no client — print-server.scrml printTool), and its entry; `not` for a web application.
         tool: CoreTool | not,
+        // s478 (s478-boot-endpoint) — §61: the program's `<endpoint>` routes (CoreEndpoint).
+        endpoints: CoreEndpoint[],
     }
+
+    // s478 (s478-boot-endpoint) — one §61 `<endpoint>`: the author-stable `path` and
+    // `method` it is mounted at (§61.7), the `accepts` enum its request body decodes
+    // into (§61.3), and one arm per variant it names (§61.4) — `variant` "_" for the
+    // wildcard `<_>`. An arm's `fn` is the server function its body was desugared to
+    // (parse.scrml endpointDesugar), called with the variant's payload fields in
+    // declaration order when `arity` > 0 (its binders), or with none; `not` for the
+    // self-closing no-op arm (§61.5: 204).
+    export type CoreEpArm:struct = { variant: string, fn: Sym | not, arity: int }
+    export type CoreEndpoint:struct = { path: string, method: string, accepts: Sym, arms: CoreEpArm[], file: string }
 
     // s477 — §64.2 / §64.3: `main` the entry function (a ServerFn — every `function`
     // of a tool runs in process); `exits` — it declares a numeric return, so the

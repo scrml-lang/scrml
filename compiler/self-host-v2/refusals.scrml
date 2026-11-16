@@ -153,6 +153,11 @@ ${
             rowG("use", "§41.2", U, ["use", "$w"], "lead", "import the names you need: `import { … } from \"scrml:…\"` (§41.3)"),
             row("~ pipeline accumulator", "§32", U, ["~"], ""),
             rowOn("?. optional chaining", "§42.3.6", U, ["?."], [], true, "test presence first: `if (x is given) { … x.f … }` (§42.2)"),
+            // s478 (s478-boot-syntax-batch): `yield` — §10.1: "JavaScript `yield` works only inside
+            // generator functions; scrml logic contexts accept real JS generators". The bootstrap
+            // builds no generator, so a `yield` is refused by name rather than read as an
+            // undeclared name.
+            rowOn("yield (a generator)", "§10.1", U, ["yield"], ["E-SCOPE-001", "E-STMT-MISSING-SEMICOLON"], true, "generators (`function*`, `yield`) are not in the bootstrap"),
             rowOn("word-form `or`", "§45.9", U, ["or"], ["E-SCOPE-001"], true, "write `||`"),
             rowOn("word-form `and`", "§45.9", U, ["and"], ["E-SCOPE-001"], true, "write `&&`"),
             rowG("map literal [:]", "§59", U, ["[", ":", "]"], "tight", "maps (§59, O44) are not in the bootstrap"),

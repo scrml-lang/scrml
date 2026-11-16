@@ -11,28 +11,28 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 539 | 28.9% |
+| PASS | 574 | 30.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 11 | 0.6% |
+| FAIL | 17 | 0.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 683 | 36.6% |
+| UNSUPPORTED | 642 | 34.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 550; of those, 539 hold (98.0%). Runtime half executed on the bootstrap for 179 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 591; of those, 574 hold (97.1%). Runtime half executed on the bootstrap for 190 case(s).
 
-- **Vacuous** passes: 13 of 539 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **526**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 11; the other 6 are implemented checks that answered wrong.
+- **Vacuous** passes: 13 of 574 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **561**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 17; the other 11 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 683.
+UNSUPPORTED by reason: bootstrap-unsupported 642.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 362 · FAIL 10 · UNSUPPORTED 502. Twin holds 362 (non-vacuous 352). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 1 replace a twin's expectations · 11 exclude a case.
-- Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 378 · FAIL 14 · UNSUPPORTED 482. Twin holds 378 (non-vacuous 368). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 4 replace a twin's expectations · 11 exclude a case.
+- Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
 NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 
@@ -111,16 +111,16 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
-| control-flow | 76 | 38 | · | · | · | 24 | 14 | · | · |
-| defer | 51 | 24 | · | · | · | 4 | 23 | · | · |
+| control-flow | 76 | 40 | · | · | · | 24 | 12 | · | · |
+| defer | 51 | 25 | · | · | · | 4 | 22 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
-| element-refusal | 39 | 22 | · | · | · | 11 | 6 | · | · |
-| endpoint | 17 | · | · | · | · | · | 17 | · | · |
-| engine | 92 | 20 | · | · | · | 50 | 22 | · | · |
+| element-refusal | 39 | 24 | · | · | · | 11 | 4 | · | · |
+| endpoint | 17 | 17 | · | · | · | · | · | · | · |
+| engine | 92 | 21 | · | · | · | 50 | 21 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 78 | 43 | · | 2 | · | 5 | 28 | · | · |
+| error | 78 | 46 | · | 4 | · | 5 | 23 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
@@ -133,9 +133,9 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | linear | 15 | 3 | · | · | · | · | 12 | · | · |
 | loop | 8 | 2 | · | · | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 89 | 30 | · | · | · | 40 | 19 | · | · |
-| match-block | 22 | 6 | · | · | · | 6 | 10 | · | · |
-| match-codes | 25 | 12 | · | 2 | · | · | 11 | · | · |
+| markup-handler | 89 | 31 | · | · | · | 40 | 18 | · | · |
+| match-block | 22 | 11 | · | · | · | 6 | 5 | · | · |
+| match-codes | 25 | 14 | · | 2 | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
@@ -151,15 +151,15 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
-| raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
+| raw-content | 9 | 7 | · | · | · | 1 | 1 | · | · |
 | reactive | 127 | 54 | · | 1 | · | 44 | 28 | · | · |
 | refinement | 57 | 17 | · | 1 | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 91 | 11 | · | · | · | 17 | 63 | · | · |
+| server-db | 91 | 11 | · | 3 | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 20 | 4 | · | 1 | · | 9 | 6 | · | · |
+| sql | 20 | 4 | · | 2 | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | · | · | 6 | 21 | · | · |
 
-### FAIL (11)
+### FAIL (17)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - missing E-UNQUOTED-DISPLAY-TEXT
@@ -185,6 +185,14 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `error/error-008-neg` (twin · parse-reject)
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
+- `error/implicit-tx-explicit-transaction-block` (parse-reject; not in the bootstrap: E-BATCH-001)
+  - missing E-BATCH-001
+  - severity: E-BATCH-001 did not fire (expected error)
+  - count: E-BATCH-001 fired 0 time(s), expected exactly 1
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `error/transaction-top-level-neg` (parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `match-codes/e-syntax-011-guard-clause-pos` (twin · parse-reject)
   - missing E-SYNTAX-011
   - E-PARSE-ARM: alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern
@@ -199,6 +207,14 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - severity: E-DG-001 did not fire (expected error)
 - `refinement/base-type-reject-rt` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-TYPE-031)
+- `server-db/event-after-await-e02-dynkey-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002, E-LOGIC-EXECUTABLE-SINK
+- `server-db/event-after-await-e25-before-ok-pos` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002
+- `server-db/event-control-after-await-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002
+- `sql/one-statement-trailing-semicolon-pos` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -212,7 +228,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (539)
+### PASS / CODES-ONLY (574)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -323,6 +339,8 @@ none
 - `control-flow/ctrl-switch-forbidden-match-neg` — PASS · TWIN
 - `control-flow/if-chain-inactive-branches-absent` — PASS · TWIN
 - `control-flow/if-chain-program-first-true-rt` — PASS
+- `control-flow/if-on-match-render-gate-absent-rt` — PASS · TWIN
+- `control-flow/if-on-match-render-gate-mounts-rt` — PASS · TWIN
 - `control-flow/s437-braceless-else-in-failable-arm` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
@@ -356,6 +374,7 @@ none
 - `defer/stack-fn-calls-fn-before-defer-twin` — PASS · TWIN
 - `defer/unbraced-arm-neg` — PASS · TWIN
 - `defer/unhandled-failable-neg` — PASS · TWIN
+- `defer/unsupported-site-neg` — PASS · TWIN
 - `defer/value-arm-site-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
 - `element-refusal/fn-return-script-pos` — PASS · TWIN
@@ -367,6 +386,8 @@ none
 - `element-refusal/lift-style-body-pos` — PASS · TWIN
 - `element-refusal/lift-svg-script-pos` — PASS
 - `element-refusal/logic-bare-markup-script-pos` — PASS
+- `element-refusal/match-arm-raw-body-pos` — PASS · TWIN
+- `element-refusal/match-arm-script-pos` — PASS · TWIN
 - `element-refusal/pre-raw-script-pos` — PASS
 - `element-refusal/raw-comment-script-pos` — PASS
 - `element-refusal/raw-content-display-neg` — PASS
@@ -379,10 +400,28 @@ none
 - `element-refusal/s474-parser-repair-p-div-neg` — PASS
 - `element-refusal/s474-parser-repair-table-foster-neg` — PASS
 - `element-refusal/text-string-attr-comment-neg` — PASS
+- `endpoint/accepts-missing` — PASS
+- `endpoint/accepts-not-enum-primitive` — PASS
+- `endpoint/accepts-not-enum-struct` — PASS
+- `endpoint/accepts-unknown-name` — PASS
+- `endpoint/arm-body-undefined-scope` — PASS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
+- `endpoint/arm-body-valid-scope-clean` — PASS (also emitted, unasserted: E-TYPE-043)
+- `endpoint/dead-arm` — PASS
+- `endpoint/duplicate-arm` — PASS
+- `endpoint/endpoint-clean` — PASS
+- `endpoint/method-bareword-get-clean` — PASS
+- `endpoint/method-invalid` — PASS
+- `endpoint/method-missing` — PASS
+- `endpoint/multi-statement-arm` — PASS
+- `endpoint/not-exhaustive` — PASS
+- `endpoint/path-missing` — PASS
+- `endpoint/self-closing-arm-exhaustive` — PASS
+- `endpoint/wildcard-exhaustive` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/initial-invalid-variant-pos` — PASS · TWIN
+- `engine/match-in-state-child-warns` — PASS · TWIN
 - `engine/mount-not-engine-pos` — PASS · TWIN
 - `engine/onidle-duplicate-pos` — PASS · TWIN
 - `engine/onidle-invalid-variant-pos` — PASS · TWIN
@@ -429,6 +468,7 @@ none
 - `error/for-await-not-in-scrml` — PASS · TWIN
 - `error/handler-else-covers-errors-rt` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
+- `error/handler-guard-in-arrow-rt` — PASS · TWIN
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
 - `error/handler-recovery-into-cell` — PASS · TWIN
 - `error/handler-unhandled-failable-bare-and-expr-pos` — PASS · TWIN
@@ -443,6 +483,8 @@ none
 - `error/propagate-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `error/propagate-success-unwrap` — PASS · TWIN
 - `error/throw-not-in-scrml` — PASS · TWIN
+- `error/transaction-nested-neg` — PASS (also emitted, unasserted: E-ERROR-010)
+- `error/transaction-non-failable-fn-neg` — PASS (also emitted, unasserted: E-ERROR-002)
 - `error/try-not-in-scrml` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `fn/arrow-body-reject` — PASS · TWIN
@@ -540,21 +582,29 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `markup-handler/s450-attr-multi-statement-pos` — PASS · TWIN
+- `markup-handler/s457-event-arrow-parameter-pos` — PASS · TWIN
 - `markup-handler/s457-handler-expression-spaced-gt-neg` — PASS · TWIN
 - `markup-handler/s457-unquoted-assign-read-whole` — PASS · TWIN
 - `markup-handler/s457-unquoted-operator-non-handler-neg` — PASS · TWIN
 - `markup-handler/s457-user-function-named-event-pos` — PASS · TWIN
+- `match-block/empty-wildcard-clear` — PASS · TWIN
 - `match-block/member-access-complete-clean` — PASS · TWIN
 - `match-block/member-access-nonexhaustive` — PASS · TWIN
+- `match-block/payload-bind` — PASS · TWIN
+- `match-block/phase-arm-swap` — PASS · TWIN
+- `match-block/round-trip` — PASS · TWIN
 - `match-block/s474-arm-tail-value-after-statement` — PASS
 - `match-block/s474-one-expr-brace-arm-value-pos` — PASS
 - `match-block/s474-one-expr-brace-statement-arm-needs-semicolon` — PASS
 - `match-block/s474-one-expr-brace-tail-after-statement-needs-semicolon` — PASS
+- `match-block/wildcard` — PASS · TWIN
 - `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-012-tnot-missing-not-arm-pos` — PASS · TWIN
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-arm-markup-in-value-neg` — PASS · TWIN
 - `match-codes/e-match-arm-markup-in-value-pos` — PASS · TWIN
+- `match-codes/e-match-block-in-lift-neg` — PASS · TWIN
+- `match-codes/e-match-block-in-lift-pos` — PASS · TWIN
 - `match-codes/e-syntax-010-else-last-neg` — PASS · TWIN
 - `match-codes/e-syntax-010-else-not-last-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-plain-pattern-neg` — PASS · TWIN
@@ -629,6 +679,7 @@ none
 - `raw-content/bare-angle-displays` — PASS
 - `raw-content/each-row-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/entity-display-unchanged` — PASS
+- `raw-content/match-arm-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/nested-code-with-attribute-is-text` — PASS
 - `raw-content/pre-code-wrapper-stays-element` — PASS
 - `reactive/counter-increment` — PASS · TWIN
@@ -754,7 +805,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (683)
+### UNSUPPORTED (642)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -862,8 +913,6 @@ none
 - `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
-- `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `x` holds a cell read (`@cond`) — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constan
 - `control-flow/markup-if-arm-reads-rerender-pos` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `control-flow/markup-statement-not-rendered-neg` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
@@ -888,35 +937,14 @@ none
 - `defer/stack-arrow-helper-before-defer` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/stack-arrow-helper-before-defer-twin` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/tilde-across-defer` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
-- `defer/unsupported-site-neg` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: `yield (a generator)` (§10.1) is not in the bootstrap yet; it is refused here by name rather than misread — generators (`function*`, `yield`) are not in the bootstrap
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `element-refusal/match-arm-raw-body-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `element-refusal/match-arm-script-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `element-refusal/near-names-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
 - `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
-- `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-not-enum-struct` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-unknown-name` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/arm-body-undefined-scope` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/arm-body-valid-scope-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/dead-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/duplicate-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/endpoint-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-bareword-get-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-invalid` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/multi-statement-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/not-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/path-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/self-closing-arm-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/wildcard-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
-- `engine/match-in-state-child-warns` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
 - `engine/msg-without-accepts-pos` — twin · bootstrap-unsupported: engine message arms (`.Msg :> …` in a `<Closed>` state-child body, §51.0.S.2.3) are not in the bootstrap
 - `engine/on-timeout` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -942,16 +970,16 @@ none
 - `equality/is-not-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `equality/same-type-primitive-clean` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `equality/strict-operator-reject` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `error-boundary/e005-nested-inner-no-fallback` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
+- `error-boundary/e005-nested-inner-no-fallback` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error-boundary/e005-no-fallback-no-renders` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error-boundary/e005-partial-coverage` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
-- `error-boundary/fallback` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `error-boundary/nested-inner-catches` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `error-boundary/no-renders-falls-to-fallback` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `error-boundary/renders-multifield-payload` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `error-boundary/success-transparent` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
+- `error-boundary/fallback` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/nested-inner-catches` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error-boundary/no-renders-falls-to-fallback` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/renders-multifield-payload` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
+- `error-boundary/success-transparent` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error-boundary/terse-fallback-closer` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
-- `error-boundary/variant-renders` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
+- `error-boundary/variant-renders` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error/construct-variant-payload-arity-let-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/construct-variant-payload-arity-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
@@ -959,13 +987,11 @@ none
 - `error/handler-exhaustive-neg` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `error/handler-guard-in-arrow-rt` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
-- `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `error/handler-non-exhaustive` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
-- `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
+- `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `error/handler-wildcard-escape` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `error/implicit-tx-explicit-begin` — twin · bootstrap-unsupported: Manual transaction control 'BEGIN' in 'manual', which is declared '!' — the bootstrap does not build what §19.10.6 requires of it (S451 R6): the transaction held by this invocation behind the database
-- `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error/render-no-clause-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/render-no-of-neg` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
@@ -974,12 +1000,9 @@ none
 - `error/render-not-enum-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/renders-payload-field-ok` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error/renders-undefined-var` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
-- `error/transaction-control-flow-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-control-flow-pos` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-nested-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-non-failable-fn-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-stmt-match-arm-fail-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
-- `error/transaction-top-level-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
+- `error/transaction-control-flow-neg` — bootstrap-unsupported: `yield (a generator)` (§10.1) is not in the bootstrap yet; it is refused here by name rather than misread — generators (`function*`, `yield`) are not in the bootstrap
+- `error/transaction-control-flow-pos` — bootstrap-unsupported: `++` is not in bootstrap slice M2 — write `x = x + 1`
+- `error/transaction-stmt-match-arm-fail-neg` — bootstrap-unsupported: `++` is not in bootstrap slice M2 — write `x = x + 1`
 - `fn/dom-mutation-reject` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
 - `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
 - `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
@@ -1046,37 +1069,29 @@ none
 - `loop/loop-001-break-outside` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` /
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · bootstrap-unsupported: a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` /
-- `markup-handler/s437-r4-arrow-block-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-block-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `markup-handler/s437-r4-arrow-block-seq-dollar-top-neg` — twin · bootstrap-unsupported: a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` /
 - `markup-handler/s437-r4-arrow-seq-braced-engine-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `markup-handler/s437-r4-arrow-seq-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-seq-braced-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `markup-handler/s437-r4-arrow-seq-braced-top-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `markup-handler/s437-r4-arrow-seq-dollar-engine-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `markup-handler/s437-r4-arrow-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `markup-handler/s437-r4-arrow-seq-dollar-top-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `markup-handler/s437-r4-dangling-else-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `markup-handler/s437-r4-try-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `markup-handler/s437-r4-undeclared-cell-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `markup-handler/s437-r4-undeclared-fn-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-dangling-else-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
+- `markup-handler/s437-r4-try-braced-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
+- `markup-handler/s437-r4-undeclared-cell-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
+- `markup-handler/s437-r4-undeclared-fn-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` without `for=` — §18.0.1: "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<matc
 - `markup-handler/s450-attr-multi-statement-neg` — twin · bootstrap-unsupported: a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` /
-- `markup-handler/s457-event-arrow-parameter-pos` — twin · bootstrap-unsupported: `onclick=${(e) => …}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event is `
 - `markup-handler/s457-event-unbound-bare-call-neg` — twin · bootstrap-unsupported: member access `.target` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `markup-handler/s457-event-unbound-inline-block-neg` — twin · bootstrap-unsupported: member access `.type` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/inline-markup-match` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `match-block/member-access-subset-dead-arm` — twin · bootstrap-unsupported: the validator `oneOf` on the field `role` is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at run time) — an enum subset (§53.1
-- `match-block/payload-bind` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-block/phase-arm-swap` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-block/round-trip` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/value-decl-block-arm-keyword-prefixed-tail` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-block/value-decl-block-arm-raw` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-block/value-decl-block-arm-variant` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
-- `match-block/wildcard` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-codes/e-match-block-in-lift-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
@@ -1250,7 +1265,6 @@ none
 - `protect/strip-info-select-star` — bootstrap-unsupported: raw SQL DDL (`CREATE …`, SQL `--` / `/* */` comments) in `<schema>` is not in the bootstrap (INTERIM) — its §39.2 head checks (E-SCHEMA-012…015) and the §14.8.9 / §14.8.10 floors that read raw declara
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: raw SQL DDL (`CREATE …`, SQL `--` / `/* */` comments) in `<schema>` is not in the bootstrap (INTERIM) — its §39.2 head checks (E-SCHEMA-012…015) and the §14.8.9 / §14.8.10 floors that read raw declara
 - `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
-- `raw-content/match-arm-raw-body-displays-as-text` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/narrowing-ends-at-server-call-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-callee-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -1327,24 +1341,21 @@ none
 - `server-db/cps-login-check-stays-server` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
 - `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
-- `server-db/event-after-await-e01-destructure-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e02-dynkey-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e04-dotcall-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e09-objwrap-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e10-methodref-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e13-fndecl-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e16-closure-param-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e20-comma-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
+- `server-db/event-after-await-e01-destructure-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-after-await-e04-dotcall-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-after-await-e09-objwrap-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-after-await-e10-methodref-neg` — twin · bootstrap-unsupported: `.bind(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` 
+- `server-db/event-after-await-e13-fndecl-neg` — twin · bootstrap-unsupported: a nested `function stop` outside a function body (an event handler, an effect or a `<request>` body) — §7.3.1 nests a function "inside the body of an outer `function` or `fn`"; the bootstrap builds th
+- `server-db/event-after-await-e16-closure-param-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `server-db/event-after-await-e20-comma-neg` — twin · bootstrap-unsupported: `event.preventDefault` — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefau
 - `server-db/event-after-await-e21-arrayalias-neg` — twin · bootstrap-unsupported: a tape destructuring pattern `[x, y]` is not in the bootstrap yet — whether a pattern longer than the tape traps like an index read (§66.12.8) or binds `not` is unruled; read the elements by index: `c
-- `server-db/event-after-await-e22-returnValue-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e23-cancelBubble-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-e25-before-ok-pos` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-after-await-h08-n3-inner-pos` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `server-db/event-control-after-await-alias-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-control-after-await-bracket-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-control-after-await-closure-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
-- `server-db/event-control-after-await-neg` — twin · bootstrap-unsupported: `onsubmit=${(…) => { … }}` — a handler function that takes the event object is not in the bootstrap yet (function values, g-bootstrap-function-values-slice-s451; §5.2.1). A handler that needs no event
+- `server-db/event-after-await-e22-returnValue-neg` — twin · bootstrap-unsupported: `event.returnValue = …` — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-after-await-e23-cancelBubble-neg` — twin · bootstrap-unsupported: `event.cancelBubble = …` — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDef
+- `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-after-await-h08-n3-inner-pos` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse(
+- `server-db/event-control-after-await-alias-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
+- `server-db/event-control-after-await-bracket-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the str
+- `server-db/event-control-after-await-closure-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: `sumAmounts` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `sumAmounts(…)`
 - `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: `.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: a call of `inner`, which waits for the server (§13.2: it calls a server function), stands in a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §1
@@ -1382,12 +1393,11 @@ none
 - `server-fn/e-route-002-pos` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
 - `server-fn/e-route-003-pos` — twin · bootstrap-unsupported: `snippet type` (§14.9) is not in the bootstrap yet; it is refused here by name rather than misread
 - `server-fn/e-route-005-neg` — twin · bootstrap-unsupported: untyped access through the browser root `document` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` b
-- `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
+- `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
-- `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
+- `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: a client call of `loadRows`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `loadRows` declares none and its returns do not prove one (the t
 - `sql/multiple-statements-in-condition-neg` — twin · bootstrap-unsupported: a `?{}` query that a `!` function propagates implicitly (§19.8.2) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return
-- `sql/one-statement-trailing-semicolon-pos` — twin · bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement

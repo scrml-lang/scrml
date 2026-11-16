@@ -795,6 +795,104 @@ ${
     }
 
     // =========================================================================
+    // s478-boot-sql-row-types — the PROJECTION of a `?{}` SELECT, for its row
+    // type. §14.8.7: "A `?{ SELECT id, email FROM users }` context produces a
+    // value whose type is a struct containing only the selected columns, derived
+    // from the appropriate `Users` view"; §39.11: "The compiler generates struct
+    // types for each table in `<schema>` before running the `<db>` type inference
+    // pass (§14.8)". Read from the ONE whitelist scanner above (scanSql) — no
+    // second reader. FAILS CLOSED (`ok` false — the query stays untyped, and a
+    // member read of its value stays refused by name) unless the text is exactly
+    //     SELECT [DISTINCT | ALL] item {, item} FROM table [; | clause …]
+    // where the query is a provable read (kindOf: SqlSelect — no call, no write
+    // word); `table` is one bare name (no alias, no qualifier, no second table,
+    // no JOIN, no subquery — a second SELECT anywhere); the token after it is the
+    // end, a trailing `;`, or WHERE / GROUP / ORDER / LIMIT / HAVING / OFFSET; no
+    // UNION / EXCEPT / INTERSECT; and each item is `*`, `table.*`, a bare column
+    // `c` or `table.c` (the same table name). An alias (`c AS n`, `c n`), an
+    // expression, a call, a literal or a `${…}` value in the select list fails
+    // closed (INTERIM — §14.8.7's alias / `asIs` degradation is impl#1's Tranche
+    // 1, not built here). Whether each named column exists is the caller's
+    // question (the schema's): `cols` are the names as written.
+    // =========================================================================
+    export type SqlProj:struct = { ok: boolean, table: string, star: boolean, cols: string[] }
+
+    fn noProj() -> SqlProj { return { ok: false, table: "", star: false, cols: [] } }
+
+    // s478-boot-sql-row-types fix r1 (#1915 review L1) — a BARE `current_timestamp` /
+    // `current_date` / `current_time` item is the SQLite keyword (the current date / time as
+    // TEXT), never a column of that name, so it is not the column's value: fail closed (the
+    // query stays untyped). (`t.current_timestamp` names the column, and stays typed.)
+    fn isTimeKeyword(w: string) -> boolean {
+        return w == "CURRENT_TIMESTAMP" || w == "CURRENT_DATE" || w == "CURRENT_TIME"
+    }
+
+    export fn rowProjection(chunks: string[]) -> SqlProj {
+        const sc: SScan = scanSql(chunks)
+        const ts: STok[] = sc.toks
+        if (sc.broken || ts.length == 0) return noProj()
+        if (at(ts, 0).w != "SELECT" || !isWord(at(ts, 0))) return noProj()
+        if (kindOf(ts) != SqlKind.SqlSelect) return noProj()
+        let i: int = 0
+        while (i < ts.length) {
+            const t: STok = ts[i]
+            if (i > 0 && isWord(t) && ["SELECT", "JOIN", "UNION", "EXCEPT", "INTERSECT", "WITH"].indexOf(t.w) >= 0) return noProj()
+            if (isP(t, ";") && i != ts.length - 1) return noProj()
+            i = i + 1
+        }
+        // the FROM at depth 0 that ends the select list
+        let from: int = -1
+        let depth: int = 0
+        let j: int = selectListStart(ts, 1)
+        const first: int = j
+        while (j < ts.length && from < 0) {
+            const t2: STok = ts[j]
+            if (isP(t2, "(")) depth = depth + 1
+            if (isP(t2, ")")) depth = depth - 1
+            if (depth == 0 && isWord(t2) && t2.w == "FROM") from = j
+            j = j + 1
+        }
+        if (from < 0) return noProj()
+        const tt: STok = at(ts, from + 1)
+        if (!isWord(tt) || isClauseWord(tt.w)) return noProj()
+        const table: string = tt.text
+        const nx: STok = at(ts, from + 2)
+        const endsHere: boolean = from + 2 >= ts.length || (isP(nx, ";") && from + 3 >= ts.length)
+        if (!endsHere && !(isWord(nx) && ["WHERE", "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET"].indexOf(nx.w) >= 0)) return noProj()
+        // the items, split on the top-level commas of the select list
+        let cols: string[] = []
+        let star = false
+        let item: STok[] = []
+        let k: int = first
+        while (k <= from) {
+            const t3: STok = at(ts, k)
+            if (k == from || isP(t3, ",")) {
+                const n: int = item.length
+                if (n == 1 && isP(item[0], "*")) {
+                    star = true
+                } else if (n == 3 && isWord(item[0]) && item[0].text == table && isP(item[1], ".") && isP(item[2], "*")) {
+                    star = true
+                } else if (n == 1 && isWord(item[0]) && !isClauseWord(item[0].w) && !isTimeKeyword(item[0].w)) {
+                    cols = cols.concat([item[0].text])
+                } else if (n == 3 && isWord(item[0]) && item[0].text == table && isP(item[1], ".") && isWord(item[2])) {
+                    cols = cols.concat([item[2].text])
+                } else {
+                    return noProj()
+                }
+                item = []
+            } else {
+                item = item.concat([t3])
+            }
+            k = k + 1
+        }
+        // `*` beside a named column (`SELECT *, id`) repeats a column: fail closed
+        if (star && cols.length > 0) return noProj()
+        if (!star && cols.length == 0) return noProj()
+        if (dedupe(cols).length != cols.length) return noProj()
+        return { ok: true, table: table, star: star, cols: cols }
+    }
+
+    // =========================================================================
     // s473 (boot-failclosed-sql-protect) — what a program-body `?{}` may HOLD.
     // Both rules read the ONE whitelist scanner above (scanSql); neither adds a
     // reader of its own.

@@ -47,11 +47,12 @@
 // =============================================================================
 ${
     import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
+             CoreEndpoint, CoreEpArm, TypeDef, VariantDef, FieldDef, Type, typeDefSym,
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
     import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
-             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts } from "./print.scrml"
+             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
 
@@ -65,9 +66,14 @@ ${
         const refused: string[] = serverPrintRefusal(p)
         if (refused.length > 0) return { js: "", refused: refused, routes: [] }
         const routed: ServerFn[] = calledServerFns(p)
-        if (routed.length == 0) return { js: "", refused: [], routes: [] }
+        // s478 (s478-boot-endpoint): §61.6 "An `<endpoint>` declaration SHALL emit a server
+        // route-handler" — a program with endpoints has a server half even when its client
+        // calls nothing
+        if (routed.length == 0 && p.endpoints.length == 0) return { js: "", refused: [], routes: [] }
+        const epRefused: string[] = endpointRefusal(p)
+        if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] }
         const ctx: Ctx = serverCtx(p)
-        const reach: int[] = serverReach(p, routed)
+        const reach: int[] = serverReach(p, routed.concat(endpointFns(p)))
 
         // s472 (boot-math-port): the host modules the reached functions call (§21.3.1 —
         // imported from `./_scrml/<module>/<file>`, the same copy the client artifact imports)
@@ -91,13 +97,26 @@ ${
                 { key: "fn", value: jstr(r.fn) }, { key: "path", value: jstr(r.path) }, { key: "value", value: JsExpr.JBool(r.value) },
             ])])
         }
+        // s478: the endpoints, at their author-stable path and method (§61.7)
+        // (a program with none prints the manifest as before)
+        let epManifest: JsExpr[] = []
+        for (const ep of p.endpoints) {
+            epManifest = epManifest.concat([JsExpr.JObject([{ key: "path", value: jstr(ep.path) }, { key: "method", value: jstr(ep.method) }])])
+        }
+        let manifestProps: JsProp[] = [{ key: "routes", value: JsExpr.JArray(manifest) }]
+        let manifestNote: string = "the routes this server answers — one per server function the client calls (paths are compiler-internal, §12.3)"
+        if (epManifest.length > 0) {
+            manifestProps = manifestProps.concat([{ key: "endpoints", value: JsExpr.JArray(epManifest) }])
+            manifestNote = manifestNote + "; and the §61 endpoints, at their author-declared path and method (§61.7)"
+        }
         body = body.concat([
-            JsStmt.SComment("the routes this server answers — one per server function the client calls (paths are compiler-internal, §12.3)"),
-            JsStmt.SExportConst("manifest", JsExpr.JObject([{ key: "routes", value: JsExpr.JArray(manifest) }])),
+            JsStmt.SComment(manifestNote),
+            JsStmt.SExportConst("manifest", JsExpr.JObject(manifestProps)),
             JsStmt.SBlank,
             JsStmt.SComment("each route's wire contract — the same §57 tables the client artifact encodes and decodes with"),
         ])
         for (const sf of routed) { body = body.concat([routeJs(p, sf)]) }
+        body = body.concat(endpointConsts(p))
 
         // s472: the constants the SERVER's code reads (the functions it reaches), once each
         let roots: Node[] = []
@@ -132,9 +151,17 @@ ${
         }
         let routeExprs: JsExpr[] = []
         for (const sf of routed) { routeExprs = routeExprs.concat([routeEntry(ctx, sf)]) }
+        let epExprs: JsExpr[] = []
+        let ei: int = 0
+        for (const ep of p.endpoints) {
+            epExprs = epExprs.concat([endpointEntry(ctx, ep, ei)])
+            ei = ei + 1
+        }
         // s473: the databases go to the server too — it checks each for an undeclared tenant
         // relation before it serves (SPEC §14.8.10 item (3); server-runtime.js tenantGate)
-        inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]))])
+        let serverArgs: JsExpr[] = [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]
+        if (epExprs.length > 0) serverArgs = serverArgs.concat([JsExpr.JArray(epExprs)])
+        inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), serverArgs))])
         body = body.concat([
             JsStmt.SBlank,
             JsStmt.SComment("createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2)"),
@@ -404,6 +431,137 @@ ${
         if (checks.length > 0) return jcall(jmember(jid("rt"), "route"), [jid(routeName(ctx.p, sf.sym)), JsExpr.JArrow(["args$"], checks.concat([JsStmt.SReturn(call)]))])
         return jcall(jmember(jid("rt"), "route"), [jid(routeName(ctx.p, sf.sym)), JsExpr.JArrowE(["args$"], call)])
     }
+
+    // =========================================================================
+    // s478 (s478-boot-endpoint) — THE §61 `<endpoint>` ROUTES. One per CoreEndpoint:
+    //
+    //   const endpoint$0 = { path: "/fsp", method: "POST", type: "FspMethod",
+    //     variants: [ { name: "Dispatch", fields: ["prompt", "project"], params: [<§57 table>, …] }, … ] };
+    //   … rt.server(host$, routes, conns, [ rt.endpoint(endpoint$0, {
+    //         Dispatch: { result: <§57 table>, binds: ["prompt", "proj"], run: (args$) => { <refinement checks>; return f(args$[0], args$[1]); } },
+    //         Ping: { result: null, binds: [], run: null },          // a self-closing arm (§61.5: 204)
+    //         _: { … } }) ])
+    //
+    // §61.6: "An `<endpoint>` declaration SHALL emit a server route-handler mounted
+    // at `path=` for `method=` (§61.7), and SHALL NOT emit a paired client
+    // fetch-stub" — so the arm functions are reached from here (endpointFns), never
+    // routed at a compiler-internal path, and the client artifact holds nothing of
+    // them. The request is decoded against `variants` and dispatched to its arm by
+    // server-runtime.js `endpoint` (§61.3 / §61.4); the arm's value is encoded
+    // against `result` (§61.5). An arm's parameter refinements are checked before
+    // it runs (print.scrml routeEntryChecks — the routed functions' own check).
+    // =========================================================================
+    fn endpointFns(p: CoreProgram) -> ServerFn[] {
+        let out: ServerFn[] = []
+        for (const ep of p.endpoints) {
+            for (const a of ep.arms) {
+                const fs: Sym | not = a.fn
+                if (fs is given) {
+                    const sf: ServerFn | not = findServerFn(p, fs)
+                    if (sf is given) out = out.concat([sf])
+                }
+            }
+        }
+        return out
+    }
+
+    fn endpointRefusal(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const ep of p.endpoints) {
+            const where: string = "the `<" + "endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">`"
+            if (endpointVariants(p, ep).length == 0) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + where + "'s `accepts=` enum is not in the Core — a compiler defect"])
+            for (const a of ep.arms) {
+                const fs: Sym | not = a.fn
+                if (fs is given) {
+                    const sf: ServerFn | not = findServerFn(p, fs)
+                    if (sf is not) {
+                        out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the `<" + a.variant + ">` arm of " + where + " is not a server-placed function in the Core — a compiler defect"])
+                    } else {
+                        if (sf.ret is not) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the `<" + a.variant + ">` arm of " + where + " yields no value — §61.5 serializes an arm's value-return as the response body, and the SPEC names no response for an arm with none (a self-closing `<" + a.variant + "/>` is the 204 no-op arm); INTERIM, g-boot-endpoint-s478"])
+                        if (sf.err is given) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the `<" + a.variant + ">` arm of " + where + " can fail — §61.5 gives an arm's failure no response; INTERIM, g-boot-endpoint-s478"])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn endpointName(i: int) -> string { return "endpoint$" + i }
+
+    fn endpointVariants(p: CoreProgram, ep: CoreEndpoint) -> VariantDef[] {
+        for (const td of p.types) {
+            if (typeDefSym(td).id == ep.accepts.id) return enumVariantsOfDef(td)
+        }
+        return []
+    }
+
+    fn enumVariantsOfDef(td: TypeDef) -> VariantDef[] {
+        return match td {
+            .EnumDef(sym: s, variants: vs) :> vs
+            .StructDef(sym: s, fields: fs) :> []
+            .HostDef(sym: s) :> []
+        }
+    }
+
+    fn endpointConsts(p: CoreProgram) -> JsStmt[] {
+        if (p.endpoints.length == 0) return []
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("the §61 endpoints — each request body decodes against its `accepts=` enum's variants (§61.3, the §41.13 tagged shape: `tag` names the variant, its payload fields beside it)")]
+        let i: int = 0
+        for (const ep of p.endpoints) {
+            let vs: JsExpr[] = []
+            for (const v of endpointVariants(p, ep)) {
+                let names: JsExpr[] = []
+                let tables: JsExpr[] = []
+                for (const f of v.fields) {
+                    names = names.concat([jstr(f.sym.hint)])
+                    tables = tables.concat([wireOrNull(p, f.ty)])
+                }
+                vs = vs.concat([JsExpr.JObject([{ key: "name", value: jstr(v.sym.hint) }, { key: "fields", value: JsExpr.JArray(names) }, { key: "params", value: JsExpr.JArray(tables) }])])
+            }
+            out = out.concat([JsStmt.SConst(endpointName(i), JsExpr.JObject([
+                { key: "path", value: jstr(ep.path) },
+                { key: "method", value: jstr(ep.method) },
+                { key: "type", value: jstr(ep.accepts.hint) },
+                { key: "variants", value: JsExpr.JArray(vs) },
+            ]))])
+            i = i + 1
+        }
+        return out
+    }
+
+    fn endpointEntry(ctx: Ctx, ep: CoreEndpoint, i: int) -> JsExpr {
+        let arms: JsProp[] = []
+        for (const a of ep.arms) {
+            arms = arms.concat([{ key: a.variant, value: endpointArmJs(ctx, a) }])
+        }
+        return jcall(jmember(jid("rt"), "endpoint"), [jid(endpointName(i)), JsExpr.JObject(arms)])
+    }
+
+    fn endpointArmJs(ctx: Ctx, a: CoreEpArm) -> JsExpr {
+        const fs: Sym | not = a.fn
+        let sf: ServerFn | not = not
+        if (fs is given) sf = findServerFn(ctx.p, fs)
+        if (sf is not) return JsExpr.JObject([{ key: "result", value: JsExpr.JNull }, { key: "binds", value: JsExpr.JArray([]) }, { key: "run", value: JsExpr.JNull }])
+        let args: JsExpr[] = []
+        let binds: JsExpr[] = []
+        let k: int = 0
+        for (const prm of sf.params) {
+            if (k < a.arity) {
+                args = args.concat([JsExpr.JIndex(jid("args$"), jnum(k))])
+                binds = binds.concat([jstr(prm.sym.hint)])
+            }
+            k = k + 1
+        }
+        const call: JsExpr = jcall(jid(symNameOf(ctx, sf.sym)), args)
+        const checks: JsStmt[] = routeEntryChecks(ctx, sf)
+        let run: JsExpr = JsExpr.JArrowE(["args$"], call)
+        if (checks.length > 0) run = JsExpr.JArrow(["args$"], checks.concat([JsStmt.SReturn(call)]))
+        let result: JsExpr = JsExpr.JNull
+        const rt: Type | not = sf.ret
+        if (rt is given) result = wireOrNull(ctx.p, rt)
+        return JsExpr.JObject([{ key: "result", value: result }, { key: "binds", value: JsExpr.JArray(binds) }, { key: "run", value: run }])
+    }
+
 
     // `{ driver: "sqlite", target: "./app.db", file: "app.scrml" }` — §8.1.1 / §44.2.
     fn dbJs(d: Db) -> JsExpr {
