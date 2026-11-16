@@ -338,7 +338,18 @@ ${
         MStar(decl: Sym, inst: InstRef),                  // s444: `<*x/>` of a user declaration's EXISTING instance (Core View.Star)
         MErrors(of: ValidityOf, all: boolean),            // s449: `<errors of=…/>` (§55.8) — the surface whose errors it renders
         MDb,                                              // s452: a `<db src=…>` state block (§4, §8.1.1) — its children render in place
+        MMatch(m: MatchBlock),                            // s478: a block-form `<match for=Type on=expr>` (§18.0.1)
     }
+    // s478 — a block-form `<match for=Type on=expr>` (SPEC §18.0.1): `es` the enum
+    // `for=` names, `on` the matched-on expression, `arms` its arms in source order —
+    // each the variant it names (`variant`, -1 the wildcard `<_>`) and the arm
+    // element itself (its body is `elem.kids`; its payload binders `elem.binds`,
+    // each carrying a BBind fact — §18.0.1 "Payload variants destructure
+    // positionally"). An arm the binder refused is not listed.
+    // `proj`: one local per binder position (minted here; lower's payload
+    // projections bind them — never the arm's own binders, which name the rows).
+    export type MatchBlockArm:struct = { variant: int, elem: AElem, proj: Sym[] }
+    export type MatchBlock:struct = { es: Sym, on: AExpr, arms: MatchBlockArm[] }
     // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
     // that is already resolved in the right context: a child field's own
     // `renders` inside its declaration's renders (`<*email/>`, `subst` = not —
@@ -19688,7 +19699,25 @@ ${
     // its offset) is a defect, refused.
     fn resolveRow(env: Env, n: ANode, st: AS) -> AS {
         if (n.nid < 0) return addDiag(st, env.file, n.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: a lifted element was not read (a bootstrap defect — please report it)")
-        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], liftedKeyDiag(env, n, st))
+        // s478 — §34 E-MATCH-BLOCK-IN-LIFT: "A block-form `<match for=Type on=expr>` is
+        // placed inside a `${ ... lift ... }` logic loop … The supported per-item form is
+        // the Tier-1 `<each>` block … Supporting block-`<match>` inside `${...lift}` was
+        // REJECTED" — reported at each one in the lifted markup (its arms still resolve).
+        let s1: AS = liftedKeyDiag(env, n, st)
+        for (const sp of matchSpansIn(n)) {
+            s1 = addDiag(s1, env.file, sp, "E-MATCH-BLOCK-IN-LIFT", "a block-form `<match>` inside a `${ for … lift … }` loop's lifted markup — the per-item form is `<each>`: move the `<match>` into `<each in=@coll as item> … <match for=Type on=item> … </match> … </each>` (§18.0.1, §17.7)")
+        }
+        return resolveNodes(withLift(env, LiftCtx.NoLift), [n], s1)
+    }
+
+    // The `<match>` elements in a lifted row (at any depth of its elements).
+    fn matchSpansIn(n: ANode) -> ASpan[] {
+        const e: AElem | not = elemOfANode(n)
+        if (e is not) return []
+        let out: ASpan[] = []
+        if (!e.star && e.tag == "match") out = [e.span]
+        for (const k of e.kids) { out = out.concat(matchSpansIn(k)) }
+        return out
     }
 
     // s473 (ruled refusals) — §6.5.3 / §17.4b (S473 review-surfaced 5): "`key=`
@@ -21782,6 +21811,7 @@ ${
             .MErrors(of: x) :> false
             .MSlot :> false
             .MDb :> false
+            .MMatch(m: mm0) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -21796,6 +21826,7 @@ ${
             .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
             .MSlot :> true
             .MDb :> true
+            .MMatch(m: mm0) :> false
             .MStateView(v: v) :> true
             .MInline(v: v) :> true
             .MStar(decl: d) :> true
@@ -21823,6 +21854,7 @@ ${
             .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
             .MSlot :> false
             .MDb :> false
+            .MMatch(m: mm0) :> true
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -21939,6 +21971,8 @@ ${
         // locus is "the element's specific misplacement code (e.g. `E-IDLE-MISPLACED`)". The
         // engine-root `<onIdle>` is a declaration child (ADeclChild.Idle), never an element.
         if (!e.star && e.tag == "onIdle") return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-IDLE-MISPLACED", "`<onIdle>` here is outside an engine's root — the watchdog sits at the value's root, a sibling of its state-children, never inside a state-child body or in markup (§51.0.R); for a per-state timer use `<onTimeout>` (§51.0.M)")
+        // s478 — the block-form `<match for=Type on=expr>` (§18.0.1)
+        if (!e.star && e.tag == "match") return resolveMatchBlock(env, e, st)
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -22381,6 +22415,7 @@ ${
         if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
         if (e.star) return mkStar(g, sa, file, e, c)
         if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
+        if (e.tag == "match") return mkMatch(g, sa, file, e, c)
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
         if (d is given) return mkUse(g, sa, file, e, d, c)
@@ -22412,6 +22447,29 @@ ${
         // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
         if (t == "template" && isHtmlInNs(c.ns, t)) return out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth)))
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
+    }
+
+    // s478 — a block-form `<match>` prints as its mount, a `<div>` (lower.scrml
+    // matchView), so the page holds it where a `<div>` is held (SPEC §24.5): judged
+    // as a `<div>` in its context, and each arm's body as a template of its own
+    // inserted into that `<div>` (as an `if=` arm's is).
+    fn mkMatch(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
+        let out: MkFault[] = []
+        if (isForeignNs(c.ns) && isForeignBreakout("div", false)) {
+            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: "`<match>` mounts its arms in a `<div>`; " + breakoutMsg("div", c) }]
+        } else if (isHtmlInNs(c.ns, "div")) {
+            out = mkRepair(file, e, "div", c)
+        }
+        let pc: MkCx = c
+        if (out.length > 0) pc = mkRoot(htmlNs(), c.depth)
+        let kns: string = c.ns
+        if (out.length > 0) kns = htmlNs()
+        const kc: MkCx = mkKid(kns, "div", "", pc)
+        for (const k of e.kids) {
+            const arm: AElem | not = elemOfANode(k)
+            if (arm is given) out = out.concat(mkNodes(g, sa, file, arm.kids, mkRootAt(kc.ns, kc.depth, mkPlaceOf(kc))))
+        }
+        return out
     }
 
     fn voidInForeignMsg(tag: string, ns: string) -> string {
@@ -22592,6 +22650,7 @@ ${
             .MSlot :> []
             .MErrors(of: x) :> []
             .MDb :> []
+            .MMatch(m: mm0) :> []
         }
     }
 
@@ -23332,6 +23391,22 @@ ${
             return { n: before + 1, bad: [] }
         }
         if (el.tag == "each" && !el.star) return { n: before, bad: [] }   // its slots are looped (loopSlotsIn)
+        // s478 — the arms of a block-form `<match>` (§18.0.1) are EXCLUSIVE branches (§66.15.2:
+        // "Two unnamed slots in the two arms of an `if/else` (or exclusive `match` arms) count as
+        // one, because only one can render"): each arm starts from `before`; the path is the max.
+        if (el.tag == "match" && !el.star) {
+            let most: int = before
+            let bad: int[] = []
+            for (const k of el.kids) {
+                const arm: AElem | not = elemOfANode(k)
+                if (arm is given) {
+                    const r: SlotPath = slotPathWalk(arm.kids, before)
+                    bad = bad.concat(r.bad)
+                    if (r.n > most) most = r.n
+                }
+            }
+            return { n: most, bad: bad }
+        }
         return slotPathWalk(el.kids, before)
     }
 
@@ -24675,6 +24750,214 @@ ${
         st = eachShapeDiags(env, e, st)
         st = addElem(st, e.nid, ElemFact.MEach(rs.s, hsyms))
         return resolveNodes(renv, e.kids, st)
+    }
+
+    // =========================================================================
+    // s478 — THE BLOCK-FORM `<match for=Type on=expr>` (SPEC §18.0.1). "The
+    // block-form is a markup-emit construct. It produces UI fragments based on
+    // the variant of an enum-typed reactive cell." §18.0: "Both shapes share a
+    // single internal AST and the same exhaustiveness-checking pass — only the
+    // surface syntax and the output category (markup vs value) differ": every arm
+    // is judged by the §18 plain-value `match`'s own arm reader (plainArm — the
+    // variant, its positional binders and their arity E-TYPE-021), with the same
+    // duplicate (E-TYPE-023), arm-after-wildcard (E-SYNTAX-010) and unreachable-
+    // wildcard (W-MATCH-001) rules; the codes §18.0.1 names for the block form:
+    //   - "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names
+    //     no code for a missing one: refused by name (fail closed).
+    //   - "`on=expr` — REQUIRED when the matched-on value is not auto-implied" —
+    //     implied ONLY by an `<engine for=Type>` in scope, which the bootstrap does
+    //     not build (`<engine>` is refused, §66.13.3), so a missing `on=` is
+    //     E-MATCH-ON-REQUIRED.
+    //   - "Exhaustiveness — the compiler verifies every variant of `Type` has a
+    //     matching state-child OR a wildcard `<_>` catch-all is present. Otherwise:
+    //     `E-MATCH-NOT-EXHAUSTIVE`."
+    //   - §34 E-MATCH-INVALID-ARM: "A tag opener at the block-form `<match>` arm
+    //     position is not a variant-named arm (`<VariantName>…</>`) or the wildcard
+    //     `<_>…</_>` catch-all".
+    //   - §18.0.2: `rule=` on an arm is "LEGAL but INERT (warning
+    //     `W-MATCH-RULE-INERT`)"; `effect=` is `E-MATCH-EFFECT-FORBIDDEN`;
+    //     `<onTransition>` is `E-MATCH-ONTRANSITION-FORBIDDEN`. Any other attribute
+    //     on an arm, or on the opener (beyond `for=` / `on=` and the §17.1.2 `if=`
+    //     chain attributes), is not defined: refused by name, never ignored.
+    // The subject's type against `for=` (and a `T | not` subject, for which
+    // §18.0.1 defines no absence arm) is the typer's (typeMatchBlock).
+    // =========================================================================
+    fn resolveMatchBlock(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let forA: AAttr | not = not
+        let onA: AAttr | not = not
+        for (const a of e.attrs) {
+            if (a.name == "for" && forA is not) {
+                forA = a
+            } else if (a.name == "on" && onA is not) {
+                onA = a
+            } else if (isChainAttr(a.name)) {
+                // §17.1.2: "For `<match if=expr>`: no arm is dispatched" — the chain lowering wraps it
+                st = resolveIfValue(env, a.value, st)
+                st = addAttr(st, a.nid, AttrKind.AIf)
+            } else {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<match>` is not in the bootstrap — a block-form `<match>` reads `for=Type` and `on=expr` (§18.0.1) and the `if=` / `else-if=` / `else` render gate (§17.1.2); the attribute would be ignored")
+            }
+        }
+        let es: Sym | not = not
+        if (forA is not) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<match>` without `for=` — §18.0.1: \"`for=Type` — REQUIRED. The enum type the match is over.\" The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<match for=Type on=expr>`")
+        } else {
+            const tn: string = bareName(forA.value)
+            const ts0: Sym | not = typeNamedHere(env, tn)
+            if (tn == "") {
+                st = addDiag(st, env.file, forA.span, "E-BOOTSTRAP-UNSUPPORTED", "`for=` on `<match>` names the enum type the match is over, unquoted: `for=Type` (§18.0.1)")
+            } else if (ts0 is not) {
+                st = addDiag(st, env.file, forA.span, "E-TYPE-UNKNOWN", "unknown type `" + tn + "` — `<match for=…>` names the enum type the match is over (§18.0.1)" + elsewhereNote(env.g.te.link, env.file, NameKind.KType, true, tn))
+            } else {
+                es = isEnumType(env.g.types, Type.Named(ts0))
+                if (es is not) {
+                    const ti: TypeInfo | not = typeInfoOf(env.g.types, ts0)
+                    let isStruct = false
+                    if (ti is given) isStruct = structFieldDefs(ti.def) is given
+                    if (isStruct) {
+                        st = addDiag(st, env.file, forA.span, "E-TYPE-024", "`<match for=" + tn + ">` — `" + tn + "` is a struct, not an enum; a `<match>` is over an enum type (§18.0.1, §18.8.2)")
+                    } else {
+                        st = addDiag(st, env.file, forA.span, "E-BOOTSTRAP-UNSUPPORTED", "`<match for=" + tn + ">` — `" + tn + "` is not an enum; the block-form `<match>` is over an enum type (§18.0.1)")
+                    }
+                }
+            }
+        }
+        let onX: AExpr | not = not
+        if (onA is not) {
+            st = addDiag(st, env.file, e.span, "E-MATCH-ON-REQUIRED", "`<match>` has no `on=expr` — name the value it matches: `<match for=Type on=@cell>` (§18.0.1; `on=` is implied only by an `<engine for=Type>` in scope)")
+        } else {
+            onX = valueExpr(onA.value)
+            const ox: AExpr | not = onX
+            if (ox is not) {
+                st = addDiag(st, env.file, onA.span, "E-BOOTSTRAP-UNSUPPORTED", "`on=` on `<match>` takes the matched-on expression — `on=@cell` or `on=(expr)` (§18.0.1); a quoted, valueless or braced `on=` names no value")
+            } else {
+                st = resolveExpr(withWhole(env, -1), ox, not, st).st
+            }
+        }
+        const esk: Sym | not = es
+        if (esk is not) return resolveArmsUntyped(env, e, st)
+        const sk: PSubj = psubj(0, esk, false, true)
+        const vs: VariantDef[] = enumVariantsOf(env.g, esk)
+        let covered: int[] = []
+        let wild = false
+        let armErr = false
+        let arms: MatchBlockArm[] = []
+        for (const k of e.kids) {
+            const ae: AElem | not = elemOfANode(k)
+            if (ae is given) {
+                const ra: RMArm = matchBlockArm(env, ae, sk, vs, wild, covered, st)
+                st = ra.st
+                if (ra.ok) {
+                    if (ra.idx >= 0) covered = covered.concat([ra.idx])
+                    if (ra.idx == -1) wild = true
+                    let proj: Sym[] = []
+                    for (const b of ae.binds) {
+                        const rp: RSym = mint(st, "m")
+                        st = rp.st
+                        proj = proj.concat([rp.s])
+                    }
+                    arms = arms.concat([{ variant: ra.idx, elem: ae, proj: proj }])
+                } else {
+                    armErr = true
+                }
+            } else if (!blankNode(k)) {
+                st = addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<match>` body holds its arms only — one tag per variant, or the wildcard `<_>` (§18.0.1)")
+            }
+        }
+        let missing: string[] = []
+        let i = 0
+        for (const v of vs) {
+            if (covered.indexOf(i) < 0) missing = missing.concat(["`" + v.sym.hint + "`"])
+            i = i + 1
+        }
+        if (!wild && missing.length > 0 && !armErr) st = addDiag(st, env.file, e.span, "E-MATCH-NOT-EXHAUSTIVE", "this `<match for=" + esk.hint + ">` has no arm for " + missing.join(", ") + " and no wildcard `<_>` — add those arms, or a `<_>…</>` catch-all (§18.0.1)")
+        const onF: AExpr | not = onX
+        if (onF is given) st = addElem(st, e.nid, ElemFact.MMatch({ es: esk, on: onF, arms: arms }))
+        return st
+    }
+
+    // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a
+    // variant or the wildcard (an invalid arm is not dispatched; it is reported
+    // once, and the coverage of a match holding one is not judged again).
+    type RMArm:struct = { idx: int, ok: boolean, st: AS }
+
+    fn matchBlockArm(env: Env, ae: AElem, sk: PSubj, vs: VariantDef[], wildBefore: boolean, covered: int[], st0: AS) -> RMArm {
+        let st: AS = st0
+        let en: string = "the enum"
+        let eh: string = "…"
+        const es: Sym | not = sk.es
+        if (es is given) {
+            en = "`" + es.hint + "`"
+            eh = es.hint
+        }
+        if (!ae.star && ae.tag == "onTransition") {
+            return { idx: -3, ok: false, st: addDiag(st, env.file, ae.span, "E-MATCH-ONTRANSITION-FORBIDDEN", "`<onTransition>` is engine-only. The match-block is read-only on its matched-on value; promote to `<engine>` to use transition handlers (§18.0.2)") }
+        }
+        const isWild: boolean = !ae.star && ae.tag == "_"
+        let named = false
+        if (!ae.star && !isWild && es is given) named = variantIndex(env.g.types, es, ae.tag) >= 0
+        if (!isWild && !named) {
+            let what: string = "`<" + ae.tag + ">`"
+            if (ae.star) what = "`<*" + ae.tag + ">`"
+            st = addDiag(st, env.file, ae.span, "E-MATCH-INVALID-ARM", what + " at a `<match for=" + eh + ">` arm position is not a variant-named arm or the wildcard `<_>` — the arms of " + en + " are " + variantArmNames(vs) + " (§18.0.1)")
+            return { idx: -3, ok: false, st: resolveMatchArmBody(env, ae, st) }
+        }
+        if (isWild && ae.parens) st = addDiag(st, env.file, ae.span, "E-MATCH-INVALID-ARM", "the wildcard `<_>` binds nothing — write `<_>…</>` (§18.0.1); to bind a payload, name the variant: `<Ready(rows)>…</>`")
+        // §18.0.2 — the arm's attributes
+        for (const a of ae.attrs) {
+            if (a.name == "rule") {
+                st = addDiag(st, env.file, a.span, "W-MATCH-RULE-INERT", "Rule inert in match-block. Promote to `<engine>` to activate enforcement. (§18.0.2: `rule=` inside `<match>` is legal but inert — the match is read-only on its matched-on value)")
+            } else if (a.name == "effect") {
+                st = addDiag(st, env.file, a.span, "E-MATCH-EFFECT-FORBIDDEN", "`effect=` is engine-only. The match-block is read-only on its matched-on value; promote to `<engine>` to use transition handlers (§18.0.2)")
+            } else {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on the `<match>` arm `<" + ae.tag + ">` is not in the bootstrap — an arm names a variant (and may carry an inert `rule=`, §18.0.2); the attribute would be ignored")
+            }
+        }
+        // the §18 plain `match`'s arm reader: the variant, its binders, their arity
+        let pat: APat = APat.PWild
+        if (!isWild) pat = APat.PName(ae.tag, ae.binds, ae.parens, "")
+        const arm: AArm = { nid: ae.nid, span: ae.span, pat: pat, body: AArmBody.ArmExpr({ nid: -1, span: ae.span, k: AExprK.Recovered }), legacy: false, lifted: false, bare: false }
+        const ra: RPArm = plainArm(env, arm, sk, vs, st)
+        st = ra.st
+        if (wildBefore) st = addDiag(st, env.file, ae.span, "E-SYNTAX-010", afterWildMsg(false))
+        if (ra.idx >= 0 && covered.indexOf(ra.idx) >= 0 && !wildBefore) st = addDiag(st, env.file, ae.span, "E-TYPE-023", "a second arm for the same variant — the first `<" + ae.tag + ">` arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)")
+        if (isWild && !wildBefore && allCovered(covered, vs.length)) st = addDiag(st, env.file, ae.span, "W-MATCH-001", "the wildcard arm `<_>` is unreachable: every variant of " + en + " already has an arm (§18.6)")
+        st = addFail(st, ae.nid, FailFact.FArm(ra.idx))
+        st = resolveNodes(ra.env, ae.kids, st)
+        return { idx: ra.idx, ok: true, st: st }
+    }
+
+    fn allCovered(covered: int[], n: int) -> boolean {
+        let i = 0
+        while (i < n) {
+            if (covered.indexOf(i) < 0) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn variantArmNames(vs: VariantDef[]) -> string {
+        let out: string[] = []
+        for (const v of vs) { out = out.concat(["`<" + v.sym.hint + ">`"]) }
+        return out.join(", ")
+    }
+
+    // An arm's body resolved with its binders bound but untyped — where the arm
+    // cannot be judged (no enum: `for=` missing or refused; an invalid arm), so
+    // its body is still checked once, without a cascade on its binder names.
+    fn resolveMatchArmBody(env: Env, ae: AElem, st: AS) -> AS {
+        const rb: RBinds = bindArm(withSubject(withWhole(env, -1), -1), ae.binds, [], st)
+        return resolveNodes(rb.env, ae.kids, rb.st)
+    }
+
+    fn resolveArmsUntyped(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        for (const k of e.kids) {
+            const ae: AElem | not = elemOfANode(k)
+            if (ae is given) st = resolveMatchArmBody(env, ae, st)
+        }
+        return st
     }
 
     // s473 — §17.7.2: "An `<each>` opener SHALL carry exactly one of `in=expr`
@@ -26212,6 +26495,7 @@ ${
             .MStar(decl: d) :> -1
             .MErrors(of: o) :> -1
             .MDb :> -1
+            .MMatch(m: mm0) :> -1
         }
     }
 
@@ -29026,6 +29310,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MDb :> not
+            .MMatch(m: mm0) :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -29042,6 +29327,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MDb :> not
+            .MMatch(m: mm0) :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -32929,6 +33215,7 @@ ${
     fn typeElem(env: TEnv, e: AElem, ts: TypeState) -> TypeState {
         if (e.star) return ts
         if (e.tag == "each") return typeEach(env, e, ts)
+        if (e.tag == "match") return typeMatchBlock(env, e, ts)
         const u: Sym | not = useDecl(elemFact(env.t.elems, e.nid))
         if (u is given) return typeUse(env, e, u, ts)
         return typeHtml(env, e, ts)
@@ -33100,6 +33387,65 @@ ${
             }
         }
         return typeNodes(renv, e.kids, ts)
+    }
+
+    // s478 — a block-form `<match>` (§18.0.1; resolveMatchBlock): its `if=` gate
+    // first (typeIfAttr), then its `on=` subject against `for=` — "`for=Type` … The
+    // enum type the match is over": a subject PROVABLY of another type is
+    // E-TYPE-VARIANT (as a `match`'s arms against its subject, §18.13), and a
+    // `T | not` subject is refused by name (§18.0.1 defines no absence arm; the
+    // provable-or-silent rule leaves an unproven subject alone). Each arm's body is
+    // typed with its binders at the payload field types (as a `match` arm's are).
+    // A `<match>` the binder refused (no fact) is not typed again.
+    fn typeMatchBlock(env: TEnv, e: AElem, ts0: TypeState) -> TypeState {
+        const mm: MatchBlock | not = matchBlockOf(elemFact(env.t.elems, e.nid))
+        if (mm is not) return ts0
+        const ri: RTEnv = typeIfAttr(env, e, ts0)
+        const renv: TEnv = ri.env
+        let ts: TypeState = ri.ts
+        const r: RVT = typeExpr(renv, mm.on, ts)
+        ts = r.ts
+        const st: Type | not = knownOf(r.vt)
+        if (st is given) {
+            if (maybeInner(st) is given) {
+                ts = report(ts, renv, mm.on.span, "E-BOOTSTRAP-UNSUPPORTED", "`<match on=…>` over a `T | not` value (`" + typeName(st) + "`) — §18.0.1 defines no absence arm for the block form; discriminate the value first (`<div if=@x>…</div>`, §14.12.3) or match a value that is always present")
+            } else {
+                const ns: Sym | not = namedOf(st)
+                let same = false
+                if (ns is given) same = ns.id == mm.es.id
+                if (!same) ts = report(ts, renv, mm.on.span, "E-TYPE-VARIANT", "the arms are variants of `" + mm.es.hint + "` (`for=" + mm.es.hint + "`), but the `on=` subject is `" + typeName(st) + "` (§18.0.1, §18.13)")
+            }
+        }
+        for (const a of mm.arms) {
+            let aenv: TEnv = renv
+            const fs: FieldDef[] = armFields(env.t, mm.es, failFact(env.t.fails, a.elem.nid))
+            let i = 0
+            for (const b of a.elem.binds) {
+                const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
+                let bvt: VType = VType.Unknown
+                if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) bvt = known(fs[i].ty)
+                if (bs is given) aenv = tWithLocal(aenv, bs, bvt)
+                i = i + 1
+            }
+            ts = typeNodes(aenv, a.elem.kids, ts)
+        }
+        return ts
+    }
+
+    fn matchBlockOf(f: ElemFact | not) -> MatchBlock | not {
+        return match f {
+            .MMatch(m: m) :> m
+            .MHtml :> not
+            .MUse(decl: d) :> not
+            .MEach(bind: b) :> not
+            .MSlot :> not
+            .MDb :> not
+            .MErrors(of: x) :> not
+            .MStateView(v: v) :> not
+            .MInline(v: v) :> not
+            .MStar(decl: d) :> not
+            not :> not
+        }
     }
 
     // RULED S440 (22-item queue #3, "`<each in=>` over a non-sequence → error,
@@ -34375,6 +34721,7 @@ ${
             .MEach(bind: b) :> not
             .MSlot :> not
             .MDb :> not
+            .MMatch(m: mm0) :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -43949,6 +44296,7 @@ ${
             .MStar(decl: x) :> false
             .MErrors(of: x) :> false
             .MDb :> false
+            .MMatch(m: mm0) :> false
             not :> false
         }
         if (each) return linRefuse(cx, s, seenNodes(cx.t, e.kids, ids), "E-LIN-002", "(declared outside this loop) is consumed inside an `<each>` row — the row renders once per item, or never (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
@@ -43962,6 +44310,7 @@ ${
             .MStar(decl: x) :> false
             .MErrors(of: x) :> false
             .MDb :> false
+            .MMatch(m: mm0) :> false
             not :> false
         }
         const plain: boolean = ok && html && !e.star && attrNamed(e.attrs, "if") is not && attrNamed(e.attrs, "else-if") is not && attrNamed(e.attrs, "else") is not
@@ -45295,6 +45644,7 @@ ${
             .MUse(decl: d) :> false
             .MSlot :> false
             .MDb :> false
+            .MMatch(m: mm0) :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -45429,6 +45779,7 @@ ${
             .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v), all)
             .MSlot :> slotBound(cx, all)
             .MDb :> []
+            .MMatch(m: mm0) :> []
             .MErrors(of: x) :> []
             .MHtml :> []
             .MEach(bind: b) :> []
@@ -45476,6 +45827,7 @@ ${
             .MEach(bind: b) :> not
             .MSlot :> not
             .MDb :> not
+            .MMatch(m: mm0) :> not
             .MErrors(of: x) :> not
             not :> not
         }
@@ -45521,6 +45873,7 @@ ${
             .MEach(bind: b) :> []
             .MSlot :> []
             .MDb :> []
+            .MMatch(m: mm0) :> []
             .MErrors(of: x) :> []
             not :> []
         }
@@ -45610,6 +45963,7 @@ ${
             .MEach(bind: b) :> false
             .MSlot :> false
             .MDb :> false
+            .MMatch(m: mm0) :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -45687,6 +46041,7 @@ ${
             .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
             .MSlot :> slotCarries(cx)
             .MDb :> false
+            .MMatch(m: mm0) :> false
             .MErrors(of: x) :> false
             .MHtml :> false
             .MEach(bind: b) :> false
