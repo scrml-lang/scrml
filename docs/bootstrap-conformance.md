@@ -11,22 +11,22 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 521 | 27.9% |
+| PASS | 525 | 28.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 10 | 0.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 702 | 37.6% |
+| UNSUPPORTED | 698 | 37.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 531; of those, 521 hold (98.1%). Runtime half executed on the bootstrap for 171 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 535; of those, 525 hold (98.1%). Runtime half executed on the bootstrap for 173 case(s).
 
-- **Vacuous** passes: 13 of 521 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **508**.
+- **Vacuous** passes: 13 of 525 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **512**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 10; the other 5 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 702.
+UNSUPPORTED by reason: bootstrap-unsupported 698.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -124,7 +124,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
-| foreign | 16 | 2 | · | · | · | 7 | 7 | · | · |
+| foreign | 16 | 3 | · | · | · | 7 | 6 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
@@ -149,7 +149,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
 | parse-variant | 8 | · | · | · | · | · | 8 | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
-| print | 1 | · | · | · | · | · | 1 | · | · |
+| print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
 | reactive | 127 | 54 | · | 1 | · | 44 | 28 | · | · |
@@ -158,8 +158,8 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 11 | · | · | · | 17 | 63 | · | · |
-| server-fn | 27 | 12 | · | · | · | 7 | 8 | · | · |
-| sql | 20 | 3 | · | 1 | · | 9 | 7 | · | · |
+| server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
+| sql | 20 | 4 | · | 1 | · | 9 | 6 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -210,7 +210,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (521)
+### PASS / CODES-ONLY (525)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -461,6 +461,7 @@ none
 - `fn/sync-decl-clean` — PASS · TWIN
 - `foreign/foreign-inline-no-lang-neg` — PASS
 - `foreign/foreign-lang-in-program-neg` — PASS
+- `foreign/foreign-slice-await-regex-pos` — PASS
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN
 - `forms/checkbox-check` — PASS · TWIN
@@ -620,6 +621,7 @@ none
 - `persist/key-required-neg` — PASS
 - `persist/prepaint-without-persist-neg` — PASS
 - `persist/storage-unknown-neg` — PASS
+- `print/tool-println-clean-stdout` — PASS
 - `raw-content/active-html-displays-as-text` — PASS
 - `raw-content/bare-angle-displays` — PASS
 - `raw-content/each-row-raw-body-displays-as-text` — PASS · TWIN
@@ -711,9 +713,11 @@ none
 - `server-fn/e-route-004-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-004-pos` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-005-pos` — PASS · TWIN
+- `server-fn/session-value-in-tool-neg` — PASS (also emitted, unasserted: E-PRINT-NON-PRIMITIVE)
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
 - `sql/multiple-statements-neg` — PASS · TWIN
+- `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
@@ -734,7 +738,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (702)
+### UNSUPPORTED (698)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -968,12 +972,11 @@ none
 - `fn/sql-access-handled-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-in-function-clean` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `foreign/foreign-crossing-shadow-in-block-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
-- `foreign/foreign-slice-await-regex-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
-- `foreign/foreign-slice-lexing-regex-quote-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
-- `foreign/foreign-slice-no-free-capture-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
-- `foreign/foreign-slice-sealed-crossings-pos` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
-- `foreign/foreign-slice-unparseable-in-block-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
+- `foreign/foreign-crossing-shadow-in-block-neg` — bootstrap-unsupported: `println(out)` — `out` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's all
+- `foreign/foreign-slice-lexing-regex-quote-pos` — bootstrap-unsupported: `println(clean)` — `clean` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's
+- `foreign/foreign-slice-no-free-capture-neg` — bootstrap-unsupported: `println(seen)` — `seen` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's a
+- `foreign/foreign-slice-sealed-crossings-pos` — bootstrap-unsupported: `println(sum)` — `sum` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's all
+- `foreign/foreign-slice-unparseable-in-block-neg` — bootstrap-unsupported: `println(plan)` — `plan` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's a
 - `foreign/foreign-slice-unparseable-neg` — twin · bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
 - `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
@@ -1195,7 +1198,6 @@ none
 - `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/misuse-non-enum-type` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `parse-variant/single-field-payload-bind` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `print/tool-println-clean-stdout` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/cte-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-pa-002-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1382,12 +1384,10 @@ none
 - `server-fn/error-boundary-fallback` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `server-fn/error-boundary-value-server-call-neg` — twin · bootstrap-unsupported: a bare `{ … }` block statement (§7.2.2) is not in the bootstrap — write its statements in the enclosing block (or under an `if`, §17.1)
-- `server-fn/session-value-in-tool-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: a client call of `loadRows`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `loadRows` declares none and its returns do not prove one (the t
 - `sql/multiple-statements-in-condition-neg` — twin · bootstrap-unsupported: a `?{}` query that a `!` function propagates implicitly (§19.8.2) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return
 - `sql/one-statement-trailing-semicolon-pos` — twin · bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — unit U1e built the implicit per-handler transaction of a `!` function (§8.9.2), not the block form, which stays owed. Remove the block: in a `!` 
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
-- `sql/prepare-tool-in-block-e-sql-006-neg` — bootstrap-unsupported: `println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `style/theme-name-collision` — bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
