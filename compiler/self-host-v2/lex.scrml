@@ -264,7 +264,7 @@ ${
     // everywhere else — token.js CONTEXTUAL_KEYWORDS), so it stays an `Ident` here
     // (both sides emit Ident on the whole-stream diff). `case` / `switch` are
     // likewise absent — impl#1 does NOT reserve them (they lex as Ident).
-    fn isKeyword(text: string) -> boolean {
+    export fn isKeyword(text: string) -> boolean {
         return match text {
             // declarations / bindings + function modifiers
             "const"      :> true

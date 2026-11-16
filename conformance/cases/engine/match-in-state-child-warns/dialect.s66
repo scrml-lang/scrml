@@ -1,0 +1,12 @@
+{
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ENGINE-STATE-CHILD-MISSING", "E-ENGINE-STATE-CHILD-INVALID-VARIANT", "W-ENGINE-MATCH-IN-STATE-CHILD"],
+    "state": { "phase": "On" },
+    "domAnchored": [
+      { "selector": "#phase", "text": "Phase: On" },
+      { "selector": "#x", "text": "X" }
+    ]
+  },
+  "reason": "S478 (s478-boot-match-element): W-ENGINE-MATCH-IN-STATE-CHILD is a CARRIED impl#1 divergence, not the language rule — its §34 row: \"(Carried impl#1 divergence — NOT the language rule. The language SUPPORTS a block `<match>` in a state-child, §51.0.B / §18.0.1, S439 ruling #5 …)\" and it names impl#1's innerHTML re-entry defect. §18.0.1: \"A block `<match>` MAY appear inside the body of a DISPATCHED arm — a block-form `<match>` arm, or an `<engine>` state-child (§51.0.B) — and SHALL NOT be refused there.\" The bootstrap lowers a state-child body as a Cond arm whose `<match>` is rebuilt on every entry (lower.scrml stateView / matchView), so it has no divergence to warn about. The twin keeps the case's runtime half (the page-load render) and asserts the warning does not fire."
+}
