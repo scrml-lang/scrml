@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 362 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 369 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -72,6 +72,7 @@ ${
             "W-LOOP-COPY-WRITE-UNREAD" :> Severity.Warning
             "W-MATCH-001" :> Severity.Warning
             "W-MATCH-002" :> Severity.Warning
+            "W-MATCH-RULE-INERT" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-REQUEST-ID-UNREFERENCEABLE" :> Severity.Warning
             "W-SCHEMA-001" :> Severity.Warning
@@ -267,7 +268,13 @@ ${
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
+            "E-MATCH-BLOCK-IN-LIFT" :> Severity.Error
+            "E-MATCH-EFFECT-FORBIDDEN" :> Severity.Error
             "E-MATCH-ELSE-ABSORBS-ERROR" :> Severity.Error
+            "E-MATCH-INVALID-ARM" :> Severity.Error
+            "E-MATCH-NOT-EXHAUSTIVE" :> Severity.Error
+            "E-MATCH-ON-REQUIRED" :> Severity.Error
+            "E-MATCH-ONTRANSITION-FORBIDDEN" :> Severity.Error
             "E-MD-IN-LOGIC-NOMINAL" :> Severity.Error
             "E-META-008" :> Severity.Error
             "E-MULTI-STATEMENT-HANDLER" :> Severity.Error

@@ -1,0 +1,7 @@
+{
+  "expect": {
+    "codes": ["E-SCOPE-001"],
+    "notCodes": ["E-MATCH-BLOCK-IN-LIFT", "E-COMPONENT-035"]
+  },
+  "reason": "S478 (s478-boot-match-element): the §66 twin is graded on every Error it emits (twin-extra-error), and the arms `<Open>open</>` / `<Closed>closed</>` are written in the pre-S111 free-text reading. §18.0.1: each arm body \"is a **code-default body** (§4.18 — S111): a bare run is code\"; §4.18.7: \"A bare prose run that happens to be valid code — a single word such as `Counter` parses as an identifier — is code and is diagnosed as code (e.g. `E-SCOPE-001`)\". So `open` / `closed` are undeclared names (E-SCOPE-001) on every implementation that speaks the S111 model. What the case pins — no E-MATCH-BLOCK-IN-LIFT and no E-COMPONENT-035 for a `<match>` outside a lift — is unchanged."
+}

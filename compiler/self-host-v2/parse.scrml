@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -8883,6 +8883,17 @@ ${
 
     // At `<` (not `</`, not `<!--`).
     fn parseOpener(mp: MP) -> ROpener {
+        const r: RArmOpener = parseOpenerB(mp, false)
+        return { o: r.o, mp: r.mp }
+    }
+
+    // s478 — an opener, and (`arm`: a block-form `<match>` arm, SPEC §18.0.1) the
+    // positional payload binders `( … )` written right after the variant name:
+    // "Payload variants destructure positionally: `<Ready(rows)>` binds `rows` for
+    // that arm's body". Only there: anywhere else `(` in a tag is E-PARSE-TAG.
+    type RArmOpener:struct = { o: Opener, binds: ABind[], parens: boolean, mp: MP }
+
+    fn parseOpenerB(mp: MP, arm: boolean) -> RArmOpener {
         const start: int = mp.pos
         let m: MP = mAdv(mp, 1)
         let star = false
@@ -8928,6 +8939,14 @@ ${
         }
         m = nm.mp
         if (nm.w == "" && !kwPrefix) m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
+        let binds: ABind[] = []
+        let parens = false
+        if (arm && chAt(m, 0) == "(") {
+            const rb: RArmBinds = parseArmBinds(m, nm.w)
+            binds = rb.bs
+            parens = true
+            m = rb.mp
+        }
         let ty: AType | not = not
         if (chAt(m, 0) == ":") {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
@@ -8997,7 +9016,60 @@ ${
                 m = mDiag(m, "E-PARSE-TAG", "a markup element cannot stand inside the opener of `<" + nm.w + ">` — `renders <…>` is a declaration's clause, written after its closer (§66.5.1)", sp.start, sp.end)
             }
         }
-        return { o: o, mp: m }
+        return { o: o, binds: binds, parens: parens, mp: m }
+    }
+
+    // s478 — at the `(` after an arm's variant name: `name (, name)*` up to `)`
+    // (SPEC §18.0.1 — positional, one name or `_` per payload field; the arity is
+    // the analyzer's, E-TYPE-021 as for a `.V(…)` pattern, §18.7). §18.0.1 names the
+    // parenthesized POSITIONAL form only ("the bare-attribute form (`<Ready rows>`)
+    // and a named form (`<Ready rows=r>`) … do NOT appear on `<match>`
+    // state-children"); a `field: x` entry, or anything else, is not defined there —
+    // refused, and the scan resumes after the `)` (or at the opener's `>`).
+    type RArmBinds:struct = { bs: ABind[], mp: MP }
+
+    fn parseArmBinds(mp: MP, tag: string) -> RArmBinds {
+        let m: MP = mAdv(mp, 1)
+        let out: ABind[] = []
+        let going = true
+        while (going) {
+            m = skipSpace(m)
+            const c: string = chAt(m, 0)
+            if (mEof(m) || c == ">") {
+                m = mDiag(m, "E-PARSE-TAG", "the binder list of `<" + tag + "(…)>` is not closed with `)`", mp.pos, m.pos)
+                going = false
+            } else if (c == ")") {
+                m = mAdv(m, 1)
+                going = false
+            } else {
+                const w: RWord = readName(m)
+                const after: MP = skipSpace(w.mp)
+                const nc: string = chAt(after, 0)
+                if (w.w != "" && isKeyword(w.w) && (nc == "," || nc == ")")) {
+                    // §18.0: one AST with the plain match — a reserved word is no binder (the plain reader's E-PARSE-ARM)
+                    m = mAt(mDiag(m, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + w.w + "`", m.pos, w.mp.pos), after.pos)
+                    if (nc == ",") m = mAdv(m, 1)
+                } else if (w.w != "" && isIdentStartCh(w.w.substring(0, 1)) && (nc == "," || nc == ")")) {
+                    out = out.concat([{ nid: m.nid, span: mkSpan(m.pos, w.mp.pos), name: w.w }])
+                    m = mBump(after)
+                    if (nc == ",") m = mAdv(m, 1)
+                } else {
+                    // not a positional binder: refused by name, skipped to the `)`
+                    const stop: int = armBindsEnd(m)
+                    m = mDiag(mAt(m, stop), "E-BOOTSTRAP-UNSUPPORTED", "`<" + tag + "(…)>` binds its payload POSITIONALLY — one name (or `_`) per field, comma-separated: `<" + tag + "(a, b)>` (§18.0.1). A named entry (`field: x`), a nested pattern or a literal is not defined for a `<match>` arm", m.pos, stop)
+                    if (chAt(m, 0) == ")") m = mAdv(m, 1)
+                    going = false
+                }
+            }
+        }
+        return { bs: out, mp: m }
+    }
+
+    // The `)` that closes an arm's binder list, or the opener's `>` (not consumed).
+    fn armBindsEnd(mp: MP) -> int {
+        let m: MP = mp
+        while (!mEof(m) && chAt(m, 0) != ")" && chAt(m, 0) != ">") { m = mAdv(m, 1) }
+        return m.pos
     }
 
     // s451 (S239 review of #1254, MED) — an attribute written TWICE on one
@@ -10154,7 +10226,7 @@ ${
     }
 
     fn elemFrom(o: Opener, kids: ANode[], mp: MP) -> RElem {
-        const e: AElem = { nid: mp.nid, span: mkSpan(o.start, mp.pos), star: o.star, tag: o.name, attrs: o.attrs, kids: kids }
+        const e: AElem = { nid: mp.nid, span: mkSpan(o.start, mp.pos), star: o.star, tag: o.name, attrs: o.attrs, kids: kids, binds: [], parens: false }
         return { e: e, mp: mBump(mp) }
     }
 
@@ -10181,11 +10253,76 @@ ${
             return elemFrom(o, sh, mp)
         }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
+        // s478 — a block-form `<match>` (§18.0.1): its body is a list of ARMS
+        if (!o.star && o.name == "match") return finishMatch(o, mp)
         if (isRawContentOpener(o)) return finishRaw(o, mp)
         // s472 (S472 ruling Q3): a `<db>` body is a code-default ITEM body
         if (isDbOpener(o)) return finishDb(o, mp)
         const kids: RNodes = parseKids(mp, o.name)
         return elemFrom(o, kids.nodes, kids.mp)
+    }
+
+    // ---- s478: the block-form `<match for=Type on=expr>` (SPEC §18.0.1) --------
+    // "State-children with variant names match enum variants"; each arm is a
+    // variant-named tag (or the wildcard `<_>`) with one of "the three legitimate
+    // body forms": self-closing `<Variant/>` ("no body, renders nothing for that
+    // variant"), a bare body `<Variant>…</>` — "a code-default body (§4.18 — S111)"
+    // — or the `:`-shorthand `<Variant : expr>` ("the `:` opens INSIDE the arm
+    // opener"). So an arm is read as a declaration's state-child is (parseDeclChild:
+    // the shorthand, or parseCodeBody), plus its `( … )` binders (parseOpenerB).
+    // Whitespace and comments between arms are trivia. Anything else at an arm
+    // position that is not a tag (text, a `${…}`) is not an arm — refused by name;
+    // a tag that does not name a variant is the analyzer's (E-MATCH-INVALID-ARM).
+    // `<script>` / `<style>` there is refused as everywhere (§4.17).
+    fn finishMatch(o: Opener, mp: MP) -> RElem {
+        let m: MP = mp
+        let arms: ANode[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<match>` is never closed", o.start, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                m = parseCloser(m, "match")
+                going = false
+            } else if (scriptStyleAt(m) != "") {
+                m = refuseScriptStyle(m)
+            } else if (chAt(m, 0) == "<") {
+                const ra: RArmOpener = parseOpenerB(m, true)
+                const ao: Opener = ra.o
+                let am: MP = ra.mp
+                // a type, an own value, a typed attribute or a validator would make
+                // the tag a DECLARATION (§66.2.2) — an arm declares nothing
+                if (isDeclOpener(ao) || ao.vals.length > 0) am = mDiag(am, "E-BOOTSTRAP-UNSUPPORTED", "`<" + ao.name + ">` at a `<match>` arm position carries a type, a value or a validator — an arm names a variant and declares nothing (§18.0.1); write `<" + ao.name + ">…</>`", ao.start, am.pos)
+                let body: ANode[] = []
+                const sh: ANode[] | not = ao.short
+                if (sh is given) {
+                    body = sh
+                } else if (!ao.selfClosing) {
+                    const kids: RNodes = parseCodeBody(am, ao.name)
+                    body = kids.nodes
+                    am = kids.mp
+                }
+                const ae: AElem = { nid: am.nid, span: mkSpan(ao.start, am.pos), star: ao.star, tag: ao.name, attrs: ao.attrs, kids: body, binds: ra.binds, parens: ra.parens }
+                am = mBump(am)
+                arms = arms.concat([{ nid: am.nid, span: ae.span, k: ANodeK.Elem(ae) }])
+                m = mBump(am)
+            } else {
+                const bad: int = m.pos
+                let stop: int = m.src.indexOf("<", bad + 1)
+                if (stop < 0) stop = m.src.length
+                if (atInterp(m)) {
+                    const ri: RNodeOne = parseInterp(m)
+                    stop = ri.mp.pos
+                    m = ri.mp
+                } else {
+                    m = mAt(m, stop)
+                }
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `<match>` body holds its ARMS only — one tag per variant (`<Ready>…</>`, `<Ready(rows)>…</>`, `<Idle : \"…\">`, `<Idle/>`) or the wildcard `<_>…</>` (§18.0.1); text or a `" + interpOpen() + "…}` between the arms is not an arm — move it into an arm's body", bad, stop)
+            }
+        }
+        return elemFrom(o, arms, m)
     }
 
     // ---- s468: raw-content elements — `<pre>` and `<code>` (SPEC §4.17) -------
@@ -10374,7 +10511,7 @@ ${
                 m = inner.mp
                 let closeEnd: int = body.length
                 if (inner.ti < toks.length) closeEnd = toks[inner.ti].end
-                const e: AElem = { nid: m.nid, span: mkSpan(base + t.start, base + closeEnd), star: false, tag: t.name, attrs: [], kids: inner.nodes }
+                const e: AElem = { nid: m.nid, span: mkSpan(base + t.start, base + closeEnd), star: false, tag: t.name, attrs: [], kids: inner.nodes, binds: [], parens: false }
                 m = mBump(m)
                 out = out.concat([{ nid: m.nid, span: e.span, k: ANodeK.Elem(e) }])
                 m = mBump(m)
