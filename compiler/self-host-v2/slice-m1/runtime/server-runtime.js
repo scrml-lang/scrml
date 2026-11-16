@@ -1362,12 +1362,19 @@ export function tenantGate(host, conns) {
 // — a WinterCG handler (Bun.serve's `fetch`, or a test calling it directly).
 // The request is read through `url`, `method`, `headers.get(name)` and `text()`
 // only. `conns` (s473): the program's database connections — the tenant gate's.
-export function server(host, routes, conns = []) {
+export function server(host, routes, conns = [], endpoints = []) {
   const byPath = new Map();
   for (const r of routes) byPath.set(r.path, r);
+  // s478 (s478-boot-endpoint): the §61 endpoints, by path, then method (§61.7 — "mounted for
+  // method="). The compiler refuses two at one path and method, and any under `/_scrml/`.
+  const byEndpoint = new Map();
+  for (const ep of endpoints) {
+    if (!byEndpoint.has(ep.path)) byEndpoint.set(ep.path, new Map());
+    byEndpoint.get(ep.path).set(ep.method, ep);
+  }
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   return {
-    routes: routes.map((r) => ({ path: r.path, method: "POST" })),
+    routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))),
     async fetch(request) {
       let path;
       try { path = new URL(request.url, "http://localhost").pathname; } catch { return jsonResponse(host, 400, FIXED[400]); }
@@ -1382,6 +1389,19 @@ export function server(host, routes, conns = []) {
         }
         if (!admitted) return jsonResponse(host, 503, FIXED[503]);
       }
+      const em = byEndpoint.get(path);
+      if (em !== undefined) {
+        // §61.7: the handler is mounted at `path=` FOR `method=` — any other method at that
+        // path is not served (405, naming the methods that are — RFC 9110 §15.5.6)
+        const ep = em.get(request.method);
+        if (ep === undefined) return jsonResponse(host, 405, FIXED[405], { Allow: [...em.keys()].join(", ") });
+        try {
+          return await handleEndpoint(host, ep, request);
+        } catch (e) {
+          logLine(host, `scrml server: ${ep.method} ${path} — ${messageOf(e)}`);
+          return jsonResponse(host, 500, FIXED[500]);
+        }
+      }
       const r = byPath.get(path);
       if (r === undefined) return jsonResponse(host, 404, FIXED[404]);
       try {
@@ -1393,6 +1413,115 @@ export function server(host, routes, conns = []) {
       }
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// s478 (s478-boot-endpoint) — SPEC §61 `<endpoint>`: a typed INBOUND route a
+// foreign client calls. `desc` (print-server.scrml endpointConsts): its path,
+// method, `accepts=` enum name and that enum's variants — each with its payload
+// field names and their §57 tables; `arms` (endpointEntry): per variant name (or
+// `_`, the wildcard) the arm's `run` (null: a self-closing no-op arm), the §57
+// table of its value and its binders' names.
+//   §61.7: NO CSRF gate ("`<endpoint>` … SHALL NOT be routed through the §12 CSRF
+//   gate (JSON+bearer is CSRF-exempt by construction, dpa-002)").
+//   §61.3: the body decodes against the enum (the §41.13 tagged shape: a JSON
+//   object whose `tag` names the variant, its payload fields beside it); a failure
+//   is "the compiler-owned structured error envelope `{ error: { kind, message } }`
+//   — HTTP 400 … `kind` ∈ … `MissingDiscriminator` / `UnknownVariant` /
+//   `InvalidPayload` / `Malformed`" (§61.5), and no arm runs.
+//   §61.5: "The compiler SHALL serialize an arm's typed value-return directly as
+//   the JSON response body — HTTP 200, `Content-Type: application/json`"; "A
+//   self-closing `<Variant/>` arm SHALL return default-success with no body — HTTP
+//   204 No Content".
+// Fail closed where the SPEC is silent (owner questions, g-boot-endpoint-s478): a
+// key that is neither `tag` nor a payload field of the named variant is
+// InvalidPayload; a JSON array is Malformed (§41.13: MissingDiscriminator is "an
+// OBJECT that lacks a `tag` field").
+// ---------------------------------------------------------------------------
+export function endpoint(desc, arms) {
+  return { path: desc.path, method: desc.method, desc, arms };
+}
+
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+function decodeFailure(host, kind, message) {
+  return jsonResponse(host, 400, { error: { kind, message } });
+}
+
+// review #1916 M1: §61.7 exempts an endpoint from CSRF because it is "JSON-body +
+// bearer-token" ("A JSON-body + bearer-token endpoint is **CSRF-exempt by
+// construction** (dpa-002)"). The JSON half is enforced here: a request whose media
+// type is not `application/json` is refused 415 before its body is read, so no arm
+// runs. A browser cannot send that media type cross-origin without a CORS preflight,
+// and the preflight (OPTIONS) is answered 405, so a page the operator visits cannot
+// drive an endpoint as a CORS simple request (`text/plain`, a form, multipart).
+// The media type is the header up to its first `;` (RFC 9110 §8.3.1: parameters such
+// as `charset` follow), compared case-insensitively (type and subtype are
+// case-insensitive, §8.3.1).
+function isJsonMediaType(ct) {
+  if (typeof ct !== "string") return false;
+  const semi = ct.indexOf(";");
+  return (semi < 0 ? ct : ct.slice(0, semi)).trim().toLowerCase() === "application/json";
+}
+
+// review #1916 L6: a request-supplied name echoed in an error message is clipped
+const clip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
+
+async function handleEndpoint(host, ep, request) {
+  if (!isJsonMediaType(request.headers.get("Content-Type"))) {
+    return jsonResponse(host, 415, { error: { kind: "UnsupportedMediaType", message: "the request Content-Type must be application/json" } });
+  }
+  let text;
+  try { text = await request.text(); } catch { return decodeFailure(host, "Malformed", "the request body could not be read"); }
+  let v;
+  try { v = JSON.parse(text); } catch (e) { return decodeFailure(host, "Malformed", `request body is not JSON: ${messageOf(e)}`); }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return decodeFailure(host, "Malformed", "request body is not a JSON object");
+  if (!own(v, "tag") || typeof v.tag !== "string") return decodeFailure(host, "MissingDiscriminator", "request body is missing the variant discriminator field 'tag'");
+  let variant;
+  for (const x of ep.desc.variants) if (x.name === v.tag) variant = x;
+  if (variant === undefined) return decodeFailure(host, "UnknownVariant", `request body names an unknown variant '${clip(v.tag)}' of ${ep.desc.type}`);
+  for (const k of Object.keys(v)) {
+    if (k !== "tag" && !variant.fields.includes(k)) return decodeFailure(host, "InvalidPayload", `request payload field '${clip(k)}' is not a field of variant '${variant.name}'`);
+  }
+  const args = [];
+  for (let i = 0; i < variant.fields.length; i++) {
+    const f = variant.fields[i];
+    if (!own(v, f)) return decodeFailure(host, "InvalidPayload", `request payload field '${f}' of variant '${variant.name}' is missing`);
+    const d = decode(variant.params[i], v[f], { canonicalOnly: true });
+    if (!d.ok) return decodeFailure(host, "InvalidPayload", `request payload field '${f}' of variant '${variant.name}' is invalid: ${d.error && d.error.reason ? d.error.reason : "it does not decode"}`);
+    args.push(d.value);
+  }
+  // §61.4: the arm of that variant, else the wildcard (the compiler proved one of them exists)
+  const arm = own(ep.arms, variant.name) ? ep.arms[variant.name] : own(ep.arms, "_") ? ep.arms._ : undefined;
+  if (arm === undefined) {
+    logLine(host, `scrml server: ${ep.method} ${ep.path} — no arm for '${variant.name}' (the compiler's exhaustiveness check should have refused this program)`);
+    return jsonResponse(host, 500, FIXED[500]);
+  }
+  if (arm.run === null) return noContent(host);
+  let result;
+  try {
+    result = await arm.run(args);
+  } catch (e) {
+    // the arm's parameter check (refineEntry) — the request's payload, not the server, is at fault (§61.3: "decoded with §53 refinement enforcement")
+    if (e !== null && typeof e === "object" && ENTRY_TRAPS.has(e)) {
+      const dt = e.detail || {};
+      const at = arm.binds.indexOf(String(dt.what));
+      const field = at >= 0 && at < variant.fields.length ? variant.fields[at] : String(dt.what);
+      return decodeFailure(host, "InvalidPayload", `request payload field '${field}' of variant '${variant.name}' violates its refinement ${String(dt.type)}`);
+    }
+    logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> threw — ${messageOf(e)}`);
+    return jsonResponse(host, 500, FIXED[500]);
+  }
+  if (arm.result === null) {
+    logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> has no result table`);
+    return jsonResponse(host, 500, FIXED[500]);
+  }
+  const out = encode(arm.result, result);
+  if (!out.ok) {
+    logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> — its answer does not encode (${out.error.reason})`);
+    return jsonResponse(host, 500, FIXED[500]);
+  }
+  return jsonResponse(host, 200, out.wire);
 }
 
 async function handle(host, r, request) {
