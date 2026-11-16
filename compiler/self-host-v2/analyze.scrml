@@ -11045,7 +11045,7 @@ ${
         const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: want }), noFailCtx())
         const n0: int = st.rets.length
         st = resolveBlock(lenv, body, st)
-        // the lambda's value type: its returns' one type (`not` when they differ or one is unknown)
+        // the lambda's value type: its returns' joined type (`not` when they share none or one is unknown)
         let rty: Type | not = not
         let first = true
         let same = true
@@ -11059,8 +11059,13 @@ ${
                     first = false
                 } else if (t is not || rty is not) {
                     same = false
-                } else if (!sameType(t, rty)) {
-                    same = false
+                } else {
+                    const j: Type | not = joinType(rty, t)     // fix round 1: joined as the typer's lambdaValueType
+                    if (j is not) {
+                        same = false
+                    } else {
+                        rty = j
+                    }
                 }
             }
             i = i + 1
@@ -11153,7 +11158,7 @@ ${
         let st: AS = st0
         let own: string[] = own0
         for (const s of b.stmts) {
-            for (const x of stmtExprs(s)) { st = lamExprCheck(env, x, st) }
+            for (const x of stmtExprs(s)) { st = lamExprCheck(env, x, own, st) }
             const k: AStmtK = s.k
             const why: string = match k {
                 .Local(name: n, mutable: m, lin: ln) :> lamLocalWhy(ln)
@@ -11192,13 +11197,36 @@ ${
         return ""
     }
 
-    // An expression statement: only `x = v` whose `x` is one of the body's own `let` locals.
+    // An expression statement: only `x = v` whose `x` is one of the body's own `let` locals
+    // (a condition head's kept assignment is lamExprCheck's, by the same rule).
     fn lamEvalWhy(e: AExpr, own: string[]) -> string {
         const t: AExpr | not = assignedTarget(e)
         if (t is not) return "an expression statement (a call run for its effect)"
-        const n: string = exprName(t)
-        if (n != "" && atName(t) == "" && own.indexOf(n) >= 0) return ""
+        if (lamOwnTarget(t, own)) return ""
         return "a write to something the callback body did not declare (a cell, a captured local, or a part of a value)"
+    }
+
+    // A §50.4.2 kept condition-head assignment's target (`if ((n = v) is not)`), else `not`
+    // (a statement's assignment is lamEvalWhy's; one in any other value position is
+    // E-ASSIGN-POSITION's, the resolver's).
+    fn keptTarget(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, kept: kp) :> keptOrNot(t, kp)
+            // no-default-arm: one question of the expression — is it a kept assignment
+            _ :> not
+        }
+    }
+
+    fn keptOrNot(t: AExpr, kp: boolean) -> AExpr | not {
+        if (kp) return t
+        return not
+    }
+
+    // An assignment's target is one of the body's own `let` locals (a plain name).
+    fn lamOwnTarget(t: AExpr, own: string[]) -> boolean {
+        const n: string = exprName(t)
+        return n != "" && atName(t) == "" && own.indexOf(n) >= 0
     }
 
     // The body's own `let` names in scope after `k` (a `let` adds its name; a `const` of the
@@ -11231,13 +11259,23 @@ ${
     }
 
     // Inside a callback body's expressions: no handling form, query or foreign block (a
-    // nested lambda's own body is judged when it is resolved).
-    fn lamExprCheck(env: Env, e: AExpr, st0: AS) -> AS {
+    // nested lambda's own body is judged when it is resolved), and no §50.4.2 kept
+    // condition-head assignment (`if ((n = v) is not)`, an operand of `&&`, …) to anything
+    // but one of the body's own `let` locals (`own`) — lamEvalWhy's rule for a statement. INTERIM: a
+    // write to a captured local or a cell from inside a callback runs whenever, and however
+    // often, the tape method calls back (§35.6's rationale), and the enclosing function's
+    // narrowing does not see it (s478 fix round 1: `if (n is given) { xs.some(x => { if ((n =
+    // not) is not) … }); n + 1 }` compiled and computed `not + 1`).
+    fn lamExprCheck(env: Env, e: AExpr, own: string[], st0: AS) -> AS {
         let st: AS = st0
+        const at: AExpr | not = keptTarget(e)
+        // a cell target keeps the condition head's own refusal (a CELL as the target of a
+        // condition-head assignment is not built anywhere) — one report per fault
+        if (at is given && !atRooted(at) && !lamOwnTarget(at, own)) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the tape method may call the callback any number of times, and the enclosing function does not track the write). Assign only the callback's own `let` locals; make the write in the statement around the call")
         if (handledOf(e.k) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handling form (`?`, `!{ … }`, `match`) in the body of a block-bodied callback is not in the bootstrap (INTERIM). Handle the value in the statement around the call, or write the choice as `if` / `else`")
         if (sqlOfK(e.k) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `?{}` query in the body of a callback is not in the bootstrap (INTERIM — a query is a wait, §13.8, and an awaited combinator is not built, §13.2). Run the query in the statement around the call")
         if (foreignOf(e) is given) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `_={ … }=` foreign block in the body of a callback is not in the bootstrap (INTERIM). Bind its value in the statement around the call")
-        for (const x of exprKids(e)) { st = lamExprCheck(env, x, st) }
+        for (const x of exprKids(e)) { st = lamExprCheck(env, x, own, st) }
         return st
     }
 
@@ -29899,6 +29937,7 @@ ${
 
     fn comparatorCheck(env: TEnv, f: ValueFact | not, args: AExpr[], ts: TypeState) -> TypeState {
         if (isPredFact(f) && args.length == 1) return predicateCheck(env, f, args[0], ts)
+        if (isSeqFact(f, SeqFn.Map) && args.length == 1 && isLambda(args[0])) return mapValuesCheck(env, args[0], ts)
         if (!isSortByFact(f) || args.length != 1) return ts
         let ts1: TypeState = ts
         for (const body of lambdaValues(args[0])) { ts1 = comparatorValueCheck(env, body, ts1) }   // s478: each `return` of a block body
@@ -29928,21 +29967,43 @@ ${
         return out
     }
 
-    // s478 — the one known type of a lambda's values (`not` when one is unknown or they differ).
+    // s478 — the one known type of a lambda's values, joined as an `if` / ternary's branches
+    // are (joinVT — §17.6.4 "When an if-as-expression has no `else` arm, the false-path
+    // result is `not`" and the value is `number | not`: `T` joined with `not` is `T | not`; int and number share `number`, the
+    // arithmetic join); `not` when one is unknown or they share no type (mapValuesCheck
+    // reports that, E-TYPE-031).
     fn lambdaValueType(ts: TypeState, lam: AExpr) -> Type | not {
-        let out: Type | not = not
+        return knownOf(lambdaValuesVT(ts, lam))
+    }
+
+    fn lambdaValuesVT(ts: TypeState, lam: AExpr) -> VType {
+        let out: VType = VType.Unknown
         let first = true
         for (const v of lambdaValues(lam)) {
-            const t: Type | not = knownOf(exprType0(ts, v.nid))
-            if (t is not) return not
+            const t: VType = exprType0(ts, v.nid)
             if (first) {
                 out = t
                 first = false
-            } else if (out is given) {
-                if (!sameType(out, t)) return not
+            } else {
+                out = joinVT(out, t)
             }
         }
         return out
+    }
+
+    // s478 fix round 1 — a `.map(…)` callback's values must share one type: its value is the
+    // new tape's element type, and a callback giving `"a"` on one path and `x: int` on
+    // another makes no `T[]` (§34 E-TYPE-031: "a value is assigned to a position whose
+    // declared type it does not satisfy" — the mapped tape's one element position). Values
+    // that join (joinVT: one type, int with number, `T` with `not`) pass; a choice of types
+    // that share none is refused — an expression body's ternary as a block body's returns.
+    fn mapValuesCheck(env: TEnv, lam: AExpr, ts: TypeState) -> TypeState {
+        const vt: VType = lambdaValuesVT(ts, lam)
+        const xs: Type[] = oneOfMembers(vt)
+        if (xs.length == 0) return ts
+        if (hasErrIn(env.errs, lam.span)) return ts
+        if (typedErrIn(ts, lam.span)) return ts
+        return report(ts, env, lam.span, "E-TYPE-031", "the callback of `.map(…)` gives values of more than one type (" + oneOfName(xs) + "), which share no type — the mapped tape has one element type (§7.5); give one type on every path (convert, or map to an enum)")
     }
 
     // s475 — the predicate of `xs.some(x => b)` / `xs.every(x => b)` is a `bool`

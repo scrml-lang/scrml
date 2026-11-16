@@ -671,6 +671,7 @@ ${
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
+            .VPrint(text: tx2, newline: nl2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()

@@ -3732,13 +3732,139 @@ ${
     // Assigns of its own locals, Ifs and Returns. Nothing in it waits, fails, writes a cell,
     // defers, loops or lifts: each would be judged against, or continue, the ENCLOSING
     // function, and the tape method may run the callback any number of times.
+    // An Assign / Assigned in it writes a local the body itself declared (a Let of its own,
+    // at any depth of its blocks): a write to a captured local or a cell would happen
+    // whenever, and however often, the tape method calls back — untracked by the enclosing
+    // function's narrowing (s478 fix round 1).
     fn checkBlockLambda(b: Block) -> string[] {
         let out: string[] = []
-        for (const n of allNodes(Node.NBlock(b))) {
+        const ns: Node[] = allNodes(Node.NBlock(b))
+        let own: int[] = []
+        for (const n of ns) { own = own.concat(lambdaLetIds(n)) }
+        for (const n of ns) {
             const what: string = lambdaForbidden(n)
             if (what != "") out = out.concat(["C-L1: a block lambda holds " + what])
+            const w: int = lambdaWrittenId(n)
+            if (w >= 0 && own.indexOf(w) < 0) out = out.concat(["C-L1: a block lambda writes a local it did not declare"])
         }
         return out
+    }
+
+    fn lambdaLetIds(n: Node) -> int[] {
+        return match n {
+            .NStmt(s: s) :> lambdaLetIdsStmt(s)
+            .NExpr(e: x) :> []
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NView(v: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn lambdaLetIdsStmt(s: Stmt) -> int[] {
+        return match s {
+            .Let(sym: x) :> [x.id]
+            .Assign(local: x) :> []
+            .If(cond: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .Write(cap: x) :> []
+            .Commit(writes: x) :> []
+            .ResetSurface(of: x) :> []
+            .Defer(body: x) :> []
+            .Unpersist(decl: x) :> []
+            .Attempt(result: x) :> []
+            .Loop(label: x) :> []
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
+            .Gather(g: x) :> []
+            .Lift(into: x) :> []
+            .LocalFn(f: x) :> []
+            .Suspend(bind: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
+            .Fail(err: x) :> []
+        }
+    }
+
+    // The local an Assign statement or an Assigned expression writes, else -1.
+    fn lambdaWrittenId(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> lambdaWrittenIdStmt(s)
+            .NExpr(e: x) :> lambdaWrittenIdExpr(x)
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn lambdaWrittenIdStmt(s: Stmt) -> int {
+        return match s {
+            .Assign(local: x) :> x.id
+            .Let(sym: x) :> -1
+            .If(cond: x) :> -1
+            .Return(e: x) :> -1
+            .Eval(e: x) :> -1
+            .Write(cap: x) :> -1
+            .Commit(writes: x) :> -1
+            .ResetSurface(of: x) :> -1
+            .Defer(body: x) :> -1
+            .Unpersist(decl: x) :> -1
+            .Attempt(result: x) :> -1
+            .Loop(label: x) :> -1
+            .Break(target: x) :> -1
+            .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
+            .Suspend(bind: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
+            .Fail(err: x) :> -1
+        }
+    }
+
+    fn lambdaWrittenIdExpr(e: Expr) -> int {
+        return match e {
+            .Assigned(local: x) :> x.id
+            .ServerCall(fn: x) :> -1
+            .Query(q: x) :> -1
+            .Refetch(req: x) :> -1
+            .Lit(lit: x) :> -1
+            .Local(sym: x) :> -1
+            .Read(place: x) :> -1
+            .Call(callee: x) :> -1
+            .Prim(op: x) :> -1
+            .Match(scrut: x) :> -1
+            .ArrayOf(elems: x) :> -1
+            .StructOf(ty: x) :> -1
+            .VariantOf(enumSym: x) :> -1
+            .Handle(inst: x) :> -1
+            .InitOf(decl: x) :> -1
+            .Host(call: x) :> -1
+            .Lambda(params: x) :> -1
+            .BlockLambda(params: x) :> -1
+            .SeqCall(op: x) :> -1
+            .Validity(of: x) :> -1
+            .Foreign(slice: x) :> -1
+        }
     }
 
     fn lambdaForbidden(n: Node) -> string {

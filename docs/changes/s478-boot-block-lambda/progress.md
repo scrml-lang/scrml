@@ -78,3 +78,24 @@ Positions: anywhere but a tape callback / no-event handler (function values slic
 - [x] implementation; slice tests green (block-lambda-s478, parse, attr-forms, semicolon-residue, parse-batch)
 - [x] conformance delta, corpus delta, CI gates
 - [ ] hook, PR
+
+## Fix round 1 (PR #1905 adversarial review)
+
+- Merged origin/main f23824dbb (#1900 print/println). Semantic conflict: `lower.scrml blockLambdaExpr`'s
+  ValueFact match lacked #1900's `VPrint` arm (impl#1 E-TYPE-006) — added. #1900's `psExpr` pre-scan left
+  walking `exprBlocks` (not `exprBlocksIn`); a print in a callback / handler-lambda body is refused (tests).
+- HIGH-1: a §50.4.2 kept condition-head assignment ("the only typed position an assignment expression may
+  occupy is the parenthesized operand or root of a `for` / `if` / `else if` condition head") wrote a captured
+  `let` from inside a callback, compiled clean, broke narrowing (`null + "!"`). analyze `lamExprCheck` now
+  refuses a kept assignment whose target is not one of the body's own `let`s (INTERIM, the statement rule;
+  a cell target keeps the condition head's own refusal — one report); the body's OWN `let` in a condition
+  head is built (§50.4.2 admits it) and runs. check C-L1 rejects an Assign / Assigned whose local is no Let
+  of the lambda body ("a block lambda writes a local it did not declare").
+- MED-2: a `.map(…)` callback's values join as `if` / ternary branches do (joinVT; §17.6.4 `T` + `not` →
+  `T | not`; int + number → number); a choice of types that share none is E-TYPE-031 (§34 "a value is
+  assigned to a position whose declared type it does not satisfy" — the mapped tape's element type). Covers
+  the expression ternary form too (same `lambdaValues` path). The joined tape is then checked against the
+  declaration (`number[]` / `(int | not)[]` into `int[]` → E-TYPE-031).
+- Tests: block-lambda-s478.test.js +23 (14 red on pre-fix; the 4 print rows and guards green on both).
+- Conformance vs main f23824dbb: PASS 525 → 525, FAIL 10 → 10, UNSUPPORTED 698 → 698; PASS→FAIL 0.
+- Corpus vs main: 3153 files, newly-rejecting 0, newly-accepting 0 (code-set changes identical to round 0's 49).

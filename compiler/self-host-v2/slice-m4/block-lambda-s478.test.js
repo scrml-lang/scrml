@@ -215,3 +215,155 @@ describe("never silently allowed", () => {
         @out = 1;`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
+
+// s478 fix round 1 (PR #1905 adversarial review). HIGH-1: a §50.4.2 kept condition-head assignment
+// (`if ((n = v) is not)` — "the only typed position an assignment expression may occupy is the
+// parenthesized operand or root of a `for` / `if` / `else if` condition head") wrote a CAPTURED `let`
+// from inside a callback, compiled clean, and broke the enclosing function's narrowing (`not + 1`
+// at run time). Refused now by the same rule as a statement's write (INTERIM): only the body's own
+// `let` locals are assigned — at the source (analyze lamExprCheck) and in Core (check C-L1).
+describe("fix round 1 — a condition-head assignment in a callback body (§50.4.2)", () => {
+  const capWrites = {
+    "narrowing broken: `(n = not)`": `        let n: int | not = 5;
+        if (n is given) {
+            const s: bool = @xs.some(x => { if ((n = not) is not) { return true; } return false; });
+            @out = n + 1;
+        }`,
+    "narrowing broken: `(n = q)`, `q` the body's own `const`": `        let n: int | not = 5;
+        if (n is given) {
+            const s: bool = @xs.some(x => { const q: int | not = not; if ((n = q) is not) { return true; } return false; });
+            @out = n + 1;
+        }`,
+    "narrowing broken: `(n = m)`, `m` captured": `        let n: int | not = 5;
+        let m: int | not = not;
+        if (n is given) {
+            const s: bool = @xs.some(x => { if ((n = m) is not) { return true; } return false; });
+            @out = n + 1;
+        }`,
+    "narrowing broken: a string": `        let n: string | not = "hi";
+        let m: string | not = not;
+        if (n is given) {
+            const s: bool = @xs.some(x => { if ((n = m) is not) { return true; } return false; });
+            @out = 1;
+        }`,
+    "an accumulating write `(n = n + x)`": `        let n: int = 0;
+        const s: bool = @xs.some(x => { if ((n = n + x) > 100) { return true; } return false; });
+        @out = n;`,
+    "an operand of `&&`": `        let n: int = 0;
+        const ys: int[] = @xs.map(x => { const q: int = x > 2 ? 1 : 0; if (q == 1 && (n = x) > 0) { return 1; } return 0; });
+        @out = n;`,
+    "an `else if` head": `        let n: int = 0;
+        const ys: int[] = @xs.map(x => { if (x > 9) { return 0; } else if ((n = x) > 2) { return 1; } return 2; });
+        @out = n;`,
+    "a nested callback writing the outer callback's `let`": `        const ys: int[] = @xs.map(x => { let q: int = 0; const s: bool = @xs.some(y => { if ((q = y) > 2) { return true; } return false; }); return q; });
+        @out = ys[0];`,
+  };
+  for (const [name, body] of Object.entries(capWrites)) {
+    test(`refused: ${name}`, () => {
+      expect(codes(prog(body))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(errs(fe(prog(body)))[0].message).toContain("a write to something the callback body did not declare");
+    });
+  }
+  test("a cell target keeps its one report (the condition head's own refusal)", () => {
+    expect(codes(prog(`        const ys: int[] = @xs.map(x => { if ((@count = x) > 2) { return 1; } return 0; });
+        @out = ys[3];`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("the same write in a plain function body keeps E-OPERAND-NOT-NARROWED (unchanged)", () => {
+    expect(codes(prog(`        let n: int | not = 5;
+        if (n is given) {
+            if ((n = not) is not) { @count = 1; }
+            @out = n + 1;
+        }`))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("guard: the body's OWN `let` assigned in a condition head is built (§50.4.2) and runs", async () => {
+    expect(await outAfterClick(`        const ys: int[] = @xs.map(x => { let q: int = 0; if ((q = x * 2) > 4) { return q; } q = 1; return q; });
+        @out = ys[0] * 1000 + ys[1] * 100 + ys[2] * 10 + ys[3];`)).toBe("1168");
+  });
+  // C-L1 (check.scrml): Core is the second line — a BlockLambda whose Assign / Assigned writes a
+  // local the body did not declare is ill-formed, whatever produced it.
+  const ownSrc = prog(`        let n: int = 0;
+        const ys: int[] = @xs.map(x => { let q: int = 0; if ((q = x) > 2) { return q; } q = 1; return q; });
+        @out = ys[3] + n;`);
+  const idsOf = (core) => {
+    const s = JSON.stringify(core);
+    return { q: +s.match(/"Let","data":\{"sym":\{"id":(\d+),"hint":"q"/)[1], n: +s.match(/"Let","data":\{"sym":\{"id":(\d+),"hint":"n"/)[1] };
+  };
+  test("C-L1: the own-`let` Core is well formed", () => {
+    const r = fe(ownSrc);
+    expect(errs(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+  });
+  test("C-L1: an Assigned (condition head) or Assign writing a captured local is ill-formed", () => {
+    for (const variant of ["Assigned", "Assign"]) {
+      const r = fe(ownSrc);
+      const { q, n } = idsOf(r.core);
+      const only = (node) => {
+        if (Array.isArray(node)) { for (const x of node) only(x); return; }
+        if (!node || typeof node !== "object") return;
+        if (node.variant === variant && node.data?.local?.id === q) node.data.local = { ...node.data.local, id: n };
+        for (const v of Object.values(node)) only(v);
+      };
+      only(r.core);
+      expect(mods.check.checkCore(r.core)).toContain("C-L1: a block lambda writes a local it did not declare");
+    }
+  });
+});
+
+// MED-2: a `.map(…)` callback whose values have types that share none was accepted silently (its
+// value type fell to unknown) — `"a"` landed in an `int[]`. §34 E-TYPE-031: "a value is assigned to
+// a position whose declared type it does not satisfy"; the mapped tape has one element type. Values
+// join as an `if` / ternary's branches do (int with number → number; `T` with `not` → `T | not`,
+// §17.6.4), and the joined tape is then checked against the declaration.
+describe("fix round 1 — a `.map(…)` callback's values share one type", () => {
+  test("a block body returning `string` and `int` is E-TYPE-031", () => {
+    expect(codes(prog(`        const ys: int[] = @xs.map(x => { if (x > 2) { return "a"; } return x; });
+        @out = ys[3];`))).toEqual(["E-TYPE-031"]);
+  });
+  test("the expression form (a ternary `string` / `int`) too", () => {
+    expect(codes(prog(`        const ys: int[] = @xs.map(x => x > 2 ? "a" : x);
+        @out = ys[3];`))).toEqual(["E-TYPE-031"]);
+  });
+  test("an unannotated binding too", () => {
+    expect(codes(prog(`        const ys = @xs.map(x => { if (x > 2) { return "a"; } return x; });
+        @out = 1;`))).toContain("E-TYPE-031");
+  });
+  test("int with number joins to `number[]` — into an `int[]` is E-TYPE-031", () => {
+    const e = errs(fe(prog(`        const ys: int[] = @xs.map(x => { if (x > 2) { return 1.5; } return x; });
+        @out = ys[3];`)));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-031"]);
+    expect(e[0].message).toContain("number[]");
+  });
+  test("`T` with `not` joins to `(T | not)[]` — into an `int[]` is E-TYPE-031", () => {
+    const e = errs(fe(prog(`        const ys: int[] = @xs.map(x => { if (x > 2) { return not; } return x; });
+        @out = ys[3];`)));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-031"]);
+    expect(e[0].message).toContain("(int | not)[]");
+  });
+  test("guard: one type on every path is clean and runs", async () => {
+    expect(await outAfterClick(`        const ys: int[] = @xs.map(x => { if (x > 2) { return 0; } return x; });
+        @out = ys[0] + ys[1] + ys[3];`)).toBe("3");
+  });
+});
+
+// #1900's print pre-scan walks exprBlocks, not exprBlocksIn: it does not enter a block lambda's body,
+// and resolvePrint fails closed on a print there (refused, never compiled — no Core is produced).
+describe("fix round 1 — print / println inside a block lambda are refused", () => {
+  const tool = (body) => `<program kind="tool" lang="js">\n    function main(args: string[]) -> number {\n${body}\n        return 0;\n    }\n</program>\n`;
+  const web = (h) => `<program>\n    let <out:int=0/>\n    <button id="b" onclick=${h}>b</button>\n    <p>\${@out}</p>\n</program>\n`;
+  const cases = {
+    "a statement in a callback body": tool(`        const xs: int[] = [1, 2];\n        const ys: int[] = xs.map(x => { println("a", x); return x; });\n        println(ys[0]);`),
+    "a value in a callback's condition head": tool(`        const xs: int[] = [1, 2];\n        const s: bool = xs.some(x => { if (print("a") == "") { return true; } return false; });\n        println(s);`),
+    "a handler arrow body": web(`\${() => { println("x"); @out = 1; }}`),
+    "a handler function-expression body": web(`\${function () { print("x"); @out = 1; }}`),
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    test(`refused: ${name}`, () => {
+      const r = frontEnd(mods, [{ path: "t.scrml", src }], "t.scrml");
+      const e = errs(r);
+      expect(e.length).toBeGreaterThan(0);
+      expect(e.every((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED")).toBe(true);
+      expect(e.some((d) => /print|println/.test(d.message))).toBe(true);
+      expect(r.core ?? null).toBe(null);
+    });
+  }
+});
