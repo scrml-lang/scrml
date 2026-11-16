@@ -213,9 +213,32 @@ describe("fix-1: `default(…)` holds a literal, never code (F2, §38.5.4)", () 
       expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("not a literal the bootstrap admits");
     }
   });
-  test("the literal shapes compile — nested parentheses included", () => {
-    for (const d of ["CURRENT_TIMESTAMP", "current_date", "0", "-1.5", "+2", "1e3", "''", "'it''s (a) ) test'", "NULL", "TRUE", "false", "X'00ff'", "(1+2)", "((0))", "(-(1) * 2 || 'x')", "('a)')"]) {
-      expect([d, errsOf(col(d))]).toEqual([d, []]);
+  test("the literal shapes compile on a column whose type holds them", () => {
+    const colT = (ty, d) => P(`        users {\n            id: integer primary key\n            n: ${ty} not null default(${d})\n        }`);
+    const ok = { text: ["CURRENT_TIMESTAMP", "current_date", "CURRENT_TIME", "''", "'it''s (a) ) test'", "NULL"], timestamp: ["CURRENT_TIMESTAMP", "'2026-01-01'"], integer: ["0", "+2", "-3", "NULL"], real: ["0", "-1.5", "1e3", "NULL"] };
+    for (const [ty, ds] of Object.entries(ok)) {
+      for (const d of ds) expect([ty, d, errsOf(colT(ty, d))]).toEqual([ty, d, []]);
+    }
+  });
+});
+
+describe("S478 #1925 review F1: a `default(…)` literal's kind must fit its column's type", () => {
+  const colT = (ty, d) => P(`        users {\n            id: integer primary key\n            n: ${ty} not null default(${d})\n        }`);
+  test("a string / CURRENT_* on a number column, a number on a text column, a real on an integer column — refused by name", () => {
+    const bad = { integer: ["CURRENT_TIMESTAMP", "'abc'", "1.5", "1e3", "current_date"], real: ["'1.5'", "CURRENT_TIME"], text: ["0", "-1.5"], timestamp: ["0"], blob: ["0", "''"] };
+    for (const [ty, ds] of Object.entries(bad)) {
+      for (const d of ds) {
+        const src = colT(ty, d);
+        expect([ty, d, errsOf(src)]).toEqual([ty, d, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+        expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("which the column's row type does not hold");
+      }
+    }
+  });
+  test("a boolean, a blob or a parenthesized expression is refused as a default", () => {
+    for (const [ty, d] of [["integer", "TRUE"], ["integer", "false"], ["blob", "X'00ff'"], ["integer", "(1+2)"], ["integer", "((0))"], ["text", "('a)')"], ["integer", "(-(1) * 2 || 'x')"]]) {
+      const src = colT(ty, d);
+      expect([ty, d, errsOf(src)]).toEqual([ty, d, ["E-BOOTSTRAP-UNSUPPORTED"]]);
+      expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("which the column's row type does not hold");
     }
   });
 });

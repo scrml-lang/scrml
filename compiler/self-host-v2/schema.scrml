@@ -66,7 +66,9 @@ ${
     // §14.8.3 nullability of the column's generated field type.
     export type SchemaCol:struct = { name: string, ty: string, pk: boolean, nn: boolean, start: int, end: int }
     export type SchemaRef:struct = { col: string, table: string, target: string, targetCol: string, start: int, end: int }
-    export type SchemaTable:struct = { name: string, cols: SchemaCol[], start: int, end: int }
+    // `strict`: a raw `CREATE TABLE … STRICT` (S478 ruling, user-voice: "a `STRICT` table stores
+    // only its declared type") — later work may type only STRICT tables; a §39.2 table is not.
+    export type SchemaTable:struct = { name: string, cols: SchemaCol[], start: int, end: int, strict: boolean }
     // A finding: its code, message and absolute source span.
     export type SchemaErr:struct = { code: string, text: string, start: int, end: int }
     export type SchemaRead:struct = { tables: SchemaTable[], errs: SchemaErr[] }
@@ -443,6 +445,57 @@ ${
         return "holds `" + shown + "`, which is not a literal the bootstrap admits" + hint + " — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\" (its examples: `CURRENT_TIMESTAMP`, `0`, `''`). The bootstrap admits a number, a `'…'` string, an `X'…'` blob, NULL, TRUE, FALSE, CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, or a parenthesized constant expression of those (INTERIM — no identifier, function call or code)"
     }
 
+    // ---- a default literal's kind against its column's type (S478 #1925 review F1) ----
+    // §39.11 / §14.8.3 type a row field by its column (`integer` / `real` → `number`, `text` /
+    // `timestamp` → `string`, non-null under `not null`), and SQLite stores a DEFAULT it cannot
+    // convert as written: `x INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP` stores the TEXT
+    // "2026-…" in a field typed `number` (measured, real SQLite). So the bootstrap admits only a
+    // default whose kind the column's row type holds — a `'…'` string or CURRENT_TIMESTAMP /
+    // CURRENT_DATE / CURRENT_TIME on a text column, an integer on an integer column, a number on
+    // a real column, NULL on any column — and refuses every other one by name (INTERIM: §38.5.4
+    // passes the literal "verbatim to the generated SQL" and names no check; the SPEC names no
+    // code). A boolean, a blob or a parenthesized expression is refused as a default.
+    //
+    // The kind of the admitted literal `s[a, b)` (defaultRefusal said ""): "null", "str",
+    // "int", "real", "bool", "blob" or "expr".
+    fn defKind(s: string, a: int, b: int) -> string {
+        let i: int = wsEnd(s, a, b)
+        while (i < b && (ch(s, i) == "-" || ch(s, i) == "+")) { i = wsEnd(s, i + 1, b) }
+        const c: string = ch(s, i)
+        if (c == "(") return "expr"
+        if (c == "'") return "str"
+        if ((c == "x" || c == "X") && ch(s, i + 1) == "'") return "blob"
+        const n: int = numEnd(s, i, b)
+        if (n > i) {
+            const t: string = s.substring(i, n)
+            if (t.indexOf(".") >= 0 || t.indexOf("e") >= 0 || t.indexOf("E") >= 0) return "real"
+            return "int"
+        }
+        const w: string = s.substring(i, wordEnd(s, i, b)).toLowerCase()
+        if (w == "null") return "null"
+        if (w == "true" || w == "false") return "bool"
+        return "str"
+    }
+
+    // "" when a default of kind `kind` fits a column of §39.4 type `ty` (a raw column's type is
+    // already mapped: INTEGER → integer, TEXT → text, …), else the refusal message.
+    fn defaultKindRefusal(col: string, ty: string, kind: string, shown: string) -> string {
+        if (kind == "null") return ""
+        const isText: boolean = ty == "text" || ty == "timestamp"
+        const isInt: boolean = ty == "integer" || ty == "boolean"
+        if (isText && kind == "str") return ""
+        if (isInt && kind == "int") return ""
+        if (ty == "real" && (kind == "int" || kind == "real")) return ""
+        let what: string = "a string"
+        if (kind == "int") what = "an integer"
+        if (kind == "real") what = "a non-integer number"
+        if (kind == "bool") what = "a boolean"
+        if (kind == "blob") what = "a blob"
+        if (kind == "expr") what = "a parenthesized expression"
+        const fits: string = "the bootstrap admits a `'…'` string or CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME on a text column, an integer on an integer column, a number on a real column, and NULL on any column (INTERIM — no boolean, blob or expression default)"
+        return "the default `" + shown + "` on column `" + col + "` (" + ty + ") is " + what + ", which the column's row type does not hold — SQLite stores a default it cannot convert as written, so a field §14.8.3 types by the column would hold another type at run time; " + fits
+    }
+
     // A column declaration at `i` (an identifier is there), inside table `table`.
     fn readColumn(s: string, i: int, to: int, table: string) -> RCol {
         let errs: SchemaErr[] = []
@@ -512,7 +565,12 @@ ${
                             return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
                         }
                         const why: string = defaultRefusal(s, after + 1, pe)
-                        if (why != "") errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)])
+                        if (why != "") {
+                            errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)])
+                        } else {
+                            const kw: string = defaultKindRefusal(table + "." + name, ty, defKind(s, after + 1, pe), s.substring(after + 1, pe).trim())
+                            if (kw != "") errs = errs.concat([refuse(kw, k, pe + 1)])
+                        }
                         k = skip(s, pe + 1, to)
                     } else if (w == "references") {
                         // §39.5.5: "This is the ONLY foreign-key production" — `references <table>(<column>)`
@@ -603,7 +661,7 @@ ${
         // make the warning a false cascade
         if (pks == 0 && !gaveUp) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
         if (pks > 1) errs = errs.concat([refuse("`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\"", start, end)])
-        return { t: { name: name, cols: cols, start: start, end: end }, refs: refs, errs: errs, next: i }
+        return { t: { name: name, cols: cols, start: start, end: end, strict: false }, refs: refs, errs: errs, next: i }
     }
 
     // ---- raw SQL DDL (s478-boot-schema-ddl) ------------------------------------
@@ -626,17 +684,17 @@ ${
     // (E-BOOTSTRAP-UNSUPPORTED), never read as something it is not:
     //   - a statement other than `CREATE TABLE` (VIEW / INDEX / TRIGGER /
     //     POLICY / ALTER / …: the §14.8.10 schema-hazard reader is not built);
-    //   - any other type name, or none (§14.8.3's affinity fallback maps every
-    //     other string — `BOOLEAN`, `DATETIME`, `NUMERIC` → `number`, an absent
-    //     type → `asIs` — and SQLite stores a value it cannot convert as TEXT, so
-    //     a guessed `number` can be a string at run time: owner question
-    //     g-boot-schema-ddl-affinity-s478);
+    //   - (E-SCHEMA-004, S478 ruling) any other type name, or none — §14.8.3's
+    //     affinity fallback does not apply inside `<schema>`;
     //   - any column constraint but PRIMARY KEY [AUTOINCREMENT], NOT NULL, NULL,
     //     UNIQUE, DEFAULT <literal>, REFERENCES t(c) [ON DELETE|UPDATE action],
     //     CHECK (…), COLLATE name, CONSTRAINT name; any table constraint but
     //     PRIMARY KEY (…), UNIQUE (…), CHECK (…), FOREIGN KEY (…) REFERENCES t(…);
-    //   - a trailing clause after the column list (`WITHOUT ROWID`, `STRICT`,
-    //     … — owner question g-boot-schema-ddl-trailing-s478);
+    //   - a trailing clause after the column list other than `STRICT` /
+    //     `WITHOUT ROWID` (S478 ruling: admitted — a WITHOUT ROWID table's
+    //     PRIMARY KEY columns are NOT NULL; a STRICT table stores only its
+    //     declared type, recorded as SchemaTable.strict);
+    //   - a DEFAULT whose kind the column's row type does not hold (#1925 F1);
     //   - a SQL comment INSIDE a statement (between statements it is a comment),
     //     a string the drivers could end differently, `$`, a backtick, a
     //     `${ … }` bound value, more than one statement in one `?{` … `}`;
@@ -747,6 +805,19 @@ ${
         return -1
     }
 
+    // The kind of the DEFAULT term at `i0` (ddlDefTerm read it) — as defKind.
+    fn ddlDefKind(ts: DdlTok[], i0: int) -> string {
+        let i: int = i0
+        while (isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+")) { i = i + 1 }
+        const t: DdlTok = tk(ts, i)
+        if (isPu(t, "(")) return "expr"
+        if (t.kind == "num") return t.text.indexOf(".") >= 0 ? "real" : "int"
+        if (t.kind == "str") return "str"
+        if (isW(t, "NULL")) return "null"
+        if (isW(t, "TRUE") || isW(t, "FALSE")) return "bool"
+        return "str"
+    }
+
     fn ddlDefExpr(ts: DdlTok[], i: int) -> int {
         let e: int = ddlDefTerm(ts, i)
         if (e < 0) return -1
@@ -831,10 +902,22 @@ ${
         let errs: SchemaErr[] = []
         const t: DdlTok = tk(it, 1)
         const ty: string = t.kind == "word" ? ddlType(t.w) : ""
+        // S478 ruling (user-voice): "a raw-DDL column type outside §14.8.3's primary list is
+        // E-SCHEMA-004 in `<schema>` (BOOLEAN, DATETIME, NUMERIC, BIGINT, an absent type, …), the
+        // same as §39.4's declarative form" — §39.4: "No other column type names SHALL be valid
+        // in a `<schema>` block. An unrecognized column type name SHALL be a compile error
+        // (E-SCHEMA-004)." A multi-word type name (`DOUBLE PRECISION`, `UNSIGNED BIG INT`) is
+        // one SQLite type name, outside the list too.
+        const constraintWords: string[] = ["PRIMARY", "NOT", "NULL", "UNIQUE", "DEFAULT", "REFERENCES", "CHECK", "COLLATE", "CONSTRAINT", "GENERATED", "AS"]
+        const noType: boolean = t.kind == "end" || (t.kind == "word" && constraintWords.indexOf(t.w) >= 0)
+        const t2: DdlTok = tk(it, 2)
+        const multi: boolean = ty != "" && t2.kind == "word" && constraintWords.indexOf(t2.w) < 0
+        if ((ty == "" && (noType || t.kind == "word")) || multi) {
+            const shownT: string = noType ? "no type" : "the type `" + t.text + (multi ? " " + t2.text : "") + "`"
+            return colGiveUp(errs, err("E-SCHEMA-004", "column `" + table + "." + name + "` has " + shownT + ", which is not a `<schema>` column type — a raw `CREATE TABLE` column in `<schema>` takes one of §14.8.3's primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\"; S478 ruling: §14.8.3's affinity fallback does not apply inside `<schema>`, because SQLite does not guarantee those values)", start, end), 0)
+        }
         if (ty == "") {
-            const noType: boolean = t.kind == "end" || ["PRIMARY", "NOT", "NULL", "UNIQUE", "DEFAULT", "REFERENCES", "CHECK", "COLLATE", "CONSTRAINT"].indexOf(t.w) >= 0
-            const shownT: string = noType ? "no type" : "the type `" + t.text + "`"
-            return colGiveUp(errs, refuse("column `" + table + "." + name + "` has " + shownT + ", which the bootstrap does not type (INTERIM) — it reads the §14.8.3 primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB; §14.8.3's affinity fallback for any other type (or none) maps to a scrml type SQLite does not guarantee (owner question g-boot-schema-ddl-affinity-s478)", start, end), 0)
+            return colGiveUp(errs, refuse("column `" + table + "." + name + "` has `" + t.text + "` where its type is, which the bootstrap does not read (INTERIM) — write one of the §14.8.3 primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB, unquoted", start, end), 0)
         }
         if (sameName(name, "tenant_id")) {
             errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", start, end)])
@@ -868,7 +951,11 @@ ${
             } else if (isW(c, "DEFAULT")) {
                 const e: int = ddlDefTerm(it, p + 1)
                 if (e < 0) {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("the `DEFAULT` on column `" + table + "." + name + "` is not a literal the bootstrap admits — §38.5.4: a `default` literal is \"passed verbatim to the generated SQL\"; the bootstrap admits a number, a `'…'` string, NULL, TRUE, FALSE, CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, or a parenthesized constant expression of those (INTERIM)", start, end), 0)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("the `DEFAULT` on column `" + table + "." + name + "` is not a literal the bootstrap admits — §38.5.4: a `default` literal is \"passed verbatim to the generated SQL\"; the bootstrap admits a number, a `'…'` string, NULL, CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME (INTERIM)", start, end), 0)
+                }
+                const kw: string = defaultKindRefusal(table + "." + name, ty, ddlDefKind(it, p + 1), shownToks(sub(it, p + 1, e), 0))
+                if (kw != "") {
+                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse(kw, start, end), 0)
                 }
                 p = e
             } else if (isW(c, "REFERENCES")) {
@@ -900,8 +987,8 @@ ${
         return { col: { name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs: refs, errs: errs, next: pkN, stop: false }
     }
 
-    // A table constraint item. `next`: 1 when it is a PRIMARY KEY, else 0.
-    type RCons:struct = { refs: SchemaRef[], errs: SchemaErr[], pk: int }
+    // A table constraint item. `pk`: 1 when it is a PRIMARY KEY, else 0; `pkCols`: its columns.
+    type RCons:struct = { refs: SchemaRef[], errs: SchemaErr[], pk: int, pkCols: string[] }
 
     fn readDdlCons(it: DdlTok[], table: string, start: int, end: int) -> RCons {
         let p: int = 0
@@ -910,12 +997,14 @@ ${
         const c1: DdlTok = tk(it, p + 1)
         let after: int = -1
         let pk: int = 0
+        let pkCols: string[] = []
         let refs: SchemaRef[] = []
         if ((isW(c, "PRIMARY") && isW(c1, "KEY")) || (isW(c, "FOREIGN") && isW(c1, "KEY"))) {
             const nl: DNames | not = nameList(it, p + 2)
             if (nl is given) {
                 if (isW(c, "PRIMARY")) {
                     pk = 1
+                    pkCols = nl.names
                     after = nl.next
                 } else if (isW(tk(it, nl.next), "REFERENCES")) {
                     const tn: DName = nameOf(tk(it, nl.next + 1))
@@ -939,9 +1028,9 @@ ${
             after = tokClose(it, p + 1) + 1
         }
         if (after < 0 || after != it.length) {
-            return { refs: [], errs: [refuse("the table constraint `" + shownToks(it, 0) + " …` in `CREATE TABLE " + table + "` is not one the bootstrap reads (INTERIM) — it reads PRIMARY KEY (…), UNIQUE (…), CHECK (…) and FOREIGN KEY (…) REFERENCES <table>(…) [ON DELETE / ON UPDATE action], each optionally named by CONSTRAINT <name>", start, end)], pk: 0 }
+            return { refs: [], errs: [refuse("the table constraint `" + shownToks(it, 0) + " …` in `CREATE TABLE " + table + "` is not one the bootstrap reads (INTERIM) — it reads PRIMARY KEY (…), UNIQUE (…), CHECK (…) and FOREIGN KEY (…) REFERENCES <table>(…) [ON DELETE / ON UPDATE action], each optionally named by CONSTRAINT <name>", start, end)], pk: 0, pkCols: [] }
         }
-        return { refs: refs, errs: [], pk: pk }
+        return { refs: refs, errs: [], pk: pk, pkCols: pkCols }
     }
 
     fn ddlRefuse(msg: string, start: int, end: int) -> RDdl {
@@ -1040,6 +1129,9 @@ ${
         let refs: SchemaRef[] = []
         let errs: SchemaErr[] = []
         let pks: int = 0
+        let pkCols: string[] = []      // the PRIMARY KEY columns (column- and table-level)
+        let autoinc = false
+        let notStrictTy: string[] = []  // columns whose type word a STRICT table refuses
         let a: int = 1
         let depth: int = 0
         let k: int = 1
@@ -1074,6 +1166,7 @@ ${
                     errs = errs.concat(rc.errs)
                     refs = refs.concat(rc.refs)
                     pks = pks + rc.pk
+                    pkCols = pkCols.concat(rc.pkCols)
                     if (rc.errs.length > 0) stopped = true
                 } else {
                     const rcol: RCol = readDdlCol(it, name, start, end)
@@ -1090,6 +1183,12 @@ ${
                         stopped = true
                     } else {
                         pks = pks + rcol.next
+                        if (c is given) {
+                            if (rcol.next > 0) pkCols = pkCols.concat([c.name])
+                            const tw: string = tk(it, 1).w
+                            if (tw != "INTEGER" && tw != "INT" && tw != "TEXT" && tw != "REAL" && tw != "BLOB") notStrictTy = notStrictTy.concat([c.name + " " + tk(it, 1).text])
+                        }
+                        for (const at of it) { if (isW(at, "AUTOINCREMENT")) autoinc = true }
                     }
                 }
                 a = k + 1
@@ -1098,14 +1197,67 @@ ${
         }
         if (stopped) return { t: not, refs: [], errs: errs, stop: true }
         if (pks > 1) errs = errs.concat([refuse("`CREATE TABLE " + name + "` declares " + pks + " primary keys — a table has one (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\")", start, end)])
+        // S478 ruling (user-voice): "`WITHOUT ROWID` and `STRICT` are ADMITTED, with their
+        // nullability and storage written into §14.8.3: a `WITHOUT ROWID` table's PRIMARY KEY
+        // columns are NOT NULL; a `STRICT` table stores only its declared type". SQLite reads
+        // them as a `,`-separated list after the column list (verified: `STRICT, WITHOUT ROWID`
+        // either order; `STRICT WITHOUT ROWID` without the `,` is a syntax error).
+        let strict = false
+        let noRowid = false
+        if (isW(tk(ts, q), "STRICT") || isW(tk(ts, q), "WITHOUT")) {
+            let more = true
+            while (more) {
+                if (isW(tk(ts, q), "STRICT")) {
+                    strict = true
+                    q = q + 1
+                } else if (isW(tk(ts, q), "WITHOUT") && isW(tk(ts, q + 1), "ROWID")) {
+                    noRowid = true
+                    q = q + 2
+                } else {
+                    return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` in the table options of `CREATE TABLE " + name + "` is not one the bootstrap reads — it reads `STRICT` and `WITHOUT ROWID`, separated by `,` (INTERIM)", start, end)]), stop: true }
+                }
+                if (isPu(tk(ts, q), ",")) {
+                    q = q + 1
+                } else {
+                    more = false
+                }
+            }
+        }
+        const optEnd: int = q
         if (isPu(tk(ts, q), ";")) q = q + 1
         if (q < ts.length) {
-            if (lc + 1 < ts.length && isPu(tk(ts, lc + 1), ";")) {
-                return { t: not, refs: [], errs: errs.concat([refuse("more than one SQL statement after `CREATE TABLE " + name + " (…);` in one `?{` … `}` — the bootstrap reads one `CREATE TABLE` statement per wrapper (INTERIM)", start, end)]), stop: true }
+            if (isPu(tk(ts, optEnd), ";")) {
+                return { t: not, refs: [], errs: errs.concat([refuse("more than one SQL statement after `CREATE TABLE " + name + " (…);` in one `?" + LB() + "` … `}` — the bootstrap reads one `CREATE TABLE` statement per wrapper (INTERIM)", start, end)]), stop: true }
             }
-            return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` after the column list of `CREATE TABLE " + name + "` is a trailing clause the bootstrap does not read (INTERIM — `WITHOUT ROWID` / `STRICT` change what a column holds; owner question g-boot-schema-ddl-trailing-s478)", start, end)]), stop: true }
+            return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` after the column list of `CREATE TABLE " + name + "` is a trailing clause the bootstrap does not read (INTERIM — it reads `STRICT` and `WITHOUT ROWID`; a Postgres clause waits for Postgres DDL)", start, end)]), stop: true }
         }
-        return { t: { name: name, cols: cols, start: start, end: end }, refs: refs, errs: errs, stop: false }
+        if (noRowid) {
+            // SQLite refuses both at CREATE (verified): "PRIMARY KEY missing on table …",
+            // "AUTOINCREMENT not allowed on WITHOUT ROWID tables"
+            if (pks == 0) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares no PRIMARY KEY — SQLite refuses it (\"PRIMARY KEY missing on table\")", start, end)]), stop: true }
+            if (autoinc) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares AUTOINCREMENT — SQLite refuses it (\"AUTOINCREMENT not allowed on WITHOUT ROWID tables\")", start, end)]), stop: true }
+        }
+        if (strict && notStrictTy.length > 0) {
+            // SQLite refuses at CREATE (verified): "unknown datatype for t.c: \"VARCHAR(10)\""
+            return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … STRICT` declares `" + notStrictTy[0] + "` — a STRICT table's column types are INTEGER, INT, REAL, TEXT, BLOB (and ANY); SQLite refuses any other (\"unknown datatype\")", start, end)]), stop: true }
+        }
+        // a WITHOUT ROWID table's PRIMARY KEY columns are NOT NULL (S478 ruling; SQLite: "NOT
+        // NULL constraint failed" on INSERT / UPDATE / OR REPLACE of a NULL, composite keys
+        // included — verified), and no column is the rowid alias
+        let outCols: SchemaCol[] = cols
+        if (noRowid) {
+            outCols = []
+            for (const c of cols) {
+                let inPk = false
+                for (const pn of pkCols) { if (sameName(pn, c.name)) inPk = true }
+                outCols = outCols.concat([{ name: c.name, ty: c.ty, pk: false, nn: c.nn || inPk, start: c.start, end: c.end }])
+            }
+        }
+        // §38.5.1: "A `<schema>` table declaration with no `primary key` column SHALL generate a
+        // compile warning (W-SCHEMA-001: table has no primary key)" — a raw table too (column-
+        // or table-level PRIMARY KEY)
+        if (pks == 0) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no PRIMARY KEY (§38.5.1)", start, end)])
+        return { t: { name: name, cols: outCols, start: start, end: end, strict: strict }, refs: refs, errs: errs, stop: false }
     }
 
     // The extent of a bare `CREATE …` statement at `i`: to its `;` (included),
@@ -1146,6 +1298,24 @@ ${
             }
         }
         return { end: to, why: "" }
+    }
+
+    // The bodies of the `'…'` string literals in `s[a, b)`, `"…"` names skipped, joined by " ".
+    fn strBodies(s: string, a: int, b: int) -> string {
+        let out: string = ""
+        let j: int = a
+        while (j < b) {
+            const c: string = ch(s, j)
+            if (c == "'" || c == "\"") {
+                const e: int = quoteEnd(s, j, b)
+                if (e < 0) return out + " " + s.substring(j, b)
+                if (c == "'") out = out + " " + s.substring(j + 1, e - 1)
+                j = e
+            } else {
+                j = j + 1
+            }
+        }
+        return out
     }
 
     // ---- the body -------------------------------------------------------------
@@ -1333,7 +1503,9 @@ ${
         let mi: int = from
         let li: int = 0
         while (li < liveA.length) {
-            masked = masked + s.substring(mi, liveA[li]) + " "
+            // a live statement is blanked except its `'…'` string literals (S478 #1925 review
+            // F3: `DEFAULT 'CREATE TABLE t (…)'` is `CREATE TABLE` text in a string)
+            masked = masked + s.substring(mi, liveA[li]) + " " + strBodies(s, liveA[li], liveB[li]) + " "
             mi = liveB[li]
             li = li + 1
         }

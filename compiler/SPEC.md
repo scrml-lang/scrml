@@ -13147,6 +13147,12 @@ continue.
 `T | not`, where `T` is the mapped type from the table above. If `nullable` is `false`,
 the type is `T` alone.
 
+**Raw `CREATE TABLE` in a `<schema>` block (S478 ruling (user-voice)):** the affinity
+fallback above does not apply inside `<schema>`, because SQLite does not guarantee those
+values: a raw-DDL column type outside the primary mapping is E-SCHEMA-004 (§39.4). The
+trailing clauses `WITHOUT ROWID` and `STRICT` are admitted: a `WITHOUT ROWID` table's
+PRIMARY KEY columns are NOT NULL; a `STRICT` table stores only its declared type.
+
 **Normative statements:**
 
 - The TS stage SHALL apply the affinity algorithm above to every `ColumnDef` in both
@@ -33599,6 +33605,7 @@ The `<schema>` block supports a fixed set of column type names that map directly
 
 - The compiler SHALL map each `<schema>` column type to its SQLite affinity as specified in the table above.
 - No other column type names SHALL be valid in a `<schema>` block. An unrecognized column type name SHALL be a compile error (E-SCHEMA-004).
+- A raw `CREATE TABLE` column in a `<schema>` block SHALL declare one of §14.8.3's primary mapping types; any other type (BOOLEAN, DATETIME, NUMERIC, BIGINT, an absent type, …) SHALL be E-SCHEMA-004, the same as the declarative form (S478 ruling (user-voice)).
 - `boolean` columns SHALL be stored as `INTEGER` in SQLite with values `0` and `1`. The compiler-generated type for the column SHALL be `boolean` in the scrml type system. The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`) in any generated migration or query helper.
 
 ### 39.5 Column Constraints

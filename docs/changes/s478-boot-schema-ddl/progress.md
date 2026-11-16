@@ -15,3 +15,11 @@ Branch `s478-boot-schema-ddl` (from origin/main 716265978).
 
 ## Remaining
 - hook commit, CI checks, PR.
+
+## Fix round 1 (S478 #1925 review + owner rulings, user-voice eeafd4d)
+- Ruling 1: a raw column type outside §14.8.3's primary list (or none, or a multi-word name) is E-SCHEMA-004 (readDdlCol).
+- Ruling 2: `STRICT` / `WITHOUT ROWID` admitted (`,`-list); WITHOUT ROWID PK columns non-null (column- and table-level, composite); `SchemaTable.strict`; SQLite's CREATE refusals (no PK / AUTOINCREMENT with WITHOUT ROWID, CHAR/VARCHAR/CLOB/FLOAT/DOUBLE in STRICT) refused by name. Verified on real SQLite 3.53.4.
+- F1: DEFAULT kind vs column type, both forms (defKind / ddlDefKind / defaultKindRefusal). F3: string literals of live statements are scanned for `CREATE … TABLE`. F4: W-SCHEMA-001 for a raw table with no PRIMARY KEY.
+- F2: gap text corrected (g-boot-schema-ddl-affinity-s478 + -trailing resolved by the rulings; g-boot-sql-row-field-types-owner-s478 owner question: boundary validation via §57 decode, INTERIM).
+- SPEC: §14.8.3 + §39.4 amended (S478 ruling (user-voice)).
+- Measured: conformance = base (574/17/642, 0 PASS→FAIL); corpus 0 newly-rejecting (vs base and vs 4e3324201), 3 tenant/* neg cases gain W-SCHEMA-001; CI checks gates green.

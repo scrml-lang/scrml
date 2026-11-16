@@ -50,7 +50,7 @@ describe("raw `CREATE TABLE` in `<schema>` compiles (§39.2)", () => {
     const body = [
       "        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE);",
       "        create table posts (id integer primary key, user_id integer not null references users(id) on delete cascade, title varchar(80))",
-      W("CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT 'x', n INT DEFAULT (-1), at TEXT DEFAULT CURRENT_TIMESTAMP, CHECK (n >= -1))"),
+      W("CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT 'x', n INT DEFAULT -1, at TEXT DEFAULT CURRENT_TIMESTAMP, CHECK (n >= -1))"),
     ].join("\n");
     expect(codesOf(P(body))).toEqual([]);
   });
@@ -123,15 +123,9 @@ describe("§39.2 head checks on raw heads", () => {
 });
 
 describe("negative probes — fails CLOSED (refused by name)", () => {
-  test("an unknown column type", () => {
-    const src = P("        CREATE TABLE a (id INTEGER PRIMARY KEY, ok BOOLEAN)");
-    expect(errsOf(src)).toEqual([UNSUP]);
-    expect(msgOf(src, UNSUP)).toContain("g-boot-schema-ddl-affinity-s478");
-  });
-  test("a column with no type, a multi-word type, a parameterized INTEGER", () => {
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, v)"))).toEqual([UNSUP]);
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, v DOUBLE PRECISION)"))).toEqual([UNSUP]);
+  test("a parameterized INTEGER, a quoted type", () => {
     expect(errsOf(P("        CREATE TABLE a (id INTEGER(4) PRIMARY KEY)"))).toEqual([UNSUP]);
+    expect(errsOf(P(`        CREATE TABLE a (id INTEGER PRIMARY KEY, v "TEXT")`))).toEqual([UNSUP]);
   });
   test("malformed CREATE: an empty column list, a stray comma, an unknown constraint", () => {
     expect(errsOf(P("        CREATE TABLE a ()"))).toEqual([UNSUP]);
@@ -149,7 +143,7 @@ describe("negative probes — fails CLOSED (refused by name)", () => {
   test("injection-shaped input: a second statement after `;` in one wrapper, a `${}` value, a trailing clause", () => {
     expect(errsOf(P(W("CREATE TABLE a (id INTEGER PRIMARY KEY); DROP TABLE b")))).toEqual([UNSUP]);
     expect(errsOf(P(W("CREATE TABLE a (id INTEGER PRIMARY KEY, n TEXT DEFAULT ${x})")))).toEqual([UNSUP]);
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY) WITHOUT ROWID"))).toEqual([UNSUP]);
+    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY) PARTITION BY RANGE (id)"))).toEqual([UNSUP]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, n TEXT DEFAULT 'a\\'; DROP TABLE b; --')"))).toEqual([UNSUP]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, n TEXT DEFAULT (lower('X')))"))).toEqual([UNSUP]);
   });
@@ -181,5 +175,87 @@ describe("negative probes — fails CLOSED (refused by name)", () => {
   });
   test("a REFERENCES target this `<schema>` does not declare", () => {
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, z INTEGER REFERENCES zz(id))"))).toEqual([UNSUP]);
+  });
+});
+
+// ---- S478 owner rulings (user-voice, eeafd4d) and #1925 review fixes ------------------------------
+describe("S478 ruling 1: a raw column type outside §14.8.3's primary list is E-SCHEMA-004 (§39.4)", () => {
+  test("BOOLEAN, DATETIME, NUMERIC, BIGINT, DECIMAL(10,2), TIMESTAMP, no type, a multi-word type", () => {
+    for (const ty of ["BOOLEAN", "DATETIME", "NUMERIC", "BIGINT", "DECIMAL(10,2)", "timestamp", "", "DOUBLE PRECISION", "UNSIGNED BIG INT"]) {
+      const src = P(`        CREATE TABLE a (id INTEGER PRIMARY KEY, v ${ty})`);
+      expect([ty, errsOf(src)]).toEqual([ty, ["E-SCHEMA-004"]]);
+      expect(msgOf(src, "E-SCHEMA-004")).toContain("No other column type names SHALL be valid");
+    }
+    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, v NOT NULL)"))).toEqual(["E-SCHEMA-004"]);
+  });
+  test("the primary types stay clean", () => {
+    expect(codesOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b INT, c TEXT, d CHAR, e VARCHAR(9), f CLOB, g REAL, h FLOAT, i DOUBLE, j BLOB)"))).toEqual([]);
+  });
+});
+
+describe("S478 ruling 2: `WITHOUT ROWID` and `STRICT` are admitted", () => {
+  test("each, both in either order, lowercase, `;`-terminated, wrapped", () => {
+    for (const t of ["WITHOUT ROWID", "STRICT", "STRICT, WITHOUT ROWID", "WITHOUT ROWID, STRICT", "without rowid", "strict;"]) {
+      expect([t, codesOf(P(`        CREATE TABLE a (k TEXT PRIMARY KEY, v INTEGER) ${t}`))]).toEqual([t, []]);
+    }
+    expect(codesOf(P(W("CREATE TABLE a (k TEXT PRIMARY KEY, v INTEGER) STRICT, WITHOUT ROWID")))).toEqual([]);
+  });
+  test("what SQLite refuses at CREATE is refused by name", () => {
+    // STRICT WITHOUT ROWID with no `,` — SQLite: syntax error
+    expect(errsOf(P("        CREATE TABLE a (k TEXT PRIMARY KEY) STRICT WITHOUT ROWID"))).toEqual([UNSUP]);
+    expect(errsOf(P("        CREATE TABLE a (k TEXT PRIMARY KEY) STRICT,"))).toEqual([UNSUP]);
+    // SQLite: "PRIMARY KEY missing on table", "AUTOINCREMENT not allowed on WITHOUT ROWID tables"
+    expect(msgOf(P("        CREATE TABLE a (k TEXT) WITHOUT ROWID"), UNSUP)).toContain("PRIMARY KEY missing");
+    expect(msgOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT) WITHOUT ROWID"), UNSUP)).toContain("AUTOINCREMENT not allowed");
+    // SQLite: unknown datatype in a STRICT table
+    for (const ty of ["VARCHAR(10)", "CHAR", "CLOB", "FLOAT", "DOUBLE"]) {
+      expect([ty, errsOf(P(`        CREATE TABLE a (id INTEGER PRIMARY KEY, v ${ty}) STRICT`))]).toEqual([ty, [UNSUP]]);
+    }
+  });
+  test("a WITHOUT ROWID table's PRIMARY KEY columns are non-null (single and composite)", () => {
+    const one = "        CREATE TABLE t (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID";
+    expect(errsOf(fnP(one, "f() -> string", [getRow("k", "t"), `if (r is not) return "";`, "const s: string = r.k;", "return s;"]))).toEqual([]);
+    const two = "        CREATE TABLE t (a INTEGER, b TEXT, v TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID";
+    expect(errsOf(fnP(two, "f() -> string", [getRow("a, b", "t"), `if (r is not) return "";`, "const n: number = r.a;", "const s: string = r.b;", "return s;"]))).toEqual([]);
+    // the non-key column stays nullable
+    expect(errsOf(fnP(two, "f() -> string", [getRow("v", "t"), `if (r is not) return "";`, "const s: string = r.v;", "return s;"])).length).toBeGreaterThan(0);
+  });
+  test("without WITHOUT ROWID the same TEXT PRIMARY KEY stays nullable (SQLite admits NULL there)", () => {
+    const es = errsOf(fnP("        CREATE TABLE t (k TEXT PRIMARY KEY, v TEXT NOT NULL)", "f() -> string", [getRow("k", "t"), `if (r is not) return "";`, "const s: string = r.k;", "return s;"]));
+    expect(es.length).toBeGreaterThan(0);
+  });
+});
+
+describe("#1925 review F1: a raw DEFAULT's kind must fit its column's type", () => {
+  test("def_ts_on_int, def_str_on_int, def_str_on_real, a real on INTEGER, a number on TEXT — refused by name", () => {
+    for (const c of ["x INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP", "x INTEGER NOT NULL DEFAULT 'abc'", "x REAL NOT NULL DEFAULT 'n/a'", "x INTEGER DEFAULT 1.5", "x TEXT DEFAULT 0", "x BLOB DEFAULT 'a'", "x INTEGER DEFAULT TRUE", "x INTEGER DEFAULT (1)"]) {
+      const src = P(`        CREATE TABLE t (id INTEGER PRIMARY KEY, ${c})`);
+      expect([c, errsOf(src)]).toEqual([c, [UNSUP]]);
+      expect(msgOf(src, UNSUP)).toContain("which the column's row type does not hold");
+    }
+  });
+  test("the same in the §39.2 declarative form", () => {
+    for (const c of ["x: integer not null default(CURRENT_TIMESTAMP)", "x: integer not null default('abc')"]) {
+      const src = P(`        t {\n            id: integer primary key\n            ${c}\n        }`);
+      expect([c, errsOf(src)]).toEqual([c, [UNSUP]]);
+    }
+  });
+  test("valid defaults stay clean (NOT NULL DEFAULT NULL included, as SQLite admits it)", () => {
+    expect(codesOf(P("        CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT 'x', b TEXT NOT NULL DEFAULT CURRENT_DATE, c INTEGER DEFAULT -1, d REAL DEFAULT 2, e REAL DEFAULT 2.5, f INTEGER NOT NULL DEFAULT NULL, g BLOB DEFAULT NULL)"))).toEqual([]);
+  });
+});
+
+describe("#1925 review F3 / F4", () => {
+  test("F3: `CREATE TABLE` text inside a string DEFAULT is refused (it is text in a string)", () => {
+    const src = P("        CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT NOT NULL DEFAULT 'CREATE TABLE u (x INTEGER)')");
+    expect(errsOf(src)).toEqual([UNSUP]);
+    expect(msgOf(src, UNSUP)).toContain("outside a live declaration");
+    // a `"create"` / `"table"` column NAME is not a string
+    expect(codesOf(P(`        CREATE TABLE t (id INTEGER PRIMARY KEY, "create" TEXT, "table" TEXT)`))).toEqual([]);
+  });
+  test("F4: W-SCHEMA-001 for a raw table with no PRIMARY KEY (§38.5.1)", () => {
+    expect(codesOf(P("        CREATE TABLE t (x TEXT)"))).toEqual(["W-SCHEMA-001"]);
+    expect(codesOf(P("        CREATE TABLE t (x TEXT, PRIMARY KEY (x))"))).toEqual([]);
+    expect(codesOf(P("        CREATE TABLE t (x TEXT PRIMARY KEY)"))).toEqual([]);
   });
 });
