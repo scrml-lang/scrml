@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 531 | 28.4% |
+| PASS | 539 | 28.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 10 | 0.5% |
+| FAIL | 11 | 0.6% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 692 | 37.0% |
+| UNSUPPORTED | 683 | 36.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 541; of those, 531 hold (98.2%). Runtime half executed on the bootstrap for 173 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 550; of those, 539 hold (98.0%). Runtime half executed on the bootstrap for 179 case(s).
 
-- **Vacuous** passes: 13 of 531 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **518**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 10; the other 5 are implemented checks that answered wrong.
+- **Vacuous** passes: 13 of 539 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **526**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 11; the other 6 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 692.
+UNSUPPORTED by reason: bootstrap-unsupported 683.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 354 · FAIL 9 · UNSUPPORTED 511. Twin holds 354 (non-vacuous 344). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 362 · FAIL 10 · UNSUPPORTED 502. Twin holds 362 (non-vacuous 352). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 1 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -153,7 +153,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
 | reactive | 127 | 54 | · | 1 | · | 44 | 28 | · | · |
-| refinement | 57 | 9 | · | · | · | 23 | 25 | · | · |
+| refinement | 57 | 17 | · | 1 | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | · | · | 6 | 21 | · | · |
 
-### FAIL (10)
+### FAIL (11)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - missing E-UNQUOTED-DISPLAY-TEXT
@@ -197,6 +197,8 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
+- `refinement/base-type-reject-rt` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-031)
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -210,7 +212,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (531)
+### PASS / CODES-ONLY (539)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -684,14 +686,22 @@ none
 - `reactive/write-not-in-logic-context-neg` — PASS · TWIN · VACUOUS
 - `reactive/write-not-in-logic-context-pos` — PASS · TWIN
 - `refinement/base-type-literal-pos` — PASS · TWIN
+- `refinement/boundary-reject-rt` — PASS · TWIN
+- `refinement/const-reject-rt` — PASS · TWIN
 - `refinement/external-ref-pos` — PASS · TWIN
+- `refinement/inhabit-rt` — PASS · TWIN
+- `refinement/literal-call-arg-neg` — PASS · TWIN
+- `refinement/literal-call-arg-pos` — PASS · TWIN
 - `refinement/literal-violation-pos` — PASS · TWIN
 - `refinement/malformed-predicate-param-pos` — PASS · TWIN
+- `refinement/nested-fn-param-reject-rt` — PASS · TWIN
+- `refinement/string-shape-inhabit-rt` — PASS · TWIN
 - `refinement/string-shape-literal-violation-pos` — PASS · TWIN
 - `refinement/tail-after-predicate-pos` — PASS · TWIN
 - `refinement/union-unjudgeable-member-pos` — PASS · TWIN
 - `refinement/unknown-shape-boundary-pos` — PASS · TWIN
 - `refinement/unknown-shape-pos` — PASS · TWIN
+- `refinement/url-executable-scheme-reject-rt` — PASS · TWIN
 - `schema/clean-pos` — PASS
 - `schema/schema-001-neg` — PASS
 - `schema/schema-002-neg` — PASS
@@ -744,7 +754,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (692)
+### UNSUPPORTED (683)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1270,30 +1280,21 @@ none
 - `reactive/server-fn-authority-wholly-server-error` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/tape-append-on-returned-tape-rt` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `refinement/array-literal-element-pos` — twin · bootstrap-unsupported: the refinement `string(url)[]` inside the type of `<links>` — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a runtime check for every boundary-zone assignme
-- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
 - `refinement/block-arrow-refined-local-pos` — twin · bootstrap-unsupported: the refinement `number(>0)` on the `let` local `k` — each later assignment to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a 
-- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0 && <10000)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
-- `refinement/const-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` on the local `link` whose value is not a literal — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a runtime check for every boun
 - `refinement/enum-subset-param-accept-neg` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/enum-subset-param-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
-- `refinement/inhabit-rt` — twin · bootstrap-unsupported: the refinement `number(>0 && <10000)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
-- `refinement/literal-call-arg-neg` — twin · bootstrap-unsupported: the refinement `number(>=0 && <=100)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
-- `refinement/literal-call-arg-pos` — twin · bootstrap-unsupported: the refinement `number(>=0 && <=100)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that r
 - `refinement/local-write-forms-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
-- `refinement/nested-fn-param-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
 - `refinement/reassign-cell-accept-neg` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
 - `refinement/reassign-cell-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
 - `refinement/reassign-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` on the `let` cell `@link` — each later write to it is a boundary-zone write — a value that reaches it is checked at run time (§53.4.3, §53.11: "The compiler SHALL emit a r
 - `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: the refinement `number(min(0) && max(100))` uses the call form `min(…)` inside a refinement's parentheses (§53.6.1 spells the shared validator vocabulary `base.min(…)`) — not in the bootstrap (INTERIM
 - `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: the refinement `string(eq("yes"))` uses the call form `eq(…)` inside a refinement's parentheses (§53.6.1 spells the shared validator vocabulary `base.eq(…)`) — not in the bootstrap (INTERIM)
-- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: the refinement `string(email)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches 
 - `refinement/struct-field-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
 - `refinement/struct-field-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
-- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
-- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: the refinement `number(>0)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it 
+- `refinement/union-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
+- `refinement/union-nonprimitive-member-reject-rt` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `refinement/union-shaped-member-accept-neg` — twin · bootstrap-unsupported: the union type `number(>0) | date` is not in the bootstrap — its type system has `T | not` only (§66.2.4 admits any union here, S451)
 - `refinement/url-executable-scheme-literal-pos` — twin · bootstrap-unsupported: the refinement `string(url)` on `@link` — whether the literal `"javascript:alert(1)"` satisfies it is not decided by the bootstrap (the normative `url` predicate is the WHATWG URL parser with the §5.2
-- `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: the refinement `string(url)` stands where a value reaches it unproven (a parameter, a return type, a struct or variant field, a tape element, a `| not` member, a `let` local) — a value that reaches it
 - `schema-for/error-invalid-call-context` — twin · bootstrap-unsupported: `req` on the field `email` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at
 - `schema-for/error-nested-struct-no-fk` — twin · bootstrap-unsupported: a `${ … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap
 - `schema-for/error-no-sql-mapping` — twin · bootstrap-unsupported: a `${ … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap
