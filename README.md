@@ -24,7 +24,7 @@ Here is a small app: a task list that saves to SQLite, stays in sync across ever
 
 ### 1 — the data and the server
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×9, E-SCOPE-001(addRow, replaceRow), E-STATE-UNDECLARED(@tasks, @tasks, @tasks, @tasks)] — the bootstrap has no <schema>, <channel>, class: binding, <empty> or <onTimeout>, no engine opener effect=, and cannot replace a whole tape yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×8, E-SCOPE-001(addRow, replaceRow), E-STATE-UNDECLARED(@tasks, @tasks, @tasks, @tasks)] — the bootstrap has no <channel>, class: binding, <empty> or <onTimeout>, no engine opener effect=, and cannot replace a whole tape yet -->
 <!-- snippet: docs/readme-snippets/tasks.scrml#L7-L53 -->
 ```scrml
 <program db="tasks.db">

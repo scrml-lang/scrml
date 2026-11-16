@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 359 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 369 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -75,6 +75,8 @@ ${
             "W-MATCH-RULE-INERT" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-REQUEST-ID-UNREFERENCEABLE" :> Severity.Warning
+            "W-SCHEMA-001" :> Severity.Warning
+            "W-SCHEMA-NO-TABLES-DECLARED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
             "W-TX-ARM-UNREACHABLE" :> Severity.Warning
@@ -344,6 +346,14 @@ ${
             "E-ROUTE-003" :> Severity.Error
             "E-ROUTE-004" :> Severity.Error
             "E-ROUTE-005" :> Severity.Error
+            "E-SCHEMA-001" :> Severity.Error
+            "E-SCHEMA-002" :> Severity.Error
+            "E-SCHEMA-003" :> Severity.Error
+            "E-SCHEMA-004" :> Severity.Error
+            "E-SCHEMA-006" :> Severity.Error
+            "E-SCHEMA-011" :> Severity.Error
+            "E-SCHEMA-012" :> Severity.Error
+            "E-SCHEMA-013" :> Severity.Error
             "E-SCOPE-001" :> Severity.Error
             "E-SCOPE-010" :> Severity.Error
             "E-SCOPE-REDECLARE" :> Severity.Error

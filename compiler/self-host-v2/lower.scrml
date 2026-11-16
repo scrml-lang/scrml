@@ -1870,6 +1870,7 @@ ${
             .MSlot :> lowerElem(c, e)
             .MDb :> lowerElem(c, e)
             .MMatch(m: m) :> [matchView(c, m)]
+            .MSchema :> []
             .MErrors(of: v, all: a) :> lowerElem(c, e)
             .MStateView(v: v) :> lowerElem(c, e)
             .MInline(v: v) :> lowerElem(c, e)
@@ -2274,6 +2275,7 @@ ${
             .MSlot :> [View.Slot]
             .MDb :> lowerNodes(c, e.kids)       // s452: a `<db>` state block renders its children in place (§4)
             .MMatch(m: m) :> condWrap(c, e, [matchView(c, m)])   // s478: §17.1.2 `<match if=…>` — no arm is dispatched while false
+            .MSchema :> []                       // s478: a `<schema>` declares structure — nothing renders (§39.1)
             .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
