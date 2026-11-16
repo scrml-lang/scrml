@@ -45,13 +45,13 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, Timing, IdleWatch, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool, CoreEndpoint, CoreEpArm,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, Diag, ASql,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
@@ -547,9 +547,9 @@ ${
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
     // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[], tool: CoreTool | not }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [], tool: not } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], reqReads: [], tool: not, endpoints: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -37291,7 +37291,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [] }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -38873,7 +38873,7 @@ ${
         for (const f of all) {
             if (nestedSym(g, f.sym)) continue     // s477: placed with, and printed inside, the function that declares it (nestedPlaces)
             const pk: PlaceK = placeOf(places, f.sym)
-            if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `?{}` in its body places it on the server)")
+            if (f.modifier && !isLoadName(f.name) && !isBatchName(f.name) && !isEndpointFnName(f.name)) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `?{}` in its body places it on the server)")
             if (f.doms.length > 0 && serverTriggered(f)) {
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
@@ -38923,7 +38923,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [], tool: toolFact(g) }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, reqReads: [], tool: toolFact(g), endpoints: [] }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -40941,7 +40941,7 @@ ${
         for (const f of files) {
             const r: RItems = pendItems(f.items, pend, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first }])
         }
         return { files: out, next: next }
     }
@@ -40986,7 +40986,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, first: f.first }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first }])
         }
         return out
     }
@@ -45884,6 +45884,255 @@ ${
     // callers must be judged again; a carrier whose enum already declares `Transport` changes nothing.
     export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[], retype: boolean }
 
+    // =========================================================================
+    // s478 (s478-boot-endpoint) — THE §61 `<endpoint>` PASS. The parser recorded
+    // each declaration (FileAst.eps) and desugared its arms into server functions
+    // (parse.scrml endpointDesugar), so an arm's body is judged as that function's
+    // body by every other pass (scope — §61.1's E-SCOPE-001 —, typing, placement).
+    // This pass judges the declaration itself:
+    //  - `accepts=` (§61.3: "`accepts=` SHALL resolve to a `:enum` type (a
+    //    non-enum is `E-ENDPOINT-ACCEPTS-NOT-ENUM`, §61.9)"; §34's
+    //    E-ENDPOINT-ACCEPTS-NOT-ENUM row: "an UNDECLARED `accepts=` ref instead
+    //    reuses `E-TYPE-UNKNOWN-NAME` (the §14.1.2 machinery — no double-report)");
+    //  - the arms (§61.4: "A variant with no arm is `E-ENDPOINT-NOT-EXHAUSTIVE`";
+    //    "A duplicate arm for the same variant, or an arm naming a variant not in
+    //    the `accepts=` enum, follows the §18.0.1 arm-validity rules"; §34's
+    //    E-ENDPOINT-NOT-EXHAUSTIVE row: "a wildcard `<_>` arm satisfies
+    //    exhaustiveness … A dead/duplicate arm reuses the §18.0.1 arm-validity
+    //    diagnostics — `E-MATCH-SUBSET-DEAD-ARM` / `E-TYPE-023`"; §18.7's
+    //    E-TYPE-021 for binders that do not match the payload);
+    //  - what the bootstrap does not build, refused by name (INTERIM, gap
+    //    g-boot-endpoint-s478): an `accepts=` enum not declared in the endpoint's
+    //    own file, a payload field the request decode does not read, a `path=` the
+    //    URL parser would rewrite or that names the compiler's own `/_scrml/`
+    //    routes, two endpoints at one path and method, an endpoint outside the
+    //    entry file.
+    // Each clean endpoint becomes a CoreEndpoint (the route print-server serves).
+    // =========================================================================
+    type REps:struct = { diags: Diag[], eps: CoreEndpoint[] }
+
+    fn endpointPass(g: Globals, files: FileAst[]) -> REps {
+        let diags: Diag[] = []
+        let out: CoreEndpoint[] = []
+        let seen: string[] = []
+        for (const f of files) {
+            for (const ep of f.eps) {
+                const d0: int = diags.length
+                if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — the bootstrap serves the endpoints of the entry file's `<program>` only (§61.2 names no rule for an endpoint in an imported file; INTERIM, g-boot-endpoint-s478)")])
+                if (ep.path != "") {
+                    const why: string = endpointPathRefusal(ep.path)
+                    if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7 makes `path=` the author-stable contract URL and names no URL syntax; the bootstrap admits a plain absolute path only — INTERIM, g-boot-endpoint-s478)")])
+                }
+                if (ep.path != "" && ep.method != "") {
+                    const key: string = ep.method + " " + ep.path
+                    if (seen.indexOf(key) >= 0) {
+                        diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "a second `<endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">` — the SPEC names no rule for two endpoints mounted at one path and method (§61.7), so the bootstrap refuses it rather than pick one (INTERIM, g-boot-endpoint-s478 owner question)")])
+                    }
+                    seen = seen.concat([key])
+                }
+                const ra: REpAccepts = endpointAccepts(g, f.path, ep)
+                diags = diags.concat(ra.diags)
+                const es: Sym | not = ra.sym
+                if (es is given) {
+                    const ad: Diag[] = endpointArmDiags(g, f.path, ep, es)
+                    diags = diags.concat(ad)
+                    if (!hasErrorDiag(diags.slice(d0)) && ep.top && ep.path != "" && ep.method != "") {
+                        out = out.concat([{ path: ep.path, method: ep.method, accepts: es, arms: coreEpArms(g, f.path, ep, es), file: f.path }])
+                    }
+                }
+            }
+        }
+        return { diags: diags, eps: out }
+    }
+
+    // s478 — a synthesized `<endpoint>` arm function (parse.scrml endpointDesugar)
+    fn isEndpointFnName(n: string) -> boolean { return n.indexOf("endpoint#") == 0 }
+
+    // Why the bootstrap does not mount `p` ("" when it does): an absolute path of
+    // unreserved characters (RFC 3986 `A-Z a-z 0-9 - . _ ~`) and `/`, with no empty,
+    // `.` or `..` segment (the request's URL is normalized before it is matched, so
+    // such a path would never match), outside the compiler's own `/_scrml/` routes.
+    fn endpointPathRefusal(p: string) -> string {
+        if (p.substring(0, 1) != "/") return "it does not begin with `/`"
+        if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
+        let i = 0
+        while (i < p.length) {
+            const c: int = p.charCodeAt(i)
+            const ok: boolean = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 95 || c == 126 || c == 47
+            if (!ok) return "`" + p.substring(i, i + 1) + "` is not a character the bootstrap matches a path on (it matches unreserved characters and `/` only — no query, fragment, percent-escape or path parameter)"
+            i = i + 1
+        }
+        const segs: string[] = p.substring(1).split("/")
+        let k = 0
+        for (const sg of segs) {
+            const last: boolean = k == segs.length - 1
+            if (sg == "." || sg == "..") return "a `" + sg + "` segment is removed when the request URL is normalized, so the path would never match"
+            if (sg == "" && !last) return "an empty segment (`//`) is not a path the bootstrap matches"
+            k = k + 1
+        }
+        return ""
+    }
+
+    type REpAccepts:struct = { diags: Diag[], sym: Sym | not }
+
+    // `accepts=` → the enum it names (desugared in this file), or its diagnostics.
+    fn endpointAccepts(g: Globals, file: string, ep: AEndpoint) -> REpAccepts {
+        const n: string = ep.accepts
+        if (n == "") return { diags: [], sym: not }
+        const sp: ASpan = ep.acceptsSpan
+        const notEnum: string = "`accepts=" + n + "` on `<endpoint>` does not name an `:enum` type — the request body decodes into it via `parseVariant` (§41.13), a tagged-variant decoder, so it SHALL resolve to a `:enum` (§61.3)"
+        if (n == "asIs") return { diags: [mkDiag(file, sp, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=asIs` on `<endpoint>` — §34 names `asIs` the sanctioned untyped escape hatch here but specifies no decode or dispatch for it, and the bootstrap has no `asIs` type (§14.1.2); declare an `:enum` (INTERIM)")], sym: not }
+        if (n == "int" || n == "integer" || n == "number" || n == "string" || n == "bool" || n == "boolean" || n == "timestamp" || isNamedShape(n)) {
+            return { diags: [mkDiag(file, sp, "E-ENDPOINT-ACCEPTS-NOT-ENUM", notEnum + " — `" + n + "` is a primitive")], sym: not }
+        }
+        const te: TypeEnv = teAt(g.te, file)
+        const s: TypeStub | not = stubNamed(te, n)
+        if (s is not) {
+            if (declTypeNamed(te, n) is given) return { diags: [mkDiag(file, sp, "E-ENDPOINT-ACCEPTS-NOT-ENUM", notEnum + " — `" + n + "` is a declaration")], sym: not }
+            return { diags: [mkDiag(file, sp, "E-TYPE-UNKNOWN-NAME", "`accepts=" + n + "` on `<endpoint>` — `" + n + "` is not a declared type (§14.1.2)" + elsewhereNote(te.link, file, NameKind.KType, true, n))], sym: not }
+        }
+        const rhs: AType | not = aliasRhs(s)
+        if (rhs is given) return { diags: [mkDiag(file, sp, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=" + n + "` on `<endpoint>` names a type alias — the bootstrap reads an `accepts=` enum declared by name in the endpoint's own file only (INTERIM, g-boot-endpoint-s478)")], sym: not }
+        if (!s.isEnum) return { diags: [mkDiag(file, sp, "E-ENDPOINT-ACCEPTS-NOT-ENUM", notEnum + " — `" + n + "` is a struct or host type")], sym: not }
+        if (!ep.lowered) return { diags: [mkDiag(file, sp, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=" + n + "` on `<endpoint>` names an enum declared outside this file — the bootstrap builds an endpoint over an `accepts=` enum declared in the endpoint's own file only (INTERIM, g-boot-endpoint-s478)")], sym: not }
+        return { diags: [], sym: s.sym }
+    }
+
+    // The arms against the enum (§61.4, §18.0.1 arm validity, §18.7 binder arity)
+    // and the payload fields the bootstrap's request decode reads.
+    fn endpointArmDiags(g: Globals, file: string, ep: AEndpoint, es: Sym) -> Diag[] {
+        let out: Diag[] = []
+        const vs: VariantDef[] = enumVariantsOf(g, es)
+        let covered: int[] = []
+        let bound: int[] = []      // variants whose payload fields are all parameters of their arm's function
+        let wild = false
+        for (const a of ep.arms) {
+            if (wild) {
+                out = out.concat([mkDiag(file, a.span, "E-SYNTAX-010", "an arm after the wildcard `<_>` — the wildcard is the last arm (§18.6)")])
+            } else if (a.variant == "_") {
+                if (a.parens) out = out.concat([mkDiag(file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "the wildcard arm `<_>` binds no payload — it takes every variant without an arm (§18.8.1); remove the `(…)`")])
+                if (covered.length == vs.length) out = out.concat([mkDiag(file, a.span, "W-MATCH-001", "this wildcard `<_>` arm is unreachable — every variant of `" + es.hint + "` already has an arm (§18.6)")])
+                wild = true
+            } else {
+                const i: int = variantPos(vs, a.variant)
+                if (i < 0) {
+                    out = out.concat([mkDiag(file, a.span, "E-MATCH-SUBSET-DEAD-ARM", "`<" + a.variant + ">` names no variant of `" + es.hint + "` (the `accepts=` enum: " + variantNamesOf(vs).join(", ") + ") — the arm can never run (§61.4, §18.8.1)")])
+                } else if (covered.indexOf(i) >= 0) {
+                    out = out.concat([mkDiag(file, a.span, "E-TYPE-023", "a second arm for the variant `" + a.variant + "` — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate arm)")])
+                } else {
+                    covered = covered.concat([i])
+                    const nf: int = vs[i].fields.length
+                    if (a.parens && a.binds.length != nf) {
+                        out = out.concat([mkDiag(file, a.span, "E-TYPE-021", "`<" + a.variant + ">` carries " + nf + " value(s) but the arm binds " + a.binds.length + " — bind one name (or `_`) per payload field, in declaration order (§18.7)")])
+                    } else if (a.parens && a.fn != "") {
+                        bound = bound.concat([i])
+                    }
+                }
+            }
+        }
+        if (!wild && covered.length < vs.length) {
+            let missing: string[] = []
+            let j = 0
+            for (const v of vs) {
+                if (covered.indexOf(j) < 0) missing = missing.concat([v.sym.hint])
+                j = j + 1
+            }
+            out = out.concat([mkDiag(file, ep.opener, "E-ENDPOINT-NOT-EXHAUSTIVE", "this `<endpoint>` has no arm for " + missing.join(", ") + " of `" + es.hint + "` — every variant of the `accepts=` enum needs an arm, or a wildcard `<_>` (§61.4)")])
+        }
+        // the request decode (§61.3: "the variant's payload fields are decoded with
+        // §53 refinement enforcement"): the bootstrap decodes a payload field of type
+        // `int`, `number`, `string` or `bool`; a refinement is checked as an arm
+        // function's parameter (print-server routeEntryChecks), so a field no arm
+        // binds is read only when its written type is a bare primitive.
+        const src: ATypeDecl | not = enumSrcOf(g, es)
+        let k = 0
+        for (const v of vs) {
+            let fi = 0
+            for (const fd of v.fields) {
+                if (fd.sym.hint == "tag") {
+                    // review #1916 L1: §41.13 / §61.3 — the request's `tag` key names the
+                    // variant ("a JSON object whose `tag` field names the variant"), so a
+                    // payload field of that name can never carry a value of its own
+                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value; rename the field (INTERIM — the SPEC names no code for it, g-boot-endpoint-s478)")])
+                } else if (!isWirePrim(fd.ty)) {
+                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` is of a type the bootstrap's `<endpoint>` request decode does not read — it decodes `int`, `number`, `string` and `bool` fields (§41.13: parseVariant \"does NOT auto-recurse into payload fields whose type is itself an enum\"; INTERIM, g-boot-endpoint-s478)")])
+                } else if (bound.indexOf(k) < 0 && !plainFieldType(src, v.sym.hint, fi)) {
+                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` has a written type the bootstrap checks only on a parameter — bind it in the `<" + v.sym.hint + "(…)>` arm (its refinement is then checked before the arm runs, §61.3 / §53); INTERIM, g-boot-endpoint-s478")])
+                }
+                fi = fi + 1
+            }
+            k = k + 1
+        }
+        return out
+    }
+
+    fn variantPos(vs: VariantDef[], name: string) -> int {
+        let i = 0
+        for (const v of vs) {
+            if (v.sym.hint == name) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn isWirePrim(t: Type) -> boolean {
+        return match t {
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+            // no-default-arm: one question of a type — is it a decoded primitive
+            _ :> false
+        }
+    }
+
+    fn enumSrcOf(g: Globals, es: Sym) -> ATypeDecl | not {
+        for (const s of g.te.stubs) {
+            if (s.sym.id == es.id) return s.src
+        }
+        return not
+    }
+
+    // The written type of field `fi` of variant `vn` is a bare primitive name.
+    fn plainFieldType(src: ATypeDecl | not, vn: string, fi: int) -> boolean {
+        if (src is not) return false
+        const b: ATypeBody = src.body
+        const vs: AVariant[] = match b {
+            .EnumBody(variants: x) :> x
+            .StructBody(fields: fs) :> []
+            .HostBody :> []
+            .AliasBody(ty: t) :> []
+        }
+        for (const v of vs) {
+            if (v.name == vn && fi < v.fields.length) {
+                const k: ATypeK = v.fields[fi].ty.k
+                const n: string = match k {
+                    .TName(name: x) :> x
+                    // no-default-arm: one question of a written type — is it a bare name
+                    _ :> ""
+                }
+                return n == "int" || n == "integer" || n == "number" || n == "string" || n == "bool" || n == "boolean"
+            }
+        }
+        return false
+    }
+
+    fn coreEpArms(g: Globals, file: string, ep: AEndpoint, es: Sym) -> CoreEpArm[] {
+        let out: CoreEpArm[] = []
+        for (const a of ep.arms) {
+            let fs: Sym | not = not
+            if (a.fn != "") {
+                for (const f of g.fns) {
+                    if (f.info.file == file && f.info.name == a.fn) fs = f.info.sym
+                }
+            }
+            let arity = 0
+            if (a.parens && fs is given) arity = a.binds.length
+            out = out.concat([{ variant: a.variant, fn: fs, arity: arity }])
+        }
+        return out
+    }
+
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram { return analyzeLinked(files, entry, "", -1) }
 
     // s474 r1 (review F1): `keyBase` = the build's source root under the PROJECT root (§21.3) —
@@ -45921,6 +46170,20 @@ ${
         // hence the second run. The desugar mints nodes from the linker's first unused id; without
         // one (-1) nothing is desugared and waitDiag refuses the cell by name.
         let next: int = nextId
+        // s478 (s478-boot-endpoint): an `<endpoint>` arm whose body is an object literal
+        // gets the struct type of that literal as its function's return type (epRetFiles),
+        // and the program is analyzed again — §61.5 "The compiler SHALL serialize an arm's
+        // typed value-return directly as the JSON response body"
+        let epNotes: Diag[] = []
+        if (next >= 0) {
+            const er: REpRet = epRetFiles(files, r1.tp, next)
+            epNotes = er.diags
+            if (er.next != next) {
+                files = er.files
+                next = er.next
+                r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, [])
+            }
+        }
         if (r1.pend.length > 0 && next >= 0) {
             const pf: RFiles = pendFiles(files, r1.pend, next)
             files = pf.files
@@ -45933,7 +46196,7 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers)
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withKwUnread(r1.tp, r0)
+        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withKwUnread(r1.tp, r0), epNotes)
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -45941,8 +46204,200 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes) }
         let ds: Diag[] = []
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
-        return withKwUnread({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, r0)
+        return withNotes(withKwUnread({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, r0), epNotes)
     }
+
+    fn withNotes(tp: TypedProgram, notes: Diag[]) -> TypedProgram {
+        if (notes.length == 0) return tp
+        return { files: tp.files, tables: tp.tables, diags: tp.diags.concat(notes), infos: tp.infos }
+    }
+
+    // ---- s478 (s478-boot-endpoint): the arm result types --------------------
+    // The bootstrap types an object literal only from a struct its position
+    // expects (g-boot-untyped-local-object-literal-s478), and an arm function
+    // (parse.scrml endpointDesugar) declares no return type. §61.5: "An arm's
+    // value-return is the typed result; the compiler serializes it into the
+    // response body". So, for each arm whose body is an object literal, the struct
+    // that literal IS — one field per key, typed by the first run's proven type of
+    // its value (`int`, `number`, `string`, `bool`, a type declared in the file, or a
+    // nested object literal — its own struct) — is declared beside the function
+    // (`endpoint#<k>#<V>#R`, a name no source can write) and becomes its return
+    // type; the program is analyzed again, so the literal is checked against it as
+    // any `return` is. A value with no proven type is refused by name (unless an
+    // Error already stands in it), INTERIM.
+    type REpRet:struct = { files: FileAst[], next: int, diags: Diag[] }
+    type EpRetDecl:struct = { fn: string, decls: ATypeDecl[], root: string }
+
+    fn epRetFiles(files: FileAst[], tp: TypedProgram, next0: int) -> REpRet {
+        let next: int = next0
+        let out: FileAst[] = []
+        let diags: Diag[] = []
+        for (const f of files) {
+            let reps: EpRetDecl[] = []
+            for (const ep of f.eps) {
+                for (const a of ep.arms) {
+                    const body: AExpr | not = a.body
+                    if (a.fn != "" && body is given) {
+                        const ps: AProp[] | not = objectPropsOf(body)
+                        if (ps is given) {
+                            const r: REpStruct = epStruct(tp, f.path, ps, a.fn + "#R", next)
+                            next = r.nid
+                            diags = diags.concat(r.diags)
+                            if (r.ok) reps = reps.concat([{ fn: a.fn, decls: r.decls, root: a.fn + "#R" }])
+                        } else {
+                            // any other value: its proven type is the function's return type
+                            const tn: string = epLeafTypeName(tp, f.path, exprType(tp.tables, body.nid))
+                            if (tn != "") {
+                                reps = reps.concat([{ fn: a.fn, decls: [], root: tn }])
+                            } else if (!epErrorWithin(tp.diags, f.path, body.span)) {
+                                diags = diags.concat([mkDiag(f.path, body.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's value has no proven type the bootstrap can serialize — §61.5 serializes the arm's typed value-return; the bootstrap builds an `int`, `number`, `string` or `bool` value, a value of a type declared in this file, or an object literal of those (INTERIM, g-boot-endpoint-s478). A call of a function that returns nothing has no value: use the self-closing `<V/>` arm for a 204")])
+                            }
+                        }
+                    }
+                }
+            }
+            if (reps.length == 0) {
+                out = out.concat([f])
+            } else {
+                const ri: RItems = epRetItems(f.items, reps, next)
+                next = ri.next
+                out = out.concat([{ path: f.path, items: ri.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first }])
+            }
+        }
+        return { files: out, next: next, diags: diags }
+    }
+
+    fn objectPropsOf(e: AExpr) -> AProp[] | not {
+        return match e.k {
+            .ObjectLit(props: ps) :> ps
+            // no-default-arm: one question of an expression — is it an object literal
+            _ :> not
+        }
+    }
+
+    type REpStruct:struct = { decls: ATypeDecl[], ok: boolean, nid: int, diags: Diag[] }
+
+    fn epStruct(tp: TypedProgram, file: string, ps: AProp[], name: string, nid0: int) -> REpStruct {
+        let nid: int = nid0
+        let decls: ATypeDecl[] = []
+        let fields: ATypeField[] = []
+        let diags: Diag[] = []
+        let ok = true
+        let sp: ASpan = mkSpan(0, 0)
+        if (ps.length > 0) sp = mkSpan(ps[0].span.start, ps[ps.length - 1].span.end)
+        for (const p of ps) {
+            const inner: AProp[] | not = objectPropsOf(p.value)
+            let tn: string = ""
+            if (p.spread || !isIdentifierText(p.name)) {
+                ok = false
+                diags = diags.concat([mkDiag(file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "this entry of an `<endpoint>` arm's object literal is not a `name: value` field — the bootstrap builds the arm's result as a struct, one field per name (INTERIM, g-boot-endpoint-s478)")])
+            } else if (p.name == "__proto__" || p.name == "constructor" || p.name == "prototype") {
+                // review #1916 L2: the arm's answer is built and encoded as a JS object, where
+                // these keys name the object's prototype machinery, not a field — refused at
+                // compile time rather than answering 500 on every request
+                ok = false
+                diags = diags.concat([mkDiag(file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "the key `" + p.name + "` in an `<endpoint>` arm's object literal — the bootstrap builds the arm's result as a JS object, where `" + p.name + "` names the object's prototype machinery rather than a field, so the answer could not be serialized (§61.5); rename the key (INTERIM, g-boot-endpoint-s478)")])
+            } else if (inner is given) {
+                const r: REpStruct = epStruct(tp, file, inner, name + "#" + p.name, nid)
+                nid = r.nid
+                decls = decls.concat(r.decls)
+                diags = diags.concat(r.diags)
+                if (!r.ok) ok = false
+                tn = name + "#" + p.name
+            } else {
+                tn = epLeafTypeName(tp, file, exprType(tp.tables, p.value.nid))
+                if (tn == "") {
+                    ok = false
+                    if (!epErrorWithin(tp.diags, file, p.value.span)) diags = diags.concat([mkDiag(file, p.value.span, "E-BOOTSTRAP-UNSUPPORTED", "the value of `" + p.name + "` in this `<endpoint>` arm's object literal has no proven type the bootstrap can give the arm's result — it builds the result as a struct whose fields are `int`, `number`, `string`, `bool`, a type declared in this file, or a nested object literal (§61.5; INTERIM, g-boot-endpoint-s478 / g-boot-untyped-local-object-literal-s478). Return a value of a declared struct type, e.g. from a function `-> S`")])
+                }
+            }
+            if (tn != "") {
+                const ty: AType = { nid: nid, span: p.span, k: ATypeK.TName(tn) }
+                fields = fields.concat([{ nid: nid + 1, span: p.span, isLet: false, name: p.name, ty: ty, vals: [] }])
+                nid = nid + 2
+            }
+        }
+        const d: ATypeDecl = { nid: nid, span: sp, exported: false, name: name, body: ATypeBody.StructBody(fields) }
+        return { decls: decls.concat([d]), ok: ok, nid: nid + 1, diags: diags }
+    }
+
+    fn epLeafTypeName(tp: TypedProgram, file: string, vt: VType) -> string {
+        const t: Type | not = match vt {
+            .Known(t: x) :> x
+            // no-default-arm: one question of a value type — is it one proven type
+            _ :> not
+        }
+        if (t is not) return ""
+        return match t {
+            .Int :> "int"
+            .Num :> "number"
+            .Str :> "string"
+            .Bool :> "bool"
+            .Named(sym: s) :> epNamedLeaf(tp, file, s)
+            // no-default-arm: a tape or `T | not` field is not built (INTERIM)
+            _ :> ""
+        }
+    }
+
+    fn epNamedLeaf(tp: TypedProgram, file: string, s: Sym) -> string {
+        const ti: TypeInfo | not = typeInfoOf(tp.tables.types, s)
+        if (ti is not) return ""
+        if (ti.file != file || isHostDef(ti.def)) return ""
+        return ti.name
+    }
+
+    fn epErrorWithin(ds: Diag[], file: string, sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.file == file && d.severity == Severity.Error && d.code != "E-TYPE-STRUCT-CONTEXT" && d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
+    }
+
+    // The arm functions given their result struct: the struct declarations stand
+    // just before the function, which now declares `-> <root>`.
+    fn epRetItems(items: AItem[], reps: EpRetDecl[], next0: int) -> RItems {
+        let next: int = next0
+        let out: AItem[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const p: AProgram | not = cpProgramOf(k)
+            const af: AFn | not = epFnOfItem(k)
+            let done = false
+            if (p is given) {
+                const r: RItems = epRetItems(p.items, reps, next)
+                next = r.next
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: r.items }) }])
+                done = true
+            }
+            if (!done && af is given) {
+                for (const rp of reps) {
+                    if (!done && rp.fn == af.name) {
+                        for (const d of rp.decls) {
+                            out = out.concat([{ nid: next, span: d.span, k: AItemK.TypeItem(d) }])
+                            next = next + 1
+                        }
+                        const ret: AType = { nid: next, span: af.span, k: ATypeK.TName(rp.root) }
+                        const f2: AFn = { nid: af.nid, span: af.span, exported: af.exported, pure: af.pure, name: af.name, params: af.params, ret: ret, body: af.body,
+                                          server: af.server, failable: af.failable, err: af.err }
+                        out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.FnItem(f2) }])
+                        next = next + 1
+                        done = true
+                    }
+                }
+            }
+            if (!done) out = out.concat([it])
+        }
+        return { items: out, next: next }
+    }
+
+    fn epFnOfItem(k: AItemK) -> AFn | not {
+        return match k {
+            .FnItem(f: f) :> f
+            // no-default-arm: one question of an item — is it a function
+            _ :> not
+        }
+    }
+
 
     // s478 r1 (MED-2, INTERIM) — a keywordless declaration (§50.8.5) that is never read. The conformance
     // case linear/must-use-unread-pos asserts E-MU-001 for `unusedThing = 42;` falling out of scope
@@ -46147,14 +46602,16 @@ ${
             }
         }
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
+        // s478 (s478-boot-endpoint): the §61 `<endpoint>` declarations
+        const eps: REps = endpointPass(ra.g, files)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes,
-                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool }
+                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum) }
-        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t))
+        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags)
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0))

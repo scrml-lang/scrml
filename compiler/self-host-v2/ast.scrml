@@ -599,7 +599,27 @@ ${
     // only"), and a `<channel>` at any depth in it is E-CHANNEL-INSIDE-PAGE
     // (§38.1). An item of the program whose span lies in a `body` came from the page.
     export type APage:struct = { span: ASpan, attrs: AAttr[], body: ASpan }
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], first: int }
+    // s478 (s478-boot-endpoint) — §61 `<endpoint path= method= accepts=>`, the typed
+    // inbound route. The parser records each one here (FileAst.eps) and DESUGARS each
+    // arm with a body into a `server function` item named `fn` (parse.scrml
+    // endpointFns): the arm's binders are its parameters, typed by the `accepts=`
+    // enum's payload fields, and its body is `return <expr>` — so scope, typing,
+    // placement and lowering of an arm are a server function's, by construction.
+    // analyze.scrml endpointPass judges the declaration (§61.2–§61.9) and hands Core
+    // the route (CoreEndpoint); print-server.scrml serves it.
+    //   `variant` — the arm's variant name ("_" for the wildcard `<_>`);
+    //   `parens` — binders written `(…)`; `body` — the one value expression
+    //   (`not` for a self-closing `<V/>` — §61.5's 204 arm — or a refused body);
+    //   `fn` — the synthesized server function's name ("" when none).
+    //   AEndpoint: `path` / `method` / `accepts` as written ("" when absent or not a
+    //   literal / name — the parser reported it); `top` — a direct child of the
+    //   top-level `<program>` (the only place the bootstrap serves one); `lowered` —
+    //   `accepts=` named an enum declared in this file, so the arms were desugared.
+    export type AEpArm:struct = { nid: int, span: ASpan, variant: string, parens: boolean, binds: ABind[], body: AExpr | not, selfClosing: boolean, fn: string }
+    export type AEndpoint:struct = { nid: int, span: ASpan, opener: ASpan, path: string, method: string, accepts: string, acceptsSpan: ASpan,
+                                     arms: AEpArm[], top: boolean, lowered: boolean }
+
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], first: int }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)
