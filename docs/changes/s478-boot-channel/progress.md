@@ -22,13 +22,25 @@ Branch `s478-boot-channel` from `716265978` (includes #1916 `<endpoint>`).
   `disconnect()` themselves, a non-`let` channel cell, markup in a channel body, nested / exported
   / non-entry channels. A clean channel → `CoreChannel` (ServerFacts → Core). Channel cells are
   exempt from E-DG-002 (read by the sync).
-- **Emit** (next commit): client half on the existing client runtime, server half mounted on the
-  existing `rt.server` fetch (`/_scrml_ws/<name>`), strict `__sync` decode.
+- **Emit**: client — `print.scrml` `channelBoot` prints `rt.channel(program$.scope, { name, reconnect,
+  cells: [{ key, cell, table }], open, close, error })` (runtime.js `channel`: send on write with echo
+  dedup, strict inbound decode, fixed reconnect, `onclient:*` hooks). Server — `print-server.scrml`
+  `channelConsts` + `rt.server(host$, routes, conns, endpoints, [rt.channel(channel$0)])`; the upgrade
+  route `/_scrml_ws/<name>` is answered by the existing `fetch` (no second router): §40.2 Origin check,
+  405 / 426 / 404, then `upgrader.upgrade`; `srv.websocket` handlers relay a strictly decoded,
+  re-encoded `__sync` to the channel's other subscribers (per-channel `[name, topic]` key); any other
+  frame closes the sender (1003/1007/1008/1009). `channelRefusal` refuses `watches=` emit, a cell with
+  no wire table / persist / timing, a waiting or server-only hook. `scrml-boot dev` routes
+  `/_scrml_ws/` to the program server with delegating `websocket` handlers.
 
 ## Status
 
-- [x] parse + analyze (commit 1) — client printer refuses a channel by name until commit 2
-- [ ] emit + runtime (commit 2)
-- [x] tests `compiler/self-host-v2/slice-m4/channel-s478.test.js` (A, B)
+- [x] parse + analyze (commit 1, b01287a59)
+- [x] emit + runtime (commit 2)
+- [x] tests `slice-m4/channel-s478.test.js` (A, B, D0) and `slice-m4/channel-served-s478.test.js` (C, D)
 - [x] severity regen
-- [ ] conformance before/after, corpus, CI gates, PR
+- [x] conformance: 574 → 586 PASS (+12: channel/onchange-* ×3, shared-modifier, watches-* ×8), 0 PASS→FAIL
+- [x] corpus (5117 files: samples, examples, conformance, acceptance, stdlib, benchmarks, docs): 0 newly-rejecting
+- [x] CI gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim
+- [x] gap `g-boot-channel-s478` (owner questions); `g-bootstrap-let-decl-in-db-channel-body-refused-s469` narrowed
+- [ ] PR

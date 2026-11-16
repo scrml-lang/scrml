@@ -4492,11 +4492,113 @@ ${
         if (holdsQuery(p) && p.server.length == 0) {
             out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `?{}` query outside a server function — the client printer has no SQL (a query stands only in a server function, check.scrml C-S2)"])
         }
-        // s478 (s478-boot-channel) — staged: the channel's client half arrives with the emit commit
+        return out.concat(channelRefusal(p))
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-channel) — SPEC §38.7 "The compiler emits a client-side IIFE …
+    // It manages connect, reconnect …, message dispatch, channel-scoped cell sync
+    // (the auto-sync wire layer for cells declared in the channel body — §38.4), and
+    // cleanup registration." One `rt.channel(prog$.scope, { … })` per channel, after
+    // the program is constructed and mounted (runtime.js `channel`): its name, its
+    // reconnect delay, per synced cell the sync key (the cell's name), its signal and
+    // its §57 wire table (the SAME table the server artifact decodes a frame with —
+    // print-server channelConsts), and its `onclient:*` hooks (§38.10).
+    // Refused by name (the printer does not build it): a `watches=` feed (§38.13 —
+    // the Postgres LISTEN bridge), a synced cell with no wire table, with a timing
+    // rule (§6.13) or browser persistence (§6.14) — the SPEC composes neither with
+    // §38.4 sync —, and a hook whose function waits (§13.2: it calls the server).
+    // =========================================================================
+    export fn channelRefusal(p: CoreProgram) -> string[] {
+        let out: string[] = []
         for (const ch of p.channels) {
-            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: `<channel name=\"" + ch.name + "\">` — its WebSocket client (§38.7) is not printed yet"])
+            const at: string = "`<channel name=\"" + ch.name + "\">`"
+            if (ch.watches != "") {
+                out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + " is a `watches=" + ch.watches + "` change feed — its Postgres LISTEN/NOTIFY capture and `<onchange>` dispatch (§38.13.7) are not built (INTERIM, g-boot-channel-s478)"])
+            }
+            for (const c of ch.cells) {
+                const fd: Field | not = programField(p, c)
+                if (fd is not) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + "'s cell `" + c.hint + "` is not a field of the program — the Core is ill-formed"])
+                } else {
+                    if (wireBuild(p, fd.ty).table is not) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + "'s cell `" + c.hint + "` has a type with no §57 wire form, so it cannot be synchronized (§38.4)"])
+                    if (fd.persist is given) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + "'s cell `" + c.hint + "` is `persist=` — the SPEC does not compose browser persistence (§6.14) with channel sync (§38.4); INTERIM, g-boot-channel-s478"])
+                    if (fd.timing is given) out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + "'s cell `" + c.hint + "` is `debounced=` / `throttled=` — the SPEC does not compose a timing rule (§6.13) with channel sync (§38.4); INTERIM, g-boot-channel-s478"])
+                }
+            }
+            for (const h of [ch.open, ch.close, ch.error]) {
+                if (h is given) {
+                    const hf: Fn | not = findFn(p, h)
+                    const why: string = "E-BOOTSTRAP-UNSUPPORTED: " + at + "'s `onclient:*` handler `" + h.hint + "()` is not a client function of the program (§38.10.2: \"`onclient:*` handlers SHALL execute on the client only\")"
+                    if (hf is not) {
+                        out = out.concat([why])
+                    } else if (hasInt(serverOnlyFns(p).concat(reachedOnlyByServer(p)), h.id)) {
+                        out = out.concat([why])
+                    } else if (hf.waits) {
+                        out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: " + at + "'s `onclient:*` handler `" + h.hint + "()` calls the server (§13.2 — it waits); a WebSocket event handler does not wait (INTERIM, g-boot-channel-s478)"])
+                    }
+                }
+            }
         }
         return out
+    }
+
+    fn programField(p: CoreProgram, s: Sym) -> Field | not {
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id) {
+                for (const f of d.fields) { if (f.sym.id == s.id) return f }
+            }
+        }
+        return not
+    }
+
+    fn programFieldIdx(p: CoreProgram, s: Sym) -> int {
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id) {
+                let i = 0
+                for (const f of d.fields) {
+                    if (f.sym.id == s.id) return i
+                    i = i + 1
+                }
+            }
+        }
+        return -1
+    }
+
+    fn channelBoot(ctx: Ctx, p: CoreProgram, progLocal: string) -> JsStmt[] {
+        if (p.channels.length == 0) return []
+        let pd: Decl | not = not
+        for (const d of p.decls) { if (d.sym.id == p.program.id) pd = d }
+        if (pd is not) return []
+        let out: JsStmt[] = [JsStmt.SComment("the §38 channels — each cell declared in a channel body is synchronized across the channel's clients (§38.4)")]
+        for (const ch of p.channels) {
+            let cells: JsExpr[] = []
+            for (const c of ch.cells) {
+                const fd: Field | not = programField(p, c)
+                const idx: int = programFieldIdx(p, c)
+                if (fd is given && idx >= 0) {
+                    cells = cells.concat([JsExpr.JObject([
+                        { key: "key", value: jstr(c.hint) },
+                        { key: "cell", value: fieldCell(jid(progLocal), pd, idx) },
+                        { key: "table", value: wireOrNull(p, fd.ty) },
+                    ])])
+                }
+            }
+            out = out.concat([sexpr(rtCall(ctx, "channel", [jmember(jid(progLocal), "scope"), JsExpr.JObject([
+                { key: "name", value: jstr(ch.name) },
+                { key: "reconnect", value: jnum(ch.reconnect) },
+                { key: "cells", value: JsExpr.JArray(cells) },
+                { key: "open", value: channelHookJs(ctx, ch.open) },
+                { key: "close", value: channelHookJs(ctx, ch.close) },
+                { key: "error", value: channelHookJs(ctx, ch.error) },
+            ])]))])
+        }
+        return out
+    }
+
+    fn channelHookJs(ctx: Ctx, h: Sym | not) -> JsExpr {
+        if (h is not) return JsExpr.JNull
+        return JsExpr.JArrowE([], jcall(jid(symName(ctx, h)), []))
     }
 
     fn holdsTxBlock(f: Fn) -> boolean {
@@ -4703,6 +4805,7 @@ ${
                 rtCall(ctx, "mount", [jmember(jid("document"), "body")]), JsExpr.JNull,
             ])),
         ])
+        boot = boot.concat(channelBoot(ctx, p, progLocal))
         body = body.concat([JsStmt.SBlank, JsStmt.SComment("boot")]).concat(dbLoadBoot(ctx, p, boot))
         let head: HNode[] = [HNode.HElem("script", [{ name: "type", value: "module" }, { name: "src", value: jsFile }], [])]
         // s451 — §65.3.4: the built-in reset, its own bottom `@layer`, unless

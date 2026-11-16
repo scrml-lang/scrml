@@ -5333,3 +5333,93 @@ export function classify(route, status, text) {
   if (status >= 500 && status <= 599) return serverFault(status);
   return malformed(`an unexpected status ${status}`);
 }
+
+// ---------------------------------------------------------------------------
+// s478 (s478-boot-channel) — SPEC §38 `<channel>`: the CLIENT half. The compiler
+// emits one `rt.channel(scope, desc)` per channel (print.scrml channelBoot):
+// `desc.name` (the route `/_scrml_ws/<name>`, §38.1), `desc.reconnect` (ms; 0 =
+// none, §38.3.1), `desc.cells` — per channel cell its sync key, its signal and
+// its §57 wire table — and the `onclient:*` hooks (`open` / `close` / `error`,
+// §38.10, each `null` or a function called with no argument).
+//   §38.4: "On every local write to a channel-declared cell, the compiler emits a
+//   sync message via WebSocket. The sync wire format is: `{ __type: "__sync",
+//   __key: "<varName>", __val: <value> }`" — `__val` is the value ENCODED against
+//   the cell's type (§57); "the client-side IIFE for server-originated writes …
+//   updates the corresponding cell" — an inbound frame is decoded STRICTLY
+//   against that table (canonical only, §57.5; a key the channel does not
+//   declare, an extra key, a wrong type: the frame is not applied).
+//   §38.10.4: "Sync of channel-scoped cells (§38.4) is suspended when the
+//   connection is closed and resumes when it reopens" — a write while closed is
+//   not queued.
+//   Echo dedup: the JSON of the value last synced per cell (inbound or outbound)
+//   — a value just applied from the wire is not sent back.
+// ---------------------------------------------------------------------------
+export function channel(scope, desc) {
+  requireScope(scope, "a channel");
+  const g = globalThis;
+  const byKey = new Map();
+  for (const c of desc.cells) byKey.set(c.key, c);
+  const last = new Map();
+  let ws = null;
+  let timer = null;
+  let disposed = false;
+  const hook = (f) => { if (typeof f === "function") batch(() => { f(); }); };
+  const url = () => (g.location.protocol === "https:" ? "wss:" : "ws:") + "//" + g.location.host + "/_scrml_ws/" + desc.name;
+  function receive(text) {
+    if (typeof text !== "string") return "a non-text frame";
+    let v;
+    try { v = JSON.parse(text); } catch { return "a frame that is not JSON"; }
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return "a frame that is not an object";
+    const keys = Object.keys(v);
+    if (keys.length !== 3 || !hasOwn(v, "__type") || !hasOwn(v, "__key") || !hasOwn(v, "__val")) return "a frame that is not exactly {__type, __key, __val}";
+    if (v.__type !== "__sync" || typeof v.__key !== "string") return "a frame that is not a __sync";
+    const c = byKey.get(v.__key);
+    if (c === undefined) return "a __sync for a cell this channel does not declare";
+    const d = decode(c.table, v.__val, { canonicalOnly: true });
+    if (!d.ok) return "a __sync whose value does not decode";
+    const e = encode(c.table, d.value);
+    if (e.ok) last.set(c.key, JSON.stringify(e.wire));
+    batch(() => { c.cell.set(d.value); });
+    return "";
+  }
+  function connect() {
+    timer = null;
+    if (disposed) return;
+    const s = new g.WebSocket(url());
+    ws = s;
+    s.onopen = () => { if (ws === s) hook(desc.open); };
+    s.onmessage = (ev) => {
+      if (ws !== s) return;
+      const why = receive(ev.data);
+      if (why !== "") g.console.error(`scrml channel ${desc.name}: ignored ${why}`);
+    };
+    s.onerror = () => { if (ws === s) hook(desc.error); };
+    s.onclose = () => {
+      if (ws !== s) return;
+      ws = null;
+      hook(desc.close);
+      if (!disposed && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
+    };
+  }
+  for (const c of desc.cells) {
+    effect(scope, () => {
+      const v = c.cell.get();
+      const e = encode(c.table, v);
+      if (!e.ok) { g.console.error(`scrml channel ${desc.name}: @${c.key} does not encode — not synced`); return; }
+      const j = JSON.stringify(e.wire);
+      if (last.get(c.key) === j) return;
+      if (ws !== null && ws.readyState === 1) {
+        ws.send(JSON.stringify({ __type: "__sync", __key: c.key, __val: e.wire }));
+        last.set(c.key, j);
+      }
+    });
+  }
+  scope.own(() => {
+    disposed = true;
+    if (timer !== null) g.clearTimeout(timer);
+    const s = ws;
+    ws = null;
+    if (s !== null) { try { s.close(); } catch { /* already closing */ } }
+  });
+  connect();
+}

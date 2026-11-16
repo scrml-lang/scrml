@@ -12,9 +12,10 @@
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
+import { loadProgram, warmLoadProgram, takePageErrors } from "../slice-m1/load-program.js";
 
 let mods;
-beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 300000 });
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 300000 });
 
 const fe = (src) => frontEnd(mods, [{ path: "app.scrml", src }], "app.scrml");
 const errs = (src) => fe(src).diags.filter((d) => d.severity === "Error");
@@ -196,4 +197,28 @@ describe("B — refused by name (fail closed — g-boot-channel-s478)", () => {
     one(prog(`${chan(`name="c"`).replace("<channel", "export <channel")}\n<p>\${@count}</p>`), "`export <channel>`");
   });
   test("a name= the route cannot carry verbatim", () => one(prog(`${chan(`name="a b"`)}\n<p>\${@count}</p>`), "letters, digits"));
+});
+
+// The served halves are channel-served-s478.test.js (it needs Bun's own WebSocket, which the
+// happy-dom page environment below replaces).
+describe("D0 — the client artifact boots with its channel (happy-dom)", () => {
+  test("the page renders and runs as before; the channel's connect does not break the page", async () => {
+
+    const src = prog(`${chan(`name="chat" reconnect=0`, `  let <count:int=0/>`)}\n<button id="b" onclick={ @count = @count + 1; }>+</button>\n<p id="o">\${@count}</p>`);
+    const r = fe(src);
+    expect(r.diags).toEqual([]);
+    // a socket stand-in: the page's connect is observed, not made (the served halves are tested
+    // against a real server in channel-served-s478.test.js)
+    const saved = globalThis.WebSocket;
+    const made = [];
+    globalThis.WebSocket = class { constructor(url) { made.push(url); this.readyState = 0; } send() {} close() {} };
+    try {
+      await loadProgram(r.core, "s478-channel-boot", []);
+      expect(made).toEqual([`ws://${globalThis.location.host}/_scrml_ws/chat`]);
+      expect(document.querySelector("#o").textContent).toBe("0");
+      document.querySelector("#b").click();
+      expect(document.querySelector("#o").textContent).toBe("1");
+    } finally { globalThis.WebSocket = saved; }
+    expect(takePageErrors()).toEqual([]);
+  });
 });

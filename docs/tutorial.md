@@ -1003,7 +1003,6 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap reads <channel> (s478-boot-channel) but does not print its WebSocket client yet -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.

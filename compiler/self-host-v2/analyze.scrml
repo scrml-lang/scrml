@@ -47581,6 +47581,9 @@ ${
         } else if (!hasErrorDiag(out)) {
             out = out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fname + "`, the `" + h.name + "` handler, is not a function declared in this file — the bootstrap calls a handler declared in the program's own file (§38.10.3 also resolves an imported one; INTERIM, g-boot-channel-s478)")])
         }
+        if (fsx is given && args.length == 0 && fsx.info.arity != 0 && !hasErrorDiag(out)) {
+            out = out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fname + "()`, the `" + h.name + "` handler, declares " + fsx.info.arity + " parameter(s) but the call passes none (§38.10.1: with no argument the event object is not passed) — the bootstrap calls a handler with no parameters only (g-boot-channel-s478)")])
+        }
         if (args.length >= 1 && !hasErrorDiag(out)) {
             out = out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "=" + fname + "(…)` passes the WebSocket event object (§38.10.1) — not in the bootstrap: its type system has no type for the host event value a handler would receive; write `" + h.name + "=" + fname + "()` (INTERIM, g-boot-channel-s478)")])
         }
