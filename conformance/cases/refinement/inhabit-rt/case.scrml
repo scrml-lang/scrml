@@ -1,6 +1,6 @@
 ${
     <amount>: number = 5000
-    function process(amt: number(>0 && <10000)) { @amount = amt }
+    function process(amt: number(>0 && <10000)) { @amount = amt; }
 }
 <program>
 <button id="ok" onclick=${process(@amount + 100)}>Ok</>

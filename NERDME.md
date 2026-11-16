@@ -230,7 +230,7 @@ Conversions that can fail or lose information are spelled out. Text becomes a nu
 
 The type annotation **is** the validation schema — no separate schema library, no `z.object()` wrappers, no `z.infer<typeof>` indirection.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4] — the bootstrap reads refinement types (number(>0 && <10000), string(email)) but judges them only at compile time on a fixed declaration with a literal value; a refinement on a struct field, a parameter or a writable cell needs the runtime check it does not build yet (g-boot-refinement-runtime-checks-s478) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3] — the bootstrap reads refinement types (number(>0 && <10000), string(email)) and builds their runtime check on a function parameter and a `const` local (S478 s478-boot-refinement-runtime); a refinement on a struct field, a `let` local or a writable cell needs the runtime check it does not build yet (g-boot-refinement-runtime-checks-s478) -->
 <!-- snippet: docs/readme-snippets/nerdme/refinement.scrml -->
 ```scrml
 // NERDME.md "Runtime type validation" — ruled; spec-ahead on the bootstrap (no refinement types yet).

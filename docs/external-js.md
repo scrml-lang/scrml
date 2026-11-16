@@ -16,7 +16,7 @@ Before you reach for an external JS library, check whether scrml already handles
 
 Usually you don't. scrml's type system checks at compile time and at the boundary where untrusted values enter. Struct types (`type User:struct = { ... }`), enums (`type Color:enum = { Red, Green, Blue }`), and inline type predicates (`int(>0 && <10000)`, `string(email)`, SPEC §53) cover most of what zod is used for, with compile-time errors instead of runtime exceptions where the value is known statically.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap emits no run-time check yet for an inline type predicate (§53) on a value that reaches it unproven -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap emits no run-time check yet for an inline type predicate (§53) on a struct field (it builds the check on a function parameter and a `const` local, S478 s478-boot-refinement-runtime) -->
 ```scrml
 <program>
   type User:struct = {

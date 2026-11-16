@@ -2823,6 +2823,150 @@ export function removeFrontWithin(target, n, min, max, at) {
   removeFront(target, n);
 }
 
+// ---------------------------------------------------------------------------
+// s478 (s478-boot-refinement-runtime) — SPEC §53.4.5, the BOUNDARY zone's runtime
+// check of a refinement type `base(pred)` (§53.4.3; §53.11: "The compiler SHALL
+// emit a runtime check for every boundary-zone assignment that it cannot statically
+// elide"). The compiler's one reader (parse.scrml judgeRefine) hands the predicate
+// over as a SPEC — prefix tokens separated by one space:
+//   `c <op> <n>`  the value against a number      `l <op> <n>`  `.length`, in code points (App. D.1)
+//   `s <name>`    a named shape (§53.6.1)         `& A B` · `| A B` · `! A`
+// The value must first be a value of the base type (§53.3.4: "A `number(>0 &&
+// <10000)` value IS a `number`. The constrained type is a subtype of the base
+// type"). A value that fails is the E-CONTRACT-001-RT trap, raised before the
+// assignment it guards (§53.11: "The runtime check SHALL halt execution and produce
+// E-CONTRACT-001-RT before the assignment is applied"), naming the constraint, the
+// value, the failing clause and the variable and its location (§53.4.5 item 3).
+// The shapes are the compiler's static-zone predicates (parse.scrml refShapeLit —
+// §53.6.1: "The normative predicate implementations are compiler-defined"), and
+// `url` is `_scrml_url_shape_ok` below (§53.6.1, normative: the WHATWG URL parser
+// and the §5.2 scheme reader — one reader, one safe-scheme set). A spec this
+// function does not read (an unknown shape, a token out of place) admits NOTHING
+// (§53.11: a runtime check "SHALL NOT admit values it cannot judge").
+
+function refineParse(toks, st) {
+  const t = toks[st.i++];
+  if (t === "&" || t === "|") {
+    const l = refineParse(toks, st);
+    const r = refineParse(toks, st);
+    return { k: t, l, r };
+  }
+  if (t === "!") return { k: "!", x: refineParse(toks, st) };
+  if (t === "c" || t === "l") {
+    const op = toks[st.i++];
+    const n = Number(toks[st.i++]);
+    return { k: t, op, n };
+  }
+  if (t === "s") return { k: "s", name: toks[st.i++] };
+  return { k: "?" };
+}
+
+function refineCmp(op, a, b) {
+  switch (op) {
+    case ">": return a > b;
+    case ">=": return a >= b;
+    case "<": return a < b;
+    case "<=": return a <= b;
+    case "==": return a === b;
+    case "!=": return a !== b;
+    default: return false;
+  }
+}
+
+// The named shapes, as the static zone judges a literal (parse.scrml shapeEmail … shapeColor).
+const _SCRML_REFINE_SHAPES = {
+  email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+  uuid: (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+  phone: (v) => /^[+]?[0-9\s\-().]{7,15}$/.test(v),
+  date: (v) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v),
+  time: (v) => /^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$/.test(v),
+  color: (v) => /^#[0-9A-Fa-f]{6}$|^[a-z]+$/.test(v),
+  url: (v) => _scrml_url_shape_ok(v),
+};
+
+function refineHolds(node, v) {
+  switch (node.k) {
+    case "&": return refineHolds(node.l, v) && refineHolds(node.r, v);
+    case "|": return refineHolds(node.l, v) || refineHolds(node.r, v);
+    case "!": return !refineHolds(node.x, v);
+    case "c": return typeof v === "number" && !Number.isNaN(node.n) && refineCmp(node.op, v, node.n);
+    case "l": return typeof v === "string" && !Number.isNaN(node.n) && refineCmp(node.op, codePoints(v).length, node.n);
+    case "s": {
+      if (typeof v !== "string" || !Object.prototype.hasOwnProperty.call(_SCRML_REFINE_SHAPES, node.name)) return false;
+      return _SCRML_REFINE_SHAPES[node.name](v) === true;
+    }
+    default: return false;
+  }
+}
+
+// Review #1911 LOW-1: is every node of the spec one this runtime reads — a known
+// combinator, comparison operator, number and shape? A spec with ANY node it does
+// not read is refused whole (refineCheck traps), so no composition — a `!` above an
+// unread node included — can turn "cannot judge" into an admit (§53.11: a runtime
+// check "SHALL NOT admit values it cannot judge").
+const _SCRML_REFINE_OPS = { ">": 1, ">=": 1, "<": 1, "<=": 1, "==": 1, "!=": 1 };
+function refineKnown(node) {
+  switch (node.k) {
+    case "&": case "|": return refineKnown(node.l) && refineKnown(node.r);
+    case "!": return refineKnown(node.x);
+    case "c": case "l":
+      return Object.prototype.hasOwnProperty.call(_SCRML_REFINE_OPS, node.op) && !Number.isNaN(node.n);
+    case "s": return Object.prototype.hasOwnProperty.call(_SCRML_REFINE_SHAPES, node.name);
+    default: return false;
+  }
+}
+
+function refineText(node) {
+  switch (node.k) {
+    case "&": return refineText(node.l) + " && " + refineText(node.r);
+    case "|": return "(" + refineText(node.l) + " || " + refineText(node.r) + ")";
+    case "!": return "!(" + refineText(node.x) + ")";
+    case "c": return "value " + node.op + " " + node.n;
+    case "l": return ".length " + node.op + " " + node.n;
+    case "s": return node.name;
+    default: return "(a predicate the runtime does not read)";
+  }
+}
+
+// The failing clause (§53.4.5 item 3, "if decomposable"): the first conjunct of a
+// `&&` chain that fails; any other predicate fails whole.
+function refineFailing(node, v) {
+  if (node.k === "&") return refineHolds(node.l, v) ? refineFailing(node.r, v) : refineFailing(node.l, v);
+  return refineText(node);
+}
+
+function refineBaseHolds(base, v) {
+  if (base === "number") return typeof v === "number" && !Number.isNaN(v);
+  // Review #1911 LOW-2: an `int` is a SAFE integer — ±(2^53−1), the range
+  // E-INT-CONVERSION-RT holds (§41.18, §19.17) — not any integral double (2^53+1, 1e300).
+  if (base === "int" || base === "integer") return Number.isSafeInteger(v);
+  if (base === "string") return typeof v === "string";
+  return false;
+}
+
+function refineShowValue(v) {
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (v === null || v === undefined) return "not";
+  return "a " + (Array.isArray(v) ? "tape" : typeof v);
+}
+
+/** A value reaching a boundary-zone refinement: `v` itself when it inhabits `base(spec)`, else the E-CONTRACT-001-RT trap. */
+export function refineCheck(v, base, spec, shown, what, at) {
+  const st = { i: 0 };
+  const toks = String(spec).split(" ");
+  const node = refineParse(toks, st);
+  const whole = st.i === toks.length && refineKnown(node);
+  if (whole && refineBaseHolds(base, v) && refineHolds(node, v)) return v;
+  let failing;
+  if (!whole) failing = "(a predicate the runtime does not read)";
+  else if (!refineBaseHolds(base, v)) failing = "the value is not a `" + base + "`";
+  else failing = refineFailing(node, v);
+  throw new ScrmlTrap("E-CONTRACT-001-RT",
+    "Value constraint violated at runtime. Type: " + shown + "; value: " + refineShowValue(v) + "; failing condition: " + failing + "; " + what + " (" + at + ")",
+    { type: shown, value: v, failing, what, at });
+}
+
 /**
  * `xs.insert(i, v)` (§66.12.6 rule 3, grow anywhere): a NEW tape with `v` at
  * position `i` — `0 <= i <= xs.length` (`i == xs.length` adds at the end). A

@@ -75,12 +75,16 @@ describe("the boundary zone is refused by name (INTERIM) — no unchecked refine
     refused(cell("let <x:number(>0)=1/>"));
     refused(cell("<x:number(>0)/>"));
   });
-  test("a parameter, a struct field, a `let` local, a non-literal const, a tape element", () => {
-    refused("${\n    fn f(v: number(>0)) -> number {\n        return v;\n    }\n}\n<program><p>${f(1)}</p></program>\n");
+  test("a struct field, a `let` local, a tape element", () => {
     refused("${\n    type L:struct = { href: string(url) }\n}\n<program><p>x</p></program>\n");
     refused(fnBody("        let q: number(>0) = 5;"));
-    refused(fnBody("        const q: number(>0) = v;"));
     refused(fnBody("        const q: number(>0)[] = [];"));
+  });
+  // s478-boot-refinement-runtime: a function declaration's parameter and a non-literal `const`
+  // local are the boundary zone with their runtime check BUILT (slice-m4/refinement-runtime-s478.test.js)
+  test("a parameter and a non-literal `const` compile — their runtime check is built", () => {
+    expect(errs("${\n    fn f(v: number(>0)) -> number {\n        return v;\n    }\n}\n<program><p>${f(1)}</p></program>\n")).toEqual([]);
+    expect(errs(fnBody("        const q: number(>0) = v;"))).toEqual([]);
   });
   test("a `url` literal is not decided by the bootstrap (no WHATWG URL parser)", () => {
     refused(cell('<x:string(url)="https://scrml.dev/"/>'));

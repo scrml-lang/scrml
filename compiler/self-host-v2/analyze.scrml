@@ -60,7 +60,7 @@ ${
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
-    import { PNs, Parsed, parseFileNs, nsOfItems } from "./parse.scrml"
+    import { PNs, Parsed, parseFileNs, nsOfItems, RefineTop, refineTopOf, refineSpec, refineLitVerdict, refineLitFailMsg } from "./parse.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, MultiStmt, StmtVerdict, sqlFacts, slotInLiteral, txControl, txControlAware, multiStatement, programStatement, journalOff } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
@@ -470,11 +470,20 @@ ${
     // value is a `T | not` — a PRESENCE TEST (RULED S440, truthiness Q1: "a
     // bare `@x` of type `T | not` IS a presence test … the compiler emits an
     // absence check, never JS truthiness"). `lower` wraps each in `IsSome`.
-    export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[], bounds: BoundCheck[] }
+    export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[], bounds: BoundCheck[], refines: RefineCheck[] }
     // s477 (O36 RULED S477): node `nid`'s value is checked at run time against the
     // length bound `min..=max` of the tape type it flows into (the
     // E-WRITE-INVARIANT-RT trap; `loc` "file:line" names the write).
     export type BoundCheck:struct = { nid: int, min: int, max: int, loc: string }
+    // s478 (s478-boot-refinement-runtime) — a refinement in the BOUNDARY zone
+    // (§53.4.3), judged at run time where the value reaches it (§53.4.5, §53.11 "The
+    // compiler SHALL emit a runtime check for every boundary-zone assignment that it
+    // cannot statically elide"; the E-CONTRACT-001-RT trap). `nid`: a function
+    // declaration's PARAMETER (its entry check, §53.9.1 / §53.9.4) or a `const`
+    // local's statement (checked as it binds). `base` / `spec` the refinement
+    // (parse.scrml refineSpec — the one reader), `shown` as written, `what` and `loc`
+    // ("file:line") name the variable and its location for the trap (§53.4.5 item 3).
+    export type RefineCheck:struct = { nid: int, base: string, spec: string, shown: string, what: string, loc: string }
     // r8 — Rule C for NAMES: a declared type that did not resolve (E-TYPE-UNKNOWN
     // answers with a placeholder type) is never checked against. `params`: the
     // parameter nids whose type did not resolve; `fields`: the struct FieldDef
@@ -6946,6 +6955,12 @@ ${
     // bootstrap; "" when it does (every parameter a scalar, the result a scalar
     // or a scalar's `T | not`).
     fn wrapperTypeWhy(te: TypeEnv, fs: FnSrc, st: AS) -> string {
+        for (const p of fs.f.params) {
+            // s478 (s478-boot-refinement-runtime): a refined parameter is checked at the
+            // function's entry (§53.9.1) — a host-backed wrapper keeps no body to hold it
+            const ptop: RefineTop = refineTopOf(p.ty)
+            if (ptop.base != "") return "its parameter `" + p.name + "` is the refinement `" + ptop.base + "(" + ptop.pred + ")`, checked at the function's entry (§53.9.1), and a host-backed wrapper keeps no body to hold that check"
+        }
         for (const p of fs.f.params) {
             const at: AType | not = p.ty
             if (at is given) {
@@ -27483,6 +27498,33 @@ ${
         return out
     }
 
+    // s478 (s478-boot-refinement-runtime) — one RefineCheck per node (the last pass's).
+    fn refineChecks(files: FileAst[], rs: RefineAt[]) -> RefineCheck[] {
+        let out: RefineCheck[] = []
+        let seen: int[] = []
+        for (const r of rs) {
+            if (seen.indexOf(r.nid) < 0) {
+                out = out.concat([{ nid: r.nid, base: r.base, spec: refineSpec(r.base, r.pred), shown: r.base + "(" + r.pred + ")", what: r.what,
+                                    loc: r.file + ":" + fileLineOf(files, r.file, r.offset) }])
+                seen = seen.concat([r.nid])
+            }
+        }
+        return out
+    }
+
+    // s478 — the boundary-zone check recorded for node `nid`, else `not`.
+    export fn refineCheckAt(t: Tables, nid: int) -> RefineCheck | not {
+        for (const r of t.typing.refines) {
+            if (r.nid == nid) return r
+        }
+        return not
+    }
+
+    fn recordRefine(ts: TypeState, nid: int, top: RefineTop, what: string, file: string, offset: int) -> TypeState {
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds,
+                 refines: ts.refines.concat([{ nid: nid, base: top.base, pred: top.pred, what: what, file: file, offset: offset }]) }
+    }
+
     fn fileLineOf(files: FileAst[], file: string, offset: int) -> int {
         for (const f of files) {
             if (f.path == file) {
@@ -27503,7 +27545,7 @@ ${
 
     // The settled pass's types, indexed by NodeId (the first entry per node;
     // the same one-pass build as `nidIndex`, over the entries' own nids).
-    fn typingOf(exprs: ExprType[], presence: int[], bounds: BoundCheck[]) -> Typing {
+    fn typingOf(exprs: ExprType[], presence: int[], bounds: BoundCheck[], refines: RefineCheck[]) -> Typing {
         let top: int = -1
         for (const x of exprs) {
             if (x.nid > top) top = x.nid
@@ -27514,13 +27556,16 @@ ${
             if (exprs[i].nid >= 0) at[exprs[i].nid] = i
             i = i - 1
         }
-        return { exprs: exprs, at: at, presence: presence, bounds: bounds }
+        return { exprs: exprs, at: at, presence: presence, bounds: bounds, refines: refines }
     }
 
     // `contribs`: every value an UNANNOTATED `let` local is given — its
     // initializer and each later assignment (a local's type is their join).
     // `presence`: the presence-test condition nodes (Typing.presence).
-    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[], bounds: BoundAt[] }
+    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[], bounds: BoundAt[], refines: RefineAt[] }
+    // s478 (s478-boot-refinement-runtime) — a boundary-zone refinement the typer met
+    // (a parameter's, a `const` local's); `file` / `offset` locate it (refineChecks).
+    type RefineAt:struct = { nid: int, base: string, pred: string, what: string, file: string, offset: int }
     // s477 (O36 RULED S477) — a value the typer could not prove inside its target's
     // length bound: checked at run time where it is evaluated (lower wraps node `nid`
     // in PrimOp.LengthCheck). `file` / `offset` locate it for the trap's message.
@@ -27906,7 +27951,7 @@ ${
     // a cell (or a server one, "*") no longer ends a narrowing it cannot reach.
     // `nid`: the function's AFn nid (s472: argument checks find THE callee's
     // parameters by it, never by name). `file`: its declaring file.
-    type FnW:struct = { name: string, nid: int, file: string, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
+    type FnW:struct = { name: string, nid: int, file: string, keys: string[], params: int[], prefs: RefineTop[] }   // s478: `prefs` each parameter's top refinement (refineTopOf), for the literal argument's static zone   // `params`: the parameter nids (r4 (c): argument checks)
     type Alias:struct = { name: string, key: string }
 
     fn exprKids(e: AExpr) -> AExpr[] {
@@ -28161,7 +28206,7 @@ ${
         for (const w of ws) {
             if (w.name == "" && w.file == file) out = out.concat([w])     // s477 fix r1: a nested function's parameters (fnWrites)
             for (const local of boundAs(lk, file, NameKind.KFn, w.name, w.file)) {
-                out = out.concat([{ name: local, nid: w.nid, file: w.file, keys: w.keys, params: w.params }])
+                out = out.concat([{ name: local, nid: w.nid, file: w.file, keys: w.keys, params: w.params, prefs: w.prefs }])
             }
         }
         return out
@@ -28282,7 +28327,7 @@ ${
             for (const af of fnItems(f.items)) {
                 let own: string[] = blockEffects(af.body, [])
                 if (af.server || sqlsInBlock(af.body).length > 0 || (!af.pure && printScanFn(lk, f, af).calls.length > 0)) own = own.concat(["*"])   // serverOwn (§12.2 T1; s478 r1: a print, §20.7.3), as the binder decides it
-                ws = ws.concat([{ name: af.name, nid: af.nid, file: f.path, keys: own, params: paramNids(af.params) }])
+                ws = ws.concat([{ name: af.name, nid: af.nid, file: f.path, keys: own, params: paramNids(af.params), prefs: paramRefines(af.params) }])
             }
         }
         let changed = true
@@ -28307,7 +28352,7 @@ ${
                         }
                     }
                 }
-                next = next.concat([{ name: w.name, nid: w.nid, file: w.file, keys: keys, params: w.params }])
+                next = next.concat([{ name: w.name, nid: w.nid, file: w.file, keys: keys, params: w.params, prefs: w.prefs }])
             }
             ws = next
             pass = pass + 1
@@ -28320,7 +28365,7 @@ ${
         // no file scope; fnwIn passes it through unbound.
         for (const f of files) {
             for (const nf of fnsWithNested(fnItems(f.items))) {
-                if (nf.outer >= 0) ws = ws.concat([{ name: "", nid: nf.f.nid, file: f.path, keys: [], params: paramNids(nf.f.params) }])
+                if (nf.outer >= 0) ws = ws.concat([{ name: "", nid: nf.f.nid, file: f.path, keys: [], params: paramNids(nf.f.params), prefs: paramRefines(nf.f.params) }])
             }
         }
         return ws
@@ -28415,7 +28460,7 @@ ${
     }
 
     fn record(ts: TypeState, nid: int, vt: VType) -> TypeState {
-        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
+        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
     }
 
     // =========================================================================
@@ -28754,7 +28799,7 @@ ${
 
     fn recordBound(ts: TypeState, env: TEnv, x: AExpr, b: BoundRange) -> TypeState {
         return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet,
-                 bounds: ts.bounds.concat([{ nid: x.nid, min: b.min, max: b.max, file: env.file, offset: x.span.start }]) }
+                 bounds: ts.bounds.concat([{ nid: x.nid, min: b.min, max: b.max, file: env.file, offset: x.span.start }]), refines: ts.refines }
     }
 
     // an array literal's length when every element is plain (no spread); -1 otherwise
@@ -28934,15 +28979,15 @@ ${
     }
 
     fn report(ts: TypeState, env: TEnv, span: ASpan, code: string, msg: string) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
+        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
     }
 
     fn contribute(ts: TypeState, s: Sym, vt: VType) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
     }
 
     fn markPresence(ts: TypeState, nid: int) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]), quiet: ts.quiet, bounds: ts.bounds }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]), quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
     }
 
     // ---- THE LIFECYCLE READ RULE (s475-boot-lifecycle-reads, slice S1) -----------
@@ -28968,7 +29013,7 @@ ${
     // (E-OPERAND-NOT-NARROWED, E-COND-NOT-BOOLEAN, …) follows for the same read.
     fn quietPlace(ts: TypeState, x: AExpr) -> TypeState {
         if (atName(x) == "") return ts
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet.concat([x.nid]), bounds: ts.bounds }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet.concat([x.nid]), bounds: ts.bounds, refines: ts.refines }
     }
 
     // A whole condition `c` that is a bare place is a presence test — except a
@@ -30772,6 +30817,7 @@ ${
             .TapeConcat :> ts
             .TapeIncludes :> ts
             .LengthCheck :> ts
+            .RefineCheck :> ts
             .TapeInsert :> ts
             .Print :> ts
         }
@@ -31522,6 +31568,7 @@ ${
             .TapeConcat :> VType.Unknown
             .TapeIncludes :> VType.Unknown
             .LengthCheck :> VType.Unknown
+            .RefineCheck :> VType.Unknown
             .TapeInsert :> VType.Unknown
             .Print :> VType.Unknown
         }
@@ -31832,6 +31879,12 @@ ${
         return false
     }
 
+    fn paramRefines(ps: AParam[]) -> RefineTop[] {
+        let out: RefineTop[] = []
+        for (const p of ps) { out = out.concat([refineTopOf(p.ty)]) }
+        return out
+    }
+
     fn paramNids(ps: AParam[]) -> int[] {
         let out: int[] = []
         for (const p of ps) { out = out.concat([p.nid]) }
@@ -31843,8 +31896,12 @@ ${
         let ts: TypeState = ts0
         const name: string = fi.name
         let pnids: int[] = []
+        let prefs: RefineTop[] = []
         for (const w of env.fnw) {
-            if (w.nid == fi.nid) pnids = w.params     // s472: THE callee's parameters (by its node), never the last function of that name
+            if (w.nid == fi.nid) {
+                pnids = w.params     // s472: THE callee's parameters (by its node), never the last function of that name
+                prefs = w.prefs
+            }
         }
         if (pnids.length != args.length) return ts
         let i = 0
@@ -31861,6 +31918,17 @@ ${
                 // s477 r1 F2: a struct literal's FIELD values against their declared fields
                 // (type and length bound), as every other write position does (§66.11.2, §66.1 rule 5)
                 ts = checkLitFields(env, args[i], ts)
+            }
+            // s478 (s478-boot-refinement-runtime) — a LITERAL argument to a refined parameter is
+            // the static zone (§53.4.2 rule 1; §53.12.3 "Call site: 10 is a literal, 10 > 0 && 10 <
+            // 500 — static zone, no check"); one that demonstrably fails is E-CONTRACT-001 (§53.11:
+            // "The compiler SHALL emit E-CONTRACT-001 when a literal value is assigned to a
+            // constrained type variable and the literal demonstrably fails the predicate"). Any
+            // other argument is judged by the callee's entry check.
+            if (i < prefs.length && prefs[i].base != "") {
+                const pr: RefineTop = prefs[i]
+                const verdict: string = refineLitVerdict(pr.base, pr.pred, args[i])
+                if (verdict == "fail" || verdict == "base") ts = report(ts, env, args[i].span, "E-CONTRACT-001", refineLitFailMsg(pr.base, pr.pred, args[i], "argument " + (i + 1) + " of `" + name + "`", verdict))
             }
             i = i + 1
         }
@@ -32707,10 +32775,31 @@ ${
         const annot: Type | not = annotOf(env.t, sym)
         if (annot is given) {
             let ts2: TypeState = checkAnnotInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", r.ts)
+            // s478 (s478-boot-refinement-runtime) — a `const` local's refinement whose value
+            // is not a literal proven now (§53.4.2) is the boundary zone (§53.4.3 rule 1):
+            // checked as the local binds (lower.scrml localRefineCheck)
+            const ltop: RefineTop = constLocalRefine(s)
+            if (ltop.base != "" && refineLitVerdict(ltop.base, ltop.pred, init) != "pass") ts2 = recordRefine(ts2, s.nid, ltop, "the local `" + name + "`", env.file, s.span.start)
             ts2 = boundValue(env, init, annot, "`" + name + "`", checkNotElems(env, init, annot, checkLitFields(env, init, ts2)))
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
+    }
+
+    // s478 — the refinement standing at the top of a `const` local's written type
+    // (a `let` local's is refused where it is read, parse.scrml localRefine).
+    fn constLocalRefine(s: AStmt) -> RefineTop {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n, mutable: m, ty: y) :> constRefineOf(m, y)
+            // no-default-arm: one question of a statement — is it a `const` local; every other form is not
+            _ :> { base: "", pred: "" }
+        }
+    }
+
+    fn constRefineOf(mutable: boolean, y: AType | not) -> RefineTop {
+        if (mutable) return { base: "", pred: "" }
+        return refineTopOf(y)
     }
 
     // s472 — a file-scope constant's type (constPass): its written type, else
@@ -34196,13 +34285,13 @@ ${
             const ts: TypeState = typePass(files, t, settled, prior, lk)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
-            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence, boundChecks(files, ts.bounds)), diags: ts.diags }
+            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence, boundChecks(files, ts.bounds), refineChecks(files, ts.refines)), diags: ts.diags }
             prev = settled
             settled = next
             pass = pass + 1
         }
         const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior, lk)
-        return { typing: typingOf(last.exprs, last.presence, boundChecks(files, last.bounds)), diags: last.diags }
+        return { typing: typingOf(last.exprs, last.presence, boundChecks(files, last.bounds), refineChecks(files, last.refines)), diags: last.diags }
     }
 
     fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
@@ -34221,7 +34310,7 @@ ${
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[], lk: Linkage) -> TypeState {
-        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [], bounds: [] }
+        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
         const fnw: FnW[] = fnWrites(files, lk)
         const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
@@ -34365,7 +34454,7 @@ ${
             // s473: rule 10 (E-DECL-TYPE-UNPROVEN, originReport) is the initializer's one
             // report — what the typer now knows of an unproven callee's returns (a
             // `function`'s `int | string`, inferReturn) is not reported inside it again
-            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds }
+            if (f.annotated && f.trusted && isWrittenUnproven(f.origin)) ts = { exprs: ts.exprs, diags: before, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
             // s473: an initializer whose value §66.3 rule 10 reports unproven
             // (E-DECL-TYPE-UNPROVEN, originReport) is not ALSO checked against
             // the annotation — the typer may know it as a choice (a `function`'s
@@ -34476,9 +34565,18 @@ ${
         return report(ts, env, f.span, "E-DECL-TYPE-UNPROVEN", "`" + n + "` is written with a type, but its value's type cannot be resolved — " + why + " — so nothing checks that the value is one (§66.3 rule 10). Declare what is untyped (the function's `-> T`, a parameter's or a local's type)")
     }
 
-    fn typeFn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {
+    fn typeFn(env: TEnv, af: AFn, ts0: TypeState) -> TypeState {
         let fenv: TEnv = env
+        let ts: TypeState = ts0
         for (const p of af.params) {
+            // s478 (s478-boot-refinement-runtime) — §53.9.1: "The constraint annotation at
+            // the parameter site is a boundary zone declaration. The compiler SHALL emit a
+            // runtime check when the function is called with an unconstrained argument";
+            // §53.9.4: on a server function "the compiler SHALL generate server-side
+            // validation code that runs before any database write or business logic".
+            // Checked at the function's entry (lower.scrml paramRefineChecks).
+            const ptop: RefineTop = refineTopOf(p.ty)
+            if (ptop.base != "") ts = recordRefine(ts, p.nid, ptop, "parameter `" + p.name + "` of `" + af.name + "`", env.file, p.span.start)
             const pf: BindFact | not = bindFact(env.t.binds, p.nid)
             const s: Sym | not = bindSym(pf)
             // an untyped parameter, or one whose type failed to parse, is unproven
@@ -46006,7 +46104,7 @@ ${
         st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: pendCallDeps(ra.g, fs.names, st.reqs) }
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [] },
+                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [], refines: [] },
                                 novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
@@ -46083,7 +46181,7 @@ ${
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
-        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [], bounds: [] }
+        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
         const fns: int[] = refusedReturns(files, t)
         for (const di of t.decls) {
             const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }
