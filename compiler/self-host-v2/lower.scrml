@@ -772,7 +772,7 @@ ${
             .VStructOf(ty: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VConstruct(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VOp(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
-            .VHost(call: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VHost(call: x) :> Expr.Host(x)    // s478 (s478-boot-fn-values): `e.type` — the listener event's member read
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -2541,7 +2541,7 @@ ${
         const b0: Block = match v {
             .Bare(e: e) :> block(handlerStmt(c, e))
             .Paren(e: e) :> block(handlerStmt(c, e))
-            .Braced(b: b) :> bracedHandlerBlock(c, b)
+            .Braced(b: b, ev: ev) :> bracedHandlerBlock(c, b, ev)
             .Quoted(v: s) :> block([])
             .Dur(text: s) :> block([])
             .NoValue :> block([])
@@ -2574,7 +2574,8 @@ ${
         return hoistStmtExpr(c, e).concat(evalStmt(c, e))
     }
 
-    fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
+    fn bracedHandlerBlock(c: LC, b: ABlock, ev: string) -> Block {
+        if (ev != "") return lowerBlock(c, b)     // s478: a listener that takes the event — never a reference (parse refuses `(e) => { f }`)
         const r: AExpr | not = blockReference(b)
         if (r is given) return block(handlerStmt(c, r))
         return lowerBlock(c, b)
@@ -3895,6 +3896,14 @@ ${
     // s454 (U1b) — the types a shipped built-in enum's payloads NAME (the
     // client-call failure enum's `Transport(t: ServerCallError)` names the
     // built-in `ServerCallError`, which then ships too).
+    fn isStructTypeDef(td: TypeDef) -> boolean {
+        return match td {
+            .HostDef(sym: x) :> false
+            .StructDef(sym: x) :> true
+            .EnumDef(sym: x) :> false
+        }
+    }
+
     fn isHostTypeDef(td: TypeDef) -> boolean {
         return match td {
             .HostDef(sym: x) :> true
@@ -4577,7 +4586,9 @@ ${
         }
         for (const ti of t.types) {
             const ts: Sym = typeDefSym(ti.def)
-            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def))) types = types.concat([ti.def])
+            // s478-boot-sql-row-types: a `?{}` row struct (analyze rowTypes — the one StructDef of the
+            // built-in file) ships always: field reads name its columns (print memberAt)
+            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def)) || isStructTypeDef(ti.def)) types = types.concat([ti.def])
             if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts
             if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts
         }
@@ -4600,8 +4611,8 @@ ${
         const consts: CoreConst[] = coreConsts(t)
         const top: AProgram | not = topProgramOf(tp.files, t)
         const head: CoreHead = headOf(top)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints }
         return { core: core, diags: tp.diags }
     }
 

@@ -404,6 +404,7 @@ ${
             envelopes: [],
             head: plainHead(),
             tool: not,
+            endpoints: [],
         }
     }
 

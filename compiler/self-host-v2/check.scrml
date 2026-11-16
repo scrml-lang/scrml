@@ -5995,6 +5995,8 @@ ${
     fn unreadableHost(c: HostCall) -> string[] {
         return match c {
             .DateNow :> []
+            .EventRead(member: m) :> []
+            .EventCall(member: m) :> []
             .Unreadable :> ["C-R1: a parse placeholder (an expression the parser could not read) reached Core — a compiler defect; nothing is printed"]
         }
     }

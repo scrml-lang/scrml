@@ -28,7 +28,7 @@ function nodes(x, out = []) {
 // or a field value, checked separately).
 // s472 (boot-math-port): `orig` — an import name's EXPORTED identifier (AImportName.orig).
 // s475 (namespace import): `ns` — the identifier `import * as ns` binds (AImport.ns; "" for any other import).
-const STRING_KEYS = new Set(["path", "name", "orig", "ns", "v", "raw", "text", "tag", "from", "variant", "op"]);
+const STRING_KEYS = new Set(["path", "name", "orig", "ns", "v", "raw", "text", "tag", "from", "variant", "op", "ev"]);   // s478 (s478-boot-fn-values): `ev` — a `${(e) => …}` listener's event parameter, an identifier ("" none)
 function strayStrings(x, key = "", out = []) {
   if (Array.isArray(x)) { x.forEach((y) => strayStrings(y, key === "grants" ? "grant" : key, out)); return out; }
   if (x && typeof x === "object") { for (const [k, v] of Object.entries(x)) if (k !== "span") strayStrings(v, k, out); return out; }

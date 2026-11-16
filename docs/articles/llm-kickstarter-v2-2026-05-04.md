@@ -95,7 +95,7 @@ When you are stuck on a design call ("should this engine attribute behave X way 
 
 Start from the canonical shape below and modify what you need. Don't write from scratch — every scrml app is a variation of this skeleton.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×4] — the bootstrap has no <db tables=> or <empty>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-TYPE-031×2] — the bootstrap has no <db tables=> or <empty>; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` and the nullable `phone` is `string | not` there (§14.8.3), which do not fit Contact's `id: int` / `phone: string` (owner question g-boot-sql-row-field-types-owner-s478) -->
 ```scrml
 <program db="contacts.db">
 
@@ -1364,7 +1364,7 @@ If the user's prompt mentions auth, real-time, reactive state, schema, multi-pag
 
 This is the **first recipe to reach for** when the UI has more than one mode, lifecycle phase, or screen state. If you're writing more than two booleans that gate the same UI, you want an engine.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no <db tables=>, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-TYPE-031] — the bootstrap has no <db tables=>; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Row's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 ```scrml
 <program db="items.db">
 
@@ -1441,7 +1441,7 @@ Notes:
 
 `signJwt` requires three arguments: `(payload, secret, expiresIn)`. Calling it with one will runtime-crash (the secret is the HMAC key).
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×10] — the bootstrap has no auth= or <db protect=> / tables=, cannot import scrml:auth / scrml:process (their sources do not compile on the bootstrap yet; each import is refused by name), and cannot type a client call's untyped ?{} rows -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×9] — the bootstrap has no auth= or <db protect=> / tables=, cannot import scrml:auth / scrml:process (their sources do not compile on the bootstrap yet; each import is refused by name), and cannot decode the answer of a client call whose returns it cannot prove (login, signup) -->
 ```scrml
 <program db="users.db" auth="none">
 
@@ -1832,7 +1832,7 @@ A `lin` declared outside a loop may not be consumed inside the loop body (E-LIN-
 
 When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×3] — the bootstrap has no <db tables=> or <empty> yet, and cannot type the rows a client call of a ?{} function returns (⚑ OPEN) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-TYPE-031] — the bootstrap has no <db tables=> or <empty> yet; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Contact's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 ```scrml
 <program db="contacts.db">
 
