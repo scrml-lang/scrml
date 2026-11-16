@@ -9,14 +9,14 @@
     <button id="inc" onclick={ @n = @n + 1; }>inc</button>
     <button id="toB" onclick={ @mode = "b"; }>b</button>
     <button id="toC" onclick={ @mode = "c"; }>c</button>
-    <div id="host">${ if (@shown) { lift <p id="n">${@n}</p> } }</div>
+    <div id="host">${ if (@shown) { lift <p id="n">${@n}</p>; } }</div>
     <div id="chain">${
         if (@mode == "a") {
-            lift <p id="pa">a-${@n}</p>
+            lift <p id="pa">a-${@n}</p>;
         } else if (@mode == "b") {
-            lift <p id="pb">b-${@n}</p>
+            lift <p id="pb">b-${@n}</p>;
         } else {
-            lift <p id="pc">c-${@n}</p>
+            lift <p id="pc">c-${@n}</p>;
         }
     }</div>
 </main>

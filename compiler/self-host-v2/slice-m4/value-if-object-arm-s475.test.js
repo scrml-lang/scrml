@@ -198,11 +198,11 @@ describe("1D — branch shapes: errors by their own code, the INTERIM refusal", 
     expect(codes(P(`    function h(c: bool) -> int { const v = if (c) { } else { 3 }; return 1; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`    function h(c: bool, d: bool) -> int { const v = if (c) { one(); if (d) { lift 1; } } else { 3 }; return 1; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("a branch that does not parse (markup as a value, g-boot-markup-as-value-unbuilt-s473) draws no shape report beside its parse error", () => {
-    const cs = codes(P(``, `        <p>\${ if (@ok) { <b>x</b> } else { "n" } }</p>`));
-    expect(cs).toContain("E-PARSE-EXPR");
-    expect(cs).not.toContain("E-ARM-TAIL-VALUE");
-    expect(cs).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+  test("a markup branch in a markup `${ if }` is the §17.6.10 value-form (s478-boot-markup-in-logic: read on the Tier-0 path) — no shape report", () => {
+    // (before s478-boot-markup-in-logic the `<b>` branch did not parse: E-PARSE-EXPR, and this
+    // test pinned that no shape report stood beside it; markup-in-logic-s478.test.js renders it)
+    const cs = codes(P(``, `        <div>\${ if (@ok) { <b>x</b> } else { "n" } }</div>`));
+    expect(cs).toEqual([]);
   });
   test("every branch is braced (§17.6.1); a logic-position head takes its parentheses", () => {
     expect(codes(P(`    function h(c: bool) -> int { const v = if (c) 1 else 2; return v; }`))).toEqual(["E-PARSE-EXPECTED", "E-PARSE-EXPECTED"]);
