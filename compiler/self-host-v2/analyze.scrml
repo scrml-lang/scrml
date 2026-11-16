@@ -9509,10 +9509,22 @@ ${
     // its field's type (the bare-variant position above) and TYPED against it by
     // typeCall (E-TYPE-031, as a `fail`'s payload is — typeFail).
     // =========================================================================
+    // s478 — a refused sink call rooted at the listener's event (`e[k]()`) still records the
+    // event's use (its NLocal fact), so §13.2's after-await rule sees it: "a computed member
+    // access with a non-literal key" is a use other than a plain read of a non-control
+    // property (E-EVENT-CONTROL-AFTER-AWAIT), reported beside the §5.2 sink refusal.
+    fn sinkEventUse(env: Env, callee: AExpr, st0: AS) -> AS {
+        const r: AExpr | not = partRootName(callee)
+        if (r is not) return st0
+        const l: LocalB | not = eventLocalOf(env, r)
+        if (l is not) return st0
+        return addName(st0, r.nid, NameFact.NLocal(l.s))
+    }
+
     fn resolveCallOrConstruct(env: Env, e: AExpr, callee: AExpr, args: AExpr[], expected: Type | not, st0: AS) -> RX {
         // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first
         const sinkC: string = sinkCallWhy(env, callee, args)
-        if (sinkC != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkC), st0)
+        if (sinkC != "") return diagX(env, e, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkC), sinkEventUse(env, callee, st0))
         const rc: RX | not = resolveConstruct(env, e, callee, args, expected, st0)
         if (rc is given) return rc
         return resolveCall(env, e, callee, args, st0)
@@ -13794,7 +13806,7 @@ ${
         // s473 — §5.2 "Executable sinks in plain logic (S473)": judged first (the
         // edit-call paths below would otherwise take a member call before it)
         const sinkS: string = sinkCallWhy(env, callee, args)
-        if (sinkS != "") return addDiag(st, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkS))
+        if (sinkS != "") return addDiag(sinkEventUse(env, callee, st), env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkS))
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
         // s469: a JavaScript tape method name, or a discarded `sort` / `reverse` (E-TAPE-JS-METHOD)
         const jm: MethodCall | not = memberCall(callee)
@@ -16718,17 +16730,21 @@ ${
         return not
     }
 
+    // The scrml scalar of a built event member read (`e.type`, `e.timeStamp`): its
+    // Appendix H slot type, else not. One lookup for the resolver and the typer.
+    fn eventReadType(name: string) -> Type | not {
+        if (isEventControl(name)) return not
+        const en: HEntry | not = findEntry("Event", name, "read")
+        if (en is given && entryConflict(en) == "") return eventScalar(sigResult(en))
+        return not
+    }
+
     // `e.m` read.
     fn resolveEventMember(env: Env, e: AExpr, obj: AExpr, l: LocalB, name: string, st0: AS) -> RX {
         const st: AS = addName(st0, obj.nid, NameFact.NLocal(l.s))
         if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
-        if (!isEventControl(name)) {
-            const en: HEntry | not = findEntry("Event", name, "read")
-            if (en is given && entryConflict(en) == "") {
-                const t: Type | not = eventScalar(sigResult(en))
-                if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name))))
-            }
-        }
+        const t: Type | not = eventReadType(name)
+        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name))))
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
     }
 
@@ -29912,6 +29928,46 @@ ${
         }
     }
 
+    // s478 — the one type of a host call (valueType, builtinCallType, typeMember):
+    // `Date.now()` is a `number`; an event member read is its Appendix H slot scalar
+    // (eventReadType: `type` string, `timeStamp` number — §5.2.1, H-047/H-048); an event
+    // control call is `void` (`() -> void`, H-049–H-051), never a value — Unknown here
+    // (the resolver already refuses it as a value, E-TYPE-001).
+    fn hostCallType(c: HostCall) -> VType {
+        return match c {
+            .DateNow :> known(Type.Num)
+            .Unreadable :> VType.Unknown
+            .EventRead(member: m) :> eventReadVType(m)
+            .EventCall(member: m2) :> VType.Unknown
+        }
+    }
+
+    fn eventReadVType(m: string) -> VType {
+        const t: Type | not = eventReadType(m)
+        if (t is given) return known(t)
+        return VType.Unknown
+    }
+
+    fn hostFact(f: ValueFact | not) -> HostCall | not {
+        return match f {
+            .VHost(call: c) :> c
+            .VLit(lit: l) :> not
+            .VVariant(enumSym: s) :> not
+            .VStructOf(ty: s) :> not
+            .VConstruct(enumSym: s) :> not
+            .VOp(op: o) :> not
+            .VSeqCall(op: o) :> not
+            .VLambda(params: ps) :> not
+            .VIndex(loc: x) :> not
+            .VAt :> not
+            .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
+            .VToEnum(enumSym: s) :> not
+            .VMethod(op: o) :> not
+            not :> not
+        }
+    }
+
     // The type of a constant the binder resolved. (An operator's type is
     // computed from its operands, typeBinary / typeUnary.)
     fn valueType(f: ValueFact | not) -> VType {
@@ -29921,7 +29977,7 @@ ${
             .VStructOf(ty: s) :> known(Type.Named(s))
             .VConstruct(enumSym: s) :> known(Type.Named(s))
             .VOp(op: o) :> VType.Unknown
-            .VHost(call: c) :> known(Type.Num)
+            .VHost(call: c) :> hostCallType(c)
             .VSeqCall(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
@@ -30464,7 +30520,7 @@ ${
     fn builtinCallType(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts: TypeState) -> VType {
         const f: ValueFact | not = valueFact(env.t.values, e.nid)
         return match f {
-            .VHost(call: c) :> known(Type.Num)
+            .VHost(call: c) :> hostCallType(c)
             .VSeqCall(op: o) :> seqCallType(ts, o, callee, args)
             .VLit(lit: l) :> VType.Unknown
             .VVariant(enumSym: s) :> VType.Unknown
@@ -30802,6 +30858,10 @@ ${
         let ts1: TypeState = ts
         if (hasErrIn(env.blame.spans, e.span)) ts1 = quietPlace(ts, obj)
         const ro: RVT = typeExpr(env, obj, ts1)
+        // s478: a host member read (`e.type`, `e.timeStamp`) carries no name fact — its
+        // type is the host call's (hostCallType), not Unknown
+        const hc: HostCall | not = hostFact(vf)
+        if (hc is given) return rvt(hostCallType(hc), ro.ts)
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
 

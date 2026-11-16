@@ -30,3 +30,15 @@ Lane: function values in the bootstrap (`compiler/self-host-v2/`). Branch `s478-
 ## Sub-items B (arrows as general values) and C (naming a function without calling it)
 
 - Not built: Core has no function type (`core.scrml` Type). See the final report.
+
+## Fix round 1 (review ~/.cache/scrml/review/s478-1918/review.md)
+
+- HIGH-1: `hostCallType(c)` in analyze.scrml is the one type of a host call, used by valueType,
+  builtinCallType and typeMember: DateNow number, EventRead its Appendix H slot scalar
+  (`eventReadType`, shared with resolveEventMember), EventCall Unknown (void; never number).
+  typeMember gives a host member read its type. Probes p6/p7 type cases all refused now.
+- MED-1: `sinkEventUse` records the event's NLocal fact on a refused sink call rooted at it
+  (resolveCallOrConstruct, resolveCallStmt). e02-dynkey-neg now emits E-EVENT-CONTROL-AFTER-AWAIT;
+  it stays FAIL on the unasserted E-ERROR-002 + E-LOGIC-EXECUTABLE-SINK extras.
+- LOW-1: gap g-boot-event-control-in-suspending-loop-s478 filed (markers only).
+- Conformance vs 213dd1203: PASS 552→554, FAIL 11→14, UNSUPPORTED 670→665, CRASH 0, PASS→FAIL 0.

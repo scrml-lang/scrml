@@ -177,3 +177,37 @@ describe("never silently accepted — refused by name (E-BOOTSTRAP-UNSUPPORTED)"
     expect(codes(P(`<button id="b" onclick=\${(e) => { f; }}>b</button>`, `    function f() { }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
+
+// Review round 1 (HIGH-1): an event member read is typed with its Appendix H slot scalar
+// (`type` string H-047, `timeStamp` number H-048) — one hostCallType for every host call —
+// so a wrong-typed slot is refused (E-TYPE-031, §66.1 rule 5), never accepted as Unknown.
+describe("§5.2.1 event member reads are typed (Appendix H scalars)", () => {
+  const ONE = (h, extra = "") => P(`<button id="b" onclick=\${${h}}>b</button>`, extra);
+  test("NEGATIVE: `e.timeStamp` (number) into int slots — cell, local, argument, arithmetic, index", () => {
+    expect(codes(ONE(`(e) => { @n = e.timeStamp; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { const k: int = e.timeStamp; @n = k; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { g(e.timeStamp); }`, `    function g(x: int) { @n = x; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { @n = @n + e.timeStamp; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { @n = @xs[e.timeStamp]; }`, `    <xs:int[]=([1, 2])/>`))).toEqual(["E-TYPE-031"]);
+  });
+  test("NEGATIVE: `e.timeStamp` into a string slot, `e.type` (string) into int / bool / enum slots", () => {
+    expect(codes(ONE(`(e) => { const s: string = e.timeStamp; @out = s; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { @n = e.type; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { @ok = e.type; }`, `    let <ok:bool=false/>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(ONE(`(e) => { @c = e.type; }`, `    type C:enum = { A, B }\n    let <c:C=(C.A)/>`))).toEqual(["E-TYPE-031"]);
+  });
+  test("NEGATIVE: `if (e.type)` is E-COND-NOT-BOOLEAN; `e.type - 1` is an operand error", () => {
+    expect(codes(ONE(`(e) => { if (e.type) { @out = "t"; } }`))).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(ONE(`(e) => { @n = e.type - 1; }`))).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+  });
+  test("the right slots compile: `e.type` into a string, `e.timeStamp` into a number", () => {
+    expect(codes(ONE(`(e) => { @out = e.type; }`))).toEqual([]);
+    expect(codes(ONE(`(e) => { const t: number = e.timeStamp; if (t > 0) { @out = "y"; } }`))).toEqual([]);
+  });
+  test("a control call in a `!{}` arm is not typed `number` (no spurious E-TYPE-031)", () => {
+    expect(codes(S(`const ok: bool = isOk(1) !{ _ :> event.preventDefault() };`))).toEqual(["E-EVENT-CONTROL-AFTER-AWAIT"]);
+  });
+  test("§13.2: `e[k]()` after the first await is E-EVENT-CONTROL-AFTER-AWAIT beside the §5.2 sink refusal", () => {
+    expect(codes(S(`const k: string = "preventDefault"; ${CALL} event[k]();`)).sort()).toEqual(["E-EVENT-CONTROL-AFTER-AWAIT", "E-LOGIC-EXECUTABLE-SINK"]);
+  });
+});
