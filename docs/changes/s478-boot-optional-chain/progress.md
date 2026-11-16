@@ -15,6 +15,8 @@ Lane: `?.` optional chaining (§42.3.6) on the bootstrap, on #1917's member acce
       0 newly-accepting.
 - [x] known-gaps: resolved g-boot-optional-member-access-s478; filed g-boot-optional-call-s478,
       g-boot-optional-chain-receiver-s478, g-boot-optional-chain-js-form-s478 (owner Q), g-boot-index-narrowed-optional-s478.
-- [ ] Commit (hook), CI gates, PR.
+- [x] Commit e79b4ed0a (hook PASS: 55712 pass / 0 fail); CI checks-job gates run locally: severity --check, types-gate,
+      snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim — all exit 0. Conformance re-measured at e79b4ed0a: same delta.
+- [ ] PR (no merge).
 
 Scratch: ~/.cache/scrml/review/s478-boot-optional-chain/
