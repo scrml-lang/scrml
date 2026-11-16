@@ -337,7 +337,7 @@ describe("§21.3 E-IMPORT-002: every import cycle is reported, at every file in 
     const r = prog([...fs, app(`import { c0_0 } from "./f000.scrml";`, `<p>\${c0_0}</p>`)]);
     const ms = performance.now() - t0;
     expect(errs(r).filter((d) => d.code === "E-IMPORT-002").length).toBe(200);
-    expect(ms).toBeLessThan(2500);   // ring 200: base (importCycles per read) ≥20s; ≈500ms now — a wide margin both ways (#1902 review)
+    expect(ms).toBeLessThan(15000);  // ring 200: base (importCycles per read) ≥20s locally; ≈500ms locally, 3.4s on the CI slices runner — margin both ways
   });
   test("control: an acyclic diamond of imports is clean", () => {
     const BASE = mod("base.scrml", `    export const V = "v";`);
