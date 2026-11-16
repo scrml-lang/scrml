@@ -9297,6 +9297,20 @@ ${
             if (lty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
             return plain(Type.Int, lst)
         }
+        // s478 (s478-boot-member-access) — `.length` of a `string | not` / `T[] | not`
+        // receiver. §42.3.5: "A member access whose receiver's static type admits `not`
+        // … SHALL be compile error E-TYPE-046 UNLESS the access is made absence-safe";
+        // "Inside the narrowed scope `recv` is `T` and bare `.field` access is safe."
+        // Resolved as the length of the present value; the TYPER (typeMember) holds the
+        // receiver to a narrowing and reports E-TYPE-046 where it is not narrowed.
+        if (name == "length" && ro.x.inst is not && lty is given) {
+            const lin: Type | not = maybeInner(lty)
+            if (lin is given && isLengthOf(lin)) {
+                const mst: AS = addName(st, e.nid, NameFact.NLength)
+                if (lin == Type.Str) return plain(Type.Int, addValue(mst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
+                return plain(Type.Int, mst)
+            }
+        }
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
         if (inst is given && iDecl is given) {
@@ -9332,6 +9346,35 @@ ${
                             i = i + 1
                         }
                         return diagX(env, e, "E-SCOPE-001", shownStruct(env, s) + " has no field `" + name + "`", st)
+                    }
+                }
+            }
+            // s478 (s478-boot-member-access) — a field of a `S | not` receiver, `S` a struct
+            // (`<user>: User | not`, a `User | not` local or parameter). §42.3.5: "A member
+            // access whose receiver's static type admits `not` (a plain-optional `T | not` /
+            // `T?` receiver) SHALL be compile error E-TYPE-046 UNLESS the access is made
+            // absence-safe by one of: … 2. Narrowing `recv` from `T | not` to `T` in an
+            // enclosing scope … Inside the narrowed scope `recv` is `T` and bare `.field`
+            // access is safe." The field resolves on `S` (the same struct step a present
+            // receiver takes); the TYPER, which owns narrowing (narrowRead), reports
+            // E-TYPE-046 where the receiver is still `S | not` (typeMember). The field's type
+            // is its declared type — per hop (§42.3.5 "The rule is per-hop"): an optional
+            // field stays `F | not` and a further member of it is judged again.
+            const mi: Type | not = maybeInner(t)
+            if (mi is given) {
+                const ms: Sym | not = namedOf(mi)
+                if (ms is given) {
+                    const mti: TypeInfo | not = typeInfoOf(env.g.types, ms)
+                    if (mti is given) {
+                        const mfs: FieldDef[] | not = structFieldDefs(mti.def)
+                        if (mfs is given) {
+                            let mx = 0
+                            for (const fd of mfs) {
+                                if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(ms, mx)))
+                                mx = mx + 1
+                            }
+                            return diagX(env, e, "E-SCOPE-001", shownStruct(env, ms) + " has no field `" + name + "`", st)
+                        }
                     }
                 }
             }
@@ -21634,7 +21677,7 @@ ${
     }
 
     fn typeFor(env: TEnv, s: AStmt, f: AFor, ts0: TypeState) -> RTEnv {
-        const entry: TEnv = tDeferEnv(env)
+        const entry: TEnv = tLoopEnv(env, f)
         const h: AForHead = f.head
         const ts: TypeState = match h {
             .HForever :> typeBlock(entry, f.body, ts0)
@@ -21642,7 +21685,35 @@ ${
             .HCounted(init: i, cond: c, step: sp) :> typeCounted(entry, i, c, sp, f.body, ts0)
             .HIter(bind: b, src: src, key: ky) :> typeIter(entry, b, src, ky, f.body, ts0)
         }
-        return keepTEnv(tDeferEnv(env), ts)
+        return keepTEnv(entry, ts)
+    }
+
+    // s478 (s478-boot-member-access) — the narrowings in force in a loop's body (every
+    // iteration) and after it. §42.3.5: "A write to the narrowed place — direct, in a
+    // nested block, or by a call that writes it or whose write set cannot be determined
+    // — ends the narrowing from that point". An iteration runs after the previous
+    // one's writes, so a place the loop (its head or body) may write is not narrowed in
+    // it, nor after it; a place it writes nowhere keeps its narrowing (the case
+    // reactive/narrowing-survives-write-after-loop-pos). Was: every cell narrowing
+    // dropped at a loop (tDeferEnv — sound, but it refused a member read of a cell the
+    // loop never writes). Locals keep tDeferEnv's rule (never rebound — their write
+    // keys are spelled names, not the `#id` keys they are narrowed by). Fail closed: a
+    // `?{}` in the loop (a suspension point, §42.3.5) drops every cell narrowing, and
+    // a call whose write set is unknown (`*`) or of a nested function does too
+    // (tUnnarrowEffects).
+    fn tLoopEnv(env: TEnv, f: AFor) -> TEnv {
+        const base: TEnv = tDeferEnv(env)
+        if (sqlsInBlock(f.body).length > 0) return base
+        const effs: string[] = exprsEffects(forExprs(f)).concat(blockEffects(f.body, []))
+        let w: TEnv = tUnnarrowEffects(env, effs)
+        for (const k of effs) {
+            if (k.indexOf("()") != 0) w = tUnnarrow(w, k)
+        }
+        let keep: string[] = base.narrowed
+        for (const k of w.narrowed) {
+            if (k.indexOf("@") == 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     fn typeLoopCond(env0: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
@@ -30680,7 +30751,82 @@ ${
         let ts1: TypeState = ts
         if (hasErrIn(env.blame.spans, e.span)) ts1 = quietPlace(ts, obj)
         const ro: RVT = typeExpr(env, obj, ts1)
+        // s478 (s478-boot-member-access) — §42.3.5: "A member access whose receiver's
+        // static type admits `not` (a plain-optional `T | not` / `T?` receiver) SHALL be
+        // compile error E-TYPE-046 UNLESS the access is made absence-safe by … Narrowing
+        // `recv`". The binder resolves a struct field / `.length` of a `T | not` receiver
+        // on `T`; here the receiver's type is read where the access stands — narrowed
+        // (narrowRead: `T`) or not (`T | not`). Every way a narrowing ends (§42.3.5: a
+        // write, a call that may write it, a suspension point, a function body / handler
+        // created in the narrowed scope) is the narrowing machinery's, unchanged. A
+        // lifecycle `(not to T)` receiver already reported E-TYPE-001 and reads `T`
+        // (lifeRead) — "a receiver fires exactly one of the two" (§42.3.5).
+        if (maybeDeref(f) && !hasErrIn(env.blame.spans, e.span)) {
+            const rt: Type | not = knownOf(ro.vt)
+            if (rt is given && maybeInner(rt) is given) {
+                return rvt(narrowRead(env, e, nameType(env, f)), report(ro.ts, env, e.span, "E-TYPE-046", optMemberMsg(obj, nameOfMember(e), rt)))
+            }
+        }
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
+    }
+
+    // A member step that dereferences its receiver's VALUE (a struct field, `.length`) —
+    // the steps §42.3.5 holds to a present receiver.
+    fn maybeDeref(f: NameFact | not) -> boolean {
+        return match f {
+            .NStruct(owner: o) :> true
+            .NLength :> true
+            .NLocal(sym: s) :> false
+            .NField(decl: d) :> false
+            .NInst(decl: d) :> false
+            .NFn(sym: s) :> false
+            .NSurface(of: x) :> false
+            .NReq(id: rq0, sig: rs0) :> false
+            .NConst(sym: s) :> false
+            not :> false
+        }
+    }
+
+    fn nameOfMember(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o, name: n) :> n
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+            .BlockLambda(params: lp) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
+            .HashRef(id: hr0) :> ""
+            .Foreign(f: fb0) :> ""
+        }
+    }
+
+    // §42.3.5: "E-TYPE-046 message names the possibly-`not` receiver and steers to the two
+    // resolutions: optional-chain the access (`recv?.field`) to propagate absence, or narrow
+    // the receiver (`if=` / `given` / `is not` / `match`) to prove presence."
+    fn optMemberMsg(obj: AExpr, name: string, rt: Type) -> string {
+        const pk: string = placeKey(obj)
+        const r: string = pk == "" ? "this receiver" : "`" + pk + "`"
+        const shown: string = pk == "" ? "`…." + name + "`" : "`" + pk + "." + name + "`"
+        return shown + " reads a member of " + r + ", which is `" + typeName(rt) + "` — it may be `not` here: it is not narrowed at this point, or its narrowing has ended (a write to it, a call that may write it, a server call or other suspension point, or a function body / event handler created after the test — re-test it there) (§42.3.5). Optional-chain the access (`" + (pk == "" ? "recv" : pk) + "?." + name + "`) to propagate absence, or narrow the receiver (`if=` / `given` / `is not` / `match`) to prove presence"
     }
 
     fn typePropValues(env: TEnv, ps: AProp[], ts0: TypeState) -> TypeState {
