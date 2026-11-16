@@ -11,22 +11,22 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 552 | 29.6% |
+| PASS | 569 | 30.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 11 | 0.6% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 670 | 35.9% |
+| UNSUPPORTED | 653 | 35.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 563; of those, 552 hold (98.0%). Runtime half executed on the bootstrap for 188 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 580; of those, 569 hold (98.1%). Runtime half executed on the bootstrap for 188 case(s).
 
-- **Vacuous** passes: 13 of 552 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **539**.
+- **Vacuous** passes: 13 of 569 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **556**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 11; the other 6 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 670.
+UNSUPPORTED by reason: bootstrap-unsupported 653.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 24 | · | · | · | 11 | 4 | · | · |
-| endpoint | 17 | · | · | · | · | · | 17 | · | · |
+| endpoint | 17 | 17 | · | · | · | · | · | · | · |
 | engine | 92 | 21 | · | · | · | 50 | 21 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
@@ -212,7 +212,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (552)
+### PASS / CODES-ONLY (569)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -383,6 +383,23 @@ none
 - `element-refusal/s474-parser-repair-p-div-neg` — PASS
 - `element-refusal/s474-parser-repair-table-foster-neg` — PASS
 - `element-refusal/text-string-attr-comment-neg` — PASS
+- `endpoint/accepts-missing` — PASS
+- `endpoint/accepts-not-enum-primitive` — PASS
+- `endpoint/accepts-not-enum-struct` — PASS
+- `endpoint/accepts-unknown-name` — PASS
+- `endpoint/arm-body-undefined-scope` — PASS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
+- `endpoint/arm-body-valid-scope-clean` — PASS (also emitted, unasserted: E-TYPE-043)
+- `endpoint/dead-arm` — PASS
+- `endpoint/duplicate-arm` — PASS
+- `endpoint/endpoint-clean` — PASS
+- `endpoint/method-bareword-get-clean` — PASS
+- `endpoint/method-invalid` — PASS
+- `endpoint/method-missing` — PASS
+- `endpoint/multi-statement-arm` — PASS
+- `endpoint/not-exhaustive` — PASS
+- `endpoint/path-missing` — PASS
+- `endpoint/self-closing-arm-exhaustive` — PASS
+- `endpoint/wildcard-exhaustive` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -767,7 +784,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (670)
+### UNSUPPORTED (653)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -906,23 +923,6 @@ none
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `element-refusal/near-names-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
 - `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
-- `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-not-enum-struct` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/accepts-unknown-name` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/arm-body-undefined-scope` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/arm-body-valid-scope-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/dead-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/duplicate-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/endpoint-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-bareword-get-clean` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-invalid` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/method-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/multi-statement-arm` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/not-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/path-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/self-closing-arm-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `endpoint/wildcard-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
