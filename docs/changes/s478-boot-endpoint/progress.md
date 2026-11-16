@@ -30,6 +30,8 @@ Branch `s478-boot-endpoint` from `720ea381d`.
 - [x] tests `compiler/self-host-v2/slice-m4/endpoint-s478.test.js`
 - [x] severity regen
 - [x] conformance: 539 → 556 PASS (+17, all `endpoint/*`), 0 PASS→FAIL
-- [ ] CI checks-job gates, hook, PR
+- [x] CI checks-job gates (types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim) clean
+- [x] corpus: 0 newly-rejecting (only `examples/33-endpoint.scrml` + `protect/endpoint-multikey-arm-response` hold `<endpoint>`; the example now compiles, the protect case stays refused for its raw DDL)
+- [ ] PR
 
 ## Owner questions — see docs/known-gaps.md `g-boot-endpoint-s478`
