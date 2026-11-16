@@ -55,7 +55,26 @@ Positions: anywhere but a tape callback / no-event handler (function values slic
   NOT the carve-out (E-PARAM-TYPE-REQUIRED on a bare parameter); an arrow is. Rec: keep (the SPEC text
   names function expressions explicitly).
 
+## Measurements (base = origin/main f6f025723, after #1901 merged in)
+
+- Tests red on base: `slice-m4/block-lambda-s478.test.js` 22 of 28 fail on base (the 6 that pass are
+  refusal rows base already refused under E-BOOTSTRAP-UNSUPPORTED).
+- Bootstrap conformance: PASS 521 → 521, FAIL 10 → 10, UNSUPPORTED 702 → 702; PASS→FAIL 0; no bucket
+  changes. 35 cases base refused for the braced arrow / function expression now reach their next named
+  blocker (18: a handler taking the event object — function values; 6: a block lambda outside a tape
+  callback — function values; the rest one each). (Before #1901 merged, one case,
+  `server-db/event-after-await-e01-destructure-neg`, went UNSUPPORTED → FAIL on the destructuring parse
+  errors the braced-arrow refusal had masked; with #1901 it is UNSUPPORTED on both.)
+- Corpus (samples/, examples/, conformance/cases, self-host-v2/acceptance, compiler/samples — 3153
+  files) old vs new bootstrap: newly-rejecting 0, newly-accepting 0; 49 already-failing files change their
+  code set (the next blocker after the braced body, or `;` reports inside bodies now parsed).
+- stdlib/data/transform.scrml: first error unchanged (67:20, a tape destructuring pattern, #1901's
+  refusal); its braced `.sort((a, b) => { … })` (line 114) no longer refuses on its own — it now stops at
+  `.sort(…)` on an untyped receiver (the function's unannotated parameters).
+- CI gates: gen-bootstrap-severity --check current; types-gate, snippet-gate, claim-gate, gen-md-shim OK.
+
 ## Status
 
-- [x] implementation; slice tests green (block-lambda-s478, parse, attr-forms, semicolon-residue)
-- [ ] conformance delta, corpus delta, CI gates, hook, PR
+- [x] implementation; slice tests green (block-lambda-s478, parse, attr-forms, semicolon-residue, parse-batch)
+- [x] conformance delta, corpus delta, CI gates
+- [ ] hook, PR
