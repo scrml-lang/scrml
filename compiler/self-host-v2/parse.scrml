@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -8856,7 +8856,11 @@ ${
                 const w: RWord = readName(m)
                 const after: MP = skipSpace(w.mp)
                 const nc: string = chAt(after, 0)
-                if (w.w != "" && isIdentStartCh(w.w.substring(0, 1)) && (nc == "," || nc == ")")) {
+                if (w.w != "" && isKeyword(w.w) && (nc == "," || nc == ")")) {
+                    // §18.0: one AST with the plain match — a reserved word is no binder (the plain reader's E-PARSE-ARM)
+                    m = mAt(mDiag(m, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + w.w + "`", m.pos, w.mp.pos), after.pos)
+                    if (nc == ",") m = mAdv(m, 1)
+                } else if (w.w != "" && isIdentStartCh(w.w.substring(0, 1)) && (nc == "," || nc == ")")) {
                     out = out.concat([{ nid: m.nid, span: mkSpan(m.pos, w.mp.pos), name: w.w }])
                     m = mBump(after)
                     if (nc == ",") m = mAdv(m, 1)

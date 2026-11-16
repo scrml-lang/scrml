@@ -287,3 +287,15 @@ describe("4 — the checks (same arm reader as the §18 `match`)", () => {
     expect(codes(prog(`<p>x <match for=Phase on=@ph>\n<Idle : "i">\n<_ : "x">\n</match></p>`))).toEqual(["E-HTML-PARSER-REPAIR"]);
   });
 });
+
+describe("#1909 review: a reserved word is no arm binder (§18.0 — one AST with the plain match)", () => {
+  for (const w of ["if", "this", "not", "true", "class"]) {
+    test(`\`<Loaded(${w}, size)>\` is E-PARSE-ARM, as \`.Loaded(${w}, size) :>\` is`, () => {
+      const c = errs(prog(`<match for=Load on=@ld>\n<Loaded(${w}, size)><p>x</p></>\n<_ : "">\n</match>`)).map((d) => d.code);
+      expect(c).toContain("E-PARSE-ARM");
+    });
+  }
+  test("`_` and ordinary names stay binders", () => {
+    expect(errs(prog(`<match for=Load on=@ld>\n<Loaded(_, size)><p>${"${"}size}</p></>\n<_ : "">\n</match>`)).map((d) => d.code)).toEqual([]);
+  });
+});
