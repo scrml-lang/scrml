@@ -33,6 +33,30 @@
 > refuses a PR that modifies `docs/generated/**` — so a PR that files or resolves gaps no longer
 > conflicts with the bot. `bun scripts/state.ts` prints the live counts for any tree.
 
+### g-boot-optional-field-write-s478 — the BOOTSTRAP refuses a field WRITE through a narrowed `T | not` cell (`if (@user is given) { @user.name = "b"; }`) as E-ASSIGN-TARGET ("`.name` is not a field of a struct here"); §42.3.5 makes the narrowed receiver `T` — `NEW S478 (s478-boot-member-access); MED; open`
+
+<!-- @gap id=g-boot-optional-field-write-s478 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(resolveAssign; writeGuards) prov=lane:s478-boot-member-access;spec:§42.3.5("Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.") -->
+
+s478-boot-member-access built the READ (a struct field / `.length` of a `T | not` receiver, E-TYPE-046 where it is not narrowed). The write path is separate and still refuses every field write through a `T | not` cell — fail closed, but under the wrong code (E-ASSIGN-TARGET reads as "no such field"). Fix direction: resolve the write on `T` and hold the receiver to a narrowing in the typer, as the read does. Pinned (still refused) by `compiler/self-host-v2/slice-m4/member-access-s478.test.js`.
+
+### g-boot-unannotated-local-member-s478 — the BOOTSTRAP binder gives an unannotated `const` bound to a declared-return call no type, so a member of it is refused (`const ys = seed(); ys.length` with `seed() -> int[append]`); the typer infers the type but the binder resolves members first — `NEW S478 (s478-boot-member-access); MED; open`
+
+<!-- @gap id=g-boot-unannotated-local-member-s478 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(resolveMember; recvType) prov=lane:s478-boot-member-access;spec:§48.8("The compiler infers the return type from the `return` statements") -->
+
+Case: `reactive/tape-append-on-returned-tape-rt` (stays UNSUPPORTED). The same case also fails E-WRITE-NOT-GRANTED on `ys.append(3)` (the inferred local type carries no grants) — a second, separate question for that case. Fix direction: give the binder the declared return type of a plain (not `!`, not server, not host) function call as an unannotated `const`'s type (recvType already reads it for a call receiver); a receiver whose type stays unknown stays refused.
+
+### g-boot-event-unbound-s478 — the BOOTSTRAP reports an unbound `event` in a handler value as E-SCOPE-001 (plus a member-access refusal per `.target` / `.type`), not E-EVENT-UNBOUND — `NEW S478 (s478-boot-member-access); LOW; open`
+
+<!-- @gap id=g-boot-event-unbound-s478 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveName; resolveMember) prov=lane:s478-boot-member-access;spec:§5.2.3("a free `event` in one is `E-EVENT-UNBOUND`") -->
+
+Cases: `markup-handler/s457-event-unbound-bare-call-neg`, `markup-handler/s457-event-unbound-inline-block-neg` (stay UNSUPPORTED). Fix direction: E-EVENT-UNBOUND for an unresolved `event` in a handler value, and no member-access report on a receiver that already failed to resolve (§42.4 statement 6, no second report).
+
+### g-boot-type-046-suspension-message-s478 — the BOOTSTRAP's E-TYPE-046 message lists every way a narrowing ends; it does not name the particular suspension point that ended it — `NEW S478 (s478-boot-member-access); LOW; open`
+
+<!-- @gap id=g-boot-type-046-suspension-message-s478 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(optMemberMsg; tUnnarrowEffects) prov=lane:s478-boot-member-access;spec:§42.3.5("The E-TYPE-046 message names the suspension and says re-test.") -->
+
+The narrowing machinery drops a key without recording why. The message says "a server call or other suspension point … re-test it", which steers correctly but does not name the call. Fix direction: record the ending site (key → span/kind) when a narrowing is dropped, and name it in the message.
+
 ### g-boot-event-members-s478 — in a `${(e) => …}` listener the BOOTSTRAP builds only the members Appendix H gives the `Event` interface itself (`e.type`, `e.timeStamp`, `e.preventDefault()`, `e.stopPropagation()`); `e.target.value`, `e.key`, an alias or an argument of the event are refused by name — `NEW S478 (s478-boot-fn-values); MED; open (OWNER QUESTION)`
 
 <!-- @gap id=g-boot-event-members-s478 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(resolveEventMember; resolveEventCall; eventUseWhy) prov=lane:s478-boot-fn-values;spec:§21.3.3("member access on a DOM element type … is unchanged from §6.7.1b and stays untyped") -->
