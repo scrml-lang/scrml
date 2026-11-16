@@ -338,6 +338,7 @@ ${
         MStar(decl: Sym, inst: InstRef),                  // s444: `<*x/>` of a user declaration's EXISTING instance (Core View.Star)
         MErrors(of: ValidityOf, all: boolean),            // s449: `<errors of=…/>` (§55.8) — the surface whose errors it renders
         MDb,                                              // s452: a `<db src=…>` state block (§4, §8.1.1) — its children render in place
+        MSchema,                                          // s478: a `<schema>` block (§39) — it declares structure and renders nothing
     }
     // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
     // that is already resolved in the right context: a child field's own
@@ -21782,6 +21783,7 @@ ${
             .MErrors(of: x) :> false
             .MSlot :> false
             .MDb :> false
+            .MSchema :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -21796,6 +21798,7 @@ ${
             .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
             .MSlot :> true
             .MDb :> true
+            .MSchema :> true
             .MStateView(v: v) :> true
             .MInline(v: v) :> true
             .MStar(decl: d) :> true
@@ -21823,6 +21826,7 @@ ${
             .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
             .MSlot :> false
             .MDb :> false
+            .MSchema :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -21885,6 +21889,9 @@ ${
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return resolveSlot(env, e, st)
+        // s478 — `<schema>` (§39): the parser read its body as §39.2 declarations
+        // whatever a declaration of that name says, so it is the schema block here too
+        if (e.tag == "schema") return resolveSchema(env, e, st)
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
@@ -22592,6 +22599,7 @@ ${
             .MSlot :> []
             .MErrors(of: x) :> []
             .MDb :> []
+            .MSchema :> []
         }
     }
 
@@ -22962,6 +22970,130 @@ ${
             }
         }
         return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
+    }
+
+    // s478 — a `<schema>` block (§39). The parser read its body (schema.scrml —
+    // the §39.2 declarations, the §39.4 / §39.5 / §39.7 checks, E-SCHEMA-002 and
+    // the refusals) and kept no children; this judges where it stands:
+    //   §39.3 "A `<schema>` block SHALL appear as an immediate child of the
+    //   `<program>` root. A `<schema>` block nested inside any other block (logic
+    //   context, component body, `<page>`, `<db>`, etc.) SHALL be a compile error
+    //   (E-SCHEMA-003)";
+    //   §39.3 "A `<schema>` block SHALL be valid only inside a `<program>` that has
+    //   a database: a `db=` attribute, or a single direct-child `<db src="...">`
+    //   that supplies the program's database (§8.1.1). … A `<schema>` block in a
+    //   `<program>` with neither SHALL be a compile error (E-SCHEMA-001)".
+    // A `<schema>` directly in a NESTED `<program>` (§4.12) is refused by name
+    // (INTERIM): "the `<program>` root" is the top-level one, and the bootstrap
+    // does not read a nested program's schema. It renders nothing (MSchema).
+    fn resolveSchema(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        const tagSpan: ASpan = mkSpan(e.span.start, e.span.start + 7)
+        // fail closed: a `<schema>` the parser read as markup (no reader of the §39.2 body ran)
+        if (e.kids.length > 0) st = addDiag(st, env.file, tagSpan, "E-BOOTSTRAP-UNSUPPORTED", "this `<schema>`'s body was read as markup, not as §39.2 table declarations — the bootstrap refuses it rather than drop it")
+        const p: AProgram | not = schemaProgram(env.g, env.file, e)
+        if (p is not) {
+            if (schemaInNested(env.g, env.file, e)) {
+                st = addDiag(st, env.file, tagSpan, "E-BOOTSTRAP-UNSUPPORTED", "`<schema>` in a nested `<program>` is not in the bootstrap (INTERIM) — §39.3 places a `<schema>` as an immediate child of the `<program>` root; put it in the top-level `<program>`")
+            } else {
+                st = addDiag(st, env.file, tagSpan, "E-SCHEMA-003", "this `<schema>` is not an immediate child of the `<program>` root — §39.3: a `<schema>` nested inside any other block (logic context, component body, `<page>`, `<db>`, an element, …) or standing outside every `<program>` is a compile error; move it out so it is a direct child of `<program>`")
+            }
+        } else if (attrNamed(p.attrs, "db") is not && supplyingDb(env.g, env.file, p.items) is not) {
+            st = addDiag(st, env.file, tagSpan, "E-SCHEMA-001", "this `<schema>`'s `<program>` has no database — no `db=` attribute and no single direct-child `<db src=…>` supplying it (§39.3, §8.1.1); the schema declares tables for the program's database, so it has no target")
+        }
+        return addElem(st, e.nid, ElemFact.MSchema)
+    }
+
+    // The top-level `<program>` of `file` that has `e` as an immediate child (an
+    // item of its body, not one that came from a `<page>` body), else not.
+    fn schemaProgram(g: Globals, file: string, e: AElem) -> AProgram | not {
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfK(it.k)
+                    if (p is given) {
+                        if (itemsHoldElem(p.items, e.nid) && !inPageBody(g, file, e.span)) return p
+                    }
+                }
+            }
+        }
+        return not
+    }
+
+    // Is `e` an immediate child of a `<program>` nested in a top-level one?
+    fn schemaInNested(g: Globals, file: string, e: AElem) -> boolean {
+        for (const f of g.files) {
+            if (f.path == file) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfK(it.k)
+                    if (p is given) {
+                        if (nestedHolds(p.items, e.nid)) return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    fn nestedHolds(items: AItem[], nid: int) -> boolean {
+        for (const it of items) {
+            const q: AProgram | not = programOfK(it.k)
+            if (q is given) {
+                if (itemsHoldElem(q.items, nid) || nestedHolds(q.items, nid)) return true
+            }
+        }
+        return false
+    }
+
+    fn itemsHoldElem(items: AItem[], nid: int) -> boolean {
+        for (const it of items) {
+            const n: ANode | not = markupOfItemK(it.k)
+            if (n is given) {
+                const x: AElem | not = elemOfANode(n)
+                if (x is given) {
+                    if (x.nid == nid) return true
+                }
+            }
+        }
+        return false
+    }
+
+    // §8.1.1 Ownership: "A `.scrml` file *owns* a SQLite database file when it
+    // declares schema for that database: it has … a `<schema>` block (in any
+    // form …) for that database"; "A `<schema>` block declares for the database
+    // the same rule gives its position — its nearest enclosing `<program db=>`,
+    // supplied `<program>`, or `<db src=>`". The databases of the top-level
+    // programs a placed `<schema>` stands in (resolveSchema accepts no other).
+    fn schemaDbs(g: Globals, scopes: ScopeDb[]) -> int[] {
+        let out: int[] = []
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const p: AProgram | not = programOfK(it.k)
+                if (p is given) {
+                    if (holdsSchema(g, f.path, p.items)) {
+                        const sd: ScopeDb | not = scopeDbOf(scopes, p.nid)
+                        if (sd is given) {
+                            const d: Db | not = sd.db
+                            if (d is given) out = out.concat([d.sym.id])
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn holdsSchema(g: Globals, file: string, items: AItem[]) -> boolean {
+        for (const it of items) {
+            const n: ANode | not = markupOfItemK(it.k)
+            if (n is given) {
+                const x: AElem | not = elemOfANode(n)
+                if (x is given) {
+                    if (!x.star && x.tag == "schema" && !inPageBody(g, file, x.span)) return true
+                }
+            }
+        }
+        return false
     }
 
     // s478 r1 (H2) — a `${ … }` logic block inside markup hoists its `function` /
@@ -23397,7 +23529,6 @@ ${
             "timeout"       :> "§6.7.8 lifecycle"
             "machine"       :> "§6.7 lifecycle"
             "errorboundary" :> "§19 error boundary"
-            "schema"        :> "§39.2"
             "channel"       :> "§38"
             "onchange"      :> "§38.13"
             "auth"          :> "§40.9.5"
@@ -26212,6 +26343,7 @@ ${
             .MStar(decl: d) :> -1
             .MErrors(of: o) :> -1
             .MDb :> -1
+            .MSchema :> -1
         }
     }
 
@@ -29026,6 +29158,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MDb :> not
+            .MSchema :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -29042,6 +29175,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MDb :> not
+            .MSchema :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -34375,6 +34509,7 @@ ${
             .MEach(bind: b) :> not
             .MSlot :> not
             .MDb :> not
+            .MSchema :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -37785,7 +37920,9 @@ ${
         // s474 (U1e): the implicit per-handler transactions, built (envelopePass)
         const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
         st = ep.st
-        // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
+        // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there,
+        // or a `<schema>` block declares for it (s478 — schemaDbs)
+        creates = creates.concat(schemaDbs(g, rd.scopes))
         let owned: Db[] = []
         for (const d of dbs) {
             owned = owned.concat([{ sym: d.sym, driver: d.driver, target: d.target, file: d.file, owner: d.driver == Driver.Sqlite && creates.indexOf(d.sym.id) >= 0 }])
@@ -38110,7 +38247,7 @@ ${
     // succeed or fail together go in a `transaction { }` block"); §14.8.10 item
     // (1): that statement on the closed allow-list (E-SQL-PROGRAM-STATEMENT-NOT-
     // ADMITTED), and no `tenant_id` column outside the tenant set — which on the
-    // bootstrap is EMPTY, since `<schema>` / `<db tables=>` are refused
+    // bootstrap is EMPTY: `<db tables=>` is refused, and a `<schema>` `tenant_id` column is refused (schema.scrml, s478)
     // (E-TENANT-UNDECLARED). Both read sql.scrml's one scanner. Before s473 both
     // compiled clean: `INSERT …; DELETE FROM notes` ran its DELETE on SQLite.
     fn statementDiags(file: string, s: SqlSite, st: AS) -> AS {
@@ -38124,7 +38261,7 @@ ${
         if (v.code == "E-TENANT-UNDECLARED") {
             let rel: string = "a relation"
             if (v.why != "") rel = "`" + v.why + "`"
-            return addDiag(st, file, s.span, "E-TENANT-UNDECLARED", "this `?{}` gives " + rel + " a `tenant_id` column, and " + rel + " is not in the compilation's tenant set (§14.8.10 item (1), S456): the tenant floor would not scope it, so every tenant's rows would reach every request. Declare it in `<schema>` so the floor scopes it — `<schema>` / `<db tables=>` are not in the bootstrap yet, so on the bootstrap the tenant set is empty — or, when its rows are not tenant data, rename the column")
+            return addDiag(st, file, s.span, "E-TENANT-UNDECLARED", "this `?{}` gives " + rel + " a `tenant_id` column, and " + rel + " is not in the compilation's tenant set (§14.8.10 item (1), S456): the tenant floor would not scope it, so every tenant's rows would reach every request. The tenant floor is not in the bootstrap (a `<schema>` table carrying `tenant_id` is refused), so on the bootstrap the tenant set is empty: when its rows are not tenant data, rename the column")
         }
         if (v.code != "") {
             return addDiag(st, file, s.span, v.code, "this `?{}` is not on the program-body allow-list (§14.8.10 item (1), S456): " + v.why + ". A program-body query is DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`), a spelled `CREATE [TEMP] TABLE name (…)`, one `ALTER TABLE … ADD [COLUMN]`, an fts5 `CREATE VIRTUAL TABLE`, transaction control, `CREATE [UNIQUE] INDEX`, or an admitted `PRAGMA`. Declare anything else in `<schema>`")
@@ -43949,6 +44086,7 @@ ${
             .MStar(decl: x) :> false
             .MErrors(of: x) :> false
             .MDb :> false
+            .MSchema :> false
             not :> false
         }
         if (each) return linRefuse(cx, s, seenNodes(cx.t, e.kids, ids), "E-LIN-002", "(declared outside this loop) is consumed inside an `<each>` row — the row renders once per item, or never (§35.4.4: \"`lin` variables from outer scope SHALL NOT be consumed inside loop bodies\"). Consume it once outside the loop")
@@ -43962,6 +44100,7 @@ ${
             .MStar(decl: x) :> false
             .MErrors(of: x) :> false
             .MDb :> false
+            .MSchema :> false
             not :> false
         }
         const plain: boolean = ok && html && !e.star && attrNamed(e.attrs, "if") is not && attrNamed(e.attrs, "else-if") is not && attrNamed(e.attrs, "else") is not
@@ -45295,6 +45434,7 @@ ${
             .MUse(decl: d) :> false
             .MSlot :> false
             .MDb :> false
+            .MSchema :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -45429,6 +45569,7 @@ ${
             .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v), all)
             .MSlot :> slotBound(cx, all)
             .MDb :> []
+            .MSchema :> []
             .MErrors(of: x) :> []
             .MHtml :> []
             .MEach(bind: b) :> []
@@ -45476,6 +45617,7 @@ ${
             .MEach(bind: b) :> not
             .MSlot :> not
             .MDb :> not
+            .MSchema :> not
             .MErrors(of: x) :> not
             not :> not
         }
@@ -45521,6 +45663,7 @@ ${
             .MEach(bind: b) :> []
             .MSlot :> []
             .MDb :> []
+            .MSchema :> []
             .MErrors(of: x) :> []
             not :> []
         }
@@ -45610,6 +45753,7 @@ ${
             .MEach(bind: b) :> false
             .MSlot :> false
             .MDb :> false
+            .MSchema :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -45687,6 +45831,7 @@ ${
             .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
             .MSlot :> slotCarries(cx)
             .MDb :> false
+            .MSchema :> false
             .MErrors(of: x) :> false
             .MHtml :> false
             .MEach(bind: b) :> false

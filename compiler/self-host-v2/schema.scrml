@@ -1,0 +1,466 @@
+// =============================================================================
+// self-host-v2 / schema.scrml — THE `<schema>` BODY READER (s478-boot-schema).
+// The parser (parse.scrml finishSchema) hands it the source of a `<schema>`
+// body; it returns the declared tables and its findings. The body is a
+// declaration language of its own (§39.2), never markup: it is read here, once,
+// at the character level.
+//
+// WHAT IT READS — SPEC §39.2:
+//   schema-block      ::= '<schema>' table-declaration* closer
+//   table-declaration ::= table-name '{' column-declaration* '}'
+//   column-declaration ::= column-name ':' column-type column-constraint*
+//   column-type       ::= 'text' | 'integer' | 'real' | 'blob' | 'boolean' | 'timestamp'
+//   column-constraint ::= 'primary key' | 'not null' | 'unique' | 'default' '(' literal ')'
+//                       | 'references' table-name '(' column-name ')'
+//                       | 'rename from' identifier
+// plus `//` comments (§27.1 — "valid in all scrml contexts"; §27.2 lists no
+// native comment for a `<schema>` body).
+//
+// WHAT IT CHECKS (§39.4, §39.5, §39.7 — "validate the `<schema>` block against
+// itself for internal consistency: all `references` targets exist, no duplicate
+// column names within a table, no duplicate table names"):
+//   E-SCHEMA-004  an unrecognized column type ("No other column type names SHALL
+//                 be valid in a `<schema>` block", §39.4);
+//   E-SCHEMA-006  `references t(c)` where `t` is declared here without column `c`;
+//   E-SCHEMA-011  `references` written in any other shape (§39.5.5);
+//   E-SCHEMA-012 / E-SCHEMA-013  a declarative head that is the tail of a
+//                 longer token (§39.2 "Declarative heads are read whole");
+//   W-SCHEMA-001  a table with no `primary key` column (§38.5.1);
+//   W-SCHEMA-NO-TABLES-DECLARED  content that declares no table (§34).
+//
+// WHAT IT REFUSES BY NAME (E-BOOTSTRAP-UNSUPPORTED — never read past silently):
+//   - duplicate table / column names: §39.7 says the compiler SHALL validate
+//     them, and §34 names no code (owner question g-boot-schema-dup-code-s478);
+//   - every form whose meaning lives in a consumer the bootstrap does not build:
+//     raw `CREATE TABLE` DDL (the §39.2 E-SCHEMA-012…015 head machinery and the
+//     §14.8.9 / §14.8.10 floors that read it), a §14.8.11.2 SECURITY-DEFINER
+//     `fn`, the §14.8.11 `db-authoritative` marker, a `${ … }` body (§41.15
+//     `schemaFor`), a `tenant_id` column (§14.8.10: "the column's presence is
+//     the declaration" — the tenant floor is not built, so accepting it would
+//     ship an unscoped table), a `boolean` column (§39.4: "The compiler SHALL
+//     emit read-path coercion (`!!value`) and write-path coercion" — not built),
+//     the §39.5.7 shared-core vocabulary, `immutable`, `rename from` (§38.5.6 —
+//     decided against the live database), a `references` target not declared
+//     here (§39.5.5 allows "the existing database schema", which the bootstrap
+//     does not read), a second `primary key` in one table;
+//   - anything else the grammar does not produce (a `,` between columns among
+//     them — owner question g-boot-schema-column-comma-s478).
+//
+// impl#1 workaround: `${` in a string literal is assembled from pieces.
+// =============================================================================
+${
+    fn LB() -> string { return "{" }
+
+    // A declared column / table (absolute source offsets of the name).
+    export type SchemaCol:struct = { name: string, ty: string, pk: boolean, start: int, end: int }
+    export type SchemaRef:struct = { col: string, table: string, target: string, targetCol: string, start: int, end: int }
+    export type SchemaTable:struct = { name: string, cols: SchemaCol[], start: int, end: int }
+    // A finding: its code, message and absolute source span.
+    export type SchemaErr:struct = { code: string, text: string, start: int, end: int }
+    export type SchemaRead:struct = { tables: SchemaTable[], errs: SchemaErr[] }
+
+    fn err(code: string, msg: string, start: int, end: int) -> SchemaErr {
+        return { code: code, text: msg, start: start, end: end }
+    }
+    fn refuse(msg: string, start: int, end: int) -> SchemaErr { return err("E-BOOTSTRAP-UNSUPPORTED", msg, start, end) }
+
+    // ---- characters -----------------------------------------------------------
+    fn ch(s: string, i: int) -> string { return s.substring(i, i + 1) }
+    fn isDigit(c: string) -> boolean { return c != "" && "0123456789".indexOf(c) >= 0 }
+    fn isWordStart(c: string) -> boolean {
+        return c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".indexOf(c) >= 0
+    }
+    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c) }
+    fn isSpace(c: string) -> boolean { return c == " " || c == "\n" || c == "\t" || c == "\r" }
+
+    // Past whitespace and `//` line comments, never past `to`.
+    fn skip(s: string, from: int, to: int) -> int {
+        let i: int = from
+        let going = true
+        while (going && i < to) {
+            const c: string = ch(s, i)
+            if (isSpace(c)) {
+                i = i + 1
+            } else if (c == "/" && ch(s, i + 1) == "/") {
+                const nl: int = s.indexOf("\n", i)
+                if (nl < 0 || nl >= to) { i = to } else { i = nl + 1 }
+            } else {
+                going = false
+            }
+        }
+        return i
+    }
+
+    // The end of the identifier starting at `i` (`i` itself: none there).
+    fn wordEnd(s: string, i: int, to: int) -> int {
+        if (i >= to || !isWordStart(ch(s, i))) return i
+        let j: int = i + 1
+        while (j < to && isWordCh(ch(s, j))) { j = j + 1 }
+        return j
+    }
+
+    fn wordAt(s: string, i: int, to: int) -> string { return s.substring(i, wordEnd(s, i, to)) }
+
+    // The end of a run of characters that are not whitespace, `{`, `}` and not
+    // a `//` comment start — a top-level head as written.
+    fn runEnd(s: string, i: int, to: int) -> int {
+        let j: int = i
+        while (j < to) {
+            const c: string = ch(s, j)
+            if (isSpace(c) || c == "{" || c == "}") return j
+            if (c == "/" && ch(s, j + 1) == "/") return j
+            j = j + 1
+        }
+        return j
+    }
+
+    // The table name a head run ends in: its longest suffix of letters, digits
+    // and `_` that does not start with a digit ("" — the run ends in something
+    // else, e.g. `users:`, and is no head at all).
+    fn headTail(run: string) -> string {
+        let k: int = run.length
+        while (k > 0 && isWordCh(ch(run, k - 1))) { k = k - 1 }
+        while (k < run.length && isDigit(ch(run, k))) { k = k + 1 }
+        return run.substring(k, run.length)
+    }
+
+    // The end (one past the closing quote) of a `'…'` / `"…"` run starting at
+    // `i`, on one line; a doubled quote is an escaped one. -1: never closed.
+    fn quoteEnd(s: string, i: int, to: int) -> int {
+        const q: string = ch(s, i)
+        let j: int = i + 1
+        while (j < to) {
+            const c: string = ch(s, j)
+            if (c == "\n") return -1
+            if (c == q) {
+                if (ch(s, j + 1) == q) {
+                    j = j + 2
+                } else {
+                    return j + 1
+                }
+            } else {
+                j = j + 1
+            }
+        }
+        return -1
+    }
+
+    // The index of the `)` closing the `(` at `open` (nested parens, quotes
+    // read whole), else -1.
+    fn parenEnd(s: string, open: int, to: int) -> int {
+        let depth: int = 0
+        let j: int = open
+        while (j < to) {
+            const c: string = ch(s, j)
+            if (c == "'" || c == "\"") {
+                const e: int = quoteEnd(s, j, to)
+                if (e < 0) return -1
+                j = e
+            } else {
+                if (c == "(") depth = depth + 1
+                if (c == ")") {
+                    depth = depth - 1
+                    if (depth == 0) return j
+                }
+                j = j + 1
+            }
+        }
+        return -1
+    }
+
+    // The `}` that ends the table body the reader gave up on at `from` (quotes
+    // read whole), else `to`.
+    fn braceEnd(s: string, from: int, to: int) -> int {
+        let j: int = from
+        while (j < to) {
+            const c: string = ch(s, j)
+            if (c == "'" || c == "\"") {
+                const e: int = quoteEnd(s, j, to)
+                if (e < 0) { j = j + 1 } else { j = e }
+            } else if (c == "/" && ch(s, j + 1) == "/") {
+                j = skip(s, j, to)
+            } else if (c == "}") {
+                return j
+            } else {
+                j = j + 1
+            }
+        }
+        return to
+    }
+
+    fn sameName(a: string, b: string) -> boolean { return a.toLowerCase() == b.toLowerCase() }
+
+    // Does `low` (lower-cased) hold `w` as a whole word?
+    fn hasWord(low: string, w: string) -> boolean {
+        let k: int = low.indexOf(w)
+        while (k >= 0) {
+            const before: string = k > 0 ? ch(low, k - 1) : ""
+            const after: string = ch(low, k + w.length)
+            if (!isWordCh(before) && !isWordCh(after)) return true
+            k = low.indexOf(w, k + 1)
+        }
+        return false
+    }
+
+    fn isColumnType(t: string) -> boolean {
+        return ["text", "integer", "real", "blob", "boolean", "timestamp"].indexOf(t) >= 0
+    }
+
+    // §39.5.7 — the shared-core validator vocabulary at the schema locus.
+    fn isSharedCore(w: string) -> boolean {
+        return ["req", "length", "pattern", "min", "max", "gt", "lt", "gte", "lte", "eq", "neq", "oneOf", "notIn"].indexOf(w) >= 0
+    }
+
+    // ---- a column -------------------------------------------------------------
+    // `stop`: the reader gave up inside this table (the table body is skipped to its `}`).
+    type RCol:struct = { col: SchemaCol | not, refs: SchemaRef[], errs: SchemaErr[], next: int, stop: boolean }
+
+    fn colGiveUp(errs: SchemaErr[], e: SchemaErr, at: int) -> RCol {
+        return { col: not, refs: [], errs: errs.concat([e]), next: at, stop: true }
+    }
+
+    // A column declaration at `i` (an identifier is there), inside table `table`.
+    fn readColumn(s: string, i: int, to: int, table: string) -> RCol {
+        let errs: SchemaErr[] = []
+        const ne: int = wordEnd(s, i, to)
+        const name: string = s.substring(i, ne)
+        let j: int = skip(s, ne, to)
+        if (ch(s, j) != ":") {
+            return colGiveUp(errs, refuse("`" + name + "` here is not a §39.2 column declaration (`name: type constraint*`) — the bootstrap reads nothing else in a `<schema>` table body", i, ne), j)
+        }
+        j = skip(s, j + 1, to)
+        const te: int = wordEnd(s, j, to)
+        if (te == j) {
+            return colGiveUp(errs, refuse("column `" + name + "` has no type — §39.2: `" + name + ": type` with type one of text, integer, real, blob, boolean, timestamp", i, ne), j)
+        }
+        const ty: string = s.substring(j, te)
+        if (!isColumnType(ty)) {
+            errs = errs.concat([err("E-SCHEMA-004", "column `" + table + "." + name + "` has the type `" + ty + "`, which is not a `<schema>` column type — the types are text, integer, real, blob, boolean, timestamp (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\")", j, te)])
+        } else if (ty == "boolean") {
+            errs = errs.concat([refuse("column `" + table + "." + name + "` is `boolean` — §39.4: it is stored as INTEGER and \"The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`)\" at every query, which the bootstrap does not build (INTERIM), so a read would hand the program `1` / `0`. Declare it `integer` and compare with 1 / 0", j, te)])
+        }
+        if (sameName(name, "tenant_id")) {
+            errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", i, ne)])
+        }
+        let pk = false
+        let pks: int = 0
+        let refs: SchemaRef[] = []
+        let k: int = skip(s, te, to)
+        let going = true
+        while (going) {
+            if (k >= to) {
+                going = false
+            } else {
+                const c: string = ch(s, k)
+                if (c == "}") {
+                    going = false
+                } else if (c == ",") {
+                    return colGiveUp(errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
+                } else if (!isWordStart(c)) {
+                    return colGiveUp(errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
+                } else {
+                    const we: int = wordEnd(s, k, to)
+                    const w: string = s.substring(k, we)
+                    const after: int = skip(s, we, to)
+                    if (ch(s, after) == ":") {
+                        // the next column declaration
+                        going = false
+                    } else if (w == "primary" && wordAt(s, after, to) == "key") {
+                        pk = true
+                        pks = pks + 1
+                        if (pks > 1) errs = errs.concat([refuse("column `" + table + "." + name + "` says `primary key` twice", k, wordEnd(s, after, to))])
+                        k = skip(s, wordEnd(s, after, to), to)
+                    } else if (w == "not" && wordAt(s, after, to) == "null") {
+                        k = skip(s, wordEnd(s, after, to), to)
+                    } else if (w == "unique") {
+                        k = after
+                    } else if (w == "default") {
+                        if (ch(s, after) != "(") {
+                            return colGiveUp(errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
+                        }
+                        const pe: int = parenEnd(s, after, to)
+                        if (pe < 0) {
+                            return colGiveUp(errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
+                        }
+                        if (s.substring(after + 1, pe).trim() == "") {
+                            return colGiveUp(errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
+                        }
+                        k = skip(s, pe + 1, to)
+                    } else if (w == "references") {
+                        // §39.5.5: "This is the ONLY foreign-key production" — `references <table>(<column>)`
+                        const tb: int = skip(s, we, to)
+                        const tbe: int = wordEnd(s, tb, to)
+                        let ok = tb > we && tbe > tb && ch(s, tbe) == "("
+                        let ce: int = tbe + 1
+                        if (ok) {
+                            ce = wordEnd(s, tbe + 1, to)
+                            ok = ce > tbe + 1 && ch(s, ce) == ")"
+                        }
+                        const tail: int = ce + 1
+                        if (ok && tail < to && isWordCh(ch(s, tail))) ok = false
+                        if (!ok) {
+                            const shown: string = s.substring(k, runEnd(s, tb, to)).trim()
+                            return colGiveUp(errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
+                        }
+                        refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }])
+                        k = skip(s, tail, to)
+                    } else if (w == "rename") {
+                        return colGiveUp(errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
+                    } else if (isSharedCore(w)) {
+                        return colGiveUp(errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
+                    } else if (w == "immutable") {
+                        return colGiveUp(errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
+                    } else {
+                        return colGiveUp(errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
+                    }
+                }
+            }
+        }
+        return { col: { name: name, ty: ty, pk: pk, start: i, end: ne }, refs: refs, errs: errs, next: k, stop: false }
+    }
+
+    // ---- a table --------------------------------------------------------------
+    type RTable:struct = { t: SchemaTable, refs: SchemaRef[], errs: SchemaErr[], next: int }
+
+    // The table body after its `{` (at `open`).
+    fn readTable(s: string, name: string, start: int, end: int, open: int, to: int) -> RTable {
+        let errs: SchemaErr[] = []
+        let cols: SchemaCol[] = []
+        let refs: SchemaRef[] = []
+        let i: int = skip(s, open + 1, to)
+        let going = true
+        while (going) {
+            if (i >= to) {
+                errs = errs.concat([err("E-PARSE-UNCLOSED", "the `{` of `<schema>` table `" + name + "` is never closed", open, open + 1)])
+                going = false
+            } else if (ch(s, i) == "}") {
+                i = i + 1
+                going = false
+            } else if (isWordStart(ch(s, i))) {
+                const rc: RCol = readColumn(s, i, to, name)
+                errs = errs.concat(rc.errs)
+                const c: SchemaCol | not = rc.col
+                if (c is given) {
+                    for (const prior of cols) {
+                        if (sameName(prior.name, c.name)) errs = errs.concat([refuse("table `" + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate column names within a table\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", c.start, c.end)])
+                    }
+                    cols = cols.concat([c])
+                    refs = refs.concat(rc.refs)
+                }
+                if (rc.stop) {
+                    const b: int = braceEnd(s, rc.next, to)
+                    if (b >= to) {
+                        i = to
+                    } else {
+                        i = b + 1
+                    }
+                    going = false
+                } else {
+                    i = skip(s, rc.next, to)
+                }
+            } else {
+                errs = errs.concat([refuse("`" + ch(s, i) + "` in `<schema>` table `" + name + "` is not a §39.2 column declaration (`name: type constraint*`)", i, i + 1)])
+                const b2: int = braceEnd(s, i, to)
+                i = b2 >= to ? to : b2 + 1
+                going = false
+            }
+        }
+        let pks: int = 0
+        for (const c of cols) { if (c.pk) pks = pks + 1 }
+        if (pks == 0) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
+        if (pks > 1) errs = errs.concat([refuse("`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\"", start, end)])
+        return { t: { name: name, cols: cols, start: start, end: end }, refs: refs, errs: errs, next: i }
+    }
+
+    // ---- the body -------------------------------------------------------------
+    // Read the `<schema>` body `s[from, to)`.
+    export fn readSchemaBody(s: string, from: int, to: int) -> SchemaRead {
+        let tables: SchemaTable[] = []
+        let refs: SchemaRef[] = []
+        let errs: SchemaErr[] = []
+        let content = false            // non-comment text in the body
+        let otherForm = false          // a recognized non-DSL form (raw DDL, `fn`, `${`) — refused, not "no table"
+        let i: int = skip(s, from, to)
+        let going = true
+        while (going && i < to) {
+            content = true
+            const re: int = runEnd(s, i, to)
+            const run: string = s.substring(i, re)
+            const after: int = skip(s, re, to)
+            if (s.substring(i, i + 2) == "$" + LB()) {
+                otherForm = true
+                errs = errs.concat([refuse("a `" + "$" + LB() + " … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap", i, i + 2)])
+                going = false
+            } else if (wordAt(s, i, to).toLowerCase() == "create" || s.substring(i, i + 2) == "--" || s.substring(i, i + 2) == "/*" || s.substring(i, i + 2) == "?" + LB()) {
+                // raw DDL — bare or `?{`…`}`-wrapped — or SQL's own comments (§27.2), which only a raw-DDL body holds
+                otherForm = true
+                errs = errs.concat([refuse("raw SQL DDL (`CREATE …`, SQL `--` / `/* */` comments) in `<schema>` is not in the bootstrap (INTERIM) — its §39.2 head checks (E-SCHEMA-012…015) and the §14.8.9 / §14.8.10 floors that read raw declarations are not built. Declare the table in the §39.2 form, `name { column: type constraint* }` (comments: `//`)", i, re > i ? re : i + 2)])
+                going = false
+            } else if (wordAt(s, i, to) == "fn") {
+                otherForm = true
+                errs = errs.concat([refuse("a `fn` in `<schema>` is a §14.8.11.2 SECURITY-DEFINER function, which is not in the bootstrap", i, i + 2)])
+                going = false
+            } else if (headTail(run) != "" && ch(s, after) == "{") {
+                // §39.2 "Declarative heads are read whole": the head is the run's
+                // trailing name; a glued prefix is E-SCHEMA-012 (a `.` in it) or
+                // E-SCHEMA-013, and the table is still declared (no cascade)
+                const name: string = headTail(run)
+                if (name != run) {
+                    if (run.indexOf(".") >= 0) {
+                        errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + run + "` carries a schema / database qualifier — §39.2: a declarative head is read whole, and a qualified table name is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, re)])
+                    } else {
+                        errs = errs.concat([err("E-SCHEMA-013", "the `<schema>` table head `" + run + "` is not a table name the compiler can read — §39.2: a declarative head is read whole; a table name is letters, digits and `_`, not starting with a digit", i, re)])
+                    }
+                }
+                const rt: RTable = readTable(s, name, i, re, after, to)
+                for (const prior of tables) {
+                    if (sameName(prior.name, name)) errs = errs.concat([refuse("`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate table names\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", i, re)])
+                }
+                tables = tables.concat([rt.t])
+                refs = refs.concat(rt.refs)
+                errs = errs.concat(rt.errs)
+                i = skip(s, rt.next, to)
+                if (wordAt(s, i, to) == "db") {
+                    const de: int = runEnd(s, i, to)
+                    if (s.substring(i, de) == "db-authoritative") {
+                        errs = errs.concat([refuse("`db-authoritative` after `<schema>` table `" + name + "` (§14.8.11) is not in the bootstrap", i, de)])
+                        i = skip(s, de, to)
+                    }
+                }
+            } else {
+                errs = errs.concat([refuse("`" + (run == "" ? ch(s, i) : run) + "` in `<schema>` is not a §39.2 table declaration (`name { column: type constraint* }`) — the bootstrap reads nothing else in a `<schema>` body", i, re > i ? re : i + 1)])
+                going = false
+            }
+        }
+        // §39.5.5: "The referenced table and column SHALL both exist in the
+        // `<schema>` declaration (or in the existing database schema, if the
+        // referenced table is not being created)" — E-SCHEMA-006.
+        for (const fk of refs) {
+            const col: string = fk.targetCol
+            let target: SchemaTable | not = not
+            for (const t of tables) { if (sameName(t.name, fk.target)) target = t }
+            if (target is not) {
+                errs = errs.concat([refuse("column `" + fk.table + "." + fk.col + "` references `" + fk.target + "`, which this `<schema>` does not declare — §39.5.5 allows a table of the existing database, which the bootstrap does not read (INTERIM), so it cannot tell whether `" + fk.target + "(" + col + ")` exists. Declare `" + fk.target + "` in the `<schema>`", fk.start, fk.end)])
+            } else {
+                let has = false
+                for (const c of target.cols) { if (sameName(c.name, col)) has = true }
+                if (!has) errs = errs.concat([err("E-SCHEMA-006", "column `" + fk.table + "." + fk.col + "` references `" + fk.target + "(" + col + ")`, and `<schema>` table `" + target.name + "` declares no column `" + col + "` (§39.5.5)", fk.start, fk.end)])
+            }
+        }
+        // §39.2 "For the §14.8.9 / §14.8.10 floors every `CREATE TABLE` head in the body
+        // text is read as a declaration wherever it appears — including inside comments
+        // … A commented-out declaration is therefore still a declaration." The bootstrap
+        // reads no raw declaration, so one written anywhere — a `//` comment included —
+        // is refused rather than skipped (fail closed).
+        const low: string = s.substring(from, to).toLowerCase()
+        if (!otherForm && hasWord(low, "create") && hasWord(low, "table")) {
+            otherForm = true
+            errs = errs.concat([refuse("this `<schema>` body holds `CREATE … TABLE` text (in a `//` comment, too) — §39.2: the §14.8.9 / §14.8.10 floors read every `CREATE TABLE` head in the body text as a declaration wherever it appears, a commented-out one included, and the bootstrap reads no raw declaration (INTERIM). Delete the text, or declare the table in the §39.2 form", from, to)])
+        }
+        // §34 W-SCHEMA-NO-TABLES-DECLARED: non-blank after comments, zero tables, no `fn`, no non-text child
+        if (content && tables.length == 0 && !otherForm) {
+            errs = errs.concat([err("W-SCHEMA-NO-TABLES-DECLARED", "this `<schema>` has content but declares no table — it is inert, and every floor keyed on a `<schema>` table cannot engage (§34)", from, to)])
+        }
+        return { tables: tables, errs: errs }
+    }
+}
