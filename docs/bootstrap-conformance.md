@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 589 | 31.5% |
+| PASS | 594 | 31.8% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 17 | 0.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 627 | 33.6% |
+| UNSUPPORTED | 622 | 33.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 606; of those, 589 hold (97.2%). Runtime half executed on the bootstrap for 197 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 611; of those, 594 hold (97.2%). Runtime half executed on the bootstrap for 200 case(s).
 
-- **Vacuous** passes: 13 of 589 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **576**.
+- **Vacuous** passes: 13 of 594 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **581**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 17; the other 11 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 627.
+UNSUPPORTED by reason: bootstrap-unsupported 622.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 393 · FAIL 14 · UNSUPPORTED 467. Twin holds 393 (non-vacuous 383). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 398 · FAIL 14 · UNSUPPORTED 462. Twin holds 398 (non-vacuous 388). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 4 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -111,13 +111,13 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
-| control-flow | 76 | 40 | · | · | · | 24 | 12 | · | · |
+| control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
 | defer | 51 | 25 | · | · | · | 4 | 22 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 24 | · | · | · | 11 | 4 | · | · |
 | endpoint | 17 | 17 | · | · | · | · | · | · | · |
-| engine | 92 | 21 | · | · | · | 50 | 21 | · | · |
+| engine | 92 | 22 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
 | error | 78 | 46 | · | 4 | · | 5 | 23 | · | · |
@@ -151,7 +151,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
-| raw-content | 9 | 7 | · | · | · | 1 | 1 | · | · |
+| raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
 | reactive | 127 | 69 | · | 1 | · | 44 | 13 | · | · |
 | refinement | 57 | 17 | · | 1 | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
@@ -228,7 +228,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (589)
+### PASS / CODES-ONLY (594)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -333,6 +333,7 @@ none
 - `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — PASS · TWIN
 - `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — PASS · TWIN
 - `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` — PASS · TWIN
+- `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-attr-expr-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-fn-body-pos` — PASS · TWIN
 - `control-flow/ctrl-switch-forbidden-logic-block-pos` — PASS · TWIN
@@ -341,6 +342,8 @@ none
 - `control-flow/if-chain-program-first-true-rt` — PASS
 - `control-flow/if-on-match-render-gate-absent-rt` — PASS · TWIN
 - `control-flow/if-on-match-render-gate-mounts-rt` — PASS · TWIN
+- `control-flow/markup-if-arm-reads-rerender-pos` — PASS · TWIN
+- `control-flow/markup-statement-not-rendered-neg` — PASS · TWIN
 - `control-flow/s437-braceless-else-in-failable-arm` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
@@ -427,6 +430,7 @@ none
 - `engine/onidle-invalid-variant-pos` — PASS · TWIN
 - `engine/onidle-legal-neg` — PASS · TWIN
 - `engine/onidle-misplaced-pos` — PASS · TWIN
+- `engine/ontimeout-misplaced-pos` — PASS · TWIN
 - `engine/phase-advance` — PASS · TWIN
 - `engine/rule-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/rule-invalid-variant-pos` — PASS · TWIN
@@ -679,6 +683,7 @@ none
 - `raw-content/bare-angle-displays` — PASS
 - `raw-content/each-row-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/entity-display-unchanged` — PASS
+- `raw-content/lift-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/match-arm-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/nested-code-with-attribute-is-text` — PASS
 - `raw-content/pre-code-wrapper-stays-element` — PASS
@@ -820,7 +825,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (627)
+### UNSUPPORTED (622)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -925,12 +930,9 @@ none
 - `control-flow/ctrl-026-arm-body-nested-value-form-decl-pos` — twin · bootstrap-unsupported: a branch of an `if` used as a value that holds statements before its `lift` is not in the bootstrap yet — the bootstrap builds a branch that is ONE value, `{ e }` or `{ lift e; }` (§17.6.8's single-li
 - `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos` — twin · bootstrap-unsupported: a branch of an `if` used as a value that holds statements before its `lift` is not in the bootstrap yet — the bootstrap builds a branch that is ONE value, `{ e }` or `{ lift e; }` (§17.6.8's single-li
 - `control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
-- `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `control-flow/if-chain-branch-declared-function-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · bootstrap-unsupported: the initializer of the file-scope constant `x` holds a cell read (`@cond`) — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constan
-- `control-flow/markup-if-arm-reads-rerender-pos` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
-- `control-flow/markup-statement-not-rendered-neg` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse(
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: a branch of an `if` used as a value that does not end in its `lift` (a `lift` on only some paths, or none — §17.6.2, W-LIFT-001) is not in the bootstrap yet — the bootstrap builds a branch that is ONE
@@ -956,8 +958,8 @@ none
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `element-refusal/near-names-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
-- `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `${ … }` logic block (§10, §17.4) is not
+- `element-refusal/near-names-neg` — bootstrap-unsupported: `lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `${ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `
+- `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: `lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `${ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
@@ -967,7 +969,6 @@ none
 - `engine/ontimeout-invalid-target-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-legal-neg` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontimeout-misplaced-markup-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `engine/ontimeout-misplaced-pos` — twin · bootstrap-unsupported: markup standing as a statement in a `${ … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)
 - `engine/ontransition-no-target-neg` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/ontransition-no-target-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/payload-arity-mismatch-pos` — twin · bootstrap-unsupported: `id` on the state-child `<Dragging>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
@@ -1279,7 +1280,6 @@ none
 - `protect/sse-yield-strip` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
-- `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: lifting MARKUP is in the bootstrap only in a Tier-0 `${ for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — here the nearest bound loop builds a tape of values; markup is not a value in the bootst
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `clear(…)`
 - `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `function-typed parameter` (§15.11.5) is not in the bootstrap yet; it is refused here by name rather than misread — function types are not in the bootstrap's type grammar yet; call the function where 
