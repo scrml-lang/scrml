@@ -645,6 +645,8 @@ ${
             .TapeIncludes :> rtCall(ctx, "tapeIncludes", a)
             // s477 (O36 RULED S477) — a bounded tape's runtime length check; a local `insert`
             .LengthCheck :> rtCall(ctx, "lengthCheck", a)
+            // s478 (§53.4.5) — a boundary-zone refinement's runtime check (the E-CONTRACT-001-RT trap)
+            .RefineCheck :> rtCall(ctx, "refineCheck", a)
             .TapeInsert :> rtCall(ctx, "tapeInsert", a)
             // s478 (§20.7) — raw stdout (server-runtime.js printOut; server code only, check.scrml C-P1)
             .Print :> rtCall(ctx, "printOut", a)

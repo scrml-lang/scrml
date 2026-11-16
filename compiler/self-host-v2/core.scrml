@@ -218,6 +218,15 @@ ${
         // past the end, not an int) is the E-INDEX-OUT-OF-RANGE-RT trap and
         // nothing is written (§66.12.8 rule 7; O36 extends the S473 trap).
         LengthCheck, TapeInsert,
+        // s478 (s478-boot-refinement-runtime) — §53.4.5 the BOUNDARY zone's runtime
+        // check: RefineCheck(v, base, spec, shown, what, loc) is `v` itself when it is
+        // a value of the base type (§53.3.4: "The constrained type is a subtype of the
+        // base type") satisfying the predicate `spec` (parse.scrml refineSpec);
+        // otherwise the E-CONTRACT-001-RT trap (§53.11: "The runtime check SHALL halt
+        // execution and produce E-CONTRACT-001-RT before the assignment is applied"),
+        // naming the constraint `shown`, the value, the failing clause, the variable
+        // `what` and its location `loc` (§53.4.5 item 3).
+        RefineCheck,
         // s478 (s478-boot-print-builtins, §20.7) — Print(s): write the string `s` to host stdout as RAW
         // text (§20.7.6: "NO origin tag / `file:line` / side classification"), its value `not`. What
         // `print(…)` / `println(…)` lower to: `s` is the arguments' texts space-joined (§20.7.1), with one

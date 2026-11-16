@@ -2749,7 +2749,7 @@ ${
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a NAMED function expression `function " + cur(t).v + "(…) { … }` used as a value is not in the bootstrap (INTERIM) — drop the name (`function (…) { … }`), or declare it as a statement (§7.3.1) and pass its name", cur(t))
             t = adv(t)
         }
-        const rp: RParams = parseParamList(expectP(t, "("))
+        const rp: RParams = parseParamList(expectP(t, "("), false)
         t = expectP(rp.tp, ")")
         const a: PTok = cur(t)
         if (!isP(t, "{")) {
@@ -5236,8 +5236,15 @@ ${
     // is refused by name (INTERIM).
     type RLocalRefine:struct = { ty: AType, tp: TP }
 
+    // s478 (s478-boot-refinement-runtime) — a `const` local whose value is not a
+    // literal (or a literal the bootstrap does not decide now, a `url`) is the
+    // boundary zone, and its runtime check is BUILT: §53.4.3 rule 1 "The compiler
+    // SHALL emit a runtime check when: The value comes from an unconstrained
+    // source", §53.4.5 "The check SHALL be emitted at the assignment site" (lower.scrml
+    // localRefineCheck — checked as the local binds, before any later statement).
     fn localRefine(tp: TP, ty: AType, init: AExpr, mutable: boolean, name: string) -> RLocalRefine {
         let z: RefZone = refineFixedZone(ty, refLitOf(init), "the local `" + name + "`")
+        if (!mutable && z.code == "E-BOOTSTRAP-UNSUPPORTED") z = { code: "", msg: "", reported: false }
         if (mutable && z.code != "E-CONTRACT-001") {
             z = { code: "E-BOOTSTRAP-UNSUPPORTED", msg: refBoundaryMsg(typeNameText(ty), "on the `let` local `" + name + "` — each later assignment to it is a boundary-zone write"), reported: false }
         }
@@ -6557,6 +6564,66 @@ ${
         return { code: "", msg: "", reported: false }
     }
 
+    // =========================================================================
+    // s478 (s478-boot-refinement-runtime) — the BOUNDARY zone's runtime check
+    // (§53.4.3, §53.4.5, §53.11: "The compiler SHALL emit a runtime check for every
+    // boundary-zone assignment that it cannot statically elide"). The predicate is
+    // judged by THIS reader (judgeRefine) and handed to the runtime as a spec —
+    // prefix tokens separated by one space — so the runtime never reads the
+    // predicate text itself (one reader; the static and the runtime check judge the
+    // same predicate, §53.6.1):
+    //   `c <op> <n>`  the value against a number     `l <op> <n>`  `.length` (code points)
+    //   `s <name>`    a named shape (§53.6.1)        `& A B` · `| A B` · `! A`
+    // "" when the refinement does not stand (reported, or not judged).
+    // =========================================================================
+    export fn refineSpec(base: string, pred: string) -> string {
+        if (pred == "") return ""
+        const j: RefJudge = judgeRefine(base, pred)
+        if (j.code != "") return ""
+        return refSpecOf(j.p)
+    }
+
+    fn refSpecOf(p: RefPred) -> string {
+        return match p {
+            .PCmp(op: o, n: k) :> "c " + o + " " + k
+            .PLen(op: o, n: k) :> "l " + o + " " + k
+            .PShape(name: nm) :> "s " + nm
+            .PAnd(l: a, r: b) :> "& " + refSpecOf(a) + " " + refSpecOf(b)
+            .POr(l: a, r: b) :> "| " + refSpecOf(a) + " " + refSpecOf(b)
+            .PNot(p: x) :> "! " + refSpecOf(x)
+        }
+    }
+
+    // The base name and predicate of a refinement standing at the TOP of `t`
+    // (`base` "" when there is none — a plain type, or a reported refinement).
+    export type RefineTop:struct = { base: string, pred: string }
+
+    export fn refineTopOf(t: AType | not) -> RefineTop {
+        if (t is not) return { base: "", pred: "" }
+        if (!standingRefine(t)) return { base: "", pred: "" }
+        return { base: refineBaseName(t), pred: refinePred(t) }
+    }
+
+    // The static zone at a value that reaches a refinement (§53.4.2 rules 1-2,
+    // T-PRED-1): `e` judged against `base(pred)` when it is a literal — "pass",
+    // "fail" / "base" (E-CONTRACT-001), "mismatch" (another primitive: the type
+    // check reports it), "open" (not decided now: the runtime check judges it) —
+    // or "none" when `e` is not a literal.
+    export fn refineLitVerdict(base: string, pred: string, e: AExpr) -> string {
+        const lit: RefLit | not = refLitOf(e)
+        if (lit is not) return "none"
+        const j: RefJudge = judgeRefine(base, pred)
+        if (j.code != "") return "open"
+        return refVerdict(base, j.p, lit)
+    }
+
+    // The E-CONTRACT-001 text for literal `e` (refineLitVerdict "fail" / "base").
+    export fn refineLitFailMsg(base: string, pred: string, e: AExpr, what: string, verdict: string) -> string {
+        const lit: RefLit | not = refLitOf(e)
+        if (lit is not) return what + " does not satisfy `" + base + "(" + pred + ")`"
+        return refFailMsg(base, pred, lit, what, verdict)
+    }
+
     // A refinement read in a code type, at its `(` (touching the base name):
     // the tokens to the matching `)` are the predicate, judged now. A tail after
     // the `)` that is not `[…]` (a label, or a tape: read by parseType's loop) and
@@ -7497,7 +7564,13 @@ ${
     // … (* §7.5 param-decl, unchanged *)").
     type RParams:struct = { ps: AParam[], tp: TP }
 
-    fn parseParamList(tp: TP) -> RParams {
+    // s478 (s478-boot-refinement-runtime) — `own`: a function DECLARATION's
+    // parameter (parseFnDecl) keeps a refinement at its type's top: §53.9.1 "The
+    // compiler SHALL emit a runtime check when the function is called with an
+    // unconstrained argument" — built (lower.scrml paramRefineChecks, the entry
+    // check). Every other parameter list (a function expression, a `<host>`
+    // binding) refuses it by name, as before (INTERIM).
+    fn parseParamList(tp: TP, own: boolean) -> RParams {
         let t: TP = tp
         let params: AParam[] = []
         while (!isP(t, ")") && !atEnd(t)) {
@@ -7512,7 +7585,7 @@ ${
             t = adv(t)
             let ty: AType | not = not
             if (isP(t, ":")) {
-                const r: RType = parseType(adv(t))
+                const r: RType = parseTypeAt(adv(t), own)
                 ty = r.t
                 t = r.tp
             }
@@ -7546,7 +7619,7 @@ ${
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
-        const rp: RParams = parseParamList(expectP(adv(t), "("))
+        const rp: RParams = parseParamList(expectP(adv(t), "("), true)
         const params: AParam[] = rp.ps
         t = expectP(rp.tp, ")")
         // s451 (Ue) — §19.4.1 `failable-fn ::= 'function' identifier '('
@@ -11080,7 +11153,7 @@ ${
         }
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident || !tk(peekAt(t, 1), "(")) return hostMalformed(mp, at, end, "this line is not a binding")
-        const rp: RParams = parseParamList(adv(adv(t)))
+        const rp: RParams = parseParamList(adv(adv(t)), false)
         if (!isP(rp.tp, ")")) return hostMalformed(mp, at, end, "a binding's parameter list does not close on its line")
         t = adv(rp.tp)
         let ret: AType | not = not

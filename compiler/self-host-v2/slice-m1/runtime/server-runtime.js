@@ -90,6 +90,8 @@ export function printOut(s) {
 export { hostResult };
 // s477 (s477-boot-tape-bounds) — a bounded tape's runtime length check and a local `insert` (O36 RULED S477): the SAME functions
 export { lengthCheck, tapeInsert } from "./runtime.js";
+// s478 (s478-boot-refinement-runtime) — a boundary-zone refinement's runtime check (§53.4.5, §53.9.4): the SAME function
+export { refineCheck } from "./runtime.js";
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the
