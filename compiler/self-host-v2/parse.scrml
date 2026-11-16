@@ -56,6 +56,7 @@ ${
     import { SchemaErr, SchemaRead, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
+    import { isKnownElementName } from "./elements.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -3507,6 +3508,7 @@ ${
         // s478 — bare markup / an implied-`lift` arm in a body-top logic block (logicBlockTP)
         // s478 (markup-in-logic) — a bare row of a Tier-0 region (parseTier0 /
         // parseTier0If): one a value-form branch did not take (§17.6.10.1)
+        if (isBareRowOther(t)) return logicRowStmt(tp, start, notMarkupWhy())
         if (isBareRowTok(t)) return unrenderedRowStmt(tp, start, false)
         if (isLocusRow(t)) return misplacedRowStmt(tp, start)
         if (isLogicRowTok(t)) return logicBareStmt(tp, start, "markup standing as a statement in a `" + interpOpen() + " … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)")
@@ -4374,6 +4376,11 @@ ${
                 const refused: boolean = refusedRowNode(rn.n) || refusalSince(m.diags, d0)
                 let mark: string = logicRowMark(refused)
                 if (!refused && !rowIsElem(rn.n)) mark = logicRowOther()
+                // #1919 review F2: an element that is not markup (a §52 state
+                // type, a `<x> = …` declaration, a §55 compound, a `renders`
+                // clause, a component) — refused by name, as before
+                const lifted: boolean = toks.length > 0 && isLiftWord(toks[toks.length - 1])
+                if (!refused && !lifted && rowIsElem(rn.n) && !rowIsMarkup(rn.n, mp.src, m.pos, toks)) mark = logicRowOther()
                 if (!refused && locusMarkOf(rn.n) != "") mark = locusMarkOf(rn.n)
                 const rt: PTok = { cls: TC.Other, v: mark, text: text, start: p.end, end: m.pos, line: p.line, bad: "" }
                 toks = toks.concat([rt])
@@ -4435,6 +4442,85 @@ ${
         return mkS(re.tp, start, AStmtK.Eval(re.e))
     }
 
+    // s478 (#1919 review F2) — is the element row MARKUP, which §17.6.10.1
+    // judges ("A markup element in statement position …")? An element of the
+    // §24.1 registry (elements.scrml isKnownElementName: HTML, SVG, MathML, a
+    // custom element), written lower-case first, that is neither followed by
+    // `=` (a `<x> = …` cell / legacy `<query default=…> = "v"` declaration)
+    // nor the operand of a §19.2 `renders` clause. Not markup, so refused by
+    // name as before (INTERIM — the by-name refusal is what BASE gave): a
+    // capitalised §52 state-type declaration (`<Account authority=…> id: number
+    // …</>`), a §55 compound declaration's parent (`<signup> … </>`), and a
+    // component (its name is known only to analysis).
+    fn rowIsMarkup(n: ANode, src: string, end: int, before: PTok[]) -> boolean {
+        const k: ANodeK = n.k
+        const tag: string = match k {
+            .Elem(e: x) :> x.tag
+            .Text(text: s) :> ""
+            .Interp(e: x) :> ""
+            .DeclNode(d: x) :> ""
+            .Css(c: x) :> ""
+            .Effect(w: x) :> ""
+            .Request(r: x) :> ""
+            .Gather(f: x) :> ""
+            .Run(b: x) :> ""
+        }
+        if (tag == "") return false
+        if (declShaped(n)) return false
+        const c0: string = tag.substring(0, 1)
+        if (c0 != c0.toLowerCase()) return false
+        if (!isKnownElementName(tag)) return false
+        if (before.length > 0) {
+            const pv: PTok = before[before.length - 1]
+            if ((pv.cls == TC.Ident || pv.cls == TC.Keyword) && pv.v == "renders") return false
+        }
+        let i: int = end
+        while (i < src.length && (src.substring(i, i + 1) == " " || src.substring(i, i + 1) == "\t" || src.substring(i, i + 1) == "\n" || src.substring(i, i + 1) == "\r")) { i = i + 1 }
+        if (src.substring(i, i + 1) == "=" && src.substring(i + 1, i + 2) != "=") return false
+        return true
+    }
+
+    // A declaration read as an element: a text child that starts with `=` —
+    // an unclosed `<label min(3)> = "hi"` (its `= …` read as the element's
+    // text), or a §55 compound `<form> <name default=…> = "v" … </>` (a
+    // child's `= …`). Markup text does not start with `=`.
+    fn declShaped(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        const kids: ANode[] = match k {
+            .Elem(e: x) :> x.kids
+            .Text(text: s) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: x) :> []
+            .Css(c: x) :> []
+            .Effect(w: x) :> []
+            .Request(r: x) :> []
+            .Gather(f: x) :> []
+            .Run(b: x) :> []
+        }
+        for (const c of kids) {
+            const ck: ANodeK = c.k
+            const txt: string = match ck {
+                .Text(text: s) :> s
+                .Elem(e: x) :> ""
+                .Interp(e: x) :> ""
+                .DeclNode(d: x) :> ""
+                .Css(c: x) :> ""
+                .Effect(w: x) :> ""
+                .Request(r: x) :> ""
+                .Gather(f: x) :> ""
+                .Run(b: x) :> ""
+            }
+            const tt: string = txt.trim()
+            if (tt.startsWith("=") && !tt.startsWith("==")) return true
+            if (declShaped(c)) return true
+        }
+        return false
+    }
+
+    fn notMarkupWhy() -> string {
+        return "this element standing as a statement in a `" + interpOpen() + " … }` logic block is not one the bootstrap reads there (a declaration written as markup — a §52 state type, a `<x> = …` cell, a §55 compound — or a component; §10, §17.6.10.1) — write it where it is read: a declaration at a body top, markup in the body"
+    }
+
     fn rowIsElem(n: ANode) -> boolean {
         const k: ANodeK = n.k
         return match k {
@@ -4456,7 +4542,7 @@ ${
     fn logicRowStmt(tp: TP, start: int, why: string) -> RStmt {
         const row: PTok = cur(tp)
         let t: TP = tp
-        if (row.v == logicRowMark(false) || row.v == logicRowOther()) t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, row)
+        if (row.v == logicRowMark(false) || row.v == logicRowOther() || row.v == bareRowOtherMark()) t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, row)
         const re: RExpr = mkE(adv(t), start, AExprK.Recovered)
         return mkS(re.tp, start, AStmtK.Eval(re.e))
     }
@@ -4617,7 +4703,12 @@ ${
 
     fn bareRowMark() -> string { return "bare-row" }
 
-    fn isBareRowTok(t: PTok) -> boolean { return t.cls == TC.Other && t.v == bareRowMark() }
+    // s478 (#1919 review F2) — a bare element that is not markup (rowIsMarkup).
+    fn bareRowOtherMark() -> string { return "bare-row-other" }
+
+    fn isBareRowTok(t: PTok) -> boolean { return t.cls == TC.Other && (t.v == bareRowMark() || t.v == bareRowOtherMark()) }
+
+    fn isBareRowOther(t: PTok) -> boolean { return t.cls == TC.Other && t.v == bareRowOtherMark() }
 
     fn isLiftWord(t: PTok) -> boolean {
         return (t.cls == TC.Keyword || t.cls == TC.Ident) && t.v == "lift"
@@ -4660,6 +4751,10 @@ ${
                     } else if (!rowIsElem(rn.n)) {
                         mark = logicRowOther()
                     } else {
+                        // #1919 review F2: an element that is not markup still
+                        // stands as a value-form branch's one item; in statement
+                        // position it is refused by name (parseStmt)
+                        if (!rowIsMarkup(rn.n, mp.src, m.pos, toks)) mark = bareRowOtherMark()
                         rows = rows.concat([rn.n])
                     }
                     rt = { cls: TC.Other, v: mark, text: rt.text, start: rt.start, end: rt.end, line: rt.line, bad: "" }
@@ -4792,6 +4887,11 @@ ${
     type RT0If:struct = { s: AStmt, tp: TP, single: boolean }
     type RT0Branch:struct = { b: ABlock, tp: TP, single: boolean }
 
+    // The one-pass loop's label: `#` starts no identifier, and a loop label is
+    // one (parseJump reads an identifier), so no source jump can name it.
+    // analyze.scrml tier0IfLabel() is the same string.
+    fn tier0IfLabel() -> string { return "#if" }
+
     fn parseTier0If(mp: MP) -> RNodeOne {
         const start: int = mp.pos
         const rr: RT0Region = tier0Region(mp)
@@ -4799,23 +4899,31 @@ ${
         const t0: TP = expectP(rr.tp, "{")
         // every branch ONE item: the value-form; otherwise every branch is a
         // statement list (accumulation, §10.1) — re-read from the same tokens
-        let ri: RT0If = parseTier0IfChain(t0, true)
-        if (!ri.single) ri = parseTier0IfChain(t0, false)
+        let ri: RT0If = parseTier0IfChain(t0, true, false)
+        // #1919 review F3: the message names the sibling's cause — an empty
+        // branch is not one item either
+        if (!ri.single) ri = parseTier0IfChain(t0, false, chainHasEmpty(ri.s))
         let t: TP = ri.tp
         if (isP(t, ";")) t = adv(t)
         if (!isP(t, "}") && !atEnd(t)) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + " if … }` in markup holds the `if` and nothing else (§17.6.10: the control-flow statement is \"the sole content of a markup `" + interpOpen() + "…}` interpolation\") — compute the rest in a function, or give it its own block", cur(t))
             while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
         }
-        t = leaveNoLoop(t, ri.s)
         t = expectRegionEnd(expectP(t, "}"))
         if (rr.bad || unrenderedSince(t.diags, d0)) return recoveredInterp(backToMarkup(rr.mp, t), start)
-        // the one-pass loop: `for { <if> break; }`
-        const brk: AStmt = { nid: t.nid, span: mkSpan(ri.s.span.end, ri.s.span.end), k: AStmtK.Break("") }
+        // the one-pass loop: `for { <if> break; }`. It is no loop of the
+        // program's (§49.9: a `break` / `continue` in the `if` has none to
+        // leave), so it and its own `break` carry the reserved label
+        // `tier0IfLabel()`, which no source label can spell: analyze's
+        // loop-control pass (loopJump) passes over its frame for an unlabelled
+        // jump — E-LOOP-001 / -002 when no loop of the program's encloses it,
+        // at ANY depth (a `match` / `!{}` arm, an initializer) — and no
+        // labelled jump can name it
+        const brk: AStmt = { nid: t.nid, span: mkSpan(ri.s.span.end, ri.s.span.end), k: AStmtK.Break(tier0IfLabel()) }
         t = bumpId(t)
         const body: ABlock = { nid: t.nid, span: ri.s.span, stmts: [ri.s, brk] }
         t = bumpId(t)
-        const f: AFor = { nid: t.nid, span: ri.s.span, label: "", head: AForHead.HForever, body: body, bound: not }
+        const f: AFor = { nid: t.nid, span: ri.s.span, label: tier0IfLabel(), head: AForHead.HForever, body: body, bound: not }
         t = bumpId(t)
         const mb: MP = backToMarkup(rr.mp, t)
         const n: ANode = { nid: mb.nid, span: mkSpan(start, mb.pos), k: ANodeK.Gather(fillRowsFor(f, rr.rows)) }
@@ -4825,7 +4933,7 @@ ${
     // At `if`: the chain (`else if` nested in `else`). `vf`: read a branch that
     // is ONE item — one element, one expression, or a nested value-form `if` —
     // as its `lift` (§17.6.10); `single`: every branch was one.
-    fn parseTier0IfChain(tp: TP, vf: boolean) -> RT0If {
+    fn parseTier0IfChain(tp: TP, vf: boolean, emptySib: boolean) -> RT0If {
         const start: int = cur(tp).start
         let t: TP = adv(tp)
         let cond: AExpr = mkE(t, start, AExprK.Recovered).e
@@ -4841,19 +4949,19 @@ ${
             cond = keptHead(c0.e)                                       // §50, D10: a condition head
             t = expectP(c0.tp, ")")
         }
-        const yes: RT0Branch = parseTier0Branch(t, vf)
+        const yes: RT0Branch = parseTier0Branch(t, vf, emptySib)
         t = yes.tp
         let single: boolean = yes.single
         let elseB: ABlock | not = not
         if (isWord(t, "else")) {
             t = adv(t)
             if (isWord(t, "if")) {
-                const inner: RT0If = parseTier0IfChain(t, vf)
+                const inner: RT0If = parseTier0IfChain(t, vf, emptySib)
                 single = single && inner.single
                 elseB = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
                 t = bumpId(inner.tp)
             } else {
-                const eb: RT0Branch = parseTier0Branch(t, vf)
+                const eb: RT0Branch = parseTier0Branch(t, vf, emptySib)
                 single = single && eb.single
                 elseB = eb.b
                 t = eb.tp
@@ -4865,7 +4973,7 @@ ${
 
     // One branch. With `vf`, a branch that is ONE item is that item's `lift`;
     // any other branch (or any branch, without `vf`) is a statement list.
-    fn parseTier0Branch(tp: TP, vf: boolean) -> RT0Branch {
+    fn parseTier0Branch(tp: TP, vf: boolean, emptySib: boolean) -> RT0Branch {
         const start: int = cur(tp).start
         if (!isP(tp, "{")) {
             // §17.6.10: every branch is braced (`'{' expression '}'`)
@@ -4877,13 +4985,16 @@ ${
         // one element: `{ <p>…</p> }` (an optional `;`)
         if (isBareRowTok(cur(inner)) && closesAfterOne(adv(inner))) {
             const row: PTok = cur(inner)
+            if (!vf && isBareRowOther(row)) return oneItemBranch(logicRowStmt(inner, row.start, notMarkupWhy()), start, false)
             if (vf) {
                 const stand: ANode = { nid: -1, span: mkSpan(row.start, row.end), k: ANodeK.Text("") }
                 const ls: RStmt = mkS(adv(inner), row.start, AStmtK.Lift(ALift.LiftNode(stand)))
                 return oneItemBranch(ls, start, true)
             }
             // a sibling branch is not one item (§17.6.10.1, the sibling sentence)
-            const dt: TP = diagAt(inner, "E-MARKUP-STATEMENT-NOT-RENDERED", "this element is the single element of its branch, but a sibling branch of the same `if` is not (it uses `lift`, or holds statements) — a single-element branch renders only when every branch is one (§17.6.10.1): make every branch a single element, or `lift` in every branch (`lift <tag>…</tag>;`)", row)
+            let why: string = "this element is the single element of its branch, but a sibling branch of the same `if` is not (it uses `lift`, or holds statements) — a single-element branch renders only when every branch is one (§17.6.10.1): make every branch a single element, or `lift` in every branch (`lift <tag>…</tag>;`)"
+            if (emptySib) why = "this element is the single element of its branch, but a sibling branch of the same `if` is empty, and an empty branch is not one item — a single-element branch renders only when every branch is one (§17.6.10.1): drop the empty branch (an `if` with no `else` renders nothing when false, §17.6.10), or write its value (`{ not }`)"
+            const dt: TP = diagAt(inner, "E-MARKUP-STATEMENT-NOT-RENDERED", why, row)
             const re: RExpr = mkE(adv(dt), row.start, AExprK.Recovered)
             return oneItemBranch(mkS(re.tp, row.start, AStmtK.Eval(re.e)), start, false)
         }
@@ -4891,7 +5002,7 @@ ${
             const h0: int = hardErrors(tp.diags)
             // a nested value-form `if` as the branch's one item
             if (isWord(inner, "if")) {
-                const ni: RT0If = parseTier0IfChain(inner, true)
+                const ni: RT0If = parseTier0IfChain(inner, true, false)
                 if (ni.single && closesAfterOne(ni.tp) && hardErrors(ni.tp.diags) == h0) {
                     return oneItemBranch({ s: ni.s, tp: ni.tp }, start, true)
                 }
@@ -4910,6 +5021,33 @@ ${
         return { b: rb.b, tp: rb.tp, single: false }
     }
 
+    // Does the chain at `s` have an empty branch (`{ }`)?
+    fn chainHasEmpty(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: tb, elseB: el) :> tb.stmts.length == 0 || elseHasEmpty(el)
+            .Break(label: l) :> false
+            .Continue(label: l) :> false
+            .Given(name: n) :> false
+            .Defer(body: b) :> false
+            .For(f: lf) :> false
+            .LocalFn(f: x) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+            .Lift(what: w) :> false
+        }
+    }
+
+    fn elseHasEmpty(el: ABlock | not) -> boolean {
+        if (el is not) return false
+        if (el.stmts.length == 0) return true
+        if (el.stmts.length == 1) return chainHasEmpty(el.stmts[0])
+        return false
+    }
+
     // `}` — or `;` then `}` — closes the branch after its one item.
     fn closesAfterOne(tp: TP) -> boolean {
         if (isP(tp, "}")) return true
@@ -4922,57 +5060,6 @@ ${
         t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: [rs.s] }
         return { b: b, tp: bumpId(t), single: single }
-    }
-
-    // §49.9 E-LOOP-001 / E-LOOP-002 — a `break` / `continue` (no label) in the
-    // chain, outside any loop of its own, has no loop to leave: the one-pass
-    // loop above is no loop of the program's. (A labelled one names no
-    // enclosing loop: analyze's E-LOOP-003 / -004.)
-    fn leaveNoLoop(tp: TP, s: AStmt) -> TP {
-        let t: TP = tp
-        for (const j of chainJumps(s)) {
-            const k: AStmtK = j.k
-            if (k is .Break) {
-                const d: Diag = newDiag("E-LOOP-001", "`break` outside any loop — this `" + interpOpen() + " if … }` in markup is not a loop, so there is nothing to leave (§49.9)", t.file, j.span)
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
-            } else {
-                const d: Diag = newDiag("E-LOOP-002", "`continue` outside any loop — this `" + interpOpen() + " if … }` in markup is not a loop (§49.9)", t.file, j.span)
-                t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file, ns: t.ns, inFn: t.inFn }
-            }
-        }
-        return t
-    }
-
-    // The unlabelled `break` / `continue` statements under `s`, not inside a loop
-    // (or a nested function) of their own.
-    fn chainJumps(s: AStmt) -> AStmt[] {
-        const k: AStmtK = s.k
-        return match k {
-            .Break(label: l) :> l == "" ? [s] : []
-            .Continue(label: l) :> l == "" ? [s] : []
-            .If(cond: c, thenB: tb, elseB: el) :> blockJumps(tb).concat(maybeBlockJumps(el))
-            .Given(name: n, subject: sub, body: b) :> blockJumps(b)
-            .Defer(body: b) :> blockJumps(b)
-            .For(f: lf) :> []
-            .LocalFn(f: x) :> []
-            .Eval(e: x) :> []
-            .Local(name: n) :> []
-            .Return(e: x) :> []
-            .EffectStmt(w: w) :> []
-            .Fail(f: x) :> []
-            .Lift(what: w) :> []
-        }
-    }
-
-    fn blockJumps(b: ABlock) -> AStmt[] {
-        let out: AStmt[] = []
-        for (const s of b.stmts) { out = out.concat(chainJumps(s)) }
-        return out
-    }
-
-    fn maybeBlockJumps(b: ABlock | not) -> AStmt[] {
-        if (b is not) return []
-        return blockJumps(b)
     }
 
     // Each row placeholder's stand-in node, replaced by the element read at its offset.

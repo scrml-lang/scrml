@@ -165,6 +165,45 @@ describe("§10.1 / §10.8 — explicit `lift` in an `if` in markup: accumulation
     expect(codes(E(`        <div>\${ if @yes { for (i of 0..3) { if (i == 1) { break; } } lift <p>x</p>; } }</div>`))).toEqual([]);
   });
 
+  // #1919 review F1: a jump nested in an EXPRESSION's block (a `match` arm, a `!{}` arm, a
+  // `match` initializer) bound to the one-pass loop — `continue` hung the render forever, `break`
+  // silently dropped every later row. The one-pass loop carries a reserved label no source jump
+  // can name, and analyze's loop-control pass passes over it (RED on 698ed0cde: 0 diagnostics).
+  test("§49.9: a jump in a `match` / `!{}` arm or a `match` initializer in a branch has no loop to leave", () => {
+    const M = `match @mode { "a" :> { JUMP; }, _ :> { const q = 1; } }`;
+    for (const [jump, code] of [["break", "E-LOOP-001"], ["continue", "E-LOOP-002"]]) {
+      const m = M.replace("JUMP", jump);
+      expect(codes(E(`        <div>\${ if @yes { lift <p>a</p>; ${m} lift <p>b</p>; } }</div>`))).toEqual([code]);
+      expect(codes(E(`        <div>\${ if @yes { lift <p>a</p>; } else { ${m} lift <p>b</p>; } }</div>`))).toEqual([code]);
+      expect(codes(E(`        <div>\${ if @yes { if (@no) { lift <p>a</p>; ${m} } } }</div>`))).toEqual([code]);
+      expect(codes(E(`        <div>\${ if @yes { const k = match @mode { "a" :> { ${jump}; }, _ :> { 1 } }; lift <p>\${k}</p>; } }</div>`))).toContain(code);
+    }
+    const g = `    function g() -> int ! .Bad { fail .Bad; }\n    type Oops:enum = { Bad }`;
+    const fe = (jump) => P(`        <div>\${ if @yes { const r = g() !{ _ :> { ${jump}; } }; lift <p>a</p>; } }</div>\n        <p>\${@yes}\${@no}\${@n}\${@mode}</p>`, g);
+    expect(codes(fe("break"))).toContain("E-LOOP-001");
+    expect(codes(fe("continue"))).toContain("E-LOOP-002");
+  });
+
+  test("§49.9: the `continue` in a `match` arm cannot reach a page (it would loop forever): no core is built", () => {
+    const r = run(E(`        <div>\${ if @yes { lift <p>a</p>; match @mode { "a" :> { continue; }, _ :> { const q = 1; } } } }</div>`));
+    expect(errs(r).map((d) => d.code)).toEqual(["E-LOOP-002"]);
+    expect(errs(r)[0].message).toContain("is not a loop");
+  });
+
+  test("a jump inside a user loop inside a branch still binds that loop (and runs)", async () => {
+    await load(E(`        <ul id="u">\${ if @yes { for (i of 0..4) { match i { 1 :> { continue; }, 3 :> { break; }, _ :> { } } lift <li>\${i}</li>; } } }</ul>`));
+    expect(all("#u li")).toEqual(["0", "2"]);
+  });
+
+  test("a labelled jump cannot name the one-pass loop (E-LOOP-003), and messages say `${ if … }`", () => {
+    const o = errs(run(E(`        <div>\${ if @yes { lift <p>a</p>; break out; } }</div>`)));
+    expect(o.map((d) => d.code)).toEqual(["E-LOOP-003"]);
+    expect(o[0].message).not.toContain("#if");
+    const w = errs(run(E(`        <div>\${ if @yes { @n = 1; lift <p>x</p>; } }</div>`))).find((d) => d.code === "E-VALUE-WRITES-STATE");
+    expect(w.message).toContain("${ if … }");
+    expect(w.message).not.toContain("for …");
+  });
+
   test("a value-form `${ if }` with no markup stays the expression value-form (unchanged)", async () => {
     await load(E(`        <p id="t">\${ if @yes { "Admin" } else { "User" } }</p>`));
     expect($("#t").textContent).toBe("Admin");
@@ -230,6 +269,30 @@ describe("§17.6.10.1 — statement-position markup that would not render is E-M
 
   test("a §66 declaration in a logic block is not markup: not this error", () => {
     expect(codes(T(`    \${ <z=1/> }`))).not.toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
+  });
+
+  // #1919 review F2: declarations written as markup are not markup — refused by name, as before.
+  test("a §52 state type, a `<x> = …` / legacy `<q default=…> = \"v\"` cell, a §55 compound, a component: not this error", () => {
+    for (const top of [
+      `    \${\n    <Account authority="server" table="users">\n        id: number\n    </>\n    }`,
+      `    \${\n    <label min(3)> = "hi"\n    }`,
+      `    \${\n    <query default="d"> = "v"\n    }`,
+      `    \${\n    <form>\n        <name default="d"> = "v"\n    </>\n    }`,
+      `    \${ <Card/> }`,
+    ]) {
+      const cs = codes(T(top));
+      expect(cs).not.toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
+      expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    }
+    expect(codes(E(`        <div>\${ if @yes { let k = 1; <Card/> } }</div>`))).not.toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
+  });
+
+  // #1919 review F3: the sibling-cause message names an EMPTY sibling as such.
+  test("a single element beside an empty branch: the message says the sibling is empty", () => {
+    const o = one(E(`        <div>\${ if @yes { } else { <p>off</p> } }</div>`));
+    expect(o.codes).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
+    expect(o.msgs[0]).toContain("is empty");
+    expect(o.msgs[0]).not.toContain("uses `lift`");
   });
 });
 

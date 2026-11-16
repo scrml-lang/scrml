@@ -34,3 +34,16 @@ Lane: markup inside logic blocks (bootstrap, compiler/self-host-v2/). Base: orig
   ontimeout-misplaced-pos), 0 PASS→FAIL.
 - corpus (3150 files: samples, examples, conformance, acceptance; same files, base vs head
   bootstrap): 0 newly-rejecting, 0 newly-accepting, 83 already-rejecting files change error set.
+
+## Fix round 1 (review #1919)
+- F1 (HIGH): chainJumps / leaveNoLoop deleted. The one-pass loop and its own `break` carry the
+  reserved label `#if` (parse.scrml / analyze.scrml tier0IfLabel; `#` starts no identifier, so no
+  source jump names it). analyze loopJump passes over that frame for an unlabelled jump
+  (E-LOOP-001 / -002 at any depth: match arm, `!{}` arm, match initializer); labelsHere / loop
+  label lists skip it; resolveFor mints it as `loop`.
+- F2 (MED): E-MARKUP-STATEMENT-NOT-RENDERED only for a registry element (isKnownElementName),
+  lower-case first, not followed by `=`, not after `renders`, no `=`-text child (declShaped).
+  Else refused by name (logicRowOther / bare-row-other) as BASE did; a bare-row-other still
+  stands as a value-form branch's single element.
+- F3: empty-sibling wording. F4: `${ if … }` wording (E-VALUE-WRITES-STATE what, return/fail).
+- F5: gap g-boot-rawtext-parent-markup-rows-s478. F6: left (§4.15 allows either code).
