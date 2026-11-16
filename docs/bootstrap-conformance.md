@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 518 | 27.7% |
+| PASS | 521 | 27.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 14 | 0.7% |
+| FAIL | 11 | 0.6% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
 | UNSUPPORTED | 701 | 37.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 532; of those, 518 hold (97.4%). Runtime half executed on the bootstrap for 171 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 532; of those, 521 hold (97.9%). Runtime half executed on the bootstrap for 171 case(s).
 
-- **Vacuous** passes: 13 of 518 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **505**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 7 of 14; the other 7 are implemented checks that answered wrong.
+- **Vacuous** passes: 13 of 521 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **508**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 11; the other 5 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 701.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 351 · FAIL 13 · UNSUPPORTED 510. Twin holds 351 (non-vacuous 341). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 354 · FAIL 10 · UNSUPPORTED 510. Twin holds 354 (non-vacuous 344). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 1 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 9 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 22 | · | · | · | 11 | 6 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
-| engine | 92 | 18 | · | 2 | · | 50 | 22 | · | · |
+| engine | 92 | 20 | · | · | · | 50 | 22 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
 | error | 78 | 43 | · | 2 | · | 5 | 28 | · | · |
@@ -158,7 +158,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 11 | · | 1 | · | 17 | 62 | · | · |
-| server-fn | 27 | 11 | · | 1 | · | 7 | 8 | · | · |
+| server-fn | 27 | 12 | · | · | · | 7 | 8 | · | · |
 | sql | 20 | 3 | · | 1 | · | 9 | 7 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | · | · | 6 | 21 | · | · |
 
-### FAIL (14)
+### FAIL (11)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - missing E-UNQUOTED-DISPLAY-TEXT
@@ -177,12 +177,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-TYPE: expected a type, found `"a"`
 - `codegen/cg-export-enum-library-rep` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
-- `engine/rule-violation-pos` (twin · codes)
-  - missing E-ENGINE-INVALID-TRANSITION
-  - severity: E-ENGINE-INVALID-TRANSITION did not fire (expected error)
-- `engine/self-write-pos` (twin · codes; not in the bootstrap: W-ENGINE-SELF-WRITE-DETECTED)
-  - missing W-ENGINE-SELF-WRITE-DETECTED
-  - severity: W-ENGINE-SELF-WRITE-DETECTED did not fire (expected info)
 - `error/error-008-message-pos` (twin · parse-reject; not in the bootstrap: E-ERROR-008)
   - missing E-ERROR-008
   - severity: E-ERROR-008 did not fire (expected error)
@@ -209,9 +203,6 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-LOCAL: expected a name after `let` / `const`
   - E-PARSE-EXPECTED: expected `=`, found `setTimeout`
   - E-PARSE-TRAILING: unexpected `=` after the expression
-- `server-fn/e-route-004-pos` (twin · codes)
-  - missing E-ROUTE-004
-  - severity: E-ROUTE-004 did not fire (expected error)
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -225,7 +216,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (518)
+### PASS / CODES-ONLY (521)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -404,7 +395,9 @@ none
 - `engine/rule-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/rule-invalid-variant-pos` — PASS · TWIN
 - `engine/rule-violation-neg` — PASS · TWIN
+- `engine/rule-violation-pos` — PASS · TWIN
 - `engine/self-write-neg` — PASS · TWIN
+- `engine/self-write-pos` — PASS · TWIN
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-invalid-variant-pos` — PASS · TWIN
 - `engine/state-child-missing-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -722,6 +715,7 @@ none
 - `server-fn/cell-assign-successive-writes-ordered` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-003-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-004-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
+- `server-fn/e-route-004-pos` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-005-pos` — PASS · TWIN
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
@@ -1253,7 +1247,7 @@ none
 - `reactive/narrowing-ends-direct-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-loop-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-ends-nested-write-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `noop` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `noop(…)`
+- `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `function-typed parameter` (§15.11.5) is not in the bootstrap yet; it is refused here by name rather than misread — function types are not in the bootstrap's type grammar yet; call the function where 
 - `reactive/narrowing-gated-handler-keeps-rt` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-gated-handler-nested-gates-pos` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `reactive/narrowing-gated-handler-other-cell-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
