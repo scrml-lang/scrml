@@ -50,7 +50,7 @@ ${
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
-    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
+    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
              sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
@@ -399,6 +399,9 @@ ${
             i = i + 1
         }
         const call: JsExpr = jcall(jid(symNameOf(ctx, sf.sym)), args)
+        // Review #1911 MED-1: its parameter refinements judged first, as the route's own (print.scrml routeEntryChecks)
+        const checks: JsStmt[] = routeEntryChecks(ctx, sf)
+        if (checks.length > 0) return jcall(jmember(jid("rt"), "route"), [jid(routeName(ctx.p, sf.sym)), JsExpr.JArrow(["args$"], checks.concat([JsStmt.SReturn(call)]))])
         return jcall(jmember(jid("rt"), "route"), [jid(routeName(ctx.p, sf.sym)), JsExpr.JArrowE(["args$"], call)])
     }
 

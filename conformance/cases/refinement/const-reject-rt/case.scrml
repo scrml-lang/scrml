@@ -3,8 +3,8 @@ ${
     <evil>: string = "javascript:alert(1)"
     <shown>: string = "none"
     function show(v: string) {
-        const link: string(url) = v
-        @shown = link
+        const link: string(url) = v;
+        @shown = link;
     }
 }
 <program>

@@ -1419,6 +1419,7 @@ ${
             .TapeConcat :> "TapeConcat"
             .TapeIncludes :> "TapeIncludes"
             .LengthCheck :> "LengthCheck"
+            .RefineCheck :> "RefineCheck"
             .TapeInsert :> "TapeInsert"
             .Print :> "Print"
         }

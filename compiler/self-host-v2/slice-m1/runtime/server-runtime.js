@@ -90,6 +90,28 @@ export function printOut(s) {
 export { hostResult };
 // s477 (s477-boot-tape-bounds) — a bounded tape's runtime length check and a local `insert` (O36 RULED S477): the SAME functions
 export { lengthCheck, tapeInsert } from "./runtime.js";
+// s478 (s478-boot-refinement-runtime) — a boundary-zone refinement's runtime check (§53.4.5, §53.9.4): the SAME function
+export { refineCheck } from "./runtime.js";
+import { refineCheck as refineCheckRt, ScrmlTrap as ScrmlTrapRt } from "./runtime.js";
+
+// Review #1911 MED-1 — a ROUTED server function's parameter refinements, judged in its
+// route's entry before the function is called (print.scrml routeEntryChecks). A trap
+// raised HERE is the route's own parameter check — a value the client sent — and is
+// "the §53.9.4 `E-CONTRACT-001-RT` 400" (§52.13: "a body-carrying compiler response is
+// refused when it must pass — the latter turning the compiler's own `400` into a
+// `500`"); nothing of the body ran (§53.9.4: "server-side validation code that runs
+// before any database write or business logic"). The mark is a module-private
+// WeakSet, so no value a program builds can claim it; a trap from anywhere else in
+// the body stays a 500.
+const ENTRY_TRAPS = new WeakSet();
+export function refineEntry(v, base, spec, shown, what, at) {
+  try {
+    return refineCheckRt(v, base, spec, shown, what, at);
+  } catch (e) {
+    if (e instanceof ScrmlTrapRt) ENTRY_TRAPS.add(e);
+    throw e;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the
@@ -1405,6 +1427,12 @@ async function handle(host, r, request) {
     result = rs === null ? await r.run(args) : await rs.run(rec, () => r.run(args));
   } catch (e) {
     logLine(host, `scrml server: ${r.path} threw — ${messageOf(e)}`);
+    // Review #1911 MED-1: the route's own parameter check (refineEntry) — 400, naming
+    // the constraint and the parameter; never the value or the server source location
+    if (e !== null && typeof e === "object" && ENTRY_TRAPS.has(e)) {
+      const d = e.detail || {};
+      return jsonResponse(host, 400, { error: "E-CONTRACT-001-RT: Value constraint violated at runtime.", constraint: String(d.type), parameter: String(d.what) });
+    }
     return jsonResponse(host, 500, FIXED[500]);
   }
   if (failed(result)) {

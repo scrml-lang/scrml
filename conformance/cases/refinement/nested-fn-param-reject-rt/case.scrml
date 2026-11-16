@@ -4,9 +4,9 @@ ${
     <shown>: string = "none"
     function show(v: string) {
         function pick(u: string(url)) {
-            return u
+            return u;
         }
-        @shown = pick(v)
+        @shown = pick(v);
     }
 }
 <program>

@@ -46,7 +46,8 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt } from "./analyze.scrml"
+    import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -895,7 +896,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
-            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(removalPre(c, i)).concat(letStmt(c, s, i))
+            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(removalPre(c, i)).concat(letStmt(c, s, i)).concat(localRefineCheck(c, s, i))
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat(removalPre(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
@@ -2923,6 +2924,81 @@ ${
             not :> []
         }
     }
+    // =========================================================================
+    // s478 (s478-boot-refinement-runtime) — the BOUNDARY zone's runtime checks
+    // (§53.4.3; analyze's Typing.refines). A function declaration's refined
+    // parameter is checked at the function's ENTRY, before its body runs: §53.9.1
+    // "The compiler SHALL emit a runtime check when the function is called with an
+    // unconstrained argument"; §53.9.4 a server function's "server-side validation
+    // code that runs before any database write or business logic". A `const`
+    // local's refinement is checked as it binds (§53.4.5 "The check SHALL be emitted
+    // at the assignment site"), before any later statement reads it. Each is the
+    // statement `Eval(RefineCheck(…))`: the value, or the E-CONTRACT-001-RT trap.
+    // FAIL CLOSED: a refinement standing on a parameter or a `const` local is
+    // checked here whatever the typer recorded — the record only names the
+    // location; without it the check names the file.
+    // =========================================================================
+    fn refineEval(c: LC, nid: int, top: RefineTop, v: Expr, what: string) -> Stmt[] {
+        let spec: string = refineSpec(top.base, top.pred)
+        let shown: string = top.base + "(" + top.pred + ")"
+        let label: string = what
+        let loc: string = c.file
+        const rc: RefineCheck | not = refineCheckAt(c.t, nid)
+        if (rc is given) {
+            spec = rc.spec
+            shown = rc.shown
+            label = rc.what
+            loc = rc.loc
+        }
+        // a refinement the one reader no longer judges admits nothing (§53.11: "its
+        // runtime check SHALL NOT admit values it cannot judge"): the shape `-`,
+        // which no value has (runtime.js refineHolds refuses an unknown shape)
+        if (spec == "") spec = "s -"
+        return [Stmt.Eval(Expr.Prim(PrimOp.RefineCheck, [v, litStr(top.base), litStr(spec), litStr(shown), litStr(label), litStr(loc)]))]
+    }
+
+    fn paramRefineChecks(c: LC, f: AFn) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const p of f.params) {
+            const top: RefineTop = refineTopOf(p.ty)
+            if (top.base != "") {
+                const ps: Param[] = paramOf(bindFact(c.t.binds, p.nid))
+                if (ps.length == 1) out = out.concat(refineEval(c, p.nid, top, Expr.Local(ps[0].sym), "parameter `" + p.name + "` of `" + f.name + "`"))
+            }
+        }
+        return out
+    }
+
+    fn withPrelude(pre: Stmt[], b: Block) -> Block {
+        if (pre.length == 0) return b
+        return block(pre.concat(b.stmts))
+    }
+
+    // A `const` local's refinement, checked as it binds — unless its value is a
+    // literal the parser proved (§53.4.2, the static zone: no runtime check).
+    fn localRefineCheck(c: LC, s: AStmt, init: AExpr) -> Stmt[] {
+        const top: RefineTop = constTop(s)
+        if (top.base == "") return []
+        if (refineLitVerdict(top.base, top.pred, init) == "pass") return []
+        const sym: Sym | not = letSym(bindFact(c.t.binds, s.nid))
+        if (sym is not) return []
+        return refineEval(c, s.nid, top, Expr.Local(sym), "the local `" + sym.hint + "`")
+    }
+
+    fn constTop(s: AStmt) -> RefineTop {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n, mutable: m, ty: y) :> constTopOf(m, y)
+            // no-default-arm: one question of a statement — is it a `const` local; every other form is not
+            _ :> { base: "", pred: "" }
+        }
+    }
+
+    fn constTopOf(mutable: boolean, y: AType | not) -> RefineTop {
+        if (mutable) return { base: "", pred: "" }
+        return refineTopOf(y)
+    }
+
     fn lowerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> Fn | not {
         for (const s of fs) {
             if (s.nid == info.nid) {
@@ -2940,7 +3016,7 @@ ${
                 // §12.2 Trigger 5) is printed as native `async` — a path that falls off simply
                 // ends the function, so it takes no Return tail
                 const waits: boolean = t.server.plan.waiting.indexOf(info.sym.id) >= 0
-                let body: Block = lowerBlock(c, s.f.body)
+                let body: Block = withPrelude(paramRefineChecks(c, s.f), lowerBlock(c, s.f.body))
                 if (waits) {
                     if (!remoteCaller(t, info.sym.id)) {
                         body = cpsBody(body, [])
@@ -2966,7 +3042,7 @@ ${
         const fc: LC = { t: c.t, file: c.file, subst: not, snap: not, rows: [] }
         let params: Param[] = []
         for (const p of f.params) { params = params.concat(paramOf(bindFact(c.t.binds, p.nid))) }
-        return [Stmt.LocalFn({ sym: s, params: params, body: lowerBlock(fc, f.body), pure: f.pure, err: not, waits: false, host: not })]
+        return [Stmt.LocalFn({ sym: s, params: params, body: withPrelude(paramRefineChecks(fc, f), lowerBlock(fc, f.body)), pure: f.pure, err: not, waits: false, host: not })]
     }
 
     // s451 (U1a): a function route inference placed on the server (analyze

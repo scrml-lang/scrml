@@ -500,6 +500,75 @@ ${
         return base
     }
 
+    // Review #1911 MED-1 — a ROUTED server function's parameter refinements, judged in
+    // its route's entry (print-server.scrml routeEntry) before the function is called:
+    // `rt.refineEntry(args$[i], …)` — the SAME check as the body's prelude
+    // (lower.scrml paramRefineChecks: its leading `Eval(RefineCheck(Local(param), …))`
+    // statements, read here and nowhere decided anew), marked as the ROUTE's own. A
+    // value the client sent that fails it is the caller's error — "the §53.9.4
+    // `E-CONTRACT-001-RT` 400" (§52.13 limb rule) — and nothing of the body ran: §53.9.4
+    // "server-side validation code that runs before any database write or business
+    // logic". The body's prelude still runs (it holds for a value the entry admitted),
+    // so a call of the function from other server code is checked as before (a trap
+    // there is the server's own — 500).
+    export fn routeEntryChecks(ctx: Ctx, sf: ServerFn) -> JsStmt[] {
+        let out: JsStmt[] = []
+        for (const s of sf.body.stmts) {
+            const j: JsStmt | not = entryCheckStmt(ctx, sf.params, s)
+            if (j is not) return out
+            out = out.concat([j])
+        }
+        return out
+    }
+
+    fn entryCheckStmt(ctx: Ctx, ps: Param[], s: Stmt) -> JsStmt | not {
+        return match s {
+            .Eval(e: e) :> entryCheckExpr(ctx, ps, e)
+            // no-default-arm: one question of a statement — is it the prelude's `Eval(RefineCheck(…))`; every other form ends the prelude
+            _ :> not
+        }
+    }
+
+    fn entryCheckExpr(ctx: Ctx, ps: Param[], e: Expr) -> JsStmt | not {
+        return match e {
+            .Prim(op: o, args: a) :> entryCheckPrim(ctx, ps, o, a)
+            // no-default-arm: one question of an expression — is it a RefineCheck primitive; every other form ends the prelude
+            _ :> not
+        }
+    }
+
+    fn isRefineCheckOp(o: PrimOp) -> boolean {
+        return match o {
+            .RefineCheck :> true
+            // no-default-arm: one question of a primitive — is it RefineCheck; every other one ends the prelude
+            _ :> false
+        }
+    }
+
+    fn entryCheckPrim(ctx: Ctx, ps: Param[], o: PrimOp, a: Expr[]) -> JsStmt | not {
+        if (!isRefineCheckOp(o) || a.length != 6) return not
+        const i: int = paramIndexOf(ps, a[0])
+        if (i < 0) return not
+        return JsStmt.SExpr(rtCall(ctx, "refineEntry", [JsExpr.JIndex(jid("args$"), jnum(i))].concat(exprsJs(ctx, a.slice(1)))))
+    }
+
+    fn paramIndexOf(ps: Param[], e: Expr) -> int {
+        return match e {
+            .Local(sym: s) :> paramPos(ps, s)
+            // no-default-arm: one question of an expression — is it a parameter's read; every other form is no parameter
+            _ :> -1
+        }
+    }
+
+    fn paramPos(ps: Param[], s: Sym) -> int {
+        let i: int = 0
+        for (const p of ps) {
+            if (p.sym.id == s.id) return i
+            i = i + 1
+        }
+        return -1
+    }
+
     // s449 — the validity surface (§55.5 / §55.6): `rt.validity(inst, i)` is
     // field i's record, `rt.compound(inst)` the declaration's; a property is
     // a tracked read (`.isValid()`, `.errors()`, `.touched()`, `.submitted()`).
@@ -645,6 +714,8 @@ ${
             .TapeIncludes :> rtCall(ctx, "tapeIncludes", a)
             // s477 (O36 RULED S477) — a bounded tape's runtime length check; a local `insert`
             .LengthCheck :> rtCall(ctx, "lengthCheck", a)
+            // s478 (§53.4.5) — a boundary-zone refinement's runtime check (the E-CONTRACT-001-RT trap)
+            .RefineCheck :> rtCall(ctx, "refineCheck", a)
             .TapeInsert :> rtCall(ctx, "tapeInsert", a)
             // s478 (§20.7) — raw stdout (server-runtime.js printOut; server code only, check.scrml C-P1)
             .Print :> rtCall(ctx, "printOut", a)

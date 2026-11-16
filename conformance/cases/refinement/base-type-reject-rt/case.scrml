@@ -3,7 +3,7 @@ ${
     <text>: string = "9"
     <shown>: number = 0
     function take(n: number(>0)) {
-        @shown = n
+        @shown = n;
     }
 }
 <program>
