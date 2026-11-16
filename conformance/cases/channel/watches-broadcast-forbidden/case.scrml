@@ -9,7 +9,7 @@
   </schema>
 
   <channel name="orders-feed" watches=orders>
-    ${ function ping() { broadcast({ x: 1 }) } }
+    ${ function ping() { broadcast({ x: 1 }); } }
     <onchange>
       <Inserted(row) : print(row)>
       <Updated(row) : print(row)>

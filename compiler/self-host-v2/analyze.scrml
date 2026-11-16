@@ -45,13 +45,13 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, HostFn, HostBind, HostSrc, HostArg, HostProp, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, Timing, IdleWatch, CoreProgram,
-             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool, CoreEndpoint, CoreEpArm,
+             SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool, CoreEndpoint, CoreEpArm, CoreChannel,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, Diag, ASql, ASqlMode,
+             AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
@@ -550,9 +550,9 @@ ${
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
     // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[] }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[], channels: CoreChannel[] }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [], channels: [] } }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -23169,6 +23169,11 @@ ${
         if (!e.star && e.tag == "onIdle") return addDiag(resolveNodes(env, e.kids, st), env.file, e.span, "E-IDLE-MISPLACED", "`<onIdle>` here is outside an engine's root — the watchdog sits at the value's root, a sibling of its state-children, never inside a state-child body or in markup (§51.0.R); for a per-state timer use `<onTimeout>` (§51.0.M)")
         // s478 — the block-form `<match for=Type on=expr>` (§18.0.1)
         if (!e.star && e.tag == "match") return resolveMatchBlock(env, e, st)
+        // s478 (s478-boot-channel) — §38.13.3: "`<onchange>` is a scrml-defined structural
+        // element valid ONLY inside a `watches=` channel body (§4.15 / §24.4;
+        // `E-STRUCTURAL-ELEMENT-MISPLACED` elsewhere)". One standing in a channel body is
+        // read by the parser (onchangeItem) and judged by channelPass; this one is in markup.
+        if (!e.star && e.tag == "onchange") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<onchange>` in markup — it is valid only inside a `<channel watches=…>` body, where it dispatches the feed's row changes (§38.13.3, §4.15)")
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -27782,6 +27787,11 @@ ${
                 for (const b of t.css.bridges) { read = read.concat([b.idx]) }
                 let persisted: int[] = []
                 for (const p of t.persists) { persisted = persisted.concat([p.sym.id]) }
+                // s478 (s478-boot-channel): a channel cell is read by its channel — every write is
+                // sent to the channel's other clients (§38.4 auto-sync), so it is never unread
+                for (const ch of t.server.channels) {
+                    for (const cs of ch.cells) { persisted = persisted.concat([cs.id]) }
+                }
                 let i = 0
                 for (const f of d.fields) {
                     const nm: string = f.sym.hint
@@ -38299,7 +38309,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -39934,7 +39944,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [] }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [], channels: [] }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -41952,7 +41962,7 @@ ${
         for (const f of files) {
             const r: RItems = pendItems(f.items, pend, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables, chans: f.chans, onchs: f.onchs }])
         }
         return { files: out, next: next }
     }
@@ -41997,7 +42007,7 @@ ${
         for (const f of files) {
             const r: RItems = composeItems(f.items, plans, next)
             next = r.next
-            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables }])
+            out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables, chans: f.chans, onchs: f.onchs }])
         }
         return out
     }
@@ -47077,6 +47087,671 @@ ${
     // s478 — a synthesized `<endpoint>` arm function (parse.scrml endpointDesugar)
     fn isEndpointFnName(n: string) -> boolean { return n.indexOf("endpoint#") == 0 }
 
+    // =========================================================================
+    // s478 (s478-boot-channel) — §38 `<channel>`. The parser read each channel's body
+    // into the program's items in place (parse.scrml channelItem — §38.1 rule 4,
+    // §40.8 S441) and recorded the channel (FileAst.chans) and each `<onchange>` in a
+    // channel body (FileAst.onchs). This pass judges the declaration itself:
+    //  - placement: a channel the parser read anywhere but the entry file's top-level
+    //    `<program>` body is refused by name (INTERIM — the SPEC's other placements are
+    //    the §38.12 cross-file forms, which the bootstrap does not build);
+    //  - the §38.3 attributes: `name` (E-CHANNEL-001 when absent, E-CHANNEL-007 when it
+    //    carries `${…}`, §38.11), `topic` (E-CHANNEL-007 likewise), E-CHANNEL-003 (a
+    //    second channel of one name in a file), the `onclient:*` / `onserver:message`
+    //    call expressions (E-CHANNEL-005 — more than one argument, §38.6.1 / §38.10.2;
+    //    E-CHANNEL-HANDLER-SHADOW — a binding name naming a visible declaration,
+    //    §38.10.2; E-CHANNEL-006 — an `onclient:*` handler declared `server` or placed
+    //    on the server by a direct trigger, §38.10.3);
+    //  - `broadcast()` / `disconnect()` (§38.6): E-CHANNEL-004 outside a channel's
+    //    lexical scope; E-CHANNEL-WATCHES-BROADCAST in a `watches=` channel (§38.13.4);
+    //    E-CHANNEL-SERVER-CELL-READ (§38.4 — the call places the function on the
+    //    server, §12.2 Trigger 7, and it reads a client-held channel cell);
+    //  - `watches=` (§38.13): E-CHANNEL-WATCHES-DRIVER, -UNKNOWN-TABLE, -CLIENT-WRITE,
+    //    W-CHANNEL-WATCHES-NO-PK, W-CHANNEL-WATCHES-NO-CONSUMER, and the `<onchange>`
+    //    arms (E-MATCH-NOT-EXHAUSTIVE over the synthesized RowChange, the §18.0.1
+    //    arm-validity codes; E-STRUCTURAL-ELEMENT-MISPLACED outside a `watches=`
+    //    channel, §38.13.3);
+    //  - what the bootstrap does not build, refused by name (INTERIM, gap
+    //    g-boot-channel-s478): `auth=`, a reactive / `not` `topic=`, the `onserver:*`
+    //    handlers, an `onclient:*` call that binds the event object or passes a
+    //    value, `broadcast()` / `disconnect()` themselves, a channel cell that is not a
+    //    plain `let` cell, markup in a channel body (§38.2: it "SHALL NOT contain
+    //    markup that emits HTML" — no code is named).
+    // A clean channel becomes a CoreChannel (print emits the client half, print-server
+    // the WebSocket route). `quiet` — the spans of the `broadcast` / `disconnect`
+    // callee names judged here: their E-SCOPE-001 ("not declared") is not also
+    // reported (one report per fault).
+    // =========================================================================
+    type RChans:struct = { diags: Diag[], chans: CoreChannel[], quiet: int[], calls: ASpan[] }
+    type ChCtx:struct = { file: string, body: ASpan, name: string, watches: boolean }
+    type RHook:struct = { diags: Diag[], fn: Sym | not }
+
+    fn channelPass(g: Globals, files: FileAst[], servers: int[], inherited: int[]) -> RChans {
+        let diags: Diag[] = []
+        let out: CoreChannel[] = []
+        let quiet: int[] = []
+        let calls: ASpan[] = []
+        let ctxs: ChCtx[] = []
+        // the channels' lexical scopes (for broadcast / disconnect, below)
+        for (const f0 of files) {
+            for (const c0 of f0.chans) {
+                ctxs = ctxs.concat([{ file: f0.path, body: c0.body, name: chNameOf(c0), watches: chHasAttr(c0.attrs, "watches") }])
+            }
+        }
+        const prog: FieldInfo[] = chProgramFields(g)
+        for (const f of files) {
+            let seen: string[] = []
+            for (const ch of f.chans) {
+                const d0: int = diags.length
+                if (ch.ctx == "nested") {
+                    diags = diags.concat([mkDiag(f.path, ch.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<channel>` inside a nested `<program>` is not in the bootstrap — the SPEC places a channel in the application's `<program>` (§38.1, §40); put it in the top-level `<program>` (INTERIM, g-boot-channel-s478)")])
+                } else if (ch.ctx == "channel") {
+                    diags = diags.concat([mkDiag(f.path, ch.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<channel>` inside another `<channel>`'s body — §38.1 places a channel as a child of `<program>`, and the SPEC gives one channel inside another no meaning; move it out, beside the first (INTERIM, g-boot-channel-s478)")])
+                } else if (f.path != g.entry) {
+                    diags = diags.concat([mkDiag(f.path, ch.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<channel>` in `" + f.path + "`, which is not the program's entry file — the bootstrap builds the channels of the entry file's `<program>` only (§38.12's cross-file channel is not built; INTERIM, g-boot-channel-s478)")])
+                }
+                let name: string = ""
+                let sawName = false
+                let topic: string = ""
+                let sawTopic = false
+                let reconnect: int = 2000
+                let watches: string = ""
+                let key: string = ""
+                let hooks: AAttr[] = []
+                for (const a of ch.attrs) {
+                    if (a.name == "name") {
+                        sawName = true
+                        const nv: string | not = chQuoted(a.value)
+                        if (nv is given) {
+                            if (nv.indexOf("$" + "{") >= 0) {
+                                diags = diags.concat([mkDiag(f.path, a.span, "E-CHANNEL-007", "`name=\"" + nv + "\"` on `<channel>` carries a `${…}` interpolation — `name=` is a static literal (§38.11): it is the WebSocket route `/_scrml_ws/<name>`, fixed at compile time. Use a static name and filter on the payload (§38.11.3)")])
+                            } else if (!chNameOk(nv)) {
+                                diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=\"" + nv + "\"` on `<channel>` — the bootstrap mounts a channel at `/_scrml_ws/<name>` for a name of letters, digits, `-` and `_` only (§38.3 names no syntax for `name=`; INTERIM, g-boot-channel-s478)")])
+                            } else {
+                                name = nv
+                            }
+                        } else {
+                            diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on `<channel>` is a static string literal (§38.3, §38.11) — write it quoted, `name=\"chat\"`")])
+                        }
+                    } else if (a.name == "topic") {
+                        sawTopic = true
+                        const tv: string | not = chQuoted(a.value)
+                        if (tv is given) {
+                            if (tv.indexOf("$" + "{") >= 0) {
+                                diags = diags.concat([mkDiag(f.path, a.span, "E-CHANNEL-007", "`topic=\"" + tv + "\"` on `<channel>` carries a `${…}` interpolation — `topic=` is a static literal here (§38.11); filter on the payload instead (§38.11.3)")])
+                            } else if (tv == "") {
+                                diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "an empty `topic=\"\"` on `<channel>` — the SPEC names no meaning for it (§38.3); omit it (the topic defaults to the name) or name one (INTERIM, g-boot-channel-s478)")])
+                            } else {
+                                topic = tv
+                            }
+                        } else {
+                            diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a reactive or `not` `topic=` on `<channel>` is not in the bootstrap — the dynamic topic subscription of §38.6.2 is not built; write a static `topic=\"…\"` (INTERIM, g-boot-channel-s478)")])
+                        }
+                    } else if (a.name == "reconnect") {
+                        const rv: int = chReconnect(a.value)
+                        if (rv >= 0) {
+                            reconnect = rv
+                        } else {
+                            diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reconnect=` on `<channel>` is a non-negative integer number of milliseconds written bare (`reconnect=2000`, §38.3, §38.3.1); the bootstrap does not fall back silently on any other value (INTERIM, g-boot-channel-s478)")])
+                        }
+                    } else if (a.name == "watches") {
+                        watches = chBareName(a.value)
+                        if (watches == "") diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`watches=` names a table as a static bare identifier (§38.13.1 — `watches=orders`)")])
+                    } else if (a.name == "key") {
+                        key = chBareName(a.value)
+                        if (key == "") diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` names a column as a static bare identifier (§38.13.2 — `key=label`)")])
+                    } else if (a.name == "auth") {
+                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`auth=` on `<channel>` is not in the bootstrap — the WS-upgrade session gate (§38.5, §52.13) needs the session machinery the bootstrap does not build; it refuses the channel rather than serve it ungated (INTERIM, g-boot-channel-s478)")])
+                    } else if (a.name == "onclient:open" || a.name == "onclient:close" || a.name == "onclient:error" || a.name == "onserver:open" || a.name == "onserver:message" || a.name == "onserver:close") {
+                        hooks = hooks.concat([a])
+                    } else {
+                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<channel>` — a `<channel>` opener carries the §38.3 attributes (`name`, `topic`, `auth`, `reconnect`, `watches`, `key`, `onserver:*`, `onclient:*`) only")])
+                    }
+                }
+                if (!sawName) diags = diags.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-001", "`<channel>` has no `name=` — the name is required: it is the channel's identity and its WebSocket route `/_scrml_ws/<name>` (§38.3)")])
+                if (name != "") {
+                    if (seen.indexOf(name) >= 0) diags = diags.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-003", "a second `<channel name=\"" + name + "\">` in this file — channel names are unique (§38.9): both would answer `/_scrml_ws/" + name + "`")])
+                    seen = seen.concat([name])
+                }
+                if (!sawTopic) topic = name
+                // the hooks (§38.6.1, §38.10)
+                let open: Sym | not = not
+                let close: Sym | not = not
+                let error: Sym | not = not
+                for (const h of hooks) {
+                    const rh: RHook = channelHook(g, f, ch, h, servers, inherited, prog)
+                    diags = diags.concat(rh.diags)
+                    if (h.name == "onclient:open") open = rh.fn
+                    if (h.name == "onclient:close") close = rh.fn
+                    if (h.name == "onclient:error") error = rh.fn
+                }
+                // the body: its cells, its markup, its `<onchange>`s
+                let cells: Sym[] = []
+                let cellDecl = false
+                for (const fi of prog) {
+                    if (f.path == g.entry && chSpanIn(fi.span, ch.body)) {
+                        cellDecl = true
+                        if (watches == "") {
+                            // §38.4: "On every local write to a channel-declared cell, the compiler emits
+                            // a sync message" — a cell with a write capability (`let`, or an edit grant
+                            // such as `append`) is synced; one with none is never written, so it has
+                            // nothing to carry (and its peers' frames for it are refused, print-server)
+                            if (fi.mode == FieldMode.Derived) {
+                                diags = diags.concat([mkDiag(f.path, fi.span, "E-BOOTSTRAP-UNSUPPORTED", "the derived value `" + fi.sym.hint + "` in a `<channel>` body is not in the bootstrap — §38.4 makes \"all three shapes legal\" but names no sync for a value each client recomputes; declare it in the `<program>` body (INTERIM, g-boot-channel-s478)")])
+                            } else if (fi.mode == FieldMode.Let || grantsAny(fi.grants)) {
+                                cells = cells.concat([fi.sym])
+                            }
+                        }
+                    }
+                }
+                diags = diags.concat(chBodyMarkup(f, ch))
+                let onchs: AOnchange[] = []
+                for (const oc of f.onchs) {
+                    if (chSpanIn(oc.span, ch.body)) onchs = onchs.concat([oc])
+                }
+                if (watches != "") {
+                    diags = diags.concat(watchesDiags(f, ch, watches, key, onchs, cellDecl, prog))
+                } else {
+                    for (const oc2 of onchs) {
+                        diags = diags.concat([mkDiag(f.path, oc2.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<onchange>` in a channel with no `watches=` — `<onchange>` is valid only inside a `watches=` channel body (§38.13.3, §4.15): there is no change feed here to dispatch")])
+                    }
+                }
+                if (!hasErrorDiag(diags.slice(d0)) && ch.ctx == "program" && f.path == g.entry && name != "") {
+                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, open: open, close: close, error: error, file: f.path, watches: watches }])
+                }
+            }
+        }
+        // broadcast() / disconnect() (§38.6)
+        if (!userNamed(g, "broadcast") || !userNamed(g, "disconnect")) {
+            for (const fs of g.fns) {
+                // a nested function declaration is part of its outer function's body (allExprsIn reads it there)
+                const bc: AExpr[] = fs.info.outer >= 0 ? [] : bareCalls(fs.f.body, "broadcast", !userNamed(g, "broadcast")).concat(bareCalls(fs.f.body, "disconnect", !userNamed(g, "disconnect")))
+                if (bc.length > 0) {
+                    let at: ChCtx | not = not
+                    for (const cx of ctxs) {
+                        if (cx.file == fs.info.file && chSpanIn(fs.info.span, cx.body)) at = cx
+                    }
+                    for (const call of bc) {
+                        quiet = quiet.concat([chCallee(call).span.start])
+                        calls = calls.concat([call.span])
+                    }
+                    const c0: AExpr = bc[0]
+                    const callee: string = chCalleeName(c0)
+                    if (at is not) {
+                        diags = diags.concat([mkDiag(fs.info.file, c0.span, "E-CHANNEL-004", "`" + callee + "()` in `" + fs.info.name + "()`, which is not declared inside a `<channel>` — `broadcast()` / `disconnect()` are available only in a function declared within a channel's lexical scope (§38.6)")])
+                    } else if (at.watches) {
+                        diags = diags.concat([mkDiag(fs.info.file, c0.span, "E-CHANNEL-WATCHES-BROADCAST", "`" + callee + "()` in the `watches=` channel `" + at.name + "` — a `watches=` feed is fed by the database change capture, not by app-side fan-out (§38.13.4); remove the call, or use an ordinary channel for app-controlled fan-out (§38.6)")])
+                    } else {
+                        const cr: string = channelCellRead(g, fs.f.body, at, prog)
+                        if (cr != "") {
+                            diags = diags.concat([mkDiag(fs.info.file, fs.info.span, "E-CHANNEL-SERVER-CELL-READ", "`" + fs.info.name + "()` calls `" + callee + "()`, which places it on the server (§12.2 Trigger 7), and it reads the channel cell `@" + cr + "` — channel cells are client-held and have no server-side value (§38.4). Operate on the message payload or the function's arguments instead (§38.6.1)")])
+                        } else if (!isClientHookFn(g, fs)) {
+                            diags = diags.concat([mkDiag(fs.info.file, c0.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + callee + "()` is not in the bootstrap — the channel's server-side fan-out (§38.6, the §12.2 Trigger 7 server placement of `" + fs.info.name + "()`) is not built; the channel's cells still synchronize across its clients (§38.4) (INTERIM, g-boot-channel-s478)")])
+                        }
+                    }
+                }
+            }
+        }
+        return { diags: diags, chans: out, quiet: quiet, calls: calls }
+    }
+
+    // Is `fs` the `onclient:*` handler of some channel? (E-CHANNEL-006 reports it — channelHook.)
+    fn isClientHookFn(g: Globals, fs: FnSrc) -> boolean {
+        for (const f of g.files) {
+            for (const ch of f.chans) {
+                for (const a of ch.attrs) {
+                    if (a.name.indexOf("onclient:") == 0) {
+                        const c: AExpr | not = chCallOf(a.value)
+                        if (c is given && chCalleeName(c) == fs.info.name && f.path == fs.info.file) return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    fn chSpanIn(a: ASpan, b: ASpan) -> boolean { return a.start >= b.start && a.end <= b.end }
+
+    // The E-SCOPE-001 of a `broadcast` / `disconnect` callee channelPass judged (`quiet`), and
+    // the typer's "an object literal needs a struct type" for an argument of that call (the
+    // built-in's parameter type is the payload's — §38.6 names none; the call is reported).
+    fn chScopeQuiet(ds: Diag[], quiet: int[], calls: ASpan[]) -> Diag[] {
+        if (quiet.length == 0) return ds
+        let out: Diag[] = []
+        for (const d of ds) {
+            let drop: boolean = d.code == "E-SCOPE-001" && quiet.indexOf(d.span.start) >= 0
+            if (d.code == "E-TYPE-STRUCT-CONTEXT") {
+                for (const c of calls) { if (chSpanIn(d.span, c)) drop = true }
+            }
+            if (!drop) out = out.concat([d])
+        }
+        return out
+    }
+
+    fn chAttr(as: AAttr[], name: string) -> AAttrValue {
+        for (const a of as) { if (a.name == name) return a.value }
+        return AAttrValue.NoValue
+    }
+
+    fn chHasAttr(as: AAttr[], name: string) -> boolean {
+        for (const a of as) { if (a.name == name) return true }
+        return false
+    }
+
+    fn chNameOf(ch: AChannel) -> string {
+        const v: string | not = chQuoted(chAttr(ch.attrs, "name"))
+        if (v is given) return v
+        return ""
+    }
+
+    // A name the WebSocket route can carry verbatim: letters, digits, `-`, `_`.
+    fn chNameOk(n: string) -> boolean {
+        if (n == "") return false
+        let i = 0
+        while (i < n.length) {
+            const c: int = n.charCodeAt(i)
+            const ok: boolean = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95
+            if (!ok) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn chQuoted(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Bare(e: x) :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn chBareName(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> chExprName(e)
+            .Quoted(v: s) :> ""
+            .Dur(text: s) :> ""
+            .NoValue :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    fn chExprName(e: AExpr) -> string {
+        return match e.k {
+            .Name(name: n) :> n
+            // no-default-arm: one question of an expression — is it a bare name
+            _ :> ""
+        }
+    }
+
+    // `reconnect=N`: a bare non-negative integer literal, else -1.
+    fn chReconnect(v: AAttrValue) -> int {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+        if (e is not) return -1
+        const raw: string = match e.k {
+            .Num(raw: r) :> r
+            // no-default-arm: one question of an expression — is it a number literal
+            _ :> ""
+        }
+        if (raw == "" || raw.length > 7) return -1
+        let n: int = 0
+        let i = 0
+        while (i < raw.length) {
+            const c: int = raw.charCodeAt(i)
+            if (c < 48 || c > 57) return -1
+            n = n * 10 + (c - 48)
+            i = i + 1
+        }
+        return n
+    }
+
+    // The call expression a hook attribute holds (`onclient:open=onOpen(e)`), else `not`.
+    fn chCallOf(v: AAttrValue) -> AExpr | not {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            .Paren(e: x) :> x
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Braced(b: b) :> chSoleEval(b)
+        }
+        if (e is not) return not
+        if (chIsCall(e)) return e
+        return not
+    }
+
+    fn chSoleEval(b: ABlock) -> AExpr | not {
+        if (b.stmts.length != 1) return not
+        return match b.stmts[0].k {
+            .Eval(e: e) :> e
+            // no-default-arm: one question of a statement — is it one expression
+            _ :> not
+        }
+    }
+
+    fn chIsCall(e: AExpr) -> boolean {
+        return match e.k {
+            .Call(callee: c, args: a) :> true
+            // no-default-arm: one question of an expression — is it a call
+            _ :> false
+        }
+    }
+
+    fn chCallee(e: AExpr) -> AExpr {
+        return match e.k {
+            .Call(callee: c, args: a) :> c
+            // no-default-arm: one question of an expression — its callee
+            _ :> e
+        }
+    }
+
+    fn chCalleeName(e: AExpr) -> string { return chExprName(chCallee(e)) }
+
+    fn chArgs(e: AExpr) -> AExpr[] {
+        return match e.k {
+            .Call(callee: c, args: a) :> a
+            // no-default-arm: one question of an expression — its arguments
+            _ :> []
+        }
+    }
+
+    // The program's cells (its declaration's fields).
+    fn chProgramFields(g: Globals) -> FieldInfo[] {
+        for (const d of g.decls) {
+            if (d.isProgram) return d.info.fields
+        }
+        return []
+    }
+
+    // Is `n` a name the program's files declare as a function (then `n()` is a call
+    // of it, not the §38.6 built-in)?
+    fn userNamed(g: Globals, n: string) -> boolean {
+        for (const fs of g.fns) { if (fs.info.name == n) return true }
+        return false
+    }
+
+    // Every call `n(…)` of the bare name `n` in a block, at any depth (a member call
+    // `x.n(…)` is a method of `x`, not the §38.6 built-in — §38.13.4's call shape).
+    fn bareCalls(b: ABlock, n: string, on: boolean) -> AExpr[] {
+        if (!on) return []
+        let out: AExpr[] = []
+        for (const e of allExprsIn(b)) {
+            if (chIsCall(e) && chCalleeName(e) == n) out = out.concat([e])
+        }
+        return out
+    }
+
+    // The first channel cell of the channel `at` a block reads (`@name`), else "".
+    fn channelCellRead(g: Globals, b: ABlock, at: ChCtx, prog: FieldInfo[]) -> string {
+        let names: string[] = []
+        for (const fi of prog) {
+            if (at.file == g.entry && chSpanIn(fi.span, at.body)) names = names.concat([fi.sym.hint])
+        }
+        for (const e of allExprsIn(b)) {
+            const n: string = match e.k {
+                .At(name: x) :> x
+                // no-default-arm: one question of an expression — is it an `@name` read
+                _ :> ""
+            }
+            if (n != "" && names.indexOf(n) >= 0) return n
+        }
+        return ""
+    }
+
+    // §38.2: a channel body "SHALL NOT contain markup that emits HTML — the channel
+    // produces no DOM". No code is named, so it is refused by name.
+    fn chBodyMarkup(f: FileAst, ch: AChannel) -> Diag[] {
+        let out: Diag[] = []
+        for (const it of f.items) {
+            const p: AProgram | not = programOfItem(it)
+            if (p is given) {
+                for (const pi of p.items) {
+                    if (chSpanIn(pi.span, ch.body)) {
+                        const why: string = match pi.k {
+                            .MarkupItem(n: n) :> chMarkupWhy(n)
+                            .ImportItem(i: i) :> ""
+                            .TypeItem(t: t) :> ""
+                            .FnItem(f: x) :> ""
+                            .DeclItem(d: d) :> ""
+                            .ProgramItem(p: q) :> ""
+                            .ConstItem(c: c) :> ""
+                        }
+                        if (why != "") out = out.concat([mkDiag(f.path, pi.span, "E-BOOTSTRAP-UNSUPPORTED", why + " in a `<channel>` body — §38.2: a channel body \"SHALL NOT contain markup that emits HTML — the channel produces no DOM\"; move it into the `<program>` body, beside the channel (the SPEC names no code; g-boot-channel-s478)")])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn chMarkupWhy(n: ANode) -> string {
+        return match n.k {
+            .Text(text: t) :> t.trim() == "" ? "" : "display text"
+            .Elem(e: e) :> "the element `<" + e.tag + ">`"
+            .Interp(e: e) :> "a rendered `${…}` value"
+            .DeclNode(d: d) :> ""
+            .Css(c: c) :> "a `#{…}` style block"
+            .Gather(f: x) :> "a rendered `for` loop"
+            .Effect(w: w) :> ""
+            .Run(b: rb0) :> ""
+            .Request(r: r) :> ""
+        }
+    }
+
+    // One `onclient:*` / `onserver:*` attribute (§38.6.1, §38.10).
+    fn channelHook(g: Globals, f: FileAst, ch: AChannel, h: AAttr, servers: int[], inherited: int[], prog: FieldInfo[]) -> RHook {
+        let out: Diag[] = []
+        const call: AExpr | not = chCallOf(h.value)
+        if (call is not) return { diags: [mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "=` names its handler as a function call (`" + h.name + "=handler(e)`, §38.3)")], fn: not }
+        const fname: string = chCalleeName(call)
+        const args: AExpr[] = chArgs(call)
+        const client: boolean = h.name.indexOf("onclient:") == 0
+        // E-CHANNEL-005 — §38.6.1 ("more than one parameter") and §38.10.2 (more than one argument)
+        if (args.length > 1 && (client || h.name == "onserver:message")) {
+            out = out.concat([mkDiag(f.path, h.span, "E-CHANNEL-005", "`" + h.name + "=" + fname + "(…)` passes " + args.length + " arguments — the call binds at most one name, the " + (client ? "event object" : "message payload") + " (" + (client ? "§38.10.2" : "§38.6.1") + "); there is nothing to bind a second argument to")])
+        }
+        if (fname == "") return { diags: out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "=` calls a function by its bare name (`" + h.name + "=handler(e)`) in the bootstrap")]), fn: not }
+        if (!client) {
+            return { diags: out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "=` is not in the bootstrap — a channel's server-side handlers (§38.6.1, §38.8) are not built; the channel's cells still synchronize across its clients (§38.4) (INTERIM, g-boot-channel-s478)")]), fn: not }
+        }
+        // E-CHANNEL-HANDLER-SHADOW — §38.10.2: the binding name SHALL NOT name a declaration visible at the channel
+        if (args.length >= 1) {
+            const bn: string = chExprName(args[0])
+            if (bn != "" && chVisible(g, f, ch, bn, prog)) {
+                out = out.concat([mkDiag(f.path, h.span, "E-CHANNEL-HANDLER-SHADOW", "the `" + h.name + "` binding name `" + bn + "` names a declaration visible at this `<channel>` — the handler would receive the WebSocket event object, not `" + bn + "` (§38.10.2: no silent shadowing). Rename the binding (`" + fname + "(e)`)")])
+            }
+        }
+        // E-CHANNEL-006 — §38.10.3: the handler is declared `server`, or placed on the server by a direct trigger
+        const fsx: FnSrc | not = chResolveFn(g, f, ch, fname)
+        if (fsx is given) {
+            const direct: boolean = fsx.f.server || (servers.indexOf(fsx.info.sym.id) >= 0 && inherited.indexOf(fsx.info.sym.id) < 0) || bareCalls(fsx.f.body, "broadcast", !userNamed2(g, "broadcast", fsx)).length > 0 || bareCalls(fsx.f.body, "disconnect", !userNamed2(g, "disconnect", fsx)).length > 0
+            if (direct) {
+                out = out.concat([mkDiag(f.path, h.span, "E-CHANNEL-006", "`" + fname + "()`, the `" + h.name + "` handler, runs on the server (" + (fsx.f.server ? "it is declared `server`" : "§12.2 places it there — its body holds a server-only operation") + ") — an `onclient:*` handler runs in the browser (§38.10.3). Move the server work to an `onserver:*` handler (§38.6.1), or write a channel cell instead: a channel-cell write runs on the client and syncs to every subscriber (§38.4)")])
+            }
+        } else if (!hasErrorDiag(out)) {
+            out = out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + fname + "`, the `" + h.name + "` handler, is not a function declared in this file — the bootstrap calls a handler declared in the program's own file (§38.10.3 also resolves an imported one; INTERIM, g-boot-channel-s478)")])
+        }
+        if (args.length >= 1 && !hasErrorDiag(out)) {
+            out = out.concat([mkDiag(f.path, h.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "=" + fname + "(…)` passes the WebSocket event object (§38.10.1) — not in the bootstrap: its type system has no type for the host event value a handler would receive; write `" + h.name + "=" + fname + "()` (INTERIM, g-boot-channel-s478)")])
+        }
+        if (hasErrorDiag(out) || fsx is not) return { diags: out, fn: not }
+        return { diags: out, fn: fsx.info.sym }
+    }
+
+    fn userNamed2(g: Globals, n: string, except: FnSrc) -> boolean {
+        for (const fs of g.fns) { if (fs.info.name == n && fs.info.sym.id != except.info.sym.id) return true }
+        return false
+    }
+
+    // §38.10.3: "The handler name is resolved to its declaration innermost-first: the
+    // channel's own body, then the file's top level, then the bodies of the file's other
+    // channels" — a function ITEM of the file (`outer` -1). A value binding of that name in
+    // the deciding region means the handler is not a function declaration: `not`.
+    fn chResolveFn(g: Globals, f: FileAst, ch: AChannel, n: string) -> FnSrc | not {
+        let own: FnSrc | not = not
+        let top: FnSrc | not = not
+        let other: FnSrc | not = not
+        for (const fs of g.fns) {
+            if (fs.info.file == f.path && fs.info.outer < 0 && fs.info.name == n) {
+                if (chSpanIn(fs.info.span, ch.body)) {
+                    own = fs
+                } else if (inSomeChannel(f, fs.info.span)) {
+                    other = fs
+                } else {
+                    top = fs
+                }
+            }
+        }
+        if (own is given) return own
+        if (chValueIn(g, f, n, ch.body, true)) return not
+        if (top is given) return top
+        if (chValueIn(g, f, n, ch.body, false)) return not
+        return other
+    }
+
+    fn inSomeChannel(f: FileAst, s: ASpan) -> boolean {
+        for (const c of f.chans) { if (chSpanIn(s, c.body)) return true }
+        return false
+    }
+
+    // A value binding (a program cell or a file-scope constant) named `n`: inside the
+    // channel body (`inside`), or outside every channel (not inside).
+    fn chValueIn(g: Globals, f: FileAst, n: string, body: ASpan, inside: boolean) -> boolean {
+        for (const fi of chProgramFields(g)) {
+            if (fi.sym.hint == n && f.path == g.entry) {
+                if (inside && chSpanIn(fi.span, body)) return true
+                if (!inside && !inSomeChannel(f, fi.span)) return true
+            }
+        }
+        for (const c of g.consts) {
+            if (c.name == n && c.file == f.path) {
+                if (inside && chSpanIn(c.span, body)) return true
+                if (!inside && !inSomeChannel(f, c.span)) return true
+            }
+        }
+        return false
+    }
+
+    // §38.10.2 "Visible means what a name written at that position resolves to: a
+    // state cell (state cells hoist to file scope, §6.9, wherever they are declared), a
+    // function (functions hoist), an import, or a `const` / `let` / other binding
+    // declared EARLIER in source order in an enclosing scope."
+    fn chVisible(g: Globals, f: FileAst, ch: AChannel, n: string, prog: FieldInfo[]) -> boolean {
+        if (f.path == g.entry) {
+            for (const fi of prog) { if (fi.sym.hint == n) return true }
+        }
+        for (const fs of g.fns) {
+            if (fs.info.file == f.path && fs.info.outer < 0 && fs.info.name == n) return true
+        }
+        for (const c of g.consts) {
+            if (c.file == f.path && c.name == n && c.span.end <= ch.opener.start) return true
+        }
+        for (const imp of importsOfItems(f.items)) {
+            for (const nm of imp.names) { if (nm.name == n) return true }
+        }
+        return false
+    }
+
+    // §38.13 — a `watches=` channel.
+    fn watchesDiags(f: FileAst, ch: AChannel, table: string, key: string, onchs: AOnchange[], cellDecl: boolean, prog: FieldInfo[]) -> Diag[] {
+        let out: Diag[] = []
+        // §38.13.1: "`watches=` REQUIRES a Postgres database … On the `sqlite` or `mysql`
+        // driver it SHALL emit `E-CHANNEL-WATCHES-DRIVER`" (§34: "(SQLite / MySQL / no db)")
+        const drv: string = programDriver(f)
+        if (drv != "postgres") out = out.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-WATCHES-DRIVER", "`<channel watches=" + table + ">` on " + (drv == "" ? "a program with no database" : "the `" + drv + "` driver") + " — a `watches=` feed's change capture is Postgres LISTEN/NOTIFY (§38.13.7); it REQUIRES `<program db=\"postgres://…\">` (§38.13.1). Use Postgres, or drop `watches=`")])
+        // §38.13.1: "A table declared by NEITHER SHALL emit `E-CHANNEL-WATCHES-UNKNOWN-TABLE`"
+        let tbl: SchemaTable | not = not
+        for (const t of f.tables) { if (t.name == table) tbl = t }
+        if (table != "" && tbl is not) out = out.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-WATCHES-UNKNOWN-TABLE", "`watches=" + table + "` names no table this program declares — the watched table's row shape and primary key come from its `<schema>` declaration (§38.13.1, §39)")])
+        if (tbl is given) {
+            // §38.13.2: "The primary key is derived by the `id`-field convention … an explicit
+            // `key=<column>` attribute … overrides it. A table with no derivable `id`/PK and no
+            // `key=` SHALL emit `W-CHANNEL-WATCHES-NO-PK`"
+            if (key != "") {
+                let found = false
+                for (const c of tbl.cols) { if (c.name == key) found = true }
+                if (!found) out = out.concat([mkDiag(f.path, ch.opener, "E-BOOTSTRAP-UNSUPPORTED", "`key=" + key + "` names no column of the table `" + table + "` — §38.13.2 names no code for it; the bootstrap refuses it rather than key the feed on nothing (g-boot-channel-s478)")])
+            } else {
+                let pk = false
+                for (const c2 of tbl.cols) { if (c2.pk || c2.name == "id") pk = true }
+                if (!pk) out = out.concat([mkDiag(f.path, ch.opener, "W-CHANNEL-WATCHES-NO-PK", "the watched table `" + table + "` has no `id` column or primary key, and the channel names no `key=` — the feed cannot key its deltas (§38.13.2); add `key=<column>`")])
+            }
+        }
+        // §38.13.4: "A synced-cell declaration … in a `watches=` channel SHALL emit `E-CHANNEL-WATCHES-CLIENT-WRITE`"
+        for (const fi of prog) {
+            if (chSpanIn(fi.span, ch.body) && fi.mode != FieldMode.Derived) out = out.concat([mkDiag(f.path, fi.span, "E-CHANNEL-WATCHES-CLIENT-WRITE", "the cell `" + fi.sym.hint + "` is declared in the `watches=` channel body — a `watches=` feed is one-way server→client and has no synced cells (§38.13.4); declare the cell in the `<program>` body and write it from `<onchange>`")])
+        }
+        // §38.13.3: "A `watches=` channel with no `<onchange>` SHALL emit `W-CHANNEL-WATCHES-NO-CONSUMER`"
+        if (onchs.length == 0) out = out.concat([mkDiag(f.path, ch.opener, "W-CHANNEL-WATCHES-NO-CONSUMER", "the `watches=` channel declares no `<onchange>` — nothing consumes the change feed (§38.13.3); add an `<onchange>` with an arm per change, or drop `watches=`")])
+        if (onchs.length > 1) out = out.concat([mkDiag(f.path, onchs[1].span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<onchange>` in this `watches=` channel — §38.13.3: the body \"contains exactly one `<onchange>` element\", and names no code for a second (g-boot-channel-s478)")])
+        for (const oc of onchs) { out = out.concat(onchangeArmDiags(f.path, oc)) }
+        return out
+    }
+
+    // The driver of the file's `<program db="…">` ("" none): `postgres`, `sqlite`, `mysql`, or the scheme.
+    fn programDriver(f: FileAst) -> string {
+        for (const it of f.items) {
+            const p: AProgram | not = programOfItem(it)
+            if (p is given) {
+                for (const a of p.attrs) {
+                    if (a.name == "db") {
+                        const v: string | not = chQuoted(a.value)
+                        if (v is given) {
+                            if (v.indexOf("postgres://") == 0 || v.indexOf("postgresql://") == 0) return "postgres"
+                            if (v.indexOf("mysql://") == 0) return "mysql"
+                            const colon: int = v.indexOf(":")
+                            if (v.indexOf("sqlite:") == 0 || colon < 0) return "sqlite"
+                            return v.substring(0, colon)
+                        }
+                        return "?"
+                    }
+                }
+            }
+        }
+        return ""
+    }
+
+    // §38.13.3: "The arms SHALL be exhaustive over `RowChange`'s three variants (reuses
+    // the §18 exhaustiveness family — a missing variant is the `E-MATCH-NOT-EXHAUSTIVE`-
+    // class; no dedicated code). A wildcard `_` arm is legal." The arm-validity codes
+    // are §18.0.1's, as an `<endpoint>`'s (endpointArmDiags).
+    fn onchangeArmDiags(file: string, oc: AOnchange) -> Diag[] {
+        let out: Diag[] = []
+        const vs: string[] = ["Inserted", "Updated", "Deleted"]
+        let covered: string[] = []
+        let wild = false
+        for (const a of oc.arms) {
+            if (wild) {
+                out = out.concat([mkDiag(file, a.span, "E-SYNTAX-010", "an arm after the wildcard `<_>` — the wildcard is the last arm (§18.6)")])
+            } else if (a.variant == "_") {
+                wild = true
+            } else if (vs.indexOf(a.variant) < 0) {
+                out = out.concat([mkDiag(file, a.span, "E-MATCH-SUBSET-DEAD-ARM", "`<" + a.variant + ">` names no variant of the feed's `RowChange` (Inserted, Updated, Deleted) — the arm can never run (§38.13.2, §18.8.1)")])
+            } else if (covered.indexOf(a.variant) >= 0) {
+                out = out.concat([mkDiag(file, a.span, "E-TYPE-023", "a second arm for the variant `" + a.variant + "` — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate arm)")])
+            } else {
+                covered = covered.concat([a.variant])
+                if (a.binds.length != 1) out = out.concat([mkDiag(file, a.span, "E-TYPE-021", "`<" + a.variant + ">` carries 1 value but the arm binds " + a.binds.length + " — bind one name (§38.13.2: `" + a.variant + "(" + (a.variant == "Deleted" ? "key" : "row") + ")`, §18.7)")])
+            }
+        }
+        if (!wild) {
+            let missing: string[] = []
+            for (const v of vs) { if (covered.indexOf(v) < 0) missing = missing.concat([v]) }
+            if (missing.length > 0) out = out.concat([mkDiag(file, oc.span, "E-MATCH-NOT-EXHAUSTIVE", "the `<onchange>` arms do not cover " + missing.join(", ") + " — they are exhaustive over the feed's `RowChange` (§38.13.3); add the missing arm(s), or a wildcard `<_ : …>`")])
+        }
+        return out
+    }
+
     // Why the bootstrap does not mount `p` ("" when it does): an absolute path of
     // unreserved characters (RFC 3986 `A-Z a-z 0-9 - . _ ~`) and `/`, with no empty,
     // `.` or `..` segment (the request's URL is normalized before it is matched, so
@@ -47390,7 +48065,7 @@ ${
             } else {
                 const ri: RItems = epRetItems(f.items, reps, next)
                 next = ri.next
-                out = out.concat([{ path: f.path, items: ri.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables }])
+                out = out.concat([{ path: f.path, items: ri.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables, chans: f.chans, onchs: f.onchs }])
             }
         }
         return { files: out, next: next, diags: diags }
@@ -47733,14 +48408,16 @@ ${
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
         // s478 (s478-boot-endpoint): the §61 `<endpoint>` declarations
         const eps: REps = endpointPass(ra.g, files)
+        // s478 (s478-boot-channel): the §38 `<channel>` declarations
+        const chs: RChans = channelPass(ra.g, files, pp.facts.servers, pp.facts.inherited)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes, txs: pp.facts.txs,
-                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps }
+                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps, channels: chs.chans }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows }
-        const base0: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags)
+        const base0: Diag[] = chScopeQuiet(domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags)
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0))

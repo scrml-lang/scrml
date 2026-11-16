@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 381 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 397 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -61,6 +61,8 @@ ${
             // §34 Severity: Warning
             "E-DG-002" :> Severity.Warning
             "W-ATTR-001" :> Severity.Warning
+            "W-CHANNEL-WATCHES-NO-CONSUMER" :> Severity.Warning
+            "W-CHANNEL-WATCHES-NO-PK" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
             "W-FOREIGN-001" :> Severity.Warning
             "W-IMPORT-001" :> Severity.Warning
@@ -85,6 +87,7 @@ ${
             "I-FORM-SUBMIT-GATED" :> Severity.Info
             "I-TAILWIND-NOT-BUILT" :> Severity.Info
             "W-ARM-PIPE-LEGACY" :> Severity.Info
+            "W-COLON-SHORTHAND-LEGACY-PLACEMENT" :> Severity.Info
             "W-ENGINE-SELF-WRITE-DETECTED" :> Severity.Info
             "W-GIVEN-PRESENCE-DEPRECATED" :> Severity.Info
             "W-IS-SOME-DEPRECATED" :> Severity.Info
@@ -111,8 +114,21 @@ ${
             "E-AUTH-ATTR-INVALID" :> Severity.Error
             "E-AWAIT-NOT-IN-SCRML" :> Severity.Error
             "E-CALL-ARITY" :> Severity.Error
+            "E-CHANNEL-001" :> Severity.Error
+            "E-CHANNEL-003" :> Severity.Error
+            "E-CHANNEL-004" :> Severity.Error
+            "E-CHANNEL-005" :> Severity.Error
+            "E-CHANNEL-006" :> Severity.Error
+            "E-CHANNEL-007" :> Severity.Error
+            "E-CHANNEL-HANDLER-SHADOW" :> Severity.Error
             "E-CHANNEL-INSIDE-PAGE" :> Severity.Error
             "E-CHANNEL-OUTSIDE-PROGRAM" :> Severity.Error
+            "E-CHANNEL-SERVER-CELL-READ" :> Severity.Error
+            "E-CHANNEL-SHARED-MODIFIER" :> Severity.Error
+            "E-CHANNEL-WATCHES-BROADCAST" :> Severity.Error
+            "E-CHANNEL-WATCHES-CLIENT-WRITE" :> Severity.Error
+            "E-CHANNEL-WATCHES-DRIVER" :> Severity.Error
+            "E-CHANNEL-WATCHES-UNKNOWN-TABLE" :> Severity.Error
             "E-CLASS-NOT-IN-SCRML" :> Severity.Error
             "E-CLOSER-001" :> Severity.Error
             "E-COLON-SHORTHAND-ON-VOID" :> Severity.Error

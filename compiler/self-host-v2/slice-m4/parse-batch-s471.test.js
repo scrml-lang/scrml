@@ -152,9 +152,11 @@ describe("a declaration in a `<db>` / `<channel>` body is an item, not a misplac
   test("a <db> body with no declaration is unchanged (clean)", () => {
     expect(codes(DB(""))).toEqual([]);
   });
-  test("`let <x/>` in a <channel> body: only the element's own refusal (no E-DECL-KEYWORD-NOT-ITEM)", () => {
+  test("`let <x/>` in a <channel> body: an item — the channel cell (no E-DECL-KEYWORD-NOT-ITEM)", () => {
+    // s478 (s478-boot-channel): the `<channel>` is built (channel-s478.test.js); its cell is a
+    // §38.4 channel cell, read by the channel's sync (no E-DG-002)
     const src = `<program>\n    <channel name="chat">\n        let <count:int=0/>\n    </channel>\n    <main><p>x</p></main>\n</program>\n`;
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(src)).toEqual([]);
   });
   test("control: `let <x:int=0/>` in a plain <div> body is still E-DECL-KEYWORD-NOT-ITEM (§66.2.5 S449 reading)", () => {
     expect(codes(P("<div>let <x:int=0/></div>"))).toContain("E-DECL-KEYWORD-NOT-ITEM");

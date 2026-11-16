@@ -1134,7 +1134,19 @@ ${
         tool: CoreTool | not,
         // s478 (s478-boot-endpoint) — §61: the program's `<endpoint>` routes (CoreEndpoint).
         endpoints: CoreEndpoint[],
+        // s478 (s478-boot-channel) — §38: the program's `<channel>`s (CoreChannel).
+        channels: CoreChannel[],
     }
+
+    // s478 (s478-boot-channel) — one §38 `<channel>`: `name` (§38.3: "Sets WS URL:
+    // `/_scrml_ws/<name>`"), its static `topic` (§38.3: "Defaults to `name`"), the
+    // `reconnect` delay in ms (§38.3.1: per-channel, else `<program channel-reconnect=>`,
+    // else 2000; 0 = disabled), and `cells` — the program fields declared in its body,
+    // each auto-synchronized across the channel's clients (§38.4). `open` / `close` /
+    // `error`: the client function an `onclient:*` attribute names (§38.10), called with
+    // no argument; `not` when the attribute is absent. `watches` — the §38.13 feed's table ("" an
+    // ordinary channel): the front end judges it, and no printer emits it (refused by name).
+    export type CoreChannel:struct = { name: string, topic: string, reconnect: int, cells: Sym[], open: Sym | not, close: Sym | not, error: Sym | not, file: string, watches: string }
 
     // s478 (s478-boot-endpoint) — one §61 `<endpoint>`: the author-stable `path` and
     // `method` it is mounted at (§61.7), the `accepts` enum its request body decodes

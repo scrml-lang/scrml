@@ -4492,6 +4492,10 @@ ${
         if (holdsQuery(p) && p.server.length == 0) {
             out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `?{}` query outside a server function — the client printer has no SQL (a query stands only in a server function, check.scrml C-S2)"])
         }
+        // s478 (s478-boot-channel) — staged: the channel's client half arrives with the emit commit
+        for (const ch of p.channels) {
+            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: `<channel name=\"" + ch.name + "\">` — its WebSocket client (§38.7) is not printed yet"])
+        }
         return out
     }
 
