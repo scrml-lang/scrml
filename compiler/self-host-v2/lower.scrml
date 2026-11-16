@@ -772,7 +772,7 @@ ${
             .VStructOf(ty: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VConstruct(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VOp(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
-            .VHost(call: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VHost(call: x) :> Expr.Host(x)    // s478 (s478-boot-fn-values): `e.type` — the listener event's member read
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -2524,7 +2524,7 @@ ${
         const b0: Block = match v {
             .Bare(e: e) :> block(handlerStmt(c, e))
             .Paren(e: e) :> block(handlerStmt(c, e))
-            .Braced(b: b) :> bracedHandlerBlock(c, b)
+            .Braced(b: b, ev: ev) :> bracedHandlerBlock(c, b, ev)
             .Quoted(v: s) :> block([])
             .Dur(text: s) :> block([])
             .NoValue :> block([])
@@ -2557,7 +2557,8 @@ ${
         return hoistStmtExpr(c, e).concat(evalStmt(c, e))
     }
 
-    fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
+    fn bracedHandlerBlock(c: LC, b: ABlock, ev: string) -> Block {
+        if (ev != "") return lowerBlock(c, b)     // s478: a listener that takes the event — never a reference (parse refuses `(e) => { f }`)
         const r: AExpr | not = blockReference(b)
         if (r is given) return block(handlerStmt(c, r))
         return lowerBlock(c, b)

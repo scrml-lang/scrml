@@ -599,6 +599,9 @@ ${
     fn hostJs(c: HostCall) -> JsExpr {
         return match c {
             .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+            // s478 (s478-boot-fn-values) — the listener's event argument (handlerParams)
+            .EventRead(member: m) :> jmember(jid(eventVar()), m)
+            .EventCall(member: m) :> jcall(jmember(jid(eventVar()), m), [])
             // unreachable (checkCore C-R1 refuses it before printing); if ever printed
             // it fails loudly (a ReferenceError), never as a silent value
             .Unreadable :> jcall(jid("scrml$unreadableExpression"), [])
@@ -3322,8 +3325,75 @@ ${
     // element's scope cancels it; a second event does not cancel the first
     // (design §2.3 reading — supersede is `<request>` semantics, not a handler's).
     fn handlerParams(body: Block) -> string[] {
+        if (usesEvent(body)) return ["task$", eventVar()]
         if (suspends(body)) return ["task$"]
         return []
+    }
+
+    // s478 (s478-boot-fn-values) — the listener's event argument: rt.on calls a handler
+    // `(task, event)`. `$`-suffixed, so no minted name is it (names.scrml).
+    fn eventVar() -> string { return "event$" }
+
+    // Does a handler body read or call the listener's event (HostCall EventRead / EventCall)?
+    fn usesEvent(b: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(b))) {
+            if (nodeIsEventHost(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsEventHost(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: x) :> exprIsEventHost(x)
+            .NStmt(s: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsEventHost(e: Expr) -> boolean {
+        return match e {
+            .Host(call: c) :> isEventCall(c)
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .VariantOf(enumSym: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .Refetch(req: x) :> false
+            .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
+            .Assigned(local: x) :> false
+            .Foreign(slice: x) :> false
+        }
+    }
+
+    fn isEventCall(c: HostCall) -> boolean {
+        return match c {
+            .EventRead(member: m) :> true
+            .EventCall(member: m) :> true
+            .DateNow :> false
+            .Unreadable :> false
+        }
     }
 
     fn attrJs(ctx: Ctx, a: Attr, node: JsExpr) -> JsStmt[] {
