@@ -33,6 +33,7 @@
 // never decides what to await (S467 §13 gate item 1).
 // =============================================================================
 
+import { writeSync } from "node:fs";
 import { encode, decode, failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
@@ -57,6 +58,34 @@ export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, str
 export { parseIntText, parseNumText, parseBoolText };
 // s469 — a logic template slot's text (§14.13.3, §20.7.2)
 export { textOf };
+// s478 (s478-boot-print-builtins) — `print(…)` / `println(…)` (SPEC §20.7). The printer passes ONE
+// string, already space-joined, with println's "\n" appended (lower.scrml printExpr), so this writes it
+// verbatim: "raw text with NO origin tag / `file:line` / side classification" (§20.7.6). Program output,
+// never stripped (§20.7.4). Its value is `not` (§20.7.1: "the emitted call evaluates to `not`").
+//
+// The write is SYNCHRONOUS (fs.writeSync on fd 1), not `process.stdout.write`: the §64.3 exit-harness
+// is "`const code = await main(process.argv.slice(2)); process.exit(code);`", and `process.exit` drops
+// whatever an async stdout write still holds buffered when stdout is a pipe — a tool piped into a slow
+// reader lost most of its output (S478 #1900 review, HIGH-1). A synchronous write has left the process
+// before `printOut` returns, so the SPEC harness (and its exit code) stays exactly as written. EAGAIN (a
+// non-blocking fd 1) retries; EPIPE (the reader closed — `tool | head`) drops the rest of the program's
+// output silently, as `process.stdout.write` did, and the program runs on to its own exit code.
+let printPipeClosed = false;
+export function printOut(s) {
+  if (printPipeClosed) return null;
+  const b = Buffer.from(s, "utf8");
+  let off = 0;
+  while (off < b.length) {
+    try {
+      off += writeSync(1, b, off, b.length - off);
+    } catch (e) {
+      if (e && e.code === "EAGAIN") continue;
+      if (e && e.code === "EPIPE") { printPipeClosed = true; return null; }
+      throw e;
+    }
+  }
+  return null;
+}
 // s472 (boot-math-port) — a host-backed function's return-point decode (§21.3.1; print.scrml hostFnJs)
 export { hostResult };
 // s477 (s477-boot-tape-bounds) — a bounded tape's runtime length check and a local `insert` (O36 RULED S477): the SAME functions

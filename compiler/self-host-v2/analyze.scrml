@@ -283,6 +283,7 @@ ${
         VIndex(loc: string),                              // s469: `xs[i]` read (§49.13) — an index node; `loc` "file:line" for the trap (§19.17)
         VAt,                                              // s469: `xs.at(i)` (§49.13) — a call node: `T | not`, never a trap
         VTemplate(text: boolean[]),                       // s469: a logic template (§14.13.3) — per slot, true when it is not a `string` and lower renders its text (Core Text)
+        VPrint(text: boolean[], newline: boolean),        // s478: a `print(…)` / `println(…)` built-in call (§20.7) — per argument, true when it is not a `string` (Core Text); `newline` for println
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -852,6 +853,7 @@ ${
         // re-derived from the whole file each time, read once here
         singles: string[],      // the program's cells declared `single` (singleCells)
         hostImps: FileImports[],  // each file's host-import declarations (hostImportsByFile)
+        printCalls: int[],      // s478 r1: the calls the print pre-scan read as the §20.7 built-in (printScans)
         // s478 (review-followups-2): the import graph's cycles (link.scrml importCycles — a
         // function of the file set), computed once: onCommonCycle asks per read
         cycles: ImportCycle[],
@@ -5913,6 +5915,179 @@ ${
         }
     }
 
+    // =========================================================================
+    // s478-boot-print-builtins r1 (#1900 review HIGH-2) — the PRINT PRE-SCAN. §20.7.3: "a `function`
+    // that calls `print` / `println` is **server-placed** by Route Inference (§12), exactly like a
+    // function that touches `?{}` SQL". A `?{}` places its function by syntax, so FnInfo.serverOwn —
+    // what makes a CLIENT call of it a remote call (§19.9.10: E-ERROR-002 unhandled, `.Transport(t)`
+    // in its handler, the wire lowering) — is known in phase A, before any body is bound (design §2.5).
+    // A `print` call is the built-in only when no user binding of the name is in scope (§20.7.5: "A
+    // user-declared in-scope binding named `print` / `println` wins"), which the binder decides
+    // (builtinFree). This scan decides it the same way BEFORE binding: a file-scope binding of the name
+    // (a function, a constant, an import, a namespace import), a parameter, a local declared earlier in
+    // the block or an enclosing one, a `given` name, a nested function of an enclosing block. It
+    // records every call it reads as the built-in (`calls`, by node id) and every function whose body
+    // holds one (`fns`). The binder is the truth: resolvePrint builds a built-in call only when the scan
+    // counted it, and refuses a user-bound call the scan counted (a binder the scan does not model — a
+    // loop variable, a lambda parameter, an arm binding named `print`), so a function the scan did not
+    // place is never handed a Print, nor one it placed a user call it misread (fail closed, INTERIM).
+    // =========================================================================
+    type PrintScan:struct = { calls: int[], fns: int[] }
+
+    fn noPrintScan() -> PrintScan { return { calls: [], fns: [] } }
+
+    fn isPrintName(n: string) -> boolean { return n == "print" || n == "println" }
+
+    // `name` is bound at file scope in `f` (the file-scope half of builtinFree).
+    fn printNameFileBound(lk: Linkage, f: FileAst, name: string) -> boolean {
+        if (scopeFrom(lk, f.path, NameKind.KFn, name) != "") return true
+        if (scopeFrom(lk, f.path, NameKind.KConst, name) != "") return true
+        if (isNsBinding(lk, f.path, name)) return true
+        for (const h of hostImportsOfItems(f.items)) {
+            for (const hn of h.names) {
+                if (hn.name == name) return true
+            }
+        }
+        for (const imp of importsOfItems(f.items)) {
+            for (const n of imp.names) {
+                if (n.name == name) return true
+            }
+        }
+        return false
+    }
+
+    fn printFileBound(lk: Linkage, f: FileAst) -> string[] {
+        let out: string[] = []
+        if (printNameFileBound(lk, f, "print")) out = out.concat(["print"])
+        if (printNameFileBound(lk, f, "println")) out = out.concat(["println"])
+        return out
+    }
+
+    fn printBind(bound: string[], n: string) -> string[] {
+        if (isPrintName(n)) return bound.concat([n])
+        return bound
+    }
+
+    fn printBindParams(bound0: string[], ps: AParam[]) -> string[] {
+        let bound: string[] = bound0
+        for (const p of ps) { bound = printBind(bound, p.name) }
+        return bound
+    }
+
+    // The scan of a function item `af` of file `f` (its nested functions included).
+    fn printScanFn(lk: Linkage, f: FileAst, af: AFn) -> PrintScan {
+        const r: PrintScan = psBlock(af.body, printBindParams(printFileBound(lk, f), af.params), noPrintScan())
+        if (r.calls.length == 0) return r
+        return { calls: r.calls, fns: r.fns.concat([af.nid]) }
+    }
+
+    fn printScans(files: FileAst[], lk: Linkage) -> PrintScan {
+        let acc: PrintScan = noPrintScan()
+        for (const f of files) {
+            for (const af of fnItems(f.items)) {
+                const r: PrintScan = printScanFn(lk, f, af)
+                acc = { calls: acc.calls.concat(r.calls), fns: acc.fns.concat(r.fns) }
+            }
+        }
+        return acc
+    }
+
+    // The name a statement declares for the statements after it in its block ("" none).
+    fn stmtLocalName(s: AStmt) -> string {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n) :> n
+            // no-default-arm: one question of the statement — the local it declares
+            _ :> ""
+        }
+    }
+
+    fn psBlock(b: ABlock, bound0: string[], acc0: PrintScan) -> PrintScan {
+        let bound: string[] = bound0
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) bound = printBind(bound, lf.name)        // bindLocalFns: the whole block
+        }
+        let acc: PrintScan = acc0
+        for (const s of b.stmts) {
+            acc = psStmt(s, bound, acc)
+            bound = printBind(bound, stmtLocalName(s))
+        }
+        return acc
+    }
+
+    fn psStmt(s: AStmt, bound: string[], acc: PrintScan) -> PrintScan {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> psExpr(e, bound, acc)
+            .Local(name: n, init: i) :> psExpr(i, bound, acc)
+            .Return(e: e) :> psMaybe(e, bound, acc)
+            .If(cond: c, thenB: tb, elseB: eb) :> psMaybeBlock(eb, bound, psBlock(tb, bound, psExpr(c, bound, acc)))
+            .Given(name: n, subject: x, body: b) :> psBlock(b, printBind(bound, n), psExpr(x, bound, acc))
+            .For(f: lf) :> psBlock(lf.body, bound, psExprs(forExprs(lf), bound, acc))
+            .Break(label: x) :> acc
+            .Continue(label: x) :> acc
+            .Lift(what: w) :> psExprs(liftExprs(w), bound, acc)
+            .LocalFn(f: f) :> psLocalFn(f, bound, acc)
+            .EffectStmt(w: w) :> psBlock(w.body, bound, acc)
+            .Defer(body: b) :> psBlock(b, bound, acc)
+            .Fail(f: f) :> psExprs(failExprs(f), bound, acc)
+        }
+    }
+
+    // A nested function: its calls are its enclosing function's too (textually in that body, as
+    // sqlsInBlock reads it), and it is a function that holds them itself.
+    fn psLocalFn(f: AFn, bound: string[], acc: PrintScan) -> PrintScan {
+        const r: PrintScan = psBlock(f.body, printBindParams(bound, f.params), noPrintScan())
+        if (r.calls.length == 0) return acc
+        return { calls: acc.calls.concat(r.calls), fns: acc.fns.concat(r.fns).concat([f.nid]) }
+    }
+
+    fn psMaybe(e: AExpr | not, bound: string[], acc: PrintScan) -> PrintScan {
+        if (e is not) return acc
+        return psExpr(e, bound, acc)
+    }
+
+    fn psMaybeBlock(b: ABlock | not, bound: string[], acc: PrintScan) -> PrintScan {
+        if (b is not) return acc
+        return psBlock(b, bound, acc)
+    }
+
+    fn psExpr(e: AExpr, bound: string[], acc0: PrintScan) -> PrintScan {
+        let acc: PrintScan = acc0
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is given) {
+            const n: string = exprName(c)
+            if (isPrintName(n) && bound.indexOf(n) < 0) acc = { calls: acc.calls.concat([e.nid]), fns: acc.fns }
+        }
+        for (const x of exprKids(e)) { acc = psExpr(x, bound, acc) }
+        for (const b of exprBlocks(e)) { acc = psBlock(b, bound, acc) }
+        return acc
+    }
+
+    fn psExprs(es: AExpr[], bound: string[], acc0: PrintScan) -> PrintScan {
+        let acc: PrintScan = acc0
+        for (const x of es) { acc = psExpr(x, bound, acc) }
+        return acc
+    }
+
+    // Each function the scan places (not a pure `fn` — resolvePrint refuses a print there — nor a
+    // host-backed one) gets serverOwn, as a `?{}` in its body would give it.
+    fn withPrintOwners(fs: FnSrc[], ps: PrintScan) -> FnSrc[] {
+        let out: FnSrc[] = []
+        for (const f of fs) {
+            if (!f.info.serverOwn && !f.info.pure && f.info.host is not && ps.fns.indexOf(f.info.nid) >= 0) {
+                const i: FnInfo = f.info
+                out = out.concat([{ info: { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
+                                            pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
+                                            serverOwn: true, rerr: i.rerr, host: i.host, derr: i.derr, outer: i.outer }, f: f.f }])
+            } else {
+                out = out.concat([f])
+            }
+        }
+        return out
+    }
+
     // Every function the binder mints, its nested declarations included (s477).
     fn allFnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
@@ -7516,7 +7691,9 @@ ${
         // s473 (boot-host-block-f3): the `<host>` bindings (DRAFT §21.3.3)
         const rhb: RFns = hostBindings(files, te0, rt.ts, rh.fs, st)
         st = rhb.st
-        const rf0: RFns = { fs: rhb.fs, st: st }
+        // s478 r1: a function that calls the `print` / `println` built-in is server-triggered (§20.7.3)
+        const pscan: PrintScan = printScans(files, lk)
+        const rf0: RFns = { fs: withPrintOwners(rhb.fs, pscan), st: st }
         // s454 (U1b): the failure enum of a client call of each server-triggered function
         const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), carriers, st)
         st = rr.st
@@ -7573,7 +7750,7 @@ ${
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
                              succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
-                             cycles: importCycles(files) }
+                             printCalls: pscan.calls, cycles: importCycles(files) }
         return { g: g, st: st }
     }
 
@@ -7905,7 +8082,7 @@ ${
     // initializers, markup, `if=` / `in=` values — not in the bootstrap (HostNo).
     type HostCtx:enum = { HostNo, HostOk, HostPure }
 
-    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean, via: string }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment); s476 `via`: why a loop binder has no type ("" = no reason recorded — srcWhy)
+    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not, fresh: boolean, via: string, foreign: boolean }   // s473 `fresh`: a `const` bound to an object / array literal — scrml data, never a host value (the plain-logic sink judgment); s476 `via`: why a loop binder has no type ("" = no reason recorded — srcWhy)
     type RowB:struct = { bind: Sym, ty: Type | not, via: string }
     // `@name` narrowed by an enclosing `given c = @name :> { … }` (§66.7.5, O56
     // RULED S435: "A direct `@handle.field = …` inside the narrowed block is
@@ -8122,7 +8299,7 @@ ${
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
-        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: row.via }
+        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: row.via, foreign: false }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
                  handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
@@ -8557,8 +8734,10 @@ ${
     fn builtinUnbuilt(name: string) -> string {
         return match name {
             "log" :> "`log(…)` is a language built-in (§20.6: \"`log(...args)` SHALL be a compiler-managed built-in\") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-ins slice"
-            "print" :> "`print(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
-            "println" :> "`println(…)` is a language built-in (§20.7, clean stdout) that the bootstrap does not build yet"
+            // s478-boot-print-builtins: a CALL of `print` / `println` is built (resolvePrint); only the bare name, a
+            // function VALUE, reaches here — the bootstrap has no function values (§14.3 S469 R2′ note)
+            "print" :> "`print` named without a call — the §20.7 built-in is called as a statement (`print(…)`); the bootstrap has no function values, so the name itself is not a value here"
+            "println" :> "`println` named without a call — the §20.7 built-in is called as a statement (`println(…)`); the bootstrap has no function values, so the name itself is not a value here"
             "navigate" :> "`navigate(…)` is a language built-in (§20.1) that the bootstrap does not build yet"
             "route" :> "`route` is a language built-in (§20.4, route parameters) that the bootstrap does not build yet"
             "cleanup" :> "`cleanup(…)` is a language built-in (§6.7.3, scope-exit teardown) that the bootstrap does not build yet"
@@ -8662,6 +8841,66 @@ ${
         if (shape == "call") return diagX(env, e, "E-LIFECYCLE-002", "the argument of `cleanup(…)` is a call expression — it would run NOW and register its result, not a function (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
         if (shape == "value") return diagX(env, e, "E-LIFECYCLE-004", "the argument of `cleanup(…)` is not a function — `cleanup()` registers a function to run when the scope is destroyed (§6.7.3). Pass a function: `cleanup(() => …)` or `cleanup(teardownFn)`", st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", builtinUnbuilt("cleanup"), st)
+    }
+
+    // s478-boot-print-builtins — `print(…)` / `println(…)` (§20.7): "compiler-managed built-ins lowered at
+    // code generation, NOT stdlib imports" (§20.7.6). The call is built where §20.7.3 places it — "a
+    // `function` that calls `print` / `println` is **server-placed** by Route Inference (§12)", and "In a
+    // `kind=\"tool\"` program … `print` / `println` write the tool process's stdout directly" — so in the
+    // body of a `function` (FnFacts.prints makes it server-placed, directPlace), at statement position
+    // (§20.7.1: "Statement-position; no usable return value"). Each argument is a text sink (§14.13.1
+    // item 1: "a `print` / `println` argument (§20.7)"), judged by the typer (printArgCheck,
+    // E-PRINT-NON-PRIMITIVE); the fact records which arguments are not a `string` — lower renders
+    // exactly those as their one honest text (Core Text, §20.7.2).
+    fn resolvePrint(env: Env, e: AExpr, nl: boolean, args: AExpr[], st0: AS) -> RX {
+        const w: string = nl ? "println" : "print"
+        if (env.fx.stmtCall != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` used as a value — §20.7.1 makes it a statement (\"Statement-position; no usable return value\"), and the bootstrap builds it only as a statement of its own (INTERIM). Call it on its own line", resolveExprs(env, args, not, st0))
+        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, a server-only resource (§20.7.3), and the SPEC does not say whether a pure `fn` (§48.3) may call it; the bootstrap does not build it there (INTERIM). Call it from a `function`", resolveExprs(env, args, not, st0))
+        if (!env.fx.inFn || env.fx.fnSym < 0 || env.inEffect || env.host != HostCtx.HostOk) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` outside a `function` body — §20.7.3 places it by the function that calls it (\"a `function` that calls `print` / `println` is server-placed\"), and the bootstrap builds it only in a `function` body (INTERIM: an event handler, a body-top statement or an initializer is not one). Move it into a `function`", resolveExprs(env, args, not, st0))
+        // s478 r1: the placement pre-scan (printScans) is what server-placed this function; a call it
+        // did not read as the built-in has no server body to stand in (fail closed, INTERIM)
+        if (env.g.printCalls.indexOf(e.nid) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(w, "the built-in", "a user binding"), resolveExprs(env, args, not, st0))
+        // s478 r1 (#1900 review MED) — an UNANNOTATED foreign value (`asIs`, §23.2.4a) as an argument: the
+        // SPEC disagrees with itself on it (g-boot-print-asis-arg-s478, owner question) — §20.7.2's allow-list
+        // and §14.13.2 ("a value whose type the compiler cannot resolve") refuse it, the §34
+        // E-PRINT-NON-PRIMITIVE row leaves "`asIs` … unflagged". Until the owner rules, it is refused BY
+        // NAME (INTERIM), never with a code the SPEC may not mean here.
+        const fa: string = printForeignArg(env, args)
+        if (fa != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(" + fa + ")` — `" + fa + "` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's allow-list and §14.13.2 refuse it; the §34 `E-PRINT-NON-PRIMITIVE` row leaves `asIs` unflagged — owner question g-boot-print-asis-arg-s478). The bootstrap does not build it (INTERIM). State its type at the binding (`const " + fa + ": string = _={ … }=`, the §23.2.4a call-site annotation)", resolveExprs(env, args, not, st0))
+        let st: AS = st0
+        let text: boolean[] = []
+        for (const a of args) {
+            const r: RX = resolveExpr(env, a, not, st)
+            text = text.concat([!isStrType(r.x.ty)])
+            st = r.st
+        }
+        return plain(not, addValue(st, e.nid, ValueFact.VPrint(text, nl)))
+    }
+
+    // s478 r1 — the first argument that is a local bound, unannotated, to a foreign block's value ("" none).
+    fn printForeignArg(env: Env, args: AExpr[]) -> string {
+        for (const a of args) {
+            const n: string = exprName(a)
+            if (n != "") {
+                const l: LocalB | not = lookupLocal(env, n)
+                if (l is given) {
+                    if (l.foreign) return n
+                }
+            }
+        }
+        return ""
+    }
+
+    // s478 r1 — the placement pre-scan and the binder read one `print` call differently (printScans).
+    fn printScanWhy(w: string, binder: string, scan: string) -> string {
+        return "`" + w + "(…)` here calls " + binder + ", but the bootstrap places a function that calls the §20.7 built-in BEFORE it binds names (§20.7.3: \"server-placed by Route Inference (§12), exactly like a function that touches `?{}` SQL\"), and that placement read this call as " + scan + " — the bootstrap's pre-scan models a file-scope binding, a parameter, a local, a `given` name and a nested function named `" + w + "`, not this one (INTERIM). Rename the binding named `" + w + "`"
+    }
+
+    // §20.7.5: "A user-declared in-scope binding named `print` / `println` wins; the built-in steps aside
+    // and the call is emitted as an ordinary call to the user's binding, with an info-level lint
+    // **`W-PRINT-SHADOWED`** at the shadowing use".
+    fn printShadowed(env: Env, e: AExpr, n: string, st: AS) -> AS {
+        return addDiag(st, env.file, e.span, "W-PRINT-SHADOWED", "`" + n + "(…)` here calls the binding `" + n + "` declared in scope, not the §20.7 clean-stdout built-in — a user-declared `" + n + "` wins (§20.7.5). Rename the binding to use the built-in")
     }
 
     fn runLocalFnReadWhy(name: string) -> string {
@@ -9355,6 +9594,11 @@ ${
         const n: string = exprName(callee)
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
         if (n == "cleanup" && builtinFree(env, n)) return resolveCleanup(env, e, args, st0)   // s478 (§6.7.3)
+        // s478-boot-print-builtins (§20.7) — the clean-stdout built-ins, unless a user binding of
+        // the name wins (§20.7.5, builtinFree) — then the call is the user's, and W-PRINT-SHADOWED
+        if ((n == "print" || n == "println") && builtinFree(env, n)) return resolvePrint(env, e, n == "println", args, st0)
+        if ((n == "print" || n == "println") && env.g.printCalls.indexOf(e.nid) >= 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(n, "a user binding of the name (§20.7.5)", "the built-in"), resolveExprs(env, args, not, st0))
+        const st1: AS = (n == "print" || n == "println") ? printShadowed(env, e, n, st0) : st0
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
             // s475 (S3b): `<#id>.refetch()` (§6.7.7 Properties)
@@ -9414,7 +9658,7 @@ ${
             }
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
-        const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
+        const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st1)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
         // against its parameter's declared type — §18.5 reads an object in an argument "exactly as
         // `f({ … })`", and §14.10 names "a function parameter type" as a position's type
@@ -10709,7 +10953,7 @@ ${
             st = rs.st
             syms = syms.concat([rs.s])
             if (ty is given) st = addAnnot(st, rs.s, ty)
-            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
         }
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
         const b: AExpr | not = lambdaBody(lam)
@@ -17317,7 +17561,7 @@ ${
         const rb: RSym = mint(reservedName(st0, env.file, b.span, b.name), b.name)
         const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
         if (b.name == "_") return { env: env, st: st }
-        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" }), st: st }
+        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }), st: st }
     }
 
     // §18.2's message at a failable site (a `!{}` arm, a `match` on a failable result).
@@ -17394,7 +17638,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let ty: Type | not = not
             if (i < fs.length) ty = fs[i].ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
             i = i + 1
         }
         return { env: env, st: st }
@@ -17410,7 +17654,7 @@ ${
             st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
             let t: Type | not = not
             if (i == 0) t = ty
-            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
             i = i + 1
         }
         return { env: env, st: st }
@@ -19067,7 +19311,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "", foreign: fi is given && annot is not }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -19090,7 +19334,7 @@ ${
         const rs: RSym = mint(reservedName(st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
-        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false, via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl, fresh: false, via: "", foreign: false }
         let inner: Env = withLocal(env, l)
         // the subject handle itself is narrowed inside the block too (§66.7.5)
         const hn: string = atName(subject)
@@ -19181,7 +19425,7 @@ ${
         let lty: Type | not = lr.elem
         if (lty is given) lty = Type.Seq(lty, fixedSeq())
         if (annot is given) lty = annot
-        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
+        const l: LocalB = { name: b.name, s: rs.s, ty: lty, mutable: b.mutable, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -19654,7 +19898,7 @@ ${
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
-        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: "" }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }
         return { env: withLocal(env, l), st: st }
     }
 
@@ -19713,7 +19957,7 @@ ${
         let via: string = ""
         const ix: AExpr | not = iterOfExpr(src)
         if (rx.x.ty is not && ix is given) via = srcWhy(env, ix, st)
-        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: via }
+        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not, fresh: false, via: via, foreign: false }
         const benv: Env = withLocal(env, l)
         // s474 — the header `key` (§17.4b): read in the body's scope (it reads
         // the binder), once per iteration — into a local minted HERE (lower
@@ -20797,6 +21041,7 @@ ${
             .VIndex(loc: l) :> l
             .VAt :> ""
             .VTemplate(text: tx) :> ""
+            .VPrint(text: tx2, newline: nl2) :> ""
             .VToEnum(enumSym: s) :> ""
             .VMethod(op: zm) :> ""
             .VLit(lit: l) :> ""
@@ -20815,6 +21060,7 @@ ${
         return match f {
             .VAt :> true
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VIndex(loc: x) :> false
             .VToEnum(enumSym: s) :> false
             .VMethod(op: zm) :> false
@@ -24553,7 +24799,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps, cycles: g.cycles }
+                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -24927,7 +25173,7 @@ ${
             // placeholder is not a type the sink judgment may trust (fail closed)
             let lty: Type | not = not
             if (proven) lty = pty
-            env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
+            env = withLocal(env, { name: p.name, s: rs.s, ty: lty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
         }
         st = resolveBlock(env, fs.f.body, st)
         st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
@@ -27177,7 +27423,7 @@ ${
             // function that calls it (the fixpoint below), ends every cell narrowing.
             for (const af of fnItems(f.items)) {
                 let own: string[] = blockEffects(af.body, [])
-                if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
+                if (af.server || sqlsInBlock(af.body).length > 0 || (!af.pure && printScanFn(lk, f, af).calls.length > 0)) own = own.concat(["*"])   // serverOwn (§12.2 T1; s478 r1: a print, §20.7.3), as the binder decides it
                 ws = ws.concat([{ name: af.name, nid: af.nid, file: f.path, keys: own, params: paramNids(af.params) }])
             }
         }
@@ -28652,6 +28898,7 @@ ${
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> VType.Unknown
             .VTemplate(text: tx) :> known(Type.Str)
+            .VPrint(text: tx2, newline: nl2) :> VType.Unknown
             .VToEnum(enumSym: s) :> VType.Unknown
             .VMethod(op: o) :> VType.Unknown
             not :> VType.Unknown
@@ -28671,6 +28918,7 @@ ${
             .VIndex(loc: x) :> not
             .VAt :> not
             .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not
@@ -29147,6 +29395,7 @@ ${
             .VIndex(loc: x) :> []
             .VAt :> []
             .VTemplate(text: tx) :> []
+            .VPrint(text: tx2, newline: nl2) :> []
             .VToEnum(enumSym: s) :> []
             .VMethod(op: o) :> []
             .VLit(lit: l) :> []
@@ -29176,6 +29425,7 @@ ${
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> atCallType(ts, callee)
             .VTemplate(text: tx) :> VType.Unknown
+            .VPrint(text: tx2, newline: nl2) :> VType.Unknown
             .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
             .VMethod(op: o) :> methodType(ts, o, callee)
             not :> VType.Unknown
@@ -29290,6 +29540,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -29309,6 +29560,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -29328,6 +29580,7 @@ ${
             .VIndex(loc: zl) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -29346,6 +29599,7 @@ ${
             .VIndex(loc: zl) :> not
             .VAt :> not
             .VTemplate(text: tx) :> not
+            .VPrint(text: tx2, newline: nl2) :> not
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
@@ -29380,6 +29634,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             not :> false
         }
     }
@@ -29399,6 +29654,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             not :> false
         }
     }
@@ -29572,6 +29828,7 @@ ${
             .TapeIncludes :> ts
             .LengthCheck :> ts
             .TapeInsert :> ts
+            .Print :> ts
         }
     }
 
@@ -30317,6 +30574,7 @@ ${
             .TapeIncludes :> VType.Unknown
             .LengthCheck :> VType.Unknown
             .TapeInsert :> VType.Unknown
+            .Print :> VType.Unknown
         }
     }
 
@@ -30370,6 +30628,62 @@ ${
         let ts: TypeState = ts0
         for (const x of f.crossings) { ts = typeExpr(env, x, ts).ts }
         return rvt(VType.Unknown, ts)
+    }
+
+    // s478-boot-print-builtins — §20.7.2: "A `print` / `println` argument SHALL be a **string**, **int**,
+    // **number**, **bool** or **unit enum value** … A **non-primitive** argument — a struct, payload enum
+    // value, tape, value-native map (§59), markup-as-value, or `not` — is **`E-PRINT-NON-PRIMITIVE`**".
+    // §14.13.2 makes the argument a text sink whose refused set includes "a value whose type the compiler
+    // cannot resolve" (fail closed, INTERIM S474), and "A `print` / `println` argument keeps its own code,
+    // `E-PRINT-NON-PRIMITIVE`" — so an unresolved argument (a foreign block's `asIs` value) is that code
+    // too. A `T | not` is refused as `not` is (it may be `not`). The judgment is textSlot's, one rule.
+    fn isPrintFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VPrint(text: tx, newline: nl) :> true
+            // no-default-arm: one question of the fact — is it a print built-in call
+            _ :> false
+        }
+    }
+
+    fn printArgCheck(env: TEnv, args: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const a of args) { ts = printSlot(env, a, exprType0(ts, a.nid), ts) }
+        return ts
+    }
+
+    fn printSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, s.span)) return ts          // Rule C: not judged across a parse error
+        return match v {
+            .Known(t: t) :> printKnown(env, s, t, ts)
+            .Absent :> notPrint(env, s, "`not` (an absent value has no text)", ts)
+            .Unknown :> printUnresolved(env, s, ts)
+            .OneOf(ts: xs) :> printOneOf(env, s, xs, ts)
+            .Partial(ts: xs) :> printUnresolved(env, s, ts)
+        }
+    }
+
+    fn printOneOf(env: TEnv, s: AExpr, xs: Type[], ts: TypeState) -> TypeState {
+        for (const t of xs) {
+            const r: TypeState = printKnown(env, s, t, ts)
+            if (r.diags.length > ts.diags.length) return r
+        }
+        return ts
+    }
+
+    fn printUnresolved(env: TEnv, s: AExpr, ts: TypeState) -> TypeState {
+        if (condBlamed(env, s, ts)) return ts
+        return report(ts, env, s.span, "E-PRINT-NON-PRIMITIVE", "a `print` / `println` argument is text, and the compiler cannot resolve this value's type — only a known `string`, `int`, `number`, `bool` or unit enum value has one honest text (§20.7.2, §14.13.2: fail closed). Annotate what it reads (`const v: string = …`, a parameter, a function's return type), or convert it (`T.parse`, §14.13.4)")
+    }
+
+    fn printKnown(env: TEnv, s: AExpr, t: Type, ts: TypeState) -> TypeState {
+        const inner: Type | not = maybeInner(t)
+        if (inner is given) return notPrint(env, s, "a `" + typeName(t) + "` — it may be `not`, which has no text; narrow it first (`if (x is given) { … }`)", ts)
+        if (isTextPrimitive(env, t)) return ts
+        return notPrint(env, s, textWhat(env, t), ts)
+    }
+
+    fn notPrint(env: TEnv, s: AExpr, what: string, ts: TypeState) -> TypeState {
+        return report(ts, env, s.span, "E-PRINT-NON-PRIMITIVE", "a `print` / `println` argument is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§20.7.2). `print` writes machine-read program output: serialize structured data explicitly, or show it to a developer with `log()` (§20.6)")
     }
 
     fn textSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
@@ -30528,6 +30842,8 @@ ${
         // `E`"). The callee names a type and a variant — never a value to type.
         const cf: ValueFact | not = valueFact(env.t.values, e.nid)
         if (isConstructFact(cf)) return rvt(valueType(cf), checkConstructArgs(env, cf, args, ts))
+        // s478-boot-print-builtins — a `print` / `println` built-in call: every argument is a text sink (§20.7.2)
+        if (isPrintFact(cf)) return rvt(VType.Unknown, printArgCheck(env, args, ts))
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
@@ -31202,6 +31518,7 @@ ${
             .VIndex(loc: x) :> []
             .VAt :> []
             .VTemplate(text: tx) :> []
+            .VPrint(text: tx2, newline: nl2) :> []
             .VToEnum(enumSym: s) :> []
             .VMethod(op: o) :> []
             not :> []
@@ -31221,6 +31538,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> false
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VToEnum(enumSym: s) :> false
             .VMethod(op: o) :> false
             not :> false
@@ -33663,6 +33981,7 @@ ${
             .VIndex(loc: x) :> false
             .VAt :> true
             .VTemplate(text: tx) :> false
+            .VPrint(text: tx2, newline: nl2) :> false
             .VToEnum(enumSym: s) :> true
             .VMethod(op: o) :> true
             not :> false
@@ -36305,6 +36624,7 @@ ${
         modifier: boolean, failable: boolean,
         sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
         foreigns: ASpan[],      // s473: its foreign blocks (§23.2.4: "an inline `_{}` escalates its enclosing function to the server boundary")
+        prints: ASpan[],        // s478: its `print` / `println` built-in calls (§20.7.3: "a `function` that calls `print` / `println` is **server-placed**")
         repeats: ASpan[],       // s473 (ruled refusals): the regions of its body that may run more than once (repeatsInBlock)
         // s477 — a `function` of a `kind="tool"` program (§64): the tool is "an in-process
         // monolith with no client boundary" (§64.5.1), so every `function` of it runs where
@@ -36372,6 +36692,57 @@ ${
             .Defer(body: b) :> foreignsInBlock(b)
             .Fail(f: f) :> foreignsInExprs(failExprs(f))
         }
+    }
+
+    // s478-boot-print-builtins — every `print` / `println` BUILT-IN call in a body, at any depth (the
+    // binder's VPrint fact on the call: a call of a user binding of the name is not one, §20.7.5).
+    fn printsInBlock(t: Tables, b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) { out = out.concat(printsInStmt(t, s)) }
+        return out
+    }
+
+    fn printsInStmt(t: Tables, s: AStmt) -> ASpan[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> printsInExpr(t, e)
+            .Local(name: n, init: i) :> printsInExpr(t, i)
+            .Return(e: e) :> printsInMaybe(t, e)
+            .If(cond: c, thenB: tb, elseB: eb) :> printsInExpr(t, c).concat(printsInBlock(t, tb)).concat(printsInMaybeBlock(t, eb))
+            .Given(name: n, subject: x, body: b) :> printsInExpr(t, x).concat(printsInBlock(t, b))
+            .For(f: lf) :> printsInExprs(t, forExprs(lf)).concat(printsInBlock(t, lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+            .Lift(what: w) :> printsInExprs(t, liftExprs(w))
+            .LocalFn(f: f) :> printsInBlock(t, f.body)
+            .EffectStmt(w: w) :> printsInBlock(t, w.body)
+            .Defer(body: b) :> printsInBlock(t, b)
+            .Fail(f: f) :> printsInExprs(t, failExprs(f))
+        }
+    }
+
+    fn printsInMaybe(t: Tables, e: AExpr | not) -> ASpan[] {
+        if (e is not) return []
+        return printsInExpr(t, e)
+    }
+
+    fn printsInMaybeBlock(t: Tables, b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return printsInBlock(t, b)
+    }
+
+    fn printsInExpr(t: Tables, e: AExpr) -> ASpan[] {
+        let out: ASpan[] = []
+        if (isPrintFact(valueFact(t.values, e.nid))) out = [e.span]
+        for (const x of exprKids(e)) { out = out.concat(printsInExpr(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(printsInBlock(t, b)) }
+        return out
+    }
+
+    fn printsInExprs(t: Tables, es: AExpr[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const x of es) { out = out.concat(printsInExpr(t, x)) }
+        return out
     }
 
     // s473 (ruled refusals, §8.9.2 interim) — the regions of a body that may
@@ -36757,12 +37128,12 @@ ${
         return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
                  modifier: fs.f.server, failable: fs.f.failable,
                  sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan,
-                 foreigns: foreignsInBlock(fs.f.body), repeats: repeatsInBlock(fs.f.body),
+                 foreigns: foreignsInBlock(fs.f.body), prints: printsInBlock(cx.t, fs.f.body), repeats: repeatsInBlock(fs.f.body),
                  tool: !fs.f.pure && fileIsTool(cx.g, fs.info.file) }
     }
 
     // ---- placement -------------------------------------------------------------
-    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.modifier || f.tool }
+    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.foreigns.length > 0 || f.prints.length > 0 || f.modifier || f.tool }
     fn clientDirect(f: FnFacts) -> boolean { return f.reads.length > 0 || f.scan.writes.length > 0 || f.doms.length > 0 }
 
     // §12.2 + §19.9.5 / §6.6.9, by the function's OWN body. Calling a server
@@ -36777,7 +37148,8 @@ ${
             // unless the deprecated `server` modifier declares the WHOLE body
             // server (§52.10: "historically forced server-side execution"); a
             // DOM access makes it unplaceable (E-ROUTE-005, judged first)
-            if ((f.sqls.length > 0 || f.foreigns.length > 0) && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
+            // s478: a `print` is a server trigger "exactly like a function that touches `?{}` SQL" (§20.7.3)
+            if ((f.sqls.length > 0 || f.foreigns.length > 0 || f.prints.length > 0) && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
             return PlaceK.Server
         }
         if (clientDirect(f)) return PlaceK.Client
@@ -37381,7 +37753,7 @@ ${
                 for (const du of f.doms) { doms = doms.concat([du.span.start]) }
                 st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
             } else if (pk == PlaceK.Split) {
-                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `?{}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
+                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both uses " + serverTrigger(f) + " and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
                 st = serverBodyDiags(cx, f, all, places, sum, st)
@@ -37534,6 +37906,8 @@ ${
         // s473: a `<db>` cell's load (`@name`) is server code by its placement (§8.1.3)
         if (isLoadName(f.name)) return "being a `<db>` cell's value (evaluated on the server per request, §8.1.3)"
         if (f.tool) return "being a `function` of a `kind=\"tool\"` program (§64.5.1: the tool runs in process, with no client)"
+        // s478: §20.7.3 "Host `process.stdout` is a server-only resource (§12.2 Trigger 3)"
+        if (f.prints.length > 0) return "a `print` / `println` call (host stdout is a server-only resource, §20.7.3)"
         return "the `server` modifier"
     }
 
@@ -40980,7 +41354,7 @@ ${
     // The own facts of a construction / a formula: its scan only.
     fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
         return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
-                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], repeats: [], tool: false }
+                 sqls: [], reads: [], doms: [], scan: scan, foreigns: [], prints: [], repeats: [], tool: false }
     }
 
     // The callable a Sym names (-1: none — a reference with no summary).
