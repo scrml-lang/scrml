@@ -188,6 +188,82 @@ ${
         return to
     }
 
+    // Past whitespace, `//` line comments and closed `/* … */` comments (the
+    // §39.2 "with any whitespace or closed comments around the `.`" of a head).
+    fn skipHead(s: string, from: int, to: int) -> int {
+        let i: int = skip(s, from, to)
+        while (i < to && s.substring(i, i + 2) == "/*") {
+            const e: int = s.indexOf("*/", i + 2)
+            if (e < 0 || e + 2 > to) return i
+            i = skip(s, e + 2, to)
+        }
+        return i
+    }
+
+    // A `.`-qualified declarative head written with whitespace or comments
+    // around a `.` (`db . users {`) — §39.2: "a `.`-qualified head
+    // (`mydb.public.assets {`, with any whitespace or closed comments around
+    // the `.`) is **E-SCHEMA-012**". `open` < 0: none at `i`.
+    type QHead:struct = { name: string, end: int, open: int }
+
+    fn qualHead(s: string, i: int, to: int) -> QHead {
+        const none: QHead = { name: "", end: i, open: -1 }
+        let j: int = wordEnd(s, i, to)
+        if (j == i) return none
+        let name: string = s.substring(i, j)
+        let dots: int = 0
+        let going = true
+        while (going) {
+            const k: int = skipHead(s, j, to)
+            if (ch(s, k) == ".") {
+                const k2: int = skipHead(s, k + 1, to)
+                const we: int = wordEnd(s, k2, to)
+                if (we == k2) return none
+                name = s.substring(k2, we)
+                j = we
+                dots = dots + 1
+            } else {
+                going = false
+            }
+        }
+        if (dots == 0) return none
+        const o: int = skipHead(s, j, to)
+        if (ch(s, o) != "{") return none
+        return { name: name, end: j, open: o }
+    }
+
+    // The start of the `<schema>` closer (`</>`, or `</schema>` with optional
+    // whitespace before its `>`) at or after `from`, else -1. Read with the body
+    // reader's own skipping: a closer inside a `//` comment or a one-line
+    // `'…'` / `"…"` literal (`default('</>')`, `// see </>`) is text, not the
+    // end of the block (§27.1: a comment is "valid in all scrml contexts").
+    export fn schemaCloseAt(s: string, from: int) -> int {
+        const to: int = s.length
+        let j: int = from
+        while (j < to) {
+            const c: string = ch(s, j)
+            if (c == "/" && ch(s, j + 1) == "/") {
+                const nl: int = s.indexOf("\n", j)
+                if (nl < 0) return -1
+                j = nl + 1
+            } else if (c == "'" || c == "\"") {
+                const e: int = quoteEnd(s, j, to)
+                j = e < 0 ? j + 1 : e
+            } else if (c == "<" && ch(s, j + 1) == "/") {
+                if (ch(s, j + 2) == ">") return j
+                if (s.substring(j + 2, j + 8) == "schema") {
+                    let k: int = j + 8
+                    while (k < to && isSpace(ch(s, k))) { k = k + 1 }
+                    if (ch(s, k) == ">") return j
+                }
+                j = j + 1
+            } else {
+                j = j + 1
+            }
+        }
+        return -1
+    }
+
     fn sameName(a: string, b: string) -> boolean { return a.toLowerCase() == b.toLowerCase() }
 
     // Does `low` (lower-cased) hold `w` as a whole word?
@@ -217,6 +293,142 @@ ${
 
     fn colGiveUp(errs: SchemaErr[], e: SchemaErr, at: int) -> RCol {
         return { col: not, refs: [], errs: errs.concat([e]), next: at, stop: true }
+    }
+
+    // A give-up after the column's name and type were read keeps the column
+    // as read so far (its `primary key` / `references` facts included), so the
+    // table-level checks do not cascade off the refusal (W-SCHEMA-001,
+    // E-SCHEMA-006 against a column that is there).
+    fn colGiveUpKeep(c: SchemaCol, refs: SchemaRef[], errs: SchemaErr[], e: SchemaErr, at: int) -> RCol {
+        return { col: c, refs: refs, errs: errs.concat([e]), next: at, stop: true }
+    }
+
+    // ---- a `default(…)` literal (§38.5.4) -------------------------------------
+    // §38.5.4: "The `literal` inside `default(...)` SHALL be passed verbatim to
+    // the generated SQL. The compiler SHALL NOT evaluate or transform it." — its
+    // examples: `default(CURRENT_TIMESTAMP)`, `default(0)`, `default('')`. Text
+    // passed verbatim into DDL must be a literal, never code: the bootstrap
+    // admits a number, a `'…'` string, an `X'…'` blob, NULL / TRUE / FALSE /
+    // CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME, a sign before a number,
+    // and a parenthesized constant expression of those (SQLite's `DEFAULT (expr)`
+    // with no identifier and no call). Everything else is refused by name
+    // (INTERIM — what else "literal" admits is not written down).
+    fn wsEnd(s: string, i: int, to: int) -> int {
+        let j: int = i
+        while (j < to && isSpace(ch(s, j))) { j = j + 1 }
+        return j
+    }
+
+    fn isDefaultKeyword(w: string) -> boolean {
+        return ["null", "true", "false", "current_timestamp", "current_date", "current_time"].indexOf(w.toLowerCase()) >= 0
+    }
+
+    // The end of a numeric literal at `i` (`i`: none there).
+    fn numEnd(s: string, i: int, to: int) -> int {
+        let j: int = i
+        while (j < to && isDigit(ch(s, j))) { j = j + 1 }
+        let had = j > i
+        if (ch(s, j) == ".") {
+            let k: int = j + 1
+            while (k < to && isDigit(ch(s, k))) { k = k + 1 }
+            if (k > j + 1) had = true
+            if (had) j = k
+        }
+        if (!had) return i
+        const e: string = ch(s, j)
+        if (e == "e" || e == "E") {
+            let k: int = j + 1
+            if (ch(s, k) == "+" || ch(s, k) == "-") k = k + 1
+            const d0: int = k
+            while (k < to && isDigit(ch(s, k))) { k = k + 1 }
+            if (k > d0) j = k
+        }
+        if (j < to && isWordCh(ch(s, j))) return i
+        return j
+    }
+
+    fn isHexRun(t: string) -> boolean {
+        let k: int = 0
+        while (k < t.length) {
+            if ("0123456789abcdefABCDEF".indexOf(ch(t, k)) < 0) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    // One term at `i` (after whitespace); its end, or -1.
+    fn defTerm(s: string, i0: int, to: int) -> int {
+        let i: int = wsEnd(s, i0, to)
+        let signed = false
+        while (i < to && (ch(s, i) == "-" || ch(s, i) == "+")) {
+            signed = true
+            i = wsEnd(s, i + 1, to)
+        }
+        const c: string = ch(s, i)
+        if (c == "(") {
+            const e: int = defExpr(s, i + 1, to)
+            if (e < 0) return -1
+            const k: int = wsEnd(s, e, to)
+            if (ch(s, k) != ")") return -1
+            return k + 1
+        }
+        const n: int = numEnd(s, i, to)
+        if (n > i) return n
+        if (signed) return -1
+        if (c == "'") {
+            const e: int = quoteEnd(s, i, to)
+            return e > to ? -1 : e
+        }
+        if ((c == "x" || c == "X") && ch(s, i + 1) == "'") {
+            const e: int = quoteEnd(s, i + 1, to)
+            if (e < 0 || e > to) return -1
+            if (!isHexRun(s.substring(i + 2, e - 1))) return -1
+            return e
+        }
+        if (isWordStart(c)) {
+            const we: int = wordEnd(s, i, to)
+            if (isDefaultKeyword(s.substring(i, we))) return we
+        }
+        return -1
+    }
+
+    // `term (op term)*` (inside parentheses only); its end, or -1.
+    fn defExpr(s: string, i: int, to: int) -> int {
+        let e: int = defTerm(s, i, to)
+        if (e < 0) return -1
+        let going = true
+        while (going) {
+            const j: int = wsEnd(s, e, to)
+            const c: string = ch(s, j)
+            let op: int = 0
+            if (s.substring(j, j + 2) == "||") {
+                op = 2
+            } else if (j < to && "+-*/%".indexOf(c) >= 0) {
+                op = 1
+            }
+            if (op == 0) {
+                going = false
+            } else {
+                e = defTerm(s, j + op, to)
+                if (e < 0) return -1
+            }
+        }
+        return e
+    }
+
+    // "" when `s[a, b)` (the text inside `default(` … `)`) is an admitted
+    // literal, else the refusal's reason.
+    fn defaultRefusal(s: string, a: int, b: int) -> string {
+        const text: string = s.substring(a, b)
+        if (text.indexOf("$" + LB()) >= 0 || text.indexOf("?" + LB()) >= 0) {
+            return "holds scrml code (a `" + "$" + LB() + " … }` / `" + "?" + LB() + " … }`), not a literal — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\", so code there would be pasted into the DDL"
+        }
+        const e: int = defTerm(s, a, b)
+        if (e >= 0 && wsEnd(s, e, b) == b) return ""
+        const shown: string = text.trim().length > 60 ? text.trim().substring(0, 60) + "…" : text.trim()
+        let hint: string = ""
+        if (shown.indexOf("\"") >= 0) hint = " (a SQL string literal is single-quoted: `'…'`; `\"…\"` is an identifier in SQL)"
+        return "holds `" + shown + "`, which is not a literal the bootstrap admits" + hint + " — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\" (its examples: `CURRENT_TIMESTAMP`, `0`, `''`). The bootstrap admits a number, a `'…'` string, an `X'…'` blob, NULL, TRUE, FALSE, CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, or a parenthesized constant expression of those (INTERIM — no identifier, function call or code)"
     }
 
     // A column declaration at `i` (an identifier is there), inside table `table`.
@@ -255,9 +467,9 @@ ${
                 if (c == "}") {
                     going = false
                 } else if (c == ",") {
-                    return colGiveUp(errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
                 } else if (!isWordStart(c)) {
-                    return colGiveUp(errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
                 } else {
                     const we: int = wordEnd(s, k, to)
                     const w: string = s.substring(k, we)
@@ -276,15 +488,17 @@ ${
                         k = after
                     } else if (w == "default") {
                         if (ch(s, after) != "(") {
-                            return colGiveUp(errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
                         }
                         const pe: int = parenEnd(s, after, to)
                         if (pe < 0) {
-                            return colGiveUp(errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
                         }
                         if (s.substring(after + 1, pe).trim() == "") {
-                            return colGiveUp(errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
                         }
+                        const why: string = defaultRefusal(s, after + 1, pe)
+                        if (why != "") errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)])
                         k = skip(s, pe + 1, to)
                     } else if (w == "references") {
                         // §39.5.5: "This is the ONLY foreign-key production" — `references <table>(<column>)`
@@ -300,18 +514,18 @@ ${
                         if (ok && tail < to && isWordCh(ch(s, tail))) ok = false
                         if (!ok) {
                             const shown: string = s.substring(k, runEnd(s, tb, to)).trim()
-                            return colGiveUp(errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
                         }
                         refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }])
                         k = skip(s, tail, to)
                     } else if (w == "rename") {
-                        return colGiveUp(errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
                     } else if (isSharedCore(w)) {
-                        return colGiveUp(errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
                     } else if (w == "immutable") {
-                        return colGiveUp(errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
                     } else {
-                        return colGiveUp(errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, start: i, end: ne }, refs, errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
                     }
                 }
             }
@@ -327,6 +541,7 @@ ${
         let errs: SchemaErr[] = []
         let cols: SchemaCol[] = []
         let refs: SchemaRef[] = []
+        let gaveUp = false             // a refusal stopped the reader inside this table
         let i: int = skip(s, open + 1, to)
         let going = true
         while (going) {
@@ -348,6 +563,7 @@ ${
                     refs = refs.concat(rc.refs)
                 }
                 if (rc.stop) {
+                    gaveUp = true
                     const b: int = braceEnd(s, rc.next, to)
                     if (b >= to) {
                         i = to
@@ -360,6 +576,7 @@ ${
                 }
             } else {
                 errs = errs.concat([refuse("`" + ch(s, i) + "` in `<schema>` table `" + name + "` is not a §39.2 column declaration (`name: type constraint*`)", i, i + 1)])
+                gaveUp = true
                 const b2: int = braceEnd(s, i, to)
                 i = b2 >= to ? to : b2 + 1
                 going = false
@@ -367,7 +584,10 @@ ${
         }
         let pks: int = 0
         for (const c of cols) { if (c.pk) pks = pks + 1 }
-        if (pks == 0) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
+        // W-SCHEMA-001 only for a table read to its end: after a refusal the
+        // reader did not see every column, and a `primary key` it skipped would
+        // make the warning a false cascade
+        if (pks == 0 && !gaveUp) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
         if (pks > 1) errs = errs.concat([refuse("`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\"", start, end)])
         return { t: { name: name, cols: cols, start: start, end: end }, refs: refs, errs: errs, next: i }
     }
@@ -387,6 +607,10 @@ ${
             const re: int = runEnd(s, i, to)
             const run: string = s.substring(i, re)
             const after: int = skip(s, re, to)
+            const qh: QHead = qualHead(s, i, to)
+            let hName: string = ""
+            let hEnd: int = -1
+            let hOpen: int = -1
             if (s.substring(i, i + 2) == "$" + LB()) {
                 otherForm = true
                 errs = errs.concat([refuse("a `" + "$" + LB() + " … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap", i, i + 2)])
@@ -412,9 +636,24 @@ ${
                         errs = errs.concat([err("E-SCHEMA-013", "the `<schema>` table head `" + run + "` is not a table name the compiler can read — §39.2: a declarative head is read whole; a table name is letters, digits and `_`, not starting with a digit", i, re)])
                     }
                 }
-                const rt: RTable = readTable(s, name, i, re, after, to)
+                hName = name
+                hEnd = re
+                hOpen = after
+            } else if (qh.open >= 0) {
+                const shownQ: string = s.substring(i, qh.end).split("\n").join(" ")
+                errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + shownQ + "` carries a schema / database qualifier — §39.2: a `.`-qualified head, \"with any whitespace or closed comments around the `.`\", is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, qh.end)])
+                hName = qh.name
+                hEnd = qh.end
+                hOpen = qh.open
+            } else {
+                errs = errs.concat([refuse("`" + (run == "" ? ch(s, i) : run) + "` in `<schema>` is not a §39.2 table declaration (`name { column: type constraint* }`) — the bootstrap reads nothing else in a `<schema>` body", i, re > i ? re : i + 1)])
+                going = false
+            }
+            if (hOpen >= 0) {
+                const name: string = hName
+                const rt: RTable = readTable(s, name, i, hEnd, hOpen, to)
                 for (const prior of tables) {
-                    if (sameName(prior.name, name)) errs = errs.concat([refuse("`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate table names\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", i, re)])
+                    if (sameName(prior.name, name)) errs = errs.concat([refuse("`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate table names\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", i, hEnd)])
                 }
                 tables = tables.concat([rt.t])
                 refs = refs.concat(rt.refs)
@@ -427,9 +666,6 @@ ${
                         i = skip(s, de, to)
                     }
                 }
-            } else {
-                errs = errs.concat([refuse("`" + (run == "" ? ch(s, i) : run) + "` in `<schema>` is not a §39.2 table declaration (`name { column: type constraint* }`) — the bootstrap reads nothing else in a `<schema>` body", i, re > i ? re : i + 1)])
-                going = false
             }
         }
         // §39.5.5: "The referenced table and column SHALL both exist in the

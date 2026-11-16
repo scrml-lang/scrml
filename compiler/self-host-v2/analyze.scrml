@@ -2365,6 +2365,15 @@ ${
         if (reservedElementName(d.name)) {
             st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
         }
+        // s478 fix-1 (F1) — a user declaration named `schema`: the parser reads
+        // every `<schema>` use as the §39 schema block (its body is §39.2's
+        // declaration language, never markup), so the declaration could never
+        // be used — a use would render nothing, silently. §4.15's reserved list
+        // does not name `schema` (owner question g-boot-schema-user-decl-name-s478),
+        // so this is refused by name (INTERIM), not E-NAME-COLLIDES-RESERVED.
+        if (d.name == "schema") {
+            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a user declaration named `schema` is not in the bootstrap (INTERIM) — the bootstrap reads every `<schema>` as the §39 schema block, so a use `<schema …/>` would never reach this declaration. §4.15's reserved structural-element list does not name `schema` (owner question g-boot-schema-user-decl-name-s478). Rename the declaration")
+        }
         const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
     }
@@ -21890,8 +21899,16 @@ ${
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return resolveSlot(env, e, st)
         // s478 — `<schema>` (§39): the parser read its body as §39.2 declarations
-        // whatever a declaration of that name says, so it is the schema block here too
-        if (e.tag == "schema") return resolveSchema(env, e, st)
+        // whatever a declaration of that name says. A user declaration in scope
+        // wins over every built-in reading of a tag (below), so with one named
+        // `schema` in scope the use is ambiguous and refused (fix-1 F1) — never
+        // rendered as nothing.
+        if (e.tag == "schema") {
+            if (!e.star && declNamed(env.g, env.file, "schema") is given) {
+                return addElem(addDiag(st, env.file, mkSpan(e.span.start, e.span.start + 7), "E-BOOTSTRAP-UNSUPPORTED", "this `<schema>` names a user declaration `schema` in scope, and the bootstrap reads every `<schema>` as the §39 schema block — it refuses the use rather than render nothing (INTERIM; owner question g-boot-schema-user-decl-name-s478: §4.15's reserved list does not name `schema`). Rename the declaration"), e.nid, ElemFact.MSchema)
+            }
+            return resolveSchema(env, e, st)
+        }
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)

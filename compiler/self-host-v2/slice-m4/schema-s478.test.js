@@ -172,3 +172,88 @@ describe("refused by name — never read past silently", () => {
   });
   test("an unknown constraint word", () => refused("        users {\n            id: integer primary key\n            name: text indexed\n        }", "not a §39.2 column constraint"));
 });
+
+// s478 fix round 1 (review of #1908).
+describe("fix-1: a user declaration named `schema` is refused, never rendered as nothing (F1)", () => {
+  // Base (before the lane) rendered "COMP x"; the lane's first head read the use as an empty
+  // §39 block and rendered NOTHING, clean. §4.15 does not reserve `schema` (owner question
+  // g-boot-schema-user-decl-name-s478), so both the declaration and the use are refused by name.
+  const DECL = `<schema label:string="x"/>\nrenders <p id="z">COMP \${label}</p>\n`;
+  const cases = {
+    "user-comp-schema-top": `${DECL}<program db="./app.db">\n<schema/>\n<p>x</p>\n</program>\n`,
+    "user-comp-schema-top-db-noattr": `${DECL}<program db="./app.db">\n<schema/>\n</program>\n`,
+    "user-comp-schema-db": `${DECL}<program db="./app.db">\n<main><schema label="y"/></main>\n</program>\n`,
+    "user-comp-schema-nodb": `${DECL}<program>\n<main><schema label="y"/></main>\n</program>\n`,
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    test(name, () => {
+      const ms = run(src).diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").map((d) => d.message);
+      expect(ms.some((m) => m.includes("user declaration named `schema`"))).toBe(true);
+      expect(ms.some((m) => m.includes("refuses the use rather than render nothing"))).toBe(true);
+    });
+  }
+  test("a CELL named `schema` (`@schema`) is not a declaration a tag names — unchanged", () => {
+    expect(errsOf(`<program db="./app.db">\n let <schema:int=3/>\n<p id="z">\${@schema}</p>\n</program>\n`)).toEqual([]);
+  });
+});
+
+describe("fix-1: `default(…)` holds a literal, never code (F2, §38.5.4)", () => {
+  const col = (d) => P(`        users {\n            id: integer primary key\n            n: text default(${d})\n        }`);
+  test("a `${…}` or `?{…}` inside `default(…)` is refused by name", () => {
+    for (const d of ["${@k = 5}", "?{`DROP TABLE users`}", "'${x}'"]) {
+      const src = col(d);
+      expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("scrml code");
+    }
+  });
+  test("an identifier, a call, a bare expression or a double-quoted string is refused by name", () => {
+    for (const d of ["foo", "datetime('now')", "1+2", "\"x\"", "'a' 'b'", "-'a'", "X'zz'"]) {
+      const src = col(d);
+      expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("not a literal the bootstrap admits");
+    }
+  });
+  test("the literal shapes compile — nested parentheses included", () => {
+    for (const d of ["CURRENT_TIMESTAMP", "current_date", "0", "-1.5", "+2", "1e3", "''", "'it''s (a) ) test'", "NULL", "TRUE", "false", "X'00ff'", "(1+2)", "((0))", "(-(1) * 2 || 'x')", "('a)')"]) {
+      expect([d, errsOf(col(d))]).toEqual([d, []]);
+    }
+  });
+});
+
+describe("fix-1: the closer is found outside comments and literals (F3)", () => {
+  test("`</>` in a `//` comment or a `default('…')` literal is text", () => {
+    expect(run(P("        // end </>\n" + USERS)).diags.map((d) => d.code)).toEqual([]);
+    expect(run(P("        users {\n            id: integer primary key\n            n: text default('</>')\n        }")).diags.map((d) => d.code)).toEqual([]);
+    expect(run(P("        users {\n            id: integer primary key // </schema>\n            name: text\n        }")).diags.map((d) => d.code)).toEqual([]);
+  });
+  test("a `tenant_id` after a commented `</>` is still read (refused), not left as page text", () => {
+    const src = P("        users {\n            id: integer primary key // </>\n            tenant_id: text\n        }");
+    expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(msgOf(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("tenant");
+  });
+  test("an unterminated `<schema>` is not rescued by a commented `</>` (E-PARSE-UNCLOSED)", () => {
+    const src = `<program db="./app.db">\n<schema>\n        users {\n            id: integer primary key\n        }\n  // </>\n<p>x</p>\n</program>\n`;
+    expect(errsOf(src)).toContain("E-PARSE-UNCLOSED");
+  });
+});
+
+describe("fix-1: a refusal does not cascade into W-SCHEMA-001 / E-SCHEMA-006 (F5)", () => {
+  test("`, ` after a `primary key` column keeps the key", () => {
+    expect(run(P("        t { id: integer primary key, done: integer }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("an unread `PRIMARY KEY` does not also warn W-SCHEMA-001", () => {
+    expect(run(P("        users {\n            id: integer PRIMARY KEY\n        }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("a column kept after its give-up is still a `references` target", () => {
+    const src = P("        users {\n            id: integer primary key indexed\n        }\n        posts {\n            id: integer primary key\n            uid: integer references users(id)\n        }");
+    expect(errsOf(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("fix-1: a qualified head with whitespace or comments around the `.` is E-SCHEMA-012 (F6, §39.2)", () => {
+  test("`db . users {`, `db .users {`, `db. users {`, `a /* c */ . b {`", () => {
+    for (const h of ["db . users", "db .users", "db. users", "a /* c */ . b", "x . y . z"]) {
+      expect([h, errsOf(P(`        ${h} {\n            id: integer primary key\n        }`))]).toEqual([h, ["E-SCHEMA-012"]]);
+    }
+  });
+});

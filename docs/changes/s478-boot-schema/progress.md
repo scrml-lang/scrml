@@ -21,3 +21,23 @@ merged with origin/main 849fe5c18.
 
 ## Next
 - push, PR.
+
+## Fix round 1 (review of #1908)
+- F1 (HIGH): a user declaration named `schema` → E-BOOTSTRAP-UNSUPPORTED (analyze userDeclStub), and a
+  `<schema>` use while one is in scope → refused (resolveElem) — never rendered as nothing. Owner
+  question g-boot-schema-user-decl-name-s478 (add `schema` to §4.15's reserved list).
+- F2 (MED): `default(…)` admits literals only (§38.5.4 "passed verbatim to the generated SQL"):
+  number, `'…'`, `X'…'`, NULL/TRUE/FALSE/CURRENT_*, signed number, parenthesized constant expression.
+  `${…}` / `?{…}`, identifiers, calls, `"…"` refused by name.
+- F3 (MED/LOW): schemaCloseAt moved to schema.scrml and reads with the body reader's skipping
+  (`//` comments, one-line quotes) — `default('</>')`, `// see </>` are text; an unterminated
+  `<schema>` is no longer rescued by `// </>` (E-PARSE-UNCLOSED).
+- F5 (LOW): a give-up after name+type keeps the partial column (pk/refs); W-SCHEMA-001 is not
+  raised on a table whose reader gave up.
+- F6 (LOW): `db . users {` (whitespace / closed comments around `.`) → E-SCHEMA-012 (§39.2).
+- Gap markers: g-boot-schema-runtime-inert-s478 (F4), g-boot-schema-type-case-s478 (F7),
+  g-boot-schema-create-table-prose-s478 (F8); interim-refusals entry extended with the default rule.
+- Tests: schema-s478.test.js 40/40 (15 new).
+- Conformance vs main: 6 UNSUPPORTED→PASS, 0 PASS→FAIL (identical to the PR's first head).
+- Corpus (3150): 0 newly-rejecting vs main; vs first head only 17 W-SCHEMA-001 cascade removals.
+- CI checks (types, snippet, claim, floor, md-shim, severity --check): green.

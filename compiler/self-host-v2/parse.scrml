@@ -53,7 +53,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
-    import { SchemaErr, SchemaRead, readSchemaBody } from "./schema.scrml"
+    import { SchemaErr, SchemaRead, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
 
@@ -10542,27 +10542,14 @@ ${
     // is the §39.2 declaration language, read by schema.scrml (readSchemaBody),
     // never as markup: the element keeps no children (it renders nothing; §39.1
     // "`<schema>` declares structure"). The body runs to the first closer, `</>`
-    // or `</schema>`. Here, too: §39.3 "The `<schema>` block takes no
+    // or `</schema>`, outside a `//` comment or a quoted literal
+    // (schema.scrml schemaCloseAt). Here, too: §39.3 "The `<schema>` block takes no
     // attributes" (each refused by name — the SPEC names no code), and "A file
     // SHALL NOT contain more than one `<schema>` block. A second `<schema>` block
     // in the same file SHALL be a compile error (E-SCHEMA-002)" (MP.schemaN
     // counts them). Where it stands (E-SCHEMA-003) and its database
     // (E-SCHEMA-001) are analyze's (resolveSchema).
     fn isSchemaOpener(o: Opener) -> boolean { return !o.star && o.name == "schema" }
-
-    fn schemaCloseAt(src: string, from: int) -> int {
-        let i: int = src.indexOf("</", from)
-        while (i >= 0) {
-            if (src.substring(i + 2, i + 3) == ">") return i
-            if (src.substring(i + 2, i + 8) == "schema") {
-                let k: int = i + 8
-                while (k < src.length && src.substring(k, k + 1).trim() == "") { k = k + 1 }
-                if (src.substring(k, k + 1) == ">") return i
-            }
-            i = src.indexOf("</", i + 1)
-        }
-        return -1
-    }
 
     fn finishSchema(o: Opener, mp: MP) -> RElem {
         let m: MP = mp
