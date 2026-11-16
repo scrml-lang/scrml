@@ -29,4 +29,4 @@ Branch `s478-boot-match-element` (from origin/main f23824dbb).
 - [x] §66.15.2 slots: `<match>` arms exclusive (slotPathElem)
 - [x] docs: spec-ahead pins / stale markers (README, NERDME, tutorial, kickstarter article)
 - [x] gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim
-- [ ] commit (hook), merge origin/main, PR
+- [x] commit (hook), merge origin/main (849fe5c18, clean), PR #1909 (owner questions: `for=` omission, the mount div, `on=` implied by a `single`)
