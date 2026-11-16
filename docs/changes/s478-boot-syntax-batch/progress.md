@@ -24,4 +24,13 @@ They share one representation, so they landed together: `AStmtK.If` gained `form
 Conformance (base 213dd1203 → head): PASS 552 → 555, FAIL 11 → 14, UNSUPPORTED 670 → 664.
 PASS→FAIL: 0. UNSUPPORTED→FAIL: 3 (stale/legacy cases — see PR body).
 
-## 3. `?.` optional chaining (§42.3.6) — next
+Committed 2581b789a (hook PASS: 55557 pass, 0 fail).
+
+## 3. `?.` optional chaining (§42.3.6) — STOPPED (blocked on a prerequisite)
+
+Measured: the bootstrap builds NO member access through a `T | not` struct value — `if (@u is given)
+{ @u.name }` and `@u is given ? @u.name : not` both refuse at analyze.scrml resolveMember ("member
+access `.name` on a value that is not a struct …") — and enforces no E-TYPE-046 (§42.3.5). A `?.`
+desugar (receivers' presence tests around the plain chain) was built and probed; every use stopped at
+that refusal, so it was not landed. Filed g-boot-optional-member-access-s478 with the recommended
+next lane; WIP patch at ~/.cache/scrml/review/s478-boot-syntax-batch/optional-chain-wip.patch.
