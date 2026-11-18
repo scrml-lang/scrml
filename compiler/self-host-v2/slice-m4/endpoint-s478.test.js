@@ -113,25 +113,101 @@ describe("A — §61 compile-time diagnostics", () => {
   });
 });
 
-describe("B — refused by name where the SPEC is silent (fail closed)", () => {
-  test("two endpoints at one path and method", () => {
+describe("B — the S478 open-Qs rulings (user-voice items 33–40), and refusals by name where the SPEC is silent", () => {
+  // item 34 — §61.7: "Two `<endpoint>` declarations of one program with the same `path=` and the
+  // same `method=` are `E-ENDPOINT-ROUTE-DUPLICATE` (§61.9), reported at the second"
+  test("two endpoints at one path and method are E-ENDPOINT-ROUTE-DUPLICATE (once, at the second); two methods are two routes", () => {
     const two = prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>`);
-    expect(refusals(two).join()).toContain("two endpoints mounted at one path and method");
+    expect(codes(two)).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
+    const ds = errs(two);
+    expect(ds.length).toBe(1);
+    expect(ds[0].span.start).toBe(two.lastIndexOf("<endpoint"));
     // one path, two methods: each is its own route
     const both = prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp" method="PUT" accepts=FspMethod>\n${ARMS3}\n</endpoint>`);
     expect(codes(both)).toEqual([]);
+    // a trailing `/` is significant (§61.7 "`/fsp` and `/fsp/` are two routes"); the bareword method is the same method
+    expect(codes(prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp/" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>`))).toEqual([]);
+    expect(codes(prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<endpoint path="/fsp" method=POST accepts=FspMethod>\n${ARMS3}\n</endpoint>`))).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
   });
 
-  test("a path= that is not a plain absolute path, or under /_scrml/", () => {
-    for (const p of ["fsp", "/_scrml/call/1", "/_scrml", "/a?b=1", "/a#x", "/a/../b", "/a//b", "/users/:id", "/a%20b", "/ünï"]) {
+  // item 34 — §61.7: "A `path=` that is `/_scrml` or `/_scrml_ws`, or begins with `/_scrml/` or
+  // `/_scrml_ws/`, is `E-ENDPOINT-ROUTE-DUPLICATE`"
+  test("a path= under the reserved /_scrml/ or /_scrml_ws/ prefixes is E-ENDPOINT-ROUTE-DUPLICATE", () => {
+    for (const p of ["/_scrml", "/_scrml/", "/_scrml/call/1", "/_scrml/health", "/_scrml_ws", "/_scrml_ws/", "/_scrml_ws/chat"]) {
+      expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
+    }
+    // a prefix that only LOOKS like one is an ordinary path
+    for (const p of ["/_scrmlx", "/_scrml_wsx/a", "/x/_scrml/y", "/_SCRML/a"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
+  });
+
+  // item 37 — §61.7 path grammar; the refusal's code is not yet named (owner question), so it stays
+  // the bootstrap's not-built code (fail closed)
+  test("a path= outside the §61.7 grammar is refused (fail closed — its code is not yet named)", () => {
+    for (const p of ["fsp", "/a?b=1", "/a#x", "/a/../b", "/a/./b", "/a//b", "/users/:id", "/a%20b", "/ünï", "/a b"]) {
       expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     }
-    for (const p of ["/", "/fsp/", "/api/v1/fleet-status", "/a.b_c~d"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
+    for (const p of ["/", "/fsp/", "/api/v1/fleet-status", "/a.b_c~d", "/A-Z/0-9"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
   });
 
-  test("an endpoint outside the top-level <program> body, or inside markup", () => {
-    expect(codes(`${FSP_TYPE}\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<program></program>\n`)).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(prog(`<div><endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint></div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  // item 36 — §61.2: "An `<endpoint>` declaration SHALL be a direct child of the top-level
+  // `<program>` … anywhere else … is `E-STRUCTURAL-ELEMENT-MISPLACED`"
+  test("an endpoint outside the top-level <program> body is E-STRUCTURAL-ELEMENT-MISPLACED — and is never served", () => {
+    const places = [
+      `${FSP_TYPE}\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n<program></program>\n`,
+      prog(`<div><endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint></div>`),
+      prog(`<page route="/">\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n</page>`),
+      prog(`<program name="inner">\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\n</program>`),
+    ];
+    // one report per fault: no not-built refusal follows about the endpoint itself (a nested
+    // `<program>` keeps its own, unrelated refusal)
+    const aboutEndpoint = (m) => m.includes("<endpoint") || m.includes("accepts=");
+    for (const src of places) {
+      expect(codes(src)).toContain("E-STRUCTURAL-ELEMENT-MISPLACED");
+      expect(refusals(src).filter(aboutEndpoint)).toEqual([]);
+    }
+    // a logic block is not the place either
+    expect(codes(prog(`\${\n  <endpoint path="/fsp" method="POST" accepts=FspMethod>\n  </endpoint>\n}`))).toContain("E-STRUCTURAL-ELEMENT-MISPLACED");
+    // the top-level `<program>` body is the place
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod`))).toEqual([]);
+  });
+
+  test("an endpoint in an imported file's <program> is E-STRUCTURAL-ELEMENT-MISPLACED", () => {
+    const files = [
+      { path: "lib.scrml", src: `<program>\n${FSP_TYPE}\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n${ARMS3}\n</endpoint>\nexport function one() -> int { return 1; }\n</program>\n` },
+      { path: "app.scrml", src: `<program>\n\${ import { one } from "./lib.scrml"; }\n<p>${"$"}{one()}</p>\n</program>\n` },
+    ];
+    const r = frontEnd(mods(), files, "app.scrml");
+    const es = r.diags.filter((d) => d.severity === "Error");
+    expect(es.filter((d) => d.code === "E-STRUCTURAL-ELEMENT-MISPLACED").map((d) => d.file)).toEqual(["lib.scrml"]);
+    // (a `<program>` outside the entry file is its own not-built refusal; none is about the endpoint)
+    expect(es.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("endpoint"))).toEqual([]);
+  });
+
+  // item 38 — §61.2: "An arm whose body has no value … is `E-ENDPOINT-ARM-NO-VALUE` … NOT read as a
+  // silent 204; the arm that answers 204 is the self-closing `<Variant/>`"
+  test("an arm with no value (a call of a function that returns nothing) is E-ENDPOINT-ARM-NO-VALUE, at the arm's body, naming <V/>", () => {
+    const shorthand = prog(`function note(t: string) { const u: string = t; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : note(t)>\n</endpoint>`, `type M:enum = {\n  Go(t: string)\n}`);
+    expect(codes(shorthand)).toEqual(["E-ENDPOINT-ARM-NO-VALUE"]);
+    const d = errs(shorthand)[0];
+    expect(d.message).toContain("`<Go/>`");
+    expect(shorthand.slice(d.span.start, d.span.end)).toBe("note(t)");
+    // the bare-body form, and a declared `-> void` function
+    const bare = prog(`function done() -> void { const u: int = 1; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go>\n    done()\n  </>\n</endpoint>`, `type M:enum = { Go }`);
+    expect(codes(bare)).toEqual(["E-ENDPOINT-ARM-NO-VALUE"]);
+    // the self-closing arm is the 204 one, and a call of a function that returns a value is fine
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go/>\n</endpoint>`, `type M:enum = { Go }`))).toEqual([]);
+    expect(codes(prog(`function v() -> int { return 1; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go : v()>\n</endpoint>`, `type M:enum = { Go }`))).toEqual([]);
+  });
+
+  // item 40 — §61.3: "An `accepts=` enum … with a variant payload field named `tag` is
+  // `E-PARSEVARIANT-TAG-FIELD`"
+  test("a payload field named `tag` is E-PARSEVARIANT-TAG-FIELD — the wire `tag` key carries the variant", () => {
+    const t = `type M:enum = {\n  Go(tag: string)\n}`;
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, t))).toEqual(["E-PARSEVARIANT-TAG-FIELD"]);
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <_ : { ok: true }>\n</endpoint>`, t))).toEqual(["E-PARSEVARIANT-TAG-FIELD"]);
+    // `tag` in a second variant too; a field whose name only contains `tag` is fine
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <_ : { ok: true }>\n</endpoint>`, `type M:enum = {\n  A(label: string)\n  B(n: int, tag: int)\n}`))).toEqual(["E-PARSEVARIANT-TAG-FIELD"]);
+    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, `type M:enum = {\n  Go(tags: string)\n}`))).toEqual([]);
   });
 
   test("a payload field the request decode does not read (an enum-typed field, §41.13 no auto-recursion)", () => {
@@ -144,19 +220,6 @@ describe("B — refused by name where the SPEC is silent (fail closed)", () => {
     const unbound = refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Since : { ok: true }>\n</endpoint>`, t)).join();
     expect(unbound).toContain("checks only on a parameter");
     expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Since(seq) : { since: seq }>\n</endpoint>`, t))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-  });
-
-  test("an arm with no value (a call of a function that returns nothing) is refused (§61.5 names no response for it)", () => {
-    const src = prog(`function note(t: string) { const u: string = t; }\n<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : note(t)>\n</endpoint>`, `type M:enum = {\n  Go(t: string)\n}`);
-    expect(refusals(src).join()).toContain("has no proven type");
-  });
-
-  test("review #1916 L1: a payload field named `tag` — the wire `tag` key carries the variant, so the field could never carry a value", () => {
-    const t = `type M:enum = {\n  Go(tag: string)\n}`;
-    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
-    expect(refusals(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <_ : { ok: true }>\n</endpoint>`, t)).join()).toContain("variant discriminator");
-    // another field name is not refused
-    expect(codes(prog(`<endpoint path="/x" method="POST" accepts=M>\n  <Go(t) : { t: t }>\n</endpoint>`, `type M:enum = {\n  Go(label: string)\n}`))).toEqual([]);
   });
 
   test("review #1916 L2: a `__proto__` / `constructor` / `prototype` key in an arm's object literal (it would answer 500 on every request)", () => {
@@ -238,9 +301,24 @@ describe("C — the route, served (§61.3 / §61.5 / §61.7)", () => {
     expect(await kind(body({ tag: "DeltaSince", seq: 1.5 }))).toBe("InvalidPayload");
     expect(await kind(body({ tag: "DeltaSince" }))).toBe("InvalidPayload");
     expect(await kind(body({ tag: "Dispatch", prompt: "p", project: null }))).toBe("InvalidPayload");
-    // a key that is neither `tag` nor a payload field — refused (fail closed; owner question)
+    // a key that is neither `tag` nor a payload field — §61.3 strict keys (S478 open-Qs ruling item 35)
     expect(await kind(body({ tag: "DeltaSince", seq: 1, extra: true }))).toBe("InvalidPayload");
     expect(await kind('{"tag":"FleetStatus","__proto__":{"x":1}}')).toBe("InvalidPayload");
+  });
+
+  // S478 open-Qs ruling item 35 — §61.3: "A foreign contract whose requests carry envelope keys
+  // (JSON-RPC's `jsonrpc`, `id`) declares them as payload fields of the variant"
+  test("§61.3 strict keys: JSON-RPC envelope keys are refused unless the variant declares them, and served when it does", async () => {
+    const strict = await served(prog(`<endpoint path="/rpc" method="POST" accepts=R>\n  <Ping : { ok: true }>\n</endpoint>`, `type R:enum = { Ping }`));
+    for (const extra of [{ jsonrpc: "2.0" }, { id: 1 }, { jsonrpc: "2.0", id: 1 }, { params: {} }]) {
+      const r = await strict.send("/rpc", "POST", body({ tag: "Ping", ...extra }));
+      expect([r.status, r.json.error.kind]).toEqual([400, "InvalidPayload"]);
+    }
+    const declared = await served(prog(`<endpoint path="/rpc" method="POST" accepts=R>\n  <Ping(v, id) : { jsonrpc: v, id: id, result: "pong" }>\n</endpoint>`, `type R:enum = {\n  Ping(jsonrpc: string, id: int)\n}`));
+    const ok = await declared.send("/rpc", "POST", body({ tag: "Ping", jsonrpc: "2.0", id: 7 }));
+    expect([ok.status, ok.json]).toEqual([200, { jsonrpc: "2.0", id: 7, result: "pong" }]);
+    const more = await declared.send("/rpc", "POST", body({ tag: "Ping", jsonrpc: "2.0", id: 7, method: "x" }));
+    expect([more.status, more.json.error.kind]).toEqual([400, "InvalidPayload"]);
   });
 
   test("review #1916 M1 / §61.7 (\"A JSON-body + bearer-token endpoint is CSRF-exempt by construction\"): a request whose media type is not application/json is 415 and no arm runs", async () => {
