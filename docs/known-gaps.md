@@ -32607,8 +32607,10 @@ s478-boot-bound-branch-static built the narrower rule: a compile error only when
 
 Not known to be broken. A probe should write an over-long value into a bounded channel cell, both from the server and from a peer, and confirm the write is refused or traps.
 
-<!-- @gap id=g-boot-scaling-test-margin-s477 sev=LOW status=open locus=compiler/self-host-v2/slice-m4/compile-scaling-s477.test.js(header + bound 3.0) prov=review:s477-1835(F2) -->
+<!-- @gap id=g-boot-scaling-test-margin-s477 sev=LOW status=resolved resolved-by=s478-scaling-test-retry locus=compiler/self-host-v2/slice-m4/compile-scaling-s477.test.js(header + bound 3.0) prov=review:s477-1835(F2);lane:s478-scaling-test-retry -->
 ### g-boot-scaling-test-margin-s477 — the compile-scaling test's bound is 3.0 against a measured 2.48–2.57 on head (about a 17% margin), and its header does not record the 2.5× floor or the super-linear terms that remain — `NEW S477; LOW; open`
+
+**RESOLVED S478 (s478-scaling-test-retry):** the bound stays 3×; the test now runs a fresh probe up to 3 times and judges the best ratio. It had failed CI three times in S478 on load alone (merge-group 3.09 on #1927, PR CI 3.02 on #1947, and one local run), each passing on a rerun; a real regression (~3.4×+) still fails every attempt.
 
 The terms to record: `sccOrder`, the `cursorAt` LF count, the `fnErr` / `capOwner` lookups, and the `OnceBinds` / `laterPrograms` list building. Who pays: whoever next sees the test go red under load, or sees it stay green while one of those terms grows. **It flaked S478:** the merge-group `slices` job ejected #1927 when the ratio measured **3.09** against the 3.0 bound under CI merge-group load; the same test passed 3/3 locally on #1927 and on main. Fix (tooling): take the median of 3 runs (or the best of 3) before comparing, or widen the bound with the measured floor recorded in the header; either keeps the test a regression guard without failing on runner load.
 
