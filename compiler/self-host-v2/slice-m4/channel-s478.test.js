@@ -245,6 +245,22 @@ describe("B2 — §38.4.2 op sync: which channel cells sync, with which ops", ()
     refusedCell(`<phase:Phase=.Active single>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n<onIdle after=5m to=.Idle/>\n</>`, "phase", "`<onIdle>` watchdog", `type Phase:enum = { Active, Idle }\n`));
   test("a lifecycle `(not to T)` cell", () =>
     refusedCell(`  let <u:(not to string)=(not)/>`, "u", "lifecycle"));
+  // #1937 fix r1 (HIGH-1) — §66.12.1 "a sequence with no grants is fully constrained — immutable";
+  // the length axis is "fixed · bounded · free" (§66.12.2). With no `free` / bound grant no local
+  // write may change the length (E-WRITE-INVARIANT), so no length-changing op is synced.
+  // RED ON c16e69503: each of these compiled, syncing the length-changing ops its grants list.
+  test("a FIXED-length tape syncs no append / prepend / pop / shift — refused when nothing is left", () => {
+    refusedCell(`  <slots:int[pop, shift]=([1, 2, 3])/>`, "slots", "fixed-length tape");
+    refusedCell(`  <xs:int[prepend]=([1])/>`, "xs", "fixed-length tape");
+    refusedCell(`  <xs:int[append, pop]=([1])/>`, "xs", "fixed-length tape");
+    expect(synced(`  <xs:int[replace, pop, append]=([1])/>`)).toEqual({ xs: "replace" });
+    expect(synced(`  <xs:int[free, pop]=([1])/>`)).toEqual({ xs: "pop" });
+  });
+  // #1937 fix r1 (MED-1) — a `let` graph field also grants `replace`, and `reset(@f)` is a replace
+  // the bootstrap writes without the §66.13.2 edge check every receiver applies (INTERIM).
+  // RED ON c16e69503: it compiled, syncing `transition` only, and an honest reset diverged.
+  test("a `let` `rule=` engine field (its reset is a replace no receiver accepts)", () =>
+    refusedCell(`let <lph:Phase=.Idle single>\n<Idle rule=.Loading></>\n<Loading rule=.Done></>\n<Done></>\n</>`, "lph", "`let` engine field", `type Phase:enum = { Idle, Loading, Done }\n`));
 });
 
 // The served halves are channel-served-s478.test.js (it needs Bun's own WebSocket, which the

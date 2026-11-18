@@ -225,8 +225,9 @@ export class Cell {
   land(v) {
     this.pending = null;
     if (Object.is(v, this.value)) return;
+    const prev = this.value;
     this.value = v;
-    if (this.sync !== null) this.sync(syncOp !== null && syncOp.target === this ? syncOp : null);
+    if (this.sync !== null) this.sync(syncOp !== null && syncOp.target === this ? syncOp : null, prev);
     // Every observer is marked first, then the `reset-on=` resets this write
     // triggered are applied — all of them, in rank order — still inside this
     // batch, so its flush sees the trigger and the resets as one change.
@@ -1616,7 +1617,7 @@ function variantTag(v) {
 /** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
 export function transition(target, table, to) {
   checkEdge(target, table, to);
-  target.set(to);
+  asOp(target, "transition", to, () => target.set(to));
 }
 
 // ---------------------------------------------------------------------------
@@ -5386,9 +5387,15 @@ function elemTable(table) {
   return table !== null && table.root.k === "seq" ? { defs: table.defs, root: table.root.elem } : null;
 }
 
-/** A tape table's length bound as [min, max] (an unbounded or fixed tape: null). */
+/**
+ * A tape table's length axis (§66.12.2 "fixed · bounded · free"): [min, max] for a bounded tape,
+ * "fixed" for a tape with no `free` / bound grant (§66.12.1: its length is fixed — no edit may
+ * change it, E-WRITE-INVARIANT locally), null for a free one. #1937 fix r1 (HIGH-1): a fixed tape
+ * was read as unbounded, so a forged `pop` emptied it on every receiver.
+ */
 function lengthBound(table) {
   const b = table.root.bound;
+  if (b === null || typeof b !== "object" || b.k === "fixed") return "fixed";
   return b.k === "bounded" ? [b.min, b.max] : null;
 }
 
@@ -5433,6 +5440,7 @@ export function channel(scope, desc) {
       const et = elemTable(c.table);
       if (et === null || !Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
       const bound = lengthBound(c.table);
+      if (bound === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
       if (op === "append" || op === "prepend") {
         const d = decode(et, v.__val, { canonicalOnly: true });
         if (!d.ok) return `an \`${op}\` of @${c.key} whose element does not decode`;
@@ -5456,12 +5464,26 @@ export function channel(scope, desc) {
   }
 
   // The op sink of one cell: the frame of one committed write (§38.4.2), or nothing.
+  // #1937 fix r1 (MED-1): the op sent is the grant the write used — never a relabel. A `rule=`
+  // field's write is a `transition` when `rt.transition` made it (tagged) or when it follows an
+  // edge of the graph from the value it replaced (a statically checked move, printed as a plain
+  // set); any other write of it (not a move) is reported and not sent, because every receiver
+  // would refuse it (§66.13.2) and the clients would diverge silently.
+  function isMove(c, prev, to) {
+    if (c.edges === null || c.edges === undefined) return false;
+    const probe = { peek: () => prev };
+    try { checkEdge(probe, c.edges, to); return true; } catch { return false; }
+  }
   function sink(c) {
-    return (o) => {
+    return (o, prev) => {
       if (applying === c.cell) return;                 // a received edit is not sent on
       let op;
       let val;
       if (has(c, "transition")) {
+        if (!(o !== null && o.k === "transition") && !isMove(c, prev, c.cell.value)) {
+          warn(`@${c.key} — a write that is not a move along its rule= graph (§66.13.2) — not synced`);
+          return;
+        }
         op = "transition";
       } else if (o !== null && has(c, o.k)) {
         op = o.k;

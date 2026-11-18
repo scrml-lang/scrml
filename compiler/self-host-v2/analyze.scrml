@@ -15685,6 +15685,13 @@ ${
         const gr: TransitionGraph | not = fi.graph
         if (gr is given) {
             if (gr.idle is given) return "is an engine field with an `<onIdle>` watchdog — every client's own watchdog would fire the same transition, and the bootstrap does not decide whose counts"
+            // #1937 fix r1 (MED-1): a `let` graph field also grants `replace` (§66.9 rule 2), and
+            // its `reset(@f)` is a replace (§66.11.2) the bootstrap writes without an edge check —
+            // while every receiver judges the frame by §66.13.2 ("A write to such a field is valid
+            // iff it follows an edge of the graph from the current state"). A replace frame would
+            // get around the graph, and a transition frame for a non-edge reset is refused by every
+            // peer (silent divergence), so the cell is refused until reset is edge-checked (INTERIM)
+            if (fi.grants.replace) return "is a `let` engine field — `let` also grants `replace` (`reset(@f)`, §66.11.2), which the bootstrap writes without the `rule=` edge check (§66.13.2) every receiver applies, so the sender and its peers would diverge; declare it without `let`"
             return ""
         }
         if (hasEditKind(fi.grants.edits, EditKind.Transition)) return "carries a transition contract with no `rule=` graph the receiver can check a move against"
@@ -15693,6 +15700,13 @@ ${
                 if (!chOpEdit(e)) return "grants an edit with no `replace` that the bootstrap cannot send as its own op (`insert` / `remove` / `write` / a part edit — §38.4.2 `insert` / `remove` / `set`)"
             }
             const t: Type = fi.ty
+            // #1937 fix r1 (HIGH-1): §66.12.1 "a sequence with no grants is fully constrained —
+            // immutable", and the length axis is "fixed · bounded · free" (§66.12.2): with no `free`
+            // or bound grant a tape's length is fixed, so a local grow or shrink is E-WRITE-INVARIANT
+            // (growsFixed — the same predicate) and chSyncOps syncs none of them. With no `replace`
+            // the cell then has no op a frame may name, and it does have grants, so it is not the
+            // §38.4.2 "cell with no write capability (no `let`, no grant)" — refused by name
+            if (growsFixed(t)) return "is a fixed-length tape (no `free` or bound grant — §66.12.1–§66.12.2) whose grants are only length-changing edits; no write may change its length (`E-WRITE-INVARIANT`), so it has no op to sync"
             return match t {
                 .Seq(elem: e, grants: gs) :> ""
                 .Maybe(inner: i) :> "is a `| not` tape with edit grants only (the receiver's edit of a `not` value is not built)"
@@ -15715,10 +15729,14 @@ ${
     // s478 (s478-boot-channel-ops) — the §38.4.2 op kinds a synced channel cell (chSyncWhy "")
     // carries, space-separated: what the sender may send and every receiver checks a frame's
     // `__op` against. A `rule=` field: `transition` only (every write of it is a move, §66.13.2).
+    // #1937 fix r1 (HIGH-1): a FIXED-length tape (growsFixed: no `free` / bound grant, §66.12.1–
+    // §66.12.2) syncs no `append` / `prepend` / `pop` / `shift` — no local write may change its
+    // length (E-WRITE-INVARIANT), so no peer's frame may either (§38.4.2 receiver check (3)).
     fn chSyncOps(fi: FieldInfo) -> string {
         if (fi.graph is given) return "transition"
         let out: string[] = []
         if (fi.grants.replace) out = out.concat(["replace"])
+        if (growsFixed(fi.ty)) return out.join(" ")
         if (hasEditKind(fi.grants.edits, EditKind.Append)) out = out.concat(["append"])
         if (hasEditKind(fi.grants.edits, EditKind.Prepend)) out = out.concat(["prepend"])
         if (hasEditKind(fi.grants.edits, EditKind.RemoveEnd)) out = out.concat(["pop"])
@@ -48315,11 +48333,10 @@ ${
                         cellDecl = true
                         if (watches == "") {
                             // §38.4: "On every local write to a channel-declared cell, the compiler emits
-                            // a sync message" — the message carries the cell's WHOLE value, and a peer's
-                            // frame is applied on the receiving client as a whole-value write. So a cell
-                            // is synced only when a whole-value write is a capability it grants: `replace`
-                            // (§66.9 rule 2: "On a scalar, `let` IS the `replace` grant"), with no
-                            // contract that a whole write may not bypass (s478 #1928 review HIGH-1). One
+                            // a sync message" — since §38.4.2 (S478) the message names the EDIT the
+                            // writer's grant allowed, checked by every receiver; chSyncWhy names a cell
+                            // whose edits the bootstrap cannot sync without letting a peer's frame past
+                            // its contract (s478 #1928 review HIGH-1, #1937 review HIGH-1). One
                             // with no write capability is never written, so it has nothing to carry (and
                             // its peers' frames for it are refused, print-server).
                             if (fi.mode == FieldMode.Derived) {

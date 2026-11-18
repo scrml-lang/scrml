@@ -320,3 +320,114 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
     } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; scope.dispose(); }
   });
 });
+
+// #1937 fix r1 — the S239 review's HIGH-1 (`fixedpop`) and MED-1, defence in depth past the compiler.
+//   HIGH-1: §66.12.1 "a sequence with no grants is fully constrained — immutable"; §66.12.2 length
+//   "fixed · bounded · free". A FIXED-length tape's length no local write may change
+//   (E-WRITE-INVARIANT), so §38.4.2 receiver check (3) ("keeps every invariant a local write of
+//   the same edit is checked against") refuses a length-changing op, and the relay refuses it from
+//   the table it holds. The compiler syncs no such op (channel-s478 B2); these tests hand the
+//   relay and the receiver a desc that lists them anyway (a compromised compiler / relay).
+//   MED-1: §66.13.2 "A write to such a field is valid iff it follows an edge of the graph from the
+//   current state" — the sink sends `transition` only for a write that IS a move.
+// RED ON c16e69503: the relay passed the forged pop / shift and every receiver applied it
+// (lengthBound read `fixed` as unbounded); the sink sent any write of a `rule=` field as `transition`.
+describe("G — #1937 fix r1: fixed-length tapes and `rule=` writes", () => {
+  const FIXED = `<program>
+<channel name="c">
+  <fx:int[replace]=([1, 2, 3])/>
+</channel>
+<p>\${@fx.length}</p>
+</program>
+`;
+  test("the relay refuses a length-changing op of a FIXED-length tape (1008, relayed to no one) even when its table lists the op", async () => {
+    const r = frontEnd(mods(), [{ path: "app.scrml", src: FIXED }], "app.scrml");
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    const { server } = artifacts(r.core);
+    const fixedRoot = `{ key: "fx", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "fixed" } } }, ops: ["replace"] }`;
+    expect(server.js).toContain(fixedRoot);
+    const forgedJs = server.js.replace(fixedRoot, fixedRoot.replace(`ops: ["replace"]`, `ops: ["replace", "append", "prepend", "pop", "shift"]`));
+    const mod = await loadServer(forgedJs, r.core);
+    const srv = mod.createServer({ root: "/tmp", log: () => {} });
+    const bun = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req, s) => srv.fetch(req, s), websocket: srv.websocket });
+    const base = `127.0.0.1:${bun.port}`;
+    try {
+      for (const [op, val] of [["pop", 2], ["shift", 1], ["append", 9], ["prepend", 0]]) {
+        const peer = await connect(base, "/_scrml_ws/c");
+        const evil = await connect(base, "/_scrml_ws/c");
+        await tick();
+        evil.ws.send(frame("fx", op, val));
+        await tick(200);
+        expect(evil.closed()?.code).toBe(1008);
+        expect(evil.closed()?.reason).toContain("fixed-length");
+        expect(peer.got).toEqual([]);
+        peer.ws.close();
+      }
+      // a `replace` of it still relays
+      const peer = await connect(base, "/_scrml_ws/c");
+      const ok = await connect(base, "/_scrml_ws/c");
+      await tick();
+      ok.ws.send(frame("fx", "replace", [7, 8, 9]));
+      await tick(200);
+      expect(ok.closed()).toBe(null);
+      expect(peer.got).toEqual([{ __type: "__sync", __key: "fx", __op: "replace", __val: [7, 8, 9] }]);
+      peer.ws.close(); ok.ws.close();
+    } finally { bun.stop(true); }
+  });
+
+  // a hand-built client desc (the socket stand-in of F)
+  function handClient(cells) {
+    const saved = globalThis.WebSocket;
+    const socks = [];
+    globalThis.WebSocket = class { constructor() { this.readyState = 1; this.sent = []; socks.push(this); } send(t) { this.sent.push(JSON.parse(t)); } close() {} };
+    const savedLoc = globalThis.location;
+    globalThis.location = { protocol: "http:", host: "127.0.0.1:1" };
+    const errs = [];
+    const savedErr = console.error;
+    console.error = (m) => errs.push(String(m));
+    const scope = rt.root.child();
+    try {
+      rt.channel(scope, { name: "c", reconnect: 0, cells, open: null, close: null, error: null });
+    } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; }
+    const sock = socks[0];
+    return { sock, errs, deliver: (t) => sock.onmessage({ data: t }), done: () => { console.error = savedErr; scope.dispose(); } };
+  }
+
+  test("the receiver refuses a length-changing op of a FIXED-length tape (the review's fixedpop frames), even when its desc lists the op", () => {
+    const fx = rt.cell([1, 2, 3]);
+    const FX = { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "fixed" } } };
+    const c = handClient([{ key: "fx", cell: fx, table: FX, ops: ["replace", "append", "prepend", "pop", "shift"], edges: null }]);
+    try {
+      c.deliver(frame("fx", "pop", 2));
+      c.deliver(frame("fx", "shift", 1));
+      c.deliver(frame("fx", "append", 4));
+      c.deliver(frame("fx", "prepend", 0));
+      expect(fx.peek()).toEqual([1, 2, 3]);
+      expect(c.errs.filter((e) => e.includes("a fixed-length tape")).length).toBe(4);
+      c.deliver(frame("fx", "replace", [5, 6, 7]));
+      expect(fx.peek()).toEqual([5, 6, 7]);
+      expect(c.sock.sent).toEqual([]);
+    } finally { c.done(); }
+  });
+
+  test("a `rule=` field's write is sent as `transition` only when it is a move; a non-move write is reported, not sent", () => {
+    const ph = rt.cell("Idle");
+    const E = rt.edges({ Idle: ["Loading"], Loading: ["Done"], Done: [] });
+    const c = handClient([{ key: "ph", cell: ph, table: phaseTable(), ops: ["transition"], edges: E }]);
+    try {
+      rt.batch(() => rt.transition(ph, E, "Loading"));          // a runtime-checked move (tagged)
+      rt.batch(() => ph.set("Done"));                           // a statically checked move (plain set along an edge)
+      rt.batch(() => ph.set("Idle"));                           // NOT a move (.Done → .Idle): what a `let` reset() wrote
+      expect(c.sock.sent.map((f) => [f.__op, f.__val])).toEqual([["transition", "Loading"], ["transition", "Done"]]);
+      expect(c.errs.join("\n")).toContain("not a move along its rule= graph");
+    } finally { c.done(); }
+  });
+
+  // the engine table the APP's client desc prints for @phase (so the test encodes as the compiler does)
+  function phaseTable() {
+    const line = compile().client.js.split("\n").find((l) => l.startsWith("rt.channel(program$.scope, "));
+    const m = line.match(/\{ key: "phase", cell: [^,]+, table: (\{.*?\}), ops: \["transition"\]/);
+    expect(m).not.toBe(null);
+    return new Function(`return (${m[1]});`)();
+  }
+});

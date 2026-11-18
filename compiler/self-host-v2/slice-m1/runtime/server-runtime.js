@@ -1583,6 +1583,14 @@ function channelFrame(ch, raw) {
   const op = v.__op;
   if (typeof op !== "string" || !cell.ops.includes(op)) return { code: 1008, why: `a __sync whose __op is not an op @${v.__key} syncs` };
   let wire;
+  // #1937 fix r1 (HIGH-1): a length-changing op of a FIXED-length tape (no `free` / bound grant,
+  // §66.12.1–§66.12.2 — no local write may change its length) is refused from the table the relay
+  // holds; it needs no cell value. (The compiler syncs no such op — analyze chSyncOps — so only a
+  // forged frame names one.)
+  if (op === "append" || op === "prepend" || op === "pop" || op === "shift") {
+    const b = cell.table !== null && cell.table.root.k === "seq" ? cell.table.root.bound : null;
+    if (b === null || typeof b !== "object" || b.k === "fixed") return { code: 1008, why: `a __sync whose __op changes the length of @${v.__key}, a fixed-length tape` };
+  }
   if (op === "replace" || op === "transition") {
     const d = decode(cell.table, v.__val, { canonicalOnly: true });
     if (!d.ok) return { code: 1007, why: `a __sync whose value does not decode against @${v.__key}'s type` };
