@@ -140,6 +140,7 @@ import { RULED_FORM_CODE, ruledFormMessage, forEachRuledCallForm, collectRuledSt
 import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
 import { codeOnlyView } from "./codegen/code-segments.ts";
+import { markSharedTypes, isSharedTypeObject } from "./shared-type-objects.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -1530,27 +1531,9 @@ function tError(name: string, fields: Map<string, ResolvedType>): ErrorType {
 // end up reachable from a compile's AST (e.g. an endpoint arm's `payloadBindingTypes`),
 // and an AST walk that annotates what it reaches would write one compile's facts onto
 // every later compile (g-impl1-dbvar-tag-mutates-shared-type-s479: codegen's `_dbVar`
-// tagging left `_dbVar: "_scrml_sql"` on the shared `string` type). Every such object —
-// and everything reachable from it — is recorded here so an annotating walk can stop at
-// it. Any new module-level type object MUST be passed through `markSharedTypes`.
-const SHARED_TYPE_OBJECTS = new WeakSet<object>();
-function markSharedTypes<T>(root: T): T {
-  const visit = (v: unknown): void => {
-    if (v === null || typeof v !== "object" || SHARED_TYPE_OBJECTS.has(v as object)) return;
-    SHARED_TYPE_OBJECTS.add(v as object);
-    if (v instanceof Map) { for (const [k, x] of v) { visit(k); visit(x); } return; }
-    if (v instanceof Set) { for (const x of v) visit(x); return; }
-    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
-    for (const key of Object.keys(v as object)) visit((v as Record<string, unknown>)[key]);
-  };
-  visit(root);
-  return root;
-}
-/** True for a process-lifetime type object (or any part of one) — never annotate it per compile. */
-function isSharedTypeObject(value: unknown): boolean {
-  return value !== null && typeof value === "object" && SHARED_TYPE_OBJECTS.has(value as object);
-}
-
+// tagging left `_dbVar: "_scrml_sql"` on the shared `string` type). Every such object
+// is passed through `markSharedTypes` (shared-type-objects.ts) so an annotating walk can
+// stop at it. Any new module-level type object MUST be passed through it too.
 const BUILTIN_TYPES: Map<string, ResolvedType> = markSharedTypes(new Map([
   ["number",    tPrimitive("number")],
   ["string",    tPrimitive("string")],
