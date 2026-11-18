@@ -490,8 +490,11 @@ describe("S239 review fix round (114e6ef80)", () => {
     expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x; }\n    function go() {\n        @n = id(ok);\n    }`))).toEqual(["E-TYPE-031"]);
   });
 
-  test("HIGH-2 — a `!` function used as a value is E-ERROR-002 (its error would be dropped by whoever calls it)", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const g = load;\n    }`))).toEqual(["E-ERROR-002"]);
+  // s478-ruled-fn-types — §19.4.3 "The failable function type (S478)": a `!` function used as a value is
+  // typed `(…)! E => R` and its error travels with it; the CALL through it is what must be handled
+  test("HIGH-2 — a `!` function used as a value keeps its error: the unhandled call through it is E-ERROR-002", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const g = load;\n    }`))).toEqual([]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const g = load;\n        const s: string = g("x");\n    }`))).toEqual(["E-ERROR-002"]);
   });
 
   test("HIGH-2 — an event-handler reference CALLS the function (bare and braced; it used to do nothing)", async () => {

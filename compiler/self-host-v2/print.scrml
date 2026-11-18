@@ -1844,6 +1844,7 @@ ${
         return match c {
             .FSettled(outcome: o) :> [o.id]
             .FCall(fn: f) :> []          // its arguments are Nodes (walk.kids); `fn` names a function, not a local
+            .FCallV(f: x) :> []          // s478-ruled-fn-types: its callee Local and arguments are Nodes (walk.failableKids)
         }
     }
 
@@ -2381,6 +2382,7 @@ ${
         return match c {
             .FCall(fn: f, args: args) :> jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
             .FSettled(outcome: o) :> localRead(ctx, o)   // s454 (U1b): the Suspend's settled outcome
+            .FCallV(f: f, args: args) :> jcall(exprJs(ctx, f), exprsJs(ctx, args))   // s478-ruled-fn-types: a call through a failable function value
         }
     }
 
@@ -5166,6 +5168,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
+            .FCallV(f: x) :> not
         }
     }
 }

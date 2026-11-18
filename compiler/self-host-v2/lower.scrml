@@ -3503,7 +3503,10 @@ ${
     fn failableCall(c: LC, f: NameFact | not, args: AExpr[]) -> Failable {
         return match f {
             .NFn(sym: s) :> Failable.FCall(s, lowerExprs(c, args))
-            .NLocal(sym: s) :> noCall()
+            // s478-ruled-fn-types — a call through a local of a failable function type (analyze
+            // reached here only for one: a handled subject that does not fail is E-ERROR-013 /
+            // E-ERROR-004, and the gate stops lowering)
+            .NLocal(sym: s) :> Failable.FCallV(Expr.Local(s), lowerExprs(c, args))
             .NField(decl: d) :> noCall()
             .NInst(decl: d) :> noCall()
             .NStruct(owner: o) :> noCall()

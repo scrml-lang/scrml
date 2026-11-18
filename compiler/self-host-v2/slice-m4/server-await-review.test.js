@@ -55,7 +55,10 @@ const REVIEW_EXPECT = {
   // s478-boot-semicolon-residue: likewise — the body after the unreadable function-typed parameter is a recovered
   // block, read and dropped, so the E-ROUTE-001 its object-literal misread drew (`c(p, h)` as an unresolvable callee)
   // goes with E-TYPE-STRUCT-CONTEXT; still REFUSED
-  "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TYPE", "E-SCOPE-001", "E-STMT-MISSING-SEMICOLON"]],
+  // s478-ruled-fn-types: the retired `(string, string) -> boolean` is one E-PARSE-TYPE naming the `=>` fix, read
+  // whole (§7.5 "Function types (S478)"), so its cascade (REDECLARE, PARAM-TYPE-REQUIRED, EXPECTED, EXPR, SCOPE-001)
+  // is gone; the call through `c` in the server-placed body is E-ROUTE-001 / refused by name; still REFUSED
+  "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-TYPE", "E-ROUTE-001", "E-STMT-MISSING-SEMICOLON"]],
   "s1/mapLambda": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/hostArgCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/orRight": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],

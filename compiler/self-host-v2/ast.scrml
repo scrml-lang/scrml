@@ -344,8 +344,12 @@ ${
         // `ret` the return type, `not` for `void`. Where one may stand is analyze's
         // (resolveFnType): a parameter, a local's annotation, a return type, and the
         // parts of another function type.
-        TFn(params: AType[], ret: AType | not),
+        // s478-ruled-fn-types — `fx`: the two modifiers of §7.5 "Function types (S478)" — `fn`
+        // before the `(` (the pure function type, §48.6.3) and `!` / `! E` after the `)` (the
+        // failable function type, §19.4.3; `err` the written error enum, `not` for `Error`).
+        TFn(params: AType[], ret: AType | not, fx: AFnFx),
     }
+    export type AFnFx:struct = { pure: boolean, failable: boolean, err: AType | not }
 
     // s478 — `vals`: the validator words written after a struct / variant field's
     // type (`role: Role req`, `role: Role oneOf([.A, .B]) req` — §55.1 / §53.6.1
