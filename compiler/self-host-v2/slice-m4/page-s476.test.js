@@ -181,14 +181,18 @@ describe("route files and multiple pages (INTERIM — refused by name)", () => {
     // app/lib/page.scrml is not under pages/ or routes/ relative to app/
     expect(r.diags.filter((d) => d.file === "app/lib/page.scrml").map((d) => d.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
   });
-  test("two `<page>`s in one `<program>`: the second is refused by name (⚑ same route)", () => {
+  // S478 open-Qs ruling item 60 — §40.8 (amended S478): "Two `<page>`s in one `<program>` are an
+  // error … A `<page>` inside a nested `<program>` … is `E-STRUCTURAL-ELEMENT-MISPLACED`". The
+  // ruling names no code for the second page: refused by name (owner question).
+  test("two `<page>`s in one `<program>`: the second is an error (S478 item 60; refused by name — no code is ruled)", () => {
     const d = run(`<program>\n<page>\n<p>a</p>\n</page>\n<page>\n<p>b</p>\n</page>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(d[0].message).toContain("second `<page>`");
+    expect(d[0].message).toContain("amended S478");
   });
-  test("a `<page>` in a nested `<program>` is refused by name", () => {
+  test("a `<page>` in a nested `<program>` is E-STRUCTURAL-ELEMENT-MISPLACED (S478 item 60)", () => {
     const d = run(`<program>\n<program name="w">\n<page>\n<p>w</p>\n</page>\n</program>\n<p>home</p>\n</program>\n`).diags;
-    expect(d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("nested `<program>`") && x.message.includes("<page>"))).toBe(true);
+    expect(d.some((x) => x.code === "E-STRUCTURAL-ELEMENT-MISPLACED" && x.message.includes("nested `<program>`") && x.message.includes("<page>"))).toBe(true);
   });
 });
 

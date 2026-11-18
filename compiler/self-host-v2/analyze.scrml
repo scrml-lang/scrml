@@ -56,7 +56,7 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { isIdentifierText } from "./lex.scrml"
+    import { isIdentifierText, isVoidName } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
@@ -68,7 +68,7 @@ ${
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
-             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements } from "./host-surface.scrml"
+             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements, eventIfaceOf } from "./host-surface.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -2838,13 +2838,10 @@ ${
     // directly in a top-level `<program>`; its body already stands in the
     // program's items). Two checks:
     //   - its attributes, against §40.8's closed per-route set (pageAttrDiags);
-    //   - a SECOND `<page>` in the file. ⚑ §40.8: "A `<program>` MAY contain
-    //     zero or more `<page>` declarations … its URL is inferred from
-    //     filesystem location" — every `<page>` of one file has that file's one
-    //     URL, and no SPEC sentence says how two pages of the same route combine
-    //     (both bodies on one document? whose `auth=`?). Searched §4.15, §20.8,
-    //     §40.8, §40.8.2, §47.9.2 — no governing sentence. Refused by name
-    //     (INTERIM — the capable form is one `<page>` per file).
+    //   - a SECOND `<page>` in the file. §40.8 (amended S478, open-Qs ruling
+    //     item 60): "Two `<page>`s in one `<program>` are an error: a route has
+    //     one page". The ruling names no code — refused by name until one is
+    //     chosen (owner question; recommendation E-PAGE-DUPLICATE).
     fn pageDiags(f: FileAst, st0: AS) -> AS {
         let st: AS = st0
         let seen = 0
@@ -2852,7 +2849,7 @@ ${
             seen = seen + 1
             st = pageAttrDiags(f.path, pg, st)
             if (seen > 1) {
-                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file is not in the bootstrap — a page's URL is its file's location (§40.8), so both pages would be the same route, and the SPEC does not say how two pages of one route combine; merge them into one `<page>` (one route file per page is the multi-page form, §40.8 — not in the bootstrap yet)")
+                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file — two `<page>`s in one `<program>` are an error (§40.8, amended S478): a route has one page, and a second page is a second route file. Merge them into one `<page>`. (The SPEC names no code for it yet — an owner question; refused by name meanwhile)")
             }
         }
         return st
@@ -9511,6 +9508,9 @@ ${
         // s478 (s478-boot-fn-values) — a member of the listener's event (§5.2.1)
         const evl: LocalB | not = eventLocalOf(env, obj)
         if (evl is given) return resolveEventMember(env, e, obj, evl, name, st0)
+        // S478 open-Qs ruling item 9 (b) — `e.target.value` on an `<input>` (H.6)
+        const etr: RX | not = resolveEventTargetRead(env, e, obj, name, st0)
+        if (etr is given) return etr
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
@@ -17546,8 +17546,8 @@ ${
     // be E-ERROR-002, exactly like `onclick=risky()`").
     // `onclick={ risky }` is a reference too (S441: "the bare `onclick=risky`,
     // `onclick=${risky}`, or `onclick={ risky }`").
-    fn bracedHandler(env: Env, b: ABlock, ev: string, st: AS) -> AS {
-        if (ev != "") return eventHandler(env, b, ev, st)
+    fn bracedHandler(env: Env, b: ABlock, ev: string, ifv: string, st: AS) -> AS {
+        if (ev != "") return eventHandler(env, b, ev, ifv, st)
         const r: AExpr | not = blockReference(b)
         if (r is not) return loopChecks(env.file, b, resolveBlock(withLift(env, LiftCtx.NoLift), b, st))   // s469: a handler block is a loop-control boundary (and a `lift` one)
         return handlerReference(env, r, resolveBlock(withFnRef(withLift(env, LiftCtx.NoLift), r.nid), b, st))
@@ -17579,14 +17579,46 @@ ${
     fn eventVia() -> string { return "the handler's event object" }
     fn eventSealedVia() -> string { return "the handler's event object, captured by a lambda in the handler" }
 
-    fn eventHandler(env: Env, b: ABlock, ev: string, st0: AS) -> AS {
+    // =========================================================================
+    // S478 open-Qs ruling item 9 — the listener's event has the Appendix H interface its
+    // attribute names, and an `<input>` handler's `e.target` is that input. SPEC Appendix H.6
+    // (amended S478): "A listener's event has the interface this table gives its event name
+    // … every other event name is `Event`"; "When the element the handler sits on can hold no
+    // element (a void element on H.4), `event.target` is that element … the reads
+    // `event.target.value` and `event.target.checked` are typed by the entry that interface
+    // has for them". The event local's `via` carries both: `<via>|<event iface>|<target iface>`
+    // (the target iface "" when the element can hold others — `target` stays `EventTarget | not`).
+    // =========================================================================
+    fn evIfaceVia(evName: string, tag: string) -> string {
+        let tgt: string = ""
+        if (isVoidName(tag.toLowerCase())) tgt = inertTagIface(tag.toLowerCase())
+        return "|" + eventIfaceOf(evName) + "|" + tgt
+    }
+
+    fn eventHandler(env: Env, b: ABlock, ev: string, ifv: string, st0: AS) -> AS {
         const rs: RSym = mint(reservedName(st0, env.file, b.span, ev), ev)
         const st: AS = addValue(rs.st, b.nid, ValueFact.VLambda([rs.s], not))
-        const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia(), foreign: false })
+        const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia() + ifv, foreign: false })
         return loopChecks(env.file, b, resolveBlock(env2, b, st))
     }
 
-    fn isEventLocal(l: LocalB) -> boolean { return l.via == eventVia() || l.via == eventSealedVia() }
+    fn isEventLocal(l: LocalB) -> boolean { return l.via.startsWith(eventVia()) }
+
+    fn isSealedEvent(l: LocalB) -> boolean { return l.via.startsWith(eventSealedVia()) }
+
+    // The event's Appendix H interface ("Event" when the handler recorded none).
+    fn evIface(l: LocalB) -> string {
+        const ps: string[] = l.via.split("|")
+        if (ps.length < 2 || ps[1] == "") return "Event"
+        return ps[1]
+    }
+
+    // The interface of `event.target` when the handler's element pins it (H.6), else "".
+    fn evTargetIface(l: LocalB) -> string {
+        const ps: string[] = l.via.split("|")
+        if (ps.length < 3) return ""
+        return ps[2]
+    }
 
     // The listener-event local a bare name `obj` resolves to here, else not.
     fn eventLocalOf(env: Env, obj: AExpr) -> LocalB | not {
@@ -17604,8 +17636,8 @@ ${
         let ls: LocalB[] = []
         let any: boolean = false
         for (const l of env.locals) {
-            if (l.via == eventVia()) {
-                ls = ls.concat([{ name: l.name, s: l.s, ty: l.ty, mutable: l.mutable, narrowed: l.narrowed, nDecl: l.nDecl, fresh: l.fresh, via: eventSealedVia(), foreign: l.foreign }])
+            if (isEventLocal(l) && !isSealedEvent(l)) {
+                ls = ls.concat([{ name: l.name, s: l.s, ty: l.ty, mutable: l.mutable, narrowed: l.narrowed, nDecl: l.nDecl, fresh: l.fresh, via: eventSealedVia() + l.via.substring(eventVia().length), foreign: l.foreign }])
                 any = true
             } else {
                 ls = ls.concat([l])
@@ -17623,8 +17655,8 @@ ${
     }
 
     fn eventUseWhy(l: LocalB, what: string) -> string {
-        const built: string = "the listener's event `" + l.name + "` is in the bootstrap only as a read of a scalar member of the `Event` interface (`" + l.name + ".type`, `" + l.name + ".timeStamp`) and a call of `" + l.name + ".preventDefault()` / `" + l.name + ".stopPropagation()` as a statement (Appendix H H-047–H-051)"
-        if (l.via == eventSealedVia()) return what + " inside a lambda in the handler — " + built + ", in the handler's own statements: §13.2 follows a function that uses the event past the handler's first `await`, which the bootstrap does not track yet (g-bootstrap-function-values-slice-s451). Read the member into a `const` before the lambda"
+        const built: string = "the listener's event `" + l.name + "` is typed `" + evIface(l) + "` here (Appendix H.6, by its attribute); it is in the bootstrap only as a read of a scalar member of that interface (`" + l.name + ".type`, `" + l.name + ".timeStamp`" + evIfaceExample(l) + "), a call of `" + l.name + ".preventDefault()` / `" + l.name + ".stopPropagation()` as a statement (Appendix H H-047–H-051), and — on an `<input>` — the reads `" + l.name + ".target.value` / `" + l.name + ".target.checked` (H.6)"
+        if (isSealedEvent(l)) return what + " inside a lambda in the handler — " + built + ", in the handler's own statements: §13.2 follows a function that uses the event past the handler's first `await`, which the bootstrap does not track yet (g-bootstrap-function-values-slice-s451). Read the member into a `const` before the lambda"
         return what + " — " + built + ". Any other use (an alias, an argument, a returned or stored event, a computed member `" + l.name + "[k]`, a member of another interface such as `" + l.name + ".target` or `" + l.name + ".key`) is not built yet: the event's members stay open and untyped in logic (§21.3.3 rule 16, §5.2 rule 2), and open, untyped member access is not in the bootstrap (g-bootstrap-function-values-slice-s451)"
     }
 
@@ -17637,29 +17669,72 @@ ${
         return not
     }
 
-    // The scrml scalar of a built event member read (`e.type`, `e.timeStamp`): its
-    // Appendix H slot type, else not. One lookup for the resolver and the typer.
-    fn eventReadType(name: string) -> Type | not {
-        if (isEventControl(name)) return not
-        const en: HEntry | not = findEntry("Event", name, "read")
-        if (en is given && entryConflict(en) == "") return eventScalar(sigResult(en))
-        return not
+    fn evIfaceExample(l: LocalB) -> string {
+        const i: string = evIface(l)
+        if (i == "KeyboardEvent") return ", `" + l.name + ".key`"
+        if (i == "MouseEvent") return ", `" + l.name + ".clientX`"
+        return ""
+    }
+
+    // The Appendix H slot type of a built event member read (`e.type`, `e.key` on a
+    // `KeyboardEvent`): its scalar slot on interface `iface` (or one it inherits), else "".
+    fn eventReadSlot(iface: string, name: string) -> string {
+        if (isEventControl(name)) return ""
+        const en: HEntry | not = findEntry(iface, name, "read")
+        if (en is given && entryConflict(en) == "" && eventScalar(sigResult(en)) is given) return sigResult(en)
+        return ""
     }
 
     // `e.m` read.
     fn resolveEventMember(env: Env, e: AExpr, obj: AExpr, l: LocalB, name: string, st0: AS) -> RX {
         const st: AS = addName(st0, obj.nid, NameFact.NLocal(l.s))
-        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
-        const t: Type | not = eventReadType(name)
-        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name))))
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+        const slot: string = eventReadSlot(evIface(l), name)
+        const t: Type | not = eventScalar(slot)
+        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name, slot))))
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+    }
+
+    // S478 (item 9 (b)) — `e.target.value` / `e.target.checked`: typed by the entry the
+    // handler's element's interface has for it (H.6) when the element pins `target`; `not`
+    // when `obj` is not `<event>.target`, so the caller reads the member as before.
+    fn resolveEventTargetRead(env: Env, e: AExpr, obj: AExpr, name: string, st0: AS) -> RX | not {
+        const ok: AExprK = obj.k
+        const tn: string = match ok {
+            .Member(obj: o, name: n) :> n
+            // no-default-arm: one question of an expression — the member name of `x.target`
+            _ :> ""
+        }
+        if (tn != "target") return not
+        const inner: AExpr | not = match ok {
+            .Member(obj: o, name: n) :> o
+            // no-default-arm: one question of an expression — the receiver of `x.target`
+            _ :> not
+        }
+        if (inner is not) return not
+        const l: LocalB | not = eventLocalOf(env, inner)
+        if (l is not) return not
+        const st: AS = addName(st0, inner.nid, NameFact.NLocal(l.s))
+        const what: string = "`" + l.name + ".target." + name + "`"
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), st)
+        const ti: string = evTargetIface(l)
+        if (ti == "" || (name != "value" && name != "checked")) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what) + targetWhy(ti), st)
+        const slot: string = eventReadSlot(ti, name)
+        const t: Type | not = eventScalar(slot)
+        if (t is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what) + " — a `" + ti + "` has no `" + name + "` read in Appendix H", st)
+        return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead("target." + name, slot))))
+    }
+
+    fn targetWhy(ti: string) -> string {
+        if (ti == "") return " — `target` is narrowed only on an element that can hold no other element (an `<input>`, H.6): elsewhere the event may come from a descendant, so `target` is `EventTarget | not` (H-049). Read the value through `bind:value` (§5.4)"
+        return " — on a `" + ti + "` only the reads `target.value` / `target.checked` are built (H.6)"
     }
 
     // `e.m(…)`.
     fn resolveEventCall(env: Env, e: AExpr, m: MethodCall, l: LocalB, args: AExpr[], st0: AS) -> RX {
         const st: AS = addName(st0, m.obj.nid, NameFact.NLocal(l.s))
         const what: string = "`" + l.name + "." + m.method + "(…)`"
-        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
         const en: HEntry | not = findEntry("Event", m.method, "call")
         if (en is given && entryConflict(en) == "" && sigParams(en).length == 0 && sigResult(en) == "void") {
             if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", what + " with an argument — Appendix H gives `" + m.method + "` the signature `() -> void` (" + en.id + "); the bootstrap builds the call as written there", resolveExprs(env, args, not, st))
@@ -25766,11 +25841,14 @@ ${
     }
 
     // A handler value is a statement (or a block of them).
-    fn resolveHandler(env: Env, v: AAttrValue, st: AS) -> AS {
+    // s478 (open-Qs ruling item 9): `evName` / `tag` — the event the attribute names and the
+    // element it sits on, which give the listener's event its Appendix H interface (H.6) and
+    // its `target` (eventHandler)
+    fn resolveHandler(env: Env, v: AAttrValue, evName: string, tag: string, st: AS) -> AS {
         return match v {
             .Bare(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
             .Paren(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
-            .Braced(b: b, ev: ev) :> bracedHandler(env, b, ev, st)
+            .Braced(b: b, ev: ev) :> bracedHandler(env, b, ev, evIfaceVia(evName, tag), st)
             .Quoted(v: s) :> st
             .Dur(text: s) :> st
             .NoValue :> st
@@ -26150,7 +26228,7 @@ ${
             } else if (a.name == "show") {
                 st = resolveShow(penv, e, a, st)
             } else if (ev != "") {
-                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, st)
+                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, ev, e.tag, st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.substring(0, 5) == "bind:") {
                 // r2 F6: one element writes back to ONE place — a second
@@ -31288,13 +31366,13 @@ ${
         return match c {
             .DateNow :> known(Type.Num)
             .Unreadable :> VType.Unknown
-            .EventRead(member: m) :> eventReadVType(m)
+            .EventRead(member: m, slot: sl) :> eventReadVType(sl)
             .EventCall(member: m2) :> VType.Unknown
         }
     }
 
-    fn eventReadVType(m: string) -> VType {
-        const t: Type | not = eventReadType(m)
+    fn eventReadVType(slot: string) -> VType {
+        const t: Type | not = eventScalar(slot)
         if (t is given) return known(t)
         return VType.Unknown
     }
@@ -45190,6 +45268,18 @@ ${
         }
         if (bound < 0 && ids.length > 0) bound = b.span.start     // fail closed: a suspension this walk does not see
         if (bound < 0) return ps
+        // S478 open-Qs ruling item 11 — §13.2 (amended S478): "A loop … whose body or condition
+        // contains a suspension point counts as after the first `await` for its WHOLE body and
+        // condition, in every iteration" — so a use inside such a loop is judged as after, even
+        // when it comes before the suspension in source order
+        let loops: ASpan[] = []
+        for (const ls of forSpansIn(b)) {
+            let susp = false
+            for (const x of all) {
+                if (x.span.start >= ls.start && x.span.end <= ls.end && (ids.indexOf(x.nid) >= 0 || isAwaitCall(cx, x))) susp = true
+            }
+            if (susp) loops = loops.concat([ls])
+        }
         let notRead: int[] = []
         for (const x of all) {
             const c: AExpr | not = calleeOf(x.k)
@@ -45205,12 +45295,38 @@ ${
         let st: AS = ps.st
         let seen: int[] = []
         for (const x of all) {
-            if (seen.indexOf(x.nid) < 0 && x.span.start >= bound && plainObj.indexOf(x.nid) < 0 && localSymOfName(cx.t, x.nid) == evs) {
+            if (seen.indexOf(x.nid) < 0 && (x.span.start >= bound || inSpans(loops, x.span.start)) && plainObj.indexOf(x.nid) < 0 && localSymOfName(cx.t, x.nid) == evs) {
                 seen = seen.concat([x.nid])
-                st = addDiag(st, cx.file, x.span, "E-EVENT-CONTROL-AFTER-AWAIT", "`" + exprName(x) + "` — the handler's event — is used after the handler's first `await` other than by a plain read of a non-control property (§13.2): by then the browser has performed the event's default action and propagated it, so a control call or any other use of the event has no effect. Call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows")
+                let inLoop: string = ""
+                if (x.span.start < bound) inLoop = " (it stands in a loop that suspends: from the second iteration on it runs after the previous iteration's `await`, so the whole loop counts as after — §13.2, amended S478)"
+                st = addDiag(st, cx.file, x.span, "E-EVENT-CONTROL-AFTER-AWAIT", "`" + exprName(x) + "` — the handler's event — is used after the handler's first `await` other than by a plain read of a non-control property" + inLoop + " (§13.2): by then the browser has performed the event's default action and propagated it, so a control call or any other use of the event has no effect. Call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows")
             }
         }
         return { st: st, plan: ps.plan }
+    }
+
+    // S478 (open-Qs ruling item 11): the spans of every loop statement in `b`, at any depth.
+    fn forSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const isFor: boolean = match k {
+                .For(f: f) :> true
+                // no-default-arm: one question of a statement — is it a loop
+                _ :> false
+            }
+            if (isFor) out = out.concat([s.span])
+            for (const nb of nestedBlocks(s)) { out = out.concat(forSpansIn(nb)) }
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(forSpansIn(kb)) }
+        }
+        return out
+    }
+
+    fn inSpans(ss: ASpan[], at: int) -> boolean {
+        for (const sp of ss) {
+            if (at >= sp.start && at < sp.end) return true
+        }
+        return false
     }
 
     // A call that waits wherever it stands (§13.2): a client call of a server function, or of a

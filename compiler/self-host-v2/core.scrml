@@ -262,7 +262,9 @@ ${
     // members (`e.preventDefault()`, `e.stopPropagation()`) — only as an Eval (its value is
     // discarded). Both stand only in the body of an `On` attribute's handler (check.scrml
     // C-EV1): the printer names the listener's event argument there.
-    export type HostCall:enum = { DateNow, Unreadable, EventRead(member: string), EventCall(member: string) }
+    // s478 (open-Qs ruling item 9): an event read's `member` may be the path `target.value` (Appendix H.6),
+    // and `slot` is its Appendix H slot type (`string` / `number` / `int` / `bool`) — what the typer reads
+    export type HostCall:enum = { DateNow, Unreadable, EventRead(member: string, slot: string), EventCall(member: string) }
     // s444 — the sequence functions a lambda is admitted as the argument of.
     // Each makes a NEW sequence value (R3: values are immutable).
     // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the

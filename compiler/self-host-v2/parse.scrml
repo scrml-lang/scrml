@@ -14228,8 +14228,8 @@ ${
     //     grammatical only as a child of `<program>` … Use outside the owning
     //     locus is `E-STRUCTURAL-ELEMENT-MISPLACED`".
     //   `ctx` "nested": in a nested `<program>` (§4.12.2: a worker / sidecar /
-    //     scoped-db context). ⚑ No SPEC sentence says what a `<page>` there
-    //     means (searched §4.12, §4.15, §40.8, §43), so it is refused by name.
+    //     scoped-db context) — E-STRUCTURAL-ELEMENT-MISPLACED (§40.8 amended
+    //     S478, open-Qs ruling item 60).
     // In either refused place the body is still read (to find its closer); the
     // error stops the build.
     fn pageItem(o: Opener, mp: MP, ctx: string) -> RMItems {
@@ -14238,7 +14238,10 @@ ${
         if (ctx == "page") {
             m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` inside a `<page>` — a `<page>` is grammatical only as a direct child of `<program>` (§4.15, §40.8); close the first `<page>` before opening the next", o.start, tagEnd)
         } else if (ctx == "nested") {
-            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<page>` inside a nested `<program>` is not in the bootstrap — the SPEC gives a `<page>` no meaning inside a worker / sidecar / scoped-db program (§4.12.2, §40.8); put the `<page>` in the top-level `<program>`", o.start, tagEnd)
+            // S478 open-Qs ruling item 60 — §40.8 (amended S478): "A `<page>` inside a nested
+            // `<program>` … is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15): a nested program is an
+            // execution context, not a route container."
+            m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` inside a nested `<program>` — a nested program is an execution context (a worker, sidecar or scoped-db program, §4.12), not a route container: a `<page>` is grammatical only as a direct child of the top-level `<program>` (§4.15, §40.8)", o.start, tagEnd)
         } else if (ctx == "channel") {
             // s478 (s478-boot-channel) — §4.15: "`<page>` is grammatical only as a child of `<program>`"
             m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<page>` inside a `<channel>` — a `<page>` is grammatical only as a direct child of `<program>` (§4.15, §40.8); a channel is app-scope shared state and emits no markup (§38.2)", o.start, tagEnd)
