@@ -1613,7 +1613,7 @@ function send() {
 ```
 
 Notes:
-- `<messages:Message[free, append]=[]/>` declares a channel-scoped tape. It is auto-synced to every connected client. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message.
+- `<messages:Message[free, append]=[]/>` declares a channel-scoped tape. Each write to it is sent as the edit it made (an `append`, SPEC §38.4.2) to every client connected at the time, and each receiver checks it against the type before applying it. Two concurrent appends can land in a different order on different clients, and a client that connects later is not sent earlier messages. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message.
 - `let` declarations are allowed inside `<channel>` (and `<db>`, `<page>`, `<theme>`) too (O61): the block owns and syncs them, and the rest of the program can read them.
 - Read it as `@messages` from anywhere in the file (including outside the channel).
 - Server functions inside the channel body see `broadcast(data)` and `disconnect()` auto-injected.

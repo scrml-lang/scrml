@@ -19,5 +19,5 @@ Base: origin/main 28fc2d031 (#1928 merged).
 ## Fix round 1 (review ~/.cache/scrml/review/s478-1937/review.md)
 - [x] HIGH-1: fixed-length tape — chSyncOps drops length ops (growsFixed), chSyncWhy refuses a cell left with no op; receiver (lengthBound "fixed") + relay refuse length ops. Tests: channel-s478 B2 "FIXED-length", channel-ops G (relay, receiver) — red on c16e69503.
 - [x] MED-1: `let` + `rule=` channel cell refused by name; sink sends `transition` only for a tagged rt.transition or an edge move from the replaced value (else warn, not sent). Tests: B2 "`let` `rule=`", G "only when it is a move".
-- [ ] MED-2 / MED-3 / LOW docs (SPEC §38.4.2, tutorial §8, kickstarter, gaps)
-- [ ] verify: probes, conformance, corpus, CI gates
+- [x] MED-2 / MED-3 / LOW docs (SPEC §38.4.2 Ordering narrowed, not-sent-on qualified, clamp + fixed bullets; tutorial §8; kickstarter §11.3; gaps: residue (6)(7), joiner divergence + LOW-1, new g-boot-channel-derived-write-resend-s478)
+- [x] verify: conformance 614/18/0, 0 case changes vs base; corpus 73 channel files 0 changes (vs c16 and vs base); CI gates all OK; probes: fixedpop now refused at compile (lane test G covers relay/receiver); receive/three/relay pass with lph made non-let
