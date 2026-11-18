@@ -2328,7 +2328,7 @@ ${
         if (atEnd(t)) return mkE(sql008(t, open), start, AExprK.Recovered)
         if (!(cur(t).cls == TC.Punct && tk(cur(t), "}"))) {
             const extra: PTok = cur(t)
-            const d: TP = diagAt(t, "E-SQL-003", "the content of `?{ … }` must be ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `?{` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
+            const d: TP = diagAt(t, "E-SQL-003", sqlShapeHead() + " ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `?{` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
             const past: RSkip = skipToSqlClose(d, open)
             if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
             const rc: RSqlChain = parseSqlChain(past.tp, emptySqlChain())
@@ -2353,13 +2353,46 @@ ${
         return true
     }
 
+    // The head of the two E-SQL-003 reports of a `?{ … }` not written `?{` + ONE
+    // backtick template + `}` (sqlNotTemplate; parseSql's text after the template)
+    // — the shapes sqlInCondition re-codes in an `if` condition.
+    fn sqlShapeHead() -> string {
+        return "the content of `?{ … }` must be"
+    }
+
+    // s479 — §34 E-SQL-QUERY-NOT-READABLE: "a `?{` in an `if` / `while` condition …
+    // not written `?{` + backtick template + `}` (an unbackticked `?{ … }`), a
+    // backtick inside the body, or no `}` right after the closing backtick". It is
+    // the more specific code for that shape there (ruling S473 D29: "one code per
+    // rule, the more specific winning"), so the E-SQL-003 a condition's `?{ … }`
+    // drew (the reports from diags[n0] on) is re-coded. The template-literal slot
+    // and `match` arm body positions are not re-coded yet
+    // (g-boot-sql-query-not-readable-positions-s479).
+    fn sqlInCondition(n0: int, r: RExpr) -> RExpr {
+        const ds: Diag[] = r.tp.diags
+        if (ds.length <= n0) return r
+        let out: Diag[] = ds.slice(0, n0)
+        let changed = false
+        for (const d of ds.slice(n0)) {
+            if (d.code == "E-SQL-003" && d.message.indexOf(sqlShapeHead()) == 0) {
+                changed = true
+                out = out.concat([newDiag("E-SQL-QUERY-NOT-READABLE", "this `?{ … }` in an `if` condition is not written `?{` + ONE backtick SQL template + `}` (the report is at the text that breaks that shape), so no check can read it, and it is refused (§8.1.2). Write the backtick form (`?{`SELECT …`}`), or bind the query to a local first (`const row = ?{`…`}.get();`)", d.file, d.span)])
+            } else {
+                out = out.concat([d])
+            }
+        }
+        if (!changed) return r
+        const t: TP = r.tp
+        return { e: r.e, tp: { toks: t.toks, i: t.i, nid: t.nid, diags: out, file: t.file, ns: t.ns, inFn: t.inFn } }
+    }
+
     // `?{` followed by something other than a template.
     fn sqlNotTemplate(t0: TP, open: PTok, start: int) -> RExpr {
         if (atEnd(t0)) return mkE(sql008(t0, open), start, AExprK.Recovered)
         const found: PTok = cur(t0)
         const past: RSkip = skipToSqlClose(t0, open)
         if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
-        const d: TP = diagAt(past.tp, "E-SQL-003", "the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `" + found.text + "` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL", found)
+        const d: TP = diagAt(past.tp, "E-SQL-003", sqlShapeHead() + " a backtick SQL template (`?{`SELECT …`}`) — found `" + found.text + "` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL", found)
         const rc: RSqlChain = parseSqlChain(d, emptySqlChain())
         return mkE(rc.tp, start, AExprK.Recovered)
     }
@@ -2488,7 +2521,7 @@ ${
         if (t.cls == TC.At) return parseAt(tp)
         if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
         if (t.cls == TC.Ident) {
-            if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+            if (t.v == "not") return notPrimary(tp, start)
             if (tk(peekAt(tp, 1), "=>")) return parseLambda(adv(tp), start, [t.v])
             return mkE(adv(tp), start, AExprK.Name(t.v))
         }
@@ -3171,12 +3204,46 @@ ${
         return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, true))
     }
 
+    // s479 — `not` at a primary. §42.10: "`not` SHALL NOT appear in prefix position
+    // before a boolean expression — in EITHER form (bare `not @x` / `not f(...)` /
+    // `not obj.prop`, OR parenthesized `not (expr)`) and in ANY expression position
+    // … The compiler SHALL emit E-TYPE-045 in all such positions." So `not`
+    // followed by the start of an operand is E-TYPE-045 at the `not` (the §42.10
+    // message), and the operand is read (a unary operand, as `!`'s is) and dropped
+    // — the expression is Recovered, so nothing cascades from it. Any other `not`
+    // is the absence value.
+    // INTERIM (§7.2.2 "Remaining newline-sensitive readings"): the operand must
+    // start on the `not`'s line. Rule 4 makes `not⏎@b;` the prefix `not @b`, but
+    // the legacy newline-terminated `@a = not⏎@b = not` (20 corpus samples) is a
+    // missing `;` after the `not`, and is reported so — the `return⏎expr`
+    // precedent (rule 8): the bootstrap does not guess across a line break while
+    // newline-terminated code is migrated. Either way it is an error.
+    fn notPrimary(tp: TP, start: int) -> RExpr {
+        const t1: TP = adv(tp)
+        if (cur(t1).line != cur(tp).line || !notOperandAt(t1)) return mkE(t1, start, AExprK.NotLit)
+        const d: TP = diagAt(tp, "E-TYPE-045", "`not` is the absence value, not a negation operator (§42.10). Use `!` for boolean negation: `!expr` (bare) or `!(expr)` (parenthesized). To check for absence, use `x is not`.", cur(tp))
+        const operand: RExpr = parseUnary(adv(d))
+        return mkE(operand.tp, start, AExprK.Recovered)
+    }
+
+    // Does an operand start at `tp` (the token after a `not`)? A cell, a name that is
+    // not a word operator, a literal, a template, `(`, `[`, `!`, or a value keyword.
+    fn notOperandAt(tp: TP) -> boolean {
+        const c: PTok = cur(tp)
+        if (c.cls == TC.At || c.cls == TC.Num || c.cls == TC.Str || c.cls == TC.TChunk) return true
+        if (c.cls == TC.Ident) return !(wordOperatorAt(tp) || deferNonLead(c.v))
+        if (c.cls == TC.Keyword) return ["true", "false", "not", "this", "typeof", "await", "new"].indexOf(c.v) >= 0
+        // (`not !{ … }` is a handler on the value `not`, §19.4.3 — a `!` before `{` opens no operand)
+        if (c.cls == TC.Punct) return tk(c, "(") || tk(c, "[") || (tk(c, "!") && !isP(adv(tp), "{"))
+        return false
+    }
+
     fn parseKeywordPrimary(tp: TP) -> RExpr {
         const t: PTok = cur(tp)
         const start: int = t.start
         if (t.v == "true") return mkE(adv(tp), start, AExprK.Bool(true))
         if (t.v == "false") return mkE(adv(tp), start, AExprK.Bool(false))
-        if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+        if (t.v == "not") return notPrimary(tp, start)
         if (t.v == "null" || t.v == "undefined") {
             const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
             return mkE(adv(d), start, AExprK.Recovered)
@@ -6373,7 +6440,7 @@ ${
     fn parseIfAs(tp: TP) -> RStmt {
         const start: int = cur(tp).start
         let t: TP = expectP(adv(tp), "(")
-        const cond0: RExpr = parseAssign(t)
+        const cond0: RExpr = sqlInCondition(t.diags.length, parseAssign(t))   // s479: §34 E-SQL-QUERY-NOT-READABLE
         const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }   // s474 (§50, D10)
         t = expectP(cond.tp, ")")
         const thenB: RBlock = parseBlockOrStmt(t)
@@ -6441,7 +6508,7 @@ ${
             t = cb.tp
         } else {
             t = bumpId(expectP(t, "("))
-            const c0: RExpr = parseAssign(t)
+            const c0: RExpr = sqlInCondition(t.diags.length, parseAssign(t))   // s479: §34 E-SQL-QUERY-NOT-READABLE
             cond = keptHead(c0.e)                                       // s474 (§50, D10): `if (…)` is a condition head
             t = expectP(c0.tp, ")")
         }
@@ -8662,15 +8729,31 @@ ${
         // = number extra` compiles `number` only)"). Not a `type … = { … }`
         // declaration, so it is a statement that takes `;` (§7.2.2 rule 1).
         if (nameTok.cls == TC.Ident && isP(adv(t), "=")) {
-            const d0: int = hardErrors(t.diags)
-            const ra: RType = parseType(adv(adv(t)))
+            let d0: int = hardErrors(t.diags)
+            const tyAt: TP = adv(adv(t))
+            const ra: RType = parseType(tyAt)
             let at: TP = ra.tp
+            const aty: AType = ra.t   // (a refused union keeps its first member, as parseOpenerType does)
+            // s479 — a general union `A | B` (§7.5: `type-expr ::= … | type-expr '|' type-expr`)
+            // is read whole and refused by name, as in an opener (parseOpenerType): the
+            // bootstrap's type system has `T | not` only. Before, the reader stopped at the
+            // `|` and reported a `;` owed after `A` — a wrong code on a valid alias.
+            if (isP(at, "|")) {
+                while (isP(at, "|")) {
+                    const rm: RType = parseType(adv(at))
+                    at = rm.tp
+                }
+                const ut: string = tokText(at, tyAt.i, at.i)
+                const ud: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", "the union type `" + ut + "` is not in the bootstrap — its type system has `T | not` only (§7.5 admits any union: `type-expr '|' type-expr`)", at.file, mkSpan(cur(tyAt).start, at.toks[at.i - 1].end))
+                at = { toks: at.toks, i: at.i, nid: at.nid, diags: at.diags.concat([ud]), file: at.file, ns: at.ns, inFn: at.inFn }
+                d0 = hardErrors(at.diags)
+            }
             if (isP(at, ";")) {
                 at = adv(at)
             } else if (hardErrors(at.diags) == d0) {
-                at = missingSemi(at)
+                at = aliasTrailing(missingSemi(at))
             }
-            const ad: ATypeDecl = { nid: at.nid, span: spanFrom(at, start), exported: exported, name: nameTok.v, body: ATypeBody.AliasBody(ra.t) }
+            const ad: ATypeDecl = { nid: at.nid, span: spanFrom(at, start), exported: exported, name: nameTok.v, body: ATypeBody.AliasBody(aty) }
             return mkItem(bumpId(at), start, AItemK.TypeItem(ad))
         }
         t = expectP(adv(t), ":")
@@ -8693,10 +8776,62 @@ ${
             body = ATypeBody.StructBody(r2.fs)
             t = expectP(r2.tp, "}")
         } else {
-            t = diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind)
+            // s479 — the refused declaration's rest is skipped (declRestEnd), not read as
+            // statements at a body top (its region is one declaration, LexStop.Decl)
+            t = declRestEnd(diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind))
         }
         const td: ATypeDecl = { nid: t.nid, span: spanFrom(t, start), exported: exported, name: nameTok.v, body: body }
         return mkItem(bumpId(t), start, AItemK.TypeItem(td))
+    }
+
+    // s479 — the rest of a type alias's line after its missing `;` (`type N = number
+    // extra`): S478 open-Qs ruling item 2 — "E-STMT-MISSING-SEMICOLON (after `number`
+    // …; the bootstrap's E-PARSE-ITEM / E-PARSE-TYPE follow-ons on `extra` / `more
+    // words` are a separate cascade to quiet)". The tokens after the alias on ITS line
+    // are skipped, up to (not past) a `}` / `)` / `]` closing an enclosing group, and
+    // through a `;` that ends them; a token on a later line starts the next statement
+    // and is read as one. The missing `;` already covers the line with an error (§40.8's
+    // coverage invariant, as the ruling notes).
+    fn aliasTrailing(tp: TP) -> TP {
+        const from: int = tp.i
+        const t: TP = declRestEnd(tp)
+        // the skipped text is named in the `;` report (§40.8: "a statement whose head
+        // expression was parsed as a valid prefix with the rest discarded is not compiled
+        // unless an error reports the discarded text")
+        let to: int = t.i
+        if (to > from && tk(t.toks[to - 1], ";")) to = to - 1
+        if (to == from || t.diags.length == 0) return t
+        const last: Diag = t.diags[t.diags.length - 1]
+        if (last.code != "E-STMT-MISSING-SEMICOLON") return t
+        let skipped: string = tokText(t, from, to)
+        if (skipped.length > 48) skipped = skipped.substring(0, 45) + "…"
+        const nd: Diag = newDiag(last.code, last.message + " The rest of the line, `" + skipped + "`, is not read: a `type` alias ends where its type expression ends (§40.8).", last.file, last.span)
+        return { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.slice(0, t.diags.length - 1).concat([nd]), file: t.file, ns: t.ns, inFn: t.inFn }
+    }
+
+    // Past the rest of a broken declaration's line (aliasTrailing; a declaration whose
+    // kind is refused): its tokens up to (not past) a `}` / `)` / `]` closing an
+    // enclosing group, and through a `;` that ends them. A group opened on the line is
+    // skipped whole, to its closer, so no half of it is left to be read as statements.
+    fn declRestEnd(tp: TP) -> TP {
+        if (atEnd(tp) || tp.i == 0) return tp
+        const line: int = tp.toks[tp.i - 1].line
+        let t: TP = tp
+        let depth: int = 0
+        let going = true
+        while (going && !atEnd(t) && (depth > 0 || cur(t).line == line)) {
+            if (depth == 0 && isP(t, ";")) {
+                t = adv(t)
+                going = false
+            } else if (depth == 0 && (isP(t, "}") || isP(t, ")") || isP(t, "]"))) {
+                going = false
+            } else {
+                if (isP(t, "(") || isP(t, "[") || isP(t, "{")) depth = depth + 1
+                if ((isP(t, ")") || isP(t, "]") || isP(t, "}")) && depth > 0) depth = depth - 1
+                t = adv(t)
+            }
+        }
+        return t
     }
 
     type RVariants:struct = { vs: AVariant[], tp: TP }
@@ -13835,9 +13970,13 @@ ${
             // statement like an `import`: its region ends at the line, not after its `}`
             if (chAt(after, 0) == "{" || chAt(after, 0) == "*") return logicRegionItem(mp, LexStop.Line, fileTop)
             // s478: `export const NAME = …;` ends at its `;` (LexStop.Decl), not at a later `}`
-            if (!fileTop && (wl.w == "const" || wl.w == "let")) return logicRegionItem(mp, LexStop.Decl, false)
+            if (!fileTop && (wl.w == "const" || wl.w == "let" || wl.w == "type")) return logicRegionItem(mp, LexStop.Decl, false)
             return logicRegionItem(mp, LexStop.Statement, false)
         }
+        // s479 — a `type` declaration at a body top is ONE declaration (LexStop.Decl):
+        // a braceless alias `type N = number;` has no `}` for LexStop.Statement to
+        // stop after, so its region ran on past its `;` (g-boot-body-top-type-alias-region-s478)
+        if (!fileTop && w.w == "type") return logicRegionItem(mp, LexStop.Decl, false)
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false)
         // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
         if (w.w == "server") return logicRegionItem(mp, LexStop.Statement, false)
