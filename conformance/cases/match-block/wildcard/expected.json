@@ -3,16 +3,36 @@
   "description": "Block-form <match> wildcard catch-all (§18.0.1). A click sets @status = Status.Unknown, which has no named arm; the <_> wildcard body renders (data-arm=\"fallback\"). The active arm is gone. Driven by a user click, not a banned state-set.",
   "language-version": "1.0",
   "spec": "§18.0.1",
-  "rationale": "§18.0.1 a <match> with named arms + a <_> wildcard renders the wildcard body for any variant lacking a named arm. Unknown -> fallback, active arm absent.",
+  "rationale": "§18.0.1 a <match> with named arms + a <_> wildcard renders the wildcard body for any variant lacking a named arm. Unknown -> fallback, active arm absent. S478 open-Qs ruling item 13 (§18.0.1 amended S478): the dispatched arm renders in place of the `<match>`, with no wrapper element — the whole-tree `dom` no longer holds impl#1's match-mount `<div>`.",
   "expect": {
     "codes": [],
     "notCodes": [],
-    "input": [{ "click": "#to-unknown" }],
-    "state": { "status": "Unknown" },
-    "dom": "<button id=\"to-stopped\">Stop</button><button id=\"to-unknown\">Unknown</button><div><p data-arm=\"fallback\">Unknown state</p></div>",
+    "input": [
+      {
+        "click": "#to-unknown"
+      }
+    ],
+    "state": {
+      "status": "Unknown"
+    },
+    "dom": "<button id=\"to-stopped\">Stop</button><button id=\"to-unknown\">Unknown</button><p data-arm=\"fallback\">Unknown state</p>",
     "domAnchored": [
-      { "selector": "[data-arm=\"fallback\"]", "text": "Unknown state" },
-      { "selector": "[data-arm=\"active\"]", "count": 0 }
+      {
+        "selector": "[data-arm=\"fallback\"]",
+        "text": "Unknown state"
+      },
+      {
+        "selector": "[data-arm=\"active\"]",
+        "count": 0
+      }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-mount-wrapper-div-s478",
+      "fails": {
+        "runtime": "sha256:6f22cfa396c65d08"
+      }
+    }
   }
 }

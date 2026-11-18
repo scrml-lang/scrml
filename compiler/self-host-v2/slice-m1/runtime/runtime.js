@@ -5467,6 +5467,94 @@ function lengthBound(table) {
   return b.k === "bounded" ? [b.min, b.max] : null;
 }
 
+// §38.4.3 (S478 fix r1, MED-3): "A conforming client paces its frames to the bound; an honest
+// client SHALL NOT be closed by it." The client mirrors the relay's token bucket (`desc.limits`)
+// with a margin — a bucket of `burst` less 5% (at least 1) refilled at 95% of `rate` — so frames
+// that arrive bunched (network jitter) still find a token at the relay. A frame that finds no
+// token is QUEUED, never sent past the bucket, and the queue drains in order as tokens refill.
+// A queued `replace` of a cell is superseded by a later `replace` of the same cell (the
+// receiver's value after the later one does not depend on it — lossless: the last value wins);
+// every other queued op is sent, in order. A new connection starts with a full bucket (the
+// relay's does, §38.4.3); a close drops the frames still queued (§38.10.4: sync is suspended
+// while closed) and returns how many. Self-contained, so a resend on reconnect can go through
+// `push` and be paced like any edit.
+//   io: { now() → ms, later(fn, ms) → handle, cancel(handle), send(text) }
+export function channelPacer(limits, io) {
+  const lim = limits !== null && typeof limits === "object" ? limits : {};
+  const pos = (v, d) => (Number.isSafeInteger(v) && v >= 1 ? v : d);
+  const burst = pos(lim.burst, 100);
+  const rate = pos(lim.rate, 50) * 0.95;
+  const cap = Math.max(1, burst - Math.ceil(burst / 20));
+  let tokens = cap;
+  let at = io.now();
+  let q = [];
+  let timer = null;
+  let open = false;
+  function pump() {
+    timer = null;
+    if (!open) return;
+    const t = io.now();
+    if (t > at) tokens = Math.min(cap, tokens + ((t - at) * rate) / 1000);
+    at = t;
+    while (q.length > 0 && tokens >= 1) {
+      tokens -= 1;
+      io.send(q.shift().text);
+    }
+    if (q.length > 0) timer = io.later(pump, Math.max(1, Math.ceil(((1 - tokens) * 1000) / rate)));
+  }
+  return {
+    // A new connection (idempotent while open): a full bucket, then the queue, if any.
+    open() {
+      if (open) return;
+      open = true;
+      tokens = cap;
+      at = io.now();
+      pump();
+    },
+    close() {
+      open = false;
+      if (timer !== null) { io.cancel(timer); timer = null; }
+      const n = q.length;
+      q = [];
+      return n;
+    },
+    // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
+    push(key, op, text) {
+      if (!open) return false;
+      if (op === "replace") q = q.filter((f) => !(f.key === key && f.op === "replace"));
+      q.push({ key, op, text });
+      if (timer === null) pump();
+      return true;
+    },
+    pending() { return q.length; },
+    isOpen() { return open; },
+  };
+}
+
+// The UTF-8 byte length of `s` is over `max` (a channel frame's size bound, §38.4.3).
+function utf8Over(s, max) {
+  if (s.length > max) return true;
+  if (s.length * 3 <= max) return false;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+    if (n > max) return true;
+  }
+  return false;
+}
+
+// The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.
+const RELAY_CLOSES = new Map([
+  [1003, "it sent a binary frame"],
+  [1007, "it sent a frame that is not JSON, or does not decode"],
+  [1008, "it sent a frame the relay refused, or frames past the channel's rate limit"],
+  [1009, "it sent a frame over the channel's frame-size bound"],
+]);
+
 export function channel(scope, desc) {
   requireScope(scope, "a channel");
   const g = globalThis;
@@ -5480,6 +5568,14 @@ export function channel(scope, desc) {
   const hook = (f) => { if (typeof f === "function") batch(() => { f(); }); };
   const url = () => (g.location.protocol === "https:" ? "wss:" : "ws:") + "//" + g.location.host + "/_scrml_ws/" + desc.name;
   const has = (c, op) => Array.isArray(c.ops) && c.ops.includes(op);
+  const lim = desc.limits !== null && typeof desc.limits === "object" ? desc.limits : {};
+  const maxFrame = Number.isSafeInteger(lim.maxFrame) && lim.maxFrame >= 1 ? lim.maxFrame : 65536;
+  const pacer = channelPacer(desc.limits, {
+    now: () => (g.performance !== undefined && typeof g.performance.now === "function" ? g.performance.now() : Date.now()),
+    later: (f, ms) => g.setTimeout(f, ms),
+    cancel: (h) => g.clearTimeout(h),
+    send: (text) => { if (ws !== null && ws.readyState === 1) ws.send(text); },
+  });
 
   // The §38.4.2 receiver checks, then the edit applied as the local write would make it. "" or why refused.
   function receive(text) {
@@ -5576,7 +5672,13 @@ export function channel(scope, desc) {
       } else {
         wire = val;
       }
-      if (ws !== null && ws.readyState === 1) ws.send(JSON.stringify({ __type: "__sync", __key: c.key, __op: op, __val: wire }));
+      if (ws === null || ws.readyState !== 1) return;   // §38.10.4: suspended while closed
+      const text = JSON.stringify({ __type: "__sync", __key: c.key, __op: op, __val: wire });
+      // §38.4.3 (S478 fix r1): a conforming client never sends a frame over the bound — the relay
+      // would close it (1009, or the host drops it unread) — it reports the edit, not synced
+      if (utf8Over(text, maxFrame)) { warn(`@${c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return; }
+      if (!pacer.isOpen()) pacer.open();
+      pacer.push(c.key, op, text);
     };
   }
 
@@ -5585,16 +5687,28 @@ export function channel(scope, desc) {
     if (disposed) return;
     const s = new g.WebSocket(url());
     ws = s;
-    s.onopen = () => { if (ws === s) hook(desc.open); };
+    s.onopen = () => {
+      if (ws !== s) return;
+      pacer.open();
+      hook(desc.open);
+    };
     s.onmessage = (ev) => {
       if (ws !== s) return;
       const why = receive(ev.data);
       if (why !== "") warn(`refused ${why}`);
     };
     s.onerror = () => { if (ws === s) hook(desc.error); };
-    s.onclose = () => {
+    s.onclose = (ev) => {
       if (ws !== s) return;
       ws = null;
+      const dropped = pacer.close();
+      // S478 fix r1 (MED-3a): a relay close (§38.4.3) is reported, naming why — never silent
+      const code = ev !== null && typeof ev === "object" ? ev.code : undefined;
+      if (RELAY_CLOSES.has(code)) {
+        const reason = typeof ev.reason === "string" && ev.reason !== "" ? ` ("${ev.reason}")` : "";
+        warn(`the relay closed this client's connection with ${code}${reason}: ${RELAY_CLOSES.get(code)} (§38.4.3) — an edit it refused was not relayed to the other clients`);
+      }
+      if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed)`);
       hook(desc.close);
       if (!disposed && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
     };
@@ -5602,6 +5716,7 @@ export function channel(scope, desc) {
   for (const c of desc.cells) c.cell.sync = sink(c);
   scope.own(() => {
     disposed = true;
+    pacer.close();
     for (const c of desc.cells) c.cell.sync = null;
     if (timer !== null) g.clearTimeout(timer);
     const s = ws;

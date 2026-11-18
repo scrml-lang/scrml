@@ -56,7 +56,7 @@ ${
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
              HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
-    import { isIdentifierText } from "./lex.scrml"
+    import { isIdentifierText, isVoidName } from "./lex.scrml"
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
              isHeading, boundsScope, formattingMarker, isSpecialHtml, tableMode, tableModeChildren } from "./elements.scrml"
     import { importTarget, importsOfItems, reexportsOfItems, localExportsOfItems, ImportCycle, importCycles, hostImportsOfItems, hostTagOf, isStdlibPath, stdlibPrefix, HostLoc, hostLocOf, Source } from "./link.scrml"
@@ -68,7 +68,7 @@ ${
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, logicWriteSink, logicCallSink, attrNameArgIndex, executableAttrName, htmlArgIndex, attrNodeMember, attrNodeValueMember, urlValueAdmitted, schemeOfUrl, isUrlAttrName, attrValueArgIndex } from "./url.scrml"
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
-             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements } from "./host-surface.scrml"
+             dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements, eventIfaceOf } from "./host-surface.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -2876,13 +2876,10 @@ ${
     // directly in a top-level `<program>`; its body already stands in the
     // program's items). Two checks:
     //   - its attributes, against §40.8's closed per-route set (pageAttrDiags);
-    //   - a SECOND `<page>` in the file. ⚑ §40.8: "A `<program>` MAY contain
-    //     zero or more `<page>` declarations … its URL is inferred from
-    //     filesystem location" — every `<page>` of one file has that file's one
-    //     URL, and no SPEC sentence says how two pages of the same route combine
-    //     (both bodies on one document? whose `auth=`?). Searched §4.15, §20.8,
-    //     §40.8, §40.8.2, §47.9.2 — no governing sentence. Refused by name
-    //     (INTERIM — the capable form is one `<page>` per file).
+    //   - a SECOND `<page>` in the file. §40.8 (amended S478, open-Qs ruling
+    //     item 60): "Two `<page>`s in one `<program>` are an error: a route has
+    //     one page". The ruling names no code — refused by name until one is
+    //     chosen (owner question; recommendation E-PAGE-DUPLICATE).
     fn pageDiags(f: FileAst, st0: AS) -> AS {
         let st: AS = st0
         let seen = 0
@@ -2890,7 +2887,7 @@ ${
             seen = seen + 1
             st = pageAttrDiags(f.path, pg, st)
             if (seen > 1) {
-                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file is not in the bootstrap — a page's URL is its file's location (§40.8), so both pages would be the same route, and the SPEC does not say how two pages of one route combine; merge them into one `<page>` (one route file per page is the multi-page form, §40.8 — not in the bootstrap yet)")
+                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file — two `<page>`s in one `<program>` are an error (§40.8, amended S478): a route has one page, and a second page is a second route file. Merge them into one `<page>`. (The SPEC names no code for it yet — an owner question; refused by name meanwhile)")
             }
         }
         return st
@@ -3003,6 +3000,10 @@ ${
             "transactions" :> true
             "batch-in-list-cap" :> true
             "channel-reconnect" :> true
+            "channel-max-frame" :> true
+            "channel-frame-rate" :> true
+            "channel-frame-burst" :> true
+            "channel-max-subscribers" :> true
             "lang" :> true
             "mode" :> true
             "callchar" :> true
@@ -3143,6 +3144,11 @@ ${
                 // s473 (B3): read — §40.7 head metadata (lower headOf; print).
                 // "A non-string-literal value … is silently ignored" and an
                 // empty one is "as if the attribute were absent" (§40.7).
+            } else if (chLimitMax(a.name) > 0) {
+                // s478 (S478 open-Qs ruling items 42, 49) — §38.4.3: the program-wide channel
+                // bounds, read by channelPass; "a value that is not a bare positive integer
+                // literal within the bound's range SHALL be a compile error, `E-CHANNEL-LIMIT-INVALID`"
+                if (chLimit(a.value, a.name) < 0) st = addDiag(st, file, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<program " + a.name + "=…>", a.name))
             } else if (a.name == "mcp") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
@@ -9574,6 +9580,9 @@ ${
         // s478 (s478-boot-fn-values) — a member of the listener's event (§5.2.1)
         const evl: LocalB | not = eventLocalOf(env, obj)
         if (evl is given) return resolveEventMember(env, e, obj, evl, name, st0)
+        // S478 open-Qs ruling item 9 (b) — `e.target.value` on an `<input>` (H.6)
+        const etr: RX | not = resolveEventTargetRead(env, e, obj, name, st0)
+        if (etr is given) return etr
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
@@ -17935,8 +17944,8 @@ ${
     // be E-ERROR-002, exactly like `onclick=risky()`").
     // `onclick={ risky }` is a reference too (S441: "the bare `onclick=risky`,
     // `onclick=${risky}`, or `onclick={ risky }`").
-    fn bracedHandler(env: Env, b: ABlock, ev: string, st: AS) -> AS {
-        if (ev != "") return eventHandler(env, b, ev, st)
+    fn bracedHandler(env: Env, b: ABlock, ev: string, ifv: string, st: AS) -> AS {
+        if (ev != "") return eventHandler(env, b, ev, ifv, st)
         const r: AExpr | not = blockReference(b)
         if (r is not) return loopChecks(env.file, b, resolveBlock(withLift(env, LiftCtx.NoLift), b, st))   // s469: a handler block is a loop-control boundary (and a `lift` one)
         return handlerReference(env, r, resolveBlock(withFnRef(withLift(env, LiftCtx.NoLift), r.nid), b, st))
@@ -17968,14 +17977,55 @@ ${
     fn eventVia() -> string { return "the handler's event object" }
     fn eventSealedVia() -> string { return "the handler's event object, captured by a lambda in the handler" }
 
-    fn eventHandler(env: Env, b: ABlock, ev: string, st0: AS) -> AS {
+    // =========================================================================
+    // S478 open-Qs ruling item 9 — the listener's event has the Appendix H interface its
+    // attribute names, and an `<input>` handler's `e.target` is that input. SPEC Appendix H.6
+    // (amended S478): "A listener's event has the interface this table gives its event name
+    // … every other event name is `Event`"; "When the element the handler sits on can hold no
+    // element (a void element on H.4), `event.target` is that element … the reads
+    // `event.target.value` and `event.target.checked` are typed by the entry that interface
+    // has for them". The event local's `via` carries both: `<via>|<event iface>|<target iface>`
+    // (the target iface "" when the element can hold others — `target` stays `EventTarget | not`).
+    // =========================================================================
+    // fix round 1 of #1945 (review LOW-7): the element a handler sits on narrows `event.target`
+    // (H.6) only when the tag IS that HTML element — a user declaration of the same name (`<Input>`,
+    // whose renders root may be a `<div>`) is not, wherever it is declared ("" — no element).
+    fn htmlTagOrNone(g: Globals, file: string, tag: string) -> string {
+        if (!isHtmlElementName(tag)) return ""
+        if (declNamed(g, file, tag) is given || declAnywhere(g, tag)) return ""
+        return tag
+    }
+
+    fn evIfaceVia(evName: string, tag: string) -> string {
+        let tgt: string = ""
+        if (isVoidName(tag.toLowerCase())) tgt = inertTagIface(tag.toLowerCase())
+        return "|" + eventIfaceOf(evName) + "|" + tgt
+    }
+
+    fn eventHandler(env: Env, b: ABlock, ev: string, ifv: string, st0: AS) -> AS {
         const rs: RSym = mint(reservedName(st0, env.file, b.span, ev), ev)
         const st: AS = addValue(rs.st, b.nid, ValueFact.VLambda([rs.s], not))
-        const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia(), foreign: false })
+        const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia() + ifv, foreign: false })
         return loopChecks(env.file, b, resolveBlock(env2, b, st))
     }
 
-    fn isEventLocal(l: LocalB) -> boolean { return l.via == eventVia() || l.via == eventSealedVia() }
+    fn isEventLocal(l: LocalB) -> boolean { return l.via.startsWith(eventVia()) }
+
+    fn isSealedEvent(l: LocalB) -> boolean { return l.via.startsWith(eventSealedVia()) }
+
+    // The event's Appendix H interface ("Event" when the handler recorded none).
+    fn evIface(l: LocalB) -> string {
+        const ps: string[] = l.via.split("|")
+        if (ps.length < 2 || ps[1] == "") return "Event"
+        return ps[1]
+    }
+
+    // The interface of `event.target` when the handler's element pins it (H.6), else "".
+    fn evTargetIface(l: LocalB) -> string {
+        const ps: string[] = l.via.split("|")
+        if (ps.length < 3) return ""
+        return ps[2]
+    }
 
     // The listener-event local a bare name `obj` resolves to here, else not.
     fn eventLocalOf(env: Env, obj: AExpr) -> LocalB | not {
@@ -17993,8 +18043,8 @@ ${
         let ls: LocalB[] = []
         let any: boolean = false
         for (const l of env.locals) {
-            if (l.via == eventVia()) {
-                ls = ls.concat([{ name: l.name, s: l.s, ty: l.ty, mutable: l.mutable, narrowed: l.narrowed, nDecl: l.nDecl, fresh: l.fresh, via: eventSealedVia(), foreign: l.foreign }])
+            if (isEventLocal(l) && !isSealedEvent(l)) {
+                ls = ls.concat([{ name: l.name, s: l.s, ty: l.ty, mutable: l.mutable, narrowed: l.narrowed, nDecl: l.nDecl, fresh: l.fresh, via: eventSealedVia() + l.via.substring(eventVia().length), foreign: l.foreign }])
                 any = true
             } else {
                 ls = ls.concat([l])
@@ -18012,8 +18062,8 @@ ${
     }
 
     fn eventUseWhy(l: LocalB, what: string) -> string {
-        const built: string = "the listener's event `" + l.name + "` is in the bootstrap only as a read of a scalar member of the `Event` interface (`" + l.name + ".type`, `" + l.name + ".timeStamp`) and a call of `" + l.name + ".preventDefault()` / `" + l.name + ".stopPropagation()` as a statement (Appendix H H-047–H-051)"
-        if (l.via == eventSealedVia()) return what + " inside a lambda in the handler — " + built + ", in the handler's own statements: §13.2 follows a function that uses the event past the handler's first `await`, which the bootstrap does not track yet (g-bootstrap-function-values-slice-s451). Read the member into a `const` before the lambda"
+        const built: string = "the listener's event `" + l.name + "` is typed `" + evIface(l) + "` here (Appendix H.6, by its attribute); it is in the bootstrap only as a read of a scalar member of that interface (`" + l.name + ".type`, `" + l.name + ".timeStamp`" + evIfaceExample(l) + "), a call of `" + l.name + ".preventDefault()` / `" + l.name + ".stopPropagation()` as a statement (Appendix H H-047–H-051), and — on an `<input>` — the reads `" + l.name + ".target.value` / `" + l.name + ".target.checked` (H.6)"
+        if (isSealedEvent(l)) return what + " inside a lambda in the handler — " + built + ", in the handler's own statements: §13.2 follows a function that uses the event past the handler's first `await`, which the bootstrap does not track yet (g-bootstrap-function-values-slice-s451). Read the member into a `const` before the lambda"
         return what + " — " + built + ". Any other use (an alias, an argument, a returned or stored event, a computed member `" + l.name + "[k]`, a member of another interface such as `" + l.name + ".target` or `" + l.name + ".key`) is not built yet: the event's members stay open and untyped in logic (§21.3.3 rule 16, §5.2 rule 2), and open, untyped member access is not in the bootstrap (g-bootstrap-function-values-slice-s451)"
     }
 
@@ -18026,29 +18076,72 @@ ${
         return not
     }
 
-    // The scrml scalar of a built event member read (`e.type`, `e.timeStamp`): its
-    // Appendix H slot type, else not. One lookup for the resolver and the typer.
-    fn eventReadType(name: string) -> Type | not {
-        if (isEventControl(name)) return not
-        const en: HEntry | not = findEntry("Event", name, "read")
-        if (en is given && entryConflict(en) == "") return eventScalar(sigResult(en))
-        return not
+    fn evIfaceExample(l: LocalB) -> string {
+        const i: string = evIface(l)
+        if (i == "KeyboardEvent") return ", `" + l.name + ".key`"
+        if (i == "MouseEvent") return ", `" + l.name + ".clientX`"
+        return ""
+    }
+
+    // The Appendix H slot type of a built event member read (`e.type`, `e.key` on a
+    // `KeyboardEvent`): its scalar slot on interface `iface` (or one it inherits), else "".
+    fn eventReadSlot(iface: string, name: string) -> string {
+        if (isEventControl(name)) return ""
+        const en: HEntry | not = findEntry(iface, name, "read")
+        if (en is given && entryConflict(en) == "" && eventScalar(sigResult(en)) is given) return sigResult(en)
+        return ""
     }
 
     // `e.m` read.
     fn resolveEventMember(env: Env, e: AExpr, obj: AExpr, l: LocalB, name: string, st0: AS) -> RX {
         const st: AS = addName(st0, obj.nid, NameFact.NLocal(l.s))
-        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
-        const t: Type | not = eventReadType(name)
-        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name))))
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+        const slot: string = eventReadSlot(evIface(l), name)
+        const t: Type | not = eventScalar(slot)
+        if (t is given) return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead(name, slot))))
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + l.name + "." + name + "`"), st)
+    }
+
+    // S478 (item 9 (b)) — `e.target.value` / `e.target.checked`: typed by the entry the
+    // handler's element's interface has for it (H.6) when the element pins `target`; `not`
+    // when `obj` is not `<event>.target`, so the caller reads the member as before.
+    fn resolveEventTargetRead(env: Env, e: AExpr, obj: AExpr, name: string, st0: AS) -> RX | not {
+        const ok: AExprK = obj.k
+        const tn: string = match ok {
+            .Member(obj: o, name: n) :> n
+            // no-default-arm: one question of an expression — the member name of `x.target`
+            _ :> ""
+        }
+        if (tn != "target") return not
+        const inner: AExpr | not = match ok {
+            .Member(obj: o, name: n) :> o
+            // no-default-arm: one question of an expression — the receiver of `x.target`
+            _ :> not
+        }
+        if (inner is not) return not
+        const l: LocalB | not = eventLocalOf(env, inner)
+        if (l is not) return not
+        const st: AS = addName(st0, inner.nid, NameFact.NLocal(l.s))
+        const what: string = "`" + l.name + ".target." + name + "`"
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), st)
+        const ti: string = evTargetIface(l)
+        if (ti == "" || (name != "value" && name != "checked")) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what) + targetWhy(ti), st)
+        const slot: string = eventReadSlot(ti, name)
+        const t: Type | not = eventScalar(slot)
+        if (t is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what) + " — a `" + ti + "` has no `" + name + "` read in Appendix H", st)
+        return plain(t, addValue(st, e.nid, ValueFact.VHost(HostCall.EventRead("target." + name, slot))))
+    }
+
+    fn targetWhy(ti: string) -> string {
+        if (ti == "") return " — `target` is narrowed only on an element that can hold no other element (an `<input>`, H.6): elsewhere the event may come from a descendant, so `target` is `EventTarget | not` (H-049). Read the value through `bind:value` (§5.4)"
+        return " — on a `" + ti + "` only the reads `target.value` / `target.checked` are built (H.6)"
     }
 
     // `e.m(…)`.
     fn resolveEventCall(env: Env, e: AExpr, m: MethodCall, l: LocalB, args: AExpr[], st0: AS) -> RX {
         const st: AS = addName(st0, m.obj.nid, NameFact.NLocal(l.s))
         const what: string = "`" + l.name + "." + m.method + "(…)`"
-        if (l.via == eventSealedVia()) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
+        if (isSealedEvent(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, what), resolveExprs(env, args, not, st))
         const en: HEntry | not = findEntry("Event", m.method, "call")
         if (en is given && entryConflict(en) == "" && sigParams(en).length == 0 && sigResult(en) == "void") {
             if (args.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", what + " with an argument — Appendix H gives `" + m.method + "` the signature `() -> void` (" + en.id + "); the bootstrap builds the call as written there", resolveExprs(env, args, not, st))
@@ -21835,6 +21928,11 @@ ${
         // compile error (E-SYNTAX-002) … unless the loop is bound" — a bare `function` body
         // has no lift target. (A `fn` body's `~`, §48.5, is not in the bootstrap.)
         if (tgt is not && inBareFunction(env)) return addDiag(st, env.file, s.span, "E-SYNTAX-002", "`lift` is not valid inside a bare `function` body (§10.4) — a `function` returns its value. Bind the loop as a value and return it (`const xs = for (…) { … lift e; … }; return xs;`, §49.6), or `return` the value and lift it at the call site")
+        // S478 open-Qs ruling item 1 (b) — §17.3 (amended S478): "A `${ … }` at a
+        // `<program>` / `<page>` / `<channel>` body top … renders nothing: a `lift` of
+        // markup there, and a single-element `if` / `given` branch there, is
+        // E-MARKUP-STATEMENT-NOT-RENDERED (§17.6.10.1)" — reported at the element.
+        if (tgt is not && !env.fx.inFn && liftsBodyTopRow(w)) return addDiag(st, env.file, liftRowSpan(w, s.span), "E-MARKUP-STATEMENT-NOT-RENDERED", "this markup is lifted in a body-top `" + "$" + "{ … }`, which is evaluated, not rendered (§17.3), so it is not rendered (§17.6.10.1) — write the element in the body itself (under `if=`, §17.1, when it is conditional)")
         if (tgt is not) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `fn` body's `~`, §10 / §48.5, is not in the bootstrap)")
         if (!tier0 && liftsMarkup(w)) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "lifted MARKUP is a row of a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — the nearest bound loop here is `" + tgt.hint + "`, which builds a tape of values")
         st = addBind(st, s.nid, BindFact.BJump(tgt))
@@ -21912,6 +22010,37 @@ ${
             }
         }
         return st
+    }
+
+    // S478 — an element lifted in a body-top `${ … }`: parse's stand-in carries
+    // the body-top row tag as its text (parseLift, bodyTopRowTag).
+    fn liftsBodyTopRow(w: ALift) -> boolean {
+        return match w {
+            .LiftNode(n: x) :> x.nid < 0 && standText(x) == "body-top-row"
+            .LiftExpr(e: x) :> false
+        }
+    }
+
+    fn standText(n: ANode) -> string {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: s) :> s
+            .Elem(e: x) :> ""
+            .Interp(e: x) :> ""
+            .DeclNode(d: x) :> ""
+            .Css(c: x) :> ""
+            .Effect(w: x) :> ""
+            .Request(r: x) :> ""
+            .Gather(f: x) :> ""
+            .Run(b: x) :> ""
+        }
+    }
+
+    fn liftRowSpan(w: ALift, dflt: ASpan) -> ASpan {
+        return match w {
+            .LiftNode(n: x) :> x.span
+            .LiftExpr(e: x) :> dflt
+        }
     }
 
     fn liftsMarkup(w: ALift) -> boolean {
@@ -24439,7 +24568,7 @@ ${
     //          template judged in the element it is inserted into).
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
                          inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string,
-                         inSel: boolean, root: boolean, tmode: boolean, selT: string }
+                         inSel: boolean, root: boolean, tmode: boolean, selT: string, carry: boolean }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
@@ -24449,7 +24578,7 @@ ${
     // A template's root context, placed at `place` (`mkPlaceOf` of where it is inserted).
     fn mkRootAt(ns: string, depth: int, place: string) -> MkCx {
         return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "",
-                 inSel: false, root: true, tmode: false, selT: place }
+                 inSel: false, root: true, tmode: false, selT: place, carry: false }
     }
 
     // Where a template inserted at context `c` is placed: "" when no `<select>` holds that point
@@ -24542,7 +24671,7 @@ ${
                         out = out.concat(mkRepairFault(file, e, rootTableMsg(e.tag, mode)))
                     }
                     cn = { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT }
+                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT, carry: c.carry }
                 }
             } else if (mode == "col") {
                 const tx: string | not = mkTextOf(k)
@@ -24621,14 +24750,28 @@ ${
         return match k {
             .Elem(e: e) :> mkElem(g, sa, file, e, c)
             .Text(text: t) :> mkText(file, n, t, c)
-            .Interp(e: x) :> []
+            .Interp(e: x) :> mkLitText(file, n, x, c)
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
             .Run(b: rb0) :> []
             .Request(r: x) :> []
             .Css(c: x) :> []
-            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
+            .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         }
+    }
+
+    // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string
+    // literal) judged where the branch stands — text in a table part (mkBranch's `carry` pass only;
+    // as the branch's own template it is a hole, which the parser does not move).
+    fn mkLitText(file: string, n: ANode, x: AExpr, c: MkCx) -> MkFault[] {
+        if (!c.carry) return []
+        const k: AExprK = x.k
+        const t: string = match k {
+            .Str(v: v) :> v
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> ""
+        }
+        return mkText(file, n, t, c)
     }
 
     // "in table" text (HTML §13.2.6.4.10): a character that is not white space
@@ -24665,10 +24808,62 @@ ${
         // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
         if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
         // an `if=` / `else-if=` / `else` element is its arm's own template
-        let c: MkCx = c0
-        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
+        if (isArmElem(e)) {
+            if (c0.carry) return mkElemAt(g, sa, file, e, mkCarryRoot(c0))
+            return mkSoft(mkElemAt(g, sa, file, e, mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))), mkElemAt(g, sa, file, e, mkCarryRoot(c0)))
+        }
+        return mkElemAt(g, sa, file, e, c0)
+    }
+
+    // fix round 1 of #1945 (review MED-2) — a BRANCH's content (a `<match>` arm, an `if=` branch,
+    // an `<each>` / `${ for … lift }` row) is a template of its own, parsed apart and inserted by DOM
+    // calls where the branch stands. Its parse is judged as one template's (§24.5 item 2: "The rule
+    // applies within one template's static markup: an `if=` arm, an `<each>` row, a `${ for … lift }`
+    // row … are each parsed apart and inserted by DOM calls, which repair nothing"). Its CONTENT MODEL
+    // is the parent's: §18.0.1 (amended S478) "the parent's content model applies to each arm's content
+    // where the `<match>` stands", and §24.2 makes a content-model violation W-HTML-001 under the default
+    // `html-content-model = warn` (§28.1). So the content is judged twice: as its own template (the
+    // §24.5 errors), and again in the context where it stands (`carry`); a fault only the second pass
+    // finds is the nesting the page holds as written — W-HTML-001. INTERIM: the nesting rules judged are
+    // §24.5 item 2's (`<div>` in `<p>`, text / a non-row in a table part, `a > a`, `button > button`, …);
+    // the full content-model table is g-boot-html-content-model-unchecked-s473.
+    fn mkBranch(g: Globals, sa: AS, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        if (c.carry) return mkNodes(g, sa, file, nodes, mkCarryRoot(c))
+        return mkSoft(mkNodes(g, sa, file, nodes, mkRootAt(c.ns, c.depth, mkPlaceOf(c))), mkNodes(g, sa, file, nodes, mkCarryRoot(c)))
+    }
+
+    // The root of a branch template judged where it stands: the parent's context, carried.
+    fn mkCarryRoot(c: MkCx) -> MkCx {
+        return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
+                 tbl: c.tbl, depth: c.depth, raw: "", inSel: c.inSel, root: true, tmode: c.tmode, selT: mkPlaceOf(c), carry: true }
+    }
+
+    // `own` (the branch judged as its own template) plus each repair fault of `placed` (judged where
+    // it stands) at a node `own` does not fault — reported as the content-model warning.
+    fn mkSoft(own: MkFault[], placed: MkFault[]) -> MkFault[] {
+        let out: MkFault[] = own
+        for (const f of placed) {
+            let seen: boolean = false
+            for (const x of own) { if (x.nid == f.nid) seen = true }
+            for (const x of out) { if (x.nid == f.nid) seen = true }
+            if (!seen && f.code == "E-HTML-PARSER-REPAIR") {
+                out = out.concat([{ nid: f.nid, file: f.file, span: f.span, code: "W-HTML-001", msg: mkSoftMsg(f.msg) }])
+            }
+        }
+        return out
+    }
+
+    fn mkSoftMsg(why: string) -> string {
+        const tail: string = " — the page would not hold the tree written here, so a hole after it (a `show=`, an `if=`, a `${}`) would address the wrong node (SPEC §24.5)"
+        let w: string = why
+        const i: int = w.indexOf(tail)
+        if (i >= 0) w = w.substring(0, i)
+        return "content-model violation (§24.2; W-HTML-001 under the default `html-content-model = warn`, §28.1): this is a branch's content — a `<match>` arm, an `if=` branch or an `<each>` row — which renders where the branch stands, inside an element whose content model does not allow it. Written there directly, " + w + ". Inserted by the branch, the page holds the nesting as written, which no HTML parser would build — restructure it so the parent can hold it"
+    }
+
+    fn mkElemAt(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
         if (e.star) return mkStar(g, sa, file, e, c)
-        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
+        if (e.tag == "each") return mkBranch(g, sa, file, e.kids, c)
         if (e.tag == "match") return mkMatch(g, sa, file, e, c)
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
@@ -24703,25 +24898,16 @@ ${
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
     }
 
-    // s478 — a block-form `<match>` prints as its mount, a `<div>` (lower.scrml
-    // matchView), so the page holds it where a `<div>` is held (SPEC §24.5): judged
-    // as a `<div>` in its context, and each arm's body as a template of its own
-    // inserted into that `<div>` (as an `if=` arm's is).
+    // S478 open-Qs ruling item 13 — §18.0.1 (amended S478): a `<match>` has no
+    // wrapper element ("The dispatched arm's content renders in place of the
+    // `<match>`"), so each arm's content is judged where the `<match>` stands, as
+    // the template of a branch there (an `if=` arm's, an `<each>` row's) — mkBranch:
+    // its own template's §24.5 errors, and the parent's content model (W-HTML-001).
     fn mkMatch(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
-        if (isForeignNs(c.ns) && isForeignBreakout("div", false)) {
-            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: "`<match>` mounts its arms in a `<div>`; " + breakoutMsg("div", c) }]
-        } else if (isHtmlInNs(c.ns, "div")) {
-            out = mkRepair(file, e, "div", c)
-        }
-        let pc: MkCx = c
-        if (out.length > 0) pc = mkRoot(htmlNs(), c.depth)
-        let kns: string = c.ns
-        if (out.length > 0) kns = htmlNs()
-        const kc: MkCx = mkKid(kns, "div", "", pc)
         for (const k of e.kids) {
             const arm: AElem | not = elemOfANode(k)
-            if (arm is given) out = out.concat(mkNodes(g, sa, file, arm.kids, mkRootAt(kc.ns, kc.depth, mkPlaceOf(kc))))
+            if (arm is given) out = out.concat(mkBranch(g, sa, file, arm.kids, c))
         }
         return out
     }
@@ -24747,7 +24933,7 @@ ${
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
                      inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "",
-                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT }
+                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT, carry: c.carry }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -24763,7 +24949,7 @@ ${
                  inSel: t == "select" || (c.inSel && !bound),
                  root: false,
                  tmode: c.tmode && t != "td" && t != "th" && t != "caption",
-                 selT: bound ? "" : c.selT }
+                 selT: bound ? "" : c.selT, carry: c.carry }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
@@ -24926,7 +25112,7 @@ ${
     // `c` one level deeper (the inlined markup stands where the `<*x/>` does).
     fn mkKidOf(c: MkCx) -> MkCx {
         return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT }
+                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT, carry: c.carry }
     }
 
     fn nsWords(ns: string) -> string {
@@ -26169,11 +26355,14 @@ ${
     }
 
     // A handler value is a statement (or a block of them).
-    fn resolveHandler(env: Env, v: AAttrValue, st: AS) -> AS {
+    // s478 (open-Qs ruling item 9): `evName` / `tag` — the event the attribute names and the
+    // element it sits on, which give the listener's event its Appendix H interface (H.6) and
+    // its `target` (eventHandler)
+    fn resolveHandler(env: Env, v: AAttrValue, evName: string, tag: string, st: AS) -> AS {
         return match v {
             .Bare(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
             .Paren(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
-            .Braced(b: b, ev: ev) :> bracedHandler(env, b, ev, st)
+            .Braced(b: b, ev: ev) :> bracedHandler(env, b, ev, evIfaceVia(evName, tag), st)
             .Quoted(v: s) :> st
             .Dur(text: s) :> st
             .NoValue :> st
@@ -26553,7 +26742,7 @@ ${
             } else if (a.name == "show") {
                 st = resolveShow(penv, e, a, st)
             } else if (ev != "") {
-                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, st)
+                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, ev, htmlTagOrNone(env.g, env.file, e.tag), st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.substring(0, 5) == "bind:") {
                 // r2 F6: one element writes back to ONE place — a second
@@ -27180,7 +27369,21 @@ ${
         }
         let es: Sym | not = not
         if (forA is not) {
-            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<match>` without `for=` — §18.0.1: \"`for=Type` — REQUIRED. The enum type the match is over.\" The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<match for=Type on=expr>`")
+            // S478 open-Qs ruling item 12 (a) — §18.0.1 (amended S478): "`for=` MAY be
+            // omitted when `on=` is provably of one enum type; the match is then over
+            // that type." Proven here: `on=@cell`, a cell of this program whose type
+            // (phase A) is an enum. Any other `on=` is not proven by the bootstrap —
+            // refused by name (INTERIM, fail closed); `on=@cell` of a non-enum type is
+            // the `for=` path's own refusal for that type.
+            const ie: RMatchEnum = matchEnumFromOn(env, onA)
+            if (ie.es is given) {
+                es = ie.es
+            } else if (ie.code != "" && !(ie.typeless && fileHasCode(st, env.file, "E-TYPE-UNKNOWN"))) {
+                // fix round 1 of #1945 (review LOW-8): no second report on a `<match>` with no
+                // `on=` (E-MATCH-ON-REQUIRED is its report), nor a "not an enum" on a cell whose
+                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type)
+                st = addDiag(st, env.file, e.span, ie.code, ie.why)
+            }
         } else {
             const tn: string = bareName(forA.value)
             const ts0: Sym | not = typeNamedHere(env, tn)
@@ -27254,6 +27457,41 @@ ${
         const onF: AExpr | not = onX
         if (onF is given) st = addElem(st, e.nid, ElemFact.MMatch({ es: esk, on: onF, arms: arms }))
         return st
+    }
+
+    // S478 (open-Qs ruling item 12) — the enum a `<match>` with no `for=` is over,
+    // read from its `on=` (resolveMatchBlock): `es` when proven, else the code and
+    // message of the refusal.
+    type RMatchEnum:struct = { es: Sym | not, code: string, why: string, typeless: boolean }
+
+    fn fileHasCode(st: AS, file: string, code: string) -> boolean {
+        for (const d of st.diags) { if (d.file == file && d.code == code) return true }
+        return false
+    }
+
+    fn matchEnumFromOn(env: Env, onA: AAttr | not) -> RMatchEnum {
+        const unproven: string = "`<match>` without `for=` — §18.0.1 (amended S478) lets `for=` be omitted when `on=` is provably of one enum type; the bootstrap proves it only for `on=@cell`, a cell of this program declared with an enum type — write `<match for=Type on=…>`"
+        if (onA is not) return { es: not, code: "", why: "", typeless: false }
+        const ox: AExpr | not = valueExpr(onA.value)
+        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        const n: string = atName(ox)
+        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        // an `as=` handle of that name in scope is not the cell
+        for (const h of env.handles) {
+            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        }
+        for (const d of env.g.decls) {
+            if (d.isProgram && d.file == env.file) {
+                for (const fi of d.info.fields) {
+                    if (fi.sym.hint == n) {
+                        const es: Sym | not = isEnumType(env.g.types, fi.ty)
+                        if (es is given) return { es: es, code: "", why: "", typeless: false }
+                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)", typeless: fi.ty is Type.Str }
+                    }
+                }
+            }
+        }
+        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
     }
 
     // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a
@@ -31665,13 +31903,13 @@ ${
         return match c {
             .DateNow :> known(Type.Num)
             .Unreadable :> VType.Unknown
-            .EventRead(member: m) :> eventReadVType(m)
+            .EventRead(member: m, slot: sl) :> eventReadVType(sl)
             .EventCall(member: m2) :> VType.Unknown
         }
     }
 
-    fn eventReadVType(m: string) -> VType {
-        const t: Type | not = eventReadType(m)
+    fn eventReadVType(slot: string) -> VType {
+        const t: Type | not = eventScalar(slot)
         if (t is given) return known(t)
         return VType.Unknown
     }
@@ -45609,6 +45847,18 @@ ${
         }
         if (bound < 0 && ids.length > 0) bound = b.span.start     // fail closed: a suspension this walk does not see
         if (bound < 0) return ps
+        // S478 open-Qs ruling item 11 — §13.2 (amended S478): "A loop … whose body or condition
+        // contains a suspension point counts as after the first `await` for its WHOLE body and
+        // condition, in every iteration" — so a use inside such a loop is judged as after, even
+        // when it comes before the suspension in source order
+        let loops: ASpan[] = []
+        for (const ls of forSpansIn(b)) {
+            let susp = false
+            for (const x of all) {
+                if (x.span.start >= ls.start && x.span.end <= ls.end && (ids.indexOf(x.nid) >= 0 || isAwaitCall(cx, x))) susp = true
+            }
+            if (susp) loops = loops.concat([ls])
+        }
         let notRead: int[] = []
         for (const x of all) {
             const c: AExpr | not = calleeOf(x.k)
@@ -45624,12 +45874,38 @@ ${
         let st: AS = ps.st
         let seen: int[] = []
         for (const x of all) {
-            if (seen.indexOf(x.nid) < 0 && x.span.start >= bound && plainObj.indexOf(x.nid) < 0 && localSymOfName(cx.t, x.nid) == evs) {
+            if (seen.indexOf(x.nid) < 0 && (x.span.start >= bound || inSpans(loops, x.span.start)) && plainObj.indexOf(x.nid) < 0 && localSymOfName(cx.t, x.nid) == evs) {
                 seen = seen.concat([x.nid])
-                st = addDiag(st, cx.file, x.span, "E-EVENT-CONTROL-AFTER-AWAIT", "`" + exprName(x) + "` — the handler's event — is used after the handler's first `await` other than by a plain read of a non-control property (§13.2): by then the browser has performed the event's default action and propagated it, so a control call or any other use of the event has no effect. Call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows")
+                let inLoop: string = ""
+                if (x.span.start < bound) inLoop = " (it stands in a loop that suspends: from the second iteration on it runs after the previous iteration's `await`, so the whole loop counts as after — §13.2, amended S478)"
+                st = addDiag(st, cx.file, x.span, "E-EVENT-CONTROL-AFTER-AWAIT", "`" + exprName(x) + "` — the handler's event — is used after the handler's first `await` other than by a plain read of a non-control property" + inLoop + " (§13.2): by then the browser has performed the event's default action and propagated it, so a control call or any other use of the event has no effect. Call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows")
             }
         }
         return { st: st, plan: ps.plan }
+    }
+
+    // S478 (open-Qs ruling item 11): the spans of every loop statement in `b`, at any depth.
+    fn forSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const isFor: boolean = match k {
+                .For(f: f) :> true
+                // no-default-arm: one question of a statement — is it a loop
+                _ :> false
+            }
+            if (isFor) out = out.concat([s.span])
+            for (const nb of nestedBlocks(s)) { out = out.concat(forSpansIn(nb)) }
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(forSpansIn(kb)) }
+        }
+        return out
+    }
+
+    fn inSpans(ss: ASpan[], at: int) -> boolean {
+        for (const sp of ss) {
+            if (at >= sp.start && at < sp.end) return true
+        }
+        return false
     }
 
     // A call that waits wherever it stands (§13.2): a client call of a server function, or of a
@@ -48795,6 +49071,11 @@ ${
                 let topic: string = ""
                 let sawTopic = false
                 let reconnect: int = 2000
+                // §38.4.3: "the `<channel>` value, else the `<program>` value, else the default"
+                const maxFrame: int = chProgramLimit(g, "channel-max-frame", 65536)
+                let rate: int = chProgramLimit(g, "channel-frame-rate", 50)
+                let burst: int = chProgramLimit(g, "channel-frame-burst", 100)
+                let maxSubs: int = chProgramLimit(g, "channel-max-subscribers", 1000)
                 let watches: string = ""
                 let key: string = ""
                 let hooks: AAttr[] = []
@@ -48834,6 +49115,17 @@ ${
                         } else {
                             diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reconnect=` on `<channel>` is a non-negative integer number of milliseconds written bare (`reconnect=2000`, §38.3, §38.3.1); the bootstrap does not fall back silently on any other value (INTERIM, g-boot-channel-s478)")])
                         }
+                    } else if (a.name == "frame-rate" || a.name == "frame-burst" || a.name == "max-subscribers") {
+                        const lv: int = chLimit(a.value, a.name)
+                        if (lv < 0) {
+                            diags = diags.concat([mkDiag(f.path, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<channel " + a.name + "=…>", a.name))])
+                        } else if (a.name == "frame-rate") {
+                            rate = lv
+                        } else if (a.name == "frame-burst") {
+                            burst = lv
+                        } else {
+                            maxSubs = lv
+                        }
                     } else if (a.name == "watches") {
                         watches = chBareName(a.value)
                         if (watches == "") diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`watches=` names a table as a static bare identifier (§38.13.1 — `watches=orders`)")])
@@ -48845,7 +49137,7 @@ ${
                     } else if (a.name == "onclient:open" || a.name == "onclient:close" || a.name == "onclient:error" || a.name == "onserver:open" || a.name == "onserver:message" || a.name == "onserver:close") {
                         hooks = hooks.concat([a])
                     } else {
-                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<channel>` — a `<channel>` opener carries the §38.3 attributes (`name`, `topic`, `auth`, `reconnect`, `watches`, `key`, `onserver:*`, `onclient:*`) only")])
+                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<channel>` — a `<channel>` opener carries the §38.3 attributes (`name`, `topic`, `auth`, `reconnect`, `frame-rate`, `frame-burst`, `max-subscribers`, `watches`, `key`, `onserver:*`, `onclient:*`) only")])
                     }
                 }
                 if (!sawName) diags = diags.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-001", "`<channel>` has no `name=` — the name is required: it is the channel's identity and its WebSocket route `/_scrml_ws/<name>` (§38.3)")])
@@ -48907,7 +49199,8 @@ ${
                     }
                 }
                 if (!hasErrorDiag(diags.slice(d0)) && ch.ctx == "program" && f.path == g.entry && name != "") {
-                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches }])
+                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches,
+                                      maxFrame: maxFrame, rate: rate, burst: burst, maxSubs: maxSubs }])
                 }
             }
         }
@@ -49063,6 +49356,93 @@ ${
             i = i + 1
         }
         return n
+    }
+
+    // §38.4.3 (S478 open-Qs ruling items 42, 49): a channel bound's largest legal value by its
+    // attribute name (`<channel>` or `<program>` spelling); 0 for any other name.
+    fn chLimitMax(name: string) -> int {
+        return match name {
+            "channel-max-frame" :> 16777216
+            "frame-rate" :> 1000000
+            "channel-frame-rate" :> 1000000
+            "frame-burst" :> 1000000
+            "channel-frame-burst" :> 1000000
+            "max-subscribers" :> 1000000
+            "channel-max-subscribers" :> 1000000
+            _ :> 0
+        }
+    }
+
+    // §38.4.3 (S478 fix r1, LOW-9): a bound's smallest legal value. A frame bound below 256 bytes
+    // admits no useful op frame (the envelope `{"__type":"__sync","__key":…,"__op":…,"__val":…}`
+    // alone is ~50 bytes), so it would compile a channel that closes its every sender (1009).
+    fn chLimitMin(name: string) -> int {
+        if (name == "channel-max-frame") return 256
+        return 1
+    }
+
+    fn chLimitMsg(at: string, name: string) -> string {
+        return "`" + at + "` is a bare positive integer literal from " + chLimitMin(name) + " to " + chLimitMax(name) + " (§38.4.3) — a channel bound has no \"off\" and no silent fallback: write it bare, e.g. `" + name + "=" + chLimitExample(name) + "`"
+    }
+
+    fn chLimitExample(name: string) -> string {
+        if (name == "channel-max-frame") return "65536"
+        if (name == "frame-rate" || name == "channel-frame-rate") return "50"
+        if (name == "frame-burst" || name == "channel-frame-burst") return "100"
+        return "1000"
+    }
+
+    // A bound's value: a bare integer literal of digits only in [chLimitMin, chLimitMax] of the
+    // bound `name`, else -1.
+    fn chLimit(v: AAttrValue, name: string) -> int {
+        const max: int = chLimitMax(name)
+        const min: int = chLimitMin(name)
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+        if (e is not) return -1
+        const raw: string = match e.k {
+            .Num(raw: r) :> r
+            // no-default-arm: one question of an expression — is it a number literal
+            _ :> ""
+        }
+        if (raw == "" || raw.length > 9) return -1
+        let n: int = 0
+        let i = 0
+        while (i < raw.length) {
+            const c: int = raw.charCodeAt(i)
+            if (c < 48 || c > 57) return -1
+            n = n * 10 + (c - 48)
+            i = i + 1
+        }
+        if (n < min || n > max) return -1
+        return n
+    }
+
+    // The entry file's top-level `<program>`'s value for the bound `name`, else `dflt` (an
+    // illegal value is E-CHANNEL-LIMIT-INVALID in topProgramAttrDiags; the default stands here).
+    fn chProgramLimit(g: Globals, name: string, dflt: int) -> int {
+        for (const f of g.files) {
+            if (f.path == g.entry) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const a of p.attrs) {
+                            if (a.name == name) {
+                                const v: int = chLimit(a.value, name)
+                                if (v > 0) return v
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return dflt
     }
 
     // The call expression a hook attribute holds (`onclient:open=onOpen(e)`), else `not`.

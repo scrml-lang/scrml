@@ -65,6 +65,7 @@ ${
             "W-CHANNEL-WATCHES-NO-PK" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
             "W-FOREIGN-001" :> Severity.Warning
+            "W-HTML-001" :> Severity.Warning
             "W-IMPORT-001" :> Severity.Warning
             "W-KEY-001" :> Severity.Warning
             "W-LIFECYCLE-010" :> Severity.Warning
@@ -123,6 +124,7 @@ ${
             "E-CHANNEL-007" :> Severity.Error
             "E-CHANNEL-HANDLER-SHADOW" :> Severity.Error
             "E-CHANNEL-INSIDE-PAGE" :> Severity.Error
+            "E-CHANNEL-LIMIT-INVALID" :> Severity.Error
             "E-CHANNEL-OUTSIDE-PROGRAM" :> Severity.Error
             "E-CHANNEL-SERVER-CELL-READ" :> Severity.Error
             "E-CHANNEL-SHARED-MODIFIER" :> Severity.Error

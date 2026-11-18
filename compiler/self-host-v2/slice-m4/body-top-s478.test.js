@@ -141,10 +141,11 @@ describe("§4.17 (S462) — `<script>` / `<style>` in a body-top logic block is 
     expect(c).not.toContain("E-PARSE-PROGRAM");
   });
 
-  test("any other markup there is refused by name (not in the bootstrap), never misread", () => {
+  test("any other markup there renders nothing: E-MARKUP-STATEMENT-NOT-RENDERED (S478 open-Qs ruling item 1), never misread", () => {
     // (s478 markup-in-logic: the `lift` is a statement now, so it takes its `;`, §7.2.2 rule 2)
-    expect(codes(run(B("lift <noscript>n</noscript>;")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(run(B("if (@f) { <p>waiting</p> }")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // §17.3 amended S478: a `lift` of markup / a single-element branch in a body-top `${ … }` renders nothing
+    expect(codes(run(B("lift <noscript>n</noscript>;")))).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
+    expect(codes(run(B("if (@f) { <p>waiting</p> }")))).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
   });
 });
 

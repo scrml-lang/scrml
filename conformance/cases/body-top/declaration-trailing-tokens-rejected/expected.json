@@ -1,19 +1,32 @@
 {
   "id": "body-top-declaration-trailing-tokens-rejected",
-  "description": "A `type` alias covers only its type expression: the words after it on its line are E-UNQUOTED-DISPLAY-TEXT (one per line), never silently dropped; the code line after them still compiles.",
+  "description": "A `type` alias covers only its type expression; the words after it are a second token run on the line after a complete statement, so the alias owes a `;`: E-STMT-MISSING-SEMICOLON after `number` and after `\"b\"` (§7.2.2 rule 7), never silently dropped.",
   "language-version": "1.0",
-  "spec": "§40.8, §7.5",
+  "spec": "§7.2.2, §40.8, §7.5",
   "source-test": "compiler/tests/unit/s441-review-r5.test.js",
-  "rationale": "§40.8 S441 coverage bullet (round 5): a statement covers only the tokens it compiles, measured by its own grammar. Round 4 credited the whole line to the type declaration, and `extra` vanished.",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 2 (g-boot-body-top-trailing-tokens-vs-semicolon-s478) — re-pinned from E-UNQUOTED-DISPLAY-TEXT ×2",
+  "rationale": "§7.2.2 (S469) governs, superseding §40.8's S441 round-5 line reading (\"The tokens after the end, on the statement's own line, are `E-UNQUOTED-DISPLAY-TEXT`\"): a line break is whitespace (rule 4), and a second token run after a complete statement is E-STMT-MISSING-SEMICOLON after the first (rule 7). The bytes are still covered by an error, so §40.8's coverage invariant holds. The follow-on parse errors on `extra` / `more words` are a separate cascade, not asserted.",
   "expect": {
     "codes": [
-      "E-UNQUOTED-DISPLAY-TEXT"
+      "E-STMT-MISSING-SEMICOLON"
     ],
     "notCodes": [
       "E-INTERNAL-BODY-TOP-DROPPED"
     ],
     "codeCounts": {
-      "E-UNQUOTED-DISPLAY-TEXT": 2
+      "E-STMT-MISSING-SEMICOLON": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-dpa063-termination-unbuilt-impl1-legacy",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-STMT-MISSING-SEMICOLON' fired 0 time(s), expected exactly 2",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=2",
+          "missing:E-STMT-MISSING-SEMICOLON"
+        ]
+      }
     }
   }
 }

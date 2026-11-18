@@ -1529,7 +1529,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   const byChannel = new Map();
   for (const ch of channels) byChannel.set(CHANNEL_PREFIX + ch.name, ch);
-  const websocket = channelSockets(host);
+  const websocket = channelSockets(host, channels);
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))).concat(channels.map((ch) => ({ path: CHANNEL_PREFIX + ch.name, method: "GET" }))),
     websocket,
@@ -1607,8 +1607,8 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   RE-ENCODED from the decoded payload … The server holds no cell value (§38.4), so it SHALL
 //   NOT be relied on for a check that needs one" — the length bound after an edit and a
 //   `rule=` edge are each receiver's checks (runtime.js `channel`).
-// Fail closed where the SPEC is silent (owner questions, g-boot-channel-s478): a frame
-// is decoded STRICTLY — text only, at most CHANNEL_MAX_FRAME characters, a JSON object
+// Strict decode + close (§38.4.3, S478 open-Qs ruling item 41 — formerly owner question 1 of g-boot-channel-s478): a frame
+// is decoded STRICTLY — text only, at most the channel's frame bound in UTF-8 bytes (§38.4.3), a JSON object
 // of exactly `__type` / `__key` / `__op` / `__val`, `__type` "__sync", `__key` a cell the
 // channel declares, `__op` one of the ops that cell syncs (`desc.cells[i].ops`), `__val`
 // decoding canonically against that cell's table (`replace` / `transition`), its element
@@ -1617,14 +1617,71 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 // other frame closes the connection (1003 / 1007 / 1008 / 1009) and is relayed to no
 // one. Each channel publishes on its own topic key (`[name, topic]`), so two channels
 // naming one `topic=` never exchange frames.
+//   §38.4.3 (S478 open-Qs ruling (user-voice), items 41–44 and 49): "The relay SHALL decode a
+//   client's frame strictly … and close the sender's connection" (1003 / 1007 / 1008 / 1009);
+//   "A channel's topic is scoped to its channel"; and the three bounds, each a §38 default with
+//   an override the compiler resolves (`desc.limits`): a frame is at most `maxFrame` bytes of
+//   UTF-8 (default 65 536; 1009), a connection's frames pass a token bucket of `burst` tokens
+//   refilled at `rate` per second (defaults 100 / 50; "a frame that finds less than one token
+//   … closes the connection (1008)"), and a channel admits at most `maxSubs` subscribers per
+//   server process ("a further upgrade SHALL be answered `503`"; default 1000).
 // ---------------------------------------------------------------------------
 const CHANNEL_PREFIX = "/_scrml_ws/";
 export const CHANNEL_MAX_FRAME = 65536;
+export const CHANNEL_FRAME_RATE = 50;
+export const CHANNEL_FRAME_BURST = 100;
+export const CHANNEL_MAX_SUBSCRIBERS = 1000;
+
+// A bound the compiler resolved (a safe integer ≥ 1), else the §38.4.3 default — never "no bound".
+function channelBound(v, dflt) {
+  return Number.isSafeInteger(v) && v >= 1 ? v : dflt;
+}
 
 export function channel(desc) {
   const cells = new Map();
   for (const c of desc.cells) cells.set(c.key, { table: c.table, ops: Array.isArray(c.ops) ? c.ops : [] });
-  return { name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells };
+  const lim = desc.limits !== null && typeof desc.limits === "object" ? desc.limits : {};
+  return {
+    name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells,
+    maxFrame: channelBound(lim.maxFrame, CHANNEL_MAX_FRAME),
+    rate: channelBound(lim.rate, CHANNEL_FRAME_RATE),
+    burst: channelBound(lim.burst, CHANNEL_FRAME_BURST),
+    maxSubs: channelBound(lim.maxSubscribers, CHANNEL_MAX_SUBSCRIBERS),
+    subs: 0,
+  };
+}
+
+// The UTF-8 byte length of `s`, counted only as far as `max + 1` (a frame's size bound).
+function utf8Over(s, max) {
+  if (s.length > max) return true;            // every UTF-16 unit is at least one byte
+  if (s.length * 3 <= max) return false;      // and at most three
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+    if (n > max) return true;
+  }
+  return false;
+}
+
+// §38.4.3: "each connection holds a bucket of `burst` tokens, refilled at `rate` tokens per
+// second up to `burst`; each frame it sends spends one token, before it is decoded". `now` ms.
+function takeToken(data, ch, now) {
+  let b = data.scrmlBucket;
+  if (b === undefined) { b = { tokens: ch.burst, at: now }; data.scrmlBucket = b; }
+  const dt = now - b.at;
+  if (dt > 0) b.tokens = Math.min(ch.burst, b.tokens + (dt * ch.rate) / 1000);
+  b.at = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+
+function clockOf(host) {
+  return host !== null && typeof host === "object" && typeof host.now === "function" ? () => host.now() : () => performance.now();
 }
 
 function originOk(request) {
@@ -1654,12 +1711,30 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
   if (request.method !== "GET") return jsonResponse(host, 405, FIXED[405], { Allow: "GET" });
   const up = (request.headers.get("Upgrade") ?? "").toLowerCase();
   if (up !== "websocket") return jsonResponse(host, 426, { error: "Upgrade Required" }, { Upgrade: "websocket" });
+  // §38.4.3: "A channel admits at most `max-subscribers` open connections per server process; a
+  // further upgrade SHALL be answered `503`" — after the 403 / 404 / 405 / 426 refusals.
+  if (ch.subs >= ch.maxSubs) return jsonResponse(host, 503, FIXED[503]);
   if (upgrader === null || upgrader === undefined || typeof upgrader.upgrade !== "function") {
     logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the host passed no WebSocket upgrader (Bun.serve's server, as fetch's second argument)`);
     return jsonResponse(host, 500, FIXED[500]);
   }
-  if (upgrader.upgrade(request, { data: { scrmlChannel: ch, scrmlSockets: websocket } })) return undefined;
+  // §38.4.3 (S478 fix r1, LOW-4): the subscriber's place is RESERVED before the upgrade (the
+  // check above and this count are one synchronous step), so "answered `503` before the
+  // upgrade" holds for every racing upgrade; a failed upgrade, and the socket's `close`,
+  // release it.
+  ch.subs += 1;
+  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true };
+  let ok = false;
+  try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data); }
+  if (ok) return undefined;
   return jsonResponse(host, 400, FIXED[400]);
+}
+
+// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once.
+function releaseSub(data) {
+  if (data.scrmlCounted !== true) return;
+  data.scrmlCounted = false;
+  data.scrmlChannel.subs -= 1;
 }
 
 function closeSocket(host, ws, code, why) {
@@ -1670,7 +1745,7 @@ function closeSocket(host, ws, code, why) {
 // The frame a client sent, or why it is refused ({ code, why }).
 function channelFrame(ch, raw) {
   if (typeof raw !== "string") return { code: 1003, why: "a non-text frame" };
-  if (raw.length > CHANNEL_MAX_FRAME) return { code: 1009, why: "a frame over " + CHANNEL_MAX_FRAME + " characters" };
+  if (utf8Over(raw, ch.maxFrame)) return { code: 1009, why: "a frame over " + ch.maxFrame + " bytes" };
   let v;
   try { v = JSON.parse(raw); } catch { return { code: 1007, why: "a frame that is not JSON" }; }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return { code: 1008, why: "a frame that is not a JSON object" };
@@ -1713,20 +1788,32 @@ function channelFrame(ch, raw) {
   return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __op: op, __val: wire }) };
 }
 
-function channelSockets(host) {
+// `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
+// LOW-5), so no more than the bound (+1) is ever buffered for one frame. A frame one byte over a
+// channel's bound reaches `channelFrame` and is closed 1009; a larger one is dropped by Bun
+// before it is read in full — the TCP connection is closed with no close frame (the client sees
+// 1006). §38.4.3 admits both ("the host MAY drop it unread"); a conforming client sends neither.
+function channelSockets(host, channels = []) {
+  let most = CHANNEL_MAX_FRAME;
+  for (const ch of channels) if (ch.maxFrame > most) most = ch.maxFrame;
+  const now = clockOf(host);
   return {
-    maxPayloadLength: CHANNEL_MAX_FRAME * 4,
+    maxPayloadLength: most + 1,
     open(ws) {
+      // the place was reserved at the upgrade (upgradeChannel) — the cap needs no check here
       ws.subscribe(ws.data.scrmlChannel.key);
     },
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
+      if (!takeToken(ws.data, ch, now())) return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst})`);
       const f = channelFrame(ch, raw);
       if (f.text === undefined) return closeSocket(host, ws, f.code, f.why);
       ws.publish(ch.key, f.text);
     },
     close(ws) {
-      try { ws.unsubscribe(ws.data.scrmlChannel.key); } catch { /* the socket is gone */ }
+      const ch = ws.data.scrmlChannel;
+      releaseSub(ws.data);
+      try { ws.unsubscribe(ch.key); } catch { /* the socket is gone */ }
     },
   };
 }

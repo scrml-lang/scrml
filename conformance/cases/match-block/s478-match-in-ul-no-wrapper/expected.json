@@ -1,0 +1,42 @@
+{
+  "id": "match-block-s478-match-in-ul-no-wrapper",
+  "description": "§18.0.1 (amended S478) — a block-form `<match>` inside a `<ul>` renders its dispatched arm's `<li>` directly in the `<ul>`, with no wrapper element (`ul > li`, never `ul > div > li`). `for=` is omitted: `on=@phase` is provably of the one enum type `Phase`. A click moves the subject; the other arm's `<li>` takes its place.",
+  "language-version": "1.0",
+  "spec": "§18.0.1",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" items 12 (`for=` may be omitted when `on=` is provably of one enum type) and 13 (\"lower it without a wrapper\")",
+  "rationale": "§18.0.1 amended S478: \"The dispatched arm's content renders in place of the `<match>`, with no wrapper element around it\", so the `<ul>` content model holds; and \"`for=` MAY be omitted when `on=` is provably of one enum type\". impl#1 still mounts the arms in a `<div data-scrml-match-mount>` (g-impl1-match-mount-wrapper-div-s478).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      {
+        "click": "#close"
+      }
+    ],
+    "state": {
+      "phase": "Closed"
+    },
+    "domAnchored": [
+      {
+        "selector": "#list > #closed",
+        "count": 1
+      },
+      {
+        "selector": "#list > div",
+        "count": 0
+      },
+      {
+        "selector": "#open",
+        "count": 0
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-mount-wrapper-div-s478",
+      "fails": {
+        "runtime": "sha256:dc2d928069843a6e"
+      }
+    }
+  }
+}

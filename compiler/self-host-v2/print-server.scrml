@@ -541,6 +541,13 @@ ${
                 { key: "name", value: jstr(ch.name) },
                 { key: "topic", value: jstr(ch.topic) },
                 { key: "cells", value: JsExpr.JArray(cells) },
+                // §38.4.3 (S478 open-Qs ruling items 42, 49): the relay's bounds, resolved (analyze channelPass)
+                { key: "limits", value: JsExpr.JObject([
+                    { key: "maxFrame", value: jnum(ch.maxFrame) },
+                    { key: "rate", value: jnum(ch.rate) },
+                    { key: "burst", value: jnum(ch.burst) },
+                    { key: "maxSubscribers", value: jnum(ch.maxSubs) },
+                ]) },
             ]))])
             i = i + 1
         }
