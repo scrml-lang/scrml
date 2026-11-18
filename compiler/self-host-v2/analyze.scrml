@@ -42476,7 +42476,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
             }
         }
         return st

@@ -1,0 +1,55 @@
+{
+  "id": "reactive-mixed-recursion-client-caller-rt",
+  "description": "§31.2 + §12.2 Trigger 5, the review-#1966 probe: a plain `step` and a db-touching `down` call each other, and the pending cell's initializer ALSO calls `step`. `step` has a client-classified caller, so it stays client-placed: its call of `down` is a client call (handled, §19.9.10), and `down`'s call of `step` runs `step` in place on the server, where its call of `down` is server→server. step(5) → 1 + down(4) → 1 + step(3) → 2 + down(2) → 2 + step(1) → 3 + down(0) → 3 + u.id = 4. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§31.2, §12.2, §13.4, §19.9.10",
+  "provenance": "lane:s479-mixed-recursion (g-boot-mixed-recursion-escalation-s479, filed by review #1966; probe ~/.cache/scrml/review/s479-1966/probes/rec/mixed2, made to reach the base case).",
+  "rationale": "§31.2 (S479): 'A cycle of calls between functions … is recursion, not a dependency cycle. The compiler SHALL NOT reject it.' §12.2 Trigger 5: 'A function with at least one client-classified caller SHALL remain ambient (client-classified).' §19.9.10 scope item 2: the call is evaluated on the client 'in a lifecycle body … or a `<request>` body' (a pending cell's load is one, §13.9.2); 'A call whose caller is itself server-placed runs in the same server handler: the callee is inlined (§13.4)'.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "v": 4
+    },
+    "domAnchored": [
+      {
+        "selector": "#v",
+        "text": "4"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:f1c3f3c7ba5f1bd7"
+      }
+    }
+  }
+}
