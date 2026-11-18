@@ -23,11 +23,11 @@
 // printer emits ONE module-level `const` per constant its artifact's code reads,
 // transitively (print.scrml constsReadIn) — so a value reaches only the artifact
 // whose code reads it. (Review #1617 MED-1: the first cut inlined each read,
-// re-lowering initializers recursively — exponential in constant depth.) Every other initializer (a call, a cell read, a
-// query, a tape / struct literal, …) runs at module initialization, where a
-// file-scope binding's home (client / server / both) is not settled by the
-// SPEC (§12 places functions): refused BY NAME. A file-scope `let` (§7.6
-// admits it — module-level mutable state, same silence) is refused by name.
+// re-lowering initializers recursively — exponential in constant depth.) s479
+// (s479-file-scope-init, §7.6 S478 rule (b)): a non-constant initializer (a call, a
+// struct / payload-variant literal, an index) is evaluated once at module
+// initialization in each artifact that reads it, and a file-scope `let` is built —
+// see file-scope-init-s479.test.js. What is still refused by name is listed below.
 //
 // RED ON MAIN: before this change every positive here was E-PARSE-ITEM
 // ("expected `import`, `type`, `function` or `fn` in a logic block") and every
@@ -275,17 +275,26 @@ describe("collisions and writes", () => {
   });
 });
 
-describe("initializers: the compile-time-constant class only — everything else refused BY NAME", () => {
-  const refused = {
+describe("initializers: what the bootstrap evaluates at module initialization (s479: §7.6 S478 rule (b)) — the rest refused BY NAME", () => {
+  // s479 (s479-file-scope-init): §7.6 rule (b) — "Any other non-constant initializer is evaluated
+  // at module initialization, once … in EVERY artifact that reads the binding" (file-scope-init-s479.test.js)
+  const admitted = {
     "a call": P("    const A = f();", "    fn f() -> int { return 1; }", "<p>${A}</p>"),
-    "a cell read": P("    const A = @n;", "", "<p>${A}</p>"),
-    "a tape literal": P("    const A = [1, 2];"),
     "a struct literal": P("    const A: Pt = { x: 1 };", "    type Pt:struct = { x: int }"),
     "an index read": P("    const S = \"ab\";\n    const A = S[0];"),
+    "a payload-variant value": P("    const S: Shape = Shape.Circle(1);", "    type Shape:enum = { Circle(r: int), Dot }"),
+  };
+  for (const [what, src] of Object.entries(admitted)) {
+    test(`${what}: admitted (s479), evaluated at module initialization`, () => {
+      expect(codes(one(src))).toEqual([]);
+    });
+  }
+  const refused = {
+    "a cell read": P("    const A = @n;", "", "<p>${A}</p>"),
+    "a tape literal with no written type (its type is not known to the binder — write it)": P("    const A = [1, 2];"),
     "a function value": P("    const A = f;", "    fn f() -> int { return 1; }"),
     "a value loop": P("    const xs = for (const i of 0..3) { lift i; };"),
     "an untyped `not`": P("    const A = not;"),
-    "a payload-variant value": P("    const S: Shape = Shape.Circle(1);", "    type Shape:enum = { Circle(r: int), Dot }"),
     // not file-scope constants at all — named, not read as a malformed `const`
     "a derived cell `const <d> = …` (§6.6)": P("    const <d> = @n * 2;"),
     "a component `const Card = <…>` (§21.2 Form 2)": P("    export const Card = <div>hi</div>;"),
@@ -308,8 +317,7 @@ describe("initializers: the compile-time-constant class only — everything else
   test("a cell read is refused citing §6.6.2's snapshot meaning (and the derived-cell spelling), not the placement silence", () => {
     const r = one(P("    const A = @n;", "", "<p>${A}</p>"));
     expect(r.diags[0].message).toContain("§6.6.2");
-    const q = one(P("    const A = f();", "    fn f() -> int { return 1; }", "<p>${A}</p>"));
-    expect(q.diags[0].message).toContain("evaluated once at module initialization in every artifact");   // S478 ruling item 59 (b)
+    expect(r.diags[0].message).toContain("module initialization runs before the program instance exists");   // s479
   });
 
   test("a read of a constant initialized LATER (or of itself) is E-SCOPE-001 — no cycle, no uninitialized read", () => {
@@ -332,14 +340,13 @@ describe("the statement form (§7.2.2) and `let` (§7.6)", () => {
   test("a constant is a statement: no `;` is E-STMT-MISSING-SEMICOLON", () => {
     expect(codes(one(P("    const A = 1", "", "<p>${A}</p>")))).toEqual(["E-STMT-MISSING-SEMICOLON"]);
   });
-  test("a file-scope `let` is refused BY NAME (E-BOOTSTRAP-UNSUPPORTED) — never read as a constant, never E-PARSE-ITEM", () => {
-    const r = one(P("    let A = 1;", "", "<p>x</p>"));
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("§7.6");
-    expect(codes(one(P("    export let A = 1;", "", "<p>x</p>")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s479 (s479-file-scope-init): a file-scope `let` is built — §7.6 rule (c), per-artifact state
+  // (file-scope-init-s479.test.js); it is no longer refused by name.
+  test("a file-scope `let` is admitted (s479) — never read as a constant, never E-PARSE-ITEM", () => {
+    expect(codes(one(P("    let A = 1;", "", "<p>x</p>")))).toEqual([]);
+    expect(codes(one(P("    export let A = 1;", "", "<p>x</p>")))).toEqual([]);
   });
-  test("what follows a refused `let` still parses (the statement is read, not skipped to the line end)", () => {
-    const r = one(P("    let A = 1; const B = 2;", "", "<p>${B}</p>"));
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("what follows a file-scope `let` parses (the statement is read, not skipped to the line end)", () => {
+    expect(codes(one(P("    let A = 1; const B = 2;", "", "<p>${B}</p>")))).toEqual([]);
   });
 });

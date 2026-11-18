@@ -170,13 +170,89 @@ ${
         return out
     }
 
+    // s479: a READ (`Local(sym)`, a place rooted at it) or a WRITE (a file-scope `let`'s
+    // `Assign`) — an artifact that only writes the binding still declares it.
     fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
         let out: int[] = acc
         for (const n of allNodes(root)) {
-            const id: int = localReadOf(n)
+            let id: int = localReadOf(n)
+            if (id < 0) id = assignedLocalOf(n)
             if (id >= 0 && !hasInt(out, id) && isConstSym(p, id)) out = out.concat([id])
         }
         return out
+    }
+
+    fn assignedLocalOf(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> stmtAssignedLocal(s)
+            .NExpr(e: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn stmtAssignedLocal(s: Stmt) -> int {
+        return match s {
+            .Assign(local: l) :> l.id
+            .Let(sym: x) :> -1
+            .Write(cap: x) :> -1
+            .Commit(writes: x) :> -1
+            .If(cond: x) :> -1
+            .Return(e: x) :> -1
+            .Eval(e: x) :> -1
+            .Suspend(bind: x) :> -1
+            .ResetSurface(of: x) :> -1
+            .Defer(body: x) :> -1
+            .Unpersist(decl: x) :> -1
+            .Attempt(result: x) :> -1
+            .Fail(err: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
+            .Loop(label: x) :> -1
+            .Break(target: x) :> -1
+            .Continue(target: x) :> -1
+            .Gather(g: x) :> -1
+            .Lift(into: x) :> -1
+            .LocalFn(f: x) :> -1
+        }
+    }
+
+    // s479 — `roots`' functions, closed over calls AND over the file-scope bindings they
+    // read: a binding an artifact carries evaluates its initializer there at module
+    // initialization (§7.6 S478 rule (b)), so the functions that initializer calls are that
+    // artifact's code too.
+    export fn fnClosureThroughConsts(p: CoreProgram, roots: Node[]) -> int[] {
+        let start: int[] = []
+        for (const r of roots) { start = start.concat(fnCalleesIn(p, r)) }
+        let fns: int[] = fnClosure(p, start)
+        if (p.consts.length == 0) return fns
+        let more = true
+        while (more) {
+            more = false
+            let rs: Node[] = roots
+            for (const f of p.fns) { if (hasInt(fns, f.sym.id)) rs = rs.concat([Node.NFn(f)]) }
+            let add: int[] = []
+            for (const k of constsReadIn(p, rs)) {
+                for (const c of fnCalleesIn(p, Node.NExpr(k.init))) {
+                    if (!hasInt(fns, c) && !hasInt(add, c)) add = add.concat([c])
+                }
+            }
+            if (add.length > 0) {
+                fns = fnClosure(p, fns.concat(add))
+                more = true
+            }
+        }
+        return fns
     }
 
     fn isConstSym(p: CoreProgram, id: int) -> boolean {
@@ -184,11 +260,20 @@ ${
         return false
     }
 
-    // One module-level `const` per constant, in order (printed before any code that reads one).
+    // One module-level binding per file-scope `const` / `let`, in order (printed before any
+    // code that reads one): its initializer runs here, once, at module initialization
+    // (§7.6 S478 rule (b) — this artifact's own copy). A `let` is printed `let` (rule (c):
+    // per-artifact state).
     export fn constStmts(ctx: Ctx, ks: CoreConst[]) -> JsStmt[] {
         if (ks.length == 0) return []
-        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("file-scope constants (§7.6)")]
-        for (const k of ks) { out = out.concat([JsStmt.SConst(symName(ctx, k.sym), exprJs(ctx, k.init))]) }
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("file-scope bindings (§7.6) — evaluated once, at module initialization, in this artifact")]
+        for (const k of ks) {
+            if (k.mutable) {
+                out = out.concat([JsStmt.SLet(symName(ctx, k.sym), exprJs(ctx, k.init))])
+            } else {
+                out = out.concat([JsStmt.SConst(symName(ctx, k.sym), exprJs(ctx, k.init))])
+            }
+        }
         return out
     }
     export fn symNameOf(ctx: Ctx, s: Sym) -> string { return symName(ctx, s) }
@@ -5064,13 +5149,15 @@ ${
     // value, or through other functions — is in the server artifact and not
     // here. One the client also reaches is printed in both (§13.4 "TWO
     // representations"); one nobody reaches stays here (dead either way).
+    // s479: both closures follow the file-scope bindings their code reads into the functions
+    // those bindings' initializers call (fnClosureThroughConsts).
     fn reachedOnlyByServer(p: CoreProgram) -> int[] {
-        let croots: int[] = []
-        for (const d of p.decls) { croots = croots.concat(fnCalleesIn(p, Node.NDecl(d))) }
-        const client: int[] = fnClosure(p, croots)
-        let sroots: int[] = []
-        for (const sf of p.server) { sroots = sroots.concat(fnCalleesIn(p, Node.NServerFn(sf))) }
-        const server: int[] = fnClosure(p, sroots)
+        let croots: Node[] = []
+        for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]) }
+        const client: int[] = fnClosureThroughConsts(p, croots)
+        let sroots: Node[] = []
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]) }
+        const server: int[] = fnClosureThroughConsts(p, sroots)
         let out: int[] = []
         for (const id of server) { if (!hasInt(client, id)) out = out.concat([id]) }
         return out

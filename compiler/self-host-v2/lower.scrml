@@ -725,7 +725,7 @@ ${
     fn coreConsts(t: Tables) -> CoreConst[] {
         let out: CoreConst[] = []
         for (const k of t.consts) {
-            if (k.ok) out = out.concat([{ sym: k.sym, init: lowerExpr({ t: t, file: k.file, subst: not, snap: not, rows: [] }, k.init) }])
+            if (k.ok) out = out.concat([{ sym: k.sym, init: lowerExpr({ t: t, file: k.file, subst: not, snap: not, rows: [] }, k.init), mutable: k.mutable }])
         }
         return out
     }

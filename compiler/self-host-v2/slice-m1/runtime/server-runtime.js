@@ -1967,6 +1967,58 @@ function isJsonMediaType(ct) {
 // review #1916 L6: a request-supplied name echoed in an error message is clipped
 const clip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
 
+// S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one
+// JSON object — the body itself or any object nested in it — names the same key twice is a
+// decode failure — `::Malformed` … Keys are compared after JSON string unescaping, so `"tag"`
+// and `"t\u0061g"` are the same key." `JSON.parse` keeps the last of a repeated name silently
+// (review #1940 (4): `{"tag":"Unit","tag":"I","n":3}` ran `I`, while a first-wins proxy saw
+// `Unit`), so the text is scanned once more after it parses.
+//
+// `text` is JSON that `JSON.parse` accepted, so the scan only tracks structure: string literals
+// (skipped by their escapes; a `\` escapes exactly the next character, so `\"` never ends a
+// string and `\\"` does), `{ [ } ] , :`. Each open object holds the set of its keys; a string
+// read where an object expects a key (after `{` or after a `,` inside that object) is a key. A
+// key with no `\` is its own text; one with escapes is decoded by `JSON.parse` of the literal,
+// so every spelling of a name (`\u0061`, `\/`, a surrogate pair) compares by its value. The
+// stack is explicit, so a deeply nested body cannot overflow the call stack here. Returns the
+// first repeated key, or `undefined`.
+export function jsonRepeatedKey(text) {
+  const stack = []; // per open container: a Set of keys (an object) or null (an array)
+  let expectKey = false;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22) {
+      const start = i;
+      let escaped = false;
+      i++;
+      while (i < n) {
+        const d = text.charCodeAt(i);
+        if (d === 0x5c) { escaped = true; i += 2; continue; }
+        if (d === 0x22) break;
+        i++;
+      }
+      i++; // past the closing quote
+      if (expectKey) {
+        const keys = stack[stack.length - 1];
+        const key = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
+        if (keys.has(key)) return key;
+        keys.add(key);
+        expectKey = false;
+      }
+      continue;
+    }
+    if (c === 0x7b) { stack.push(new Set()); expectKey = true; }
+    else if (c === 0x5b) { stack.push(null); expectKey = false; }
+    else if (c === 0x7d || c === 0x5d) { stack.pop(); expectKey = false; }
+    else if (c === 0x2c) expectKey = stack.length > 0 && stack[stack.length - 1] !== null;
+    else if (c === 0x3a) expectKey = false;
+    i++;
+  }
+  return undefined;
+}
+
 async function handleEndpoint(host, ep, request) {
   if (!isJsonMediaType(request.headers.get("Content-Type"))) {
     return jsonResponse(host, 415, { error: { kind: "UnsupportedMediaType", message: "the request Content-Type must be application/json" } });
@@ -1976,6 +2028,8 @@ async function handleEndpoint(host, ep, request) {
   let v;
   try { v = JSON.parse(text); } catch (e) { return decodeFailure(host, "Malformed", `request body is not JSON: ${messageOf(e)}`); }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return decodeFailure(host, "Malformed", "request body is not a JSON object");
+  const rep = jsonRepeatedKey(text);
+  if (rep !== undefined) return decodeFailure(host, "Malformed", `request body repeats the key '${clip(rep)}' in one object`);
   if (!own(v, "tag") || typeof v.tag !== "string") return decodeFailure(host, "MissingDiscriminator", "request body is missing the variant discriminator field 'tag'");
   let variant;
   for (const x of ep.desc.variants) if (x.name === v.tag) variant = x;

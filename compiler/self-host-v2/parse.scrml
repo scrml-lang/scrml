@@ -8167,10 +8167,10 @@ ${
             const ds: TP = diagAt(ts, "E-PARSE-ITEM", "`server` here modifies a function declaration (`server function name(…) { … }`, deprecated — §52.10); found `" + bs.text + "`", bs)
             return { items: [], tp: skipToLineEnd(ds) }
         }
-        // s472: a file-scope constant (§7.6, §21.2) — and the `let` §7.6 also
-        // admits there, refused by name (refusedLetItem)
+        // s472: a file-scope constant (§7.6, §21.2) — and (s479) the file-scope `let`
+        // §7.6 also admits there: per-artifact state (S478 open-Qs ruling item 59 (c))
         if (isWord(t, "const")) return parseConstItem(t, start, exported)
-        if (isWord(t, "let")) return refusedLetItem(t, start)
+        if (isWord(t, "let")) return parseLetItem(t, start, exported)
         if (!exported && kwDeclAhead(t)) return parseKwConstItem(t, start)
         if (!exported && sharedModAhead(t)) return sharedModItem(t)
         // s449: a keyword `when` at logic-item level (a `<program>` body, a
@@ -8349,7 +8349,7 @@ ${
     fn constOfStmt(s: AStmt, exported: boolean) -> AConst | not {
         const k: AStmtK = s.k
         return match k {
-            .Local(name: n, mutable: m, ty: y, init: i) :> mkConst(s, exported, n, y, i)
+            .Local(name: n, mutable: m, ty: y, init: i) :> mkConst(s, exported, n, y, i, m)
             .Eval(e: x) :> not
             .Return(e: x) :> not
             .If(cond: x) :> not
@@ -8365,27 +8365,46 @@ ${
         }
     }
 
-    fn mkConst(s: AStmt, exported: boolean, name: string, ty: AType | not, init: AExpr) -> AConst {
-        return { nid: s.nid, span: s.span, exported: exported, name: name, ty: ty, init: init }
+    fn mkConst(s: AStmt, exported: boolean, name: string, ty: AType | not, init: AExpr, mutable: boolean) -> AConst {
+        return { nid: s.nid, span: s.span, exported: exported, name: name, ty: ty, init: init, mutable: mutable }
     }
 
-    // s472 — a `let` at the top level of a `${ }` logic block. SPEC §7.6
-    // admits it ("A variable declared with `let` or `const` at the top level of
-    // a file-level `${}` block SHALL be in scope …"; "Re-declaring a name with
-    // `let` in a later file-level `${}` block … SHALL be a compile error
-    // (E-SCOPE-010)"), but it is module-level MUTABLE state, and the SPEC does
-    // not say where that state lives: §12 places FUNCTIONS (client, server, or
-    // both), never a binding, so a module `let` written by a server function and
-    // read by a client one has no stated home (one copy per bundle? per request?
-    // per process?). Refused BY NAME — never read as a constant, never dropped.
-    // The statement is still read (and its `;` judged), so what follows parses.
-    fn refusedLetItem(tp: TP, start: int) -> RItems {
+    // s479 (s479-file-scope-init) — `[export] let NAME[: T] = init;` at the top level of a
+    // `${ }` logic block: a FILE-SCOPE `let`. SPEC §7.6: "A variable declared with `let` or
+    // `const` at the top level of a file-level `${}` block SHALL be in scope for all
+    // subsequent `${}` blocks and markup interpolations in the same file"; and (S478, rule
+    // (c)) "A file-scope `let` is per-artifact state. A server function SHALL NOT write a
+    // file-scope `let`" (analyze: E-FILE-SCOPE-LET-SERVER-WRITE). It is read exactly as a
+    // `const` item is (the statement reader and its `;` rule); its initializer is judged by
+    // analyze's constPass as a constant's is (rule (b): evaluated once at module
+    // initialization in each artifact that reads or writes it). `let <x…/>` is a §66 cell
+    // declaration, not this item: it keeps the by-name refusal below.
+    fn parseLetItem(tp: TP, start: int, exported: boolean) -> RItems {
+        if (tk(peekAt(tp, 1), "<")) return refusedLetItem(tp, start)
         const kw: PTok = cur(tp)
         const d0: int = hardErrors(tp.diags)
         if (destructDeclAhead(tp)) return refusedDestructItem(tp, d0, "a destructuring `let` at the top level of a logic block (module-level mutable state, as a file-scope `let` is)")
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
-        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, and (S478) rules it per-artifact state that a server function may not write (E-FILE-SCOPE-LET-SERVER-WRITE), evaluated once at module initialization in each artifact that reads it; the bootstrap does not build that yet (INTERIM, g-boot-file-scope-init-eval-s478). Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
+        const c: AConst | not = constOfStmt(r.s, exported)
+        if (c is not) {
+            const dt: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a file-scope `let` bound to a value loop (`let xs = for … { lift … };`, §49.6) — the loop would run at module initialization, which the bootstrap does not build for a file-scope binding; compute the tape in a function and call it where it is needed", kw)
+            return { items: [], tp: dt }
+        }
+        return mkItem(t, start, AItemK.ConstItem(c))
+    }
+
+    // s472 — a `let` at the top level of a `${ }` logic block was refused here by name
+    // until s479 (parseLetItem builds it). What is left: `let <x…/>` — a §66 cell
+    // declaration written inside a logic block — which the item reader does not read
+    // (a cell is declared in the `<program>`). Refused BY NAME; the statement is still
+    // read, so what follows parses.
+    fn refusedLetItem(tp: TP, start: int) -> RItems {
+        const kw: PTok = cur(tp)
+        const d0: int = hardErrors(tp.diags)
+        const r: RStmt = parseLocal(tp)
+        const t: TP = termAfter(r.tp, r.s, d0)
+        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a cell declaration (`let <x:T=…/>`, §66) at the top level of a `${ }` logic block is not in the bootstrap — declare the cell in the `<program>`, or write a file-scope `let x: T = …;` (§7.6) for per-artifact state", kw)
         return { items: [], tp: d }
     }
 
@@ -13848,7 +13867,7 @@ ${
         // s478 — a `const NAME = …;` / `let NAME …` at a body top is the same item
         // as at the top level of a `${ … }` there (§40.8: the auto-lift covers
         // "`let`/`const` local declarations"): a file-scope constant (§7.6,
-        // parseConstItem) / the by-name refusal of a top-level `let` (refusedLetItem)
+        // parseConstItem) / a file-scope `let` (s479, parseLetItem)
         if (!fileTop && (w.w == "const" || w.w == "let")) return logicRegionItem(mp, LexStop.Decl, false)
         // s478 r1 (MED-1) — a keywordless declaration analysis proved (PNs.kw) is that same item
         // (§50.8.5: it "declares `x` exactly as `const x = 1` does"; parseKwConstItem)
