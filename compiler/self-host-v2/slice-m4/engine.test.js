@@ -289,9 +289,9 @@ type Phase:enum = { Idle, Loading, Done }
 </program>
 `;
   const ds = (src) => compileDiags(src);
-  test.each([['rule=".Loading"', '`rule=".Loading"`'], ['rule="*"', '`rule="*"`']])("%s → one E-BOOTSTRAP-UNSUPPORTED naming the spelling, nothing cascading", (rule, shown) => {
+  test.each([['rule=".Loading"', '`rule=".Loading"`'], ['rule="*"', '`rule="*"`']])("%s → one E-ENGINE-RULE-QUOTED naming the spelling, nothing cascading (S478 ruling item 30)", (rule, shown) => {
     const d = ds(prog(rule));
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d.map((x) => x.code)).toEqual(["E-ENGINE-RULE-QUOTED"]);
     expect(d[0].message).toContain(shown);
     expect(d[0].message).toContain("§51.0.F");
   });

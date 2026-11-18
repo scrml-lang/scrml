@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 409 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
+// 415 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 36 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
 //   E-BOOTSTRAP-REDECLARE — no §34 row
@@ -41,7 +41,6 @@
 //   E-INTERNAL-RECOVERED-UNREPORTED — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
-//   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
 //   E-TYPE-STRUCT-CONTEXT — no §34 row
@@ -82,6 +81,7 @@ ${
             "W-SCHEMA-NO-TABLES-DECLARED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
+            "W-TIMED-READ-MODIFY-WRITE" :> Severity.Warning
             "W-TX-ARM-UNREACHABLE" :> Severity.Warning
             "W-TX-EXIT-ROLLS-BACK" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
@@ -191,6 +191,8 @@ ${
             "E-ENDPOINT-PATH-MISSING" :> Severity.Error
             "E-ENDPOINT-ROUTE-DUPLICATE" :> Severity.Error
             "E-ENGINE-MOUNT-NOT-ENGINE" :> Severity.Error
+            "E-ENGINE-RULE-LEGACY-SYNTAX" :> Severity.Error
+            "E-ENGINE-RULE-QUOTED" :> Severity.Error
             "E-ENGINE-STATE-CHILD-MISSING" :> Severity.Error
             "E-ENUM-VARIANT-CASE" :> Severity.Error
             "E-EQ-001" :> Severity.Error
@@ -213,6 +215,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-EVENT-CONTROL-AFTER-AWAIT" :> Severity.Error
             "E-EXPORT-001" :> Severity.Error
+            "E-FILE-SCOPE-SERVER-ONLY-REACH" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
             "E-FN-005" :> Severity.Error
@@ -360,6 +363,7 @@ ${
             "E-PREPAINT-WITHOUT-PERSIST" :> Severity.Error
             "E-PRINT-NON-PRIMITIVE" :> Severity.Error
             "E-PROGRAM-002" :> Severity.Error
+            "E-PROGRAM-MISSING" :> Severity.Error
             "E-PROGRAM-NESTED-ATTR" :> Severity.Error
             "E-PROGRAM-NESTED-AUTH" :> Severity.Error
             "E-PROGRAM-NESTED-SESSION" :> Severity.Error
@@ -463,6 +467,7 @@ ${
             "E-TYPE-ANY-FORBIDDEN" :> Severity.Error
             "E-TYPE-UNKNOWN-NAME" :> Severity.Error
             "E-UNQUOTED-DISPLAY-TEXT" :> Severity.Error
+            "E-VALIDATOR-CONTRADICTORY" :> Severity.Error
             "E-VALIDATOR-DEAD" :> Severity.Error
             "E-VALIDITY-NO-SURFACE" :> Severity.Error
             "E-VALIDITY-RESERVED-NAME" :> Severity.Error

@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/integration/foreign-sealed-scope.test.js",
   "spec": "§23.2.4a",
-  "rationale": "§23.2.4a: the `in:{}` names are the values that cross; the slice body is a verbatim ts/js slice in either the single-expression shape (codegen supplies the `return`) or the multi-statement shape (the slice SHALL carry its own `return`; one that never returns settles to `undefined`, which crosses the §13180 boundary as `not` per §42); the slice MAY use `await` internally and the boundary `await` is injected by codegen. §23.2.3: foreign code is author-trusted host code — sealing its scope against scrml bindings is not a sandbox, so host globals remain reachable.",
+  "rationale": "§23.2.4a: the `in:{}` names are the values that cross; the slice body is a verbatim ts/js slice in either the single-expression shape (codegen supplies the `return`) or the multi-statement shape (the slice SHALL carry its own `return`; one that never returns settles to `undefined`, which crosses the §13180 boundary as `not` per §42); the slice MAY use `await` internally and the boundary `await` is injected by codegen. §23.2.3: foreign code is author-trusted host code — sealing its scope against scrml bindings is not a sandbox, so host globals remain reachable. S478 open-Qs ruling (user-voice) item 23: each printed foreign value is annotated at its binding (the §23.2.4a call-site override) — an unannotated foreign value is `asIs`, and a `print` / `println` argument of unresolved type is E-PRINT-NON-PRIMITIVE (§20.7.2, §14.13.2, fail closed).",
   "expect": {
     "codes": [],
     "notCodePrefixes": ["E-FOREIGN-", "E-TOOL-"],

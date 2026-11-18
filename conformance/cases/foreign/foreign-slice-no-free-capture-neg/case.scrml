@@ -2,10 +2,10 @@
     const banner = "MODULE";
     function main(args: string[]) -> number {
         const hidden = "LOCAL";
-        const seen = _={ [typeof hidden, typeof banner].join(",") }=;
+        const seen: string = _={ [typeof hidden, typeof banner].join(",") }=;
         println(seen);
         const n = 7;
-        const crossed = _={ in: { n } [typeof n, typeof hidden].join(",") }=;
+        const crossed: string = _={ in: { n } [typeof n, typeof hidden].join(",") }=;
         println(crossed);
         return 0;
     }

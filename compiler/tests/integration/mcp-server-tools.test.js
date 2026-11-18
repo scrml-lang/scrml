@@ -41,7 +41,7 @@ import {
   shutdownMcpServer,
   TOOL_NAMES,
   _resetForTests,
-} from "../../runtime/stdlib/mcp.js";
+} from "../../runtime/stdlib/mcp/internal.js";
 
 // ---------------------------------------------------------------------------
 // Fixture — a multi-surface app: 2 engines (one payload variant), 1 form

@@ -1,14 +1,38 @@
 {
   "id": "refinement-base-type-reject-rt",
-  "description": "S458: the runtime check tests the BASE type before the predicate. take(n: number(>0)) is called with the number 7 (passes; @shown becomes 7) and then with the STRING \"9\" (refused: not a number — E-CONTRACT-001-RT, @shown keeps 7). Before S458 the check was `(n > 0)`, which JavaScript coerces: \"9\" > 0 is true, so a string inhabited `number(>0)`.",
+  "description": "S458 / S478: the runtime check tests the BASE type before the predicate. take(n: number(>0)) is called with the number 7 (passes; @shown becomes 7), then with a value from a SERVER ANSWER the typer cannot see: loadAmount() is declared `-> number`, but its answer is stubbed as the STRING \"9\". That value is refused before take's body runs (E-CONTRACT-001-RT, §53.3.4 — or, on an implementation that decodes the wire strictly (§57), the answer is refused at the wire and the handler's fallback `0` fails the predicate), so @shown keeps 7. Before S458 the check was `(n > 0)`, which JavaScript coerces: \"9\" > 0 is true, so a string inhabited `number(>0)`.",
   "language-version": "1.0",
   "spec": "§53.3.4",
-  "rationale": "§53.3.4: \"A `number(>0 && <10000)` value IS a `number`. The constrained type is a subtype of the base type\" — a value that is not of the base type cannot inhabit the refinement; §53.4.5 the boundary check refuses it.",
+  "rationale": "§53.3.4: \"A `number(>0 && <10000)` value IS a `number`. The constrained type is a subtype of the base type\" — a value that is not of the base type cannot inhabit the refinement; §53.4.5 the boundary check refuses it. S478 open-Qs ruling (user-voice) item 25: the case was rewritten so the typer cannot see the non-number (it arrives in a server answer) — before, it passed a `string` cell straight to the `number(>0)` parameter, which §7.3.4 / §7.5.1 position 3 (S447 call 9) make a compile-time E-TYPE-031, so the runtime check was not what refused it.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
-    "input": [{ "click": "#num" }, { "click": "#text" }],
-    "state": { "shown": 7 },
-    "domAnchored": [{ "selector": "#out", "text": "7" }]
+    "notCodes": [
+      "E-CONTRACT-001",
+      "E-CONTRACT-002",
+      "E-TYPE-031"
+    ],
+    "serverStub": {
+      "loadAmount": "9"
+    },
+    "input": [
+      {
+        "click": "#num"
+      },
+      {
+        "click": "#server"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "shown": 7
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "7"
+      }
+    ]
   }
 }

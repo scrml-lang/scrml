@@ -51,10 +51,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SHIM_ROOT = resolve(here, "../../runtime/stdlib");
 
 // Shim exports that are deliberately NOT part of the module's scrml surface.
-// `scrml:mcp` — compiler-internal (MCP V0 Sub-unit D, auto-bundled by the
-// compiler); the runtime/tool helpers below are consumed by generated code and
-// the MCP sidecar, not by scrml source. Each entry is a named exception, never a
-// pattern: a new shim export must be declared in the `.scrml` source or listed here.
+// Each entry is a named exception, never a pattern: a new shim export must be
+// declared in the `.scrml` source or listed here. (S478 open-Qs ruling item 62:
+// the `scrml:mcp` helpers moved to the non-`scrml:` module stdlib/mcp/internal.js,
+// so `scrml:mcp` has no exception any more.)
 const SHIM_ONLY_EXPORTS = {
   // S472 (s472-boot-math-port): the runtime shims' INTERNAL non-trapping host floor / ceil —
   // auth.js / data.js / time.js import them; the §41.18 `floor` / `ceil` trap (E-INT-CONVERSION-RT)
@@ -63,14 +63,6 @@ const SHIM_ONLY_EXPORTS = {
   // `maxUnchecked` likewise — the public `min` / `max` now refuse a call shape the S469 API does not
   // define, and data.js / auth.js keep the raw host min / max.
   "scrml:math": ["floorUnchecked", "ceilUnchecked", "minUnchecked", "maxUnchecked"],
-  "scrml:mcp": [
-    "install", "uninstall", "loadSidecars", "stopWatchers", "getCurrentVariant",
-    "getFormStatus", "getChannelState", "_stateForTests", "_resetForTests",
-    "toolGetAppTopology", "toolListEngines", "toolGetEngine", "toolListForms",
-    "toolGetFormStatus", "toolListRoutes", "toolGetRouteChunks",
-    "toolListServerFunctions", "toolListChannels", "toolGetChannelState",
-    "toolGetReachableServerFns", "buildToolSpecs", "TOOL_NAMES", "registerMcpTools",
-  ],
 };
 
 function parse(absPath) {

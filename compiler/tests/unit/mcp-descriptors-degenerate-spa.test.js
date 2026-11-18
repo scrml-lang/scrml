@@ -25,7 +25,7 @@ import {
   getChannelState,
   _stateForTests,
   _resetForTests,
-} from "../../runtime/stdlib/mcp.js";
+} from "../../runtime/stdlib/mcp/internal.js";
 
 let TMP;
 beforeAll(() => { TMP = makeSidecarTmpRoot("degenerate"); });

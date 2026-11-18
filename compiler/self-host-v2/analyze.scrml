@@ -5092,7 +5092,97 @@ ${
             const vi: ValInfo | not = r.v
             if (vi is given) out = out.concat([vi])
         }
-        return { vs: out, st: st }
+        return { vs: out, st: contradictoryVals(file, name, out, st) }
+    }
+
+    // S478 open-Qs ruling (user-voice) item 61 — §55.12: "Validators whose literal bounds
+    // no value can satisfy together … SHALL be `E-VALIDATOR-CONTRADICTORY`". The bounds the
+    // bootstrap reads are literals: `length(op N)` on a string (an integer length range) and
+    // `min(n)` / `max(n)` on a number. Reported once, at the validator that empties the range.
+    fn contradictoryVals(file: string, name: string, vs: ValInfo[], st0: AS) -> AS {
+        let lo: int = 0
+        let hi: int = -1                 // -1: no upper length bound
+        let loBy: string = ""
+        let hiBy: string = ""
+        let nlo: number = 0
+        let nhi: number = 0
+        let hasNlo = false
+        let hasNhi = false
+        let nloBy: string = ""
+        let nhiBy: string = ""
+        for (const v of vs) {
+            const c: Validator = v.core
+            const text: string = validatorText(c)
+            const bounds: int[] = match c {
+                .LengthCmp(op: op, n: n) :> lengthRange(op, n)
+                .Req :> [1, -1]          // r1 (#1947 F9): `req` rejects the empty value — a length of at least 1 (§55.12)
+                .Min(n: x) :> [0, -1]
+                .Max(n: x) :> [0, -1]
+                .Pattern(source: x) :> [0, -1]
+            }
+            if (bounds[0] > lo) {
+                lo = bounds[0]
+                loBy = text
+            }
+            if (bounds[1] >= 0 && (hi < 0 || bounds[1] < hi)) {
+                hi = bounds[1]
+                hiBy = text
+            }
+            if (hi >= 0 && lo > hi) return addDiag(st0, file, v.span, "E-VALIDATOR-CONTRADICTORY", "`" + name + "`'s validators cannot all hold: `" + loBy + "` needs a length of at least " + lo + " and `" + hiBy + "` a length of at most " + hi + ", so no value is valid (§55.12). Drop or correct one of them")
+            const mn: boolean = match c {
+                .Min(n: x) :> true
+                .Max(n: x) :> false
+                .LengthCmp(op: op, n: n) :> false
+                .Req :> false
+                .Pattern(source: x) :> false
+            }
+            const mx: boolean = match c {
+                .Max(n: x) :> true
+                .Min(n: x) :> false
+                .LengthCmp(op: op, n: n) :> false
+                .Req :> false
+                .Pattern(source: x) :> false
+            }
+            const bn: number = match c {
+                .Min(n: x) :> x
+                .Max(n: x) :> x
+                .LengthCmp(op: op, n: n) :> 0
+                .Req :> 0
+                .Pattern(source: x) :> 0
+            }
+            if (mn && (!hasNlo || bn > nlo)) {
+                nlo = bn
+                hasNlo = true
+                nloBy = text
+            }
+            if (mx && (!hasNhi || bn < nhi)) {
+                nhi = bn
+                hasNhi = true
+                nhiBy = text
+            }
+            if (hasNlo && hasNhi && nlo > nhi) return addDiag(st0, file, v.span, "E-VALIDATOR-CONTRADICTORY", "`" + name + "`'s validators cannot all hold: `" + nloBy + "` needs a value of at least " + nlo + " and `" + nhiBy + "` one of at most " + nhi + ", so no value is valid (§55.12). Drop or correct one of them")
+        }
+        return st0
+    }
+
+    // `length(op N)` as an integer length range [lo, hi] (hi -1: unbounded).
+    fn lengthRange(op: string, n: int) -> int[] {
+        if (op == ">=") return [n, -1]
+        if (op == ">") return [n + 1, -1]
+        if (op == "<=") return [0, n]
+        if (op == "<") return [0, n - 1]
+        if (op == "==") return [n, n]
+        return [0, -1]
+    }
+
+    fn validatorText(c: Validator) -> string {
+        return match c {
+            .LengthCmp(op: op, n: n) :> "length(" + op + n + ")"
+            .Min(n: x) :> "min(" + x + ")"
+            .Max(n: x) :> "max(" + x + ")"
+            .Req :> "req"
+            .Pattern(source: x) :> "pattern(/" + x + "/)"
+        }
     }
 
     // s449 — B3 is RULED (S447, user-voice "validated top-level cells get a
@@ -5435,7 +5525,28 @@ ${
                         // g-boot-rule-quoted-spelling-s478): refused by name. The state is then treated as
                         // admitting every target, so no edge / reachability / literal-write report cascades
                         // from the refused attribute — the refusal is the one report.
-                        st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is not a `rule=` form the bootstrap reads — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`, written unquoted; the attribute would be read as no rule at all")
+                        // S478 open-Qs ruling (user-voice) item 30 — §51.0.F: "A `rule=` value written
+                        // QUOTED … SHALL be `E-ENGINE-RULE-QUOTED`". A braced value is none of the forms
+                        // either, and stays refused by name.
+                        // s478 r1 (#1947 review F2) — a quoted value holding `->` is the legacy
+                        // event-arrow form, §34 E-ENGINE-RULE-LEGACY-SYNTAX fire-site (a): "a `rule=`
+                        // value uses the legacy event-arrow form (`rule="event -> Variant"`)". The more
+                        // specific code wins; E-ENGINE-RULE-QUOTED is a quoted TARGET form only.
+                        // r1 F6 — the message echoes the source's own quote character, and never offers
+                        // `rule=*` while the bootstrap refuses the unquoted wildcard (INTERIM, gap
+                        // g-boot-rule-quoted-spelling-s478).
+                        if (ruleQuoted(a.value)) {
+                            const qtext: string = ruleQuotedText(a.value)
+                            if (qtext.indexOf("->") >= 0) {
+                                st = addDiag(st, te.file, a.span, "E-ENGINE-RULE-LEGACY-SYNTAX", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is the legacy event-arrow form — a `rule=` names only the variants this state may move to, unquoted: `rule=.NextVariant` or `rule=(.A | .B | .C)` (§51.0.F); the event is the write that moves the state, not part of the rule")
+                            } else if (qtext.trim() == "*") {
+                                st = addDiag(st, te.file, a.span, "E-ENGINE-RULE-QUOTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is quoted — §51.0.F's forms are written unquoted and a quoted value is not an alias of one. The wildcard's unquoted spelling `rule=*` is not read by this bootstrap yet (INTERIM, gap g-boot-rule-quoted-spelling-s478), so list the targets this state may move to: `rule=(.A | .B | .C)`")
+                            } else {
+                                st = addDiag(st, te.file, a.span, "E-ENGINE-RULE-QUOTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is quoted — §51.0.F's forms are written unquoted (`rule=.NextVariant`, `rule=(.A | .B | .C)`) and a quoted value is not an alias of one; drop the quotes: `rule=" + qtext.trim() + "`")
+                            }
+                        } else {
+                            st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is not a `rule=` form the bootstrap reads — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`, written unquoted; the attribute would be read as no rule at all")
+                        }
                         const tiq: TypeInfo | not = typeInfoOf(g, es)
                         if (tiq is given) {
                             let vq = 0
@@ -5632,6 +5743,29 @@ ${
         }
     }
 
+    // A quoted `rule=` value (`rule=".V"`, `rule="*"`, `rule="a -> B"`) — S478 ruling item 30.
+    fn ruleQuotedText(v: AAttrValue) -> string {
+        return match v {
+            .Quoted(v: s) :> s
+            .Dur(text: s) :> ""
+            .Braced(b: b) :> ""
+            .NoValue :> ""
+            .Bare(e: e) :> ""
+            .Paren(e: e) :> ""
+        }
+    }
+
+    fn ruleQuoted(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: s) :> true
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+            .NoValue :> false
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
+        }
+    }
+
     fn ruleValueless(v: AAttrValue) -> boolean {
         return match v {
             .NoValue :> true
@@ -5664,7 +5798,7 @@ ${
 
     fn ruleSpelling(v: AAttrValue) -> string {
         return match v {
-            .Quoted(v: s) :> "\"" + s + "\""
+            .Quoted(v: s, sq: sq) :> (sq ? "'" + s + "'" : "\"" + s + "\"")
             .Dur(text: s) :> s
             .Braced(b: b) :> "{ … }"
             .NoValue :> ""
@@ -7886,6 +8020,47 @@ ${
         }
     }
 
+    // S478 ruling item 26 (1) — §21.5: a file "that contains only `${ export type ... }` and
+    // `${ export function ... }` blocks (no markup, no CSS) is a pure-type file … library
+    // files, not pages". s478 r1 (#1947 review F3) — §21.5 "Which declarations make a
+    // library": imports, types, constants, exported functions, and §66 declarations other
+    // than a non-exported cell. A non-exported top-level cell or function is a program's own
+    // state or behaviour — such a file is a program missing its `<program>`.
+    // "" when the entry is a library; otherwise why it is not (the E-PROGRAM-MISSING detail).
+    fn libraryEntryWhy(files: FileAst[], entry: string) -> string {
+        for (const f of files) {
+            if (f.path == entry) {
+                if (f.items.length == 0) return "it is empty"
+                for (const it of f.items) {
+                    const k: AItemK = it.k
+                    const why: string = match k {
+                        .ImportItem(i: x) :> ""
+                        .TypeItem(t: x) :> ""
+                        .FnItem(f: x) :> libFnWhy(x)
+                        .DeclItem(d: x) :> libDeclWhy(x)
+                        .ConstItem(c: x) :> ""
+                        .MarkupItem(n: x) :> "its top level holds markup"
+                        .ProgramItem(p: x) :> "it holds a `<program>`"
+                    }
+                    if (why != "") return why
+                }
+                return ""
+            }
+        }
+        return "it is not among the compiled files"
+    }
+
+    fn libFnWhy(x: AFn) -> string {
+        if (x.exported) return ""
+        return "it declares the non-exported function `" + x.name + "` at its top level, which is a program's own behaviour"
+    }
+
+    fn libDeclWhy(d: ADecl) -> string {
+        if (d.exported) return ""
+        if (d.isLet || hasOwnType(d) || hasOwnValue(d.own)) return "it declares the non-exported cell `@" + d.name + "` at its top level, which is a program's own state"
+        return ""
+    }
+
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
@@ -7914,7 +8089,14 @@ ${
         const rl: RLinkage = linkage(files, ownNames(files, rs.stubs, rd.ds), st)
         st = rl.st
         const lk: Linkage = rl.lk
-        if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
+        // S478 open-Qs ruling (user-voice) item 26 (1): "compile a library-file entry as a
+        // library (§21.5)" — an entry with no `<program>` whose items are all library items
+        // (imports, types, functions, constants, declarations — no markup) is compiled for its
+        // own checks; any other entry without a `<program>` is E-PROGRAM-MISSING (§34).
+        if (!hasProgram) {
+            const libWhy: string = libraryEntryWhy(files, entry)
+            if (libWhy != "") st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`, and it is not a library: " + libWhy + " — a page or app entry holds one `<program>` (§4.12); wrap the program in `<program>…</program>`. A library entry holds only imports, types, constants, exported functions and declarations other than a non-exported cell (§21.5)")
+        }
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
         st = namedInstanceDiags(te0, rd.ds, declNames, files, st)
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
@@ -8373,6 +8555,18 @@ ${
     // s477 fix r1 (F3) — `pureFn`: the name of the `fn` a NESTED body is inside ("" in a
     // file-level body, or outside every `fn`), so a purity report names the `fn` that makes it pure.
     type NestCtx:struct = { fns: FnInfo[], top: int[], caps: int[], pureCaps: int[], pureFn: string, lam: int, lamWant: Type | not }   // s478: `lam` — the nid of the block lambda whose body this is (-1: none), its `return`s' expected type `lamWant`
+
+    // s478 r1 (#1947 review F7) — who is pure, for an E-FN-004 report: the `fn` itself, a
+    // function nested in one, or a function value (a lambda) inside one.
+    fn pureWho(env: Env) -> string {
+        const pf: string = env.nest.pureFn
+        const n: string = env.fx.fnName
+        if (pf != "" && pf != n) {
+            if (n == "") return "a function value inside `fn " + pf + "` (pure, nested functions included, §48.3)"
+            return "the nested function `" + n + "` inside `fn " + pf + "` (pure, nested functions included, §48.3)"
+        }
+        return "`fn " + n + "` (pure)"
+    }
 
     fn noNest() -> NestCtx { return { fns: [], top: [], caps: [], pureCaps: [], pureFn: "", lam: -1, lamWant: not } }
 
@@ -9211,19 +9405,18 @@ ${
     // exactly those as their one honest text (Core Text, §20.7.2).
     fn resolvePrint(env: Env, e: AExpr, nl: boolean, args: AExpr[], st0: AS) -> RX {
         const w: string = nl ? "println" : "print"
+        // S478 open-Qs ruling (user-voice) item 24 — §48.3.4: "A `print` / `println` call (§20.7)
+        // SHALL NOT appear inside a `fn` body (nested functions included); it is `E-FN-004`."
+        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-FN-004", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, an effect and not a value computed from the inputs, so " + pureWho(env) + " cannot call it (§48.3.4). Print from a `function` that calls the `fn`", resolveExprs(env, args, not, st0))
         if (env.fx.stmtCall != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` used as a value — §20.7.1 makes it a statement (\"Statement-position; no usable return value\"), and the bootstrap builds it only as a statement of its own (INTERIM). Call it on its own line", resolveExprs(env, args, not, st0))
-        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, a server-only resource (§20.7.3), and the SPEC does not say whether a pure `fn` (§48.3) may call it; the bootstrap does not build it there (INTERIM). Call it from a `function`", resolveExprs(env, args, not, st0))
         if (!env.fx.inFn || env.fx.fnSym < 0 || env.inEffect || env.host != HostCtx.HostOk) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` outside a `function` body — §20.7.3 places it by the function that calls it (\"a `function` that calls `print` / `println` is server-placed\"), and the bootstrap builds it only in a `function` body (INTERIM: an event handler, a body-top statement or an initializer is not one). Move it into a `function`", resolveExprs(env, args, not, st0))
         // s478 r1: the placement pre-scan (printScans) is what server-placed this function; a call it
         // did not read as the built-in has no server body to stand in (fail closed, INTERIM)
         if (env.g.printCalls.indexOf(e.nid) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(w, "the built-in", "a user binding"), resolveExprs(env, args, not, st0))
-        // s478 r1 (#1900 review MED) — an UNANNOTATED foreign value (`asIs`, §23.2.4a) as an argument: the
-        // SPEC disagrees with itself on it (g-boot-print-asis-arg-s478, owner question) — §20.7.2's allow-list
-        // and §14.13.2 ("a value whose type the compiler cannot resolve") refuse it, the §34
-        // E-PRINT-NON-PRIMITIVE row leaves "`asIs` … unflagged". Until the owner rules, it is refused BY
-        // NAME (INTERIM), never with a code the SPEC may not mean here.
-        const fa: string = printForeignArg(env, args)
-        if (fa != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(" + fa + ")` — `" + fa + "` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's allow-list and §14.13.2 refuse it; the §34 `E-PRINT-NON-PRIMITIVE` row leaves `asIs` unflagged — owner question g-boot-print-asis-arg-s478). The bootstrap does not build it (INTERIM). State its type at the binding (`const " + fa + ": string = _={ … }=`, the §23.2.4a call-site annotation)", resolveExprs(env, args, not, st0))
+        // S478 open-Qs ruling (user-voice) item 23: an UNANNOTATED foreign value (`asIs`, §23.2.4a)
+        // as an argument is NOT special-cased — "keep the fail-closed rule (§20.7.2 allow-list,
+        // §14.13.2)": the typer refuses it with E-PRINT-NON-PRIMITIVE (printArgCheck), as any
+        // argument whose type it cannot resolve.
         let st: AS = st0
         let text: boolean[] = []
         for (const a of args) {
@@ -9232,20 +9425,6 @@ ${
             st = r.st
         }
         return plain(not, addValue(st, e.nid, ValueFact.VPrint(text, nl)))
-    }
-
-    // s478 r1 — the first argument that is a local bound, unannotated, to a foreign block's value ("" none).
-    fn printForeignArg(env: Env, args: AExpr[]) -> string {
-        for (const a of args) {
-            const n: string = exprName(a)
-            if (n != "") {
-                const l: LocalB | not = lookupLocal(env, n)
-                if (l is given) {
-                    if (l.foreign) return n
-                }
-            }
-        }
-        return ""
     }
 
     // s478 r1 — the placement pre-scan and the binder read one `print` call differently (printScans).
@@ -11271,7 +11450,7 @@ ${
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", "`Date.now()` is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
+            .HostPure :> diagX(env, e, "E-FN-004", "`Date.now()` is non-deterministic — " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? (env.fx.fnName == "" ? "a function value" : "the nested function `" + env.fx.fnName + "`") + " is inside `fn " + env.nest.pureFn + "`, which is pure (nested functions included, §48.3) and cannot call it" : "`fn " + env.fx.fnName + "` is pure and cannot call it") + " (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`Date.now()` here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
@@ -12134,7 +12313,11 @@ ${
     fn lamBlockValue(env: Env, env2: Env, lam: AExpr, body: ABlock, want: Type | not, what: string, st0: AS) -> RX {
         let st: AS = lamBodyCheck(env, body, [], st0)
         if (!exits(body)) st = addDiag(st, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "this callback's body can reach its end without a `return` — " + what + " gives a value on every path (falling off the end would give JavaScript's `undefined`, which is no scrml value). End every path with `return …;`")
-        const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: want }), noFailCtx())
+        // s478 r1 (#1947 review F7): a lambda's body has no function name of its own (noFailCtx),
+        // so the pure `fn` it stands in is carried for the E-FN-004 report
+        let lamPure: string = env2.nest.pureFn
+        if (lamPure == "" && env2.host == HostCtx.HostPure) lamPure = env2.fx.fnName
+        const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: lamPure, lam: lam.nid, lamWant: want }), noFailCtx())
         const n0: int = st.rets.length
         st = resolveBlock(lenv, body, st)
         // the lambda's value type: its returns' joined type (`not` when they share none or one is unknown)
@@ -14477,13 +14660,107 @@ ${
         // s475 r1 (#1783 review F2b): a locked `(not to T)` cell takes the whole `not → T` write only
         if (lockedLife(f) && p.path.length > 0) return partRefused(env, value, target.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`" + placeKey(target) + " = …` is a field write"), st)
         if (lockedLife(f) && isSelfSpread(target, value)) return partRefused(env, value, target.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`" + placeKey(target) + " = { ..." + placeKey(target) + ", … }` is a field write"), st)
-        if (p.path.length == 0 && isSelfSpread(target, value)) return resolveSpread(env, e, p, f, value, st)
-        if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, placeKey(target), st)
-        const rv: RX = resolveExpr(env, value, f.ty, st)
+        // s478 r1 (#1947 review F1): a field write (`@x.a = @x.a + 1`) and a self-spread
+        // rebuild (`@x = { ...@x, a: … }`) are writes to the timed cell too (§6.13.6)
+        if (p.path.length == 0 && isSelfSpread(target, value)) return resolveSpread(env, e, p, f, value, timedSelfRead(env, p, f, value, e.span, st))
+        if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, placeKey(target), timedSelfRead(env, p, f, value, e.span, st))
+        const rv0: RX = resolveExpr(env, value, f.ty, st)
+        const rv: RX = { x: rv0.x, st: timedSelfRead(env, p, f, value, e.span, rv0.st) }
         const rw: RWriteFact = wholeFieldWrite(env, p, f, value, placeKey(target), rv.st, e.span)
         const w: WriteFact | not = rw.w
         if (w is given) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
+    }
+
+    // S478 open-Qs ruling (user-voice) item 32 — §6.13.6: "A write to a `debounced=` /
+    // `throttled=` cell whose right-hand side reads the SAME cell … SHALL produce the lint
+    // `W-TIMED-READ-MODIFY-WRITE` (Warning) at the write." Program cells only (§6.13 times a
+    // program cell; timingPass). A read inside a lambda in the value is not an immediate read.
+    fn timedSelfRead(env: Env, p: WPlace, f: FieldInfo, value: AExpr, span: ASpan, st: AS) -> AS {
+        if (p.decl.sym.id != env.g.program.id) return st
+        const n: string = f.sym.hint
+        if (!readsAtName(value, n)) return st
+        const prog: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (prog is not) return st
+        const ap: AProgram | not = prog.p
+        if (ap is not) return st
+        let w: string = ""
+        for (const it of ap.items) {
+            for (const d of declsOfItem(it)) {
+                if (d.name == n && !isNestedUserDecl(d)) {
+                    if (attrNamed(d.mods, "debounced") is given) w = "debounced"
+                    if (attrNamed(d.mods, "throttled") is given) w = "throttled"
+                }
+            }
+        }
+        if (w == "") return st
+        return addDiag(st, env.file, span, "W-TIMED-READ-MODIFY-WRITE", "this write to `@" + n + "` reads `@" + n + "`, a `" + w + "=` cell — reads see the timed value (§6.13.4), so a write still pending in the window is invisible here and the updates made inside one window are lost (three `@" + n + " = @" + n + " + 1` in one window commit `+1`). Keep a plain source cell for the read-modify-write and time a copy of it (§6.13.6)")
+    }
+
+    fn readsAtName(e: AExpr, n: string) -> boolean {
+        const k: AExprK = e.k
+        const here: boolean = match k {
+            .At(name: m) :> m == n
+            .Lambda(params: lp) :> false
+            .Name(name: m) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .BlockLambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: m) :> false
+        }
+        if (here) return true
+        const lam: boolean = match k {
+            .Lambda(params: lp) :> true
+            .BlockLambda(params: lp) :> true
+            .At(name: m) :> false
+            .Name(name: m) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: m) :> false
+        }
+        if (lam) return false
+        for (const x of exprKids(e)) {
+            if (readsAtName(x, n)) return true
+        }
+        return false
     }
 
     // s475 — the elements of `xs = [...xs, e…]` / `xs = [e…, ...xs]` on a local `xs`:
@@ -27737,6 +28014,10 @@ ${
     }
 
     fn constValue(g: Globals, c: ConstInfo, st0: AS) -> RConst1 {
+        // S478 open-Qs ruling (user-voice) item 59 (a) — §7.6: "An initializer that reaches a
+        // server-only resource — a `?{}` query … SHALL be a compile error, `E-FILE-SCOPE-SERVER-ONLY-REACH`"
+        const q: AExpr | not = sqlIn(c.init)
+        if (q is given) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of the file-scope constant `" + c.name + "` runs a query (`?{ … }`) — a file-scope initializer runs at module initialization, which is synchronous and cannot wait on the server (§7.6 rule (a), as §6.6.19 refuses a derived cell). Run the query in a server function and call it where the value is needed") }
         const b: AExpr | not = constBlocker(c.init)
         if (b is given) {
             const st1: AS = addDiag(st0, c.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "the initializer of the file-scope constant `" + c.name + "` holds " + blockerWhat(b) + " — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member read and the operators over them (§7.4.2: \"a literal, `const`-bound to a literal, simple arithmetic on constants\"). Anything else would have to be evaluated at module initialization, which the bootstrap does not build for a file-scope binding" + blockerWhy(b) + ". Compute the value in a function and call it where it is needed")
@@ -27828,6 +28109,46 @@ ${
         }
     }
 
+    // S478 ruling item 59 (a): the first `?{}` the expression evaluates (not inside a function value).
+    fn sqlIn(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        const own: int = match k {
+            .Sql(q: x) :> 1
+            .Lambda(params: x) :> 2
+            .BlockLambda(params: x) :> 2
+            .Name(name: n) :> 0
+            .Num(raw: r) :> 0
+            .Str(v: v) :> 0
+            .Bool(v: v) :> 0
+            .NotLit :> 0
+            .Recovered :> 0
+            .Variant(name: n) :> 0
+            .Member(obj: o) :> 0
+            .Unary(op: o) :> 0
+            .Binary(op: o) :> 0
+            .Ternary(test: t) :> 0
+            .Template(quasis: q) :> 0
+            .HashRef(id: hr0) :> 0
+            .Foreign(f: fb0) :> 0
+            .At(name: n) :> 0
+            .AtItem :> 0
+            .Call(callee: c) :> 0
+            .Assign(target: t) :> 0
+            .ArrayLit(elems: x) :> 0
+            .ObjectLit(props: x) :> 0
+            .Spread(e: x) :> 0
+            .Index(obj: o) :> 0
+            .Handled(h: x) :> 0
+        }
+        if (own == 1) return e
+        if (own == 2) return not
+        for (const x of exprKids(e)) {
+            const r: AExpr | not = sqlIn(x)
+            if (r is given) return r
+        }
+        return not
+    }
+
     // `x |> f` is a call (§ pipe); every other operator is a value.
     fn binaryBlocker(e: AExpr, op: BinOp, l: AExpr, r: AExpr) -> AExpr | not {
         if (op == BinOp.Pipe) return e
@@ -27880,7 +28201,7 @@ ${
     // say where a file-scope initializer runs (g-spec-file-scope-binding-placement-s472).
     fn blockerWhy(b: AExpr) -> string {
         if (atName(b) != "") return " (§6.6.2: `const x = @c` is a snapshot taken at declaration time; for a value that follows `@c`, declare a derived cell `<x:T = @c/>`)"
-        return " — and the SPEC does not say where such an initializer runs: the client, the server, or both (§12 places functions, not bindings)"
+        return " — §7.6 (S478) rules it is evaluated once at module initialization in every artifact that reads it, which the bootstrap does not build yet (INTERIM, g-boot-file-scope-init-eval-s478)"
     }
 
     // s472 (after #1608): `.V(args)` / `E.V(args)` is a payload-variant VALUE, not a call.
@@ -40026,8 +40347,8 @@ ${
     // compile error" (§6.13.6) — E-SYNTAX-DURATION (§34: "neither literal-form
     // … nor computed-form … parses cleanly"). The computed form `${expr}<unit>`
     // (§51.12.3.1) is not built: refused by name (computed = true).
-    // A quoted value is read as its text (impl#1's shared parser takes the
-    // attribute's text with the quotes stripped).
+    // A quoted value is the same literal (§51.12.3, S478 open-Qs ruling
+    // (user-voice) item 28: "a quoted duration is accepted as the same literal").
     // =========================================================================
     type DurParse:struct = { ms: int, why: string, computed: boolean }
 
@@ -40079,6 +40400,10 @@ ${
         if (unit == "m") mult = 60000
         if (unit == "h") mult = 3600000
         if (unit == "") return durBad("`" + s + "` has no unit — the unit suffix is required: `ms`, `s`, `m` or `h` (§51.12.3)")
+        // S478 open-Qs ruling (user-voice) item 28: "units stay lowercase-only,
+        // and the refusal names the lowercase unit" (§51.12.3).
+        const lu: string = unit.toLowerCase()
+        if (mult == 0 && (lu == "ms" || lu == "s" || lu == "m" || lu == "h")) return durBad("`" + unit + "` in `" + s + "` is not a duration unit — units are lowercase only: write `" + s.substring(0, i) + lu + "` (§51.12.3)")
         if (mult == 0) return durBad("`" + unit + "` in `" + s + "` is not a duration unit — `ms`, `s`, `m` or `h` (§51.12.3)")
         const n: number = Number(s.substring(0, i))
         return { ms: Math.floor(n * mult + 0.5), why: "", computed: false }

@@ -2790,6 +2790,9 @@ ${
     //     is declared "at the top of the block, inside the braces", so a comment
     //     ahead of it leaves `in:` inside the slice text, and `in` is a reserved
     //     word: not JavaScript.
+    // S478 open-Qs ruling (user-voice) item 27: JS comments BETWEEN the header's
+    // names (after `in`, around `:`, `{`, each name, `,` and `}`) are admitted —
+    // "they are whitespace to the JavaScript the header becomes" (§23.2.4a).
     fn foreignHeader(body: string) -> FHeader {
         const none: FHeader = { names: [], starts: [], bodyAt: 0, ok: true, why: "" }
         const i: int = skipBlankChars(body, 0)
@@ -2798,12 +2801,12 @@ ${
             if (ci > i && headerAt(body, ci)) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block's `in:` header follows a comment — the crossing header is declared \"at the top of the block, inside the braces\" (§23.2.4a), so after a comment it is not read as one: `in:` stays in the slice, which is then not JavaScript (`in` is a reserved word) and cannot be built (E-FOREIGN-007). Put the comment after the header, or before the block" }
             return none
         }
-        let j: int = skipBlankChars(body, i + 2)
+        let j: int = skipBlankAndComments(body, i + 2)
         if (body.substring(j, j + 1) != ":") return none
         const bad: FHeader = { names: [], starts: [], bodyAt: 0, ok: false, why: "" }
-        j = skipBlankChars(body, j + 1)
+        j = skipBlankAndComments(body, j + 1)
         if (body.substring(j, j + 1) != "{") return bad
-        j = skipBlankChars(body, j + 1)
+        j = skipBlankAndComments(body, j + 1)
         let names: string[] = []
         let starts: int[] = []
         let ok: boolean = true
@@ -2816,10 +2819,10 @@ ${
                 while (isIdentCh(body.substring(j, j + 1))) { j = j + 1 }
                 names = names.concat([body.substring(n0, j)])
                 starts = starts.concat([n0])
-                j = skipBlankChars(body, j)
+                j = skipBlankAndComments(body, j)
                 const c: string = body.substring(j, j + 1)
                 if (c == ",") {
-                    j = skipBlankChars(body, j + 1)
+                    j = skipBlankAndComments(body, j + 1)
                     if (body.substring(j, j + 1) == "}") done = true
                 } else if (c == "}") {
                     done = true
@@ -2842,7 +2845,7 @@ ${
     // `in` + blanks + `:` at offset `at`
     fn headerAt(body: string, at: int) -> boolean {
         if (body.substring(at, at + 2) != "in" || isIdentCh(body.substring(at + 2, at + 3))) return false
-        const j: int = skipBlankChars(body, at + 2)
+        const j: int = skipBlankAndComments(body, at + 2)
         return body.substring(j, j + 1) == ":"
     }
 
@@ -8382,7 +8385,7 @@ ${
         if (destructDeclAhead(tp)) return refusedDestructItem(tp, d0, "a destructuring `let` at the top level of a logic block (module-level mutable state, as a file-scope `let` is)")
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
-        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per request) is not settled (§12 places functions, not bindings), so the bootstrap does not build it. Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
+        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, and (S478) rules it per-artifact state that a server function may not write (E-FILE-SCOPE-LET-SERVER-WRITE), evaluated once at module initialization in each artifact that reads it; the bootstrap does not build that yet (INTERIM, g-boot-file-scope-init-eval-s478). Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
         return { items: [], tp: d }
     }
 
@@ -9682,9 +9685,9 @@ ${
         }
         if (mEof(m)) {
             const d: MP = mDiag(m, "E-PARSE-ATTR", "unterminated attribute string", mp.pos, m.pos)
-            return { v: AAttrValue.Quoted(text), mp: d }
+            return { v: AAttrValue.Quoted(text, q == "'"), mp: d }
         }
-        return { v: AAttrValue.Quoted(text), mp: mAdv(m, 1) }
+        return { v: AAttrValue.Quoted(text, q == "'"), mp: mAdv(m, 1) }
     }
 
     // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------

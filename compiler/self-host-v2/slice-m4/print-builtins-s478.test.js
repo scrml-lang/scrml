@@ -133,14 +133,13 @@ describe("B — E-PRINT-NON-PRIMITIVE (§20.7.2, §14.13.2)", () => {
     });
   }
 
-  // r1 (#1900 review MED): the SPEC disagrees with itself on an `asIs` argument (g-boot-print-asis-arg-s478,
-  // owner question) — refused BY NAME until it is ruled, never E-PRINT-NON-PRIMITIVE (which hid the
-  // E-FOREIGN-006 / -007 conformance checks)
-  test("an unannotated foreign value (asIs) is refused by name, citing the open question (INTERIM)", () => {
+  // S478 open-Qs ruling (user-voice) item 23 — "keep the fail-closed rule (§20.7.2 allow-list, §14.13.2)":
+  // an unannotated foreign value (`asIs`) is a print argument of unresolved type, E-PRINT-NON-PRIMITIVE.
+  // (Red before: refused by name, E-BOOTSTRAP-UNSUPPORTED citing g-boot-print-asis-arg-s478.)
+  test("an unannotated foreign value (asIs) is E-PRINT-NON-PRIMITIVE (fail closed, §14.13.2)", () => {
     const d = run(tool(`        const v = _={ 1 + 1 }=;\n        println(v);`)).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("g-boot-print-asis-arg-s478");
-    expect(d[0].message).toContain("`asIs`");
+    expect(d.map((x) => x.code)).toEqual(["E-PRINT-NON-PRIMITIVE"]);
+    expect(d[0].message).toContain("cannot resolve this value's type");
   });
 
   test("an ANNOTATED foreign value is not refused (the §23.2.4a call-site annotation)", () => {
@@ -205,7 +204,6 @@ describe("D — placement (§20.7.3)", () => {
 
   for (const [what, src, why] of [
     ["an event handler", `<program>\n    <button id="b" onclick={ println("x"); }>go</button>\n</program>\n`, "outside a `function` body"],
-    ["a pure `fn`", tool(`        const k = f();`, "    fn f() -> int {\n        println(\"x\");\n        return 1;\n    }\n"), "in a `fn` body"],
     ["a value position", tool(`        const v = println("x");`), "used as a value"],
   ]) {
     test(`refused by name (INTERIM) in ${what}`, () => {
@@ -216,6 +214,26 @@ describe("D — placement (§20.7.3)", () => {
       expect(d.map((x) => x.code)).not.toContain("E-SCOPE-001");
     });
   }
+
+  // S478 open-Qs ruling (user-voice) item 24 — §48.3.4: "A `print` / `println` call (§20.7) SHALL NOT
+  // appear inside a `fn` body (nested functions included); it is `E-FN-004`." (Red before: refused by name.)
+  test("in a pure `fn` → E-FN-004 (§48.3.4, S478 ruling item 24)", () => {
+    const d = run(tool(`        const k = f();`, "    fn f() -> int {\n        println(\"x\");\n        return 1;\n    }\n")).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-FN-004"]);
+    expect(d[0].message).toContain("`fn f`");
+  });
+
+  test("in a function nested in a pure `fn` → E-FN-004, naming both", () => {
+    const pre = "    fn f() -> int {\n        function g() {\n            print(\"x\");\n        }\n        return 1;\n    }\n";
+    const d = run(tool(`        const k = f();`, pre)).diags;
+    expect(d.map((x) => x.code)).toContain("E-FN-004");
+    expect(d.map((x) => x.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  test("a `fn` used as a value position print → still E-FN-004 (the purity rule comes first)", () => {
+    const d = run(tool(`        const k = f();`, "    fn f() -> int {\n        const v = println(\"x\");\n        return 1;\n    }\n")).diags;
+    expect(d.map((x) => x.code)).toContain("E-FN-004");
+  });
 
   test("the bare name (a function value) stays refused by name", () => {
     const d = run(tool(`        const f = println;`)).diags;

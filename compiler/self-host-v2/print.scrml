@@ -4826,6 +4826,11 @@ ${
     export fn printProgram(p: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
         const ill: string[] = coreRefusal(p)
         if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] }
+        // S478 ruling item 26 (1): a LIBRARY entry (no `<program>`, §21.5) is analyzed as a
+        // library, but §21.5's output — "no HTML output … a JS module with the exported bindings
+        // as its sole output" — is not built: refused by name, never printed as a page (INTERIM,
+        // g-boot-library-entry-emit-s478).
+        if (p.program.id < 0) return { js: "", html: "", refused: ["E-BOOTSTRAP-UNSUPPORTED: this entry is a library file (no `<program>`, §21.5) — its checks ran, but the bootstrap does not emit a library's JS module yet (§21.5: \"a JS module with the exported bindings as its sole output\"), and it never prints a library as a page. Import it from a program, or compile it with the main compiler"], routes: [] }
         const refused: string[] = serverRefusal(p)
         if (refused.length > 0) return { js: "", html: "", refused: refused, routes: [] }
         const names: NameTable = planNames(p)
