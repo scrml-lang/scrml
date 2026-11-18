@@ -4931,7 +4931,9 @@ ${
     // each, the value decoded against the cell's declared type — and binds each
     // answer to the module-level const its field's init reads (`Local(val)`);
     // only then is the program instance built and mounted. A failed load mounts
-    // nothing (rt.loadDbCells reports it). Without `<db>` cells: `boot` as it is.
+    // no program: rt.loadDbCells reports it and shows the program-level default
+    // failure view instead (§8.1.3 "A failed load", S479). Without `<db>` cells:
+    // `boot` as it is.
     //   const dbcells$ = await rt.loadDbCells([route$load_rows]);
     //   const rows_db = dbcells$.values[0];
     //   if (dbcells$.ok) { const program$ = shared_program(); … mount … }

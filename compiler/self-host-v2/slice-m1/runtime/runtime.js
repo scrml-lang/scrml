@@ -5334,17 +5334,39 @@ export function call(route, args, task) {
 // fails the page is NOT mounted (ok = false) and the failure is reported by its
 // ServerCallError variant only — never a reason text, which is the only part
 // that could quote anything the server sent.
+// s479 (s479-records; SPEC §8.1.3 "A failed load", RULED S479 §3.B item 23 —
+// "a program-level default failure view, not `@x.error`"): in place of the
+// program, the page shows the default failure view (loadFailedView). INTERIM:
+// the author override slot comes with the §52 load slice.
 export async function loadDbCells(routes) {
   const values = [];
   for (const r of routes) {
     const v = await call(r, [], null);
     if (failed(v)) {
       reportHostError(new Error(`scrml: a <db> cell's server load failed (${loadFailureName(v)}) — the page is not mounted`));
+      loadFailedView();
       return { ok: false, values: [] };
     }
     values.push(v);
   }
   return { ok: true, values };
+}
+
+// The program-level default failure view (§8.1.3): one element where the
+// program would have mounted (the end of <body>), with fixed text — it quotes
+// nothing the server sent (no reason, no status, no body). Its two attributes
+// are constants set through the reflected properties (`role`, `dataset`): the
+// runtime keeps one `setAttribute`, the guarded data write in `attr`
+// (compiler/tests/unit/bootstrap-url-guard-verbatim.test.js).
+export const LOAD_FAILED_TEXT = "This page could not load its data.";
+function loadFailedView() {
+  const d = globalThis.document;
+  if (!d || !d.body) return;
+  const el = d.createElement("p");
+  el.role = "alert";
+  el.dataset.scrmlLoadFailed = "";
+  el.textContent = LOAD_FAILED_TEXT;
+  d.body.appendChild(el);
 }
 
 // `Transport(Unreachable)`, `Transport(ServerFault(500))`, `Transport(Malformed)` — names and a status only.
