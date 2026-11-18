@@ -297,12 +297,24 @@ describe("§17.6.10.1 — statement-position markup that would not render is E-M
 });
 
 // ---------------------------------------------------------------------------
-describe("held back (INTERIM, refused by name) — a body-top `${ … }` that would render", () => {
-  // §17.3 (S449): a body-top `${ … }` "is a statement list, evaluated, not rendered", and
-  // §17.6.10.1 renders only a value-form in a MARKUP interpolation — but the conformance corpus
-  // (type-state-codes/e-type-045-*, element-refusal/*-neg) reads these as rendered. Owner question.
-  test("`${ if (c) { <p/> } }` and `${ lift <p/>; }` at a body top stay E-BOOTSTRAP-UNSUPPORTED", () => {
-    expect(codes(T(`    \${ if (@yes) { <p>held</p> } }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(T(`    \${ lift <p>held</p>; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+describe("S478 open-Qs ruling item 1 (b) — a body-top `${ … }` renders nothing", () => {
+  // §17.3 (amended S478): "a `lift` of markup there, and the single element of an `if` / `given`
+  // branch there …, render nothing, and each is E-MARKUP-STATEMENT-NOT-RENDERED (§17.6.10.1),
+  // reported at the element". (Red on base: both were E-BOOTSTRAP-UNSUPPORTED, held back.)
+  test("`${ if (c) { <p/> } }` and `${ lift <p/>; }` at a body top are E-MARKUP-STATEMENT-NOT-RENDERED", () => {
+    expect(codes(T(`    \${ if (@yes) { <p>held</p> } }`))).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
+    expect(codes(T(`    \${ lift <p>held</p>; }`))).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
+    expect(codes(T(`    \${ if (@yes) { lift <p>held</p>; } }`))).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
+  });
+  test("the message names the body-top fix (`if=` / plain markup)", () => {
+    for (const src of [T(`    \${ if (@yes) { <p>held</p> } }`), T(`    \${ lift <p>held</p>; }`)]) {
+      const d = run(src).diags.find((x) => x.code === "E-MARKUP-STATEMENT-NOT-RENDERED");
+      expect(d.message).toContain("§17.3");
+      expect(d.message).toContain("if=");
+    }
+  });
+  test("a `lift` into a loop bound as a value, and the same shapes in markup, are untouched", () => {
+    expect(codes(T(`    <div>\${ if (@yes) { <p>shown</p> } }</div>`))).toEqual([]);
+    expect(codes(T(`    \${ function f() { for (const x of [1]) { lift <p>x</p>; } } }`))).toEqual(["E-SYNTAX-002"]);
   });
 });

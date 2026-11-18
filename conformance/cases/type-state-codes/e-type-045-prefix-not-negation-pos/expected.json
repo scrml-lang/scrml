@@ -4,10 +4,15 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/type-system.test.js",
   "spec": "§42.10",
-  "rationale": "§42.10 `not` is the absence value, never a prefix negation operator; a prefix `not expr` in any expression position is a compile error (E-TYPE-045), steering to `!expr` (negation) or `expr is not` (absence check).",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 1 (g-boot-body-top-lift-render-s478, option (b)) — migrated: a body-top `${ … }` renders nothing (§17.3 amended S478)",
+  "rationale": "§42.10 `not` is the absence value, never a prefix negation operator; a prefix `not expr` in any expression position is a compile error (E-TYPE-045), steering to `!expr` (negation) or `expr is not` (absence check). (S478 open-Qs ruling item 1: migrated from a body-top `${ if (…) { <p/> } }`, which renders nothing there and is E-MARKUP-STATEMENT-NOT-RENDERED (§17.3 amended S478), to the `if=` attribute form. The bootstrap has no E-TYPE-045: it reports a parse error at the `@` of `not @ready` — g-boot-e-type-045-prefix-not-s478.)",
   "expect": {
-    "codes": ["E-TYPE-045"],
+    "codes": [
+      "E-TYPE-045"
+    ],
     "notCodes": [],
-    "severity": { "E-TYPE-045": "error" }
+    "severity": {
+      "E-TYPE-045": "error"
+    }
   }
 }

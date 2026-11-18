@@ -1,0 +1,26 @@
+{
+  "id": "server-db-event-control-in-suspending-loop-neg",
+  "description": "§13.2 (amended S478) — a loop whose body holds a suspension point counts as \"after\" the first `await` for its whole body: `event.preventDefault()` BEFORE the server call in the loop body still runs after the previous iteration's `await` from the second iteration on, so it is E-EVENT-CONTROL-AFTER-AWAIT.",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 11 (g-boot-event-control-in-suspending-loop-s478)",
+  "rationale": "§13.2 amended S478: \"A loop … whose body or condition contains a suspension point counts as after the first `await` for its WHOLE body and condition, in every iteration … any use of the event … inside such a loop, other than a plain read of a non-control property, is `E-EVENT-CONTROL-AFTER-AWAIT`.\" The conditional call (`i == 2`) would otherwise do nothing, silently.",
+  "expect": {
+    "codes": [
+      "E-EVENT-CONTROL-AFTER-AWAIT"
+    ],
+    "notCodes": [
+      "E-ERROR-002"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-event-control-suspending-loop-s478",
+      "fails": {
+        "codes": [
+          "missing:E-EVENT-CONTROL-AFTER-AWAIT"
+        ]
+      }
+    }
+  }
+}
