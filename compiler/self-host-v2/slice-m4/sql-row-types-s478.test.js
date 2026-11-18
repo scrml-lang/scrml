@@ -351,14 +351,14 @@ describe("runtime (SQLite): a typed row value that does not fit its column type 
   test("a blob in a `text` column: the query fails (its arm runs) — never a Uint8Array through a string", async () => {
     expect((await call("armLeave")).json).toBe("err");
     expect((await call("firstBody")).json).toBe("none");
-    expect(logs.some((l) => /does not fit its declared type/.test(l) && /expected a string/.test(l))).toBe(true);
+    expect(logs.some((l) => /does not fit its declared type/.test(l) && /\$\.body: the stored value is a blob/.test(l))).toBe(true);
   });
   test("a string in a `real not null` column: the `.all()` query fails ([] arm)", async () => {
     expect((await call("scoreSum")).json).toBe(0);
   });
   test("a non-integral REAL in an `integer` column (`int` since S478): the query fails", async () => {
     expect((await call("kwQual")).json).toBe(0);
-    expect(logs.some((l) => /expected an int, got 1\.5/.test(l))).toBe(true);
+    expect(logs.some((l) => /\$\.current_timestamp: the stored value is a real/.test(l))).toBe(true);
   });
   test("a fitting row still reads (the check passes a NULL in a nullable column)", async () => {
     await sql.unsafe("INSERT INTO notes (id, body, note, score) VALUES (2, 'b', NULL, 2)");
@@ -413,5 +413,101 @@ describe("docs/tutorial-snippets/02b-counter-persisted.scrml (S478 ruling 20)", 
       await sql.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// fix r1 (#1944 review MED-1 / MED-2 / LOW-3) — §14.8.3 "A typed row is checked as it is read":
+// an `int` field holds an integer within ±(2^53−1) (§21.3.1.1); a column the declared type does not
+// declare is dropped, not refused; the log names the field path and the storage class, never the value.
+describe("runtime (SQLite): the row check's int range, undeclared columns and log line (#1944 r1)", () => {
+  const SCH = `    <schema>
+        acct {
+            id: integer primary key
+            owner: text not null
+            bal: integer not null
+        }
+        w {
+            k: integer primary key
+            v: text not null
+        }
+    </>`;
+  const SRC = `<program db="./app.db">
+${SCH}
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    \${
+        function debitBob()! E {
+            const r = ${SQ}\`SELECT id, bal FROM acct WHERE owner = 'bob'\`}.get();
+            if (r is not) return 0;
+            ${SQ}\`UPDATE acct SET bal = bal - 100 WHERE id = \${r.id}\`}.run();
+            return 1;
+        }
+        function balOf(o: string) -> int {
+            const r = ${SQ}\`SELECT * FROM acct WHERE owner = \${o}\`}.get() !{ _ :> not };
+            if (r is not) return -1;
+            return r.bal;
+        }
+        function wv() -> string {
+            const x = ${SQ}\`SELECT * FROM w WHERE k = 1\`}.get() !{ _ :> not };
+            if (x is not) return "nf";
+            return x.v;
+        }
+        function wAll() -> int {
+            const xs = ${SQ}\`SELECT * FROM w\`}.all() !{ _ :> [] };
+            return xs.length;
+        }
+    }
+    let <out:string=""/>
+    let <n:int=0/>
+    <button onclick={ @n = debitBob() !{ _ :> 0 }; }>a</button>
+    <button onclick={ @n = balOf("x") !{ _ :> 0 }; }>b</button>
+    <button onclick={ @out = wv() !{ _ :> "err" }; }>c</button>
+    <button onclick={ @n = wAll() !{ _ :> 0 }; }>d</button>
+    <p>\${@out} \${@n}</p>
+</program>
+`;
+  let dir, sql, srv, routes;
+  const logs = [];
+  const call = (f, args = []) => post(srv, pathOf(routes, f), args);
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s478-row-check-r1-"));
+    sql = new SQL("sqlite://" + join(dir, "app.db"));
+    // `acct` carries 64-bit ids past 2^53 and a column `<schema>` does not declare (`note`);
+    // `w` is STRICT and carries one too (`added`)
+    await sql.unsafe("CREATE TABLE acct (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, bal INTEGER NOT NULL, note TEXT)");
+    await sql.unsafe("INSERT INTO acct VALUES (9007199254740992, 'alice', 500, 'secret-a'), (9007199254740993, 'bob', 500, 'secret-b'), (7, 'carol', 300, 'secret-c'), (8, 'dave', 9223372036854775807, NULL), (9, 'erin', 1e300, NULL)");
+    await sql.unsafe("CREATE TABLE w (k INTEGER PRIMARY KEY, v TEXT NOT NULL, added INTEGER) STRICT");
+    await sql.unsafe("INSERT INTO w VALUES (1, 'wv', 3)");
+    const r = compile(SRC);
+    expect(r.diags.filter((d) => d.severity === "Error").map((d) => d.code)).toEqual([]);
+    ({ srv, routes } = await serve(r.core, sql, logs));
+  }, 300000);
+  afterAll(async () => {
+    await sql.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("MED-1: an id past 2^53 fails the query as QueryFailed — the rounded id never selects alice's row", async () => {
+    const a = await call("debitBob");
+    expect(a.status).toBe(500);
+    expect(a.json.variant).toBe("QueryFailed");
+    const rows = await sql.unsafe("SELECT owner, bal FROM acct WHERE owner IN ('alice', 'bob') ORDER BY owner");
+    expect(rows.map((x) => [x.owner, x.bal])).toEqual([["alice", 500], ["bob", 500]]);
+    expect(logs.some((l) => /\$\.id: the stored value is an integer outside ±\(2\^53−1\)/.test(l))).toBe(true);
+  });
+  test("MED-1: int64 max and a REAL 1e300 in an `int` field fail; a safe integer reads", async () => {
+    expect((await call("balOf", ["dave"])).json).toBe(-1);
+    expect((await call("balOf", ["erin"])).json).toBe(-1);
+    expect((await call("balOf", ["carol"])).json).toBe(300);
+  });
+  test("MED-2: a live column `<schema>` does not declare is dropped — `SELECT *` still reads (non-STRICT and STRICT)", async () => {
+    expect((await call("balOf", ["carol"])).json).toBe(300);
+    expect((await call("wv")).json).toBe("wv");
+    expect((await call("wAll")).json).toBe(1);
+  });
+  test("LOW-3: the log line names the path and storage class, never the stored value", async () => {
+    await sql.unsafe("INSERT INTO acct VALUES (10, 'frank', 'pii-value-xyz', NULL)");
+    expect((await call("balOf", ["frank"])).json).toBe(-1);
+    expect(logs.some((l) => /\$\.bal: the stored value is text/.test(l))).toBe(true);
+    expect(logs.some((l) => l.includes("pii-value-xyz"))).toBe(false);
   });
 });

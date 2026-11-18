@@ -36,3 +36,19 @@ E-SCHEMA-017 = a column declared twice. Built to the user-voice text.
 - New/changed tests red on base: 21 assertions across schema / schema-ddl / sql-row-types / syntax-batch.
 - CI gates locally: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor,
   gen-md-shim, s34-census --check-new, delta-lint, e2e-render-map — all PASS.
+
+## Fix round 1 (#1944 review, `~/.cache/scrml/review/s478-1944/review.md`)
+- Merged origin/main (c60b0bf59): known-gaps both sides kept (resolved markers + main's RULED notes);
+  severity.scrml regenerated (W-TX-EXIT-ROLLS-BACK) and `--check` clean.
+- [x] MED-1: `server-runtime.js` `fitRow` — an `int` row field must be `Number.isSafeInteger` (row check
+      only; the shared wire decoder is untouched, g-boot-wire-int-decode-unsafe-s478). §14.8.3 states ±(2^53−1).
+- [x] MED-2: `fitRow` drops a live column the declared type does not declare (SELECT * on a drifted
+      non-STRICT or STRICT table reads again). §14.8.3 states it; the "redundant once STRICT" claim narrowed
+      to the storage-class part (SPEC + g-boot-sql-row-check-interim-s478).
+- [x] LOW-1: §14.8.3 INTEGER→int direction-of-change names `/` (E-INT-DIVISION, §66.20), the `number`
+      local workaround, corpus count 0.
+- [x] LOW-2: filed g-boot-sql-row-check-untyped-bound-s478 (repro + fix suggestion).
+- [x] LOW-3: the log line names path + storage class (`storageClass`), never the value.
+- Tests: sql-row-types-s478.test.js new describe (4 tests, red on the pre-fix runtime); 52/52.
+- Conformance pre-fix (c60b0bf59) → fix: per-case identical (614/19/600, CRASH 0).
+- Gates: types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim, severity --check — PASS.
