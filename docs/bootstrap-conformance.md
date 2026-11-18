@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1881 of 1881 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1880 of 1880 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 681 | 36.2% |
+| PASS | 683 | 36.3% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 7 | 0.4% |
+| FAIL | 4 | 0.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 637 | 33.9% |
 | UNSUPPORTED | 556 | 29.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 688; of those, 681 hold (99.0%). Runtime half executed on the bootstrap for 223 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 687; of those, 683 hold (99.4%). Runtime half executed on the bootstrap for 223 case(s).
 
-- **Vacuous** passes: 18 of 681 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **663**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 7; the other 2 are implemented checks that answered wrong.
+- **Vacuous** passes: 18 of 683 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **665**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **878** — PASS 457 · FAIL 6 · UNSUPPORTED 415. Twin holds 457 (non-vacuous 442). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **877** — PASS 458 · FAIL 4 · UNSUPPORTED 415. Twin holds 458 (non-vacuous 443). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -120,7 +120,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | engine | 92 | 22 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
-| error | 78 | 52 | · | 2 | · | 5 | 19 | · | · |
+| error | 77 | 53 | · | · | · | 5 | 19 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 127 | 73 | · | 1 | · | 44 | 9 | · | · |
+| reactive | 127 | 74 | · | · | · | 44 | 9 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
@@ -167,24 +167,13 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 9 | · | 2 | · | 6 | 15 | · | · |
 
-### FAIL (7)
+### FAIL (4)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - count: E-STMT-MISSING-SEMICOLON fired 1 time(s), expected exactly 2
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `extra` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-TYPE: expected a type, found `"a"`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `|` (other statements at logic-block level are not in the bootstrap)
-- `error/error-008-message-pos` (twin · parse-reject; not in the bootstrap: E-ERROR-008)
-  - missing E-ERROR-008
-  - severity: E-ERROR-008 did not fire (expected error)
-  - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `error/error-008-neg` (twin · parse-reject)
-  - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
-  - missing E-DG-001
-  - severity: E-DG-001 did not fire (expected error)
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -206,7 +195,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (681)
+### PASS / CODES-ONLY (683)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -458,6 +447,7 @@ none
 - `error/construct-variant-payload-arity-ok` — PASS · TWIN
 - `error/construct-variant-payload-arity-return-neg` — PASS · TWIN
 - `error/construct-variant-payload-arity-trailing-comma-ok` — PASS · TWIN
+- `error/error-008-neg` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
@@ -792,6 +782,7 @@ none
 - `reactive/reset-init-after-assignment-rt` — PASS · TWIN
 - `reactive/reset-reserved-identifier` — PASS · TWIN
 - `reactive/s437-r5-template-cell-read-value-attr` — PASS · TWIN
+- `reactive/server-fn-mutual-recursion-clean` — PASS
 - `reactive/server-fn-rawvar-read-error` — PASS · TWIN
 - `reactive/tape-bound-append-rt` — PASS
 - `reactive/tape-bound-append-trap-rt` — PASS
