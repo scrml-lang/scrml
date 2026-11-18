@@ -7,7 +7,7 @@ ${
         return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not };
     }
     function pick(id: number) -> User | not {
-        return loadUser(id);
+        return loadUser(id) !{ _ :> not };
     }
 }
 <request id="userReq">
