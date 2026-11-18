@@ -48,14 +48,25 @@ async function served(src) {
 }
 
 // A raw WebSocket client: resolves on open (rejects when the upgrade is refused); records frames and the close.
+// S478 open-Qs items 50–51 (§38.4.2): the relay's first message is the `__replay` of its frame log
+// (kept in `replays`); every relayed frame carries `__seq` and `__own` — `frames` keeps them whole,
+// `got` keeps the relayed edit without them (what the earlier tests assert about the payload).
 function connect(base, path, headers = {}) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://${base}${path}`, { headers });
     const got = [];
+    const frames = [];
+    const replays = [];
     let closed = null;
-    ws.onmessage = (ev) => got.push(JSON.parse(String(ev.data)));
+    ws.onmessage = (ev) => {
+      const v = JSON.parse(String(ev.data));
+      if (v.__type === "__replay") { replays.push(v); return; }
+      frames.push(v);
+      const { __seq, __own, ...edit } = v;
+      got.push(edit);
+    };
     ws.onclose = (ev) => { closed = { code: ev.code, reason: ev.reason }; };
-    ws.onopen = () => resolve({ ws, got, closed: () => closed });
+    ws.onopen = () => resolve({ ws, got, frames, replays, closed: () => closed });
     ws.onerror = () => reject(new Error("refused"));
   });
 }
@@ -74,7 +85,10 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
     } finally { bun.stop(true); }
   });
 
-  test("§38.4: a client's __sync is relayed to the channel's OTHER subscribers, re-encoded; the sender gets nothing back", async () => {
+  // S478 open-Qs ruling (user-voice), item 50 — §38.4.2: "relayed RE-ENCODED from the decoded payload
+  // to EVERY subscriber of the channel, its sender included" with "`__own`: `true` on the copy sent
+  // to the frame's sender". RED ON b04fdc27a: the sender got nothing back and no frame had `__seq`.
+  test("§38.4.2: a client's __sync is relayed to EVERY subscriber, the sender included (`__own`), numbered, re-encoded", async () => {
     const { bun, base } = await served(SYNC);
     try {
       const a = await connect(base, "/_scrml_ws/chat");
@@ -83,8 +97,11 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       a.ws.send(sync("count", 7));
       a.ws.send(sync("note", "hi"));
       await tick();
-      expect(b.got).toEqual([{ __type: "__sync", __key: "count", __op: "replace", __val: 7 }, { __type: "__sync", __key: "note", __op: "replace", __val: "hi" }]);
-      expect(a.got).toEqual([]);
+      expect(b.frames).toEqual([{ __type: "__sync", __seq: 1, __key: "count", __op: "replace", __val: 7, __own: false }, { __type: "__sync", __seq: 2, __key: "note", __op: "replace", __val: "hi", __own: false }]);
+      expect(a.frames).toEqual([{ __type: "__sync", __seq: 1, __key: "count", __op: "replace", __val: 7, __own: true }, { __type: "__sync", __seq: 2, __key: "note", __op: "replace", __val: "hi", __own: true }]);
+      // each connection's first message was the (empty) replay of the frame log
+      expect(a.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
+      expect(b.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
       a.ws.close();
       b.ws.close();
     } finally { bun.stop(true); }
