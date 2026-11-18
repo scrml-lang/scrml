@@ -42538,7 +42538,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
             }
         }
         return st
@@ -45812,6 +45812,20 @@ ${
         }
         for (const p of valuePositions(g, t, [])) {
             for (const r of scanValue({ t: t, file: p.file }, p.v, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: p.what, file: r.file, span: r.span }]) }
+        }
+        // s479 (g-boot-mixed-recursion-escalation-s479) — a `<request>` body, the author's or
+        // the compiler-written half of a pending cell (§13.9.2), is CLIENT code: §19.9.10 scope
+        // item 2 "The call is evaluated on the client: … in a lifecycle body … or a `<request>`
+        // body". A function its load calls therefore has a client-classified caller and "SHALL
+        // remain ambient (client-classified)" (§12.2 Trigger 5). Before s479 a request body was
+        // no referrer at all, so a helper the load called that a server function ALSO called
+        // (`step` ↔ `down`) was placed by inheritance — then its server calls were judged
+        // server→server (a false E-ERROR-013) and the load called it as a server function
+        // that is not one (C-R2 / C-S3: E-BOOTSTRAP-CORE-ILL-FORMED).
+        for (const rq of t.requests) {
+            let what: string = "the `<request>` body that loads `@" + rq.targetName + "`"
+            if (rq.pend >= 0) what = "the initializer of `@" + rq.targetName + "`"
+            for (const r of scanBlock({ t: t, file: rq.file }, rq.req.body, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: what, file: r.file, span: r.span }]) }
         }
         return out
     }
