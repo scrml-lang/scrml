@@ -17753,7 +17753,84 @@ ${
         for (const f of env.g.files) {
             if (f.path == env.file && itemCellNames(f.items).indexOf(tn) >= 0) return ""
         }
+        // s479 r1 (MED-1) — a FILE-SCOPE keywordless declaration of `tn` elsewhere in the file (the first
+        // `tn = …` statement at the top of a body-top run, §7.6) binds `tn` here as `const tn = …` would:
+        // §50.8.5 "the keywordless bare naming statement (`x = 1`) … declares `x` exactly as `const x = 1`
+        // does", and a file-scope `const` is in scope in every function of the file (§7.6: "Variables
+        // declared in a file-level `${}` block are accessible to all subsequent markup and nested `${}`
+        // blocks"). So `tn = …` inside a function (or any scope that does not see the run's locals) is
+        // a WRITE to that binding — E-ASSIGN-004 once the file is re-read with it a file-scope constant —
+        // never a second declaration (which would make a dead local and silently lose the update).
+        const at: int = fileKwDeclAt(env, tn)
+        if (at >= 0 && at != e.span.start) return ""
         return tn
+    }
+
+    // s479 r1 (MED-1) — the offset of the statement that declares `name` keywordlessly at file scope in
+    // `env.file` — the FIRST statement `name = …` (unparenthesized, a bare name) at the top level of a
+    // body-top run, in source order — else -1. A body-top run's top-level locals are file-scope (§7.6;
+    // resolveRunEnv), and the re-read makes that statement a file-scope constant (parse.scrml PNs.kw).
+    fn fileKwDeclAt(env: Env, name: string) -> int {
+        for (const f of env.g.files) {
+            if (f.path == env.file) return itemsKwDeclAt(f.items, name)
+        }
+        return -1
+    }
+
+    fn itemsKwDeclAt(items: AItem[], name: string) -> int {
+        for (const it of items) {
+            const k: AItemK = it.k
+            const at: int = match k {
+                .ProgramItem(p: p) :> itemsKwDeclAt(p.items, name)
+                .MarkupItem(n: n) :> nodeKwDeclAt(n, name)
+                // no-default-arm: one question of the item — can it hold a body-top run
+                _ :> -1
+            }
+            if (at >= 0) return at
+        }
+        return -1
+    }
+
+    fn nodeKwDeclAt(n: ANode, name: string) -> int {
+        const k: ANodeK = n.k
+        return match k {
+            .Run(b: b) :> runKwDeclAt(b, name)
+            .Elem(e: e) :> nodesKwDeclAt(e.kids, name)
+            // no-default-arm: one question of the node — can it hold a body-top run
+            _ :> -1
+        }
+    }
+
+    fn nodesKwDeclAt(ns: ANode[], name: string) -> int {
+        for (const n of ns) {
+            const at: int = nodeKwDeclAt(n, name)
+            if (at >= 0) return at
+        }
+        return -1
+    }
+
+    fn runKwDeclAt(b: ABlock, name: string) -> int {
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const at: int = match k {
+                .Eval(e: e) :> evalKwDeclAt(e, name)
+                // no-default-arm: one question of the statement — is it a bare `name = …`
+                _ :> -1
+            }
+            if (at >= 0) return at
+        }
+        return -1
+    }
+
+    fn evalKwDeclAt(e: AExpr, name: string) -> int {
+        const ek: AExprK = e.k
+        const tn: string = match ek {
+            .Assign(target: t, paren: p, kept: k) :> assignedName(t, p, k)
+            // no-default-arm: one question of the expression — is it an assignment
+            _ :> ""
+        }
+        if (tn != "" && tn == name) return e.span.start
+        return -1
     }
 
     // s478 r1 (LOW-9) — every cell name (a lowercase declaration name) written anywhere in `items`:

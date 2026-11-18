@@ -48,4 +48,18 @@ describe("§7.3.3 / §18.7 — one arm binds each name once", () => {
     const src = `<program>\n    type T:enum = { V(x: int, y: int, z: int), W }\n    function f(t: T) -> int {\n        return match t {\n            .V(a, b, a) :> a + b,\n            .W :> 0\n        };\n    }\n    <p>\${f(T.W)}</p>\n</program>\n`;
     expect(codes(src)).toEqual(["E-SCOPE-REDECLARE"]);
   });
+
+  // s479 r1 (review LOW-1): the report names the pattern AS WRITTEN — a qualified pattern keeps its qualifier
+  test("the message names a qualified pattern with its qualifier: `E.Bad(…)`, `Pair.Loaded(…)`", () => {
+    const h = `<program>\n    type E:enum = { Bad(a: int, b: int) }\n    function g()! E -> int { fail E.Bad(1, 2); }\n    function h() -> int {\n        const v: int = g() !{ E.Bad(x, x) :> x };\n        return v;\n    }\n    <p>\${h()}</p>\n</program>\n`;
+    const hm = errs(h).filter((d) => d.code === "E-SCOPE-REDECLARE");
+    expect(hm.length).toBeGreaterThan(0);
+    expect(hm[0].message).toContain("`E.Bad(…)`");
+    const v = valueProg(`            Pair.Loaded(n, n) :> n,\n            .Twice(a, b) :> a + b,\n            .Empty :> 0`);
+    const vm = errs(v).filter((d) => d.code === "E-SCOPE-REDECLARE");
+    expect(vm.length).toBeGreaterThan(0);
+    expect(vm[0].message).toContain("`Pair.Loaded(…)`");
+    const b = valueProg(`            .Loaded(n, n) :> n,\n            .Twice(a, b) :> a + b,\n            .Empty :> 0`);
+    expect(errs(b).filter((d) => d.code === "E-SCOPE-REDECLARE")[0].message).toContain("`.Loaded(…)`");
+  });
 });
