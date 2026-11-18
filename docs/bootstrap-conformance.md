@@ -11,27 +11,27 @@ Scope: **1870 of 1870 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 645 | 34.5% |
+| PASS | 651 | 34.8% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 12 | 0.6% |
+| FAIL | 6 | 0.3% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 637 | 34.1% |
 | UNSUPPORTED | 576 | 30.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 657; of those, 645 hold (98.2%). Runtime half executed on the bootstrap for 219 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 657; of those, 651 hold (99.1%). Runtime half executed on the bootstrap for 221 case(s).
 
-- **Vacuous** passes: 14 of 645 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **631**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 5 of 12; the other 7 are implemented checks that answered wrong.
+- **Vacuous** passes: 14 of 651 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **637**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 4 of 6; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 576.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 430 · FAIL 9 · UNSUPPORTED 435. Twin holds 430 (non-vacuous 419). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 4 replace a twin's expectations · 13 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 434 · FAIL 5 · UNSUPPORTED 435. Twin holds 434 (non-vacuous 423). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
 NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
@@ -112,7 +112,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
 | control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
-| defer | 51 | 25 | · | 1 | · | 4 | 21 | · | · |
+| defer | 51 | 26 | · | · | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
@@ -120,7 +120,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | engine | 92 | 22 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 78 | 47 | · | 4 | · | 5 | 22 | · | · |
+| error | 78 | 49 | · | 2 | · | 5 | 22 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
@@ -129,7 +129,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 68 | 33 | · | 1 | · | 22 | 12 | · | · |
+| lifecycle | 68 | 34 | · | · | · | 22 | 12 | · | · |
 | linear | 15 | 3 | · | · | · | · | 12 | · | · |
 | loop | 8 | 2 | · | · | · | 3 | 3 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -157,9 +157,9 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 92 | 14 | · | 1 | · | 17 | 60 | · | · |
+| server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 20 | 4 | · | 2 | · | 9 | 5 | · | · |
+| sql | 20 | 5 | · | 1 | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -167,15 +167,13 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 6 | · | 1 | · | 6 | 19 | · | · |
 
-### FAIL (12)
+### FAIL (6)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - count: E-STMT-MISSING-SEMICOLON fired 1 time(s), expected exactly 2
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `extra` (other statements at logic-block level are not in the bootstrap)
   - E-PARSE-TYPE: expected a type, found `"a"`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `|` (other statements at logic-block level are not in the bootstrap)
-- `defer/server-callee-error-total-handler-twin` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-ERROR-010)
 - `error/error-008-message-pos` (twin · parse-reject; not in the bootstrap: E-ERROR-008)
   - missing E-ERROR-008
   - severity: E-ERROR-008 did not fire (expected error)
@@ -184,24 +182,9 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 - `error/error-008-neg` (twin · parse-reject)
   - E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
   - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `{` (other statements at logic-block level are not in the bootstrap)
-- `error/implicit-tx-explicit-transaction-block` (parse-reject; not in the bootstrap: E-BATCH-001)
-  - missing E-BATCH-001
-  - severity: E-BATCH-001 did not fire (expected error)
-  - count: E-BATCH-001 fired 0 time(s), expected exactly 1
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `}`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `error/transaction-top-level-neg` (parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
-- `lifecycle/request-body-client-wrapper-rt` (twin · codes+runtime)
-  - forbidden family E-* fired: E-ERROR-002
-  - runtime: no artifact — the compile reported an error (E-ERROR-002)
 - `reactive/dg-001-cyclic-pos` (codes; not in the bootstrap: E-DG-001)
   - missing E-DG-001
   - severity: E-DG-001 did not fire (expected error)
-- `server-db/event-after-await-e02-dynkey-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-LOGIC-EXECUTABLE-SINK
-- `sql/one-statement-trailing-semicolon-pos` (twin · parse-reject)
-  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 - `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
   - missing E-SQL-QUERY-NOT-READABLE
   - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
@@ -220,7 +203,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (645)
+### PASS / CODES-ONLY (651)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -377,6 +360,7 @@ none
 - `defer/propagate-path` — PASS · TWIN
 - `defer/return-value-before-deferred` — PASS · TWIN
 - `defer/scope-redeclare-with-defer-neg` — PASS · TWIN
+- `defer/server-callee-error-total-handler-twin` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `defer/stack-fn-calls-fn-before-defer` — PASS · TWIN
 - `defer/stack-fn-calls-fn-before-defer-twin` — PASS · TWIN
 - `defer/unbraced-arm-neg` — PASS · TWIN
@@ -485,6 +469,7 @@ none
 - `error/handler-unhandled-failable-bare-and-expr-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
+- `error/implicit-tx-explicit-transaction-block` — PASS (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `error/match-failable-ok-arm-rt` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
@@ -496,6 +481,7 @@ none
 - `error/throw-not-in-scrml` — PASS · TWIN
 - `error/transaction-nested-neg` — PASS (also emitted, unasserted: E-ERROR-010)
 - `error/transaction-non-failable-fn-neg` — PASS (also emitted, unasserted: E-ERROR-002)
+- `error/transaction-top-level-neg` — PASS
 - `error/try-not-in-scrml` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `fn/arrow-body-reject` — PASS · TWIN
@@ -563,6 +549,7 @@ none
 - `lifecycle/pending-tape-granted-append-rt` — PASS
 - `lifecycle/pending-tape-granted-replace-rt` — PASS
 - `lifecycle/pending-tape-whole-write-not-granted-pos` — PASS
+- `lifecycle/request-body-client-wrapper-rt` — PASS · TWIN
 - `lifecycle/request-deps-empty-mount-only-rt` — PASS · TWIN
 - `lifecycle/request-deps-explicit-listed-refire-rt` — PASS · TWIN
 - `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — PASS · TWIN
@@ -817,6 +804,7 @@ none
 - `schema/schema-002-neg` — PASS
 - `schema/schema-003-neg` — PASS
 - `schema/w-schema-001-warn` — PASS
+- `server-db/event-after-await-e02-dynkey-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/event-after-await-e25-before-ok-pos` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/event-control-after-await-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/event-control-in-suspending-loop-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
@@ -846,6 +834,7 @@ none
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
 - `sql/multiple-statements-neg` — PASS · TWIN
+- `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
 - `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
