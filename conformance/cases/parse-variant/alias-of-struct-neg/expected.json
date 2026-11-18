@@ -1,0 +1,16 @@
+{
+  "id": "parse-variant-alias-of-struct-neg",
+  "description": "§41.13 — an alias whose right-hand side is a struct (`type Row = UserRow`) is not an alias of an enum: E-PARSEVARIANT-TYPE-NOT-ENUM.",
+  "language-version": "1.0",
+  "spec": "§41.13",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 6 (§41.13 strict keys + E-TYPE-080; `parseVariant` accepts an enum alias)",
+  "rationale": "§41.13: \"An alias whose right-hand side is anything else (a refinement, a union, a struct, a type expression) is still `E-PARSEVARIANT-TYPE-NOT-ENUM`.\"",
+  "expect": {
+    "codes": [
+      "E-PARSEVARIANT-TYPE-NOT-ENUM"
+    ],
+    "severity": {
+      "E-PARSEVARIANT-TYPE-NOT-ENUM": "error"
+    }
+  }
+}
