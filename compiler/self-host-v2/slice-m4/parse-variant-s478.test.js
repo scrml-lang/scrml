@@ -229,6 +229,48 @@ ${types}
     const src = call("LoadResult").replace("parseVariant('{}', LoadResult)", "parseVariant('{}')");
     expect(codes(src)).toEqual(["E-CALL-ARITY"]);
   });
+
+  // #1948 review LOW-5: the type argument of a wrong-arity call is not resolved as a value (no
+  // spurious E-SCOPE-001 next to the E-CALL-ARITY)
+  test("arity: three arguments is E-CALL-ARITY alone", () => {
+    const src = call("LoadResult").replace("parseVariant('{}', LoadResult)", "parseVariant('{}', LoadResult, 1)");
+    expect(codes(src)).toEqual(["E-CALL-ARITY"]);
+  });
+
+  // #1948 review LOW-4: an alias is refused (§41.13 "a bare scrml-native `:enum` type identifier";
+  // §19.3.3 "`type A = E` is not a `:enum` declaration") — with a message that says it is an alias
+  // (and of which enum), never the untrue "is not an `:enum` type"
+  test("a type alias is refused, and the message says it is an alias", () => {
+    const one = (arg, decl) => errs(fe(call(arg, TYPES + "\n    ${ " + decl + " }\n")));
+    for (const [arg, decl, says] of [
+      ["LR2", "type LR2 = LoadResult;", "`LR2` is a type alias of the enum `LoadResult` — an alias is not accepted here; name the enum itself (`parseVariant(json, LoadResult)`)"],
+      ["LR3", "type LR2 = LoadResult; type LR3 = LR2;", "`LR3` is a type alias of the enum `LoadResult`"],
+      ["UR", "type UR = UserRow;", "`UR` is a type alias of a type that is not an `:enum`"],
+      ["ML", "type ML = LoadResult | not;", "`ML` is a type alias of a type that is not an `:enum`"],
+    ]) {
+      const e = one(arg, decl);
+      expect(e.map((d) => d.code)).toEqual(["E-PARSEVARIANT-TYPE-NOT-ENUM"]);
+      expect(e[0].message).toContain(says);
+      expect(e[0].message).not.toContain("is not an `:enum` type");
+    }
+  });
+});
+
+// #1948 review LOW-6: C-PV1 asserts the decode's failure enum IS the stdlib ParseError (its four
+// variants and their `string` fields) — the runtime builds those by name, so another shape would be a
+// run-time CodecDefect, not a compile-time finding
+describe("check C-PV1: the failure enum is the stdlib ParseError", () => {
+  test("a Core whose ParseError has another shape is reported", () => {
+    const r = clean(decoder());
+    const pe = r.core.types.find((t) => t.variant === "EnumDef" && t.data.sym.hint === "ParseError");
+    expect(pe).toBeDefined();
+    const mutated = (f) => { const c = structuredClone(r.core); f(c.types.find((t) => t.variant === "EnumDef" && t.data.sym.hint === "ParseError").data); return check(c); };
+    const pv1 = (xs) => xs.filter((x) => x.startsWith("C-PV1")).length;
+    expect(pv1(mutated((d) => { d.variants[3].sym.hint = "Garbled"; }))).toBe(1);       // a renamed variant
+    expect(pv1(mutated((d) => { d.variants[1].fields[0].sym.hint = "t"; }))).toBe(1);   // a renamed field
+    expect(pv1(mutated((d) => { d.variants[1].fields[0].ty = "Int"; }))).toBe(1);       // a field of another type
+    expect(pv1(mutated((d) => { d.variants.push({ sym: { id: 9999, hint: "Extra" }, fields: [] }); }))).toBeGreaterThan(0); // a fifth variant
+  });
 });
 
 describe("the runtime half directly (slice-m1/runtime/runtime.js parseVariant)", () => {

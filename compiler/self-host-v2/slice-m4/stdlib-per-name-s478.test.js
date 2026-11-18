@@ -122,3 +122,20 @@ describe("an entry, or a file its entry IMPORTS, failing still withdraws the mod
     expect(r.stdlib.refused[0].sources.map((s) => s.path).sort()).toEqual(["scrml:hub/helper.scrml", "scrml:hub/index.scrml"]);
   });
 });
+
+// s478 #1948 review MED-1: a followed named re-export is supplied verbatim, so its target must
+// export every name it lists — a barrel re-exporting a barrel (relative, or through a `scrml:`
+// specifier) imported for ONE of its names compiles and runs, as before per-name supply.
+describe("a barrel that re-exports a barrel is not withdrawn when one of its names is imported", () => {
+  for (const mod of ["nest2", "nest3"]) {
+    test(`scrml:${mod} { good } alone: clean, nothing refused or withheld, and the page renders 2`, async () => {
+      const src = `<program>\n\${ import { good } from "scrml:${mod}"; }\n<p id="out">\${good(1)}</p>\n</program>\n`;
+      const r = fe(src);
+      expect(errs(r).map((d) => `${d.code} ${d.file}: ${d.message}`)).toEqual([]);
+      expect(r.stdlib.refused).toEqual([]);
+      expect(r.stdlib.withheld).toEqual([]);
+      await loadProgram(r.core, "s478pn-" + mod + "-" + k++);
+      expect(document.querySelector("#out").textContent).toBe("2");
+    });
+  }
+});

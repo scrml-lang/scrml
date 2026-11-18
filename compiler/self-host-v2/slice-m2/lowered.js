@@ -342,14 +342,17 @@ export function stdlibSources(mods, files, opts = {}) {
   while (todo.length > 0) {
     const [module, p] = todo.pop();
     const entry = read(p);
-    const pNeed = need.get(p);
     for (const l of linksOf(entry.path, entry.src)) {
       const t = targetOf(p, l.from);
       if (t === null || !followed(p, l, t)) continue;
       // a relative statement is this module's own file; a `scrml:` one is another module, judged on
       // its own — withdrawn, its import here is refused in THIS module's file, which withdraws this one
       if (t.module !== null) entries.set(t.module, t.path);
-      const names = l.re === "Reexport" ? new Set(reachedNames(l, pNeed).map((n) => n.orig)) : namesNeeded(l);
+      // a followed named re-export is supplied VERBATIM — every name it lists — so its target must
+      // export all of them, not only the reached ones: else a barrel re-exporting a barrel would
+      // re-export a name its (blanked) target no longer exports, and the module fail whole
+      // (s478 #1948 review MED-1). A leaf target is supplied whole anyway; per-name holds there.
+      const names = namesNeeded(l);
       want(t.module ?? module, t.path, names);
     }
   }

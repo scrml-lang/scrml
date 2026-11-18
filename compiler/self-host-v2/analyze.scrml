@@ -10095,7 +10095,7 @@ ${
     }
 
     fn resolveParseVariant(env: Env, e: AExpr, f: FnInfo, args: AExpr[], st0: AS) -> RX {
-        if (args.length != 2) return diagX(env, e, "E-CALL-ARITY", "`parseVariant(json, EnumType)` takes two arguments — the JSON text and the `:enum` type it decodes into (§41.13); " + args.length + " given", resolveExprs(env, args, not, st0))
+        if (args.length != 2) return diagX(env, e, "E-CALL-ARITY", "`parseVariant(json, EnumType)` takes two arguments — the JSON text and the `:enum` type it decodes into (§41.13); " + args.length + " given", pvArityArgs(env, args, st0))
         let st: AS = resolveExpr(env, args[0], Type.Str, st0).st
         if (f.failable && env.fx.subject != e.nid) st = unhandledCall(env, e, f.name, st)
         const ta: AExpr = args[1]
@@ -10110,6 +10110,21 @@ ${
             return plain(not, addValue(addDiag(rt, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", "the second argument of `parseVariant(json, EnumType)` is not a type — it SHALL be a bare `:enum` type identifier (§41.13); a value, a literal or a type expression is not accepted"), e.nid, ValueFact.VParseVariant(not)))
         }
         const es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+        // s478 #1948 review LOW-4: an alias is refused — §41.13 "The second argument SHALL be a bare
+        // scrml-native `:enum` type identifier", and §19.3.3: "`type A = E` is not a `:enum`
+        // declaration" (whether an alias of an enum is accepted anywhere is OPEN there) — but the
+        // message says it is an alias, and of what, rather than claiming the type "is not an enum"
+        const stb: TypeStub | not = stubNamed(teAt(env.g.te, env.file), n)
+        if (es is not && stb is given) {
+            if (aliasRhs(stb) is given) {
+                const asym: Sym | not = aliasedTypeSym(env.g.te, stb)
+                let aes: Sym | not = not
+                if (asym is given) aes = isEnumType(env.g.types, Type.Named(asym))
+                let why = "`" + n + "` is a type alias of a type that is not an `:enum`"
+                if (aes is given) why = "`" + n + "` is a type alias of the enum `" + aes.hint + "` — an alias is not accepted here; name the enum itself (`parseVariant(json, " + aes.hint + ")`)"
+                return plain(not, addValue(addDiag(st, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", why + " — the second argument of `parseVariant(json, EnumType)` SHALL be a bare `:enum` type identifier (§41.13), and `type A = E` is not a `:enum` declaration (§19.3.3)"), e.nid, ValueFact.VParseVariant(not)))
+            }
+        }
         if (es is not) return plain(not, addValue(addDiag(st, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", "`" + n + "` is not an `:enum` type — the second argument of `parseVariant(json, EnumType)` SHALL be a bare `:enum` type identifier; a struct, a named shape, a refinement type or any other type is not accepted (§41.13). For a struct-shaped boundary, normalize in a server function"), e.nid, ValueFact.VParseVariant(not)))
         const src: ATypeDecl | not = enumSrcOf(env.g, es)
         let bad = false
@@ -10128,6 +10143,49 @@ ${
         }
         if (bad) return plain(not, addValue(st, e.nid, ValueFact.VParseVariant(not)))
         return plain(Type.Named(es), addValue(callPurity(env, e, f, st), e.nid, ValueFact.VParseVariant(es)))
+    }
+
+    // s478 #1948 review LOW-4 — the type an alias `s0` names through a chain of aliases whose
+    // right-hand sides are each a bare type name (`type A = B`, `type B = E`): the first non-alias
+    // type's Sym; `not` when a right-hand side is anything else, names no type, or the chain cycles.
+    // (Read only to word the refusal of an alias as `parseVariant`'s type argument.)
+    fn aliasedTypeSym(te: TypeEnv, s0: TypeStub) -> Sym | not {
+        let s: TypeStub = s0
+        let hops: int = 0
+        while (hops < 64) {
+            const rhs: AType | not = aliasRhs(s)
+            if (rhs is not) return s.sym
+            const m: string = aTypeBareName(rhs)
+            if (m == "") return not
+            const nx: TypeStub | not = stubNamed(teAt(te, s.file), m)
+            if (nx is not) return not
+            s = nx
+            hops = hops + 1
+        }
+        return not
+    }
+
+    fn aTypeBareName(at: AType) -> string {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> n
+            // no-default-arm: one question of a type expression — is it a bare type name
+            _ :> ""
+        }
+    }
+
+    // s478 #1948 review LOW-5 — the arguments of a `parseVariant` call of the wrong arity, resolved
+    // as values except a bare name of a type (the `EnumType` argument is not a value; resolving it as
+    // one reports a spurious E-SCOPE-001 next to the E-CALL-ARITY).
+    fn pvArityArgs(env: Env, args: AExpr[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of args) {
+            const n: string = bareNameOf(a)
+            let isType = false
+            if (n != "" && lookupLocal(env, n) is not) isType = typeNamedHere(env, n) is given
+            if (!isType) st = resolveExpr(env, a, not, st).st
+        }
+        return st
     }
 
     // `e`'s name when it is a bare name (`LoadResult`), else "".

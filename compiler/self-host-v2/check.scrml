@@ -1111,6 +1111,11 @@ ${
     fn parseProblems(p: CoreProgram, en: Sym, er: Sym, err: Sym) -> string[] {
         let out: string[] = []
         if (er.id != err.id) out = out.concat(["C-PV1: a parseVariant Attempt handles `" + err.hint + "` but the decode fails with `" + er.hint + "`"])
+        // s478 #1948 review LOW-6: the failure enum IS the stdlib ParseError — the runtime decode
+        // (rt.parseVariant) builds its four variants by name, so an enum of another shape would fail
+        // at run time (CodecDefect), not here. Core carries no declaring file, so ParseError is
+        // recognised by its declaration (scrml:data/parse.scrml): exactly these variants, in order.
+        out = out.concat(parseErrorProblems(p, er))
         const t: TypeDef | not = findTypeDef(p, en)
         if (t is not) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not a type of the program"])
         if (!isEnumDef(t)) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not an enum (§41.13)"])
@@ -1120,6 +1125,45 @@ ${
             }
         }
         return out
+    }
+
+    // `er` is the stdlib `ParseError`: `MissingDiscriminator`, `UnknownVariant(tag: string)`,
+    // `InvalidPayload(field: string, reason: string)`, `Malformed(reason: string)`.
+    fn parseErrorProblems(p: CoreProgram, er: Sym) -> string[] {
+        const bad: string[] = ["C-PV1: a parseVariant decode fails with `" + er.hint + "`, which is not the stdlib `ParseError` (MissingDiscriminator / UnknownVariant(tag) / InvalidPayload(field, reason) / Malformed(reason), §41.13)"]
+        const t: TypeDef | not = findTypeDef(p, er)
+        if (t is not) return bad
+        if (!isEnumDef(t)) return bad
+        const vs: VariantDef[] = enumVariantDefs(t)
+        if (vs.length != 4) return bad
+        if (!strVariant(vs[0], "MissingDiscriminator", "", "")) return bad
+        if (!strVariant(vs[1], "UnknownVariant", "tag", "")) return bad
+        if (!strVariant(vs[2], "InvalidPayload", "field", "reason")) return bad
+        if (!strVariant(vs[3], "Malformed", "reason", "")) return bad
+        return []
+    }
+
+    // Is `v` the variant `name` with the `string` fields `f1`, `f2` (each "" for none)?
+    fn strVariant(v: VariantDef, name: string, f1: string, f2: string) -> boolean {
+        if (v.sym.hint != name) return false
+        let want: string[] = []
+        if (f1 != "") want = want.concat([f1])
+        if (f2 != "") want = want.concat([f2])
+        if (v.fields.length != want.length) return false
+        let i: int = 0
+        while (i < want.length) {
+            if (v.fields[i].sym.hint != want[i] || !isStrType(v.fields[i].ty)) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn isStrType(t: Type) -> boolean {
+        return match t {
+            .Str :> true
+            // no-default-arm: one question of a type — is it `string`
+            _ :> false
+        }
     }
 
     fn primField(t: Type) -> boolean {
