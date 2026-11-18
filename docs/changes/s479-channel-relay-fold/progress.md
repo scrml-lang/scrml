@@ -15,4 +15,20 @@ upgradeChannel, takeToken); client = runtime.js `channel`; server desc printer =
 6. SPEC §38.4 / §38.4.2 / §38.4.3 text. 7. tests. 8. probes. 9. gaps. 10. gates.
 
 ## Status
-- started
+- [x] 1–5 built (commit 4355237fd); per-address frame bucket switched from parked buckets to ONE shared
+      address bucket of 4 connections' worth (the brief: parallel sockets must not bypass the bucket).
+- [x] 6 SPEC §38.4 / §38.4.2 ("The relay's fold", `__base`, compaction, memory) / §38.4.3 ("Per-address bounds (INTERIM)").
+- [x] 7 tests: slice-m4/channel-fold-s479.test.js (A judge, B compaction, C per-address, D chFoldWhy, E client);
+      S478 channel tests moved to the new replay shape; truncation tests run on a fold-less channel (CONV_NOFOLD).
+- [x] 8 probes re-baselined in ~/.cache/scrml/review/s479-channel-relay-fold/probes (fuzz settle-wait, attack A1–A4, bigreplay B1–B2): all pass.
+- [x] 9 gaps: relay-order-residue + client-bound resolved; residue g-boot-channel-relay-fold-residue-s479, g-boot-channel-client-bound-residue-s479.
+- [ ] 10 gates (comp.sh), base/head conformance, merge origin/main, PR.
+
+## Decisions taken (report as owner-visible choices)
+- Fold refusal: close 1008 only when no concurrent edit can explain the frame; else `__refused` to the sender
+  (an honest client that lost a race is not closed). Forged frames are never relayed or logged either way.
+- Foldable channel = literal initializers, no body-top / <request> write of a cell, reset-on= among the channel's own
+  cells with a literal value. Others: no fold (S478 behaviour), reason printed as `noFold`.
+- Base over half the byte bound → truncate + drop fold (bounds relay memory; avoids re-encoding a huge base often).
+- Per-address: share = max(1, ⌊cap/10⌋) (429); upgrade bucket = share, refill share/10 per s (≥1) (429);
+  ONE frame bucket per address = 4 × burst / 4 × rate (1008).

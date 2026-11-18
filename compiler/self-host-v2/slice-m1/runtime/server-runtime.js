@@ -1664,6 +1664,9 @@ export const CHANNEL_LOG_TEST_HOOK = Symbol.for("scrml.test.channelLog");
 // process can stand in for many clients) is a registered symbol on the host, like the log seam:
 // `host[CHANNEL_ADDRESS_TEST_HOOK](request) → string`. A deployment's config cannot carry it.
 export const CHANNEL_ADDRESS_SHARE = 10;
+// §38.4.3 "Per-address bounds": an address's frame bucket, shared by all its connections, is this many
+// connections' buckets — `burst` × 4 tokens refilled at `rate` × 4 per second (a browser's few tabs).
+export const CHANNEL_ADDRESS_BUCKETS = 4;
 export const CHANNEL_ADDRESS_TEST_HOOK = Symbol.for("scrml.test.channelAddress");
 
 // A bound the compiler resolved (a safe integer ≥ 1), else the §38.4.3 default — never "no bound".
@@ -1687,7 +1690,7 @@ export function channel(desc) {
     subs: 0,
     // S479 (s479-channel-relay-fold) — §38.4.3 "Per-address bounds" (INTERIM): the subscriber places
     // one address may hold, its upgrade bucket (`perAddr` upgrades, refilled at a tenth of that per
-    // second, at least 1), and per address its live count, parked frame buckets and upgrade bucket
+    // second, at least 1), and per address its live count, upgrade bucket and shared frame bucket
     perAddr,
     upRate: Math.max(1, perAddr / 10),
     addrs: new Map(),
@@ -1790,8 +1793,13 @@ function utf8Over(s, max) {
 function takeToken(data, ch, now) {
   let b = data.scrmlBucket;
   if (b === undefined) { b = { tokens: ch.burst, at: now }; data.scrmlBucket = b; }
+  return spend(b, ch.burst, ch.rate, now);
+}
+
+// One token of bucket `b` (`size` tokens, refilled at `rate` per second), or false when it has less than one.
+function spend(b, size, rate, now) {
   const dt = now - b.at;
-  if (dt > 0) b.tokens = Math.min(ch.burst, b.tokens + (dt * ch.rate) / 1000);
+  if (dt > 0) b.tokens = Math.min(size, b.tokens + (dt * rate) / 1000);
   b.at = now;
   if (b.tokens < 1) return false;
   b.tokens -= 1;
@@ -1855,10 +1863,7 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
   // release it.
   ch.subs += 1;
   a.live += 1;
-  // §38.4.3 "A new connection from an address takes the most-spent bucket that address's closed
-  // connections left, refilled for the time since, while one is not yet full" — reconnecting does
-  // not buy a full bucket
-  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true, scrmlAddr: a, scrmlBucket: takeParked(ch, a, now) };
+  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true, scrmlAddr: a };
   let ok = false;
   try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data, now); }
   if (ok) return undefined;
@@ -1878,51 +1883,26 @@ function addressOf(host, ch, request, upgrader, now) {
   let a = ch.addrs.get(addr);
   if (a === undefined) {
     if (ch.addrs.size >= ch.sweepAt) {
-      const fullMs = Math.max(ch.burst / ch.rate, ch.perAddr / ch.upRate) * 1000;
+      const fullMs = Math.max(ch.burst / ch.rate, ch.perAddr / ch.upRate) * 1000;   // both buckets refilled
       for (const [k, x] of ch.addrs) if (x.live === 0 && now - x.idle >= fullMs) ch.addrs.delete(k);
       ch.sweepAt = Math.max(64, ch.addrs.size * 2);
     }
-    a = { live: 0, parked: [], up: { tokens: ch.perAddr, at: now }, idle: now };
+    a = { live: 0, up: { tokens: ch.perAddr, at: now }, frames: { tokens: ch.burst * CHANNEL_ADDRESS_BUCKETS, at: now }, idle: now };
     ch.addrs.set(addr, a);
   }
   return a;
 }
 
-// A frame bucket for a new connection of address `a`: the most-spent one its closed connections
-// parked, refilled to `now` (one that has refilled is dropped — it is a full bucket), else a full one.
-function takeParked(ch, a, now) {
-  let best = -1;
-  const keep = [];
-  for (const b of a.parked) {
-    b.tokens = Math.min(ch.burst, b.tokens + (Math.max(0, now - b.at) * ch.rate) / 1000);
-    b.at = now;
-    if (b.tokens < ch.burst) keep.push(b);
-  }
-  a.parked = keep;
-  for (let i = 0; i < keep.length; i++) if (best < 0 || keep[i].tokens < keep[best].tokens) best = i;
-  if (best < 0) return { tokens: ch.burst, at: now };
-  return keep.splice(best, 1)[0];
-}
-
-// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once — and parks
-// its frame bucket with its address (at most `perAddr` parked, the most-spent kept).
+// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once — and its
+// address's (the address record stays, with its buckets, until it is idle and refilled).
 function releaseSub(data, now) {
   if (data.scrmlCounted !== true) return;
   data.scrmlCounted = false;
   data.scrmlChannel.subs -= 1;
   const a = data.scrmlAddr;
   if (a === undefined) return;
-  const ch = data.scrmlChannel;
   a.live -= 1;
   a.idle = now;
-  const b = data.scrmlBucket;
-  if (b !== undefined && b.tokens < ch.burst) {
-    a.parked.push(b);
-    if (a.parked.length > ch.perAddr) {
-      a.parked.sort((x, y) => x.tokens - y.tokens);
-      a.parked.length = ch.perAddr;
-    }
-  }
 }
 
 function closeSocket(host, ws, code, why) {
@@ -2080,7 +2060,17 @@ function channelSockets(host, channels = [], limits = {}) {
     },
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
-      if (!takeToken(ws.data, ch, now())) return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst})`);
+      const t = now();
+      if (!takeToken(ws.data, ch, t)) return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst})`);
+      // S479 — §38.4.3 "Per-address bounds" (INTERIM): every frame also spends one token of its
+      // ADDRESS's bucket, shared by all that address's connections and kept across them — so neither
+      // reconnecting nor parallel sockets multiply one address's frame rate past CHANNEL_ADDRESS_BUCKETS
+      // connections' worth
+      const a = ws.data.scrmlAddr;
+      const k = CHANNEL_ADDRESS_BUCKETS;
+      if (a !== undefined && !spend(a.frames, ch.burst * k, ch.rate * k, t)) {
+        return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit for one address (${ch.rate * k}/s, burst ${ch.burst * k}, shared by its connections)`);
+      }
       const f = channelFrame(ch, raw);
       if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
       const r = relayOf(ch);
