@@ -1430,7 +1430,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   const byChannel = new Map();
   for (const ch of channels) byChannel.set(CHANNEL_PREFIX + ch.name, ch);
-  const websocket = channelSockets(host, host.channelLog ?? {});
+  const websocket = channelSockets(host, host[CHANNEL_LOG_TEST_HOOK] ?? {});
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))).concat(channels.map((ch) => ({ path: CHANNEL_PREFIX + ch.name, method: "GET" }))),
     websocket,
@@ -1525,16 +1525,21 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   "The relay SHALL keep, per channel, a log of the frames it has relayed … When a client
 //   subscribes … the relay SHALL send it, before any other frame, ONE replay message" — `__replay`,
 //   sent in `open` before the socket subscribes, so every live frame it gets follows the log.
-//   "A channel's log SHALL hold at most 10,000 frames and at most 8,388,608 characters … A frame
+//   "A channel's log SHALL hold at most 10,000 frames and at most 8,388,608 bytes … A frame
 //   that would take the log past either bound is still relayed live, but the log is TRUNCATED: the
-//   relay drops the whole log, and from then on every replay message … says `__complete: false`."
+//   relay drops the whole log and logs no frame from then on, and every replay message for the
+//   channel says `__complete: false` with no frames."
 //   The log is a FRAME log (§38.4, amended): the relay never applies a frame to a value. Its
 //   state lives per `server()` call (channelSockets), never at module scope.
 // ---------------------------------------------------------------------------
 const CHANNEL_PREFIX = "/_scrml_ws/";
 export const CHANNEL_MAX_FRAME = 65536;
 export const CHANNEL_MAX_LOG_FRAMES = 10000;
-export const CHANNEL_MAX_LOG_CHARS = 8388608;
+export const CHANNEL_MAX_LOG_BYTES = 8388608;
+// #1941 fix r1 (LOW-2): the TEST seam that lowers the log bounds is a registered symbol key on the
+// host, never a string key — a deployment's JSON / env-built `createServer` options cannot carry
+// it, so a config value like `{ frames: 0 }` can never truncate (and lock) every channel.
+export const CHANNEL_LOG_TEST_HOOK = Symbol.for("scrml.test.channelLog");
 
 export function channel(desc) {
   const cells = new Map();
@@ -1629,24 +1634,39 @@ function channelFrame(ch, raw) {
 }
 
 function channelSockets(host, limits = {}) {
-  // `host.channelLog` (a test seam) may only LOWER the §38.4.2 bounds, never raise them
+  // CHANNEL_LOG_TEST_HOOK (a test seam) may only LOWER the §38.4.2 bounds, never raise them
   const lower = (v, max) => (Number.isSafeInteger(v) && v >= 0 && v < max ? v : max);
   const maxFrames = lower(limits.frames, CHANNEL_MAX_LOG_FRAMES);
-  const maxChars = lower(limits.chars, CHANNEL_MAX_LOG_CHARS);
-  // per channel (its topic key): the last sequence number and the frame log (null once truncated)
+  const maxBytes = lower(limits.bytes, CHANNEL_MAX_LOG_BYTES);
+  // per channel (its topic key): the last sequence number, the frame log (null once truncated),
+  // its size in UTF-8 bytes, the replay text built from it (null: not built since the last
+  // change) and the number of subscribed sockets.
+  //   #1941 fix r1 (LOW-1): §38.4.2 "at most 8,388,608 bytes of relayed frame text (8 MiB; the
+  //   frames' `JSON` text as relayed, UTF-8 encoded, summed)" — counted in UTF-8 bytes, so the bound
+  //   is the replay's size on the wire, not UTF-16 code units (a CJK frame is 3 bytes a unit).
+  //   #1941 fix r1 (MED-3): the replay text is built once per log change and reused by every
+  //   open, not re-joined per open (the per-address and rate limits of item 49 are PR #1942's).
+  //   #1941 fix r1 (HIGH-1): §38.4.2 "When the last subscriber of a channel whose log was
+  //   truncated leaves, the relay SHALL start the channel again: a new, empty, complete log at
+  //   sequence `0`" — no client holds the channel's state then, so nothing can diverge.
   const relays = new Map();
   const relayOf = (ch) => {
     let r = relays.get(ch.key);
-    if (r === undefined) { r = { seq: 0, log: [], chars: 0 }; relays.set(ch.key, r); }
+    if (r === undefined) { r = { seq: 0, log: [], bytes: 0, text: null, subs: 0 }; relays.set(ch.key, r); }
     return r;
+  };
+  const replayText = (r) => {
+    if (r.text === null) r.text = `{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__frames":[${r.log === null ? "" : r.log.join(",")}]}`;
+    return r.text;
   };
   return {
     maxPayloadLength: CHANNEL_MAX_FRAME * 4,
     open(ws) {
       const ch = ws.data.scrmlChannel;
       const r = relayOf(ch);
-      const frames = r.log === null ? "" : r.log.join(",");
-      ws.send(`{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__frames":[${frames}]}`);
+      ws.data.scrmlChannelSub = true;
+      r.subs += 1;
+      ws.send(replayText(r));
       ws.subscribe(ch.key);
     },
     message(ws, raw) {
@@ -1655,25 +1675,37 @@ function channelSockets(host, limits = {}) {
       if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
       const r = relayOf(ch);
       r.seq += 1;
+      r.text = null;
       const body = { __type: "__sync", __seq: r.seq, __key: f.key, __op: f.op, __val: f.wire, __own: false };
       const peer = JSON.stringify(body);
       body.__own = true;
       const own = JSON.stringify(body);
       if (r.log !== null) {
-        if (r.log.length + 1 > maxFrames || r.chars + peer.length > maxChars) {
+        const size = Buffer.byteLength(peer, "utf8");
+        if (r.log.length + 1 > maxFrames || r.bytes + size > maxBytes) {
+          // past the bound the relay stops logging: it keeps no frame from here until the epoch ends
           r.log = null;
-          r.chars = 0;
-          logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the frame log passed its bound (${maxFrames} frames / ${maxChars} characters) and was truncated; a client that connects from now on is told the log is incomplete (§38.4.2)`);
+          r.bytes = 0;
+          logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the frame log passed its bound (${maxFrames} frames / ${maxBytes} bytes) and was truncated; the relay logs no more frames, and a client that connects while any subscriber remains is told the log is incomplete (§38.4.2); the channel starts again, empty, when its last subscriber leaves`);
         } else {
           r.log.push(peer);
-          r.chars += peer.length;
+          r.bytes += size;
         }
       }
       ws.publish(ch.key, peer);
       ws.send(own);
     },
     close(ws) {
-      try { ws.unsubscribe(ws.data.scrmlChannel.key); } catch { /* the socket is gone */ }
+      const ch = ws.data.scrmlChannel;
+      try { ws.unsubscribe(ch.key); } catch { /* the socket is gone */ }
+      if (ws.data.scrmlChannelSub !== true) return;
+      ws.data.scrmlChannelSub = false;
+      const r = relayOf(ch);
+      r.subs -= 1;
+      if (r.subs <= 0 && r.log === null) {
+        relays.delete(ch.key);
+        logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the last subscriber left a channel whose frame log was truncated; the channel starts again with an empty log at sequence 0 (§38.4.2)`);
+      }
     },
   };
 }

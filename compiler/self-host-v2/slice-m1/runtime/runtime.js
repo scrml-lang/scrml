@@ -207,6 +207,7 @@ export class Cell {
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    if (resetGuard !== null && runningReset !== null && !resetGuard.cells.has(this)) { resetGuard.deferred.add(runningReset); return; }
     if (this.timing !== null) { timedWrite(this, v); return; }
     this.write(v);
   }
@@ -1029,6 +1030,13 @@ export function reportHostError(e) {
 // ---------------------------------------------------------------------------
 const pendingResets = new Set();
 let drainingResets = false;
+// #1941 fix r1 (MED-2) — §38.4.2 "A `reset-on=` reset of a cell that is NOT a channel cell is made
+// when, and only when, the value the client SHOWS of a trigger changes across the received unit": while a channel applies a
+// received unit, `resetGuard` holds that channel's cells; a reset that would write any other cell
+// is not made then (`Cell.set`), but deferred to the unit's end (`channel` — unit). `runningReset`
+// is the reset `drainResets` is running (a drain never nests, so its writes are that reset's own).
+let resetGuard = null;
+let runningReset = null;
 
 class ResetOn {
   constructor(scope, triggers, reset, rank) {
@@ -1059,7 +1067,10 @@ function drainResets() {
       let next = null;
       for (const r of pendingResets) if (next === null || r.rank < next.rank) next = r;
       pendingResets.delete(next);
-      if (!next.disposed) batch(() => untrack(next.reset));
+      if (!next.disposed) {
+        runningReset = next;
+        try { batch(() => untrack(next.reset)); } finally { runningReset = null; }
+      }
     }
   } finally {
     drainingResets = false;
@@ -5448,7 +5459,11 @@ export function channel(scope, desc) {
   const init = new Map();
   for (const c of desc.cells) init.set(c, c.cell.peek());
   const conf = new Map(init);
+  const chanCells = new Set(desc.cells.map((c) => c.cell));
   let pending = [];
+  // #1941 fix r1 (MED-1): the edits made on a connection that is open (or opening) but whose replay
+  // has not been applied — §38.4.2 "held"; re-applied on the rebuilt value and sent after the replay
+  let held = [];
   let seq = 0;              // the last sequence number applied on this connection
   let live = false;         // this connection's replay has been applied
   let stopped = false;      // a truncated frame log: the channel is out of sync for good
@@ -5537,19 +5552,50 @@ export function channel(scope, desc) {
     try { e.c.cell.set(why.next); } catch (err) { report(`applying a \`${e.op}\` of @${e.c.key} failed: ${err && err.message ? err.message : err}`); }
   }
 
+  // Two values of a channel cell are the same value (its §57 wire form; a rebuilt tape is a new array)
+  function same(c, a, b) {
+    if (Object.is(a, b)) return true;
+    const ea = encode(c.table, a);
+    const eb = encode(c.table, b);
+    return ea.ok && eb.ok && JSON.stringify(ea.wire) === JSON.stringify(eb.wire);
+  }
+
   // One received unit (a relayed frame, or a whole replay): restore the confirmed value, apply,
   // record the new confirmed value, re-apply the pending edits — one batch, `applying` held across it.
-  function unit(fn) {
+  //   #1941 fix r1 (MED-2), §38.4.2: "A `reset-on=` reset of a cell that is NOT a channel cell is
+  //   made when, and only when, the value the client SHOWS of a trigger changes across the received unit" —
+  //   such a reset is not made inside the unit (`resetGuard`); at its end, one whose trigger's shown
+  //   value changed is made (still `applying`, so a channel write it causes stays local). A
+  //   channel cell's own reset is made as the frame is applied, as before: that keeps it convergent.
+  //   `after` (the replay's held edits) runs in the same batch, after the pending edits.
+  function unit(fn, after) {
+    const shown = new Map();
+    for (const c of desc.cells) shown.set(c.cell, c);
+    const before = new Map();
+    for (const c of desc.cells) before.set(c, c.cell.peek());
+    const guard = { cells: chanCells, deferred: new Set() };
     applying = true;
     try {
       batch(() => {
-        for (const c of desc.cells) rebaseSet(c.cell, conf.get(c));
-        fn();
-        for (const c of desc.cells) conf.set(c, c.cell.peek());
-        for (const p of pending) {
-          const s = step(p.c, p.c.cell.peek(), p.op, p.val);
-          if (typeof s !== "string") rebaseSet(p.c.cell, s.next);
+        const outer = resetGuard;
+        resetGuard = guard;
+        try {
+          for (const c of desc.cells) rebaseSet(c.cell, conf.get(c));
+          fn();
+          for (const c of desc.cells) conf.set(c, c.cell.peek());
+          for (const p of pending) {
+            const s = step(p.c, p.c.cell.peek(), p.op, p.val);
+            if (typeof s !== "string") rebaseSet(p.c.cell, s.next);
+          }
+          if (after !== undefined) after();
+        } finally {
+          resetGuard = outer;
         }
+        for (const r of guard.deferred) {
+          if (r.disposed) continue;
+          if (r.triggers.some((t) => { const c = shown.get(t); return c !== undefined && !same(c, before.get(c), t.peek()); })) pendingResets.add(r);
+        }
+        drainResets();
       });
     } finally {
       applying = false;
@@ -5576,8 +5622,10 @@ export function channel(scope, desc) {
       seq = v.__seq;
       pending = [];
       for (const c of desc.cells) conf.set(c, init.get(c));
-      unit(() => { for (const f of frames) apply(f, false); });
-      return "";
+      const early = held;
+      held = [];
+      unit(() => { for (const f of frames) apply(f, false); }, () => resendHeld(early));
+      return "REPLAYED";
     }
     if (!relayedShape(v)) return "a frame that is not exactly {__type, __seq, __key, __op, __val, __own}";
     if (v.__seq !== seq + 1) return `a frame numbered ${v.__seq} after ${seq}`;
@@ -5641,12 +5689,33 @@ export function channel(scope, desc) {
       } else {
         wire = val;
       }
-      // §38.10.4: not sent while the connection is closed — nor before its replay is applied
-      // (the relay would number the edit after the log the reset is about to rebuild from)
-      if (ws === null || ws.readyState !== 1 || !live) return;
-      ws.send(JSON.stringify({ __type: "__sync", __key: c.key, __op: op, __val: wire }));
-      pending.push({ c, op, val, wire });
+      // §38.10.4: not sent while the connection is closed. #1941 fix r1 (MED-1): on a connection
+      // that is open (or opening) but whose replay is not applied yet, the edit is HELD (§38.4.2) —
+      // sending it now would number it after the log the replay is about to rebuild from
+      if (ws === null || ws.readyState > 1) return;
+      if (!live) { held.push({ c, op, val, wire }); return; }
+      send({ c, op, val, wire });
     };
+  }
+
+  // The ONE place an edit goes on the wire (the op sink, and the held edits after a replay): it is
+  // sent and becomes pending. A future pacing / rate rule wraps this function.
+  function send(p) {
+    ws.send(JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire }));
+    pending.push(p);
+  }
+
+  // §38.4.2 (#1941 fix r1, MED-1): "after the replay is applied, each held edit, in order, is
+  // re-applied on top of the rebuilt value, checked as a pending edit is, and sent — it is then
+  // pending — in the same unit as the replay … A held edit that no longer passes on the rebuilt
+  // value is not shown, not sent, and reported".
+  function resendHeld(early) {
+    for (const p of early) {
+      const s = step(p.c, p.c.cell.peek(), p.op, p.val);
+      if (typeof s === "string") { warn(`an edit made before the channel's history arrived no longer applies to it — not sent: ${s}`); continue; }
+      rebaseSet(p.c.cell, s.next);
+      send(p);
+    }
   }
 
   function connect() {
@@ -5657,10 +5726,14 @@ export function channel(scope, desc) {
     live = false;
     seq = 0;
     let ok = true;
-    s.onopen = () => { if (ws === s) hook(desc.open); };
+    held = [];
+    // #1941 fix r1 (MED-1), §38.10.2: "the handler SHALL run when the connection's replay message
+    // has been applied … a connection given an incomplete replay … runs `onclient:error`, not
+    // `onclient:open`" — so a channel write it makes is sent, not undone by the replay
     s.onmessage = (ev) => {
       if (ws !== s || !ok) return;
       const why = receive(ev.data);
+      if (why === "REPLAYED") { hook(desc.open); return; }
       if (why === "") return;
       ok = false;
       if (why === "TRUNCATED") {
@@ -5677,6 +5750,7 @@ export function channel(scope, desc) {
       if (ws !== s) return;
       ws = null;
       live = false;
+      held = [];                                        // never sent: dropped, as a write while closed is
       hook(desc.close);
       if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
     };

@@ -15,3 +15,12 @@ Gaps: g-boot-channel-op-order-joiner-s478, g-boot-channel-derived-write-resend-s
 - [x] 1 SPEC  - [x] 2 relay  - [x] 3 client  - [x] 4 tests (channel-ops-s478 H–K; 35 red on b04fdc27a)  - [x] 5 docs (known-gaps, tutorial §8); PR pending
 Base conformance (b04fdc27a): PASS 614 FAIL 18 CRASH 0 (~/.cache/scrml/review/s478-ruled-channel-sync2/conf-base-cases.json)
 Head conformance (c5729242f): PASS 614 FAIL 18 CRASH 0 — per-case identical to base.
+
+## Fix round 1 (#1941 review, ~/.cache/scrml/review/s478-1941/review.md)
+- [x] HIGH-1 epoch reset of a truncated channel at 0 subscribers; relay stops logging past the bound; residue item 2 → HIGH + PA rec (owner Q: relay-computed compaction fold)
+- [x] MED-1 held edits before the replay (sent after it, via `send`); `onclient:open` after the replay (§38.10.2 amended)
+- [x] MED-2 non-channel `reset-on=` made only when the trigger's SHOWN value changes across a unit (runtime `resetGuard`, no print change)
+- [x] MED-3 replay text cached per channel; limits are PR #1942's
+- [x] LOW-1 bound counted in UTF-8 bytes; LOW-2 seam = `Symbol.for("scrml.test.channelLog")`; LOW-3 `<onTimeout>` not built (refused everywhere) — residue item 8
+- Tests: channel-ops-s478 L (10 tests; 10 red on f7d0a01f3 runtime except the two behaviour-preserving ones)
+- [ ] gates, conformance, hook, push
