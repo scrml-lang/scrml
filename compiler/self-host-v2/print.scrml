@@ -4635,6 +4635,12 @@ ${
             out = out.concat([sexpr(rtCall(ctx, "channel", [jmember(jid(progLocal), "scope"), JsExpr.JObject([
                 { key: "name", value: jstr(ch.name) },
                 { key: "reconnect", value: jnum(ch.reconnect) },
+                // §38.4.3 (S478 fix r1, MED-3): the relay's bounds, so the client paces its frames to them
+                { key: "limits", value: JsExpr.JObject([
+                    { key: "maxFrame", value: jnum(ch.maxFrame) },
+                    { key: "rate", value: jnum(ch.rate) },
+                    { key: "burst", value: jnum(ch.burst) },
+                ]) },
                 { key: "cells", value: JsExpr.JArray(cells) },
                 { key: "open", value: channelHookJs(ctx, ch.open) },
                 { key: "close", value: channelHookJs(ctx, ch.close) },

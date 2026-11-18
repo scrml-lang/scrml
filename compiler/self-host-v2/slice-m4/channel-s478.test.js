@@ -125,7 +125,9 @@ describe("A — §38 compile-time diagnostics", () => {
 
   describe("§38.13 `watches=` (front end)", () => {
     const SCHEMA = `<schema>\n  orders {\n    id: integer primary key\n    status: text\n  }\n</schema>`;
-    const ARMS = `  <onchange>\n    <Inserted(row) : print(row)>\n    <Updated(row) : print(row)>\n    <Deleted(key) : print(key)>\n  </onchange>`;
+    // s478-ruled-channel-hard (S478 open-Qs ruling item 47): the arms are now client functions typed by
+    // RowChange, so `print(row)` of the row STRUCT is E-PRINT-NON-PRIMITIVE (§20.7) — the arms print a column
+    const ARMS = `  <onchange>\n    <Inserted(row) : print(row.id)>\n    <Updated(row) : print(row.id)>\n    <Deleted(key) : print(key)>\n  </onchange>`;
     const w = (attrs, body = ARMS, db = ` db="postgres://localhost/app"`, schema = SCHEMA) => prog(`${schema}\n<channel ${attrs}>\n${body}\n</channel>`, db);
 
     test("a canonical feed is clean", () => {
@@ -156,13 +158,13 @@ describe("A — §38 compile-time diagnostics", () => {
       expect(allCodes(w(`name="f" watches=orders`, `  function ping() { broadcast({ x: 1 }); }\n${ARMS}`))).toEqual(["E-CHANNEL-WATCHES-BROADCAST"]);
     });
     test("<onchange>: E-MATCH-NOT-EXHAUSTIVE; a wildcard covers; dead / duplicate arms", () => {
-      expect(codes(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row)>\n    <Updated(row) : print(row)>\n  </onchange>`))).toEqual(["E-MATCH-NOT-EXHAUSTIVE"]);
-      expect(codes(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row)>\n    <_ : print("other")>\n  </onchange>`))).toEqual([]);
+      expect(codes(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row.id)>\n    <Updated(row) : print(row.id)>\n  </onchange>`))).toEqual(["E-MATCH-NOT-EXHAUSTIVE"]);
+      expect(codes(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row.id)>\n    <_ : print("other")>\n  </onchange>`))).toEqual([]);
       expect(codes(w(`name="f" watches=orders`, `${ARMS.replace("</onchange>", "  <Bogus(x) : print(x)>\n  </onchange>")}`))).toEqual(["E-MATCH-SUBSET-DEAD-ARM"]);
       expect(codes(w(`name="f" watches=orders`, `${ARMS.replace("</onchange>", "  <Deleted(k) : print(k)>\n  </onchange>")}`))).toEqual(["E-TYPE-023"]);
     });
     test("<onchange> legacy after-`>` placement parses with W-COLON-SHORTHAND-LEGACY-PLACEMENT (Info)", () => {
-      const d = fe(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row)>\n    <_> : print("other")\n  </onchange>`)).diags;
+      const d = fe(w(`name="f" watches=orders`, `  <onchange>\n    <Inserted(row) : print(row.id)>\n    <_> : print("other")\n  </onchange>`)).diags;
       expect(d.filter((x) => x.severity === "Error")).toEqual([]);
     });
     test("<onchange> outside a watches= channel: E-STRUCTURAL-ELEMENT-MISPLACED", () => {

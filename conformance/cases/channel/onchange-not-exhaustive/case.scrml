@@ -10,8 +10,8 @@
 
   <channel name="orders-feed" watches=orders>
     <onchange>
-      <Inserted(row) : print(row)>
-      <Updated(row) : print(row)>
+      <Inserted(row) : print(row.id)>
+      <Updated(row) : print(row.id)>
     </onchange>
   </channel>
 
