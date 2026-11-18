@@ -1,6 +1,6 @@
 {
   "id": "server-fn-e-route-004-nonserializable-param-pos",
-  "description": "§12.3/§12.5 — a server function with a non-JSON-serializable PARAMETER type (`fn()`) fires E-ROUTE-004 (error). Arguments cross the client→server network boundary as JSON; a function value cannot be transmitted.",
+  "description": "§12.3/§12.5 — a server function with a non-JSON-serializable PARAMETER type (`() => void`; S478: `=>` is the one function-type spelling, §7.5) fires E-ROUTE-004 (error). Arguments cross the client→server network boundary as JSON; a function value cannot be transmitted.",
   "language-version": "1.0",
   "spec": "§12.5",
   "source-test": "compiler/tests/unit/route-wire-serializability.test.js",

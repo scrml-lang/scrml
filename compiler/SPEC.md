@@ -8655,9 +8655,19 @@ A call to a statically resolved scrml function — a `fn` or `function` declared
    closes the question the conversions principle left open.)*
 
 Out of scope here (not ruled): calls to host / foreign functions (`_{ }`, `.js` imports, `import:host`) — the
-S440 PA reading's *"the check applies only when the callee is statically resolved"* is the standing text; a
+S440 PA reading's *"the check applies only when the callee is statically resolved"* is the standing text~~; a
 callee reached through a function-typed value (a callback parameter) is the S440 reopen condition, not this
-rule.
+rule~~ *(struck S478, next paragraph)*.
+
+**A call through a function value (S478).** A callee reached through a function-typed value — a callback
+parameter, or a local holding a function value — is checked by rules 1 and 2 against the value's declared function
+type (§7.5 "Function types"): **the signature is the static callee type.** More or fewer arguments than its
+parameters is `E-CALL-ARITY`; a proven argument that does not satisfy the corresponding parameter type is
+`E-TYPE-031` at §7.5.1 position 3. A function type has no defaults, so every parameter takes an argument. A value
+that reaches the position satisfies the type exactly (§7.5.1, "Function types — invariance"), so the call is
+checked as a direct call of the function the value holds would be. **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 7 —
+*"ratify that in §7.3.4 (the signature is the static callee type)."* · **supersedes:** the struck clause above.
+**Direction of change:** inert — the bootstrap's behaviour since s478-boot-fn-type; Nominal on impl#1.
 
 ### 7.4 Markup as Expression in Logic Context
 
@@ -8772,7 +8782,11 @@ Type annotations appear on variable declarations, function parameters, and funct
 #### Syntax
 
 ```
-type-expr       ::= primitive-type | identifier | type-expr '[]' | type-expr '|' type-expr | type-expr '?'
+type-expr       ::= primitive-type | identifier | type-expr '[]' | type-expr '|' type-expr | type-expr '?' | fn-type
+fn-type         ::= 'fn'? '(' ( fn-type-param ( ',' fn-type-param )* )? ')' ( '!' error-type? )? '=>' ( type-expr | 'void' )
+fn-type-param   ::= ( identifier ':' )? type-expr
+                    (* S478: `=>` is the one spelling of a function type — `(…) -> R` and `fn(…)` with no `=>`
+                       in a type are E-PARSE-TYPE; a leading `fn` is the pure function type, `!` the failable one *)
 primitive-type  ::= 'string' | 'number' | 'int' | 'integer' | 'bool' | 'boolean' | 'void' | 'not'
                     (* S469: `int` / `bool` canonical, `integer` / `boolean` synonyms, §14.13.6 *)
 param-decl      ::= identifier ':' type-expr | identifier '?' ':' type-expr
@@ -8816,9 +8830,11 @@ rest parameter is annotated like any other (`...xs: int[]`).
 > parameter on this rule alone". **Direction of change:** newly-rejecting (a bare parameter of a lambda outside the
 > three positions). *(PA reading: "an event handler" covers a lambda that is an `on*=` handler value; a lambda
 > passed to a host call is not one of the three positions — a host parameter has no scrml function signature.)*
-- **A function-valued parameter** is annotated with a function signature type. Until function types are built
+- **A function-valued parameter** is annotated with a function signature type. ~~Until function types are built
   (dpa-074 R1 deferred; R3′ after RP1), the spelling is the §15.11.4 signature type, `f: (x: int) => int`
-  *(PA derivation — the one function-signature type the SPEC has; it moves with the function-types slice)*.
+  *(PA derivation — the one function-signature type the SPEC has; it moves with the function-types slice)*.~~
+  *(superseded S478 — the spelling is ruled: "Function types (S478)" below.)* It is annotated with a function
+  type, `f: (x: int) => int`.
 - A host-supplied value of no scrml type ~~(a middleware `request`, a host event)~~ — a handle returned by a `.js`
   import or a `_{ }` block, e.g. `function redraw(chart: asIs)` for a third-party chart object — is annotated
   `asIs` (§14.1.1) where no scrml type names it. *(S469 r2: middleware `request` is not one — §40.3.2 types it
@@ -8851,6 +8867,41 @@ rest parameter is annotated like any other (`...xs: int[]`).
 
 **Union types.** `T | U` is a union. `[]` binds tighter than `|`.
 
+**Function types (S478).** A function type spells the signature of a function value (§14.3 S469 R2′: a function
+value may be bound, passed, returned and called). There are three forms, and the two modifiers combine
+(`fn (x: T)! E => R`):
+
+- `(x: T, y: U) => R` — a function taking a `T` and a `U` and giving an `R`; `() => void` gives no value. A
+  parameter's name is optional and is no part of the type: `(T, U) => R` is the same type.
+- `fn (x: T) => R` — the **pure function type**: a function value that keeps §48's `fn` contract. A `fn`
+  declaration named as a value has this type (§48.6.3). Its result SHALL NOT be an impure function type.
+- `(x: T)! E => R` — the **failable function type**, spelled as a `!` declaration is (§19.4.1): a function value
+  whose call may fail with the error enum `E`; `(x: T)! => R` fails with the built-in `Error` (§19.4.2). A `!`
+  function named as a value has this type, and a call through a value of it is a §19.4.3 failable call — handled
+  by `!{}`, `match` or `?`, else E-ERROR-002 (§19.4.3, "A failable function used as a value").
+
+**`=>` is the one spelling.** In a type, a function type SHALL be written with `=>`. The thin-arrow spelling
+`(x: T) -> R` and the `fn(…)` spelling with no `=>` (`cb: fn()`) SHALL be a parse error, **E-PARSE-TYPE**,
+whose message names the fix: write `(x: T) => R` (a bare `fn()` is `() => void`). `->` stays the return-type
+annotation of a function DECLARATION (below). A signature column in a reference table (Appendix H, §6.7.7)
+describes a member as its declaration would (`(handle: int) -> void`); it is not a type.
+
+> **Amendment (S478) — function types.** **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" —
+> item 3: *"spell it as the declaration does, `(x: T)! E => R`, and let a call through it be a §19.4.3 failable call
+> (handled by `!{}` / `match` / `?`)."*; item 4: *"`fn (x: T) => R` as the pure function type; a `fn` body may call
+> through a value of that type only."* and *"once the pure function type exists, a `fn` may return only a value of
+> it."*; item 5: *"`=>` is the one spelling; `->` / `fn()` in a type are a parse error with a named fix (`scrml fix`
+> rewrite)."* · **supersedes:** the "A function-valued parameter" bullet's *"Until function types are built … (PA
+> derivation …)"* (struck above); §14.3's examples *"`onClick: () -> void`, `cb: fn()`"*. **Direction of change:**
+> newly-rejecting for the two retired spellings — measured over the corpus (samples, examples, conformance,
+> acceptance, stdlib, benchmarks): three conformance cases wrote them (`server-fn/e-route-004-pos`,
+> `type-state-codes/e-struct-function-field-pos`, `reactive/narrowing-ends-unresolvable-call-reject`); each is
+> migrated to `=>`, and impl#1 gives each the same codes; newly-accepting for the pure and failable function types.
+> **Code:** the existing E-PARSE-TYPE (*"A malformed type"*) — a parse error, as ruled, the way §7's `:` return type
+> is E-PARSE-FN (S477). **Nominal on impl#1:** impl#1 still reads both retired spellings, and the `scrml fix`
+> rewrite rule (`(…) -> R` / `fn()` → `(…) => R` / `() => void`) is impl#1 tooling — both owed there (S471 policy;
+> `g-boot-fn-values-residue-s478`). The bootstrap implements the parse error.
+
 **Return type annotation.** `->` annotates function return types:
 
 ```scrml
@@ -8869,6 +8920,9 @@ function add(a: number, b: number) -> number { return a + b; }
 - The compiler SHALL emit E-TYPE-031 at the assignability positions enumerated in §7.5.1, and SHALL emit W-TYPE-031-UNPROVEN where inference is defeated (§7.5.2).
 - `T?` SHALL be desugared to `T | not` before type checking.
 - `->` is the sole return-type annotation syntax for `function` and `fn` declarations.
+- A function TYPE SHALL be written `(params) => R` (`=> void` for no value), optionally led by `fn` (the pure
+  function type) and with `!` or `! E` after the parameter list (the failable function type). `(params) -> R`
+  and `fn(…)` with no `=>`, in a type, SHALL be compile error E-PARSE-TYPE, naming the `=>` fix (S478).
 
 #### Worked Examples
 
@@ -8937,6 +8991,22 @@ yet emitted** (the row above); impl#1 carries it (§34.0, S440 #12) and the boot
 > mismatch → E-TYPE-031 + a §66.20 row + a cell-write row in §7.5.1"* · and (the three SPEC-text OPEN items,
 > #1) — *"a typed field is as typed as a typed cell"* → *"a wrong-typed FIELD write is E-TYPE-031 too"* ·
 > supersedes: the round-1 ⚑ OPEN on field writes.
+
+**Function types — invariance (S478).** A function value satisfies a position of function type (§7.5 "Function
+types") exactly when the two signatures are the SAME: the same number of parameters, each parameter type the same
+type, and the same result (both `void`, or the same type). This is **invariance**, in the parameter and the result
+position alike: `(x: int) => int` does not satisfy `(x: number) => int` nor `(x: int) => number`, and `() => int`
+does not satisfy `() => void`. Failability is part of the type and is invariant too: a failable value satisfies
+only a failable type of the same error enum, and a non-failable value never satisfies a failable type, nor the
+reverse. Purity is the one widening: a pure value (`fn (x: T) => R`) satisfies the impure type of the same
+signature (`(x: T) => R`), since it keeps a contract the position does not ask for; an impure value never satisfies
+a pure type. Not satisfying is E-TYPE-031 at every position this section checks — a function value's type is always
+proven (it is its signature). **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 6 — *"keep
+invariance for v1 and write it into §7.5.1."* *(PA reading pending the owner's confirmation, flagged for veto: the purity widening and exact
+failability are not named by the ruling. Without the widening every `fn` passed to a callback parameter would be
+E-TYPE-031, against §48.6.3 "`fn` declarations MAY be … Passed as function arguments"; failability is exact
+because §19.4.3 says it "travels with the value".)* **Direction of change:** inert — the bootstrap's rule since
+s478-boot-fn-type; impl#1 has no function-type assignability (Nominal on impl#1).
 
 **Position 3 — an argument (S447, call 9 kept).** A plain call's argument whose type the compiler PROVES and
 that does not satisfy the corresponding parameter's declared type is **E-TYPE-031**, the same code as positions
@@ -11365,6 +11435,15 @@ The compiler inserts `await` automatically per §13.
 - A server function MAY declare a return type with `->`: `server function name(args) -> ReturnType { ... }`. If absent, the compiler infers the return type from the body.
 - Return types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003: non-serializable return type from server function). The non-serializable kinds are: a **function** (not value data — §15.11; no JSON form), **markup** (an `html-element` — the scrml analog of "DOM nodes"; post-S166 there are no class instances, so markup is the live form of this case), a **snippet** (parameterized markup), a **cssClass**, an **engine / machine**, and a live **state object** (has identity, is not a value). The check recurses into struct fields, array elements, union members, and map values — a struct with a function-typed field anywhere in its shape is a non-serializable return. `asIs` (and `unknown`) is the deliberate untyped escape hatch (§14.1.1) and is ALLOWED (never errored — erroring would break the hatch). **(S179 — this reject is now ENFORCED. Prior to S179 the compiler generated ser/deser per §12.5 but never VALIDATED the type, so a non-serializable return silently produced garbage on the wire; the gate is wired in the type pass, consuming the §12 route map and the resolved return-type annotation.)** A server function with an UN-annotated return type whose INFERRED return is non-serializable is a deferred follow-on (the markup / fn / engine inferred-return shapes are already rejected at their own declaration sites).
 - **Parameter types crossing the client→server boundary SHALL be JSON-serializable.** Arguments to a server-escalated function are serialized as JSON on the client and deserialized on the server (§12.3 — "serialization and deserialization for all arguments and return values"). A parameter whose type is NOT JSON-serializable — the same non-serializable kinds enumerated for the return direction (function, markup / `html-element`, snippet, cssClass, engine / machine, state object), recursing into struct fields / array elements / union members / map values — SHALL be a compile error (**E-ROUTE-004**: non-serializable parameter type to server function). The error message SHALL identify the server function by name, the offending parameter (with the nested field path when the non-serializable type is reached through a struct field or array element), and the non-serializable kind. As with the return direction, `asIs` / `unknown` is the ALLOWED escape hatch. This bullet applies to `server function*` SSE generators as well: their parameters are query-encoded onto the §37.3 GET route and cross the same boundary. (Added S179 — the parameter-direction companion to E-ROUTE-003; both are enforced by a single wire-serializability gate in the type pass.)
+- **A function-typed result is E-ROUTE-003 (S478).** A server function whose return type is a function type
+  (§7.5 "Function types") — `server function f() -> () => void` — is E-ROUTE-003 under the bullet above (*"a
+  **function** (not value data … no JSON form)"*): its result would cross the server→client boundary, and a function
+  value has no wire form (§14.3). ⚑ **PA reading pending the owner's confirmation, flagged for veto.** The S478 ruling (ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 8: *"widen E-ROUTE-004 to "a parameter or return type""*) answered an owner question
+  whose premise was that *"a function-typed return has no code"*; it has one — E-ROUTE-003, above, which impl#1
+  emits for this exact shape (measured: `server function badRet() -> () => void` → E-ROUTE-003). Widening
+  E-ROUTE-004 to results too would give one shape two codes and split the implementations, so E-ROUTE-004 stays the
+  parameter code and the bootstrap reports E-ROUTE-003 (it refused the shape by name before). If the PA wants the
+  literal widening, E-ROUTE-003's function kind moves to E-ROUTE-004 in both §34 rows and in impl#1.
 - A server function returning `not` on some paths and `T` on others has inferred return type `T | not`. The client must handle the `not` case.
 - The developer SHALL NOT write `JSON.stringify`, `JSON.parse`, or `fetch` to consume server function return values. These are compiler responsibilities.
 
@@ -12682,7 +12761,7 @@ type user:struct = {
 - `(!A && !B)` — conjunction of constraints. The value must satisfy all constraints simultaneously.
 - `A | B` — union. The value is one of the listed types.
 - `[KeyT: ValT]` — value-native **map** type (with an optional `@ordered` postfix affix). The bracketed `key-type : value-type` form registers as a concrete type (not a generic — scrml has no type parameters). The full key/value/iteration/equality/serialization rules live in §59 (Value-Native Maps); the key type SHALL itself be comparable (§59.4).
-- A field whose type is a **function type** (`onClick: () -> void`, `cb: fn()`, `handler: (x: int) => string`) is **REJECTED** at declaration with the hard error `E-STRUCT-FUNCTION-FIELD` (§34, S174 ruling). A function is **not value data** — it has no structural equality (§45.2), is not serializable, and cannot be a map key (§59.4) — so it SHALL NOT be **stored** as a field on a value-shaped collection. This is the limit-the-primitive axiom (§14.1.1): *a struct is a collection of data and state, NOT a behavior-bearing object.* It is also the **STORED** face of the passed-vs-stored rule (§15.11.5): a function may be PASSED (a component prop, `W-COMPONENT-001`) or CALLED (an event handler, inline), but never STORED as value data (a struct field or a state cell). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The type resolves to a distinguishable `FunctionType` (not an opaque `asIs`), which is what makes the reject fire precisely on a function-typed field. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type (it is never rejected); only the param-paren-then-arrow shape `(...) -> RetType` (which does not end in `)`) is a function type.
+- A field whose type is a **function type** (~~`onClick: () -> void`, `cb: fn()`~~ `onClick: () => void`, `handler: (x: int) => string`; S478: `() -> void` and `fn()` are no longer type spellings — E-PARSE-TYPE, §7.5 "Function types") is **REJECTED** at declaration with the hard error `E-STRUCT-FUNCTION-FIELD` (§34, S174 ruling). A function is **not value data** — it has no structural equality (§45.2), is not serializable, and cannot be a map key (§59.4) — so it SHALL NOT be **stored** as a field on a value-shaped collection. This is the limit-the-primitive axiom (§14.1.1): *a struct is a collection of data and state, NOT a behavior-bearing object.* It is also the **STORED** face of the passed-vs-stored rule (§15.11.5): a function may be PASSED (a component prop, `W-COMPONENT-001`) or CALLED (an event handler, inline), but never STORED as value data (a struct field or a state cell). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The type resolves to a distinguishable `FunctionType` (not an opaque `asIs`), which is what makes the reject fire precisely on a function-typed field. NOTE the disambiguation from a lifecycle annotation: `(A to B)` / `(A -> B)` is the arrow WRAPPED in outer parens and is NOT a function type (it is never rejected); only the param-paren-then-arrow shape ~~`(...) -> RetType`~~ `(...) => RetType` (which does not end in `)`) is a function type (S478: `(...) -> RetType` in a type is E-PARSE-TYPE, §7.5).
 - **No value holds a function (`E-VALUE-FUNCTION-STORED`).** The STORED prohibition above is not limited to a declared field type: it governs every **value**. An object literal, array literal or map literal (§59.3) SHALL NOT hold a function in a field, element or entry — written directly, through a spread, a method or getter, or through a ternary / `??` / `||` that chooses one — and a state cell SHALL NOT be initialised or assigned one. A function SHALL NOT be written INTO a value either: not by a field or element write (`o.f = g`, `o["k"] = g`, `@fs[0] = g`), not as an enum payload (`Op.Apply(g)`), and not by a method on a scrml value. On a receiver known to be a scrml value (a state cell, a literal, a binding initialised with one) every method that receives a function is refused EXCEPT the closed set of built-ins that only CALL it (`map` / `filter` / `forEach` / `some` / `every` / `find…` / `reduce…` / `flatMap` / `sort` / `toSorted` / `then` / `catch` / `finally` / `replace…`, the §59.7 `update` and §59.8 `sortedBy`); on a receiver of unknown provenance the storing methods (`push` / `unshift` / `splice` / `fill` / `concat` / `with` / `set` / `insert` / `add` …) are refused. A value BUILT FROM what a callback returns is judged by what the callback returns: `xs.map(f)` / `xs.flatMap(f)`, `Array.from(xs, f)` and the §59.7 `m.update(k, f)` whose callback may return a function build a value holding functions and are refused (`[1, 2].map(() => twice)`, `items.map((i) => () => pick(i))`) — bind the call at the use site instead (`<each in=@items as i><button onclick=pick(i)>…`, or `onclick=${() => pick(i)}`); a host call that writes into a scrml value (`Object.assign(o, { f })`, `Object.defineProperty(o, "f", { value: f })`, `Reflect.set(o, "f", f)`), a host collection that took a function and is then stored, and a host value KNOWN to be callable (a standard global function or a function member of a standard namespace — `Math.max`, `String`) are stored functions too. A `match` expression is the value its arms yield: an arm value (or a `{ … }` block arm's tail) that may be a function makes the match one (`{ f: match n { 1 => twice, _ => thrice } }`, `xs.map((x) => match x { … })`); an arm the compiler cannot read fails closed. A value-form `if` (`const a = if (c) { lift f } else { lift g }`) is the values it lifts, and a `for` lift that lifts functions builds an array of functions. Function facts cross `import` — including `export { a } from …`, `export * from …`, a local `export { a, b }` list, and the `scrml:` standard library (read from its own source): an exported function that returns a closure, or an exported const arrow, is a function in the importing file, an exported data value is data; a lower-case value name whose module gives no fact (unresolvable, a cycle, or a missing export) fails closed.
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Close it" (the closure-array entry — a value built by a callback that returns functions is refused).
@@ -21829,6 +21908,18 @@ A handler handles the call the way any other caller does: `onclick={ risky() !{ 
 
 **A failable function used as a value (S469).** A failable function MAY be used as a value: passed as an argument or as a component prop, returned from a function, or stored in a binding. Its failability is part of its type (§19.4.4: "The `!` modifier SHALL be part of the function's type signature") and travels with the value, so every eventual call of that value is a call to a `!` function under this section and SHALL be handled like a direct call (E-ERROR-002 otherwise). **Nominal / spec-ahead for impl#1:** impl#1 has no function types that carry failability, so it refuses every read of a failable function outside callee position — except a `const` alias of it by name (`const g = risky`, which it follows) and where this SPEC requires a failable function value (`<formFor onsubmit=…>`, §41.14.3) — with **E-IMPL1-FAILABLE-FN-VALUE**, an impl#1 limitation and not a language rule (carried: `g-impl1-failable-fn-value-refused-s469`). An event-handler reference is governed by "Handler references" above (E-ERROR-002), not by this paragraph. The bootstrap implements the rule.
 
+**The failable function type (S478).** The type of a failable function value is spelled as the declaration is:
+`(x: T)! E => R`, or `(x: T)! => R` for the default `Error` enum (§7.5 "Function types"). A `!` function named as
+a value has that type. A call through a value of a failable function type is a call to a `!` function under this
+section: it is handled by a `!{}`, by a `match` on the result, or by `?` inside a `!` function whose error type can
+take its variants (§19.5.3), and an unhandled one is E-ERROR-002. A failable value stands only where its position's
+type is the same failable type (§7.5.1, "Function types — invariance"): passed to a non-failable function type, it
+is E-TYPE-031, so no position can call it and drop the error. **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 3 — *"spell it as the declaration does, `(x: T)! E => R`, and let a call through it be a
+§19.4.3 failable call (handled by `!{}` / `match` / `?`)."* · **supersedes:** nothing struck — the paragraph above
+states the rule ("travels with the value"); this one gives it the spelling it lacked. **Direction of change:**
+newly-accepting (a `!` function used as a value was E-ERROR-002 in the bootstrap). Nominal on impl#1
+(E-IMPL1-FAILABLE-FN-VALUE, above).
+
 > **Provenance:** ruling:user-voice-scrml.md S469 "Split + audit" — NOT callee-only as a language rule; the SPEC states the expressive rule and impl#1 refuses what it cannot verify, labelled as an impl#1 limitation. · **supersedes:** the carried-gaps clause "refusing every such read is a new rule, owed a ruling" (`g-failable-function-used-as-value-unchecked-s468`). · **Direction of change (pa-base §8):** the language — newly-accepting in principle (Nominal: no implementation accepts it yet); impl#1 — newly-rejecting, measured S469 by compiling every `.scrml` under `examples/ samples/ stdlib/ benchmarks/ conformance/` and the adopter repos `giti`, `flogence` one by one (2960 files): **0** real sites; **3** in conformance fixtures (the two callback props of `error/handler-failable-reference-component-prop-neg`, now an impl1-ts xfail pinning the clean compile, and one in `error/handler-failable-reference-via-component-prop-pos`, already E-ERROR-002 at that call site).
 
 **Carried impl#1 gaps (tracked in `docs/known-gaps.md`, not the language rule).** Since S467 impl#1 also checks a `!` call used as a value — a declaration initializer (`let v = risky()`), a write (`@r = risky()`), an argument, an operand, a ternary branch, a `return` operand, an array / object member, a template interpolation — with one structural rule: a call whose callee resolves to a failable function is E-ERROR-002 unless its value REACHES a handling form UNCHANGED. It reaches a `!{}` (statement- or expression-position), a `?`, a `<request>` body's right-hand side, or a render-time `<errorBoundary>` through parentheses, as an operand that `||` / `??` return as-is or the right operand of `&&`, or as a ternary arm; any transformation in between — a member access (`risky().toString() !{ … }`, `.ok`, `["variant"]`), an argument position, a coercing operator (`!`, `==`, `+`, a template), the left operand of `&&` — means the handler sees something else, so the call is unhandled. impl#1 handles a `match` subject only when the subject IS a call of a function that is PROVABLY failable — a `!` function by name or a `const` alias of one: its lowering reads every non-error value as `.Ok`, so a subject that may ALSO be a plain value has no correct lowering and the check refuses it — an operator (`match (a || risky())`, `match (c ? E::V : risky())`) or a callee that may be a plain function (`const g = c ? plain : risky; match g()`) (`g-match-failable-subject-through-operator-miscompiled-s467`). The direct form is discriminated in an event-handler attribute too, in every handler value form (since S469; before, a one-statement value compared the error object as a plain value — `g-match-failable-subject-in-handler-attribute-not-discriminated-s468`), except two forms impl#1 refuses (E-ERROR-002): a one-statement handler value inside a component body, and a block-bodied arrow handler. A statement-position `match` in a server function awaits its subject (since S469; `g-server-statement-match-failable-subject-unawaited-s468`). A member-target assignment `o.v = risky() !{ … }` is refused too: impl#1 assigns before the guard (`g-member-assign-guard-emitted-after-assign-s467`). The walk reaches every expression container: the bodies of functions written as values (expression- and block-bodied arrows, `function () { … }`), parameter defaults, `on mount` / `on dismount` / `when … changes` / `when message` / `<onchange>` bodies, `!{}` arm values and bodies, raw inline-`match` arms, C-style `for` parts, non-handler attribute values, the arguments of a handler call (`onclick=f(risky())`), and `const` aliases (`const g = risky; g()`); every other read of a failable function as a value — an operator alias (`c ? risky : plain`), a `let` alias, a `return risky`, an argument (`items.map(risky)`), a parameter or destructuring default, a closure write — is refused with E-IMPL1-FAILABLE-FN-VALUE ("A failable function used as a value", above; S469 — before, impl#1 followed a closed set of such flows and missed the rest, `g-failable-alias-through-operator-or-returned-fn-s467`, `g-failable-function-used-as-value-unchecked-s468`). Only a RENDER-time position is contained by `<errorBoundary>` (§19.6.6) — not a function body, an `on mount` body or a handler inside it; impl#1's boundary does not yet catch a render-time call's RETURNED error (`${ const ok = risky() }` reads the error as a value; `g-errorboundary-runtime-does-not-catch-returned-error-value-s467`). A parameter, lambda parameter or local that shadows the name is not the function (`g-unhandled-failable-call-in-value-position-s467`). It does not yet reach a body the front-end cannot re-parse. Note that §19.4.3's list is exhaustive, so `return risky()` inside a `!` function is reported (the remedy is `const v = risky()?` then `return v`; impl#1 does not parse `return risky()?`). An imported `!` function is failable in the importing file exactly as a local one is (since S469; read off the exporting file's declaration, through renames, named re-exports and `export *`; a body-split server function is CPS-implicitly failable). A `match` on its result is accepted only when the importing file reads its error enum (the same enum, imported under its name); otherwise impl#1 refuses that subject (E-ERROR-002), as the `match` lowering could not discriminate the error. A `!{}` written after an unbraced handler call (`onclick=risky() !{ … }`) is silently dropped, so that handler reports E-ERROR-002; it compiles when the handler is braced. Some arrow forms are not modelled: an arrow handler with more than one parameter, or with a non-simple parameter (a default `(e = 1)`, a rest `(...a)`, or a destructuring pattern with a default), and a `function (e) { … }` expression (which fails codegen with E-CODEGEN-INVALID-LOGIC). None of these is checked. Each is emitted exactly as before S440. A component prop that holds a function and is called with the bare `onclick=act()` form is not substituted (the handler emits `act()`), so that call is not checked either. A `!{}` guard inside a ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{ … } } }`) passes the check but fails the build with E-CODEGEN-INVALID-LOGIC (a raw `!{` is emitted; fails closed; `g-guard-in-one-line-if-for-emits-raw-bang-brace`) — the multi-line and multi-statement forms compile. A `?` in a handler (`onclick={ risky()?; @m = 1 }`) is not flagged: a handler is not a `!` function, so §19.5.4's E-ERROR-003 applies, but impl#1 checks `?` only in function bodies; at runtime the handler returns early and the error is discarded (`g-propagate-in-handler-silently-drops-error`). A handler reference or call through a `const` alias (`const h = risky` + `onclick=h` / `onclick=h()`) is checked like the function's own name (since S469); a `!` function reached through a cell (`onclick=@fnc`), a member (`onclick=o.m`) or a conditional (`${ c ? risky : plain }`) is refused where it is read as a value (E-IMPL1-FAILABLE-FN-VALUE; `g-failable-handler-indirect-reference-unchecked`, resolved).
@@ -30297,7 +30388,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
-| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. **S474 (§14.3, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a field whose function parts are all pure `fn` is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474); an impure function-typed field is INTERIM too, until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474; ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). (Emitted at `compiler/src/type-system.ts` (`checkFunctionTypedStructFields`).) | Error |
+| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: () => void }`) is declared with a FUNCTION type (`() => void`, `(x: int) => string`; S478: the retired spellings ~~`() -> void`~~ and ~~`fn()`~~ are E-PARSE-TYPE, §7.5 "Function types"). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. **S474 (§14.3, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a field whose function parts are all pure `fn` is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474); an impure function-typed field is INTERIM too, until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474; ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). (Emitted at `compiler/src/type-system.ts` (`checkFunctionTypedStructFields`).) | Error |
 | E-VALUE-FUNCTION-STORED | §14.3, §15.11.5.1, §59.3 | A VALUE stores a function: an object, array or map literal holds a function in a field, element or entry (directly, through a spread, a method / getter, or a ternary / `??` / logical-or choosing one); a state cell is initialised or assigned one (`<f> = g`, `@f = g`); a field / element write puts one into a value (`o.f = g`, `@o["k"] = g`, `@fs[0] = g`); an enum payload holds one (`Op.Apply(g)`); a method puts one into a scrml value (on a known scrml value every method except the closed calling set `map` / `filter` / `forEach` / `then` / … / `update` / `sortedBy`; on a receiver of unknown provenance the storing methods `push` / `concat` / `with` / `insert` / `add` / …); a host call whose argument literal held one has its RESULT kept as a scrml value (`const o = Object.freeze({ f: g })`, `Array.of(g)`, `new Set().add(g)`); a host call writes one into a scrml value (`Object.assign(o, { f: g })`, `Object.defineProperty`, `Reflect.set`); a value is BUILT FROM a callback that returns functions (`xs.map(() => g)`, `Array.from(xs, f)`, `m.update(k, f)` — S464 "(a) Close it", the closure-array entry); the dot-shorthand enum payload (`.Apply(g)`); or a known host callable is stored (`{ f: Math.max }`). A `match` arm value, a value-form `if` lift and a `for` lift count as the value. Function facts cross imports, re-exports (`export … from`, `export *`) and local export lists, and are read for `scrml:` stdlib modules from their source; an unknown cross-module value name fails closed. Function-ness is read from the tree and solved to a fixpoint over the file, failing closed: an arrow / `fn` / `function` expression (block bodies included), or a name that may hold one — an alias, a reassigned binding, a destructuring / parameter default, a function-typed parameter, a parameter a call site hands a function — or a call of a file function that may return one. NOT fired for a function PASSED as an argument or callback, wired as a prop / event handler, CALLED, or bound to a local name; nor for a literal handed to a host-JS call in statement position (the host boundary), nor for a write or method whose target is rooted in a host binding. The sibling of `E-STRUCT-FUNCTION-FIELD` (which stays the type-annotation code). Fix: pass the function instead (hand it to the call that uses it), wire it as a prop / handler, or store an enum tag and `match` on it. Partitions into `result.errors`. (Ruling S462 "a" + S464; emitted at `compiler/src/value-function-stored.ts` via `compiler/src/type-system.ts` `checkValueFunctionStored`.) **S474 (§14.3; S469 R2′, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a pure `fn` value in a cell or struct field is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474), and so is a local binding holding any function value (R2′); an impure function value in a cell or field is INTERIM until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474); any function-holding value at `==` / ordering, a map key or a serialization sink stays refused, PERMANENT (semantic impossibility: function `==` is undecidable; a closure cannot be serialized — ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). | Error |
 | E-TIMER-STRUCT-MISUSE | §41.21 | A `scrml:time` `Debouncer` / `Throttler` (a name or state cell initialised by `debounce(…)` / `throttle(…)` imported from `scrml:time`) is CALLED (`d(q)`, `@d(q)`) or has a method called on it (`d.cancel()`, `d.flush()`, `d.run()`). The struct is data, not a function: the message names the free function to use — `run(d, …)`, `cancel(d)`, `flush(d)`. Retires the pre-S464 callable-with-methods shape at compile time (it threw at run time). Partitions into `result.errors`. (Ruling S464 "(a) Struct + free fns" / "(a) Fix + land + type rule"; emitted at `compiler/src/value-function-stored.ts` via `checkTimerMisuse`.) | Error |
 | E-STRUCT-DUPLICATE-KEY | §14.3, §66.11.3 | A struct literal names the same key twice — a plain literal (`{ x: 5, x: 6 }`), a nested one, or the spread-override shape (`{ ...@g, phase: .Gone, phase: .Live }`). Not a map literal (that is `W-MAP-DUPLICATE-LITERAL-KEY`, §59.3). **Provenance:** ruling:user-voice-scrml.md S440 — "duplicate keys are an error in ANY struct literal" + the six-open-questions "all recs" (S440, second entry), item 2. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). | Error |
@@ -30562,7 +30653,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-CHANNEL-WATCHES-NO-CONSUMER | §38.13.3 | A `<channel watches=<table>>` feed declares no `<onchange>` handler — nothing consumes the change feed. Per §38.13.3 a `watches=` channel body contains exactly one `<onchange>` element (the typed dispatch over the synthesized `RowChange`). Add an `<onchange>` handler, or drop `watches=`. (§38.13.8.) | Warning |
 | E-FN-001 | §48.3.1 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | §48.3.2 | DOM mutation call inside a `fn` body | Error |
-| E-FN-003 | §48.3.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function | Error |
+| E-FN-003 | §48.3.3, §48.6.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through a function value whose type is not the pure function type, and a `fn` (or a pure function type) whose result is an impure function type (S478, §48.6.3; the S478 call-through and result cases are emitted at `compiler/self-host-v2/analyze.scrml` (pure-type result check and `fn` result check, `E-FN-003`); impl#1 does not emit them yet.) | Error |
 | E-FN-004 | §48.3.4 | Non-deterministic call — or read of mutable browser/global state (`window.*`/`document.*`/`navigator.*`/`location.*`) — inside a `fn` body | Error |
 | E-FN-005 | §48.3.5 | `async` on a `fn` declaration, or `await` inside a `fn` body. The `fn`-scope manifestation of §19.9.8 (S114 — the language-wide rule). | Error |
 | E-ASYNC-NOT-IN-SCRML | §19.9.8 | The `async` keyword appears on any function or arrow declaration in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted at the native parser's expression / declaration heads — `compiler/native-parser/parse-stmt.js` + `parse-expr.js`.) | Error |
@@ -31392,7 +31483,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-PARSE-TAG | §4, §66 | A malformed tag: no tag name after `<`, an unterminated tag, an unexpected token in a tag, a markup element inside a declaration opener, or a `<*name>` reference that declares typed attributes. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 | E-PARSE-TEMPLATE | §8.1.2, §14.13.3 | A malformed or ambiguous template: an unclosed template, an empty slot or a slot holding more than one expression, a slot (or a `?{}` bound parameter, §8.1.2) whose extent cannot be read one way, an escape that is not a JavaScript template escape, or a template starting the line after an expression (read two ways: JavaScript's tagged template, or scrml's new statement). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 | E-PARSE-TRAILING | §7, §7.2.2 | An unexpected token after a complete expression — including a token that continues a statement-position `match` on the same line after its `}` (`match k { … } + 2`): a statement `match` is block-like and ends at its `}` (§7.2.2 rule 2, dpa-073 F3 (i); s469-boot-semicolons r3). To use the value, write the `match` in a value position. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
-| E-PARSE-TYPE | §14, §53 | A malformed type or type declaration: no type where one is expected, no field or variant name, a type kind other than `:enum` / `:struct`, or an unterminated `[` in a type. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-TYPE | §7.5, §14, §53 | A malformed type or type declaration: no type where one is expected, no field or variant name, a type kind other than `:enum` / `:struct`, or an unterminated `[` in a type. Includes a function type spelled `(…) -> R` or `fn(…)` with no `=>` — `=>` is the one spelling (§7.5 "Function types"; S478 **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 5). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 | E-PARSE-UNCLOSED | §4 | An element that is never closed (`<tag>` with no closer). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 | E-PARSE-WHEN | §6.7.4 | A malformed legacy `when … changes { }`: an empty dep-list, a dep-list entry that is not `@name`, no `changes` after the dep-list, or the retired `reads` clause. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 
@@ -38225,10 +38316,38 @@ fn buildItem(name: string) {
 `fn` declarations MAY be:
 - Assigned to `let`/`const`/`lin` variables.
 - Passed as function arguments.
-- Stored as fields of `<state>` objects (using a function type annotation).
+- ~~Stored as fields of `<state>` objects (using a function type annotation).~~ *(superseded by §14.3: a function
+  is "never STORED as value data (a struct field or a state cell)" — E-STRUCT-FUNCTION-FIELD /
+  E-VALUE-FUNCTION-STORED.)*
 - Returned from other `fn` bodies (the returned `fn` carries its constraints).
 
-When a `fn` is stored in a `<state>` field, the field's type annotation carries the `fn` constraint. Calling the stored function is subject to the same constraints as calling any `fn` directly.
+~~When a `fn` is stored in a `<state>` field, the field's type annotation carries the `fn` constraint. Calling the stored function is subject to the same constraints as calling any `fn` directly.~~
+*(S478: superseded by §14.3 — a function is not stored in a `<state>` field or any other value data. The `fn`
+constraint is carried by the pure function type below, in the positions §14.3 R2′ admits: bound, passed,
+returned and called.)*
+
+**The pure function type (S478).** The type that carries the `fn` constraint is spelled `fn (x: T) => R` (§7.5
+"Function types"). It stands in the positions §14.3 R2′ admits a function value (a local's, a parameter's or a
+return type), never a stored field. A `fn` declaration named as a value has it; an impure value never satisfies it (§7.5.1,
+"Function types — invariance"). Two rules follow:
+
+1. **A `fn` body calls through a pure value only.** Inside a `fn` body, a call through a function value SHALL have
+   a callee of a pure function type. A call through a value of an impure function type is **E-FN-003** — §48.6.2's
+   rule for a call of a `function`, since the value may run any of the five prohibited constructs.
+2. **A `fn` returns only a pure value.** A `fn` SHALL return only a value of a pure function type: a `fn` whose
+   declared return type is an impure function type is **E-FN-003**, as is a pure function type whose result is an
+   impure function type. *(⚑ Code — PA reading pending the owner's confirmation, flagged for veto: the ruling names no code. E-FN-003 is the code of
+   the purity contract this protects — a later call of the returned value would run an impure body on the `fn`'s
+   behalf.)*
+
+**Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 4 — *"`fn (x: T) => R` as the pure function type; a `fn` body may call
+through a value of that type only."*; and (the #1929 review L3 sub-question) *"once the pure function type exists,
+a `fn` may return only a value of it."* · **supersedes:** nothing struck by this paragraph — this section said *"the returned `fn`
+carries its constraints"* with no spelling. (Its *"the field's type annotation carries the `fn` constraint"*
+and the `<state>`-field bullet are struck above as superseded by §14.3, which forbids storing a function as value
+data; they are no home of the pure type.)
+**Direction of change:** newly-accepting for rule 1 (a call through a value in a `fn` body was refused by name in
+the bootstrap); newly-rejecting for rule 2 (a `fn` returning an impure function value compiled). Nominal on impl#1.
 
 #### 48.6.4 Mutual Recursion and Hoisting
 
@@ -38351,7 +38470,7 @@ newly-rejecting, as §48's amendment states.)
 |------|---------|----------|
 | E-FN-001 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | DOM mutation call inside a `fn` body | Error |
-| E-FN-003 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function | Error |
+| E-FN-003 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through an impure function value, and an impure function type as a `fn`'s result (S478, §48.6.3; the S478 call-through and result cases are emitted at `compiler/self-host-v2/analyze.scrml` (pure-type result check and `fn` result check, `E-FN-003`); impl#1 does not emit them yet.) | Error |
 | E-FN-004 | Non-deterministic call (`Date.now`, `Math.random`, `crypto.randomUUID`, etc.) inside a `fn` body | Error |
 | E-FN-005 | `async` on a `fn` declaration, or `await` inside a `fn` body | Error |
 | ~~E-FN-006~~ | **Retired 2026-04-20 (S32).** Relocated to E-STATE-COMPLETE at every state literal site (§54.6.1). | — |
@@ -53954,7 +54073,7 @@ s474-slot-exclusive-branches; impl#1 does not implement §66.)*
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
 
-> ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. `onOpen:fn()`) is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
+> ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. ~~`onOpen:fn()`~~ `onOpen:() => void` — S478: `fn()` is no longer a type spelling, E-PARSE-TYPE, §7.5 "Function types") is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O8: function-typed attributes vs the passed-vs-stored rule.** "Callback props =
 > function-typed attributes" is ruled. But an attribute is declaration DATA — part of the declaration's type
@@ -53966,7 +54085,7 @@ s474-slot-exclusive-branches; impl#1 does not implement §66.)*
 > the value; a function stored on a declaration instance and invoked through it (`@x.onpick(…)`) is the shape
 > that stance rejects. (The components text bryan answered asserted the opposite reading — *"This isn't a method,
 > just a value passed in, so it's consistent with your S430 stance"* — which ratifies function-typed attributes
-> (`<card title:string onOpen:fn()>`) but not how they meet §15.11.5.1 / `E-EQ-003`.)
+> (`<card title:string onOpen:fn()>` — the record's spelling; S478 writes it `onOpen:() => void`, §7.5) but not how they meet §15.11.5.1 / `E-EQ-003`.)
 
 #### 66.15.3 Explicit attribute forwarding — the ratified destination (Nominal, not built)
 
@@ -53990,13 +54109,15 @@ A declaration MAY opt in to forwarding by declaring an **element-typed rest** an
 element** in its `renders`:
 
 ```scrml
-<btn label:string act:fn() ...attrs:button/>
+<btn label:string act:() => void ...attrs:button/>
 renders <button class="btn" type="button" onclick=act() ...attrs>${label}</button>
 
 <btn label="Delete" act=confirmDelete() aria-describedby="del-help" data-testid="del" class="btn--danger"/>
 <btn label="Save" act=save() type="submit"/>      // E-DECL-USE-ATTR — `type` is written by <btn>'s renders
 <btn label="Save" act=save() hreff="/x"/>         // E-DECL-USE-ATTR — not an attribute of <button>
 ```
+
+*(S478: the example read ~~`act:fn()`~~; `fn()` is no longer a type spelling — `() => void`, §7.5 "Function types". The bootstrap does not yet read a function type in a declaration opener: `act:() => void` there is a parse error, INTERIM, gap `g-boot-opener-fn-type-s478`.)*
 
 1. **Declared as `...name:element`.** The rest is declared in the opener as `...attrs:button` — an element NAME,
    with no angle brackets (`<button>` would close the opener, §66.2.4). Its type is that element's attribute set,

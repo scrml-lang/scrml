@@ -157,10 +157,13 @@ describe("a call through a value is checked like a direct call (§7.3.4)", () =>
 });
 
 describe("what a direct call would check stays checked (fail closed)", () => {
-  test("NEGATIVE: passing a `!` function where a non-failable is expected, and calling it unhandled, is E-ERROR-002", () => {
+  // s478-ruled-fn-types — §19.4.3 "The failable function type (S478)": a `!` function used as a value is typed
+  // `(…)! E => R`; §7.5.1 invariance keeps it out of a non-failable position (E-TYPE-031), and an unhandled
+  // call through it is E-ERROR-002 (fn-types-ruled-s478.test.js has the built cases)
+  test("NEGATIVE: passing a `!` function where a non-failable is expected is E-TYPE-031; calling it unhandled is E-ERROR-002", () => {
     const src = P(`    type E:enum = { Bad }\n    function risky(x: int)! -> E { if (x < 0) { fail E.Bad; } return x; }\n${APPLY}\n    function go() { @out = apply(risky, 1); }`);
-    expect(codes(src)).toEqual(["E-ERROR-002"]);
-    expect(codes(P(`    type E:enum = { Bad }\n    function risky(x: int)! -> E { if (x < 0) { fail E.Bad; } return x; }\n    function go() { const g = risky; }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(src)).toEqual(["E-TYPE-031"]);
+    expect(codes(P(`    type E:enum = { Bad }\n    function risky(x: int)! -> E { if (x < 0) { fail E.Bad; } return x; }\n    function go() { const g = risky; @out = g(1); }`))).toEqual(["E-ERROR-002"]);
   });
   test("NEGATIVE: capturing a `lin` value in a closure is its one consumption — a second use is E-LIN-002 (§35.6)", () => {
     const U = `    function use(x: int) -> int { return x; }`;
@@ -202,10 +205,12 @@ describe("what a direct call would check stays checked (fail closed)", () => {
   test("NEGATIVE: a server function's function-typed parameter is E-ROUTE-004 (§12.5)", () => {
     expect(codes(P(`    server function s(f: (x: int) => int) -> int { return 1; }\n    function go() { }`))).toContain("E-ROUTE-004");
   });
-  test("NEGATIVE: a call through a value inside a pure `fn` is refused by name (§48.6.2: purity not verifiable)", () => {
+  // s478-ruled-fn-types — §48.6.3 "The pure function type (S478)" rule 1: an impure callee is E-FN-003; the pure
+  // type `fn (x: int) => int` is called through (fn-types-ruled-s478.test.js)
+  test("NEGATIVE: a call through an IMPURE value inside a pure `fn` is E-FN-003 (§48.6.3)", () => {
     const ms = msgs(P(`    fn one(x: int) -> int { return x; }\n    fn via(f: (x: int) => int) -> int { return f(1); }\n    function go() { @out = via(one); }`));
     expect(ms.length).toBe(1);
-    expect(ms[0]).toStartWith("E-BOOTSTRAP-UNSUPPORTED: `f(…)` calls through a function value inside a `fn` body");
+    expect(ms[0]).toStartWith("E-FN-003: `f(…)` calls through a function value of the IMPURE type");
   });
   test("NEGATIVE: a local named like a function in scope is not called through (the narrowing pass reads calls by name)", () => {
     expect(codes(P(`${TWICE}\n    function apply2(twice: (x: int) => int) -> int { return twice(1); }\n    function go() { @out = apply2(twice); }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

@@ -114,9 +114,12 @@ describe("the spellings the bootstrap refuses by name never reach the match (fai
     const cs = codes(P(login(`        @msg = match check?.("wrong") { .Locked :> "locked", else :> "LOGGED IN" };`)));
     expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
-  test("a call through a function value bound to a name", () => {
+  // s478-ruled-fn-types: a failable function value is built now (§19.4.3 "The failable function
+  // type (S478)": "A call through a value of a failable function type is a call to a `!` function
+  // under this section"), so the `match` on the call through it IS judged — and refused by the rule.
+  test("a call through a failable function value bound to a name is E-MATCH-ELSE-ABSORBS-ERROR", () => {
     const r = run(P(login(`        const f = check;\n        @msg = match f("wrong") { .Locked :> "locked", else :> "LOGGED IN" };`)));
-    expect(r.diags.map((d) => d.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(r.diags.map((d) => d.code)).toContain("E-MATCH-ELSE-ABSORBS-ERROR");
     expect(r.core == null).toBe(true);
   });
 });
