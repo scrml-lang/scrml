@@ -52,7 +52,8 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
     import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
-             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull, channelRefusal, chOpsJs } from "./print.scrml"
+             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull, channelRefusal, chOpsJs,
+             ChReset, chFoldWhy, chResets, chValueJs, chEdgesJs } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
 
@@ -125,7 +126,7 @@ ${
             JsStmt.SComment("each route's wire contract — the same §57 tables the client artifact encodes and decodes with"),
         ])
         for (const sf of routed) { body = body.concat([routeJs(p, sf)]) }
-        body = body.concat(endpointConsts(p)).concat(channelConsts(p))
+        body = body.concat(endpointConsts(p)).concat(channelConsts(ctx, p))
 
         // s472: the constants the SERVER's code reads (the functions it reaches), once each
         let roots: Node[] = []
@@ -520,27 +521,49 @@ ${
     // decodes every client frame against it.
     fn channelName(i: int) -> string { return "channel$" + i }
 
-    fn channelConsts(p: CoreProgram) -> JsStmt[] {
+    // S479 (s479-channel-relay-fold) — §38.4.2 "The relay's fold": a channel the relay can fold
+    // (print.scrml chFoldWhy "") also carries each cell's `init` (its literal initializer, printed as
+    // the client prints it), and the channel its `resets` (`reset-on=` rules among its own cells); every
+    // cell carries `edges` (a `rule=` field's graph — the client's `<field>_edges` table — else null).
+    // The relay's fold starts from those values and makes those writes; `noFold` is "" then, else
+    // why the channel has no fold.
+    fn channelConsts(ctx: Ctx, p: CoreProgram) -> JsStmt[] {
         if (p.channels.length == 0) return []
-        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("the §38 channels — each `__sync` op frame a client sends names an op its cell syncs and decodes against its cell's table (§38.4.2, §57), or the connection is closed")]
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("the §38 channels — each `__sync` op frame a client sends names an op its cell syncs and decodes against its cell's table (§38.4.2, §57), or the connection is closed; a channel with a fold (`noFold` empty) also judges each frame against the relay's fold of its cells (§38.4.2 \"The relay's fold\")")]
         let i: int = 0
         for (const ch of p.channels) {
+            const noFold: string = chFoldWhy(p, ch)
             let cells: JsExpr[] = []
             let ci: int = 0
             for (const c of ch.cells) {
                 for (const d of p.decls) {
                     if (d.sym.id == p.program.id) {
                         for (const f of d.fields) {
-                            if (f.sym.id == c.id) cells = cells.concat([JsExpr.JObject([{ key: "key", value: jstr(c.hint) }, { key: "table", value: wireOrNull(p, f.ty) }, { key: "ops", value: chOpsJs(ch.ops, ci) }])])
+                            if (f.sym.id == c.id) {
+                                let props: JsProp[] = [{ key: "key", value: jstr(c.hint) }, { key: "table", value: wireOrNull(p, f.ty) }, { key: "ops", value: chOpsJs(ch.ops, ci) }, { key: "edges", value: chEdgesJs(ctx, f) }]
+                                const init: Expr | not = f.init
+                                if (noFold == "" && init is given) props = props.concat([{ key: "init", value: chValueJs(ctx, init) }])
+                                cells = cells.concat([JsExpr.JObject(props)])
+                            }
                         }
                     }
                 }
                 ci = ci + 1
             }
+            let resets: JsExpr[] = []
+            if (noFold == "") {
+                for (const r of chResets(p, ch)) {
+                    let on: JsExpr[] = []
+                    for (const k of r.on) { on = on.concat([jstr(k)]) }
+                    resets = resets.concat([JsExpr.JObject([{ key: "cell", value: jstr(r.cell) }, { key: "on", value: JsExpr.JArray(on) }, { key: "rank", value: jnum(r.rank) }, { key: "value", value: chValueJs(ctx, r.value) }])])
+                }
+            }
             out = out.concat([JsStmt.SConst(channelName(i), JsExpr.JObject([
                 { key: "name", value: jstr(ch.name) },
                 { key: "topic", value: jstr(ch.topic) },
                 { key: "cells", value: JsExpr.JArray(cells) },
+                { key: "resets", value: JsExpr.JArray(resets) },
+                { key: "noFold", value: jstr(noFold) },
                 // §38.4.3 (S478 open-Qs ruling items 42, 49): the relay's bounds, resolved (analyze channelPass)
                 { key: "limits", value: JsExpr.JObject([
                     { key: "maxFrame", value: jnum(ch.maxFrame) },

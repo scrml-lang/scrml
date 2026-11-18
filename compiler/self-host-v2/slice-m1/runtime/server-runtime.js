@@ -34,7 +34,7 @@
 // =============================================================================
 
 import { writeSync } from "node:fs";
-import { encode, decode, failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
+import { encode, decode, channelStep, failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
   parseIntText, parseNumText, parseBoolText, textOf,
@@ -1381,6 +1381,7 @@ const FIXED = {
   403: { error: "Forbidden" },
   404: { error: "Not Found" },
   405: { error: "Method Not Allowed" },
+  429: { error: "Too Many Requests" },
   500: { error: "Internal Server Error" },
   503: { error: "Service Unavailable" },
 };
@@ -1658,6 +1659,12 @@ export const CHANNEL_MAX_LOG_BYTES = 8388608;
 // host, never a string key — a deployment's JSON / env-built `createServer` options cannot carry
 // it, so a config value like `{ frames: 0 }` can never truncate (and lock) every channel.
 export const CHANNEL_LOG_TEST_HOOK = Symbol.for("scrml.test.channelLog");
+// S479 (s479-channel-relay-fold) — §38.4.3 "Per-address bounds" (INTERIM): one address holds at most
+// a tenth of a channel's subscriber places. The TEST seam that names a request's address (so one
+// process can stand in for many clients) is a registered symbol on the host, like the log seam:
+// `host[CHANNEL_ADDRESS_TEST_HOOK](request) → string`. A deployment's config cannot carry it.
+export const CHANNEL_ADDRESS_SHARE = 10;
+export const CHANNEL_ADDRESS_TEST_HOOK = Symbol.for("scrml.test.channelAddress");
 
 // A bound the compiler resolved (a safe integer ≥ 1), else the §38.4.3 default — never "no bound".
 function channelBound(v, dflt) {
@@ -1666,16 +1673,100 @@ function channelBound(v, dflt) {
 
 export function channel(desc) {
   const cells = new Map();
-  for (const c of desc.cells) cells.set(c.key, { table: c.table, ops: Array.isArray(c.ops) ? c.ops : [] });
+  for (const c of desc.cells) cells.set(c.key, { key: c.key, table: c.table, ops: Array.isArray(c.ops) ? c.ops : [], edges: c.edges ?? null });
   const lim = desc.limits !== null && typeof desc.limits === "object" ? desc.limits : {};
+  const maxSubs = channelBound(lim.maxSubscribers, CHANNEL_MAX_SUBSCRIBERS);
+  const perAddr = Math.max(1, Math.floor(maxSubs / CHANNEL_ADDRESS_SHARE));
+  const fold = foldOf(desc, cells);
   return {
     name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells,
     maxFrame: channelBound(lim.maxFrame, CHANNEL_MAX_FRAME),
     rate: channelBound(lim.rate, CHANNEL_FRAME_RATE),
     burst: channelBound(lim.burst, CHANNEL_FRAME_BURST),
-    maxSubs: channelBound(lim.maxSubscribers, CHANNEL_MAX_SUBSCRIBERS),
+    maxSubs,
     subs: 0,
+    // S479 (s479-channel-relay-fold) — §38.4.3 "Per-address bounds" (INTERIM): the subscriber places
+    // one address may hold, its upgrade bucket (`perAddr` upgrades, refilled at a tenth of that per
+    // second, at least 1), and per address its live count, parked frame buckets and upgrade bucket
+    perAddr,
+    upRate: Math.max(1, perAddr / 10),
+    addrs: new Map(),
+    sweepAt: 64,
+    // §38.4.2 "The relay's fold": `{ cells: [{ key, init }], resets }` — or null, and `noFold` says why
+    fold: fold.fold,
+    noFold: fold.why,
   };
+}
+
+// S479 (s479-channel-relay-fold) — §38.4.2 "The relay's fold". The compiler prints a fold for a
+// channel whose every cell starts from a value fixed by the source (`init`, its initializer) and whose
+// every write that applying a frame causes is one the relay can make itself (`resets`: a `reset-on=`
+// of a channel cell whose triggers are all cells of this channel, writing a value fixed by the source);
+// `desc.noFold` names why a channel has none (print.scrml chFoldWhy). Each value is checked here
+// against its cell's type (encoded and decoded back, §57) — a value that does not encode is a
+// compiler defect, and the channel gets no fold (fail closed: the receivers still check every frame).
+function foldOf(desc, cells) {
+  if (typeof desc.noFold !== "string") return { fold: null, why: "the compiler printed no fold for this channel" };
+  if (desc.noFold !== "") return { fold: null, why: desc.noFold };
+  const canon = (key, v) => {
+    const c = cells.get(key);
+    if (c === undefined) return { ok: false };
+    const e = encode(c.table, v);
+    if (!e.ok) return { ok: false };
+    return decode(c.table, e.wire, { canonicalOnly: true });
+  };
+  const out = [];
+  for (const c of desc.cells) {
+    if (!own(c, "init")) return { fold: null, why: `@${c.key} has no initial value in the channel's desc (a compiler defect)` };
+    const d = canon(c.key, c.init);
+    if (!d.ok) return { fold: null, why: `@${c.key}'s initial value does not encode against its type (a compiler defect)` };
+    out.push({ key: c.key, init: d.value });
+  }
+  const resets = [];
+  for (const r of Array.isArray(desc.resets) ? desc.resets : []) {
+    const d = canon(r.cell, r.value);
+    if (!d.ok || !Array.isArray(r.on) || r.on.length === 0 || !r.on.every((k) => cells.has(k)) || !Number.isSafeInteger(r.rank)) {
+      return { fold: null, why: `the reset-on= rule of @${r.cell} is not one the relay can make (a compiler defect)` };
+    }
+    resets.push({ cell: r.cell, on: r.on, rank: r.rank, value: d.value });
+  }
+  return { fold: { cells: out, resets }, why: "" };
+}
+
+// A fold's starting state: each cell's initial value (§38.4.2 "The relay's fold").
+function foldStart(ch) {
+  if (ch.fold === null) return null;
+  const m = new Map();
+  for (const c of ch.fold.cells) m.set(c.key, fresh(c.init));
+  return m;
+}
+
+// A value as a source literal evaluates to: an object or a tape is a NEW one each time (the client's
+// reset evaluates its value again — runtime.js `drainResets` — so its write is never `Object.is` the
+// old value), a primitive is itself.
+function fresh(v) {
+  return v !== null && typeof v === "object" ? structuredClone(v) : v;
+}
+
+// §38.4.2: a frame applied to the fold as a receiver applies it to its cells — `Cell.set` with
+// `Object.is` change detection (runtime.js `Cell.land`), then the `reset-on=` resets the write
+// triggers, lowest rank first, each reset's own write queueing the resets it triggers (runtime.js
+// `drainResets`). Only channel cells are modelled: a channel with any other derived write has no fold.
+function foldWrite(ch, vals, key, next) {
+  if (Object.is(next, vals.get(key))) return;
+  vals.set(key, next);
+  const due = new Set();
+  const trigger = (k) => { for (const r of ch.fold.resets) if (r.on.includes(k)) due.add(r); };
+  trigger(key);
+  while (due.size > 0) {
+    let r = null;
+    for (const x of due) if (r === null || x.rank < r.rank) r = x;
+    due.delete(r);
+    const v = fresh(r.value);
+    if (Object.is(v, vals.get(r.cell))) continue;
+    vals.set(r.cell, v);
+    trigger(r.cell);
+  }
 }
 
 // The UTF-8 byte length of `s`, counted only as far as `max + 1` (a frame's size bound).
@@ -1745,23 +1836,93 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
     logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the host passed no WebSocket upgrader (Bun.serve's server, as fetch's second argument)`);
     return jsonResponse(host, 500, FIXED[500]);
   }
+  // S479 (s479-channel-relay-fold) — §38.4.3 "Per-address bounds" (INTERIM, keyed by the request's
+  // address, `server.requestIP`): "An address SHALL hold at most `max(1, ⌊max-subscribers / 10⌋)`
+  // of a channel's places … a further upgrade from it SHALL be answered `429`", and "each address
+  // has an upgrade bucket … an upgrade that finds less than one token SHALL be answered `429`" —
+  // after the channel-wide cap (`503`). Checked and reserved in this one synchronous step.
+  const now = clockOf(host)();
+  const a = addressOf(host, ch, request, upgrader, now);
+  if (a.live >= ch.perAddr) return jsonResponse(host, 429, FIXED[429]);
+  const ub = a.up;
+  ub.tokens = Math.min(ch.perAddr, ub.tokens + (Math.max(0, now - ub.at) * ch.upRate) / 1000);
+  ub.at = now;
+  if (ub.tokens < 1) return jsonResponse(host, 429, FIXED[429]);
+  ub.tokens -= 1;
   // §38.4.3 (S478 fix r1, LOW-4): the subscriber's place is RESERVED before the upgrade (the
   // check above and this count are one synchronous step), so "answered `503` before the
   // upgrade" holds for every racing upgrade; a failed upgrade, and the socket's `close`,
   // release it.
   ch.subs += 1;
-  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true };
+  a.live += 1;
+  // §38.4.3 "A new connection from an address takes the most-spent bucket that address's closed
+  // connections left, refilled for the time since, while one is not yet full" — reconnecting does
+  // not buy a full bucket
+  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true, scrmlAddr: a, scrmlBucket: takeParked(ch, a, now) };
   let ok = false;
-  try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data); }
+  try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data, now); }
   if (ok) return undefined;
   return jsonResponse(host, 400, FIXED[400]);
 }
 
-// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once.
-function releaseSub(data) {
+// The per-address record of `ch` for this request's address (`server.requestIP(request).address`;
+// "" when the host names none — every such request is one address). Swept of idle, refilled records
+// whenever the table has doubled since the last sweep, so it is bounded by the addresses in use.
+function addressOf(host, ch, request, upgrader, now) {
+  let addr = "";
+  try {
+    const seam = host !== null && typeof host === "object" ? host[CHANNEL_ADDRESS_TEST_HOOK] : undefined;
+    if (typeof seam === "function") addr = String(seam(request));
+    else if (typeof upgrader.requestIP === "function") { const ip = upgrader.requestIP(request); if (ip !== null && ip !== undefined && typeof ip.address === "string") addr = ip.address; }
+  } catch { addr = ""; }
+  let a = ch.addrs.get(addr);
+  if (a === undefined) {
+    if (ch.addrs.size >= ch.sweepAt) {
+      const fullMs = Math.max(ch.burst / ch.rate, ch.perAddr / ch.upRate) * 1000;
+      for (const [k, x] of ch.addrs) if (x.live === 0 && now - x.idle >= fullMs) ch.addrs.delete(k);
+      ch.sweepAt = Math.max(64, ch.addrs.size * 2);
+    }
+    a = { live: 0, parked: [], up: { tokens: ch.perAddr, at: now }, idle: now };
+    ch.addrs.set(addr, a);
+  }
+  return a;
+}
+
+// A frame bucket for a new connection of address `a`: the most-spent one its closed connections
+// parked, refilled to `now` (one that has refilled is dropped — it is a full bucket), else a full one.
+function takeParked(ch, a, now) {
+  let best = -1;
+  const keep = [];
+  for (const b of a.parked) {
+    b.tokens = Math.min(ch.burst, b.tokens + (Math.max(0, now - b.at) * ch.rate) / 1000);
+    b.at = now;
+    if (b.tokens < ch.burst) keep.push(b);
+  }
+  a.parked = keep;
+  for (let i = 0; i < keep.length; i++) if (best < 0 || keep[i].tokens < keep[best].tokens) best = i;
+  if (best < 0) return { tokens: ch.burst, at: now };
+  return keep.splice(best, 1)[0];
+}
+
+// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once — and parks
+// its frame bucket with its address (at most `perAddr` parked, the most-spent kept).
+function releaseSub(data, now) {
   if (data.scrmlCounted !== true) return;
   data.scrmlCounted = false;
   data.scrmlChannel.subs -= 1;
+  const a = data.scrmlAddr;
+  if (a === undefined) return;
+  const ch = data.scrmlChannel;
+  a.live -= 1;
+  a.idle = now;
+  const b = data.scrmlBucket;
+  if (b !== undefined && b.tokens < ch.burst) {
+    a.parked.push(b);
+    if (a.parked.length > ch.perAddr) {
+      a.parked.sort((x, y) => x.tokens - y.tokens);
+      a.parked.length = ch.perAddr;
+    }
+  }
 }
 
 function closeSocket(host, ws, code, why) {
@@ -1784,6 +1945,7 @@ function channelFrame(ch, raw) {
   const op = v.__op;
   if (typeof op !== "string" || !cell.ops.includes(op)) return { code: 1008, why: `a __sync whose __op is not an op @${v.__key} syncs` };
   let wire;
+  let val;   // S479: the decoded payload — what the relay's fold applies (§38.4.2 "The relay's fold")
   // #1937 fix r1 (HIGH-1): a length-changing op of a FIXED-length tape (no `free` / bound grant,
   // §66.12.1–§66.12.2 — no local write may change its length) is refused from the table the relay
   // holds; it needs no cell value. (The compiler syncs no such op — analyze chSyncOps — so only a
@@ -1798,6 +1960,7 @@ function channelFrame(ch, raw) {
     const e = encode(cell.table, d.value);
     if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
     wire = e.wire;
+    val = d.value;
   } else if (op === "append" || op === "prepend") {
     if (cell.table === null || cell.table.root.k !== "seq") return { code: 1011, why: `an element op for @${v.__key}, which is not a tape` };
     const et = { defs: cell.table.defs, root: cell.table.root.elem };
@@ -1806,13 +1969,15 @@ function channelFrame(ch, raw) {
     const e = encode(et, d.value);
     if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
     wire = e.wire;
+    val = d.value;
   } else if (op === "pop" || op === "shift") {
     if (!Number.isSafeInteger(v.__val) || v.__val < 1) return { code: 1007, why: `a __sync whose count for @${v.__key} is not an int ≥ 1` };
     wire = v.__val;
+    val = v.__val;
   } else {
     return { code: 1008, why: `a __sync whose __op the server does not relay` };
   }
-  return { key: v.__key, op, wire };
+  return { key: v.__key, op, wire, val };
 }
 
 // `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
@@ -1839,15 +2004,49 @@ function channelSockets(host, channels = [], limits = {}) {
   //   #1941 fix r1 (HIGH-1): §38.4.2 "When the last subscriber of a channel whose log was
   //   truncated leaves, the relay SHALL start the channel again: a new, empty, complete log at
   //   sequence `0`" — no client holds the channel's state then, so nothing can diverge.
+  //   S479 (s479-channel-relay-fold), §38.4.2 "The relay's fold": a channel the compiler gave a fold
+  //   (`ch.fold`) keeps, beside its log, the value of each of its cells after every frame it has
+  //   relayed (`r.fold`), computed from its initial values by the relay's own judgement of each
+  //   frame — runtime.js `channelStep`, the receiver's check (3) — and the `reset-on=` writes that
+  //   applying it causes (`foldWrite`). It is used twice: a frame the fold refuses is relayed to no
+  //   one, logged nowhere and takes no sequence number (its sender is told, `__refused`, or closed
+  //   `1008` when no concurrent edit can explain it); and past the log bound the relay COMPACTS — the
+  //   fold becomes the replay's `__base` and the log starts again after it — instead of truncating.
+  //   It is never sent except as that base, and never read from a client.
   const relays = new Map();
   const relayOf = (ch) => {
     let r = relays.get(ch.key);
-    if (r === undefined) { r = { seq: 0, log: [], bytes: 0, text: null }; relays.set(ch.key, r); }
+    if (r === undefined) {
+      r = { seq: 0, log: [], bytes: 0, base: null, fold: foldStart(ch), text: null, last: { seq: 0, who: null }, other: 0 };
+      relays.set(ch.key, r);
+    }
     return r;
   };
   const replayText = (r) => {
-    if (r.text === null) r.text = `{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__frames":[${r.log === null ? "" : r.log.join(",")}]}`;
+    if (r.text === null) {
+      const base = r.log === null || r.base === null ? "null" : r.base.text;
+      r.text = `{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__base":${base},"__frames":[${r.log === null ? "" : r.log.join(",")}]}`;
+    }
     return r.text;
+  };
+  // The compaction base of the fold now: `{ seq, text, bytes }` (`text` the `__base` JSON), or null
+  // when a value does not encode (a defect — the relay then truncates, fail closed).
+  const baseOf = (ch, r) => {
+    const parts = [];
+    for (const c of ch.fold.cells) {
+      const e = encode(ch.cells.get(c.key).table, r.fold.get(c.key));
+      if (!e.ok) return null;
+      parts.push(`${JSON.stringify(c.key)}:${JSON.stringify(e.wire)}`);
+    }
+    const text = `{"__seq":${r.seq},"__cells":{${parts.join(",")}}}`;
+    return { seq: r.seq, text, bytes: Buffer.byteLength(text, "utf8") };
+  };
+  const truncate = (ch, r, why) => {
+    r.log = null;
+    r.bytes = 0;
+    r.base = null;
+    r.fold = null;
+    logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the frame log passed its bound (${maxFrames} frames / ${maxBytes} bytes) and was truncated (${why}); the relay logs no more frames, and a client that connects while any subscriber remains is told the log is incomplete (§38.4.2); the channel starts again, empty, when its last subscriber leaves`);
   };
   // §38.4.2 "When the last subscriber of a channel whose log was truncated leaves, the relay SHALL
   // start the channel again" — read from `ch.subs` (the one count, reserved at the upgrade).
@@ -1874,6 +2073,9 @@ function channelSockets(host, channels = [], limits = {}) {
       let st;
       try { st = ws.send(replayText(r)); } catch { st = 0; }
       if (st === 0) return closeSocket(host, ws, 1011, "the replay message could not be sent");
+      // S479: the last sequence number this connection's replay holds — a frame of ANOTHER connection
+      // numbered past it is an edit this connection may not have seen when it made its own
+      ws.data.scrmlOpenSeq = r.seq;
       ws.subscribe(ch.key);
     },
     message(ws, raw) {
@@ -1882,19 +2084,47 @@ function channelSockets(host, channels = [], limits = {}) {
       const f = channelFrame(ch, raw);
       if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
       const r = relayOf(ch);
+      // §38.4.2 "The relay's fold": the frame applied to the fold's value of its cell, by the
+      // receiver's own check (3). Refused: relayed to no one, not logged, no sequence number. Its
+      // sender is closed `1008` when it could not have been made honestly — no frame of another
+      // connection was relayed after this connection's replay and none of its own frames was
+      // refused, so its cells showed exactly the fold's value — and is otherwise told `__refused`
+      // (a concurrent edit came first in relay order), which drops the edit from its pending edits.
+      if (r.fold !== null) {
+        const s = channelStep(ch.cells.get(f.key), r.fold.get(f.key), f.op, f.val);
+        if (typeof s === "string") {
+          const other = r.last.who !== ws.data ? r.last.seq : r.other;
+          if (other <= ws.data.scrmlOpenSeq && ws.data.scrmlRefused !== true) {
+            return closeSocket(host, ws, 1008, `a frame the relay's fold refuses with no concurrent edit before it: ${s}`);
+          }
+          ws.data.scrmlRefused = true;
+          ws.send(JSON.stringify({ __type: "__refused", __key: f.key, __op: f.op, __val: f.wire, __why: s }));
+          return;
+        }
+        foldWrite(ch, r.fold, f.key, s.next);
+      }
       r.seq += 1;
       r.text = null;
+      if (r.last.who !== ws.data) { r.other = r.last.seq; r.last = { seq: r.seq, who: ws.data }; } else r.last.seq = r.seq;
       const body = { __type: "__sync", __seq: r.seq, __key: f.key, __op: f.op, __val: f.wire, __own: false };
       const peer = JSON.stringify(body);
       body.__own = true;
       const own = JSON.stringify(body);
       if (r.log !== null) {
         const size = Buffer.byteLength(peer, "utf8");
-        if (r.log.length + 1 > maxFrames || r.bytes + size > maxBytes) {
-          // past the bound the relay stops logging: it keeps no frame from here until the epoch ends
-          r.log = null;
-          r.bytes = 0;
-          logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the frame log passed its bound (${maxFrames} frames / ${maxBytes} bytes) and was truncated; the relay logs no more frames, and a client that connects while any subscriber remains is told the log is incomplete (§38.4.2); the channel starts again, empty, when its last subscriber leaves`);
+        const baseBytes = r.base === null ? 0 : r.base.bytes;
+        if (r.log.length + 1 > maxFrames || baseBytes + r.bytes + size > maxBytes) {
+          if (r.fold === null) {
+            truncate(ch, r, `this channel has no relay fold: ${ch.noFold}`);
+          } else {
+            // §38.4.2 "The log bound": COMPACT — the fold after this frame is the new base, and the
+            // log starts again after it. A base over half the byte bound is not kept (each later
+            // compaction would re-encode it for a few frames): the log is truncated and the fold dropped.
+            const b = baseOf(ch, r);
+            if (b === null) truncate(ch, r, "a fold value did not encode (a defect)");
+            else if (b.bytes * 2 > maxBytes) truncate(ch, r, `the relay's fold is ${b.bytes} bytes, over half the log's byte bound`);
+            else { r.base = b; r.log = []; r.bytes = 0; }
+          }
         } else {
           r.log.push(peer);
           r.bytes += size;
@@ -1907,7 +2137,7 @@ function channelSockets(host, channels = [], limits = {}) {
       const ch = ws.data.scrmlChannel;
       try { ws.unsubscribe(ch.key); } catch { /* the socket is gone */ }
       if (ws.data.scrmlCounted !== true) return;
-      releaseSub(ws.data);
+      releaseSub(ws.data, now());
       if (ch.subs <= 0) restart(ch, "the last subscriber left a channel whose frame log was truncated");
     },
   };
