@@ -1003,7 +1003,6 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap syncs a channel cell only when it grants `replace` — an `append`-only tape in a channel body is refused by name until each client enforces the cell's capability on a received frame (INTERIM, g-boot-channel-capability-sync-s478) -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
@@ -1105,7 +1104,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-TYPE-031] — the bootstrap syncs a channel cell only when it grants `replace` — the `append`-only `saved` tape in a channel body is refused by name until each client enforces the cell's capability on a received frame (INTERIM, g-boot-channel-capability-sync-s478); and the bootstrap types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Note's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-TYPE-031] — the bootstrap types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Note's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.

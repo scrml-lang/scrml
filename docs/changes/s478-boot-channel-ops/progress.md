@@ -13,3 +13,5 @@ Base: origin/main 28fc2d031 (#1928 merged).
 - tests: slice-m4/channel-ops-s478.test.js (new), channel-s478 B2 rewritten, channel-served frames updated — all green locally
 - gaps: capability-sync resolved; op-residue + op-order-joiner filed
 - next: commit (hook), head conformance, corpus, CI checks gates, PR
+- committed d4697b91f (hook PASS). Conformance base vs head: 614 PASS / 18 FAIL both, 0 case changes. Corpus (73 `<channel` files): 0 changes.
+- gates: severity/types/corpus-floor/md-shim OK; snippet-gate + claim-gate needed the stale channel spec-ahead markers removed (tutorial 07, kickstarter 11.3) and 10-all-together re-pinned to [E-TYPE-031]
