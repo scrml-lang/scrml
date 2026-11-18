@@ -24,5 +24,11 @@ Gap: g-boot-stdlib-data-owner-questions-s478.
   e-import-004-stdlib-name-exported-clean UNSUPPORTED (validate.scrml = Q3, deferred).
 - known-gaps: owner-questions gap resolved; residue -> g-boot-stdlib-data-residue-s478.
 
-## TODO
-- full conformance head vs base; corpus measure; CI gates; PR.
+## Measurements (base 7f1f5385b vs head)
+- bootstrap conformance: PASS 614 -> 623 (+9), UNSUPPORTED 601 -> 592, FAIL 18 -> 18, CRASH 0; 0 PASS->FAIL.
+  UNSUPPORTED->PASS: 8 parse-variant/* + module/e-import-004-stdlib-name-not-exported-reject.
+- corpus (126 files importing a `scrml:` module, samples/examples/acceptance/benchmarks/conformance, raw source):
+  newly rejecting 0, newly clean 0; 61 files: module-level `scrml:data` refusal -> per-name refusal.
+- CI gates: types-gate OK, severity --check OK, gen-md-shim OK, corpus-compile-floor PASS;
+  snippet-gate / claim-gate: two spec-ahead pins re-counted (NERDME.md type-derived ×8->×9,
+  llm-kickstarter-v2 block #25 ×6->×7) — the import is now refused per name (formFor/schemaFor/tableFor).
