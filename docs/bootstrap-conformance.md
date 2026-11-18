@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1881 of 1881 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1890 of 1890 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 684 | 36.4% |
+| PASS | 693 | 36.7% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 4 | 0.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.9% |
-| UNSUPPORTED | 556 | 29.6% |
+| NOT-TWINNED | 637 | 33.7% |
+| UNSUPPORTED | 556 | 29.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 688; of those, 684 hold (99.4%). Runtime half executed on the bootstrap for 223 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 697; of those, 693 hold (99.4%). Runtime half executed on the bootstrap for 223 case(s).
 
-- **Vacuous** passes: 18 of 684 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **666**.
+- **Vacuous** passes: 18 of 693 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **675**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -117,10 +117,10 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
 | endpoint | 24 | 24 | · | · | · | · | · | · | · |
-| engine | 92 | 22 | · | · | · | 50 | 20 | · | · |
+| engine | 93 | 23 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
-| error | 78 | 54 | · | · | · | 5 | 19 | · | · |
+| error | 80 | 56 | · | · | · | 5 | 19 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
@@ -135,7 +135,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
-| match-codes | 25 | 16 | · | · | · | · | 9 | · | · |
+| match-codes | 27 | 18 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
@@ -145,21 +145,21 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
-| page | 1 | · | · | · | · | 1 | · | · | · |
+| page | 3 | 2 | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | 2 | · | · | · | 2 | · | · | · |
 | parse-variant | 12 | 12 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 127 | 74 | · | · | · | 44 | 9 | · | · |
+| reactive | 128 | 75 | · | · | · | 44 | 9 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 20 | 5 | · | 1 | · | 9 | 5 | · | · |
+| sql | 21 | 6 | · | 1 | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -195,7 +195,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (684)
+### PASS / CODES-ONLY (693)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -410,6 +410,7 @@ none
 - `endpoint/path-reserved-scrml-local-bare` — PASS
 - `endpoint/self-closing-arm-exhaustive` — PASS
 - `endpoint/wildcard-exhaustive` — PASS
+- `engine/e-engine-rule-quoted-pos` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -447,6 +448,7 @@ none
 - `error/construct-variant-payload-arity-ok` — PASS · TWIN
 - `error/construct-variant-payload-arity-return-neg` — PASS · TWIN
 - `error/construct-variant-payload-arity-trailing-comma-ok` — PASS · TWIN
+- `error/e-tx-client-placed-pos` — PASS
 - `error/error-008-neg` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -494,6 +496,7 @@ none
 - `error/transaction-non-failable-fn-neg` — PASS (also emitted, unasserted: E-ERROR-002)
 - `error/transaction-top-level-neg` — PASS
 - `error/try-not-in-scrml` — PASS · TWIN
+- `error/w-tx-exit-rolls-back-pos` — PASS (also emitted, unasserted: E-DG-002)
 - `files/multifile-import` — PASS · TWIN
 - `fn/arrow-body-reject` — PASS · TWIN
 - `fn/async-decl-reject` — PASS · TWIN
@@ -633,11 +636,13 @@ none
 - `match-codes/e-match-arm-markup-in-value-pos` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-neg` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-pos` — PASS · TWIN
+- `match-codes/e-match-for-required-pos` — PASS
 - `match-codes/e-syntax-010-else-last-neg` — PASS · TWIN
 - `match-codes/e-syntax-010-else-not-last-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-guard-clause-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-plain-pattern-neg` — PASS · TWIN
 - `match-codes/e-type-024-enum-subject-neg` — PASS · TWIN
+- `match-codes/e-type-024-match-no-for-pos` — PASS
 - `match-codes/e-type-024-struct-subject-pos` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
@@ -701,6 +706,8 @@ none
 - `own-value-type/not-inferable-unproven-call-neg` — PASS
 - `own-value-type/unproven-annotation-neg` — PASS
 - `own-value-type/unproven-annotation-pos` — PASS
+- `page/e-page-duplicate-neg` — PASS
+- `page/e-page-duplicate-pos` — PASS
 - `parse-syntax/e-syntax-042-not-value-position-neg` — PASS · TWIN · VACUOUS
 - `parse-syntax/e-syntax-042-null-value-position-pos` — PASS · TWIN
 - `parse-variant/alias-of-struct-neg` — PASS · TWIN
@@ -801,6 +808,7 @@ none
 - `reactive/throttle-leading` — PASS · TWIN
 - `reactive/throttle-trailing-commit` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
+- `reactive/w-timed-read-modify-write-pos` — PASS
 - `reactive/write-not-in-logic-context-neg` — PASS · TWIN · VACUOUS
 - `reactive/write-not-in-logic-context-pos` — PASS · TWIN
 - `refinement/base-type-literal-pos` — PASS · TWIN
@@ -855,6 +863,7 @@ none
 - `server-fn/session-value-in-tool-neg` — PASS (also emitted, unasserted: E-PRINT-NON-PRIMITIVE)
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
+- `sql/e-file-scope-server-only-reach-pos` — PASS
 - `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
 - `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
