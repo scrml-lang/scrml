@@ -1,140 +1,183 @@
-# scrml — Session 478 (bryan · theRog) — WRAPPED
+# scrml — Session 478 (bryan · theRog) — WRAPPED (second wrap)
 
-> S478 ran from 2026-11-14 to 11-17: Profile A, many compactions, and 6–8 parallel lanes the whole time. The S476+S477 hand-off is at `handOffs/hand-off-477.md`. **Rotate this file to `handOffs/hand-off-478.md` at the next wrap.**
+> S478 ran 2026-11-14 → 11-18. It was Profile A, with many compactions and 6–8 parallel lanes throughout. There were two wraps:
+> - the first was #1934 (main 314895410);
+> - the work after it — op-based channel sync, and the wholesale ruling of the open owner questions with seven ruled build lanes — is wrapped here.
+>
+> **Rotate this file to `handOffs/hand-off-478.md` at the next wrap.** The S476+S477 hand-off is `handOffs/hand-off-477.md`.
+>
 > - Board: `scrml-support/handOffs/active-sessions/S478-bryan.md`.
-> - Rulings, verbatim: `scrml-support/user-voice-scrml.md` §S478.
-> - PA ledger: `~/.claude/pa-ledger/scrml.md` S478-A … S478-DH.
-> - Delta-log: [4029]–[4033].
+> - Rulings, verbatim: `scrml-support/user-voice-scrml.md` §S478 (latest: 86dc707 op-sync; ccb6b40 open-Qs, items 1–62).
+> - PA ledger: `~/.claude/pa-ledger/scrml.md`, S478-A … S478-FH.
+> - Delta-log: [4029]–[4038].
 
 ## 0. Where things stand
 - **bryan's subscription is ending.** This file and `handOffs/delta-log.md` must be enough to pick up cold.
-- **Policy holds:** bootstrap only (`compiler/self-host-v2/`). impl#1 (`compiler/src/`) is frozen except for the bootstrap-build carve-out (S471).
-- **Main at wrap:** 314895410 (#1929 merged), plus this wrap PR.
-- **#1929 function types and values MERGED at wrap.** Still in the merge queue: #1928, composition-tested on main + #1919, S239-reviewed, fixed in round 1, and PA-verified with the reviewers' probes.
-  1. **#1928 `<channel>` (§38)**, head 14a8dbfad. Merged tree: 606 PASS / 0 CRASH.
-  - **If it is ejected:**
-    1. Read the merge-group run's failed job.
-    2. `compile-scaling-s477` fails on load: a 3.09 ratio against the 3.0 bound ejected #1927 once. Re-enqueue it.
-    3. Otherwise merge origin/main into the branch. Severity conflict: `git checkout --theirs compiler/self-host-v2/severity.scrml && bun scripts/gen-bootstrap-severity.ts && … --check`.
-    4. Run `~/.cache/scrml/review/comp.sh <tree>` and push.
-    5. Enqueue with `gh pr merge N --auto -R scrml-lang/scrml`, run on its own.
-- **Older open PRs:** #1448 (`s468-rulings-spec`) and #580 (draft). Both are untouched.
-- **Conformance (bootstrap, main f11506f4c):** PASS 599 / FAIL 18 / CRASH 0. At the S477 wrap it was PASS 336 / FAIL 260. Expect about 610 PASS once #1928 lands.
-- **Gap rollup (generated):** impl#1-owed HIGH 271 · MED 779 · LOW 797; bootstrap-carried HIGH 6 · MED 13 · LOW 7. The wrap's follow-up gaps add LOW/MED rows.
+- **Policy holds:** bootstrap only (`compiler/self-host-v2/`). impl#1 (`compiler/src/`) is frozen except for the bootstrap-build carve-out (S471). Every impl#1 parity item a ruling named is recorded as impl#1-owed, not built (§4).
+- **Main at wrap:** b22575ba6 (#1952 bot regen), plus this wrap PR.
+- **In the merge queue at wrap** (both auto-merge on, PA-verified):
+  1. **#1947** — misc rulings 23–32, 58, 59, 61, 62. Head b277d0c8c. The merged tree is 645 PASS / 0 CRASH with all gates green.
+     - Its PR CI `slices` job failed only on the compile-scaling flake (3.02 vs 3.0). That job was re-run.
+     - If it is ejected again: rerun the job, or wait for #1953.
+  2. **#1953** — the compile-scaling test now judges the best of up to 3 probes (fixes that flake). PA-direct, test-only.
+- **If either PR goes DIRTY:**
+  1. Merge origin/main into it.
+  2. Take `severity.scrml` with `--theirs`, then run `bun scripts/gen-bootstrap-severity.ts` and its `--check` (the post-merge bot regenerates it after every merge).
+  3. Resolve `docs/known-gaps.md`: keep both sides; where a gap's marker line is on both sides, keep the side with the newer status.
+  4. Run `~/.cache/scrml/review/comp.sh <tree>`. It now includes the severity exit code and the §34.0 gate.
+  5. Push, then **verify the remote head equals the local head**.
+  6. Enqueue with `gh pr merge N --auto -R scrml-lang/scrml`, run on its own.
+- **Conformance (bootstrap, main b22575ba6):** PASS 638 / FAIL 16 / CRASH 0. It was 599 at the first S478 wrap and 336 at S477. With #1947 it is about 645.
+- **Gap rollup (generated):** impl#1-owed HIGH 272 · MED 783 · LOW 821; bootstrap-carried HIGH 6 · MED 13 · LOW 10.
 
-## 1. What landed (49 PRs, plus #1928 in the queue)
-Every code PR had an S239 adversarial review on a frozen tree, except a few small ones the PA checked directly (marked in `docs/pr-reviews.md`). Fix rounds were fresh agents, and the PA re-ran the reviewers' HIGH probes on each fix head before enqueuing.
-- **Rulings built:**
-  - #1846: negative `insert` literal;
-  - #1850, #1857: bounded branch literals, option A;
-  - #1852, #1860, #1864: pending `[replace]`, reset/reload order, rule 4;
-  - #1886: body-top run locals are file-scope.
-- **impl#1 build tool:** #1853 and #1869 make the text rewrites skip string literals. #1862 and #1872 then removed the bootstrap's workarounds for them.
-- **Language on the bootstrap:**
-  - #1863 re-exports and import cycles (§21.4);
-  - #1865 attribute-value forms;
-  - #1867 engine codes;
-  - #1873 is-tests;
-  - #1875 durations, debounced=/throttled=, `<onIdle>`;
-  - #1876 body-top statements, display literals, logic `<script>`;
-  - #1877 parser smalls;
-  - #1880 `${}` hoisting;
-  - #1885 markup in value positions, foreign `in:{}`;
-  - #1887 keywordless declarations, §20 built-ins;
-  - #1888 refinement types; #1911 refinement runtime checks (§53.4.5);
-  - #1894 engine rule= in state children;
-  - #1900 print/println (§20.7);
-  - #1901 object destructuring;
-  - #1905 block lambdas and function expressions;
-  - #1908 `<schema>` (§39); #1915 typed `?{}` SELECT from the schema; #1925 raw CREATE TABLE DDL;
-  - #1909 `<match for= on=>` element;
-  - #1916 `<endpoint>` (§61);
-  - #1917 `T | not` member access (E-TYPE-046); #1927 `?.` (§42.3.6);
-  - #1918 the `${(e) => …}` event listener, E-EVENT-CONTROL-AFTER-AWAIT;
-  - #1919 markup in `${ if … }`;
-  - #1920 bare blocks and `transaction { }`;
-  - #1929 function types and values (bound, passed, returned, called through).
-- **Conformance and stale cases:** #1866 #1871 #1879 #1895 #1897 (the `;` migration, honest fixtures, false-positive FAILs).
-- **Review follow-up rounds:** #1870 #1891 #1902 #1907.
-- **Tooling:** #1855 fixes hook shard pollution, the memory ceiling (`SCRML_HOOK_SHARD_MEM_MB`), and the pre-push exit code.
+## 1. What landed after the first wrap (#1934)
+Every code PR below had an S239 adversarial review on a frozen tree. Fix rounds were fresh agents, and the PA verified each fix head with the reviewer's probes plus `comp.sh` before enqueuing. The markers are in `docs/pr-reviews.md`.
 
-## 2. Rulings (verbatim in user-voice §S478; brief from there, never from this list)
-1. S477 Q1: a whole-cell write on a pending tape without `[replace]` is REFUSED. S477 Q2: the later write beats a reset's reload.
-2. Bounded branches, option A: any branch with a provably violating literal is a compile error. §13.9.4 rule 4: the reload starts at the write. `reset-on=` timing is kept.
-3. Body-top (#1876):
-   - the display-literal line test stays INTERIM;
-   - body-top `lin`/locals are file-scope;
-   - SPEC-contradicting cases are fixed, not the compiler;
-   - `Counter;` reports E-STMT-NO-EFFECT plus E-SCOPE-001.
-4. Raw DDL (#1925): a non-primary column type is E-SCHEMA-004. WITHOUT ROWID and STRICT are admitted (WITHOUT ROWID PK columns are NOT NULL; STRICT stores only the declared type).
+- **#1937 — §38.4 op-based channel sync** (ruled "yes to op-based channel sync").
+  - A write syncs as the granted edit, and each receiver checks it against grants and the current value.
+  - Append-only, pop-only and bounded tapes, deques, and `rule=` engine fields now sync. The tutorial chat compiles.
+  - Review r0 HIGH: a fixed-length tape could be emptied by a forged pop. Fixed in r1.
+- **#1938 — records:** 36 gaps marked RULED (PA recs adopted).
+- **#1940 — §61 `<endpoint>` rulings 33–40:**
+  - 405 + Allow;
+  - `E-ENDPOINT-ROUTE-DUPLICATE`, with `/_scrml/` and `/_scrml_ws/` reserved;
+  - strict keys and 415;
+  - placement;
+  - `E-ENDPOINT-ARM-NO-VALUE`;
+  - `E-PARSEVARIANT-TAG-FIELD`.
+- **#1941 — channel convergence:**
+  - the relay echoes `__seq` to every subscriber, and each client rebases its pending edits;
+  - a frame log is replayed to late joiners and reconnects (bounded at 10,000 frames / 8 MiB UTF-8);
+  - derived writes stay local;
+  - the epoch resets when a truncated channel empties;
+  - pre-replay edits are held;
+  - `onclient:open` runs after the replay.
+  - An integration round merged #1942's pacing in. The PA verified it with fuzz-settle (6/6 seeds converge), attack, burst and relay61.
+- **#1942 — relay bounds** (rulings 41–45, 48, 49):
+  - 64 KiB frames;
+  - a token bucket of 50/s, burst 100;
+  - a cap of 1000 subscribers, reserved at upgrade;
+  - `E-CHANNEL-LIMIT-INVALID`;
+  - client pacing (an honest burst loses 0 edits);
+  - a dev-server Host allowlist (403);
+  - typed `onchange` arms.
+- **#1943 — function types** (rulings 3–8):
+  - failable `(x:T)! E => R`;
+  - pure `fn (x:T) => R` (E-FN-003);
+  - `=>` is the only spelling (`->` / `fn()` in a type is E-PARSE-TYPE);
+  - invariance (§7.5.1);
+  - item 8 lands as E-ROUTE-003 (owner Q below).
+- **#1944 — schema / SQL / tx** (rulings 17–22):
+  - an optional `,` between `<schema>` columns;
+  - E-SCHEMA-016 (table) / -017 (column);
+  - `schema` is reserved;
+  - INTEGER→`int`, plus a row-read check (safe-int range; undeclared columns dropped; values never logged);
+  - a tx block with no envelope is a plain block;
+  - `E-TX-CLIENT-PLACED`;
+  - `W-TX-EXIT-ROLLS-BACK`;
+  - a tx in a handler is E-ERROR-001.
+  - Tutorial 02b compiles and runs.
+- **#1945 — markup / match / events** (rulings 1, 2, 9–13, 15, 16, 60):
+  - a body-top lift renders nothing;
+  - Appendix H.6 event→interface typing (`e.target.value` only on void inputs);
+  - the suspending-loop rule;
+  - `for=` may be omitted on an enum cell;
+  - a wrapper-less `<match>` mount (branch content model is W-HTML-001);
+  - the `|` guard is E-SYNTAX-011;
+  - one `<page>` per file.
+- **#1948 — stdlib** (rulings 55–56): per-name barrel supply (INTERIM), and the `parseVariant` intrinsic (strict keys; prototype-safe).
+- **PA fixes during landing:**
+  - §34.0 provenance notes on new §34 rows (#1942, #1943, #1945, #1947);
+  - the Failable union, `FParse` + `FCallV` (#1948 × #1943);
+  - known-gaps / severity merges.
 
-## 3. Owner questions open (each has a PA rec; record rulings verbatim in user-voice)
-1. **#1928 §38.4: sync channel ops, not whole values. PA rec: YES.** This is the biggest one.
-   - Today the bootstrap refuses any non-`replace` channel cell (append, pop, engine). That is INTERIM, and it blocks the tutorial's chat example.
-   - The capable alternative: send "append X" and have the receiver check the grant. That also fixes the lost-update race when two clients append at once.
-   - It is a wire-protocol change in §38.4. #1928 Qs 1–7 are in its PR body.
-2. **#1929 function types**, Qs 1–6 in the PR body:
-   - failable spelling `(x:T)! E => R`;
-   - a pure `fn` type;
-   - `=>` only;
-   - invariance;
-   - callback colour;
-   - a server fn returning a fn stays refused.
-   - PA recs are in the PR body.
-3. **#1916 `<endpoint>`**, Qs 1–8. PA rec, adopt all of these:
-   - 405 + Allow;
-   - E-ENDPOINT-ROUTE-DUPLICATE, and reserve `/_scrml/` (and `/_scrml_ws/`);
-   - strict 400 on extra keys;
-   - direct child of the entry `<program>`;
-   - path grammar unreserved + `/`;
-   - E-ENDPOINT-ARM-NO-VALUE;
-   - 415 with impl#1 parity;
-   - a `tag` field.
-   - Separate: the GET query-string design.
-4. **SQL:**
-   - §14.8.3 maps INTEGER→`number`, but S440 enforces `int`. **PA rec:** amend it to `int`.
-   - Non-STRICT row trust. **PA rec:** (b) a §57 decode check at the boundary, INTERIM.
-5. **stdlib data** (lane stopped, no PR):
-   - Q1, per-name barrel import: **PA rec YES, INTERIM**;
-   - Q2, the parseVariant intrinsic: **PA rec: build it**;
-   - Q3, a typed data API: **PA rec: defer until the F3 `<host>` bridge**.
-6. **#1917:** loop narrowing.
-7. **#1918:** event attribute → interface table, and the loop-suspension rule. **PA rec:** rewrite the 18 event-after-await cases with `!{}`.
-8. **#1919:** a body-top `lift` renders nothing.
-9. **#1920:** a tx block with no envelope. **PA rec:** a plain block when there is no query, and a permanent refusal on the client.
-10. **#1927:** §42.3.6 says literal `?.`. **PA rec:** amend it to "short-circuit as".
-11. **#1909:** duplicate binders in `<Loaded(n, n)>`. **PA rec:** refuse them in both match forms. Also, the `<match>` mount wrapper inside `<ul>`/`<select>`. **PA rec:** lower it without a wrapper.
-12. **Carried from S477 §3:** the #1793 veto-window readings; `.join` on `int[]`; O9 slot spelling; the S473 veto markers; `<m.card>`.
+The first-wrap list (#1846–#1929, 49 PRs) is in delta-log [4030] and in this file as of #1934 (`git show 546d98051:hand-off.md`).
 
-## 4. Owed next (pick from here)
-1. Land #1928 (§0).
-2. Once the owner rules on §3.1, build op-based channel sync. That unblocks the tutorial chat.
-3. **Review follow-ups:** the gaps filed at this wrap (`prov=review:#18xx/#19xx`, `docs/known-gaps.md`). Best value first:
-   - #1920 MED: a `transaction` in a handler should be E-ERROR-001 (it currently fails closed as CORE-ILL-FORMED);
-   - #1886 LOW-6: a latent lin fail-open on nested Run;
-   - #1895 LOW-1: an import-cycle recompute that is ~cubic;
-   - #1901 M1: E-OBJECT-SHORTHAND-CELL.
-4. impl#1 silently overrides a duplicate top-level fn (agents hit this twice). It is in scope under the build-tool carve-out.
-5. Make `compile-scaling-s477` robust (median of 3, or a wider bound).
-6. Next conformance blockers for `server-db/*-rt`: nullable text vs string slots, untyped params, `.push` on `[]`, `Object.values`, `count(*) AS n` / JOIN.
-7. A maps refresh: last at f92d1a8fb, and S478 rewrote parse/analyze heavily.
+## 2. Rulings this session (verbatim in user-voice §S478 — brief from there, never from this list)
+- First half: see delta-log [4029]. That covers S477 Q1/Q2, bounded branches option A, rule 4, body-top Qs 1–4, and raw-DDL types.
+- **op-based channel sync: YES** (86dc707).
+- **"your recs on the open owner Qs" → PA recs adopted wholesale** (ccb6b40, items 1–62).
+  - Items held OPEN there, because no single rec existed, are listed in §3.
 
-## 5. Lessons (S478)
-- **`bun run pretest` exits 0 when the bootstrap bundle fails to build.**
-  - Symptom: whole test files fail as one `(fail) (unnamed)` after 30–90 s. It looks like load, but it isn't.
-  - Run one file and read the `bootstrap bundle failed to compile under impl#1:` error.
-  - After merging two lanes, grep every match AND every construction of a variant or struct that gained a field or variant. The bundle broke this way four times: ElemFact.MSchema, `If.form`, `Braced.ev`, `Ternary.optChain`.
-- **The composition test is mandatory before every push of a merged branch:** `~/.cache/scrml/review/comp.sh <tree>`. CRASH must be 0, and every gate must be green. `types-gate` needs `node_modules` symlinked into the worktree; otherwise it prints "tool is missing".
-- **Keep the main checkout on current main.** Hooks run from it via an absolute hooksPath. At wrap it was 14 commits behind, so every worktree's hook was running stale gates.
-- **Merge queue:**
-  - A push clears auto-merge.
-  - The next PR usually goes DIRTY only on `severity.scrml` (regenerate it).
-  - A queued PR can be ejected by a flaky timing test; read the merge-group run before touching code.
-- **Agents tried `--no-verify` twice** (the #1918 lane and the #1919 r1 agent). The classifier blocked both, and nothing ran. Briefs (`~/.cache/scrml/review/s478-lanes/COMMON.md`) now forbid it explicitly. Keep that line.
-- **Never `pkill -f` with a pattern your own shell matches.** It killed the PA's shell.
-- **At 6–8 lanes, load reaches 11–18.** Hook load-timeouts are noise: rerun once before investigating.
+## 3. Owner questions open (each with a PA rec — record rulings verbatim in user-voice)
+**A. From the ruled lanes — names and readings the rulings left open:**
+1. **Function types (#1943):**
+   - confirm **E-ROUTE-003** for a function-typed server return (item 8's premise was false; §12.5.3 already names it);
+   - confirm **E-FN-003** for "a `fn` returns only a pure value";
+   - confirm the **purity widening** (a pure value fits the impure type) and **exact failability**.
+   - *Rec: confirm all.*
+2. **Provisional code names (#1944, #1947):** E-TX-CLIENT-PLACED, W-TX-EXIT-ROLLS-BACK, E-ENGINE-RULE-QUOTED, W-TIMED-READ-MODIFY-WRITE, E-FILE-SCOPE-LET-SERVER-WRITE. (E-FILE-SCOPE-SERVER-REACH was renamed **E-FILE-SCOPE-SERVER-ONLY-REACH** on review.) *Rec: confirm.*
+3. **#1947 readings:**
+   - a private top-level `const` still counts as library content (*rec: keep*);
+   - §34 E-ENGINE-RULE-LEGACY-SYNTAX now also covers a quoted `->` on a §66 state-child (*rec: keep*).
+4. **#1945:**
+   - a second `<page>` → *rec:* `E-PAGE-DUPLICATE`;
+   - `for=` still required → *rec:* E-TYPE-024 when `on=` is a known non-enum, and `E-MATCH-FOR-REQUIRED` when it is unprovable;
+   - branch content-model violations are W-HTML-001 per §24.5 item 2 / §24.2 → *rec: keep the warning* (making them errors needs a §24.5 change).
+5. **#1940 endpoints:**
+   - a `path=` grammar code → *rec:* `E-ENDPOINT-PATH-INVALID`;
+   - reserve `/_scrml_local/` → *rec: yes*;
+   - duplicate JSON keys → *rec:* `::Malformed`.
+6. **#1948 stdlib:**
+   - add §61.3's strict-keys sentence to §41.13 and name E-TYPE-080 → *rec: yes*;
+   - `parseVariant` accepting an enum **alias** (§19.3.3 OPEN) → *rec: accept* (the resolver is written).
+7. **Channels (#1941, #1942):**
+   - **the relay fold** — a relay-computed state used to judge and close senders of refused frames, and as a compaction base in the replay. It closes `g-boot-channel-relay-order-residue-s478` (**HIGH**) items 1–2. *Rec: yes*; it needs one §38.4 sentence.
+   - **per-address INTERIM bounds** (bucket bypass by reconnecting / parallel sockets; cap lockout) → *rec: yes*, keyed by `server.requestIP` (`g-boot-channel-client-bound-s478`).
+   - `onclient:open` after the replay (§38.10.2 amended) → *rec: keep*.
+   - the log bound counted in bytes → *rec: keep*.
+   - an over-bound edit disappears locally → *rec: keep*.
+   - re-baseline the review probes (fuzz settle-wait, A3, bigreplay) → *rec: yes*.
+
+**B. Held OPEN at the wholesale ruling (no single PA rec):**
+- **kw-unread must-use** contradicts the ratified **S422** "unused-binding is a LINT across all binding forms". *Rec: keep S422 (W-, not E-).*
+- schema type case;
+- the second-PK code (lane rec: E-SCHEMA-018, Error);
+- the duplicate-binder code;
+- channel reconnect backoff wording (§38.7);
+- `X-Forwarded-*` last entry vs trusted-proxy count;
+- endpoint GET query string;
+- #1917 loop narrowing;
+- the S477 carried items;
+- older gaps with no rec, and four pre-S471 recs that may be stale (state-undeclared, epa004, bare-arrow-binding, placement-only-helper).
+
+## 4. Owed next
+1. Land #1947 and #1953 (§0).
+2. Once the owner rules on §3.A.7: the **relay fold** (`g-boot-channel-relay-order-residue-s478`, HIGH) and per-address channel bounds.
+3. Ruled but not built:
+   - item 14 (duplicate binders; the code is open);
+   - item 59 (b)(c) (file-scope `let` server write; full init eval — `g-boot-file-scope-init-eval-s478`);
+   - Q3 data API (deferred, PERMANENT fork).
+4. **impl#1-owed parity (S471 policy — needs an owner call to lift):**
+   - endpoint 415 / strict keys / 405 / new codes;
+   - channel strict decode before relay;
+   - the schema-comma line reader;
+   - INTEGER→int + row check;
+   - `parseVariant` strict keys;
+   - the retired fn-type spellings + `scrml fix`;
+   - the `<match>` wrapper div;
+   - the suspending-loop rule;
+   - the dev Host check.
+   - impl#1 still runs an endpoint arm on a CORS-simple request (no 415) — a real security divergence in impl#1.
+5. Review follow-up gaps filed this half: `prov=review:#19xx` in `docs/known-gaps.md`.
+6. A maps refresh (last at f92d1a8fb).
+
+## 5. Lessons (S478, second half — first half in delta-log [4031])
+- **The §34.0 row-provenance gate is CI-only.** Every new or changed §34 row needs "(Emitted at `compiler/self-host-v2/…`)" or a spec-ahead declaration. Four PRs hit it. `comp.sh` and the lane rules now run `s34-census --check-new --base origin/main`.
+- **`severity.scrml` goes stale after every merge, and the post-merge bot regenerates it.** Branches conflict on it constantly. Resolve with `--theirs` + regen.
+- **Two lanes adding a variant to the same enum** (Failable.FParse vs FCallV): the conflicting hunks union cleanly, but **non-conflicting matches** miss the other arm. The bundle build's E-TYPE-020 catches it.
+- **Verify every push** (`git rev-parse origin/<b>` == HEAD). One push failed silently behind a broken grep. A push while the PR is in a merge-group run is refused ("protected branch hook declined").
+- **Watchers keyed on the last `removed_from_merge_queue` event misfire**, because a push also emits it. Key on state + CI instead.
+- **Brief from user-voice, not the PA's paraphrase.** The PA brief swapped E-SCHEMA-016/-017; the lane followed the verbatim ruling (correct).
+- **Hook-bypass attempts: 3 this session**, all blocked by the classifier, nothing landed:
+  - `--no-verify` ×2 (the #1918 lane, the #1919 r1);
+  - `core.hooksPath=/dev/null` ×1 (the #1943 r1).
+  - COMMON.md now forbids every bypass route by name.
+- **A lane committed the `node_modules` worktree symlink** (#1948). The PA untracked it, and COMMON.md forbids it.
+- **compile-scaling-s477 flaked 3× on CI load** → #1953.
+- **At 7+ agents, load reaches 20–26:** hook shard timeouts and memory-test flakes. Rerun once.
 
 ## 6. Wrap state
-- **Worktrees:** 70 merged review and agent trees were removed at wrap. Kept: #1928 (`agent-a956129cc31d703a5`), #1929 (`agent-a5a565bae8b5cecb0`), #1448 (`agent-a036efcbcbcb1c8b0`), `rev-1927*`/`rev-1928*`/`rev-1929*` and their bases under `~/.cache/scrml/review/s478-192{7,8,9}/base`, and the wrap trees. Some trees stay locked while this Claude process runs. Once it exits, bryan runs: `! cd ~/scrmlMaster/scrml && git worktree list | awk '{print $1}' | grep -E '/worktrees/(agent|rev|wrap)-' | grep -v a036efcbcbcb1c8b0 | xargs -r -n1 git worktree remove -f -f && git worktree prune`. Wait until #1928 has merged.
-- **Review probes:** `~/.cache/scrml/review/s478-*`. Runner: `bun ~/.cache/scrml/review/s478-1886/probes/run.mjs <absTree> <probe.mjs> [filter]`. A `.probe.test.js` runs as `TREE=<tree> bun test ./<file>`.
-- **Lane rules for briefs:** `~/.cache/scrml/review/s478-lanes/COMMON.md`.
+- **Worktrees:** merged trees were removed at the first wrap. The second half's lane / rev trees remain. Many are locked by this Claude process. After it exits, bryan runs: `! cd ~/scrmlMaster/scrml && git worktree list | awk '{print $1}' | grep -E '/worktrees/(agent|rev|wrap|s478)-' | xargs -r -n1 git worktree remove -f -f && git worktree prune` — but only once #1947 and #1953 have merged. Keep `agent-a036efcbcbcb1c8b0` (#1448) by adding `| grep -v a036efcbcbcb1c8b0`.
+- **Review trees and probes:** `~/.cache/scrml/review/s478-19{37,40..48}/`. Base trees `~/.cache/scrml/review/s478-*/base` can be removed.
+- **Lane rules:** `~/.cache/scrml/review/s478-lanes/COMMON.md` + `RULED-LANES.md`. Composition script: `~/.cache/scrml/review/comp.sh`.
