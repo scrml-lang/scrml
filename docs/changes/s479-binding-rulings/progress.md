@@ -15,3 +15,8 @@
 
 ## Measurements
 - scratch: ~/.cache/scrml/review/s479-binding-rulings/
+- bootstrap conformance: PASS 645 -> 649, FAIL 12 -> 12, UNSUPPORTED 576 -> 575, CRASH 0; 0 PASS->FAIL.
+- corpus (samples/ examples/ conformance/ acceptance, 3152 base files): 0 existing files change verdict
+  besides linear/must-use-unread-pos (E-BOOTSTRAP-UNSUPPORTED -> clean). Newly-rejecting: 0 existing files.
+- commit 1 hook: PASS (56205 pass, 0 fail) after two load-timeout runs (load avg 28, other lanes).
+- host-global-scan: the two new -pos cases pinned in scripts/host-global-scan.known-throws.txt.
