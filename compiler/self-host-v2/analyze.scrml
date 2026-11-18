@@ -23802,6 +23802,11 @@ ${
         // `E-STRUCTURAL-ELEMENT-MISPLACED` elsewhere)". One standing in a channel body is
         // read by the parser (onchangeItem) and judged by channelPass; this one is in markup.
         if (!e.star && e.tag == "onchange") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<onchange>` in markup — it is valid only inside a `<channel watches=…>` body, where it dispatches the feed's row changes (§38.13.3, §4.15)")
+        // s478-ruled-endpoint — §61.2 (S478 open-Qs ruling (user-voice), item 36): "An
+        // `<endpoint>` anywhere else — inside … an element … — is
+        // `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)". parse.scrml endpointItem reads every
+        // `<endpoint>` at an item position; this one is in markup. Its arms are not judged.
+        if (!e.star && e.tag == "endpoint") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` inside markup — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15); move it out of the enclosing element")
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -48146,12 +48151,17 @@ ${
     //    exhaustiveness … A dead/duplicate arm reuses the §18.0.1 arm-validity
     //    diagnostics — `E-MATCH-SUBSET-DEAD-ARM` / `E-TYPE-023`"; §18.7's
     //    E-TYPE-021 for binders that do not match the payload);
+    //  - the S478 open-Qs rulings (user-voice, items 34–38, 40): an endpoint
+    //    outside the entry file's `<program>` (E-STRUCTURAL-ELEMENT-MISPLACED,
+    //    §61.2), two endpoints at one path and method or a `path=` under
+    //    `/_scrml/` / `/_scrml_ws/` (E-ENDPOINT-ROUTE-DUPLICATE, §61.7), an arm
+    //    with no value (E-ENDPOINT-ARM-NO-VALUE, §61.2), a `tag` payload field
+    //    (E-PARSEVARIANT-TAG-FIELD, §61.3);
+    //  - a `path=` outside the §61.7 grammar — refused under E-BOOTSTRAP-UNSUPPORTED
+    //    because the SPEC names no code for it yet (owner question, g-boot-endpoint-s478);
     //  - what the bootstrap does not build, refused by name (INTERIM, gap
     //    g-boot-endpoint-s478): an `accepts=` enum not declared in the endpoint's
-    //    own file, a payload field the request decode does not read, a `path=` the
-    //    URL parser would rewrite or that names the compiler's own `/_scrml/`
-    //    routes, two endpoints at one path and method, an endpoint outside the
-    //    entry file.
+    //    own file, a payload field the request decode does not read.
     // Each clean endpoint becomes a CoreEndpoint (the route print-server serves).
     // =========================================================================
     type REps:struct = { diags: Diag[], eps: CoreEndpoint[] }
@@ -48163,31 +48173,76 @@ ${
         for (const f of files) {
             for (const ep of f.eps) {
                 const d0: int = diags.length
-                if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — the bootstrap serves the endpoints of the entry file's `<program>` only (§61.2 names no rule for an endpoint in an imported file; INTERIM, g-boot-endpoint-s478)")])
-                if (ep.path != "") {
-                    const why: string = endpointPathRefusal(ep.path)
-                    if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7 makes `path=` the author-stable contract URL and names no URL syntax; the bootstrap admits a plain absolute path only — INTERIM, g-boot-endpoint-s478)")])
-                }
-                if (ep.path != "" && ep.method != "") {
-                    const key: string = ep.method + " " + ep.path
-                    if (seen.indexOf(key) >= 0) {
-                        diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "a second `<endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">` — the SPEC names no rule for two endpoints mounted at one path and method (§61.7), so the bootstrap refuses it rather than pick one (INTERIM, g-boot-endpoint-s478 owner question)")])
+                // A misplaced `<endpoint>` (parse.scrml endpointItem: not a direct child of the
+                // top-level `<program>`, E-STRUCTURAL-ELEMENT-MISPLACED) is not mounted and its arms
+                // are not desugared, so nothing more is judged of it (one report per fault).
+                if (ep.top) {
+                    // §61.2 (S478 open-Qs ruling (user-voice), item 36): "An `<endpoint>`
+                    // declaration SHALL be a direct child of the top-level `<program>` (the entry
+                    // file's `<program>`, §40.8)" — one in another file's `<program>` is misplaced
+                    if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to an imported module; move it into the entry file's `<program>`")])
+                    if (ep.path != "") {
+                        // §61.7 (S478 open-Qs ruling (user-voice), item 34): "A `path=` that is
+                        // `/_scrml` or `/_scrml_ws`, or begins with `/_scrml/` or `/_scrml_ws/`, is
+                        // `E-ENDPOINT-ROUTE-DUPLICATE`"
+                        const rsv: string = endpointReservedWhy(ep.path)
+                        if (rsv != "") {
+                            diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-ROUTE-DUPLICATE", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + rsv + "; an `<endpoint>` may not mount there (§61.7). Choose another path")])
+                        } else {
+                            // §61.7 (item 37): the `path=` grammar. A path outside it "is refused at
+                            // compile time — an Error whose code is not yet named (owner question)"
+                            const why: string = endpointPathRefusal(ep.path)
+                            if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no empty, `.` or `..` segment; the SPEC names no code for this refusal yet — g-boot-endpoint-s478)")])
+                        }
                     }
-                    seen = seen.concat([key])
-                }
-                const ra: REpAccepts = endpointAccepts(g, f.path, ep)
-                diags = diags.concat(ra.diags)
-                const es: Sym | not = ra.sym
-                if (es is given) {
-                    const ad: Diag[] = endpointArmDiags(g, f.path, ep, es)
-                    diags = diags.concat(ad)
-                    if (!hasErrorDiag(diags.slice(d0)) && ep.top && ep.path != "" && ep.method != "") {
-                        out = out.concat([{ path: ep.path, method: ep.method, accepts: es, arms: coreEpArms(g, f.path, ep, es), file: f.path }])
+                    if (ep.path != "" && ep.method != "") {
+                        // §61.7 (item 34): "Two `<endpoint>` declarations of one program with the
+                        // same `path=` and the same `method=` are `E-ENDPOINT-ROUTE-DUPLICATE`
+                        // (§61.9), reported at the second"
+                        const key: string = ep.method + " " + ep.path
+                        if (seen.indexOf(key) >= 0) {
+                            diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-ROUTE-DUPLICATE", "a second `<endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">` — one path and method has one handler (§61.7); give this endpoint another path or method, or merge its arms into the first")])
+                        }
+                        seen = seen.concat([key])
+                    }
+                    diags = diags.concat(endpointNoValueDiags(g, f.path, ep))
+                    const ra: REpAccepts = endpointAccepts(g, f.path, ep)
+                    diags = diags.concat(ra.diags)
+                    const es: Sym | not = ra.sym
+                    if (es is given) {
+                        const ad: Diag[] = endpointArmDiags(g, f.path, ep, es)
+                        diags = diags.concat(ad)
+                        if (!hasErrorDiag(diags.slice(d0)) && ep.top && ep.path != "" && ep.method != "") {
+                            out = out.concat([{ path: ep.path, method: ep.method, accepts: es, arms: coreEpArms(g, f.path, ep, es), file: f.path }])
+                        }
                     }
                 }
             }
         }
         return { diags: diags, eps: out }
+    }
+
+    // s478-ruled-endpoint — §61.2 (S478 open-Qs ruling (user-voice), item 38): "An arm
+    // whose body has no value — a `:`-shorthand or bare body that is a call of a function
+    // returning nothing (`void`, §18.3) — is `E-ENDPOINT-ARM-NO-VALUE` (§61.9) … It is NOT
+    // read as a silent 204; the arm that answers 204 is the self-closing `<Variant/>`".
+    // The arm's desugared function (`return <body>`) is void exactly when its body is a
+    // call of a void function (voidFns: `return f()` of a void `f` passes `void` on).
+    // Anchored at the body, so epRetFiles's not-proven-type refusal stays quiet (one
+    // report per fault).
+    fn endpointNoValueDiags(g: Globals, file: string, ep: AEndpoint) -> Diag[] {
+        let out: Diag[] = []
+        for (const a of ep.arms) {
+            const body: AExpr | not = a.body
+            if (a.fn != "" && body is given) {
+                for (const f of g.fns) {
+                    if (f.info.file == file && f.info.name == a.fn && isVoidFn(g, f.info.sym.id)) {
+                        out = out.concat([mkDiag(file, body.span, "E-ENDPOINT-ARM-NO-VALUE", "the `<" + a.variant + ">` arm of this `<endpoint>` has no value — its body calls a function that returns nothing, and §61.5 answers with the arm's value (§61.2). Return a value from that function, or write the self-closing `<" + a.variant + "/>` arm for a 204 No Content answer")])
+                    }
+                }
+            }
+        }
+        return out
     }
 
     // s478 — a synthesized `<endpoint>` arm function (parse.scrml endpointDesugar)
@@ -48981,12 +49036,18 @@ ${
     // unreserved characters (RFC 3986 `A-Z a-z 0-9 - . _ ~`) and `/`, with no empty,
     // `.` or `..` segment (the request's URL is normalized before it is matched, so
     // such a path would never match), outside the compiler's own `/_scrml/` routes.
+    // §61.7 (S478 open-Qs ruling (user-voice), item 34): the reserved prefixes — why `p`
+    // is under one, else "". (#1928 fix r1 MED-1 — §38.1: "a server-side upgrade route at
+    // `/_scrml_ws/<name>`": the prefix is the compiler's channel mount.)
+    fn endpointReservedWhy(p: string) -> string {
+        if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
+        if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
+        return ""
+    }
+
+    // §61.7 (item 37): why `p` is outside the `path=` grammar, else "".
     fn endpointPathRefusal(p: string) -> string {
         if (p.substring(0, 1) != "/") return "it does not begin with `/`"
-        if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
-        // s478 #1928 fix r1 (MED-1) — §38.1: "a server-side upgrade route at `/_scrml_ws/<name>`":
-        // the prefix is the compiler's channel mount, reserved like `/_scrml/`
-        if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
         let i = 0
         while (i < p.length) {
             const c: int = p.charCodeAt(i)
@@ -49085,7 +49146,9 @@ ${
                     // review #1916 L1: §41.13 / §61.3 — the request's `tag` key names the
                     // variant ("a JSON object whose `tag` field names the variant"), so a
                     // payload field of that name can never carry a value of its own
-                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value; rename the field (INTERIM — the SPEC names no code for it, g-boot-endpoint-s478)")])
+                    // S478 open-Qs ruling (user-voice), item 40 — §61.3: "An `accepts=` enum …
+                    // with a variant payload field named `tag` is `E-PARSEVARIANT-TAG-FIELD`"
+                    out = out.concat([mkDiag(file, ep.opener, "E-PARSEVARIANT-TAG-FIELD", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value of its own; rename the field")])
                 } else if (!isWirePrim(fd.ty)) {
                     out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` is of a type the bootstrap's `<endpoint>` request decode does not read — it decodes `int`, `number`, `string` and `bool` fields (§41.13: parseVariant \"does NOT auto-recurse into payload fields whose type is itself an enum\"; INTERIM, g-boot-endpoint-s478)")])
                 } else if (bound.indexOf(k) < 0 && !plainFieldType(src, v.sym.hint, fi)) {
@@ -49282,7 +49345,7 @@ ${
                             if (tn != "") {
                                 reps = reps.concat([{ fn: a.fn, decls: [], root: tn }])
                             } else if (!epErrorWithin(tp.diags, f.path, body.span)) {
-                                diags = diags.concat([mkDiag(f.path, body.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's value has no proven type the bootstrap can serialize — §61.5 serializes the arm's typed value-return; the bootstrap builds an `int`, `number`, `string` or `bool` value, a value of a type declared in this file, or an object literal of those (INTERIM, g-boot-endpoint-s478). A call of a function that returns nothing has no value: use the self-closing `<V/>` arm for a 204")])
+                                diags = diags.concat([mkDiag(f.path, body.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's value has no proven type the bootstrap can serialize — §61.5 serializes the arm's typed value-return; the bootstrap builds an `int`, `number`, `string` or `bool` value, a value of a type declared in this file, or an object literal of those (INTERIM, g-boot-endpoint-s478)")])
                             }
                         }
                     }

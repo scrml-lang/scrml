@@ -163,6 +163,7 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       const r = frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
       const es = r.diags.filter((d) => d.severity === "Error");
       expect(es.length).toBe(1);
+      expect(es[0].code).toBe("E-ENDPOINT-ROUTE-DUPLICATE");   // §61.7 reserved prefix (S478 open-Qs ruling item 34)
       expect(es[0].message).toContain("`/_scrml_ws/` is where the compiler mounts its channels");
     }
   });
