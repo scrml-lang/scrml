@@ -12,6 +12,18 @@
 // Both were measured on impl#1's emitted chunks (S473). impl#1 is frozen for semantics (S471
 // policy), so this lint is the check.
 //
+// S479 (s479-import-shadow) — WIDENED TO THE WHOLE §7.6 FILE-SCOPE NAMESPACE, and RUN BY THE BUILD.
+//   - The namespace is SPEC §7.6's: "A `let` / `const`, a `function`, a `type` and a user declaration
+//     (`<card>`) bound at file scope share one namespace … SHALL be a compile error (E-SCOPE-010:
+//     duplicate binding in file scope)", and "a file that imports a name and also declares it is
+//     E-SCOPE-010". So a top-level `const` / `let` / `type` counts beside `fn`, and `import * as ns`
+//     binds `ns`. (impl#1 on `import { K }` + `const K`: the local wins and the import is dropped.)
+//   - The hook and CI ran this, but the bootstrap BUILD did not: a lane that built and measured
+//     locally got a silently miscompiled bundle (lex.scrml exporting `opensTag` into parse.scrml,
+//     which had its own `opensTag`: bootstrap conformance 648 → 515, nothing reported). The build
+//     (compiler/self-host-v2/slice-m1/harness.js `buildBundleChunks`) now calls `lintFiles` on the
+//     bundle's inputs and refuses to build.
+//
 // HOW THE BUILD LINKS THE FILES (why the check is per file). impl#1 compiles each bootstrap file to
 // its own chunk with its own scope; a chunk sees another file's names ONLY through an `import`,
 // which is emitted as `const { a, b } = _scrml_modules["<file>"]`. Function names are file-local
@@ -58,18 +70,39 @@ function matchClose(toks, i) {
 }
 
 const isFnKw = (t) => t && (t.kind === "KwFn" || t.kind === "KwFunction");
+// s479-import-shadow: the other file-scope binders of §7.6 ("A `let` / `const`, a `function`, a `type`
+// and a user declaration … bound at file scope share one namespace").
+const BINDER = { KwConst: "const", KwLet: "let", KwType: "type" };
 
 /**
  * The top-level names of one scrml source text:
  *   fns:     [{ name, line, col }]           every top-level `fn` / `function`
- *   imports: [{ name, line, col, from }]     every name an `import { … } from "…"` binds
+ *   binds:   [{ name, line, col, kind }]     every top-level `const` / `let` / `type` (kind is the keyword)
+ *   imports: [{ name, line, col, from }]     every name an `import { … } from "…"` (or `import * as x`) binds
  */
 export function topLevelNames(src) {
   const toks = lex(src).filter((t) => t.kind !== "EOF");
   const fns = [];
+  const binds = [];
   const imports = [];
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
+    // `import * as ns from "…"` binds `ns`
+    if (t.kind === "KwImport" && toks[i + 1] && toks[i + 1].text === "*" && toks[i + 2] && toks[i + 2].kind === "KwAs" && toks[i + 3] && toks[i + 3].kind === "Ident") {
+      const ns = toks[i + 3];
+      const from = toks[i + 4] && toks[i + 4].kind === "KwFrom" && toks[i + 5] ? toks[i + 5].text : "";
+      imports.push({ name: ns.text, line: ns.span.line, col: ns.span.col, from: from.replace(/^["']|["']$/g, "") });
+      i += 3;
+      continue;
+    }
+    // the native lexer reads `type` as an identifier: a top-level `type Name` is a declaration
+    // (a struct field `type: string` is followed by `:`, not by a name)
+    const kind = BINDER[t.kind] ?? (t.kind === "Ident" && t.text === "type" ? "type" : undefined);
+    if (kind) {
+      const name = toks[i + 1];
+      if (name && name.kind === "Ident") binds.push({ name: name.text, line: name.span.line, col: name.span.col, kind });
+      continue;
+    }
     if (t.kind === "KwImport" && toks[i + 1] && toks[i + 1].kind === "LBrace") {
       const close = matchClose(toks, i + 1);
       if (close === -1) continue;
@@ -106,29 +139,43 @@ export function topLevelNames(src) {
     if (bclose === -1) continue;
     i = bclose;
   }
-  return { fns, imports };
+  return { fns, binds, imports };
 }
 
-/** Lint one source text. Returns { violations: [{ line, col, message }] }. */
+const what = (d) => (d.kind ? `\`${d.kind} ${d.name}\`` : `function \`${d.name}\``);
+
+/**
+ * Lint one source text. Returns { violations: [{ line, col, message }] }.
+ * One file-scope namespace (SPEC §7.6, E-SCOPE-010 "duplicate binding in file scope"): the file's
+ * top-level functions, `const` / `let` / `type` declarations and imported names. A second binding of
+ * a name is reported at the second one (an import, at the local declaration it collides with).
+ */
 export function lintText(src) {
-  const { fns, imports } = topLevelNames(src);
+  const { fns, binds, imports } = topLevelNames(src);
   const violations = [];
-  const firstFn = new Map();
+  const firstDecl = new Map();
   const firstImport = new Map();
   for (const im of imports) {
     const prev = firstImport.get(im.name);
-    if (prev) violations.push({ line: im.line, col: im.col, message: `\`${im.name}\` is imported twice (line ${prev.line}, from "${prev.from}"; here from "${im.from}") — impl#1 binds every use to one of them silently` });
+    if (prev) violations.push({ line: im.line, col: im.col, message: `E-SCOPE-010: \`${im.name}\` is imported twice (line ${prev.line}, from "${prev.from}"; here from "${im.from}") — impl#1 binds every use to one of them silently` });
     else firstImport.set(im.name, im);
   }
-  for (const f of fns) {
-    const prev = firstFn.get(f.name);
+  const decls = [...fns, ...binds].sort((a, b) => a.line - b.line || a.col - b.col);
+  for (const d of decls) {
+    const prev = firstDecl.get(d.name);
     if (prev) {
-      violations.push({ line: f.line, col: f.col, message: `duplicate top-level function \`${f.name}\` (first at line ${prev.line}) — impl#1 binds EVERY call to the last one; rename one` });
+      const both = !d.kind && !prev.kind;
+      violations.push({ line: d.line, col: d.col, message: both
+        ? `E-SCOPE-010: duplicate top-level function \`${d.name}\` (first at line ${prev.line}) — impl#1 binds EVERY call to the last one; rename one`
+        : `E-SCOPE-010: ${what(d)} is a second file-scope binding of \`${d.name}\` (first: ${what(prev)} at line ${prev.line}) — impl#1 resolves the pair silently; rename one` });
       continue;
     }
-    firstFn.set(f.name, f);
-    const im = firstImport.get(f.name);
-    if (im) violations.push({ line: f.line, col: f.col, message: `top-level function \`${f.name}\` has the name of an import (line ${im.line}, from "${im.from}") — impl#1 binds every call to the import and this function is dead; rename one` });
+    firstDecl.set(d.name, d);
+    const im = firstImport.get(d.name);
+    if (!im) continue;
+    violations.push({ line: d.line, col: d.col, message: d.kind
+      ? `E-SCOPE-010: top-level ${what(d)} has the name of an import (line ${im.line}, from "${im.from}") — impl#1 silently drops one of the two; rename one`
+      : `E-SCOPE-010: top-level function \`${d.name}\` has the name of an import (line ${im.line}, from "${im.from}") — impl#1 binds every call to the import and this function is dead; rename one` });
   }
   return { violations };
 }
@@ -145,6 +192,11 @@ export function bootstrapFiles(root) {
       for (const inner of readdirSync(p)) if (inner.endsWith(".scrml") && statSync(join(p, inner)).isFile()) seeds.push(join(p, inner));
     }
   }
+  return importClosure(seeds);
+}
+
+/** `seeds` plus every file they import, transitively (relative imports only), sorted. */
+export function importClosure(seeds) {
   const seen = new Set();
   const queue = [...seeds];
   while (queue.length > 0) {
@@ -158,14 +210,24 @@ export function bootstrapFiles(root) {
   return [...seen].sort();
 }
 
-/** Lint the bootstrap sources under `root`. Returns { files, violations: [{ file, line, col, message }] }. */
-export function lintTree(root) {
-  const files = bootstrapFiles(root);
+/**
+ * Lint `seeds` and everything they import (relative imports, transitively).
+ * Returns { files, violations: [{ file, line, col, message }] }. s479-import-shadow: the bootstrap's
+ * BUILD (compiler/self-host-v2/slice-m1/harness.js `buildBundleChunks`) calls this on the bundle's
+ * inputs, so a collision is refused before impl#1 builds a silently miscompiled bundle.
+ */
+export function lintFiles(seeds) {
+  const files = importClosure(seeds);
   const violations = [];
   for (const f of files) {
     for (const v of lintText(readFileSync(f, "utf8")).violations) violations.push({ file: f, ...v });
   }
   return { files, violations };
+}
+
+/** Lint the bootstrap sources under `root`. Returns { files, violations: [{ file, line, col, message }] }. */
+export function lintTree(root) {
+  return lintFiles(bootstrapFiles(root));
 }
 
 if (import.meta.main) {

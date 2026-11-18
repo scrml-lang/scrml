@@ -8,10 +8,11 @@
 // namespace a name can collide in is one file's functions + its imports.
 
 import { describe, test, expect, afterEach } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { lintText, lintTree, topLevelNames, bootstrapFiles } from "../../../scripts/lint-duplicate-fn.js";
+import { buildBundleChunks } from "./harness.js";
 
 const TREE = join(import.meta.dir, "..");
 
@@ -80,5 +81,63 @@ describe("lint-duplicate-fn — bite on a scratch tree", () => {
     writeFileSync(join(d, "top.scrml"), mod("    fn a() {}\n    fn a2() {}"));
     writeFileSync(join(d, "lib", "linked.scrml"), mod("    export fn q() {}"));
     expect(lintTree(d).violations).toEqual([]);
+  });
+});
+
+// s479-import-shadow — the lint covers SPEC §7.6's whole file-scope namespace ("A `let` / `const`, a
+// `function`, a `type` and a user declaration … bound at file scope share one namespace"; "a file that
+// imports a name and also declares it is E-SCOPE-010"), and the bootstrap BUILD runs it. Found when a
+// lane exported `opensTag` from lex.scrml into parse.scrml, which had its own `opensTag`: impl#1 built
+// the bundle, bound every call to the import, and bootstrap conformance fell 648 → 515 with nothing
+// reported (the hook would have caught it at commit; the local build did not).
+describe("s479-import-shadow — the §7.6 namespace", () => {
+  test("an import colliding with a top-level `const` / `let` / `type`", () => {
+    const r = lintText(mod("    import { K, L, T } from \"./x.scrml\"\n    const K = 1\n    let L = 2\n    type T:struct = { a: number }"));
+    expect(r.violations.map((v) => v.line)).toEqual([3, 4, 5]);
+    for (const v of r.violations) expect(v.message).toContain("E-SCOPE-010");
+    expect(r.violations[2].message).toContain("`type T` has the name of an import");
+  });
+  test("an `as` alias collides by its LOCAL name, and `import * as ns` binds `ns`", () => {
+    const r = lintText(mod("    import { g as f } from \"./x.scrml\"\n    import * as ns from \"./y.scrml\"\n    fn f() {}\n    const ns = 3\n    fn g() {}"));
+    expect(r.violations.map((v) => v.line)).toEqual([4, 5]);
+    expect(r.violations[1].message).toContain("from \"./y.scrml\"");
+  });
+  test("two local bindings of one name, of different kinds", () => {
+    const r = lintText(mod("    type Sym:struct = { id: int }\n    fn Sym() -> int { return 1 }\n    const Sym = 2"));
+    expect(r.violations.map((v) => v.line)).toEqual([3, 4]);
+    expect(r.violations[0].message).toContain("first: `type Sym` at line 2");
+  });
+  test("not flagged: a struct field named `type`; a `const` inside a function; a `type` used as a field read", () => {
+    expect(lintText(mod("    import { a } from \"./x.scrml\"\n    type T:struct = { type: string, b: int }\n    fn f(t: T) -> string { const a = t.type\n return a }")).violations).toEqual([]);
+  });
+  test("the incident, replayed on the real parse.scrml: importing lex.scrml's `opensTag` is flagged at the local", () => {
+    const src = readFileSync(join(TREE, "parse.scrml"), "utf8");
+    const old = "isKeyword } from \"./lex.scrml\"";
+    const at = src.indexOf(old);
+    expect(at).toBeGreaterThan(0);
+    const replay = src.slice(0, at) + "isKeyword, opensTag } from \"./lex.scrml\"" + src.slice(at + old.length);
+    const r = lintText(replay);
+    expect(r.violations.length).toBe(1);
+    expect(r.violations[0].message).toContain("top-level function `opensTag` has the name of an import");
+  });
+});
+
+describe("s479-import-shadow — the bootstrap BUILD refuses a collision (buildBundleChunks)", () => {
+  test("a bundle whose (transitively imported) module collides is refused before impl#1 runs; renamed, it builds", () => {
+    const d = scratch();
+    writeFileSync(join(d, "lib.scrml"), mod("    export fn f() -> string { return \"lib\" }"));
+    writeFileSync(join(d, "mid.scrml"), mod("    import { f } from \"./lib.scrml\"\n    fn f() -> string { return \"local\" }\n    export fn useF() -> string { return f() }"));
+    writeFileSync(join(d, "bundle.scrml"), "<program>\n    ${ import { useF } from \"./mid.scrml\" }\n    <p>${useF()}</p>\n</program>\n");
+    let err = null;
+    try { buildBundleChunks(join(d, "bundle.scrml"), []); } catch (e) { err = e; }
+    expect(err).not.toBeNull();
+    expect(String(err.message)).toContain("bootstrap bundle refused");
+    expect(String(err.message)).toContain("E-SCOPE-010");
+    expect(String(err.message)).toContain("mid.scrml:3:");
+    expect(String(err.message)).toContain("`f` has the name of an import");
+    // renamed: it builds
+    writeFileSync(join(d, "mid.scrml"), mod("    import { f } from \"./lib.scrml\"\n    fn f2() -> string { return \"local\" }\n    export fn useF() -> string { return f() + f2() }"));
+    const built = buildBundleChunks(join(d, "bundle.scrml"), []);
+    expect(built.chunks.length).toBeGreaterThan(0);
   });
 });
