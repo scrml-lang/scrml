@@ -5612,26 +5612,49 @@ function utf8Over(s, max) {
  * §38.4.2 receiver check (3): the edit `op` / `val` applied to `cur`, the cell's CURRENT value —
  * `{ next }`, or why it is refused (a string). `c`: `{ key, table, edges }` (a channel cell's desc).
  * Pure: it writes nothing. The client applies a relayed frame, and re-applies a pending edit, through
- * it; the relay's fold (server-runtime.js `channelSockets`, S479 — §38.4.2 "The relay's fold") judges
- * a client's frame through the SAME function, so the relay refuses exactly what a receiver would.
+ * it. The JUDGEMENT is `channelJudge`, which the relay's fold (server-runtime.js `channelSockets`,
+ * S479 — §38.4.2 "The relay's fold") calls too, so the relay refuses exactly what a receiver would;
+ * the relay then applies an edit it accepts to its own fold IN PLACE (it owns that value — s479 fix
+ * r1, MED-1: a copy per frame made one frame cost the tape's length), where a client builds the new
+ * value here.
  */
 export function channelStep(c, cur, op, val) {
-  if (op === "replace") return { next: val };
+  const why = channelJudge(c, cur, op, val);
+  if (why !== null) return why;
+  if (op === "replace" || op === "transition") return { next: val };
+  if (op === "append") return { next: [...cur, val] };
+  if (op === "prepend") return { next: [val, ...cur] };
+  const left = Math.max(0, cur.length - val);
+  return { next: op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left) };
+}
+
+// A tape the relay's fold holds in place of an array (server-runtime.js `FoldTape`) says so with this
+// key and has a `length` — all `channelJudge` reads of a tape.
+export const CHANNEL_TAPE = Symbol.for("scrml.channel.foldTape");
+
+/**
+ * §38.4.2 receiver check (3), the judgement alone: null when the edit `op` / `val` applies to `cur`
+ * (the cell's CURRENT value), else why it is refused (a string). It never writes `cur`; of a tape it
+ * reads only that it is one and its length. The client (through `channelStep`) and the relay's fold
+ * both judge by it — one rule, never two copies.
+ */
+export function channelJudge(c, cur, op, val) {
+  if (op === "replace") return null;
   if (op === "transition") {
     try { checkEdge({ peek: () => cur }, c.edges, val); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
-    return { next: val };
+    return null;
   }
-  if (!Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
+  if (!Array.isArray(cur) && !(cur !== null && typeof cur === "object" && cur[CHANNEL_TAPE] === true)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
   const bound = lengthBound(c.table);
   if (bound === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
   if (op === "append" || op === "prepend") {
     if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
-    return { next: op === "append" ? [...cur, val] : [val, ...cur] };
+    return null;
   }
   if (op !== "pop" && op !== "shift") return `an op \`${op}\` the bootstrap does not apply`;
   const left = Math.max(0, cur.length - val);
   if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
-  return { next: op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left) };
+  return null;
 }
 
 // The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.

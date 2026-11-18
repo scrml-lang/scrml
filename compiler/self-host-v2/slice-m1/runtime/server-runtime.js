@@ -34,7 +34,7 @@
 // =============================================================================
 
 import { writeSync } from "node:fs";
-import { encode, decode, channelStep, failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
+import { encode, decode, channelJudge, CHANNEL_TAPE, failure, failed, unmatchedFailure, runDefers, eq, indexRead, atRead, writePath, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
   parseIntText, parseNumText, parseBoolText, textOf,
@@ -1706,17 +1706,19 @@ export function channel(desc) {
 // every write that applying a frame causes is one the relay can make itself (`resets`: a `reset-on=`
 // of a channel cell whose triggers are all cells of this channel, writing a value fixed by the source);
 // `desc.noFold` names why a channel has none (print.scrml chFoldWhy). Each value is checked here
-// against its cell's type (encoded and decoded back, §57) — a value that does not encode is a
-// compiler defect, and the channel gets no fold (fail closed: the receivers still check every frame).
+// against its cell's type — sent through the wire as a receiver would get it (`onWire`) — and a value
+// that does not encode, or that reads back as a DIFFERENT value (a `-0`, which JSON writes as `0`:
+// a compaction base would then differ from the clients that started from the literal), is a
+// compiler defect (chFoldWhy gives no fold to a `-0` initializer — not a literal value), and the
+// channel gets no fold (fail closed: the receivers still check every frame).
 function foldOf(desc, cells) {
   if (typeof desc.noFold !== "string") return { fold: null, why: "the compiler printed no fold for this channel" };
   if (desc.noFold !== "") return { fold: null, why: desc.noFold };
   const canon = (key, v) => {
     const c = cells.get(key);
     if (c === undefined) return { ok: false };
-    const e = encode(c.table, v);
-    if (!e.ok) return { ok: false };
-    return decode(c.table, e.wire, { canonicalOnly: true });
+    const d = onWire(c.table, v);
+    return d.ok && sameValue(d.value, v) ? d : { ok: false };
   };
   const out = [];
   for (const c of desc.cells) {
@@ -1736,11 +1738,101 @@ function foldOf(desc, cells) {
   return { fold: { cells: out, resets }, why: "" };
 }
 
+// s479 fix r1 (HIGH-1) — a value as a RECEIVER gets it: encoded against `table` (§57), written as the
+// JSON text the relay sends, read back and decoded by the client's own decoder (canonicalOnly, as
+// runtime.js `channel` `edit` decodes a relayed `__val`). `{ ok, text, value }`: `text` is the exact
+// `__val` text the relay sends, `value` the value every receiver decodes from it — what the fold
+// applies. One encode → one decode, so the fold and the receivers cannot disagree on a value whose
+// JSON text loses something (a `-0` is written `0`; JSON has no `-0`).
+function onWire(table, v) {
+  const e = encode(table, v);
+  if (!e.ok) return { ok: false };
+  const text = JSON.stringify(e.wire);
+  if (typeof text !== "string") return { ok: false };
+  const d = decode(table, JSON.parse(text), { canonicalOnly: true });
+  return d.ok ? { ok: true, text, value: d.value } : { ok: false };
+}
+
+// Two decoded values are the same value, `Object.is` at every leaf (a decoded value is built of
+// primitives, tapes and plain objects, §57) — so `0` and `-0` differ.
+function sameValue(a, b) {
+  if (Object.is(a, b)) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!own(b, k) || !sameValue(a[k], b[k])) return false;
+  return true;
+}
+
+// s479 fix r1 (MED-1) — a TAPE the relay's fold holds: a ring buffer, so the relay applies an edit it
+// has judged IN PLACE in time independent of the tape's length (amortized O(1) per element added or
+// removed), where a copy per frame (runtime.js `channelStep`, the clients' way) cost the whole tape.
+// The relay owns its fold — no one else reads it — so it needs no copy-on-write. `channelJudge`
+// reads only `[CHANNEL_TAPE]` and `length`; `toArray` is the value for an encode (a compaction base).
+class FoldTape {
+  constructor(items) {
+    let cap = 8;
+    while (cap < items.length) cap *= 2;
+    this.buf = new Array(cap);
+    for (let i = 0; i < items.length; i++) this.buf[i] = items[i];
+    this.head = 0;
+    this.length = items.length;
+  }
+  slot(i) { return (this.head + i) & (this.buf.length - 1); }
+  resize(cap) {
+    const buf = new Array(cap);
+    for (let i = 0; i < this.length; i++) buf[i] = this.buf[this.slot(i)];
+    this.buf = buf;
+    this.head = 0;
+  }
+  push(x) {
+    if (this.length === this.buf.length) this.resize(this.buf.length * 2);
+    this.buf[this.slot(this.length)] = x;
+    this.length += 1;
+  }
+  unshift(x) {
+    if (this.length === this.buf.length) this.resize(this.buf.length * 2);
+    this.head = (this.head - 1) & (this.buf.length - 1);
+    this.buf[this.head] = x;
+    this.length += 1;
+  }
+  // remove `k` elements (at most all) from the end (`pop`) or the start (`shift`); a buffer left a
+  // quarter full is halved, so a tape that shrinks gives its memory back
+  pop(k) {
+    const n = Math.min(k, this.length);
+    for (let i = 0; i < n; i++) { this.length -= 1; this.buf[this.slot(this.length)] = undefined; }
+    this.shrink();
+  }
+  shift(k) {
+    const n = Math.min(k, this.length);
+    for (let i = 0; i < n; i++) { this.buf[this.head] = undefined; this.head = this.slot(1); this.length -= 1; }
+    this.shrink();
+  }
+  shrink() {
+    let cap = this.buf.length;
+    while (cap > 8 && this.length * 4 < cap) cap /= 2;
+    if (cap !== this.buf.length) this.resize(cap);
+  }
+  toArray() {
+    const out = new Array(this.length);
+    for (let i = 0; i < this.length; i++) out[i] = this.buf[this.slot(i)];
+    return out;
+  }
+}
+FoldTape.prototype[CHANNEL_TAPE] = true;
+
+// A fold value as the encoder reads it (a FoldTape is a tape).
+function plainOf(v) {
+  return v instanceof FoldTape ? v.toArray() : v;
+}
+
 // A fold's starting state: each cell's initial value (§38.4.2 "The relay's fold").
 function foldStart(ch) {
   if (ch.fold === null) return null;
   const m = new Map();
-  for (const c of ch.fold.cells) m.set(c.key, fresh(c.init));
+  for (const c of ch.fold.cells) m.set(c.key, held(ch, c.key, fresh(c.init)));
   return m;
 }
 
@@ -1751,13 +1843,34 @@ function fresh(v) {
   return v !== null && typeof v === "object" ? structuredClone(v) : v;
 }
 
+// A value the fold holds for cell `key`: a tape cell's array becomes a FoldTape (a copy of it — the
+// fold owns what it holds); anything else is held as it is.
+function held(ch, key, v) {
+  const c = ch.cells.get(key);
+  return Array.isArray(v) && c !== undefined && c.table !== null && c.table.root.k === "seq" ? new FoldTape(v) : v;
+}
+
 // §38.4.2: a frame applied to the fold as a receiver applies it to its cells — `Cell.set` with
 // `Object.is` change detection (runtime.js `Cell.land`), then the `reset-on=` resets the write
 // triggers, lowest rank first, each reset's own write queueing the resets it triggers (runtime.js
 // `drainResets`). Only channel cells are modelled: a channel with any other derived write has no fold.
-function foldWrite(ch, vals, key, next) {
-  if (Object.is(next, vals.get(key))) return;
-  vals.set(key, next);
+//   s479 fix r1 (MED-1): the edit — one `channelJudge` has already accepted against `vals.get(key)` —
+// is applied IN PLACE. A tape op is always a change, as for the receiver: its `channelStep` builds a
+// NEW array, never `Object.is` the old one. `val` is the value decoded from the relay's own outbound
+// text (`onWire`), owned by the fold from here.
+function foldApply(ch, vals, key, op, val) {
+  if (op === "replace" || op === "transition") {
+    if (Object.is(val, vals.get(key))) return;
+    vals.set(key, held(ch, key, val));
+  } else {
+    const t = vals.get(key);
+    if (!(t instanceof FoldTape)) throw new Error(`scrml server: the relay's fold holds no tape for @${key} (a defect)`);
+    if (op === "append") t.push(val);
+    else if (op === "prepend") t.unshift(val);
+    else if (op === "pop") t.pop(val);
+    else if (op === "shift") t.shift(val);
+    else throw new Error(`scrml server: the relay's fold has no in-place \`${op}\` (a defect)`);
+  }
   const due = new Set();
   const trigger = (k) => { for (const r of ch.fold.resets) if (r.on.includes(k)) due.add(r); };
   trigger(key);
@@ -1767,10 +1880,15 @@ function foldWrite(ch, vals, key, next) {
     due.delete(r);
     const v = fresh(r.value);
     if (Object.is(v, vals.get(r.cell))) continue;
-    vals.set(r.cell, v);
+    vals.set(r.cell, held(ch, r.cell, v));
     trigger(r.cell);
   }
 }
+
+// The relay's fold step as `channelSockets` makes it — a fold's start (`start(ch)`, `ch` from
+// `channel(desc)`), the judgement (`channelJudge`) and the in-place apply — for the slice tests
+// (channel-fold-s479.test.js: the ring buffer against the clients' copy, and the per-frame cost).
+export const CHANNEL_FOLD_TEST = Object.freeze({ start: foldStart, judge: channelJudge, apply: foldApply, plain: plainOf, FoldTape });
 
 // The UTF-8 byte length of `s`, counted only as far as `max + 1` (a frame's size bound).
 function utf8Over(s, max) {
@@ -1924,8 +2042,6 @@ function channelFrame(ch, raw) {
   const cell = ch.cells.get(v.__key);
   const op = v.__op;
   if (typeof op !== "string" || !cell.ops.includes(op)) return { code: 1008, why: `a __sync whose __op is not an op @${v.__key} syncs` };
-  let wire;
-  let val;   // S479: the decoded payload — what the relay's fold applies (§38.4.2 "The relay's fold")
   // #1937 fix r1 (HIGH-1): a length-changing op of a FIXED-length tape (no `free` / bound grant,
   // §66.12.1–§66.12.2 — no local write may change its length) is refused from the table the relay
   // holds; it needs no cell value. (The compiler syncs no such op — analyze chSyncOps — so only a
@@ -1934,30 +2050,30 @@ function channelFrame(ch, raw) {
     const b = cell.table !== null && cell.table.root.k === "seq" ? cell.table.root.bound : null;
     if (b === null || typeof b !== "object" || b.k === "fixed") return { code: 1008, why: `a __sync whose __op changes the length of @${v.__key}, a fixed-length tape` };
   }
+  //   s479 fix r1 (HIGH-1) — §38.4.2: a frame is "relayed RE-ENCODED from the decoded payload", and
+  //   the fold applies it "as a receiver applies it". A receiver applies what it RECEIVES — the
+  //   relay's re-encoded text, decoded — not the sender's text: the two differ where JSON loses
+  //   something (the sender's `-0` is relayed as `0`). So the payload is re-encoded once, to the
+  //   exact `__val` text sent (`text`), and the fold's value is decoded from THAT text (`onWire`).
+  let r;
   if (op === "replace" || op === "transition") {
     const d = decode(cell.table, v.__val, { canonicalOnly: true });
     if (!d.ok) return { code: 1007, why: `a __sync whose value does not decode against @${v.__key}'s type` };
-    const e = encode(cell.table, d.value);
-    if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
-    wire = e.wire;
-    val = d.value;
+    r = onWire(cell.table, d.value);
   } else if (op === "append" || op === "prepend") {
     if (cell.table === null || cell.table.root.k !== "seq") return { code: 1011, why: `an element op for @${v.__key}, which is not a tape` };
     const et = { defs: cell.table.defs, root: cell.table.root.elem };
     const d = decode(et, v.__val, { canonicalOnly: true });
     if (!d.ok) return { code: 1007, why: `a __sync whose element does not decode against @${v.__key}'s element type` };
-    const e = encode(et, d.value);
-    if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
-    wire = e.wire;
-    val = d.value;
+    r = onWire(et, d.value);
   } else if (op === "pop" || op === "shift") {
     if (!Number.isSafeInteger(v.__val) || v.__val < 1) return { code: 1007, why: `a __sync whose count for @${v.__key} is not an int ≥ 1` };
-    wire = v.__val;
-    val = v.__val;
+    r = { ok: true, text: JSON.stringify(v.__val), value: v.__val };
   } else {
     return { code: 1008, why: `a __sync whose __op the server does not relay` };
   }
-  return { key: v.__key, op, wire, val };
+  if (!r.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode to a value its receivers decode` };
+  return { key: v.__key, op, text: r.text, val: r.value };
 }
 
 // `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
@@ -1987,8 +2103,8 @@ function channelSockets(host, channels = [], limits = {}) {
   //   S479 (s479-channel-relay-fold), §38.4.2 "The relay's fold": a channel the compiler gave a fold
   //   (`ch.fold`) keeps, beside its log, the value of each of its cells after every frame it has
   //   relayed (`r.fold`), computed from its initial values by the relay's own judgement of each
-  //   frame — runtime.js `channelStep`, the receiver's check (3) — and the `reset-on=` writes that
-  //   applying it causes (`foldWrite`). It is used twice: a frame the fold refuses is relayed to no
+  //   frame — runtime.js `channelJudge`, the receiver's check (3) — and the `reset-on=` writes that
+  //   applying it causes (`foldApply`, in place). It is used twice: a frame the fold refuses is relayed to no
   //   one, logged nowhere and takes no sequence number (its sender is told, `__refused`, or closed
   //   `1008` when no concurrent edit can explain it); and past the log bound the relay COMPACTS — the
   //   fold becomes the replay's `__base` and the log starts again after it — instead of truncating.
@@ -2014,7 +2130,9 @@ function channelSockets(host, channels = [], limits = {}) {
   const baseOf = (ch, r) => {
     const parts = [];
     for (const c of ch.fold.cells) {
-      const e = encode(ch.cells.get(c.key).table, r.fold.get(c.key));
+      // every fold value reads back as itself (s479 fix r1, HIGH-1: each came from `onWire`, or is an
+      // initial / reset value `foldOf` checked the same way), so a joiner decodes exactly the fold
+      const e = encode(ch.cells.get(c.key).table, plainOf(r.fold.get(c.key)));
       if (!e.ok) return null;
       parts.push(`${JSON.stringify(c.key)}:${JSON.stringify(e.wire)}`);
     }
@@ -2081,25 +2199,28 @@ function channelSockets(host, channels = [], limits = {}) {
       // refused, so its cells showed exactly the fold's value — and is otherwise told `__refused`
       // (a concurrent edit came first in relay order), which drops the edit from its pending edits.
       if (r.fold !== null) {
-        const s = channelStep(ch.cells.get(f.key), r.fold.get(f.key), f.op, f.val);
-        if (typeof s === "string") {
+        // s479 fix r1 (MED-1): judged by the receivers' own rule (runtime.js `channelJudge`), then
+        // applied to the fold in place (`foldApply`) — no copy of the cell's value per frame
+        const s = channelJudge(ch.cells.get(f.key), r.fold.get(f.key), f.op, f.val);
+        if (s !== null) {
           const other = r.last.who !== ws.data ? r.last.seq : r.other;
           if (other <= ws.data.scrmlOpenSeq && ws.data.scrmlRefused !== true) {
             return closeSocket(host, ws, 1008, `a frame the relay's fold refuses with no concurrent edit before it: ${s}`);
           }
           ws.data.scrmlRefused = true;
-          ws.send(JSON.stringify({ __type: "__refused", __key: f.key, __op: f.op, __val: f.wire, __why: s }));
+          ws.send(`{"__type":"__refused","__key":${JSON.stringify(f.key)},"__op":${JSON.stringify(f.op)},"__val":${f.text},"__why":${JSON.stringify(s)}}`);
           return;
         }
-        foldWrite(ch, r.fold, f.key, s.next);
+        foldApply(ch, r.fold, f.key, f.op, f.val);
       }
       r.seq += 1;
       r.text = null;
       if (r.last.who !== ws.data) { r.other = r.last.seq; r.last = { seq: r.seq, who: ws.data }; } else r.last.seq = r.seq;
-      const body = { __type: "__sync", __seq: r.seq, __key: f.key, __op: f.op, __val: f.wire, __own: false };
-      const peer = JSON.stringify(body);
-      body.__own = true;
-      const own = JSON.stringify(body);
+      // s479 fix r1 (HIGH-1): `__val` is spliced from `f.text` — the very text the fold's value was
+      // decoded from (`onWire`) — so what every receiver decodes is what the fold applied
+      const head = `{"__type":"__sync","__seq":${r.seq},"__key":${JSON.stringify(f.key)},"__op":${JSON.stringify(f.op)},"__val":${f.text},"__own":`;
+      const peer = head + "false}";
+      const own = head + "true}";
       if (r.log !== null) {
         const size = Buffer.byteLength(peer, "utf8");
         const baseBytes = r.base === null ? 0 : r.base.bytes;

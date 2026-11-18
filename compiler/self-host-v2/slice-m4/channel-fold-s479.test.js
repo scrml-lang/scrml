@@ -23,12 +23,23 @@
 // that pass on base: A's two forgeries the relay's type/grant check already refused (#1928, #1937),
 // A's reset-on= convergence check (receivers already made that write), and E's two `__refused`
 // broken-stream cases (on base any unknown message broke the stream).
+//
+//   F. (review fix r1, HIGH-1) the fold applies what receivers RECEIVE: a payload whose JSON text
+//      loses something (`-0` is relayed as `0`) is folded as relayed, so the fold, every live client
+//      and every post-compaction joiner agree; the other representation cases (a lone surrogate, an
+//      int past 2^53, a duplicated `__val` key, a number JSON reads as Infinity).
+//   G. (review fix r1, MED-1) the relay applies a judged edit to its fold IN PLACE: the ring buffer
+//      matches the clients' copy-on-write `channelStep` op for op, and a frame's cost does not grow
+//      with the tape's length.
+// RED ON 89af3f699 (fix r1's base): F's `-0` test (the fold reset @m on a `-0` the clients read as
+// `0`: base m=5, clients m=7) and G (no CHANNEL_FOLD_TEST; the copy cost ~100x at 1M vs 10k).
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
+import * as srt from "../slice-m1/runtime/server-runtime.js";
 
 let pageEnv = false;
 beforeAll(async () => {
@@ -521,4 +532,151 @@ describe("E — the client's half: `__base` and `__refused` are checked (stand-i
       } finally { c.done(); }
     });
   }
+});
+
+describe("F — the fold applies what receivers RECEIVE (review fix r1, HIGH-1: §38.4.2 \"relayed RE-ENCODED\", \"as a receiver applies it\")", () => {
+  test("a forged `-0`: relayed as `0`, folded as `0` — the reset-on= it would fire fires nowhere; fold == every live client == every post-compaction joiner", async () => {
+    const w = await world(app(), { [LOG_HOOK]: { frames: 3 } });
+    try {
+      const A = w.live();
+      const B = w.live();
+      await until(() => A.hooks.opens === 1 && B.hooks.opens === 1);
+      const P = await w.raw();
+      P.ws.send(frame("m", "replace", 7));
+      // JSON.stringify writes -0 as "0": a forger writes the text by hand. `-1e-400` also reads as -0.
+      P.ws.send('{"__type":"__sync","__key":"n","__op":"replace","__val":-0}');
+      P.ws.send('{"__type":"__sync","__key":"n","__op":"replace","__val":-1e-400}');
+      P.ws.send('{"__type":"__sync","__key":"dq","__op":"append","__val":-0}');   // the 4th frame compacts
+      expect(await until(() => P.got.length === 4)).toBe(true);
+      expect(Object.is(P.got[1].__val, 0)).toBe(true);           // relayed as 0
+      expect(Object.is(P.got[2].__val, 0)).toBe(true);
+      await until(() => A.val("dq").length === 4 && B.val("dq").length === 4);
+      expect(A.val("m")).toBe(7);                                // n 0 → 0: no change, no reset
+      expect(B.val("m")).toBe(7);
+      expect(Object.is(A.val("n"), 0)).toBe(true);
+      const R = await w.raw();
+      await until(() => R.replays.length === 1);
+      const base = R.replays[0].__base;
+      expect(base.__seq).toBe(4);
+      expect(base.__cells.m).toBe(7);                            // on 89af3f699 the fold reset it: 5
+      expect(Object.is(base.__cells.n, 0)).toBe(true);
+      expect(base.__cells.dq).toEqual([1, 2, 3, 0]);
+      const J = w.live();
+      await until(() => J.hooks.opens === 1);
+      await until(() => J.state() === A.state());
+      expect(J.state()).toBe(A.state());
+      expect(J.state()).toBe(B.state());
+      expect(Object.is(J.val("n"), 0)).toBe(true);
+      expect(P.closed()).toBe(null);
+      // honest traffic after it: every client follows, no one is closed, nothing is refused
+      rt.batch(() => B.cells.n.set(1));                         // resets @m to 5 everywhere
+      rt.batch(() => rt.append(J.cells.xs, "after"));
+      expect(await until(() => [A, B, J].every((X) => X.val("m") === 5 && X.val("xs").at(-1) === "after"))).toBe(true);
+      expect(J.state()).toBe(A.state());
+      const errs = w.errs.join("\n");
+      expect(errs).not.toContain("closed the connection");
+      expect(errs).not.toContain("refused");
+    } finally { w.done(); }
+  });
+
+  test("the other representation cases agree too: a lone surrogate, an int past 2^53, a duplicated `__val` key — fold == live == joiner", async () => {
+    const w = await world(app(), { [LOG_HOOK]: { frames: 2 } });
+    try {
+      const A = w.live();
+      await until(() => A.hooks.opens === 1);
+      const P = await w.raw();
+      P.ws.send('{"__type":"__sync","__key":"xs","__op":"append","__val":"\\ud800x"}');       // escaped lone surrogate
+      P.ws.send('{"__type":"__sync","__key":"n","__op":"replace","__val":9007199254740993}');  // reads as 2^53
+      P.ws.send('{"__type":"__sync","__key":"m","__op":"replace","__val":1,"__val":2}');      // JSON.parse keeps the last
+      expect(await until(() => P.got.length === 3)).toBe(true);
+      expect(P.got.map((f) => f.__val)).toEqual(["\ud800x", 9007199254740992, 2]);
+      await until(() => A.val("m") === 2);
+      expect(A.val("xs")).toEqual(["\ud800x"]);
+      expect(A.val("n")).toBe(9007199254740992);
+      const R = await w.raw();
+      await until(() => R.replays.length === 1);
+      expect(R.replays[0].__base.__cells.xs).toEqual(["\ud800x"]);
+      expect(R.replays[0].__base.__cells.n).toBe(9007199254740992);
+      expect(R.replays[0].__base.__cells.m).toBe(2);
+      const J = w.live();
+      await until(() => J.hooks.opens === 1);
+      await until(() => J.state() === A.state());
+      expect(J.state()).toBe(A.state());
+      expect(P.closed()).toBe(null);
+    } finally { w.done(); }
+  });
+
+  test("a number JSON reads as Infinity (`1e400`) is refused at decode (1007), relayed to no one", async () => {
+    const w = await world(app());
+    try {
+      const obs = await w.raw();
+      const P = await w.raw();
+      P.ws.send('{"__type":"__sync","__key":"n","__op":"replace","__val":1e400}');
+      expect(await until(() => P.closed() !== null)).toBe(true);
+      expect(P.closed().code).toBe(1007);
+      await tick(150);
+      expect(obs.got.length).toBe(0);
+    } finally { w.done(); }
+  });
+});
+
+describe("G — the relay applies a judged edit to its fold in place (review fix r1, MED-1)", () => {
+  const F = srt.CHANNEL_FOLD_TEST;
+  const tapeDesc = (bound) => ({
+    name: "c", topic: "c", noFold: "", resets: [],
+    cells: [{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound } }, ops: ["replace", "append", "prepend", "pop", "shift"], edges: null, init: [1, 2] }],
+  });
+
+  test("the ring buffer matches the clients' copy-on-write `channelStep` op for op (judgement and value), across grow / wrap / shrink", () => {
+    for (const bound of [{ k: "free" }, { k: "bounded", min: 2, max: 40 }]) {
+      const ch = srt.channel(tapeDesc(bound));
+      const vals = F.start(ch);
+      const c = ch.cells.get("xs");
+      let client = [1, 2];
+      let seed = 12345;
+      const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+      for (let i = 0; i < 6000; i++) {
+        const pick = rnd(20);
+        // runs of growth and of shrinking, so the buffer grows, wraps and shrinks
+        const grow = Math.floor(i / 700) % 2 === 0;
+        const op = pick === 0 ? "replace" : pick < (grow ? 14 : 6) ? (rnd(2) ? "append" : "prepend") : (rnd(2) ? "pop" : "shift");
+        const val = op === "replace" ? Array.from({ length: rnd(30) + 2 }, (_, k) => k) : op === "append" || op === "prepend" ? i : rnd(5) + 1;
+        const s = rt.channelStep(c, client, op, val);
+        const j = F.judge(c, vals.get("xs"), op, val);
+        expect(j).toBe(typeof s === "string" ? s : null);
+        if (typeof s === "string") continue;
+        client = s.next;
+        F.apply(ch, vals, "xs", op, op === "replace" ? [...val] : val);
+        expect(F.plain(vals.get("xs"))).toEqual(client);
+      }
+    }
+  });
+
+  test("a frame's relay cost does not grow with the tape's length (10k vs 1M elements; on 89af3f699 ~100x)", () => {
+    const ch = srt.channel(tapeDesc({ k: "free" }));
+    const c = ch.cells.get("xs");
+    const perFrame = (n) => {
+      const vals = F.start(ch);
+      for (let i = vals.get("xs").length; i < n; i++) F.apply(ch, vals, "xs", "append", i);
+      let best = Infinity;
+      for (let run = 0; run < 7; run++) {
+        const t0 = performance.now();
+        for (let i = 0; i < 2000; i++) {
+          if (F.judge(c, vals.get("xs"), "append", i) !== null) throw new Error("refused");
+          F.apply(ch, vals, "xs", "append", i);
+          if (F.judge(c, vals.get("xs"), "shift", 1) !== null) throw new Error("refused");
+          F.apply(ch, vals, "xs", "shift", 1);
+        }
+        best = Math.min(best, (performance.now() - t0) / 4000);
+      }
+      expect(vals.get("xs").length).toBe(n);
+      return best;
+    };
+    perFrame(10_000);                                             // warm up
+    const small = perFrame(10_000);
+    const large = perFrame(1_000_000);
+    console.log(`relay fold per frame: ${(small * 1000).toFixed(2)} us at 10k, ${(large * 1000).toFixed(2)} us at 1M`);
+    // a copy per frame costs ~100x more at 1M; a generous bound for CI noise and cache effects
+    expect(large).toBeLessThan(Math.max(small * 10, 0.01));
+  }, 120000);
 });
