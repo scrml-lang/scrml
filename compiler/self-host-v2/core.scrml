@@ -1167,7 +1167,14 @@ ${
     // `error`: the client function an `onclient:*` attribute names (§38.10), called with
     // no argument; `not` when the attribute is absent. `watches` — the §38.13 feed's table ("" an
     // ordinary channel): the front end judges it, and no printer emits it (refused by name).
-    export type CoreChannel:struct = { name: string, topic: string, reconnect: int, cells: Sym[], ops: string[], open: Sym | not, close: Sym | not, error: Sym | not, file: string, watches: string }
+    // `maxFrame` / `rate` / `burst` / `maxSubs` — the §38.4.3 relay bounds, resolved per channel
+    // (S478 open-Qs ruling items 42, 49): the frame size in UTF-8 bytes (`<program
+    // channel-max-frame=>`, else 65 536), the token bucket's refill rate per second and its size
+    // (`<channel frame-rate=>` / `frame-burst=`, else the `<program channel-…>` value, else 50 / 100)
+    // and the subscriber cap (`<channel max-subscribers=>`, else `<program channel-max-subscribers=>`,
+    // else 1000).
+    export type CoreChannel:struct = { name: string, topic: string, reconnect: int, cells: Sym[], ops: string[], open: Sym | not, close: Sym | not, error: Sym | not, file: string, watches: string,
+                                       maxFrame: int, rate: int, burst: int, maxSubs: int }
 
     // s478 (s478-boot-endpoint) — one §61 `<endpoint>`: the author-stable `path` and
     // `method` it is mounted at (§61.7), the `accepts` enum its request body decodes

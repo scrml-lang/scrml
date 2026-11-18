@@ -53,7 +53,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
-    import { SchemaErr, SchemaRead, SchemaTable, readSchemaBody, schemaCloseAt } from "./schema.scrml"
+    import { SchemaErr, SchemaRead, SchemaTable, SchemaCol, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
     import { isKnownElementName } from "./elements.scrml"
@@ -14808,6 +14808,163 @@ ${
 
     type EpRepl:struct = { at: int, items: AItem[] }
 
+    // ---- the `<onchange>` desugar (S478 open-Qs ruling item 47) ---------------
+    // Ruling (user-voice S478 item 47, g-boot-channel-s478 owner question 7): "desugar the
+    // arms into client functions typed by the synthesized `RowChange`". §38.13.2: "`RowChange:enum
+    // = { Inserted(row: <RowT>), Updated(row: <RowT>), Deleted(key: <PKT>) }` where `<RowT>` is
+    // the struct of `T`'s columns and `<PKT>` is the type of `T`'s primary key"; §38.13.3: "`<onchange>`
+    // arm bodies run CLIENT-side … via canonical `@` access to program-scope cells". So, for an
+    // `<onchange>` in a `watches=<T>` channel of the top-level `<program>` whose table `T` this
+    // file's `<schema>` declares, every column of a typed column type:
+    //   type onchange#<k>#Row:struct = { <column>: <its type>, … }      (read-only fields)
+    //   function onchange#<k>#<Variant>(<binder>: onchange#<k>#Row) { <body>; }   (Inserted / Updated)
+    //   function onchange#<k>#Deleted(<binder>: <the key column's type>) { <body>; }
+    //   function onchange#<k>#_() { <body>; }                             (the wildcard)
+    // are added to the program's items, so each arm's scope and typing are a client function's
+    // (an unknown name in an arm is E-SCOPE-001). `#` keeps every synthesized name out of source.
+    // The column types mirror analyze.scrml colType (§14.8.3: INTEGER / REAL → `number`, TEXT
+    // and TIMESTAMP → `string`; a nullable column `T | not`). FAILS CLOSED to no desugar (the
+    // arms are judged for shape only, as before): a table not declared here or with an untyped
+    // column, an arm with no `:` body (a block arm's markup body is not kept), an arm naming
+    // no variant / repeating one / binding the wrong count (onchangeArmDiags reports those),
+    // and a feed with no key column for a `Deleted` arm. The feed itself is still refused at
+    // emit (print.scrml — the §38.13.7 capture is not built), so nothing here is printed.
+    type ROnchDesugar:struct = { items: AItem[], nid: int }
+
+    fn onchangeDesugar(items: AItem[], chans: AChannel[], onchs: AOnchange[], tables: SchemaTable[], nid0: int) -> ROnchDesugar {
+        if (onchs.length == 0 || tables.length == 0) return { items: items, nid: nid0 }
+        let nid: int = nid0
+        let add: AItem[] = []
+        let k: int = 0
+        for (const oc of onchs) {
+            let table: string = ""
+            let keyCol: string = ""
+            let top = false
+            for (const ch of chans) {
+                if (oc.span.start >= ch.body.start && oc.span.end <= ch.body.end) {
+                    top = ch.ctx == "program"
+                    for (const a of ch.attrs) {
+                        if (a.name == "watches") table = attrBareName(a.value)
+                        if (a.name == "key") keyCol = attrBareName(a.value)
+                    }
+                }
+            }
+            let tbl: SchemaTable | not = not
+            for (const t of tables) { if (t.name == table) tbl = t }
+            if (top && tbl is given && onchAllTyped(tbl.cols)) {
+                const rowName: string = "onchange#" + k + "#Row"
+                let fields: ATypeField[] = []
+                for (const c of tbl.cols) {
+                    const ct: RClone = onchColType(c, oc.span, nid)
+                    nid = ct.nid
+                    fields = fields.concat([{ nid: nid, span: oc.span, isLet: false, name: c.name, ty: ct.t, vals: [] }])
+                    nid = nid + 1
+                }
+                add = add.concat([{ nid: nid, span: oc.span, k: AItemK.TypeItem({ nid: nid + 1, span: oc.span, exported: false, name: rowName, body: ATypeBody.StructBody(fields) }) }])
+                nid = nid + 2
+                // §38.13.2: "The primary key is derived by the `id`-field convention …; an explicit
+                // `key=<column>` attribute … overrides it"
+                let pkc: SchemaCol | not = not
+                for (const c2 of tbl.cols) {
+                    if (keyCol != "" && c2.name == keyCol) pkc = c2
+                }
+                if (keyCol == "") {
+                    for (const c3 of tbl.cols) { if (pkc is not && c3.pk) pkc = c3 }
+                    for (const c4 of tbl.cols) { if (pkc is not && c4.name == "id") pkc = c4 }
+                }
+                let seen: string[] = []
+                let wild = false
+                for (const a of oc.arms) {
+                    const fresh: boolean = seen.indexOf(a.variant) < 0 && !wild
+                    seen = seen.concat([a.variant])
+                    if (a.variant == "_") wild = true
+                    const body: AExpr | not = a.body
+                    let pty: AType | not = not
+                    let known = false
+                    if (a.variant == "Inserted" || a.variant == "Updated") {
+                        pty = { nid: nid, span: a.span, k: ATypeK.TName(rowName) }
+                        nid = nid + 1
+                        known = true
+                    } else if (a.variant == "Deleted" && pkc is given) {
+                        const kt: RClone = onchColType(pkc, a.span, nid)
+                        nid = kt.nid
+                        pty = kt.t
+                        known = true
+                    } else if (a.variant == "_") {
+                        known = true
+                    }
+                    const fits: boolean = !a.parens || (a.variant != "_" && a.binds.length == 1)
+                    if (known && fresh && fits && body is given) {
+                        let params: AParam[] = []
+                        if (a.parens && a.binds.length == 1) {
+                            let pn: string = a.binds[0].name
+                            if (pn == "_") pn = "_#0"
+                            params = [{ nid: nid, span: a.binds[0].span, name: pn, ty: pty, lin: false }]
+                            nid = nid + 1
+                        }
+                        const st: AStmt = { nid: nid, span: body.span, k: AStmtK.Eval(body) }
+                        const blk: ABlock = { nid: nid + 1, span: body.span, stmts: [st] }
+                        const f: AFn = { nid: nid + 2, span: a.span, exported: false, pure: false, name: "onchange#" + k + "#" + a.variant, params: params, ret: not, body: blk,
+                                         server: false, failable: false, err: not }
+                        add = add.concat([{ nid: nid + 3, span: a.span, k: AItemK.FnItem(f) }])
+                        nid = nid + 4
+                    }
+                }
+            }
+            k = k + 1
+        }
+        if (add.length == 0) return { items: items, nid: nid }
+        return { items: appendToProgram(items, add), nid: nid }
+    }
+
+    // `items` with `add` appended to the body of its (first) top-level `<program>`.
+    fn appendToProgram(items: AItem[], add: AItem[]) -> AItem[] {
+        let out: AItem[] = []
+        let done = false
+        for (const it of items) {
+            const p: AProgram | not = programOfItem(it.k)
+            if (p is given && !done) {
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: p.items.concat(add) }) }])
+                done = true
+            } else {
+                out = out.concat([it])
+            }
+        }
+        return out
+    }
+
+    fn onchAllTyped(cs: SchemaCol[]) -> boolean {
+        if (cs.length == 0) return false
+        for (const c of cs) {
+            if (c.ty != "integer" && c.ty != "real" && c.ty != "text" && c.ty != "timestamp") return false
+        }
+        return true
+    }
+
+    // A column's type (analyze.scrml colType's mapping, §14.8.3), with fresh node ids.
+    fn onchColType(c: SchemaCol, at: ASpan, nid: int) -> RClone {
+        let base: string = "string"
+        if (c.ty == "integer" || c.ty == "real") base = "number"
+        const t: AType = { nid: nid, span: at, k: ATypeK.TName(base) }
+        if (c.nn || (c.pk && c.ty == "integer")) return { t: t, nid: nid + 1 }
+        return { t: { nid: nid + 1, span: at, k: ATypeK.TMaybe(t) }, nid: nid + 2 }
+    }
+
+    // A bare-name attribute value (`watches=orders`), else "".
+    fn attrBareName(v: AAttrValue) -> string {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            // no-default-arm: one question of an attribute value — is it bare
+            _ :> not
+        }
+        if (e is not) return ""
+        return match e.k {
+            .Name(name: n) :> n
+            // no-default-arm: one question of an expression — is it a bare name
+            _ :> ""
+        }
+    }
+
     // The placeholder MarkupItem of each endpoint (its node id is the endpoint's) → its functions.
     fn replaceEpItems(items: AItem[], repl: EpRepl[]) -> AItem[] {
         let out: AItem[] = []
@@ -14976,7 +15133,10 @@ ${
         const r0: RMItems = parseMarkupItems(m0, "")
         const r1: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
         // s478 (s478-boot-endpoint): each `<endpoint>`'s arms, as server functions (endpointDesugar)
-        const dz: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
+        const dz0: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
+        // s478 (S478 open-Qs ruling item 47): each `<onchange>` arm, as a client function (onchangeDesugar)
+        const oz: ROnchDesugar = onchangeDesugar(dz0.items, r1.mp.chans, r1.mp.onchs, r1.mp.tables, dz0.nid)
+        const dz: RDesugar = { items: oz.items, eps: dz0.eps, nid: oz.nid }
         const m1: MP = r1.mp
         const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, chans: m1.chans, onchs: m1.onchs, schemaN: m1.schemaN, tables: m1.tables, ns: m1.ns } }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do

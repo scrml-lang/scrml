@@ -12,7 +12,7 @@
  *
  * USAGE
  *   bun scripts/scrml-boot.ts compile <file.scrml> [--output-dir <dir>] [--format pretty|line] [--rebuild]
- *   bun scripts/scrml-boot.ts dev <file.scrml> [--output-dir <dir>] [--port <n>] [--format pretty|line]
+ *   bun scripts/scrml-boot.ts dev <file.scrml> [--output-dir <dir>] [--port <n>] [--allow-host <name>]… [--format pretty|line]
  *   bun run boot:compile <file.scrml>          (package script → `compile`)
  *   bun run boot:dev <file.scrml>              (package script → `dev`)
  *
@@ -1246,9 +1246,54 @@ export function devClientAssets(r: CompileResult): Set<string> {
   return new Set(collectClientAssets(r.outDir, ["index.html", "program.client.js", "scrml-runtime.js"]));
 }
 
-async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line"; columns: ColumnUnit }) {
+/**
+ * SPEC §40.2 (S478 open-Qs ruling item 48, g-boot-dev-dns-rebinding-host-allowlist-s478): "The
+ * development server SHALL check `Host`. … It SHALL answer `403` to every request — on every route,
+ * the WebSocket upgrade included, and before any other check — whose `Host` does not name the
+ * server itself: `127.0.0.1`, `localhost` or `[::1]` (compared without regard to case) with the port
+ * the development server listens on (an omitted port is 80), or a host name the developer configured
+ * for the development server, with any port. A request with no `Host`, or a `Host` that is not a
+ * host with an optional port, SHALL be refused." The Origin check (§40.2) cannot tell a rebound name
+ * from the real one — a page on `evil.example` rebound to 127.0.0.1 is same-origin with itself.
+ * `allowed` holds the configured names, lowercase (`--allow-host`). Exported for the tests.
+ */
+export function devHostAllowed(host: string | null, port: number, allowed: ReadonlySet<string> = new Set()): boolean {
+  if (host === null) return false;
+  const h = host.toLowerCase();
+  let name: string;
+  let p: string;
+  if (h.startsWith("[")) {
+    const close = h.indexOf("]");
+    if (close < 0) return false;
+    name = h.slice(0, close + 1);
+    const rest = h.slice(close + 1);
+    if (rest === "") p = "";
+    else if (rest.startsWith(":")) p = rest.slice(1);
+    else return false;
+  } else {
+    const c = h.indexOf(":");
+    if (c !== h.lastIndexOf(":")) return false;
+    name = c < 0 ? h : h.slice(0, c);
+    p = c < 0 ? "" : h.slice(c + 1);
+  }
+  if (name === "" || !/^[a-z0-9.\-\[\]:_]+$/.test(name)) return false;
+  if (p !== "" && !/^[0-9]{1,5}$/.test(p)) return false;
+  const pn = p === "" ? 80 : Number(p);
+  if (name === "127.0.0.1" || name === "localhost" || name === "[::1]") return pn === port;
+  return allowed.has(name);
+}
+
+/** A name `--allow-host` may configure: a host name or address, no port, scheme, path or wildcard. */
+export function devAllowHostName(v: string): string | null {
+  const n = v.toLowerCase();
+  if (n === "" || !/^([a-z0-9_]([a-z0-9_\-]*[a-z0-9_])?)(\.[a-z0-9_]([a-z0-9_\-]*[a-z0-9_])?)*$|^\[[0-9a-f:.]+\]$/.test(n)) return null;
+  return n;
+}
+
+async function dev(file: string, opts: { outDir?: string; port: number; format: "pretty" | "line"; columns: ColumnUnit; allowHosts?: ReadonlySet<string> }) {
   const entryAbs = resolve(file);
   const log = (s: string) => console.error(s);
+  const allowHosts: ReadonlySet<string> = opts.allowHosts ?? new Set();
   let current: CompileResult | null = null;
   let assets: Set<string> = new Set();
   let server: { fetch(req: Request, upgrader?: unknown): Promise<Response | undefined> } | null = null;
@@ -1326,12 +1371,18 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     // server that upgraded it (server-runtime.js `channelSockets`), so a rebuild does not re-route
     // a socket already open
     websocket: {
-      maxPayloadLength: 262144,
+      // above every channel's §38.4.3 frame bound (the relay closes an over-bound frame with 1009);
+      // a later build that raises `channel-max-frame=` past it needs a restart of `dev`
+      maxPayloadLength: Math.max(262144, (server as any)?.websocket?.maxPayloadLength ?? 0),
       open(ws: any) { ws.data?.scrmlSockets?.open(ws); },
       message(ws: any, m: any) { ws.data?.scrmlSockets?.message(ws, m); },
       close(ws: any) { ws.data?.scrmlSockets?.close(ws); },
     },
     async fetch(req, bunServer) {
+      // §40.2 (S478): the Host allowlist, before any other check on any route (DNS rebinding)
+      if (!devHostAllowed(req.headers.get("host"), bunServer.port, allowHosts)) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
+      }
       const url = new URL(req.url);
       if (url.pathname === RELOAD_PATH) {
         let ctl: ReadableStreamDefaultController;
@@ -1389,6 +1440,9 @@ Options:
   --columns <utf16|bytes>  The col unit (default utf16, as JS/LSP count; bytes = UTF-8, for vim's %c)
   --rebuild                Rebuild the cached bootstrap bundle even if its inputs did not change
   --port <n>               dev: HTTP port (default 3000)
+  --allow-host <name>      dev: also answer requests whose Host is <name> (repeatable). Otherwise only
+                           127.0.0.1 / localhost / [::1] on the dev port are served; any other Host
+                           gets 403 (SPEC §40.2 — DNS-rebinding protection)
   --verbose, -v            Timings (bundle load, compile)
 
 Exit status: 0 compiled · 1 compile errors · 2 usage or internal error.`;
@@ -1410,6 +1464,7 @@ async function main(argv: string[]): Promise<number> {
   let port = 3000;
   let rebuild = false;
   let verbose = false;
+  const allowHosts = new Set<string>();
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     const val = () => {
@@ -1426,6 +1481,12 @@ async function main(argv: string[]): Promise<number> {
       else if (a.startsWith("--columns=")) columns = a.slice("--columns=".length) as any;
       else if (a === "--port") port = Number(val());
       else if (a.startsWith("--port=")) port = Number(a.slice("--port=".length));
+      else if (a === "--allow-host" || a.startsWith("--allow-host=")) {
+        const raw = a === "--allow-host" ? val() : a.slice("--allow-host=".length);
+        const n = devAllowHostName(raw);
+        if (n === null) throw new Error(`--allow-host takes a host name (no port, scheme, path or wildcard): '${raw}'`);
+        allowHosts.add(n);
+      }
       else if (a === "--rebuild") rebuild = true;
       else if (a === "--verbose" || a === "-v") verbose = true;
       else if (a.startsWith("-")) throw new Error(`unknown option ${a}`);
@@ -1443,7 +1504,7 @@ async function main(argv: string[]): Promise<number> {
   if (!Number.isInteger(port) || port < 0 || port > 65535) { console.error(`scrml-boot: bad --port`); return 2; }
 
   if (cmd === "dev") {
-    await dev(file, { outDir, port, format, columns });
+    await dev(file, { outDir, port, format, columns, allowHosts });
     return -1; // keep running
   }
   const t0 = performance.now();

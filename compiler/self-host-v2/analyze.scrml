@@ -2965,6 +2965,10 @@ ${
             "transactions" :> true
             "batch-in-list-cap" :> true
             "channel-reconnect" :> true
+            "channel-max-frame" :> true
+            "channel-frame-rate" :> true
+            "channel-frame-burst" :> true
+            "channel-max-subscribers" :> true
             "lang" :> true
             "mode" :> true
             "callchar" :> true
@@ -3105,6 +3109,11 @@ ${
                 // s473 (B3): read — §40.7 head metadata (lower headOf; print).
                 // "A non-string-literal value … is silently ignored" and an
                 // empty one is "as if the attribute were absent" (§40.7).
+            } else if (chLimitMax(a.name) > 0) {
+                // s478 (S478 open-Qs ruling items 42, 49) — §38.4.3: the program-wide channel
+                // bounds, read by channelPass; "a value that is not a bare positive integer
+                // literal within the bound's range SHALL be a compile error, `E-CHANNEL-LIMIT-INVALID`"
+                if (chLimit(a.value, chLimitMax(a.name)) < 0) st = addDiag(st, file, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<program " + a.name + "=…>", a.name))
             } else if (a.name == "mcp") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
@@ -48254,6 +48263,11 @@ ${
                 let topic: string = ""
                 let sawTopic = false
                 let reconnect: int = 2000
+                // §38.4.3: "the `<channel>` value, else the `<program>` value, else the default"
+                const maxFrame: int = chProgramLimit(g, "channel-max-frame", 65536)
+                let rate: int = chProgramLimit(g, "channel-frame-rate", 50)
+                let burst: int = chProgramLimit(g, "channel-frame-burst", 100)
+                let maxSubs: int = chProgramLimit(g, "channel-max-subscribers", 1000)
                 let watches: string = ""
                 let key: string = ""
                 let hooks: AAttr[] = []
@@ -48293,6 +48307,17 @@ ${
                         } else {
                             diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reconnect=` on `<channel>` is a non-negative integer number of milliseconds written bare (`reconnect=2000`, §38.3, §38.3.1); the bootstrap does not fall back silently on any other value (INTERIM, g-boot-channel-s478)")])
                         }
+                    } else if (a.name == "frame-rate" || a.name == "frame-burst" || a.name == "max-subscribers") {
+                        const lv: int = chLimit(a.value, chLimitMax(a.name))
+                        if (lv < 0) {
+                            diags = diags.concat([mkDiag(f.path, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<channel " + a.name + "=…>", a.name))])
+                        } else if (a.name == "frame-rate") {
+                            rate = lv
+                        } else if (a.name == "frame-burst") {
+                            burst = lv
+                        } else {
+                            maxSubs = lv
+                        }
                     } else if (a.name == "watches") {
                         watches = chBareName(a.value)
                         if (watches == "") diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`watches=` names a table as a static bare identifier (§38.13.1 — `watches=orders`)")])
@@ -48304,7 +48329,7 @@ ${
                     } else if (a.name == "onclient:open" || a.name == "onclient:close" || a.name == "onclient:error" || a.name == "onserver:open" || a.name == "onserver:message" || a.name == "onserver:close") {
                         hooks = hooks.concat([a])
                     } else {
-                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<channel>` — a `<channel>` opener carries the §38.3 attributes (`name`, `topic`, `auth`, `reconnect`, `watches`, `key`, `onserver:*`, `onclient:*`) only")])
+                        diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<channel>` — a `<channel>` opener carries the §38.3 attributes (`name`, `topic`, `auth`, `reconnect`, `frame-rate`, `frame-burst`, `max-subscribers`, `watches`, `key`, `onserver:*`, `onclient:*`) only")])
                     }
                 }
                 if (!sawName) diags = diags.concat([mkDiag(f.path, ch.opener, "E-CHANNEL-001", "`<channel>` has no `name=` — the name is required: it is the channel's identity and its WebSocket route `/_scrml_ws/<name>` (§38.3)")])
@@ -48366,7 +48391,8 @@ ${
                     }
                 }
                 if (!hasErrorDiag(diags.slice(d0)) && ch.ctx == "program" && f.path == g.entry && name != "") {
-                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches }])
+                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches,
+                                      maxFrame: maxFrame, rate: rate, burst: burst, maxSubs: maxSubs }])
                 }
             }
         }
@@ -48522,6 +48548,82 @@ ${
             i = i + 1
         }
         return n
+    }
+
+    // §38.4.3 (S478 open-Qs ruling items 42, 49): a channel bound's largest legal value by its
+    // attribute name (`<channel>` or `<program>` spelling); 0 for any other name.
+    fn chLimitMax(name: string) -> int {
+        return match name {
+            "channel-max-frame" :> 16777216
+            "frame-rate" :> 1000000
+            "channel-frame-rate" :> 1000000
+            "frame-burst" :> 1000000
+            "channel-frame-burst" :> 1000000
+            "max-subscribers" :> 1000000
+            "channel-max-subscribers" :> 1000000
+            _ :> 0
+        }
+    }
+
+    fn chLimitMsg(at: string, name: string) -> string {
+        return "`" + at + "` is a bare positive integer literal from 1 to " + chLimitMax(name) + " (§38.4.3) — a channel bound has no \"off\" and no silent fallback: write it bare, e.g. `" + name + "=" + chLimitExample(name) + "`"
+    }
+
+    fn chLimitExample(name: string) -> string {
+        if (name == "channel-max-frame") return "65536"
+        if (name == "frame-rate" || name == "channel-frame-rate") return "50"
+        if (name == "frame-burst" || name == "channel-frame-burst") return "100"
+        return "1000"
+    }
+
+    // A bound's value: a bare integer literal of digits only in [1, max], else -1.
+    fn chLimit(v: AAttrValue, max: int) -> int {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+        if (e is not) return -1
+        const raw: string = match e.k {
+            .Num(raw: r) :> r
+            // no-default-arm: one question of an expression — is it a number literal
+            _ :> ""
+        }
+        if (raw == "" || raw.length > 9) return -1
+        let n: int = 0
+        let i = 0
+        while (i < raw.length) {
+            const c: int = raw.charCodeAt(i)
+            if (c < 48 || c > 57) return -1
+            n = n * 10 + (c - 48)
+            i = i + 1
+        }
+        if (n < 1 || n > max) return -1
+        return n
+    }
+
+    // The entry file's top-level `<program>`'s value for the bound `name`, else `dflt` (an
+    // illegal value is E-CHANNEL-LIMIT-INVALID in topProgramAttrDiags; the default stands here).
+    fn chProgramLimit(g: Globals, name: string, dflt: int) -> int {
+        for (const f of g.files) {
+            if (f.path == g.entry) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const a of p.attrs) {
+                            if (a.name == name) {
+                                const v: int = chLimit(a.value, chLimitMax(name))
+                                if (v > 0) return v
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return dflt
     }
 
     // The call expression a hook attribute holds (`onclient:open=onOpen(e)`), else `not`.
