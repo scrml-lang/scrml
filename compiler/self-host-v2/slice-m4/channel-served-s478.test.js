@@ -60,7 +60,7 @@ function connect(base, path, headers = {}) {
   });
 }
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
-const sync = (key, val) => JSON.stringify({ __type: "__sync", __key: key, __val: val });
+const sync = (key, val, op = "replace") => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
 
 describe("C — the server half: the upgrade route on the program's own fetch (§38.8, §40.2)", () => {
   test("the server artifact mounts `/_scrml_ws/<name>` and lists it in its manifest; each cell's §57 table is the client's", async () => {
@@ -68,9 +68,9 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
     try {
       expect(server.js).toContain(`channels: [{ path: "/_scrml_ws/chat" }]`);
       expect(server.js).toContain(`rt.channel(channel$0)`);
-      expect(server.js).toContain(`{ key: "count", table: { defs: [], root: { k: "int" } } }`);
+      expect(server.js).toContain(`{ key: "count", table: { defs: [], root: { k: "int" } }, ops: ["replace"] }`);
       expect(client.js).toContain(`rt.channel(program$.scope, { name: "chat", reconnect: 2000, cells: [{ key: "count", cell: program$.fields[`);
-      expect(client.js).toContain(`table: { defs: [], root: { k: "int" } } }`);
+      expect(client.js).toContain(`table: { defs: [], root: { k: "int" } }, ops: ["replace"], edges: null }`);
     } finally { bun.stop(true); }
   });
 
@@ -83,7 +83,7 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       a.ws.send(sync("count", 7));
       a.ws.send(sync("note", "hi"));
       await tick();
-      expect(b.got).toEqual([{ __type: "__sync", __key: "count", __val: 7 }, { __type: "__sync", __key: "note", __val: "hi" }]);
+      expect(b.got).toEqual([{ __type: "__sync", __key: "count", __op: "replace", __val: 7 }, { __type: "__sync", __key: "note", __op: "replace", __val: "hi" }]);
       expect(a.got).toEqual([]);
       a.ws.close();
       b.ws.close();
@@ -94,11 +94,15 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
   const BAD = [
     ["a frame that is not JSON", "{nope", 1007],
     ["a JSON array", "[1,2]", 1008],
-    ["an unknown __type", JSON.stringify({ __type: "__rpc", __key: "count", __val: 1 }), 1008],
-    ["an extra key", JSON.stringify({ __type: "__sync", __key: "count", __val: 1, x: 1 }), 1008],
-    ["a missing __val", JSON.stringify({ __type: "__sync", __key: "count" }), 1008],
+    ["an unknown __type", JSON.stringify({ __type: "__rpc", __key: "count", __op: "replace", __val: 1 }), 1008],
+    ["an extra key", JSON.stringify({ __type: "__sync", __key: "count", __op: "replace", __val: 1, x: 1 }), 1008],
+    ["a missing __val", JSON.stringify({ __type: "__sync", __key: "count", __op: "replace" }), 1008],
+    ["the pre-§38.4.2 whole-value frame (no __op)", JSON.stringify({ __type: "__sync", __key: "count", __val: 1 }), 1008],
+    ["an op the cell does not sync (`append` of an int)", sync("count", 1, "append"), 1008],
+    ["an unknown op", sync("count", 1, "splice"), 1008],
+    ["a non-string op", JSON.stringify({ __type: "__sync", __key: "count", __op: 1, __val: 1 }), 1008],
     ["a key the channel does not declare", sync("secret", 1), 1008],
-    ["`__proto__` as the key", JSON.stringify({ __type: "__sync", __key: "__proto__", __val: 1 }), 1008],
+    ["`__proto__` as the key", JSON.stringify({ __type: "__sync", __key: "__proto__", __op: "replace", __val: 1 }), 1008],
     ["`constructor` as the key", sync("constructor", 1), 1008],
     ["a wrong type (a string for an int cell)", sync("count", "7"), 1007],
     ["a non-integer for an int cell", sync("count", 1.5), 1007],
@@ -211,7 +215,7 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       await tick();
       a1.ws.send(sync("count", 3));
       await tick();
-      expect(a2.got).toEqual([{ __type: "__sync", __key: "count", __val: 3 }]);
+      expect(a2.got).toEqual([{ __type: "__sync", __key: "count", __op: "replace", __val: 3 }]);
       expect(b1.got).toEqual([]);
       // channel b does not accept channel a's cell
       b1.ws.send(sync("count", 3));
@@ -249,7 +253,7 @@ describe("D — the client half (runtime.js `channel`, the call the client artif
       const scope = rt.root.child();
       const cell = rt.cell(0);
       const hooks = { opens: 0, closes: 0 };
-      rt.channel(scope, { name: "chat", reconnect: 0, cells: [{ key: "count", cell, table: INT }],
+      rt.channel(scope, { name: "chat", reconnect: 0, cells: [{ key: "count", cell, table: INT, ops: ["replace"], edges: null }],
         open: () => { hooks.opens++; }, close: () => { hooks.closes++; }, error: null });
       return { scope, cell, hooks };
     };
@@ -280,13 +284,13 @@ describe("D — the client half (runtime.js `channel`, the call the client artif
     const s = await served(src);
     expect(s.client.js).toContain(`{ key: "xs", cell: program$.fields[`);
     const table = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
-    expect(s.server.js).toContain(`{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } } }`);
+    expect(s.server.js).toContain(`{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } }, ops: ["replace"] }`);
     const saved = globalThis.location;
     globalThis.location = { protocol: "http:", host: s.base };
     const mk = () => {
       const scope = rt.root.child();
       const cell = rt.cell([]);
-      rt.channel(scope, { name: "tl", reconnect: 0, cells: [{ key: "xs", cell, table }], open: null, close: null, error: null });
+      rt.channel(scope, { name: "tl", reconnect: 0, cells: [{ key: "xs", cell, table, ops: ["replace"], edges: null }], open: null, close: null, error: null });
       return { scope, cell };
     };
     const a = mk();
@@ -307,7 +311,7 @@ describe("D — the client half (runtime.js `channel`, the call the client artif
       rt.batch(() => t.a.cell.set(4));
       await tick(200);
       // the raw peer saw a's one write — b applied it and did not re-send it
-      expect(raw.got).toEqual([{ __type: "__sync", __key: "count", __val: 4 }]);
+      expect(raw.got).toEqual([{ __type: "__sync", __key: "count", __op: "replace", __val: 4 }]);
       raw.ws.close();
     } finally { t.done(); }
   });

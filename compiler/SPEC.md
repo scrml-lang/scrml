@@ -32740,12 +32740,12 @@ Reactive variables declared inside a `<channel>` body are **automatically synchr
 </>
 ```
 
-On every local write to a channel-declared cell, the compiler emits a sync message via WebSocket. The sync wire format is: `{ __type: "__sync", __key: "<varName>", __val: <value> }`. The receiving end (server-side router for client-originated writes; client-side IIFE for server-originated writes) updates the corresponding cell.
+On every local write to a channel-declared cell, the compiler emits a sync message via WebSocket. The message names the EDIT the write made — the operation the writer's grant allowed — not the cell's whole value (§38.4.2, S478). The sync wire format is: `{ __type: "__sync", __key: "<varName>", __op: "<op>", __val: <payload> }` (plus `__at` for a positional edit, §38.4.2). The receiving end (server-side router for client-originated writes; client-side IIFE for server-originated writes) checks the edit and applies it to the corresponding cell, or refuses it (§38.4.2).
 
 **Normative statements (V5-strict body):**
 
 - A state declaration inside a channel body SHALL use the V5-strict structural form `<name> = init` (§6.1, §6.2).
-- The compiler SHALL emit sync wire-format messages on every write to a channel-declared cell. The wire-format SHALL be `{ __type: "__sync", __key: <name>, __val: <value> }`. **Channel cells are CLIENT-HELD — there is NO server-authoritative channel-cell store.** A write to a channel-declared cell from a standalone `function` declared inside the channel body runs on the CLIENT: the client mutates its locally-held cell and the auto-sync reactive effect (§38.7) emits the `__sync` wire frame that distributes the new value to every other subscriber. Such a pure cell-write publisher is NOT server-escalated — it stays on the client, exactly like an `onclient:*` handler that writes a channel cell (§38.10). (Amended 2026-06-12 — change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A (S189); supersedes the prior "a WRITE ... is also a §12.2 Trigger-7 server-escalation signal" added by `server-keyword-eliminate-2026-06-10` D2. A `broadcast()`/`disconnect()` call still escalates per §12.2 Trigger 7.)
+- The compiler SHALL emit sync wire-format messages on every write to a channel-declared cell. The wire-format SHALL be the op frame of §38.4.2, `{ __type: "__sync", __key: <name>, __op: <op>, __val: <payload> }` (S478; it superseded the whole-value frame `{ __type: "__sync", __key: <name>, __val: <value> }`). **Channel cells are CLIENT-HELD — there is NO server-authoritative channel-cell store.** A write to a channel-declared cell from a standalone `function` declared inside the channel body runs on the CLIENT: the client mutates its locally-held cell and the auto-sync (§38.7) emits the `__sync` op frame (§38.4.2) that distributes the edit to every other subscriber. Such a pure cell-write publisher is NOT server-escalated — it stays on the client, exactly like an `onclient:*` handler that writes a channel cell (§38.10). (Amended 2026-06-12 — change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A (S189); supersedes the prior "a WRITE ... is also a §12.2 Trigger-7 server-escalation signal" added by `server-keyword-eliminate-2026-06-10` D2. A `broadcast()`/`disconnect()` call still escalates per §12.2 Trigger 7.)
 - **A server-context channel function SHALL NOT READ a channel cell.** Because channel cells are client-held (no server-side value exists), a function that the compiler has placed on the SERVER — escalated via `broadcast()`/`disconnect()` (§38.6), recognized as an `onserver:*` handler (§38.6.1), or escalated by any other §12.2 trigger (e.g. a `?{}` SQL block) — that reads a channel-declared cell is a compile error: `E-CHANNEL-SERVER-CELL-READ` (§34). The server function SHALL instead operate on the message payload / its function arguments, and broadcast a value derived from them (§38.6.1). A CLIENT-side function reading a channel cell is unaffected (the client holds the cell).
 - Cells declared inside a channel body SHALL be reachable from within `<program>` and from any logic context in the same file via canonical `@name` access — the same machinery that makes engine auto-declared variables visible across the file (§51.0.D, §6.9 hoisting model).
 - LOCALS declared inside a channel body's logic blocks (`let x = ...`, `const x = ...`) SHALL NOT auto-sync. Only V5-strict structural-decl cells (`<x> = init`) are synced.
@@ -32785,7 +32785,7 @@ Channel placement and body shape have moved twice. The full trajectory:
 
 The v0.3 reversal returns channel placement to its v1 location (inside `<program>`) while preserving the v0.next body-shape (V5-strict, no `@shared`). The motivation: under v0.3's one-program-per-application rule (§40), the entry-file `<program>` is the application's host scope, and channels — being app-scope shared-state vehicles — belong inside it. The v0.next "channel as peer of `<program>`" framing was useful for the M19 declarative-multi-file model, but the v0.3 program-shape unification supersedes it.
 
-The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `auth=` cookie check) is UNCHANGED across all three eras. Only the source-level placement of `<channel>` (twice) and the body decl shape (once at v0.next, unchanged since) have moved.
+The wire layer (WebSocket route, sync wire format, broadcast/disconnect built-ins, server function escalation, `auth=` cookie check) is UNCHANGED across all three eras. (The sync frame itself was amended after them, S478: it names the edit, not the value — §38.4.2.) Only the source-level placement of `<channel>` (twice) and the body decl shape (once at v0.next, unchanged since) have moved.
 
 The compiler emits two reversed-direction error codes to guide migration:
 
@@ -32794,6 +32794,36 @@ The compiler emits two reversed-direction error codes to guide migration:
 - `E-CHANNEL-SHARED-MODIFIER` — unchanged across v0.next + v0.3.
 
 There is no backward compatibility shim; v0.3 is scrml as of 2026-05-12; v0.next is a prior iteration. The pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM` error code is retired (its trigger shape is now canonical, not violating).
+
+### 38.4.2 Op-based sync — a frame names the granted edit (S478)
+
+> **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — §38.4 op-based channel sync" — *"yes to op-based channel sync"*, adopting the PA text: *"A channel cell syncs the granted EDIT, not the whole value. … A local write to a channel cell emits a frame naming the operation the writer's grant allowed (`replace` with the value, `append` / `pop` / `shift` / `insert` / a part edit, a `rule=` transition); each receiving client checks the operation against the cell's declared grants (and a `rule=` graph / lifecycle against its CURRENT value) before applying it, and refuses a frame that fails. … ends the concurrent-append last-writer-wins loss. SPEC §38.4 (and §38.7 wire frame) to be amended; PERMANENT direction."*
+> **supersedes:** the whole-value frame `{ __type: "__sync", __key, __val: <value> }` of §38.4, applied by each receiver as a whole-value write.
+
+**The frame.** A sync frame is a JSON object with exactly the keys `__type` (the string `"__sync"`), `__key` (the cell's name), `__op` (one op kind below), `__val` (its payload) and, for a positional op only, `__at`. Every value in a payload is encoded against its type (§57).
+
+| `__op` | The local write it names | `__val` | `__at` | Granted by |
+|---|---|---|---|---|
+| `replace` | a whole-value write, `@x = v` | the new value | — | `replace` (`let` on a scalar or struct, §66.9 rule 2; `replace` in a tape type, §66.12.2) |
+| `append` | `@xs.append(v)` | the element | — | `append` or `insert` (§66.12.2) |
+| `prepend` | `@xs.prepend(v)` | the element | — | `prepend` or `insert` |
+| `pop` | removing `n` elements at the end (`@xs.pop()`: `n` = 1) | `n`, an `int` ≥ 1 | — | `pop` or `remove` |
+| `shift` | removing `n` elements at the front | `n`, an `int` ≥ 1 | — | `shift` or `remove` |
+| `insert` | an insertion at position `i` | the element | `i` | `insert` |
+| `remove` | removing `n` elements from position `i` | `n`, an `int` ≥ 1 | `i` | `remove` |
+| `set` | a part write — a position (`@xs[i] = v`) or a field (`@p.f = v`, `@xs[i].f = v`) | the value written at the path | the path: a tape of positions (`int`) and field names (`string`), outermost first | the grant that admits that part write (`write`, a field's own contract, §66.11.4, §66.12.6) |
+| `transition` | a write of a field that carries a `rule=` graph (§66.13.2) | the target variant | — | the graph |
+
+**Normative statements:**
+
+- A local write to a channel-declared cell SHALL send one frame per edit, naming the narrowest op above that is that edit. Edits are sent in the order the writes happen; writes in one batch are not merged into one frame.
+- **The sender applies its own edit first.** The write is an ordinary local write (a read after it sees the new value, §6.2). The relay does not return a frame to its sender, so a sender never receives, and never re-applies, its own edit.
+- **The relay** (the server-side router) SHALL check a client's frame against the frame shape, that `__key` names a cell of the channel, that `__op` is an op the cell's declared grants admit, and that each payload part decodes canonically against its type (§57.5); it relays the frame RE-ENCODED from the decoded payload to the channel's other subscribers. The server holds no cell value (§38.4), so it SHALL NOT be relied on for a check that needs one.
+- **The receiver** SHALL, before it applies a frame, check: (1) the cell is a channel cell of this channel and `__op` is an op its declared grants admit (the table above); (2) the payload decodes canonically against its type; (3) the edit, applied to the cell's CURRENT value, keeps every invariant a local write of the same edit is checked against — a bounded tape's length (§66.12.2, `E-WRITE-INVARIANT-RT`), a position inside the current tape (§66.12.6 rule 3), a `rule=` edge from the current variant (§66.13.2; a self-write is a no-op, §51.0.F.1), a lifecycle's path from the current state (§66.11.6). A frame that passes is applied as the local write of the same edit would be — the same notify (§66.11.7) — but is not sent on.
+- **A refused frame** — one that fails a receiver check — SHALL NOT be applied, in whole or in part, and SHALL be reported to the developer (a development-console warning naming the channel, the cell and the failed check). The connection stays open: the frame was relayed by the server, and one peer's frame does not make the server faulty.
+- **Ordering.** The relay keeps each channel's arrival order, so every receiver applies the edits it receives in one order. Because each sender applies its own edit at once, two concurrent edits reach their two writers in different orders: both edits survive on every client (no concurrent `append` is lost), but the ORDER of two concurrent elements, or the winner of two concurrent `replace`s, may differ between clients. *(Open — owner question in `g-boot-channel-op-order-joiner-s478`.)*
+- **A client that connects** (or reconnects) starts from its cells' initializers and receives only the frames relayed after it connects; no earlier edit is replayed to it. *(Open — owner question in `g-boot-channel-op-order-joiner-s478`.)*
+- A cell with no write capability (no `let`, no grant) is never written, so it has no frames; a frame for it is refused.
 
 ### 38.5 auth= Integration
 
@@ -32945,7 +32975,7 @@ When `topic=@var` and `@var` evaluates to `not`, the `<channel>` element behaves
 
 ### 38.7 Client JS Output
 
-The compiler emits a client-side IIFE: `const _scrml_ws_<safeName>`. It manages connect, reconnect (with exponential backoff), message dispatch, channel-scoped cell sync (the auto-sync wire layer for cells declared in the channel body — §38.4), and cleanup registration.
+The compiler emits a client-side IIFE: `const _scrml_ws_<safeName>`. It manages connect, reconnect (with exponential backoff), message dispatch, channel-scoped cell sync (the auto-sync wire layer for cells declared in the channel body — §38.4: one op frame per local write, and each received frame applied only after the receiver checks of §38.4.2), and cleanup registration.
 
 The IIFE registers `onclient:open`, `onclient:close`, and `onclient:error` event listeners when those attributes are present on the `<channel>` element (see §38.10). These listeners are registered directly on the `WebSocket` instance created inside the IIFE and do not involve any server round-trip.
 

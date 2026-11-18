@@ -196,37 +196,55 @@ describe("B — refused by name (fail closed — g-boot-channel-s478)", () => {
   test("a name= the route cannot carry verbatim", () => one(prog(`${chan(`name="a b"`)}\n<p>\${@count}</p>`), "letters, digits"));
 });
 
-// s478 #1928 fix round 1 (review HIGH-1). A sync frame is the cell's WHOLE value, and the
-// receiving client applies it as a whole-value write — so a cell whose grants forbid one (an
-// append-only / pop-only / bounded-append tape, a `rule=` engine, a lifecycle, a struct holding
-// a tape without `replace`) would let any peer rewrite it past its contract. INTERIM: only a
-// `replace`-granted cell is synced (§66.9 rule 2: "On a scalar, `let` IS the `replace` grant");
-// every other granted cell in a channel body is refused by name (g-boot-channel-capability-sync-s478).
-// RED ON BASE OF THE FIX (f1a5ceb11): each refused shape compiled clean and was synced.
-describe("B2 — a channel cell is synced only when a whole-value write is granted (HIGH-1)", () => {
+// s478 (s478-boot-channel-ops) — §38.4.2 (RULED S478 "op-based channel sync"): "A channel cell
+// syncs the granted EDIT, not the whole value." Every receiver checks a frame's op against the
+// cell's grants and current value, so the append-only / pop-only / bounded tapes and the `rule=`
+// engine the #1928 fix r1 refused (INTERIM, g-boot-channel-capability-sync-s478) are synced, each
+// with the op kinds its grants admit (CoreChannel.ops). What the bootstrap still cannot sync
+// without letting a peer past the contract is refused by name (g-boot-channel-op-residue-s478).
+// RED ON BASE (28fc2d031): the four synced shapes were E-BOOTSTRAP-UNSUPPORTED, and CoreChannel
+// had no `ops`.
+describe("B2 — §38.4.2 op sync: which channel cells sync, with which ops", () => {
+  const synced = (body, extra = "") => {
+    const r = fe(prog(`${extra}${chan(`name="c"`, body)}\n<p>x</p>`));
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    const ch = r.core.channels[0];
+    return Object.fromEntries(ch.cells.map((c, i) => [c.hint, ch.ops[i]]));
+  };
   const refusedCell = (body, cell, needle, extra = "") => {
     const src = prog(`${extra}${chan(`name="c"`, body)}\n<p>x</p>`);
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     const msg = refusals(src).join("\n");
     expect(msg).toContain("the channel cell `" + cell + "`");
     expect(msg).toContain(needle);
-    expect(msg).toContain("g-boot-channel-capability-sync-s478");
+    expect(msg).toContain("g-boot-channel-op-residue-s478");
   };
-  test("P-append-grant / P-client-append-truncation: an append-only tape", () =>
-    refusedCell(`  <xs:string[free, append]=[]/>\n  function add(s: string) { @xs.append(s); }`, "xs", "not `replace`"));
-  test("P-bounded-tape: a bounded append-only tape", () =>
-    refusedCell(`  <xs:int[1..=3, append]=([1])/>\n  function add() { @xs.append(2); }`, "xs", "not `replace`"));
-  test("GRANT-ONLY-POP: a pop-only tape", () =>
-    refusedCell(`  <xs:int[free, pop]=([1,2,3])/>\n  function drop() { @xs.pop(); }`, "xs", "not `replace`"));
-  test("ENGINE: a `rule=` engine field", () =>
-    refusedCell(`<phase:Phase=.Idle single>\n    <Idle rule=.Loading></>\n    <Loading rule=.Done></>\n    <Done></>\n</>`, "phase", "`rule=` transition graph", `type Phase:enum = { Idle, Loading, Done }\n`));
+  test("P-append-grant / P-client-append-truncation: an append-only tape syncs `append`", () =>
+    expect(synced(`  <xs:string[free, append]=[]/>\n  function add(s: string) { @xs.append(s); }`)).toEqual({ xs: "append" }));
+  test("P-bounded-tape: a bounded append-only tape syncs `append`", () =>
+    expect(synced(`  <xs:int[1..=3, append]=([1])/>\n  function add() { @xs.append(2); }`)).toEqual({ xs: "append" }));
+  test("GRANT-ONLY-POP: a pop-only tape syncs `pop`; a deque its four edits", () => {
+    expect(synced(`  <xs:int[free, pop]=([1,2,3])/>\n  function drop() { @xs.pop(); }`)).toEqual({ xs: "pop" });
+    expect(synced(`  <dq:int[free, append, prepend, pop, shift]=([])/>`)).toEqual({ dq: "append prepend pop shift" });
+  });
+  test("ENGINE: a `rule=` engine field syncs `transition` only", () =>
+    expect(synced(`<phase:Phase=.Idle single>\n    <Idle rule=.Loading></>\n    <Loading rule=.Done></>\n    <Done></>\n</>`, `type Phase:enum = { Idle, Loading, Done }\n`)).toEqual({ phase: "transition" }));
+  test("`let` scalars and structs, and `replace`-granted tapes, sync `replace` (+ their edits)", () => {
+    expect(synced(`  let <n:int=0/>\n  let <pt:Pt=({ x: 1, y: 2 })/>\n  <xs:int[free, replace]=([])/>\n  <ys:int[0..=2, replace]=([])/>\n  <zs:int[free, replace, append]=([])/>`, `type Pt:struct = { x: int, y: int }\n`))
+      .toEqual({ n: "replace", pt: "replace", xs: "replace", ys: "replace", zs: "replace append" });
+  });
+  // refused by name (residue)
   test("a struct whose tape field grants no `replace` (§66.12.6 rule 4)", () =>
     refusedCell(`  let <s:Box=({ xs: [] })/>`, "s", "tape whose type grants no `replace`", `type Box:struct = { xs: int[] }\n`));
-  test("(synced) `let` scalars and structs, and a `replace`-granted tape (bounded or not)", () => {
-    const r = fe(prog(`type Pt:struct = { x: int, y: int }\n${chan(`name="c"`, `  let <n:int=0/>\n  let <pt:Pt=({ x: 1, y: 2 })/>\n  <xs:int[free, replace]=([])/>\n  <ys:int[0..=2, replace]=([])/>\n  <zs:int[free, replace, append]=([])/>`)}\n<p>\${@n}\${@pt.x}\${@xs.length}\${@ys.length}\${@zs.length}</p>`));
-    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
-    expect(r.core.channels[0].cells.map((c) => c.hint)).toEqual(["n", "pt", "xs", "ys", "zs"]);
+  test("an `insert` / `remove` / `write` tape without `replace` (§38.4.2 `insert` / `remove` / `set` not built)", () => {
+    refusedCell(`  <xs:int[free, insert]=([])/>`, "xs", "cannot send as its own op");
+    refusedCell(`  <xs:int[free, remove]=([1])/>`, "xs", "cannot send as its own op");
+    refusedCell(`  <xs:int[free, append, write]=([])/>`, "xs", "cannot send as its own op");
   });
+  test("an engine field with an `<onIdle>` watchdog", () =>
+    refusedCell(`<phase:Phase=.Active single>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n<onIdle after=5m to=.Idle/>\n</>`, "phase", "`<onIdle>` watchdog", `type Phase:enum = { Active, Idle }\n`));
+  test("a lifecycle `(not to T)` cell", () =>
+    refusedCell(`  let <u:(not to string)=(not)/>`, "u", "lifecycle"));
 });
 
 // The served halves are channel-served-s478.test.js (it needs Bun's own WebSocket, which the

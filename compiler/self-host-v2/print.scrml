@@ -4597,16 +4597,25 @@ ${
         let out: JsStmt[] = [JsStmt.SComment("the §38 channels — each cell declared in a channel body is synchronized across the channel's clients (§38.4)")]
         for (const ch of p.channels) {
             let cells: JsExpr[] = []
+            let ci: int = 0
             for (const c of ch.cells) {
                 const fd: Field | not = programField(p, c)
                 const idx: int = programFieldIdx(p, c)
                 if (fd is given && idx >= 0) {
+                    // s478 (s478-boot-channel-ops) — §38.4.2: the op kinds the cell syncs (the
+                    // sender's and every receiver's check) and, for a `rule=` field, its edge table
+                    // (the receiver checks a `transition` against the CURRENT variant)
+                    let edges: JsExpr = JsExpr.JNull
+                    if (fd.graph is given) edges = jid(nameOf(ctx.names, NameKey.Edges(pd.sym.id, idx)))
                     cells = cells.concat([JsExpr.JObject([
                         { key: "key", value: jstr(c.hint) },
                         { key: "cell", value: fieldCell(jid(progLocal), pd, idx) },
                         { key: "table", value: wireOrNull(p, fd.ty) },
+                        { key: "ops", value: chOpsJs(ch.ops, ci) },
+                        { key: "edges", value: edges },
                     ])])
                 }
+                ci = ci + 1
             }
             out = out.concat([sexpr(rtCall(ctx, "channel", [jmember(jid(progLocal), "scope"), JsExpr.JObject([
                 { key: "name", value: jstr(ch.name) },
@@ -4618,6 +4627,17 @@ ${
             ])]))])
         }
         return out
+    }
+
+    // `ops[i]` (CoreChannel, space-separated) as a JS array of op names; [] when absent (nothing is sent or applied)
+    export fn chOpsJs(ops: string[], i: int) -> JsExpr {
+        let out: JsExpr[] = []
+        if (i < ops.length) {
+            for (const o of ops[i].split(" ")) {
+                if (o != "") out = out.concat([jstr(o)])
+            }
+        }
+        return JsExpr.JArray(out)
     }
 
     fn channelHookJs(ctx: Ctx, h: Sym | not) -> JsExpr {
