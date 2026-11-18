@@ -11,7 +11,7 @@
 //           containing only the selected columns … `.get()` produces `Row | not`, `.all()` (or a
 //           bare `?{}`) produces `Row[]` (§8.3)"; "`SELECT *` over a single table expands to that
 //           table's generated type".
-//   §14.8.3 INTEGER / REAL → `number`, TEXT → `string`; "A `ColumnDef` with `nullable: true` SHALL
+//   §14.8.3 INTEGER → `int` (S478 open-Qs ruling item 20; was `number`), REAL → `number`, TEXT → `string`; "A `ColumnDef` with `nullable: true` SHALL
 //           produce a field type of `T | not`" (a column without `not null`, §38.5.2; an
 //           `integer primary key` is the rowid, §38.5.1).
 //   §14.8.1 "The generated types are **nominal**".
@@ -24,7 +24,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { mods, compile, serve, post, pathOf } from "./server-artifact-harness.js";
@@ -75,8 +75,8 @@ describe("§14.8.3 field types", () => {
   test("a `text not null` column is `string`; used as `int` it is E-TYPE-031", () => {
     expect(codesOf(P(fn("f() -> int", [getRow("id, body"), "if (r is not) return 0;", "const n: int = r.body;", "return n;"])))).toEqual(["E-TYPE-031"]);
   });
-  test("an `integer` column is `number`, not `int` (INTEGER → number)", () => {
-    expect(codesOf(P(fn("f() -> int", [getRow("id"), "if (r is not) return 0;", "const n: int = r.id;", "return n;"])))).toEqual(["E-TYPE-031"]);
+  test("an `integer` column is `int` (S478 ruling 20: INTEGER → int); an `int` still fits a `number`", () => {
+    expect(codesOf(P(fn("f() -> int", [getRow("id"), "if (r is not) return 0;", "const n: int = r.id;", "return n;"])))).toEqual([]);
     expect(codesOf(P(fn("f() -> number", [getRow("id"), "if (r is not) return 0;", "const n: number = r.id;", "return n;"])))).toEqual([]);
   });
   test("a column without `not null` is `T | not`", () => {
@@ -323,6 +323,49 @@ describe("runtime (SQLite): the rows the compiler typed are the rows the server 
   });
 });
 
+// S478 open-Qs ruling item 20, option (b), INTERIM — §14.8.3 "A typed row is checked as it is read":
+// "the server SHALL check each row value against its declared field type as the row is read … A row
+// value that fails the check SHALL fail the query as `SqlError::QueryFailed` … the program never sees
+// the value." A non-STRICT SQLite table stores any storage class in any column (measured before this:
+// TEXT holding x'41' answered 200 "65!", INTEGER holding 'abc' made `r.x * 2` NaN).
+describe("runtime (SQLite): a typed row value that does not fit its column type fails the query (§14.8.3, S478)", () => {
+  let dir, sql, srv, routes;
+  const logs = [];
+  const call = (f, args = []) => post(srv, pathOf(routes, f), args);
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s478-row-check-"));
+    sql = new SQL("sqlite://" + join(dir, "app.db"));
+    // the table is NOT STRICT: SQLite stores what it is given
+    await sql.unsafe("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL, note TEXT, score REAL NOT NULL)");
+    await sql.unsafe("INSERT INTO notes (id, body, note, score) VALUES (1, x'41', 'n1', 'zz')");
+    await sql.unsafe("CREATE TABLE t2 (current_timestamp INTEGER NOT NULL)");
+    await sql.unsafe("INSERT INTO t2 VALUES (1.5)");
+    const r = compile(RT);
+    ({ srv, routes } = await serve(r.core, sql, logs));
+  }, 300000);
+  afterAll(async () => {
+    await sql.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a blob in a `text` column: the query fails (its arm runs) — never a Uint8Array through a string", async () => {
+    expect((await call("armLeave")).json).toBe("err");
+    expect((await call("firstBody")).json).toBe("none");
+    expect(logs.some((l) => /does not fit its declared type/.test(l) && /\$\.body: the stored value is a blob/.test(l))).toBe(true);
+  });
+  test("a string in a `real not null` column: the `.all()` query fails ([] arm)", async () => {
+    expect((await call("scoreSum")).json).toBe(0);
+  });
+  test("a non-integral REAL in an `integer` column (`int` since S478): the query fails", async () => {
+    expect((await call("kwQual")).json).toBe(0);
+    expect(logs.some((l) => /\$\.current_timestamp: the stored value is a real/.test(l))).toBe(true);
+  });
+  test("a fitting row still reads (the check passes a NULL in a nullable column)", async () => {
+    await sql.unsafe("INSERT INTO notes (id, body, note, score) VALUES (2, 'b', NULL, 2)");
+    expect((await call("nullNote", [2])).json).toBe("null");
+  });
+});
+
 // fix r1 (#1915 review): the review's runtime repros — each returned a wrongly-typed value through a
 // typed slot on the server (rt.test.js: armInt / rebindInt / rebindNarrow "undefined!", lit2 "10",
 // cntStr 7, cntNot 500, kw2 NaN). Each is now refused at compile time.
@@ -346,5 +389,125 @@ describe("runtime repros of the #1915 review are refused at compile time", () =>
   });
   test("kw2 (L1)", () => {
     expect(one("kw2() -> string", [`const r = ${SQ}\`SELECT current_timestamp FROM t2\`}.get() !{ _ :> not };`, `if (r is not) return "none";`, "const k: number = r.current_timestamp * 2;", `return k > 5 ? "gt5" : "NOT-gt5";`])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// S478 open-Qs ruling item 20 — "Expect tutorial 02b to compile clean": `value: integer not null` is now
+// `int`, so `return row is given ? row.value : 0` fits the `(not to int)` cell. On base it was
+// E-TYPE-031 (`@count` expects `int | not`, and this value is `number | not`).
+describe("docs/tutorial-snippets/02b-counter-persisted.scrml (S478 ruling 20)", () => {
+  const SRC = readFileSync(join(import.meta.dir, "../../../docs/tutorial-snippets/02b-counter-persisted.scrml"), "utf8");
+  test("compiles clean on the bootstrap", () => {
+    expect(errs(SRC).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  });
+  test("its server functions run against SQLite (the row check passes a fitting row)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s478-02b-"));
+    const sql = new SQL("sqlite://" + join(dir, "counter.db"));
+    try {
+      await sql.unsafe("CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)");
+      const { srv, routes } = await serve(compile(SRC).core, sql, []);
+      expect((await post(srv, pathOf(routes, "loadCount"), [])).json).toBe(0);
+      expect((await post(srv, pathOf(routes, "persistCount"), [5])).json).toBe(5);
+      expect((await post(srv, pathOf(routes, "loadCount"), [])).json).toBe(5);
+    } finally {
+      await sql.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// fix r1 (#1944 review MED-1 / MED-2 / LOW-3) — §14.8.3 "A typed row is checked as it is read":
+// an `int` field holds an integer within ±(2^53−1) (§21.3.1.1); a column the declared type does not
+// declare is dropped, not refused; the log names the field path and the storage class, never the value.
+describe("runtime (SQLite): the row check's int range, undeclared columns and log line (#1944 r1)", () => {
+  const SCH = `    <schema>
+        acct {
+            id: integer primary key
+            owner: text not null
+            bal: integer not null
+        }
+        w {
+            k: integer primary key
+            v: text not null
+        }
+    </>`;
+  const SRC = `<program db="./app.db">
+${SCH}
+    type E:enum = { Bad, QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost }
+    \${
+        function debitBob()! E {
+            const r = ${SQ}\`SELECT id, bal FROM acct WHERE owner = 'bob'\`}.get();
+            if (r is not) return 0;
+            ${SQ}\`UPDATE acct SET bal = bal - 100 WHERE id = \${r.id}\`}.run();
+            return 1;
+        }
+        function balOf(o: string) -> int {
+            const r = ${SQ}\`SELECT * FROM acct WHERE owner = \${o}\`}.get() !{ _ :> not };
+            if (r is not) return -1;
+            return r.bal;
+        }
+        function wv() -> string {
+            const x = ${SQ}\`SELECT * FROM w WHERE k = 1\`}.get() !{ _ :> not };
+            if (x is not) return "nf";
+            return x.v;
+        }
+        function wAll() -> int {
+            const xs = ${SQ}\`SELECT * FROM w\`}.all() !{ _ :> [] };
+            return xs.length;
+        }
+    }
+    let <out:string=""/>
+    let <n:int=0/>
+    <button onclick={ @n = debitBob() !{ _ :> 0 }; }>a</button>
+    <button onclick={ @n = balOf("x") !{ _ :> 0 }; }>b</button>
+    <button onclick={ @out = wv() !{ _ :> "err" }; }>c</button>
+    <button onclick={ @n = wAll() !{ _ :> 0 }; }>d</button>
+    <p>\${@out} \${@n}</p>
+</program>
+`;
+  let dir, sql, srv, routes;
+  const logs = [];
+  const call = (f, args = []) => post(srv, pathOf(routes, f), args);
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s478-row-check-r1-"));
+    sql = new SQL("sqlite://" + join(dir, "app.db"));
+    // `acct` carries 64-bit ids past 2^53 and a column `<schema>` does not declare (`note`);
+    // `w` is STRICT and carries one too (`added`)
+    await sql.unsafe("CREATE TABLE acct (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, bal INTEGER NOT NULL, note TEXT)");
+    await sql.unsafe("INSERT INTO acct VALUES (9007199254740992, 'alice', 500, 'secret-a'), (9007199254740993, 'bob', 500, 'secret-b'), (7, 'carol', 300, 'secret-c'), (8, 'dave', 9223372036854775807, NULL), (9, 'erin', 1e300, NULL)");
+    await sql.unsafe("CREATE TABLE w (k INTEGER PRIMARY KEY, v TEXT NOT NULL, added INTEGER) STRICT");
+    await sql.unsafe("INSERT INTO w VALUES (1, 'wv', 3)");
+    const r = compile(SRC);
+    expect(r.diags.filter((d) => d.severity === "Error").map((d) => d.code)).toEqual([]);
+    ({ srv, routes } = await serve(r.core, sql, logs));
+  }, 300000);
+  afterAll(async () => {
+    await sql.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("MED-1: an id past 2^53 fails the query as QueryFailed — the rounded id never selects alice's row", async () => {
+    const a = await call("debitBob");
+    expect(a.status).toBe(500);
+    expect(a.json.variant).toBe("QueryFailed");
+    const rows = await sql.unsafe("SELECT owner, bal FROM acct WHERE owner IN ('alice', 'bob') ORDER BY owner");
+    expect(rows.map((x) => [x.owner, x.bal])).toEqual([["alice", 500], ["bob", 500]]);
+    expect(logs.some((l) => /\$\.id: the stored value is an integer outside ±\(2\^53−1\)/.test(l))).toBe(true);
+  });
+  test("MED-1: int64 max and a REAL 1e300 in an `int` field fail; a safe integer reads", async () => {
+    expect((await call("balOf", ["dave"])).json).toBe(-1);
+    expect((await call("balOf", ["erin"])).json).toBe(-1);
+    expect((await call("balOf", ["carol"])).json).toBe(300);
+  });
+  test("MED-2: a live column `<schema>` does not declare is dropped — `SELECT *` still reads (non-STRICT and STRICT)", async () => {
+    expect((await call("balOf", ["carol"])).json).toBe(300);
+    expect((await call("wv")).json).toBe("wv");
+    expect((await call("wAll")).json).toBe(1);
+  });
+  test("LOW-3: the log line names the path and storage class, never the stored value", async () => {
+    await sql.unsafe("INSERT INTO acct VALUES (10, 'frank', 'pii-value-xyz', NULL)");
+    expect((await call("balOf", ["frank"])).json).toBe(-1);
+    expect(logs.some((l) => /\$\.bal: the stored value is text/.test(l))).toBe(true);
+    expect(logs.some((l) => l.includes("pii-value-xyz"))).toBe(false);
   });
 });

@@ -76,7 +76,12 @@ ${
         // Every function value the bootstrap builds is synchronous (never waits, §13.2) and
         // never fails (§19.4.3) — analyze refuses the others by name — so the type carries
         // neither colour.
-        Fn(params: Type[], ret: Type | not),
+        // s478-ruled-fn-types — §7.5 "Function types (S478)": `pure` the pure function type
+        // (`fn (x: T) => R`, §48.6.3 — a value that keeps the `fn` contract); `err` the error
+        // enum of the failable function type (`(x: T)! E => R`, §19.4.3 — a call through such a
+        // value is a failable call, so it stands in Core only as an Attempt's FCallV), `not` for
+        // a value that never fails. A waiting value is still never built (§13.2 R3′).
+        Fn(params: Type[], ret: Type | not, pure: boolean, err: Sym | not),
     }
 
     // A struct field carries its OWN write contract (O3 ruled: struct fields take
@@ -440,6 +445,9 @@ ${
         FCall(fn: Sym, args: Expr[]),
         FSettled(outcome: Sym),
         FParse(json: Expr, en: Sym, err: Sym),
+        // s478-ruled-fn-types — a call THROUGH a local holding a failable function value
+        // (§19.4.3 "The failable function type (S478)"): `f` is that Local (check.scrml C-FV3).
+        FCallV(f: Expr, args: Expr[]),
     }
     // The success branch: the result is bound to `bind`, `body` runs, and
     // `value` is the branch's value (when the Attempt has a `result`).
@@ -500,6 +508,10 @@ ${
         nobatch: boolean,
         handled: boolean,
         site: NodeId,
+        // S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): the result type of a
+        // query whose rows are typed from a `<schema>` table (analyze.scrml rowTypes) — `Row[]` or
+        // `Row | not` — else `not`. The server checks each row against it as the row is read.
+        row: Type | not,
     }
 
     // s451 (U1a) — a database a program's queries run on (§8.1.1, §44.2):

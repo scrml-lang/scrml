@@ -895,11 +895,31 @@ ${
 
     // C-E1: a plain call of a failable function.
     fn callFailable(p: CoreProgram, n: Node) -> string[] {
+        // s478-ruled-fn-types — a FnRef names a failable function as a VALUE (§19.4.3 "The
+        // failable function type (S478)"), which is no call: each call through it is an
+        // Attempt's FCallV (exprCallee counts a FnRef as called for the effect summary only)
+        if (isFnRefNode(n)) return []
         const c: Sym | not = exprNodeCallee(n)
         if (c is not) return []
         const e: Sym | not = fnErr(p, c)
         if (e is given) return ["C-E1: a plain call of " + c.hint + "(), which is declared `!` — a failable call stands only as an Attempt's call (§19.4.3)"]
         return []
+    }
+
+    fn isFnRefNode(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> isFnRefExpr(e)
+            // no-default-arm: one question of a node — is it a FnRef expression
+            _ :> false
+        }
+    }
+
+    fn isFnRefExpr(e: Expr) -> boolean {
+        return match e {
+            .FnRef(fn: x) :> true
+            // no-default-arm: one question of an expression — is it a FnRef
+            _ :> false
+        }
     }
 
     fn exprNodeCallee(n: Node) -> Sym | not {
@@ -1053,6 +1073,10 @@ ${
         const f: Sym | not = failableFn(call)
         let want: Sym | not = not
         out = out.concat(checkParse(p, call, err))
+        // s478-ruled-fn-types — C-FV3 for a failable call through a value: its callee is a Local
+        // (the error enum is analyze's, from the value's function type — Core locals carry no type)
+        const fv: Expr | not = failableValue(call)
+        if (fv is given) out = out.concat(callVProblems(fv))
         if (f is given) {
             want = fnErr(p, f)
             if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
@@ -1105,6 +1129,7 @@ ${
             .FParse(json: j, en: en, err: er) :> parseProblems(p, en, er, err)
             .FCall(fn: x) :> []
             .FSettled(outcome: x) :> []
+            .FCallV(f: x) :> []
         }
     }
 
@@ -1631,11 +1656,21 @@ ${
         }
     }
 
+    fn failableValue(c: Failable) -> Expr | not {
+        return match c {
+            .FCallV(f: f) :> f
+            .FCall(fn: x) :> not
+            .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
+        }
+    }
+
     fn failableFn(c: Failable) -> Sym | not {
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
             .FParse(json: x) :> not
+            .FCallV(f: x) :> not
         }
     }
 
@@ -3854,6 +3889,7 @@ ${
             .FSettled(outcome: o) :> o
             .FCall(fn: x) :> not
             .FParse(json: x) :> not
+            .FCallV(f: x) :> not
         }
     }
 
@@ -6144,7 +6180,9 @@ ${
     }
 
     // s478 (s478-boot-fn-type) — C-FV2: a FnRef names a Fn of `p.fns` (never a ServerFn) that
-    // never waits and never fails: every function value is synchronous and total, so a call
+    // never waits (s478-ruled-fn-types: it MAY fail — a failable value's every call is an
+    // Attempt's FCallV, §19.4.3 "The failable function type (S478)"): every function value is
+    // synchronous, so a call
     // through it needs no Suspend and no Attempt (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE's hazard — a
     // call that would hand its caller an unawaited Promise — and §19.4.3's — a failure read as a
     // value — are unrepresentable).
@@ -6152,7 +6190,9 @@ ${
         for (const fd of p.fns) {
             if (fd.sym.id == f.id) {
                 if (fd.waits) return ["C-FV2: the function value `" + f.hint + "` waits (§13.2) — a function value is never async-coloured in the bootstrap"]
-                if (fd.err is given) return ["C-FV2: the function value `" + f.hint + "` is failable (§19.4) — a function value never fails in the bootstrap"]
+                // s478-ruled-fn-types: a failable function value is built (§19.4.3 "The failable
+                // function type (S478)") — analyze types it `(…)! E => R` and lowers every call
+                // through it as an Attempt's FCallV
                 if (fd.host is given) return ["C-FV2: the function value `" + f.hint + "` is host-backed — not a function value the bootstrap builds"]
                 return []
             }

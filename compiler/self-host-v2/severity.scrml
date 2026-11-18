@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 403 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 407 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -82,6 +82,7 @@ ${
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-STRING-INTERP-LITERAL" :> Severity.Warning
             "W-TX-ARM-UNREACHABLE" :> Severity.Warning
+            "W-TX-EXIT-ROLLS-BACK" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -385,6 +386,8 @@ ${
             "E-SCHEMA-012" :> Severity.Error
             "E-SCHEMA-013" :> Severity.Error
             "E-SCHEMA-014" :> Severity.Error
+            "E-SCHEMA-016" :> Severity.Error
+            "E-SCHEMA-017" :> Severity.Error
             "E-SCOPE-001" :> Severity.Error
             "E-SCOPE-010" :> Severity.Error
             "E-SCOPE-REDECLARE" :> Severity.Error
@@ -440,6 +443,7 @@ ${
             "E-TRANSACTION-CONTROL-FLOW" :> Severity.Error
             "E-TRY-NOT-IN-SCRML" :> Severity.Error
             "E-TX-CLIENT-MULTI-CALL" :> Severity.Error
+            "E-TX-CLIENT-PLACED" :> Severity.Error
             "E-TX-FAIL-AFTER-COMMIT" :> Severity.Error
             "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
