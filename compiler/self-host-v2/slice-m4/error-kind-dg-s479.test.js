@@ -33,6 +33,33 @@ describe("§14.2 — there is no `:error` kind; error types are enums", () => {
     expect(r.diags.map((d) => d.code)).toEqual(["E-PARSE-TYPE"]);
   });
 
+  // review #1966 MED-1: the body is skipped by brace depth, not parsed as fields — an
+  // enum-shaped body used to cascade and eat the closing `}`, losing the next item.
+  const FN = `\n    fn f() -> int {\n        return 1;\n    }`;
+  const CALL = `<p>\${f()}</p>`;
+  const codes = (body) => run(L(`    type E:error = ${body}${FN}`, CALL)).diags.map((d) => d.code);
+
+  test("an enum-shaped body is one E-PARSE-TYPE and the next item survives", () => {
+    expect(codes(`{ Failed(message: string), Other }`)).toEqual(["E-PARSE-TYPE"]);
+  });
+
+  test("a garbage body is one E-PARSE-TYPE (the body is covered by the refusal, §40.8)", () => {
+    expect(codes(`{ @x = 5; let y = "}"; if (a) { b() } // }\n }`)).toEqual(["E-PARSE-TYPE"]);
+  });
+
+  test("nested braces in the body are balanced by depth", () => {
+    expect(codes(`{ A { b: { c: int } }, D(e: { f: string }) }`)).toEqual(["E-PARSE-TYPE"]);
+  });
+
+  test("an unclosed `{` is bounded and reported — no worse than the same unclosed `:enum` body", () => {
+    // The unclosed body takes the logic block's own `}`, so the block runs to the end of the
+    // file; the reports are the `:enum` body's (the block-level `}` missing) plus the refusal.
+    const err = run(L(`    type E:error = { Failed(message: string)`)).diags.map((d) => d.code);
+    const enm = run(L(`    type E:enum = { Failed(message: string)`)).diags.map((d) => d.code);
+    expect(enm).toContain("E-PARSE-EXPECTED");
+    expect(err).toEqual(["E-PARSE-TYPE", ...enm]);
+  });
+
   test("an error enum whose variants carry `message` / `type` payload fields compiles clean (E-ERROR-008 retired)", () => {
     const r = run(L(`    type MyError:enum = { Failed(message: string, code: int), Rejected(type: string, reason: string) }`));
     expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
