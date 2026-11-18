@@ -1134,3 +1134,240 @@ describe("L — #1941 fix r1: epoch reset, held edits, onclient:open after the r
     } finally { w.done(); }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// K — #1941 × #1942 integration (S478): relay order (§38.4.2) over the relay bounds and client
+// pacing (§38.4.3). §38.4.3: "A conforming client paces its frames to the bound … While a `replace`
+// of a cell is queued, a later `replace` of the same cell supersedes it … A superseded `replace` is
+// never sent, so it is not a pending edit (§38.4.2) … The held edits of §38.4.2 are paced as every
+// other edit is". §38.4.3 subscriber cap: "This count is the one §38.4.2's 'last subscriber of a
+// channel whose log was truncated leaves' reads: a reserved place counts as a subscriber from the
+// reservation". RED before the integration: `send` bypassed the pacer (a 200-append burst from one
+// client was closed 1008), a coalesced `replace` left its pending entry waiting for an echo that
+// never came (the next own frame broke the stream), and the two subscriber counts disagreed.
+// ---------------------------------------------------------------------------------------------
+describe("K — #1941 × #1942: relay order over the bounds and client pacing", () => {
+  test("a 200-append burst from each of two clients converges on 3 clients, none lost, across a reconnect mid-burst", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      const B = w.live();
+      const C = w.live({ reconnect: 60 });
+      await tick(300);
+      for (let i = 0; i < 200; i++) { rt.batch(() => rt.append(A.cells.xs, "a" + i)); rt.batch(() => rt.append(B.cells.xs, "b" + i)); }
+      await tick(900);                                       // mid-burst: the pacers are draining
+      expect(A.val("xs").filter((x) => x[0] === "a").length).toBe(200);   // A's own edits shown at once (optimistic)
+      C.socket().close();                                    // C drops and reconnects mid-burst
+      const done = async () => {
+        for (let t = 0; t < 120; t++) {
+          if ([A, B, C].every((X) => X.val("xs").length === 400) && new Set([A, B, C].map((X) => JSON.stringify(X.val("xs")))).size === 1) return true;
+          await tick(100);
+        }
+        return false;
+      };
+      expect(await done()).toBe(true);
+      const xs = A.val("xs");
+      for (let i = 0; i < 200; i++) { expect(xs).toContain("a" + i); expect(xs).toContain("b" + i); }
+      // each sender's own appends keep their order (FIFO pacing, relay order)
+      expect(xs.filter((s) => s[0] === "a")).toEqual(Array.from({ length: 200 }, (_, i) => "a" + i));
+      expect(C.hooks.opens).toBe(2);
+      expect(w.logs.join("\n")).not.toContain("rate limit");
+      expect(w.errs.join("\n")).not.toContain("closed the connection");
+      expect(w.errs.join("\n")).not.toContain("dropped when the connection closed");
+    } finally { w.done(); }
+  }, 60000);
+
+  test("a coalesced `replace` burst converges with no broken-stream close (a superseded frame is not pending)", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      const B = w.live();
+      const C = w.live();
+      await tick(300);
+      const obs = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      for (let i = 1; i <= 300; i++) { rt.batch(() => A.cells.n.set(i)); if (i % 3 === 0) rt.batch(() => B.cells.n.set(1000 + i)); }
+      rt.batch(() => rt.append(A.cells.xs, "after"));       // an own echo AFTER the coalesced ones must still match
+      let ok = false;
+      for (let t = 0; t < 80 && !ok; t++) {
+        await tick(100);
+        ok = obs.got.some((f) => f.__key === "xs") && new Set([A, B, C].map((X) => JSON.stringify(X.state()))).size === 1;
+      }
+      expect(ok).toBe(true);
+      const ns = obs.got.filter((f) => f.__key === "n");
+      expect(ns.length).toBeLessThan(400);                   // coalesced: not every write went on the wire
+      expect([300, 1300]).toContain(A.val("n"));             // the last write of one of them wins, everywhere
+      expect(A.val("n")).toBe(ns[ns.length - 1].__val);
+      expect(A.val("xs")).toEqual(["after"]);
+      expect(w.errs.join("\n")).not.toContain("closed the connection");
+      expect(w.errs.join("\n")).not.toContain("not this client's oldest pending edit");
+      obs.ws.close();
+    } finally { w.done(); }
+  }, 30000);
+
+  // The relay's websocket handlers, driven directly: a fake upgrader that reserves a place but
+  // whose socket the test opens (or never opens) when it chooses.
+  async function relay(host) {
+    const { r, server } = compileConv();
+    const logs = [];
+    const mod = await loadServer(server.js, r.core);
+    const srv = mod.createServer({ root: "/tmp", log: (s) => logs.push(s), ...host });
+    const upgrade = async (accept = true) => {
+      let data = null;
+      const res = await srv.fetch(new Request("http://x.test/_scrml_ws/c", { headers: { Upgrade: "websocket" } }), { upgrade: (_req, o) => { data = o.data; return accept; } });
+      return { res, data };
+    };
+    const sock = (data) => ({ data, sent: [], closed: null, send(t) { this.sent.push(t); return t.length; }, subscribe() {}, unsubscribe() {}, publish() {}, close(c) { this.closed = c; } });
+    return { srv, logs, upgrade, sock, ws: srv.websocket };
+  }
+  const replayOf = (s) => JSON.parse(s.sent[0]);
+
+  test("a truncated channel starts again when the last reserved subscriber leaves — never while an upgrade holds a place", async () => {
+    const R = await relay({ [LOG_HOOK]: { frames: 2 } });
+    const u1 = await R.upgrade();
+    expect(u1.res).toBe(undefined);
+    const s1 = R.sock(u1.data); R.ws.open(s1);
+    for (let i = 1; i <= 3; i++) R.ws.message(s1, frame("n", "replace", i));
+    expect(R.logs.join("\n")).toContain("the frame log passed its bound");
+    // a second socket reserved (mid-upgrade, not yet opened) when the first leaves: no reset
+    const u2 = await R.upgrade();
+    R.ws.close(s1);
+    expect(R.logs.join("\n")).not.toContain("starts again with an empty log");
+    // a third, opened beside the reserved one, is told the log is incomplete (fail closed)
+    const u3 = await R.upgrade();
+    const s3 = R.sock(u3.data); R.ws.open(s3);
+    expect(replayOf(s3)).toEqual({ __type: "__replay", __complete: false, __seq: 3, __frames: [] });
+    R.ws.close(s3);
+    expect(R.logs.join("\n")).not.toContain("starts again with an empty log");
+    // the reserved socket closes WITHOUT ever opening: its place is released, and it was the last
+    R.ws.close(R.sock(u2.data));
+    expect(R.logs.join("\n")).toContain("the last subscriber left a channel whose frame log was truncated");
+    const u4 = await R.upgrade();
+    const s4 = R.sock(u4.data); R.ws.open(s4);
+    expect(replayOf(s4)).toEqual({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+    R.ws.message(s4, frame("n", "replace", 7));
+    expect(JSON.parse(s4.sent[1])).toEqual({ __type: "__sync", __seq: 1, __key: "n", __op: "replace", __val: 7, __own: true });
+  });
+
+  test("a failed upgrade releases its place; the next socket that opens alone on a truncated channel starts it again", async () => {
+    const R = await relay({ [LOG_HOOK]: { frames: 1 } });
+    const u1 = await R.upgrade();
+    const s1 = R.sock(u1.data); R.ws.open(s1);
+    R.ws.message(s1, frame("n", "replace", 1)); R.ws.message(s1, frame("n", "replace", 2));
+    const bad = await R.upgrade(false);
+    expect(bad.res.status).toBe(400);
+    R.ws.close(s1);
+    expect(R.logs.join("\n")).toContain("the last subscriber left");
+    // the cap counted the failed one only while it was reserved: a full cap is free again
+    const u2 = await R.upgrade();
+    const s2 = R.sock(u2.data); R.ws.open(s2);
+    expect(replayOf(s2).__complete).toBe(true);
+    expect(replayOf(s2).__seq).toBe(0);
+  });
+
+  test("a relay echo spends no token: a sender at its full bucket is not closed by its own `__seq` echoes", async () => {
+    const R = await relay({});
+    const u = await R.upgrade();
+    const s = R.sock(u.data); R.ws.open(s);
+    for (let i = 1; i <= 100; i++) R.ws.message(s, frame("n", "replace", i));   // the default burst, exactly
+    expect(s.closed).toBe(null);
+    expect(s.sent.length).toBe(101);                       // the replay + 100 own echoes
+    R.ws.message(s, frame("n", "replace", 101));            // the 101st client frame finds no token
+    expect(s.closed).toBe(1008);
+  });
+
+  test("a replay larger than the frame-size bound is sent as ONE message and applied by the client", async () => {
+    const R = await relay({});
+    const u = await R.upgrade();
+    const s = R.sock(u.data); R.ws.open(s);
+    const big = "x".repeat(60000);                         // each frame under 65 536 bytes; the log well over
+    for (let i = 0; i < 4; i++) R.ws.message(s, frame("xs", "append", big + i));
+    const u2 = await R.upgrade();
+    const s2 = R.sock(u2.data); R.ws.open(s2);
+    expect(s2.sent.length).toBe(1);
+    expect(new TextEncoder().encode(s2.sent[0]).length).toBeGreaterThan(65536);
+    const rep = JSON.parse(s2.sent[0]);
+    expect(rep.__complete).toBe(true);
+    expect(rep.__frames.length).toBe(4);
+  });
+});
+
+describe("K — #1941 × #1942: held and pending edits through the pacer (client, driven socket)", () => {
+  class FakeSocket {
+    static last = null;
+    constructor(url) { this.url = url; this.readyState = 0; this.sent = []; FakeSocket.last = this; }
+    send(t) { this.sent.push(t); }
+    close() { this.readyState = 3; }
+  }
+  const XS = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
+  const NT = { defs: [], root: { k: "int" } };
+  function world(limits) {
+    const prevWs = globalThis.WebSocket, prevLoc = globalThis.location, prevErr = console.error;
+    const errs = [];
+    globalThis.WebSocket = FakeSocket;
+    globalThis.location = { protocol: "http:", host: "x.test" };
+    console.error = (m) => errs.push(String(m));
+    const scope = rt.root.child();
+    const xs = rt.cell([]), n = rt.cell(0);
+    rt.channel(scope, { name: "c", reconnect: 0, limits, open: null, close: null, error: null,
+      cells: [{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }, { key: "n", cell: n, table: NT, ops: ["replace"], edges: null }] });
+    const s = FakeSocket.last;
+    let seq = 0;
+    // the relay's copy of each frame the client sent, back to it (`__own: true`), in order
+    const echo = (from) => { for (const t of s.sent.slice(from)) { const f = JSON.parse(t); s.onmessage({ data: JSON.stringify({ __type: "__sync", __seq: ++seq, __key: f.__key, __op: f.__op, __val: f.__val, __own: true }) }); } };
+    return { s, xs, n, errs, echo, done: () => { scope.dispose(); globalThis.WebSocket = prevWs; globalThis.location = prevLoc; console.error = prevErr; } };
+  }
+  const REPLAY0 = '{"__type":"__replay","__complete":true,"__seq":0,"__frames":[]}';
+
+  test("held pre-replay edits are paced: after the replay only the bucket goes out, the rest drain in order", async () => {
+    const W = world({ maxFrame: 65536, rate: 20, burst: 3 });
+    try {
+      W.s.readyState = 1; W.s.onopen();
+      for (let i = 0; i < 6; i++) rt.batch(() => rt.append(W.xs, "h" + i));   // before the replay: HELD
+      expect(W.s.sent).toEqual([]);
+      W.s.onmessage({ data: REPLAY0 });
+      expect(W.xs.peek()).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);       // re-applied on the rebuilt value
+      expect(W.s.sent.length).toBe(2);                                         // burst 3 less 5% (rounded up) = 2
+      await tick(400);
+      expect(W.s.sent.map((t) => JSON.parse(t).__val)).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);
+      W.echo(0);
+      expect(W.errs.join("\n")).not.toContain("closed the connection");
+      expect(W.xs.peek()).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);
+    } finally { W.done(); }
+  });
+
+  test("a superseded queued `replace` leaves no pending entry: the echoes of the frames actually sent match in order", async () => {
+    const W = world({ maxFrame: 65536, rate: 20, burst: 2 });                  // a 1-token client bucket
+    try {
+      W.s.readyState = 1; W.s.onopen(); W.s.onmessage({ data: REPLAY0 });
+      rt.batch(() => W.n.set(1));                                              // sent
+      rt.batch(() => W.n.set(2));                                              // queued
+      rt.batch(() => rt.append(W.xs, "a"));                                    // queued
+      rt.batch(() => W.n.set(3));                                              // supersedes n=2: never sent
+      expect(W.s.sent.length).toBe(1);
+      W.echo(0);                                                               // n=1 comes back
+      expect(W.n.peek()).toBe(3);                                              // pending a, n=3 re-applied on top
+      await tick(300);
+      expect(W.s.sent.map((t) => JSON.parse(t).__val)).toEqual([1, "a", 3]);
+      W.echo(1);                                                               // a, then n=3: each the oldest pending
+      expect(W.errs).toEqual([]);
+      expect(W.n.peek()).toBe(3);
+      expect(W.xs.peek()).toEqual(["a"]);
+    } finally { W.done(); }
+  });
+
+  test("a close drops the queued frames and their pending entries; the next replay rebuilds without them", () => {
+    const W = world({ maxFrame: 65536, rate: 1, burst: 2 });
+    try {
+      W.s.readyState = 1; W.s.onopen(); W.s.onmessage({ data: REPLAY0 });
+      rt.batch(() => rt.append(W.xs, "sent"));
+      rt.batch(() => rt.append(W.xs, "queued1"));
+      rt.batch(() => rt.append(W.xs, "queued2"));
+      expect(W.s.sent.length).toBe(1);
+      W.s.readyState = 3; W.s.onclose({ code: 1006, reason: "", wasClean: false });
+      expect(W.errs.join("\n")).toContain("2 edits not yet sent were dropped");
+      rt.batch(() => rt.append(W.xs, "while-closed"));                         // not sent, not queued
+      expect(W.s.sent.length).toBe(1);
+    } finally { W.done(); }
+  });
+});

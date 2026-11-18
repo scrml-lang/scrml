@@ -11,26 +11,26 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 614 | 32.9% |
+| PASS | 615 | 32.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 18 | 1.0% |
+| FAIL | 19 | 1.0% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 601 | 32.2% |
+| UNSUPPORTED | 599 | 32.1% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 632; of those, 614 hold (97.2%). Runtime half executed on the bootstrap for 205 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 634; of those, 615 hold (97.0%). Runtime half executed on the bootstrap for 205 case(s).
 
-- **Vacuous** passes: 13 of 614 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **601**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 18; the other 12 are implemented checks that answered wrong.
+- **Vacuous** passes: 13 of 615 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **602**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 19; the other 13 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 601.
+UNSUPPORTED by reason: bootstrap-unsupported 599.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 405 · FAIL 15 · UNSUPPORTED 454. Twin holds 405 (non-vacuous 395). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **874** — PASS 406 · FAIL 16 · UNSUPPORTED 452. Twin holds 406 (non-vacuous 396). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 4 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -112,7 +112,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
 | control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
-| defer | 51 | 25 | · | · | · | 4 | 22 | · | · |
+| defer | 51 | 25 | · | 1 | · | 4 | 21 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 24 | · | · | · | 11 | 4 | · | · |
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 127 | 72 | · | 1 | · | 44 | 10 | · | · |
+| reactive | 127 | 73 | · | 1 | · | 44 | 9 | · | · |
 | refinement | 57 | 17 | · | 1 | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
@@ -167,7 +167,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | tool | 11 | 11 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 5 | · | · | · | 6 | 21 | · | · |
 
-### FAIL (18)
+### FAIL (19)
 
 - `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
   - missing E-UNQUOTED-DISPLAY-TEXT
@@ -177,6 +177,8 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
   - E-PARSE-TYPE: expected a type, found `"a"`
 - `codegen/cg-export-enum-library-rep` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
+- `defer/server-callee-error-total-handler-twin` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-ERROR-010)
 - `error/error-008-message-pos` (twin · parse-reject; not in the bootstrap: E-ERROR-008)
   - missing E-ERROR-008
   - severity: E-ERROR-008 did not fire (expected error)
@@ -231,7 +233,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (614)
+### PASS / CODES-ONLY (615)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -727,6 +729,7 @@ none
 - `reactive/narrowing-ends-direct-write-reject` — PASS · TWIN
 - `reactive/narrowing-ends-loop-write-reject` — PASS · TWIN
 - `reactive/narrowing-ends-nested-write-reject` — PASS · TWIN
+- `reactive/narrowing-ends-unresolvable-call-reject` — PASS · TWIN
 - `reactive/narrowing-gated-handler-keeps-rt` — PASS · TWIN
 - `reactive/narrowing-gated-handler-nested-gates-pos` — PASS · TWIN
 - `reactive/narrowing-gated-handler-other-cell-reject` — PASS · TWIN
@@ -848,7 +851,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (601)
+### UNSUPPORTED (599)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -948,9 +951,9 @@ none
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse(
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: a branch of an `if` used as a value that does not end in its `lift` (a `lift` on only some paths, or none — §17.6.2, W-LIFT-001) is not in the bootstrap yet — the bootstrap builds a branch that is ONE
 - `defer/control-flow-inner-loop-ok` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `helper` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
-- `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: a `,` after column `tasks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `defer/cps-batch0-failure` — twin · bootstrap-unsupported: a `,` after column `tasks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `defer/cps-batch1-failure` — twin · bootstrap-unsupported: a `,` after column `tasks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
+- `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: `save()` both uses a `?{}` query and writes `@busy`, so it is split across the client/server boundary (§19.9.5: "A function whose body mixes a server-trigger statement with a reactive-assignment state
+- `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/cps-batch1-failure` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
 - `defer/deferred-server-call-completes` — twin · bootstrap-unsupported: a client call of the server function `ping` (§19.9.10) stands in a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)
 - `defer/hoist-structural` — twin · bootstrap-unsupported: a tape destructuring pattern `[x, y]` is not in the bootstrap yet — whether a pattern longer than the tape traps like an index read (§66.12.8) or binds `not` is unruled; read the elements by index: `c
@@ -958,10 +961,9 @@ none
 - `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a nested `function inner` inside a block of the function body (an `if`, a loop, a `match` arm, a `given` or `defer` body) — the bootstrap builds a nested function only at the TOP LEVEL of a function b
 - `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a failable nested function `function inner(…)!` — the language allows it (§7.3.1, §19.4); the bootstrap does not build a nested `!` function yet (INTERIM — its failures, `?` propagation and transactio
 - `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `o.a = …` writes a part of `o`, whose type is not known here — annotate it (`let o: T = …`)
-- `defer/server-block-nested-neg` — twin · bootstrap-unsupported: a `,` after column `tasks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `defer/server-callee-error-total-handler` — twin · bootstrap-unsupported: a `,` after column `locks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `defer/server-callee-error-total-handler-twin` — twin · bootstrap-unsupported: a `,` after column `locks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `defer/server-in-split-neg` — twin · bootstrap-unsupported: a `,` after column `tasks.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
+- `defer/server-block-nested-neg` — twin · bootstrap-unsupported: `save()` both uses a `?{}` query and writes `@busy`, so it is split across the client/server boundary (§19.9.5: "A function whose body mixes a server-trigger statement with a reactive-assignment state
+- `defer/server-callee-error-total-handler` — twin · bootstrap-unsupported: a client call of the server function `release` (§19.9.10) stands in a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)
+- `defer/server-in-split-neg` — twin · bootstrap-unsupported: `save()` both uses a `?{}` query and writes `@trace`, so it is split across the client/server boundary (§19.9.5: "A function whose body mixes a server-trigger statement with a reactive-assignment stat
 - `defer/stack-arrow-helper-before-defer` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/stack-arrow-helper-before-defer-twin` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/tilde-across-defer` — twin · bootstrap-unsupported: `~ pipeline accumulator` (§32) is not in the bootstrap yet; it is refused here by name rather than misread
@@ -1287,7 +1289,6 @@ none
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
-- `reactive/narrowing-ends-unresolvable-call-reject` — twin · bootstrap-unsupported: `function-typed parameter` (§15.11.5) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap reads a function type in the §15.11.4 spelling only, `(x: T) => R` (§7
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it
 - `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
@@ -1336,13 +1337,13 @@ none
 - `server-db/async-fn-escapes-handler-destructured-scheduler-neg` — twin · bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
 - `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
 - `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: untyped access through the browser root `window` is not in the bootstrap (§21.3.3 "Implementation status": it refuses a bare `window` / `document` read outright) — reach the DOM through a `<host>` bin
-- `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
-- `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
-- `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
-- `server-db/cps-idempotency-store-missing-import-pos` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
+- `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-db/cps-idempotency-store-missing-import-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-login-check-stays-server` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
-- `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
-- `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: a `,` after column `counters.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-s
+- `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/event-after-await-e01-destructure-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
 - `server-db/event-after-await-e04-dotcall-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
 - `server-db/event-after-await-e09-objwrap-neg` — twin · bootstrap-unsupported: `event` used as a value — the listener's event `event` is in the bootstrap only as a read of a scalar member of the `Event` interface (`event.type`, `event.timeStamp`) and a call of `event.preventDefa
@@ -1368,8 +1369,8 @@ none
 - `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/server-fn-in-sync-callback-neg` — twin · bootstrap-unsupported: `<page auth="optional">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.8), so the page is refused rather than compiled ungated
 - `server-db/server-fn-in-sync-callback-pos` — twin · bootstrap-unsupported: `<page auth="optional">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.8), so the page is refused rather than compiled ungated
-- `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: a `,` after column `items.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
-- `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: a `,` after column `items.id` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-sche
+- `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `server-db/sql-configured-db-no-e-sql-004` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
 - `server-db/sql-handled-cell-write-arm-values-rt` — twin · bootstrap-unsupported: `loadLit()` both uses a `?{}` query and writes `@lit`, so it is split across the client/server boundary (§19.9.5: "A function whose body mixes a server-trigger statement with a reactive-assignment sta
 - `server-db/sql-handled-cell-write-rt` — twin · bootstrap-unsupported: member access `.body` on a value that is not a struct or an instance is not in bootstrap slice M2

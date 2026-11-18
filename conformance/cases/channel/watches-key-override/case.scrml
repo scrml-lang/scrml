@@ -9,9 +9,9 @@
 
   <channel name="events-feed" watches=events key=label>
     <onchange>
-      <Inserted(row) : print(row)>
-      <Updated(row) : print(row)>
-      <Deleted(key) : print(key)>
+      <Inserted(row) : print("inserted")>
+      <Updated(row) : print("updated")>
+      <Deleted(key) : print("deleted")>
     </onchange>
   </channel>
 

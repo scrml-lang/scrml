@@ -2,15 +2,15 @@
     <schema>
         notes {
             id: integer primary key
-            body: text
+            body: text not null
         }
         empties {
             id: integer primary key
-            body: text
+            body: text not null
         }
         gone {
             id: integer primary key
-            body: text
+            body: text not null
         }
     </schema>
     <hit> = "init"

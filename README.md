@@ -24,7 +24,7 @@ Here is a small app: a task list that saves to SQLite, stays in sync across ever
 
 ### 1 — the data and the server
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×7, E-TYPE-031] — the bootstrap has no class: binding, <empty> or <onTimeout>, and no engine opener effect= yet (its <channel> is built, s478-boot-channel); it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Task's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×7] — the bootstrap has no class: binding, <empty> or <onTimeout>, and no engine opener effect= yet (its <channel> is built, s478-boot-channel; its `<schema>` rows type `integer` as `int` since the S478 ruling, so Task's `id: int` fits) -->
 <!-- snippet: docs/readme-snippets/tasks.scrml#L7-L53 -->
 ```scrml
 <program db="tasks.db">

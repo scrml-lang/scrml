@@ -46,14 +46,14 @@
 ${
     import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr } from "./ast.scrml"
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
-    import { SchemaErr, SchemaRead, SchemaTable, readSchemaBody, schemaCloseAt } from "./schema.scrml"
+    import { SchemaErr, SchemaRead, SchemaTable, SchemaCol, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
     import { isKnownElementName } from "./elements.scrml"
@@ -4783,7 +4783,8 @@ ${
     }
 
     fn locusTag(tag: string) -> boolean {
-        return tag == "onTransition" || tag == "onTimeout" || tag == "onIdle" || tag == "page" || tag == "onchange" || tag == "theme" || tag == "defaults"
+        // s478-ruled-endpoint — `endpoint`: §61.2 "a direct child of the top-level `<program>`"
+        return tag == "onTransition" || tag == "onTimeout" || tag == "onIdle" || tag == "page" || tag == "onchange" || tag == "theme" || tag == "defaults" || tag == "endpoint"
     }
 
     // The row mark for an element node: its locus mark when its tag is locus-bound, else "".
@@ -6832,7 +6833,13 @@ ${
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
         if (lifeAhead(tp)) return parseLifeType(tp)
-        if (fnTypeAhead(tp)) return parseFnType(tp)        // s478 (s478-boot-fn-type)
+        if (fnTypeAhead(tp)) return parseFnType(tp, start, false, false)        // s478 (s478-boot-fn-type)
+        // s478-ruled-fn-types — §7.5 "Function types (S478)": `fn (x: T) => R`, the pure function
+        // type; and the two retired spellings, `(…) -> R` and `fn(…)` with no `=>`, which are
+        // E-PARSE-TYPE naming the `=>` fix (read whole, so nothing cascades)
+        if (isWord(tp, "fn") && fnTypeAhead(adv(tp))) return parseFnType(adv(tp), start, true, false)
+        if (thinFnTypeAhead(tp)) return parseFnType(tp, start, false, true)
+        if (isWord(tp, "fn") && isP(adv(tp), "(")) return parseRetiredFnKw(tp, start)
         let t: TP = tp
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
@@ -7678,7 +7685,60 @@ ${
         if (!isP(tp, "(")) return false
         const close: int = parenClose(tp)
         if (close < 0) return false
-        return tk(peekAt(tp, close + 1), "=>")
+        return fnArrowAt(tp, close + 1) > 0
+    }
+
+    // s478-ruled-fn-types — after a function type's `)`, at offset `k`: `=>`, or the failable
+    // modifier `!` / `! E` then `=>` (§7.5 "Function types (S478)": `(x: T)! E => R`, spelled as
+    // the declaration is, §19.4.1). The offset just past the `=>`, else 0.
+    fn fnArrowAt(tp: TP, k: int) -> int {
+        let j: int = k
+        if (tk(peekAt(tp, j), "!")) {
+            j = j + 1
+            const e: PTok = peekAt(tp, j)
+            if ((e.cls == TC.Ident || e.cls == TC.Keyword) && tk(peekAt(tp, j + 1), "=>")) j = j + 1
+        }
+        if (tk(peekAt(tp, j), "=>")) return j + 1
+        return 0
+    }
+
+    // s478-ruled-fn-types — the RETIRED thin-arrow spelling `(…) -> R` in a type: a `(` whose
+    // matching `)` is followed by a glued `->` (a lifecycle `(A -> B)` is lifeAhead's, tested
+    // first: its arrow is INSIDE the parentheses).
+    fn thinFnTypeAhead(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return thinArrowAt(tp, close + 1) > 0
+    }
+
+    // s478-ruled-fn-types r1 (review LOW-1) — after a function type's `)`, at offset `k`: the
+    // retired glued `->`, past an optional failable modifier `!` / `! E` (`(x: int)! E -> int`
+    // is the retired spelling of `(x: int)! E => int`, §7.5). The offset of the `-`, else 0.
+    fn thinArrowAt(tp: TP, k: int) -> int {
+        let j: int = k
+        if (tk(peekAt(tp, j), "!")) {
+            j = j + 1
+            const e: PTok = peekAt(tp, j)
+            if ((e.cls == TC.Ident || e.cls == TC.Keyword) && tk(peekAt(tp, j + 1), "-")) j = j + 1
+        }
+        const a: PTok = peekAt(tp, j)
+        if (tk(a, "-") && tk(peekAt(tp, j + 1), ">") && touching(a, peekAt(tp, j + 1))) return j
+        return 0
+    }
+
+    fn thinArrowFix() -> string {
+        return "a function type is written with `=>`, never `->` (§7.5 \"Function types\", S478: `=>` is the one spelling; `->` is the return-type annotation of a function DECLARATION only). Write `(x: T) => R` — `() => void` for a function that gives no value"
+    }
+
+    // s478-ruled-fn-types — the RETIRED `fn(…)` spelling (no `=>` after its `)`): E-PARSE-TYPE
+    // naming the fix, then the rest read as a function type (a following `-> R` is its result)
+    // so nothing cascades.
+    fn parseRetiredFnKw(tp: TP, start: int) -> RType {
+        const t0: TP = diagAt(tp, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value; `fn (x: T) => R` (with `=>`) is the PURE function type (§48.6.3)", cur(tp))
+        const close: int = parenClose(adv(t0))
+        if (close > 0 && thinArrowAt(adv(t0), close + 1) > 0) return parseFnTypeAt(adv(t0), start, false, true, false)
+        return parseFnTypeAt(adv(t0), start, false, false, true)
     }
 
     // The offset (from `tp`, at a `(`) of the `)` that closes it, else -1 (a `{`, `}` or `;`
@@ -7709,8 +7769,17 @@ ${
     // are built on a declaration's own parameters only). `void` as the return: a function that
     // gives no value. A failable function type has no spelling in the SPEC (§19.4.4 puts `!` in
     // a function's type signature but names no type syntax): nothing is read for it here.
-    fn parseFnType(tp: TP) -> RType {
-        const start: int = cur(tp).start
+    fn parseFnType(tp: TP, start: int, pure: boolean, thin: boolean) -> RType {
+        if (!thin) return parseFnTypeAt(tp, start, pure, false, false)
+        // the retired `(…) -> R`: reported at its `->`, then read as `(…) => R`
+        const close: int = parenClose(tp)
+        const t1: TP = diagAt(tp, "E-PARSE-TYPE", thinArrowFix(), peekAt(tp, thinArrowAt(tp, close + 1)))
+        return parseFnTypeAt(t1, start, pure, true, false)
+    }
+
+    // `thin`: the arrow is the retired `->` (already reported); `bare`: no arrow at all (the
+    // retired `fn(…)`, already reported) — the type gives no value.
+    fn parseFnTypeAt(tp: TP, start: int, pure: boolean, thin: boolean, bare: boolean) -> RType {
         let t: TP = adv(tp)
         let ps: AType[] = []
         while (!isP(t, ")") && !atEnd(t)) {
@@ -7731,10 +7800,30 @@ ${
             }
         }
         t = expectP(t, ")")
-        t = expectP(t, "=>")
-        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not))
+        // s478-ruled-fn-types — the failable modifier `!` / `! E` (§7.5 "Function types (S478)",
+        // spelled as a `!` declaration is, §19.4.1): `err` the error enum's NAME, `not` for the
+        // built-in `Error` (§19.4.2)
+        let isFail = false
+        let err: AType | not = not
+        if (!bare && isP(t, "!")) {
+            isFail = true
+            t = adv(t)
+            const et: PTok = cur(t)
+            if ((et.cls == TC.Ident || et.cls == TC.Keyword) && (tk(peekAt(t, 1), "=>") || (thin && tk(peekAt(t, 1), "-")))) {
+                err = { nid: t.nid, span: mkSpan(et.start, et.end), k: ATypeK.TName(et.v) }
+                t = bumpId(adv(t))
+            }
+        }
+        const fx: AFnFx = { pure: pure, failable: isFail, err: err }
+        if (bare) return mkT(t, start, ATypeK.TFn(ps, not, fx))
+        if (thin) {
+            t = adv(adv(t))
+        } else {
+            t = expectP(t, "=>")
+        }
+        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not, fx))
         const rr: RType = parseTypeBody(t)
-        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t))
+        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t, fx))
     }
 
     fn lifeAhead(tp: TP) -> boolean {
@@ -9845,6 +9934,24 @@ ${
         let m: MP = nm.mp
         if (nm.w == "") {
             m = mDiag(m, "E-PARSE-TYPE", "expected a type after " + after, start, start + 1)
+        }
+        // s478-ruled-fn-types r1 (review MED-2) — the RETIRED `fn(…)` spelling on a declaration
+        // attribute (`<btn act:fn()/>`, §66): E-PARSE-TYPE naming the fix (§7.5 "Function types":
+        // "the `fn(…)` spelling with no `=>` (`cb: fn()`) SHALL be a parse error, E-PARSE-TYPE, whose
+        // message names the fix"). The `(…)` — and a glued `-> R` after it — is read past, so nothing
+        // cascades; the type is blank (already reported).
+        if (nm.w == "fn" && chAt(m, 0) == "(") {
+            const fclose: int = lifeCloseCh(mp.src, m.pos)
+            if (fclose >= 0) {
+                m = mAt(m, fclose + 1)
+                if (chAt(m, 0) == "-" && chAt(m, 1) == ">") {
+                    const rr: RMType = openerTypeMember(mAdv(m, 2), "`->`")
+                    m = rr.mp
+                }
+                m = mDiag(m, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value. (The bootstrap does not yet read a function type on a declaration attribute — INTERIM, g-boot-opener-fn-type-s478.)", start, m.pos)
+                const bt: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName("") }
+                return { t: bt, mp: mBump(m) }
+            }
         }
         let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
         m = mBump(m)
@@ -12530,17 +12637,24 @@ ${
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
             .TRefine(base: b, pred: p) :> typeNameText(b) + "(" + p + ")"
-            .TFn(params: ps, ret: r) :> fnTypeText(ps, r)
+            .TFn(params: ps, ret: r, fx: x) :> fnTypeText(ps, r, x)
         }
     }
 
-    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`
-    fn fnTypeText(ps: AType[], ret: AType | not) -> string {
+    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`; s478-ruled-fn-types: `fn (…) => R`
+    // (pure), `(…)! E => R` (failable)
+    fn fnTypeText(ps: AType[], ret: AType | not, fx: AFnFx) -> string {
         let parts: string[] = []
         for (const p of ps) { parts = parts.concat([typeNameText(p)]) }
         let r: string = "void"
         if (ret is given) r = typeNameText(ret)
-        return "(" + parts.join(", ") + ") => " + r
+        let lead: string = ""
+        if (fx.pure) lead = "fn "
+        let bang: string = ""
+        if (fx.failable) bang = "!"
+        const e: AType | not = fx.err
+        if (e is given) bang = "! " + typeNameText(e)
+        return lead + "(" + parts.join(", ") + ")" + bang + " => " + r
     }
 
     // ---- the target checks (rules 4, 5, 6, 8, 11) — the target's view is ast.scrml hostView / hostTargetParts ----
@@ -14448,11 +14562,11 @@ ${
         let m: MP = mp
         const tagEnd: int = o.start + 9
         if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<endpoint>`", o.start, tagEnd)
-        // §61.2 — the declaration's place. The SPEC names none beyond "a
-        // scrml-defined structural element (§4.15 / §24.4)", and the bootstrap
-        // serves the routes of the top-level `<program>` only: anywhere else it is
-        // refused by name (INTERIM — g-boot-endpoint-s478 owner question 4)
-        if (ctx != "program") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " is not in the bootstrap — it serves an `<endpoint>` written directly in the top-level `<program>` body only (§61.2 names no other place; INTERIM)", o.start, tagEnd)
+        // §61.2 (S478 open-Qs ruling (user-voice), item 36): "An `<endpoint>`
+        // declaration SHALL be a direct child of the top-level `<program>` … An
+        // `<endpoint>` anywhere else … is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)".
+        // A non-entry file's `<program>` is judged in analyze (endpointPass).
+        if (ctx != "program") m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to a page, a channel or a nested program; move it into the `<program>` body", o.start, tagEnd)
         for (const v of o.vals) {
             m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", v.span.start, v.span.end)
         }
@@ -14808,6 +14922,163 @@ ${
 
     type EpRepl:struct = { at: int, items: AItem[] }
 
+    // ---- the `<onchange>` desugar (S478 open-Qs ruling item 47) ---------------
+    // Ruling (user-voice S478 item 47, g-boot-channel-s478 owner question 7): "desugar the
+    // arms into client functions typed by the synthesized `RowChange`". §38.13.2: "`RowChange:enum
+    // = { Inserted(row: <RowT>), Updated(row: <RowT>), Deleted(key: <PKT>) }` where `<RowT>` is
+    // the struct of `T`'s columns and `<PKT>` is the type of `T`'s primary key"; §38.13.3: "`<onchange>`
+    // arm bodies run CLIENT-side … via canonical `@` access to program-scope cells". So, for an
+    // `<onchange>` in a `watches=<T>` channel of the top-level `<program>` whose table `T` this
+    // file's `<schema>` declares, every column of a typed column type:
+    //   type onchange#<k>#Row:struct = { <column>: <its type>, … }      (read-only fields)
+    //   function onchange#<k>#<Variant>(<binder>: onchange#<k>#Row) { <body>; }   (Inserted / Updated)
+    //   function onchange#<k>#Deleted(<binder>: <the key column's type>) { <body>; }
+    //   function onchange#<k>#_() { <body>; }                             (the wildcard)
+    // are added to the program's items, so each arm's scope and typing are a client function's
+    // (an unknown name in an arm is E-SCOPE-001). `#` keeps every synthesized name out of source.
+    // The column types mirror analyze.scrml colType (§14.8.3: INTEGER / REAL → `number`, TEXT
+    // and TIMESTAMP → `string`; a nullable column `T | not`). FAILS CLOSED to no desugar (the
+    // arms are judged for shape only, as before): a table not declared here or with an untyped
+    // column, an arm with no `:` body (a block arm's markup body is not kept), an arm naming
+    // no variant / repeating one / binding the wrong count (onchangeArmDiags reports those),
+    // and a feed with no key column for a `Deleted` arm. The feed itself is still refused at
+    // emit (print.scrml — the §38.13.7 capture is not built), so nothing here is printed.
+    type ROnchDesugar:struct = { items: AItem[], nid: int }
+
+    fn onchangeDesugar(items: AItem[], chans: AChannel[], onchs: AOnchange[], tables: SchemaTable[], nid0: int) -> ROnchDesugar {
+        if (onchs.length == 0 || tables.length == 0) return { items: items, nid: nid0 }
+        let nid: int = nid0
+        let add: AItem[] = []
+        let k: int = 0
+        for (const oc of onchs) {
+            let table: string = ""
+            let keyCol: string = ""
+            let top = false
+            for (const ch of chans) {
+                if (oc.span.start >= ch.body.start && oc.span.end <= ch.body.end) {
+                    top = ch.ctx == "program"
+                    for (const a of ch.attrs) {
+                        if (a.name == "watches") table = attrBareName(a.value)
+                        if (a.name == "key") keyCol = attrBareName(a.value)
+                    }
+                }
+            }
+            let tbl: SchemaTable | not = not
+            for (const t of tables) { if (t.name == table) tbl = t }
+            if (top && tbl is given && onchAllTyped(tbl.cols)) {
+                const rowName: string = "onchange#" + k + "#Row"
+                let fields: ATypeField[] = []
+                for (const c of tbl.cols) {
+                    const ct: RClone = onchColType(c, oc.span, nid)
+                    nid = ct.nid
+                    fields = fields.concat([{ nid: nid, span: oc.span, isLet: false, name: c.name, ty: ct.t, vals: [] }])
+                    nid = nid + 1
+                }
+                add = add.concat([{ nid: nid, span: oc.span, k: AItemK.TypeItem({ nid: nid + 1, span: oc.span, exported: false, name: rowName, body: ATypeBody.StructBody(fields) }) }])
+                nid = nid + 2
+                // §38.13.2: "The primary key is derived by the `id`-field convention …; an explicit
+                // `key=<column>` attribute … overrides it"
+                let pkc: SchemaCol | not = not
+                for (const c2 of tbl.cols) {
+                    if (keyCol != "" && c2.name == keyCol) pkc = c2
+                }
+                if (keyCol == "") {
+                    for (const c3 of tbl.cols) { if (pkc is not && c3.pk) pkc = c3 }
+                    for (const c4 of tbl.cols) { if (pkc is not && c4.name == "id") pkc = c4 }
+                }
+                let seen: string[] = []
+                let wild = false
+                for (const a of oc.arms) {
+                    const fresh: boolean = seen.indexOf(a.variant) < 0 && !wild
+                    seen = seen.concat([a.variant])
+                    if (a.variant == "_") wild = true
+                    const body: AExpr | not = a.body
+                    let pty: AType | not = not
+                    let known = false
+                    if (a.variant == "Inserted" || a.variant == "Updated") {
+                        pty = { nid: nid, span: a.span, k: ATypeK.TName(rowName) }
+                        nid = nid + 1
+                        known = true
+                    } else if (a.variant == "Deleted" && pkc is given) {
+                        const kt: RClone = onchColType(pkc, a.span, nid)
+                        nid = kt.nid
+                        pty = kt.t
+                        known = true
+                    } else if (a.variant == "_") {
+                        known = true
+                    }
+                    const fits: boolean = !a.parens || (a.variant != "_" && a.binds.length == 1)
+                    if (known && fresh && fits && body is given) {
+                        let params: AParam[] = []
+                        if (a.parens && a.binds.length == 1) {
+                            let pn: string = a.binds[0].name
+                            if (pn == "_") pn = "_#0"
+                            params = [{ nid: nid, span: a.binds[0].span, name: pn, ty: pty, lin: false }]
+                            nid = nid + 1
+                        }
+                        const st: AStmt = { nid: nid, span: body.span, k: AStmtK.Eval(body) }
+                        const blk: ABlock = { nid: nid + 1, span: body.span, stmts: [st] }
+                        const f: AFn = { nid: nid + 2, span: a.span, exported: false, pure: false, name: "onchange#" + k + "#" + a.variant, params: params, ret: not, body: blk,
+                                         server: false, failable: false, err: not }
+                        add = add.concat([{ nid: nid + 3, span: a.span, k: AItemK.FnItem(f) }])
+                        nid = nid + 4
+                    }
+                }
+            }
+            k = k + 1
+        }
+        if (add.length == 0) return { items: items, nid: nid }
+        return { items: appendToProgram(items, add), nid: nid }
+    }
+
+    // `items` with `add` appended to the body of its (first) top-level `<program>`.
+    fn appendToProgram(items: AItem[], add: AItem[]) -> AItem[] {
+        let out: AItem[] = []
+        let done = false
+        for (const it of items) {
+            const p: AProgram | not = programOfItem(it.k)
+            if (p is given && !done) {
+                out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: p.attrs, items: p.items.concat(add) }) }])
+                done = true
+            } else {
+                out = out.concat([it])
+            }
+        }
+        return out
+    }
+
+    fn onchAllTyped(cs: SchemaCol[]) -> boolean {
+        if (cs.length == 0) return false
+        for (const c of cs) {
+            if (c.ty != "integer" && c.ty != "real" && c.ty != "text" && c.ty != "timestamp") return false
+        }
+        return true
+    }
+
+    // A column's type (analyze.scrml colType's mapping, §14.8.3), with fresh node ids.
+    fn onchColType(c: SchemaCol, at: ASpan, nid: int) -> RClone {
+        let base: string = "string"
+        if (c.ty == "integer" || c.ty == "real") base = "number"
+        const t: AType = { nid: nid, span: at, k: ATypeK.TName(base) }
+        if (c.nn || (c.pk && c.ty == "integer")) return { t: t, nid: nid + 1 }
+        return { t: { nid: nid + 1, span: at, k: ATypeK.TMaybe(t) }, nid: nid + 2 }
+    }
+
+    // A bare-name attribute value (`watches=orders`), else "".
+    fn attrBareName(v: AAttrValue) -> string {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            // no-default-arm: one question of an attribute value — is it bare
+            _ :> not
+        }
+        if (e is not) return ""
+        return match e.k {
+            .Name(name: n) :> n
+            // no-default-arm: one question of an expression — is it a bare name
+            _ :> ""
+        }
+    }
+
     // The placeholder MarkupItem of each endpoint (its node id is the endpoint's) → its functions.
     fn replaceEpItems(items: AItem[], repl: EpRepl[]) -> AItem[] {
         let out: AItem[] = []
@@ -14914,7 +15185,7 @@ ${
             .TMaybe(inner: i) :> cloneMaybe(t.span, i, nid0)
             .TLife(pre: a, post: b) :> cloneLife(t.span, a, b, nid0)
             .TRefine(base: b, pred: p) :> cloneRefine(t.span, b, p, nid0)
-            .TFn(params: ps, ret: r) :> cloneFnType(t.span, ps, r, nid0)
+            .TFn(params: ps, ret: r, fx: x) :> cloneFnType(t.span, ps, r, x, nid0)
         }
     }
 
@@ -14940,7 +15211,7 @@ ${
     }
 
     // s478 (s478-boot-fn-type)
-    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, nid0: int) -> RClone {
+    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, fx: AFnFx, nid0: int) -> RClone {
         let nid: int = nid0
         let out: AType[] = []
         for (const p of ps) {
@@ -14948,9 +15219,9 @@ ${
             out = out.concat([r.t])
             nid = r.nid
         }
-        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not) }, nid: nid + 1 }
+        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not, fx) }, nid: nid + 1 }
         const rr: RClone = cloneType(ret, nid)
-        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t) }, nid: rr.nid + 1 }
+        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t, fx) }, nid: rr.nid + 1 }
     }
 
     // =========================================================================
@@ -14976,7 +15247,10 @@ ${
         const r0: RMItems = parseMarkupItems(m0, "")
         const r1: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) }
         // s478 (s478-boot-endpoint): each `<endpoint>`'s arms, as server functions (endpointDesugar)
-        const dz: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
+        const dz0: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid)
+        // s478 (S478 open-Qs ruling item 47): each `<onchange>` arm, as a client function (onchangeDesugar)
+        const oz: ROnchDesugar = onchangeDesugar(dz0.items, r1.mp.chans, r1.mp.onchs, r1.mp.tables, dz0.nid)
+        const dz: RDesugar = { items: oz.items, eps: dz0.eps, nid: oz.nid }
         const m1: MP = r1.mp
         const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, chans: m1.chans, onchs: m1.onchs, schemaN: m1.schemaN, tables: m1.tables, ns: m1.ns } }
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do

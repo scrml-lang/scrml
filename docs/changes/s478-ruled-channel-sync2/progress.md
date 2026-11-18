@@ -24,3 +24,11 @@ Head conformance (c5729242f): PASS 614 FAIL 18 CRASH 0 — per-case identical to
 - [x] LOW-1 bound counted in UTF-8 bytes; LOW-2 seam = `Symbol.for("scrml.test.channelLog")`; LOW-3 `<onTimeout>` not built (refused everywhere) — residue item 8
 - Tests: channel-ops-s478 L (10 tests; 10 red on f7d0a01f3 runtime except the two behaviour-preserving ones)
 - [ ] gates, conformance, hook, push
+
+## Integration round (#1941 × #1942, after #1942 merged to main)
+- [x] merge origin/main (SPEC §38.4.2/§38.4.3/§38.10.4 both rule sets kept; runtime.js, server-runtime.js resolved)
+- [x] one subscriber count: #1942's `ch.subs` (reserved at upgrade); epoch reset at 0, or at open holding the only reservation
+- [x] pacing: `send(p)` → `channelPacer.push(…, ref)`; superseded `replace` drops its pending entry; close drops queued pending
+- [x] replay: one message, not a client frame (no bucket, no frame bound); a replay `send` → 0 closes 1011 unsubscribed
+- [x] tests: channel-ops-s478 K (8 tests); #1942 bounds tests adapted to the `__replay` / `__seq` / `__own` protocol
+- [ ] probes, conformance, CI gates, hook, push

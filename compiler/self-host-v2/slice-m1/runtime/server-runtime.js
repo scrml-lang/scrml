@@ -807,12 +807,12 @@ export async function txEnd(h, ok) {
 // A SQLite error that ended the whole transaction (ON CONFLICT ROLLBACK, SQLITE_FULL, …) is found by
 // runQuery's probe, which throws: the savepoint went with the transaction, and the envelope rolls
 // back and answers a server error. A ROLLBACK TO / RELEASE that fails throws the same way.
-async function statement(tx, mode, text, params, slots) {
+async function statement(tx, mode, text, params, slots, row = null) {
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
   await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
-  const result = await runQuery(tx.conn, mode, text, params, slots, tx);
+  const result = await runQuery(tx.conn, mode, text, params, slots, tx, row);
   if (failed(result)) {
     await undoSavepoint(tx, name);
     return result;
@@ -924,23 +924,25 @@ function logLine(host, line) {
 // handled where it is written (a `!{}` on it, a `match` on its result). Inside a transaction this
 // scope owns it runs under a statement savepoint of its own (`statement`); outside one it runs as
 // any other query (one statement undoes only itself).
-export async function query(conn, mode, text, params, slots, handled = false) {
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): `row` — the §57 wire table of the
+// query's result type when its rows are typed from a `<schema>` table (print.scrml queryJs), else null.
+export async function query(conn, mode, text, params, slots, handled = false, row = null) {
   const tx = ownTx(conn);
   if (tx !== null) {
     if (tx.broken) throw brokenError(conn);
-    if (handled === true) return statement(tx, mode, text, params, slots);
-    return runQuery(conn, mode, text, params, slots, tx);
+    if (handled === true) return statement(tx, mode, text, params, slots, row);
+    return runQuery(conn, mode, text, params, slots, tx, row);
   }
-  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null);
+  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null, row);
   await conn.gate.acquire();
   try {
-    return await runQuery(conn, mode, text, params, slots, null);
+    return await runQuery(conn, mode, text, params, slots, null, row);
   } finally {
     conn.gate.release();
   }
 }
 
-async function runQuery(conn, mode, text, params, slots, tx) {
+async function runQuery(conn, mode, text, params, slots, tx, row = null) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
@@ -960,8 +962,103 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   if (mode === "run") return null;
   const list = [];
   for (const r of rows ?? []) list.push(plainRow(r));
-  if (mode === "get") return list.length > 0 ? list[0] : null;
-  return list;
+  const value = mode === "get" ? (list.length > 0 ? list[0] : null) : list;
+  if (row === null) return value;
+  return checkRows(conn, row, value);
+}
+
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM — ruling:user-voice-scrml.md S478
+// open-Qs item 20, option (b): "validate each typed row value at the query boundary, server-side, as
+// the row is read"). A non-STRICT SQLite table stores any storage class in any column (an INTEGER
+// column holding 'abc' or 1.5, a TEXT column holding a blob), so a row typed off the `<schema>`
+// declaration is checked against its §57 descriptor — the decoder's own check (an `int` an integer,
+// a `number` finite, a `string` a string, `T | not` null or a T; a declared field the row lacks
+// refused) — before the program sees it. Two row-only rules run first (fitRow):
+//   * an `int` field holds an integer within ±(2^53−1) (§21.3.1.1, "integral, within ±(2^53−1)"):
+//     a stored 64-bit INTEGER outside that range reaches us already rounded by the driver
+//     (9007199254740993 reads as …992), and a rounded id selects the WRONG row (#1944 review MED-1);
+//   * a column the declared type does not declare (a live table with a column `<schema>` does not
+//     list, read by `SELECT *`) is DROPPED, not refused: the row is still a row of the declared
+//     type, and the program sees only the declared fields (#1944 review MED-2).
+// A value that fails fails the QUERY as SqlError::QueryFailed, as a driver error does (handled where
+// the query is, propagated where it propagates), with a server log line naming the field path and
+// the stored value's storage class, never the value (#1944 review LOW-3); the program never sees it.
+// The decoded value (the codec's runtime layout) is what the query returns. STRICT DDL from
+// `<schema>` (the ruling's option (a)) would make the storage-class part redundant; the int range,
+// a missing / renamed column and the dropped extras are row rules a STRICT table still needs.
+function checkRows(conn, row, value) {
+  const fit = fitRow(row, row.root, value, "$");
+  const r = fit.ok ? decode(row, fit.value) : fit;
+  if (r.ok) return r.value;
+  const path = r.error.path;
+  const stored = fit.ok ? storageClass(valueAt(fit.value, path)) : r.error.stored;
+  conn.log(`scrml server: a query on ${conn.desc.driver}:${conn.desc.file} read a row value that does not fit its declared type — ${path}: the stored value is ${stored} (§14.8.3: a typed row is checked as it is read; a table that is not STRICT stores any value in any column)`);
+  const err = { variant: "QueryFailed", data: [`a row value does not fit its declared type at ${path} (§14.8.3)`] };
+  noteDriverText({ message: err.data[0] }, err);
+  return failure(err);
+}
+
+// The row-only rules (checkRows above), over the row's §57 descriptor: drops the undeclared keys of
+// each struct row and refuses an `int` outside the safe range. Everything else is left to `decode`.
+function fitRow(table, ty, v, path) {
+  switch (ty.k) {
+    case "maybe":
+      return v === null ? { ok: true, value: v } : fitRow(table, ty.inner, v, path);
+    case "int":
+      if (typeof v === "number" && Number.isInteger(v) && !Number.isSafeInteger(v)) {
+        return { ok: false, error: { path, stored: "an integer outside ±(2^53−1), which the driver reads lossily" } };
+      }
+      return { ok: true, value: v };
+    case "seq": {
+      if (!Array.isArray(v)) return { ok: true, value: v };
+      const out = [];
+      for (let i = 0; i < v.length; i++) {
+        const r = fitRow(table, ty.elem, v[i], `${path}[${i}]`);
+        if (!r.ok) return r;
+        out.push(r.value);
+      }
+      return { ok: true, value: out };
+    }
+    case "ref": {
+      const d = table.defs[ty.def];
+      if (d === undefined || d.k !== "struct" || v === null || typeof v !== "object" || Array.isArray(v)) return { ok: true, value: v };
+      const out = {};
+      for (const f of d.fields) {
+        if (!Object.hasOwn(v, f.name)) continue; // decode reports the missing field
+        const r = fitRow(table, f.ty, v[f.name], `${path}.${f.name}`);
+        if (!r.ok) return r;
+        Object.defineProperty(out, f.name, { value: r.value, enumerable: true, writable: true, configurable: true });
+      }
+      return { ok: true, value: out };
+    }
+    default:
+      return { ok: true, value: v };
+  }
+}
+
+// The value a decode failure path (`$`, `.name`, `[i]`) names, or undefined where there is none.
+function valueAt(v, path) {
+  let cur = v;
+  const re = /\.([A-Za-z_$][A-Za-z0-9_$]*)|\[(\d+)\]/g;
+  let m;
+  while ((m = re.exec(path)) !== null) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    const k = m[1] !== undefined ? m[1] : Number(m[2]);
+    if (!Object.hasOwn(cur, k)) return undefined;
+    cur = cur[k];
+  }
+  return cur;
+}
+
+// A stored value's SQLite storage class, for the log line — never the value itself.
+function storageClass(v) {
+  if (v === undefined) return "absent (the row has no such column)";
+  if (v === null) return "NULL";
+  if (typeof v === "number") return Number.isInteger(v) ? "an integer" : "a real";
+  if (typeof v === "bigint") return "an integer";
+  if (typeof v === "string") return "text";
+  if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return "a blob";
+  return `a ${typeof v}`;
 }
 
 // A row as a value: a fresh plain object of the row's own columns.
@@ -1430,7 +1527,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   const byChannel = new Map();
   for (const ch of channels) byChannel.set(CHANNEL_PREFIX + ch.name, ch);
-  const websocket = channelSockets(host, host[CHANNEL_LOG_TEST_HOOK] ?? {});
+  const websocket = channelSockets(host, channels, host[CHANNEL_LOG_TEST_HOOK] ?? {});
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))).concat(channels.map((ch) => ({ path: CHANNEL_PREFIX + ch.name, method: "GET" }))),
     websocket,
@@ -1450,7 +1547,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
       }
       // s478 #1928 fix r1 (MED-1): the prefix is intercepted only in a program that HAS channels
       // (a program without one answers `/_scrml_ws/…` as any other path, unchanged from before
-      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (endpointPathRefusal),
+      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (E-ENDPOINT-ROUTE-DUPLICATE, endpointReservedWhy),
       // so no endpoint is ever shadowed here. Refusal order (LOW-1): 403 (Origin, §40.2 — first,
       // before anything about the request is answered), then 404 (no such channel), 405
       // (non-GET), 426 (no `Upgrade: websocket`); only then the upgrade.
@@ -1508,8 +1605,8 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   RE-ENCODED from the decoded payload … The server holds no cell value (§38.4), so it SHALL
 //   NOT be relied on for a check that needs one" — the length bound after an edit and a
 //   `rule=` edge are each receiver's checks (runtime.js `channel`).
-// Fail closed where the SPEC is silent (owner questions, g-boot-channel-s478): a frame
-// is decoded STRICTLY — text only, at most CHANNEL_MAX_FRAME characters, a JSON object
+// Strict decode + close (§38.4.3, S478 open-Qs ruling item 41 — formerly owner question 1 of g-boot-channel-s478): a frame
+// is decoded STRICTLY — text only, at most the channel's frame bound in UTF-8 bytes (§38.4.3), a JSON object
 // of exactly `__type` / `__key` / `__op` / `__val`, `__type` "__sync", `__key` a cell the
 // channel declares, `__op` one of the ops that cell syncs (`desc.cells[i].ops`), `__val`
 // decoding canonically against that cell's table (`replace` / `transition`), its element
@@ -1518,6 +1615,14 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 // other frame closes the connection (1003 / 1007 / 1008 / 1009) and is relayed to no
 // one. Each channel publishes on its own topic key (`[name, topic]`), so two channels
 // naming one `topic=` never exchange frames.
+//   §38.4.3 (S478 open-Qs ruling (user-voice), items 41–44 and 49): "The relay SHALL decode a
+//   client's frame strictly … and close the sender's connection" (1003 / 1007 / 1008 / 1009);
+//   "A channel's topic is scoped to its channel"; and the three bounds, each a §38 default with
+//   an override the compiler resolves (`desc.limits`): a frame is at most `maxFrame` bytes of
+//   UTF-8 (default 65 536; 1009), a connection's frames pass a token bucket of `burst` tokens
+//   refilled at `rate` per second (defaults 100 / 50; "a frame that finds less than one token
+//   … closes the connection (1008)"), and a channel admits at most `maxSubs` subscribers per
+//   server process ("a further upgrade SHALL be answered `503`"; default 1000).
 //   S478 open-Qs ruling (user-voice), items 50–51 (s478-ruled-channel-sync2), §38.4.2:
 //   "A frame that passes is given the channel's next SEQUENCE NUMBER (1 for the channel's first
 //   relayed frame, then 2, 3, … with no gap …) and is relayed RE-ENCODED from the decoded payload
@@ -1531,9 +1636,20 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   channel says `__complete: false` with no frames."
 //   The log is a FRAME log (§38.4, amended): the relay never applies a frame to a value. Its
 //   state lives per `server()` call (channelSockets), never at module scope.
+//   Integration (#1941 × #1942, S478): ONE subscriber count per channel — #1942's `ch.subs`,
+//   reserved at the upgrade and released once on a failed upgrade or the socket's close. The
+//   §38.4.2 epoch reset reads it: a truncated channel starts again when that count reaches 0 (the
+//   last reserved subscriber has left), or when a socket opens holding the ONLY reservation (every
+//   earlier subscriber has left — this covers a reservation released by a failed upgrade). A socket
+//   still mid-upgrade holds a reservation, so the reset never fires while one is reserved and not
+//   yet opened: conservative — such a socket that then opens beside no one is reset at its open,
+//   and one that opens beside another subscriber is told the log is incomplete (fail closed).
 // ---------------------------------------------------------------------------
 const CHANNEL_PREFIX = "/_scrml_ws/";
 export const CHANNEL_MAX_FRAME = 65536;
+export const CHANNEL_FRAME_RATE = 50;
+export const CHANNEL_FRAME_BURST = 100;
+export const CHANNEL_MAX_SUBSCRIBERS = 1000;
 export const CHANNEL_MAX_LOG_FRAMES = 10000;
 export const CHANNEL_MAX_LOG_BYTES = 8388608;
 // #1941 fix r1 (LOW-2): the TEST seam that lowers the log bounds is a registered symbol key on the
@@ -1541,10 +1657,56 @@ export const CHANNEL_MAX_LOG_BYTES = 8388608;
 // it, so a config value like `{ frames: 0 }` can never truncate (and lock) every channel.
 export const CHANNEL_LOG_TEST_HOOK = Symbol.for("scrml.test.channelLog");
 
+// A bound the compiler resolved (a safe integer ≥ 1), else the §38.4.3 default — never "no bound".
+function channelBound(v, dflt) {
+  return Number.isSafeInteger(v) && v >= 1 ? v : dflt;
+}
+
 export function channel(desc) {
   const cells = new Map();
   for (const c of desc.cells) cells.set(c.key, { table: c.table, ops: Array.isArray(c.ops) ? c.ops : [] });
-  return { name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells };
+  const lim = desc.limits !== null && typeof desc.limits === "object" ? desc.limits : {};
+  return {
+    name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells,
+    maxFrame: channelBound(lim.maxFrame, CHANNEL_MAX_FRAME),
+    rate: channelBound(lim.rate, CHANNEL_FRAME_RATE),
+    burst: channelBound(lim.burst, CHANNEL_FRAME_BURST),
+    maxSubs: channelBound(lim.maxSubscribers, CHANNEL_MAX_SUBSCRIBERS),
+    subs: 0,
+  };
+}
+
+// The UTF-8 byte length of `s`, counted only as far as `max + 1` (a frame's size bound).
+function utf8Over(s, max) {
+  if (s.length > max) return true;            // every UTF-16 unit is at least one byte
+  if (s.length * 3 <= max) return false;      // and at most three
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+    if (n > max) return true;
+  }
+  return false;
+}
+
+// §38.4.3: "each connection holds a bucket of `burst` tokens, refilled at `rate` tokens per
+// second up to `burst`; each frame it sends spends one token, before it is decoded". `now` ms.
+function takeToken(data, ch, now) {
+  let b = data.scrmlBucket;
+  if (b === undefined) { b = { tokens: ch.burst, at: now }; data.scrmlBucket = b; }
+  const dt = now - b.at;
+  if (dt > 0) b.tokens = Math.min(ch.burst, b.tokens + (dt * ch.rate) / 1000);
+  b.at = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+
+function clockOf(host) {
+  return host !== null && typeof host === "object" && typeof host.now === "function" ? () => host.now() : () => performance.now();
 }
 
 function originOk(request) {
@@ -1574,12 +1736,30 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
   if (request.method !== "GET") return jsonResponse(host, 405, FIXED[405], { Allow: "GET" });
   const up = (request.headers.get("Upgrade") ?? "").toLowerCase();
   if (up !== "websocket") return jsonResponse(host, 426, { error: "Upgrade Required" }, { Upgrade: "websocket" });
+  // §38.4.3: "A channel admits at most `max-subscribers` open connections per server process; a
+  // further upgrade SHALL be answered `503`" — after the 403 / 404 / 405 / 426 refusals.
+  if (ch.subs >= ch.maxSubs) return jsonResponse(host, 503, FIXED[503]);
   if (upgrader === null || upgrader === undefined || typeof upgrader.upgrade !== "function") {
     logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the host passed no WebSocket upgrader (Bun.serve's server, as fetch's second argument)`);
     return jsonResponse(host, 500, FIXED[500]);
   }
-  if (upgrader.upgrade(request, { data: { scrmlChannel: ch, scrmlSockets: websocket } })) return undefined;
+  // §38.4.3 (S478 fix r1, LOW-4): the subscriber's place is RESERVED before the upgrade (the
+  // check above and this count are one synchronous step), so "answered `503` before the
+  // upgrade" holds for every racing upgrade; a failed upgrade, and the socket's `close`,
+  // release it.
+  ch.subs += 1;
+  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true };
+  let ok = false;
+  try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data); }
+  if (ok) return undefined;
   return jsonResponse(host, 400, FIXED[400]);
+}
+
+// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once.
+function releaseSub(data) {
+  if (data.scrmlCounted !== true) return;
+  data.scrmlCounted = false;
+  data.scrmlChannel.subs -= 1;
 }
 
 function closeSocket(host, ws, code, why) {
@@ -1590,7 +1770,7 @@ function closeSocket(host, ws, code, why) {
 // The frame a client sent, or why it is refused ({ code, why }).
 function channelFrame(ch, raw) {
   if (typeof raw !== "string") return { code: 1003, why: "a non-text frame" };
-  if (raw.length > CHANNEL_MAX_FRAME) return { code: 1009, why: "a frame over " + CHANNEL_MAX_FRAME + " characters" };
+  if (utf8Over(raw, ch.maxFrame)) return { code: 1009, why: "a frame over " + ch.maxFrame + " bytes" };
   let v;
   try { v = JSON.parse(raw); } catch { return { code: 1007, why: "a frame that is not JSON" }; }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return { code: 1008, why: "a frame that is not a JSON object" };
@@ -1633,14 +1813,22 @@ function channelFrame(ch, raw) {
   return { key: v.__key, op, wire };
 }
 
-function channelSockets(host, limits = {}) {
+// `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
+// LOW-5), so no more than the bound (+1) is ever buffered for one frame. A frame one byte over a
+// channel's bound reaches `channelFrame` and is closed 1009; a larger one is dropped by Bun
+// before it is read in full — the TCP connection is closed with no close frame (the client sees
+// 1006). §38.4.3 admits both ("the host MAY drop it unread"); a conforming client sends neither.
+function channelSockets(host, channels = [], limits = {}) {
+  let most = CHANNEL_MAX_FRAME;
+  for (const ch of channels) if (ch.maxFrame > most) most = ch.maxFrame;
+  const now = clockOf(host);
   // CHANNEL_LOG_TEST_HOOK (a test seam) may only LOWER the §38.4.2 bounds, never raise them
   const lower = (v, max) => (Number.isSafeInteger(v) && v >= 0 && v < max ? v : max);
   const maxFrames = lower(limits.frames, CHANNEL_MAX_LOG_FRAMES);
   const maxBytes = lower(limits.bytes, CHANNEL_MAX_LOG_BYTES);
   // per channel (its topic key): the last sequence number, the frame log (null once truncated),
   // its size in UTF-8 bytes, the replay text built from it (null: not built since the last
-  // change) and the number of subscribed sockets.
+  // change). The subscriber count is `ch.subs` (#1942, reserved at the upgrade) — not kept here.
   //   #1941 fix r1 (LOW-1): §38.4.2 "at most 8,388,608 bytes of relayed frame text (8 MiB; the
   //   frames' `JSON` text as relayed, UTF-8 encoded, summed)" — counted in UTF-8 bytes, so the bound
   //   is the replay's size on the wire, not UTF-16 code units (a CJK frame is 3 bytes a unit).
@@ -1652,25 +1840,43 @@ function channelSockets(host, limits = {}) {
   const relays = new Map();
   const relayOf = (ch) => {
     let r = relays.get(ch.key);
-    if (r === undefined) { r = { seq: 0, log: [], bytes: 0, text: null, subs: 0 }; relays.set(ch.key, r); }
+    if (r === undefined) { r = { seq: 0, log: [], bytes: 0, text: null }; relays.set(ch.key, r); }
     return r;
   };
   const replayText = (r) => {
     if (r.text === null) r.text = `{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__frames":[${r.log === null ? "" : r.log.join(",")}]}`;
     return r.text;
   };
+  // §38.4.2 "When the last subscriber of a channel whose log was truncated leaves, the relay SHALL
+  // start the channel again" — read from `ch.subs` (the one count, reserved at the upgrade).
+  const restart = (ch, why) => {
+    const r = relays.get(ch.key);
+    if (r === undefined || r.log !== null) return;
+    relays.delete(ch.key);
+    logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — ${why}; the channel starts again with an empty log at sequence 0 (§38.4.2)`);
+  };
   return {
-    maxPayloadLength: CHANNEL_MAX_FRAME * 4,
+    maxPayloadLength: most + 1,
     open(ws) {
       const ch = ws.data.scrmlChannel;
+      // the place was reserved at the upgrade (upgradeChannel) — the cap needs no check here. A
+      // truncated channel whose ONLY reservation is this socket's has no other subscriber holding
+      // its state (an earlier one left, or its upgrade failed): it starts again before the replay.
+      if (ch.subs === 1 && ws.data.scrmlCounted === true) restart(ch, "a subscriber opened a channel whose frame log was truncated and that no other subscriber holds");
       const r = relayOf(ch);
-      ws.data.scrmlChannelSub = true;
-      r.subs += 1;
-      ws.send(replayText(r));
+      // §38.4.2: the replay is ONE message, the first this socket is sent. It is a relay-to-client
+      // message: no client bucket counts it and the frame-size bound (client-to-relay frames,
+      // §38.4.3) does not apply to it; the log bound (8 MiB) bounds it. Fail closed: a replay the
+      // host drops (`send` → 0) closes the socket unsubscribed, so it never gets a live frame
+      // without the log before it.
+      let st;
+      try { st = ws.send(replayText(r)); } catch { st = 0; }
+      if (st === 0) return closeSocket(host, ws, 1011, "the replay message could not be sent");
       ws.subscribe(ch.key);
     },
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
+      if (!takeToken(ws.data, ch, now())) return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst})`);
       const f = channelFrame(ch, raw);
       if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
       const r = relayOf(ch);
@@ -1698,14 +1904,9 @@ function channelSockets(host, limits = {}) {
     close(ws) {
       const ch = ws.data.scrmlChannel;
       try { ws.unsubscribe(ch.key); } catch { /* the socket is gone */ }
-      if (ws.data.scrmlChannelSub !== true) return;
-      ws.data.scrmlChannelSub = false;
-      const r = relayOf(ch);
-      r.subs -= 1;
-      if (r.subs <= 0 && r.log === null) {
-        relays.delete(ch.key);
-        logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the last subscriber left a channel whose frame log was truncated; the channel starts again with an empty log at sequence 0 (§38.4.2)`);
-      }
+      if (ws.data.scrmlCounted !== true) return;
+      releaseSub(ws.data);
+      if (ch.subs <= 0) restart(ch, "the last subscriber left a channel whose frame log was truncated");
     },
   };
 }
@@ -1728,9 +1929,11 @@ function channelSockets(host, limits = {}) {
 //   the JSON response body — HTTP 200, `Content-Type: application/json`"; "A
 //   self-closing `<Variant/>` arm SHALL return default-success with no body — HTTP
 //   204 No Content".
-// Fail closed where the SPEC is silent (owner questions, g-boot-endpoint-s478): a
-// key that is neither `tag` nor a payload field of the named variant is
-// InvalidPayload; a JSON array is Malformed (§41.13: MissingDiscriminator is "an
+// S478 open-Qs ruling (user-voice), items 33 / 35 / 39 — §61.3: "The request body's
+// keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key
+// that is neither is a decode failure — `::InvalidPayload`"; §61.5: a non-JSON
+// media type is 415 `UnsupportedMediaType`; §61.7: another method at the path is
+// 405 + `Allow`. A JSON array is Malformed (§41.13: MissingDiscriminator is "an
 // OBJECT that lacks a `tag` field").
 // ---------------------------------------------------------------------------
 export function endpoint(desc, arms) {

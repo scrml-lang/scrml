@@ -5449,6 +5449,105 @@ function rebaseSet(cell, v) {
   for (const o of [...cell.observers]) if (!(o instanceof ResetOn)) o.markStale();
 }
 
+// §38.4.3 (S478 fix r1, MED-3): "A conforming client paces its frames to the bound; an honest
+// client SHALL NOT be closed by it." The client mirrors the relay's token bucket (`desc.limits`)
+// with a margin — a bucket of `burst` less 5% (at least 1) refilled at 95% of `rate` — so frames
+// that arrive bunched (network jitter) still find a token at the relay. A frame that finds no
+// token is QUEUED, never sent past the bucket, and the queue drains in order as tokens refill.
+// A queued `replace` of a cell is superseded by a later `replace` of the same cell (the
+// receiver's value after the later one does not depend on it — lossless: the last value wins);
+// every other queued op is sent, in order. A new connection starts with a full bucket (the
+// relay's does, §38.4.3); a close drops the frames still queued (§38.10.4: sync is suspended
+// while closed) and returns how many. Self-contained, so a resend on reconnect can go through
+// `push` and be paced like any edit.
+//   io: { now() → ms, later(fn, ms) → handle, cancel(handle), send(text, ref), superseded?(ref) }
+// Integration (#1941 × #1942, S478): each queued frame carries the caller's `ref` (#1941's pending
+// entry); `send(text, ref)` is told which frame went on the wire, and `superseded(ref)` which queued
+// `replace` a later one superseded — that frame is never sent, so the caller drops its pending
+// entry rather than wait for an echo that cannot come. `close()` returns how many were dropped.
+export function channelPacer(limits, io) {
+  const lim = limits !== null && typeof limits === "object" ? limits : {};
+  const pos = (v, d) => (Number.isSafeInteger(v) && v >= 1 ? v : d);
+  const burst = pos(lim.burst, 100);
+  const rate = pos(lim.rate, 50) * 0.95;
+  const cap = Math.max(1, burst - Math.ceil(burst / 20));
+  let tokens = cap;
+  let at = io.now();
+  let q = [];
+  let timer = null;
+  let open = false;
+  function pump() {
+    timer = null;
+    if (!open) return;
+    const t = io.now();
+    if (t > at) tokens = Math.min(cap, tokens + ((t - at) * rate) / 1000);
+    at = t;
+    while (q.length > 0 && tokens >= 1) {
+      tokens -= 1;
+      const f = q.shift();
+      io.send(f.text, f.ref);
+    }
+    if (q.length > 0) timer = io.later(pump, Math.max(1, Math.ceil(((1 - tokens) * 1000) / rate)));
+  }
+  return {
+    // A new connection (idempotent while open): a full bucket, then the queue, if any.
+    open() {
+      if (open) return;
+      open = true;
+      tokens = cap;
+      at = io.now();
+      pump();
+    },
+    close() {
+      open = false;
+      if (timer !== null) { io.cancel(timer); timer = null; }
+      const n = q.length;
+      q = [];
+      return n;
+    },
+    // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
+    push(key, op, text, ref) {
+      if (!open) return false;
+      if (op === "replace") {
+        q = q.filter((f) => {
+          if (!(f.key === key && f.op === "replace")) return true;
+          if (typeof io.superseded === "function") io.superseded(f.ref);
+          return false;
+        });
+      }
+      q.push({ key, op, text, ref });
+      if (timer === null) pump();
+      return true;
+    },
+    pending() { return q.length; },
+    isOpen() { return open; },
+  };
+}
+
+// The UTF-8 byte length of `s` is over `max` (a channel frame's size bound, §38.4.3).
+function utf8Over(s, max) {
+  if (s.length > max) return true;
+  if (s.length * 3 <= max) return false;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+    if (n > max) return true;
+  }
+  return false;
+}
+
+// The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.
+const RELAY_CLOSES = new Map([
+  [1003, "it sent a binary frame"],
+  [1007, "it sent a frame that is not JSON, or does not decode"],
+  [1008, "it sent a frame the relay refused, or frames past the channel's rate limit"],
+  [1009, "it sent a frame over the channel's frame-size bound"],
+]);
+
 export function channel(scope, desc) {
   requireScope(scope, "a channel");
   const g = globalThis;
@@ -5485,6 +5584,20 @@ export function channel(scope, desc) {
   const hook = (f) => { if (typeof f === "function") batch(() => { f(); }); };
   const url = () => (g.location.protocol === "https:" ? "wss:" : "ws:") + "//" + g.location.host + "/_scrml_ws/" + desc.name;
   const has = (c, op) => Array.isArray(c.ops) && c.ops.includes(op);
+  const lim = desc.limits !== null && typeof desc.limits === "object" ? desc.limits : {};
+  const maxFrame = Number.isSafeInteger(lim.maxFrame) && lim.maxFrame >= 1 ? lim.maxFrame : 65536;
+  const pacer = channelPacer(desc.limits, {
+    now: () => (g.performance !== undefined && typeof g.performance.now === "function" ? g.performance.now() : Date.now()),
+    later: (f, ms) => g.setTimeout(f, ms),
+    cancel: (h) => g.clearTimeout(h),
+    send: (text, p) => {
+      if (ws === null || ws.readyState !== 1) return;
+      ws.send(text);
+      if (p !== undefined && p !== null) p.sent = true;
+    },
+    // a queued `replace` superseded by a later one is never sent: it stops being pending (#1941 × #1942)
+    superseded: (p) => { const i = pending.indexOf(p); if (i >= 0) pending.splice(i, 1); },
+  });
 
   // A relayed frame's shape (§38.4.2 "The relayed frame"): exactly __type, __seq, __key, __op,
   // __val, __own. Anything else is a broken stream, not a refusal.
@@ -5698,11 +5811,24 @@ export function channel(scope, desc) {
     };
   }
 
-  // The ONE place an edit goes on the wire (the op sink, and the held edits after a replay): it is
-  // sent and becomes pending. A future pacing / rate rule wraps this function.
+  // The ONE place an edit goes on the wire (the op sink, and the held edits after a replay): it
+  // becomes pending and is handed to the pacer (§38.4.3, #1942), which sends it as the bucket
+  // allows — so the sink path and `resendHeld` are paced alike. `p.sent` turns true when the pacer
+  // puts it on the wire; a queued `replace` a later `replace` of the same cell supersedes is never
+  // sent, and its pending entry is removed (`superseded`), so no echo is waited for. Pending order
+  // is still send order: the queue is FIFO, and a supersede only removes an entry.
+  //   §38.4.3: "A conforming client never sends a frame over the frame-size bound. An edit whose
+  //   frame would be over it is not sent; the client reports it" — it is not pending either, so the
+  //   next received unit's rebase drops it from the shown value (it never reaches a peer). Returns
+  //   whether the edit was queued.
   function send(p) {
-    ws.send(JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire }));
+    const text = JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire });
+    if (utf8Over(text, maxFrame)) { warn(`@${p.c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return false; }
+    if (!pacer.isOpen()) pacer.open();
+    p.sent = false;
     pending.push(p);
+    if (!pacer.push(p.c.key, p.op, text, p)) { pending.pop(); return false; }
+    return true;
   }
 
   // §38.4.2 (#1941 fix r1, MED-1): "after the replay is applied, each held edit, in order, is
@@ -5713,8 +5839,7 @@ export function channel(scope, desc) {
     for (const p of early) {
       const s = step(p.c, p.c.cell.peek(), p.op, p.val);
       if (typeof s === "string") { warn(`an edit made before the channel's history arrived no longer applies to it — not sent: ${s}`); continue; }
-      rebaseSet(p.c.cell, s.next);
-      send(p);
+      if (send(p)) rebaseSet(p.c.cell, s.next);
     }
   }
 
@@ -5727,6 +5852,12 @@ export function channel(scope, desc) {
     seq = 0;
     let ok = true;
     held = [];
+    // §38.4.3 (#1942): the pacer opens with the connection (a full bucket, as the relay's is). No
+    // frame is pushed to it before the replay is applied (the edits until then are HELD, §38.4.2).
+    s.onopen = () => {
+      if (ws !== s) return;
+      pacer.open();
+    };
     // #1941 fix r1 (MED-1), §38.10.2: "the handler SHALL run when the connection's replay message
     // has been applied … a connection given an incomplete replay … runs `onclient:error`, not
     // `onclient:open`" — so a channel write it makes is sent, not undone by the replay
@@ -5746,11 +5877,23 @@ export function channel(scope, desc) {
       try { s.close(); } catch { /* already closing */ }
     };
     s.onerror = () => { if (ws === s) hook(desc.error); };
-    s.onclose = () => {
+    s.onclose = (ev) => {
       if (ws !== s) return;
       ws = null;
       live = false;
       held = [];                                        // never sent: dropped, as a write while closed is
+      // §38.4.3 (#1942): the frames still queued are dropped (§38.10.4) — and so are their pending
+      // entries (#1941): a frame never sent has no relayed copy to wait for. The sent ones stay
+      // pending until the replay of the next connection drops them (§38.4.2 "The frame log").
+      const dropped = pacer.close();
+      pending = pending.filter((p) => p.sent === true);
+      // S478 fix r1 (MED-3a): a relay close (§38.4.3) is reported, naming why — never silent
+      const code = ev !== null && typeof ev === "object" ? ev.code : undefined;
+      if (RELAY_CLOSES.has(code)) {
+        const reason = typeof ev.reason === "string" && ev.reason !== "" ? ` ("${ev.reason}")` : "";
+        warn(`the relay closed this client's connection with ${code}${reason}: ${RELAY_CLOSES.get(code)} (§38.4.3) — an edit it refused was not relayed to the other clients`);
+      }
+      if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed)`);
       hook(desc.close);
       if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
     };
@@ -5758,6 +5901,7 @@ export function channel(scope, desc) {
   for (const c of desc.cells) c.cell.sync = sink(c);
   scope.own(() => {
     disposed = true;
+    pacer.close();
     for (const c of desc.cells) c.cell.sync = null;
     if (timer !== null) g.clearTimeout(timer);
     const s = ws;
