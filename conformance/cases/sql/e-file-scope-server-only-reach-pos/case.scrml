@@ -1,0 +1,6 @@
+<program db="./app.db">
+${
+    const ROWS = ?{`SELECT 1 AS a`}.all();
+}
+<p>"hi"</p>
+</program>
