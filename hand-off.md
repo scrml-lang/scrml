@@ -9,21 +9,20 @@
 ## 0. Where things stand
 - **bryan's subscription is ending.** This file and `handOffs/delta-log.md` must be enough to pick up cold.
 - **Policy holds:** bootstrap only (`compiler/self-host-v2/`). impl#1 (`compiler/src/`) is frozen except for the bootstrap-build carve-out (S471).
-- **Main at wrap:** f11506f4c (#1927), plus whatever the queue lands after it.
-- **In the merge queue at wrap.** Both are composition-tested on main + #1919. Both are S239-reviewed, fixed in round 1, and PA-verified with the reviewers' probes.
+- **Main at wrap:** 314895410 (#1929 merged), plus this wrap PR.
+- **#1929 function types and values MERGED at wrap.** Still in the merge queue: #1928, composition-tested on main + #1919, S239-reviewed, fixed in round 1, and PA-verified with the reviewers' probes.
   1. **#1928 `<channel>` (§38)**, head 14a8dbfad. Merged tree: 606 PASS / 0 CRASH.
-  2. **#1929 function types and values**, head 70e494afa. Merged tree: 597 PASS / 0 CRASH.
-  - **If either is ejected:**
+  - **If it is ejected:**
     1. Read the merge-group run's failed job.
     2. `compile-scaling-s477` fails on load: a 3.09 ratio against the 3.0 bound ejected #1927 once. Re-enqueue it.
     3. Otherwise merge origin/main into the branch. Severity conflict: `git checkout --theirs compiler/self-host-v2/severity.scrml && bun scripts/gen-bootstrap-severity.ts && … --check`.
     4. Run `~/.cache/scrml/review/comp.sh <tree>` and push.
     5. Enqueue with `gh pr merge N --auto -R scrml-lang/scrml`, run on its own.
 - **Older open PRs:** #1448 (`s468-rulings-spec`) and #580 (draft). Both are untouched.
-- **Conformance (bootstrap, main f11506f4c):** PASS 599 / FAIL 18 / CRASH 0. At the S477 wrap it was PASS 336 / FAIL 260. Expect about 610 PASS once #1928 and #1929 land.
+- **Conformance (bootstrap, main f11506f4c):** PASS 599 / FAIL 18 / CRASH 0. At the S477 wrap it was PASS 336 / FAIL 260. Expect about 610 PASS once #1928 lands.
 - **Gap rollup (generated):** impl#1-owed HIGH 271 · MED 779 · LOW 797; bootstrap-carried HIGH 6 · MED 13 · LOW 7. The wrap's follow-up gaps add LOW/MED rows.
 
-## 1. What landed (48 PRs, plus 2 in the queue)
+## 1. What landed (49 PRs, plus #1928 in the queue)
 Every code PR had an S239 adversarial review on a frozen tree, except a few small ones the PA checked directly (marked in `docs/pr-reviews.md`). Fix rounds were fresh agents, and the PA re-ran the reviewers' HIGH probes on each fix head before enqueuing.
 - **Rulings built:**
   - #1846: negative `insert` literal;
@@ -53,7 +52,8 @@ Every code PR had an S239 adversarial review on a frozen tree, except a few smal
   - #1917 `T | not` member access (E-TYPE-046); #1927 `?.` (§42.3.6);
   - #1918 the `${(e) => …}` event listener, E-EVENT-CONTROL-AFTER-AWAIT;
   - #1919 markup in `${ if … }`;
-  - #1920 bare blocks and `transaction { }`.
+  - #1920 bare blocks and `transaction { }`;
+  - #1929 function types and values (bound, passed, returned, called through).
 - **Conformance and stale cases:** #1866 #1871 #1879 #1895 #1897 (the `;` migration, honest fixtures, false-positive FAILs).
 - **Review follow-up rounds:** #1870 #1891 #1902 #1907.
 - **Tooling:** #1855 fixes hook shard pollution, the memory ceiling (`SCRML_HOOK_SHARD_MEM_MB`), and the pre-push exit code.
@@ -107,7 +107,7 @@ Every code PR had an S239 adversarial review on a frozen tree, except a few smal
 12. **Carried from S477 §3:** the #1793 veto-window readings; `.join` on `int[]`; O9 slot spelling; the S473 veto markers; `<m.card>`.
 
 ## 4. Owed next (pick from here)
-1. Land #1928 and #1929 (§0).
+1. Land #1928 (§0).
 2. Once the owner rules on §3.1, build op-based channel sync. That unblocks the tutorial chat.
 3. **Review follow-ups:** the gaps filed at this wrap (`prov=review:#18xx/#19xx`, `docs/known-gaps.md`). Best value first:
    - #1920 MED: a `transaction` in a handler should be E-ERROR-001 (it currently fails closed as CORE-ILL-FORMED);
@@ -135,6 +135,6 @@ Every code PR had an S239 adversarial review on a frozen tree, except a few smal
 - **At 6–8 lanes, load reaches 11–18.** Hook load-timeouts are noise: rerun once before investigating.
 
 ## 6. Wrap state
-- **Worktrees:** 70 merged review and agent trees were removed at wrap. Kept: #1928 (`agent-a956129cc31d703a5`), #1929 (`agent-a5a565bae8b5cecb0`), #1448 (`agent-a036efcbcbcb1c8b0`), `rev-1927*`/`rev-1928*`/`rev-1929*` and their bases under `~/.cache/scrml/review/s478-192{7,8,9}/base`, and the wrap trees. Some trees stay locked while this Claude process runs. Once it exits, bryan runs: `! cd ~/scrmlMaster/scrml && git worktree list | awk '{print $1}' | grep -E '/worktrees/(agent|rev|wrap)-' | grep -v a036efcbcbcb1c8b0 | xargs -r -n1 git worktree remove -f -f && git worktree prune`. Wait until #1928 and #1929 have merged.
+- **Worktrees:** 70 merged review and agent trees were removed at wrap. Kept: #1928 (`agent-a956129cc31d703a5`), #1929 (`agent-a5a565bae8b5cecb0`), #1448 (`agent-a036efcbcbcb1c8b0`), `rev-1927*`/`rev-1928*`/`rev-1929*` and their bases under `~/.cache/scrml/review/s478-192{7,8,9}/base`, and the wrap trees. Some trees stay locked while this Claude process runs. Once it exits, bryan runs: `! cd ~/scrmlMaster/scrml && git worktree list | awk '{print $1}' | grep -E '/worktrees/(agent|rev|wrap)-' | grep -v a036efcbcbcb1c8b0 | xargs -r -n1 git worktree remove -f -f && git worktree prune`. Wait until #1928 has merged.
 - **Review probes:** `~/.cache/scrml/review/s478-*`. Runner: `bun ~/.cache/scrml/review/s478-1886/probes/run.mjs <absTree> <probe.mjs> [filter]`. A `.probe.test.js` runs as `TREE=<tree> bun test ./<file>`.
 - **Lane rules for briefs:** `~/.cache/scrml/review/s478-lanes/COMMON.md`.
