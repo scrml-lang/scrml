@@ -142,7 +142,8 @@ describe("§4.17 (S462) — `<script>` / `<style>` in a body-top logic block is 
   });
 
   test("any other markup there is refused by name (not in the bootstrap), never misread", () => {
-    expect(codes(run(B("lift <noscript>n</noscript>")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // (s478 markup-in-logic: the `lift` is a statement now, so it takes its `;`, §7.2.2 rule 2)
+    expect(codes(run(B("lift <noscript>n</noscript>;")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(run(B("if (@f) { <p>waiting</p> }")))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });

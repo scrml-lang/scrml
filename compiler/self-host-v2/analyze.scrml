@@ -20562,7 +20562,7 @@ ${
     // =========================================================================
     fn resolveFor(env: Env, s: AStmt, f: AFor, st0: AS) -> AS {
         let hint: string = f.label
-        if (hint == "") hint = "loop"
+        if (hint == "" || isTier0If(f)) hint = "loop"
         const rl: RSym = mint(st0, hint)
         const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not, not))
         const h: AForHead = f.head
@@ -20948,10 +20948,10 @@ ${
         if (boundLoopExitless(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never ends: its head never stops it, and no path in its body reaches a `break` that leaves it — so the page never finishes rendering (a `break` inside an inner loop leaves only that loop). Add `if (<done>) { break; }` after the last row, or give it a head that ends (`for (x of xs)`, `for (cond)`) (§49.6 rule 10, §17.4)")
         if (boundLoopStranded(f)) st = addDiag(st, env.file, f.span, "E-LOOP-008", "This `" + "$" + "{ for … }` loop never finishes a row: every path through its body runs into an inner loop that never ends (`for { }`, `for (;;)`, `for (true)` with no `break` of its own), and no path reaches a `continue` of this loop or a `break` that leaves it — so the page never finishes rendering. Give the inner loop a `break` (`if (<done>) { break; }`), or leave this loop from it (`break <label>`, `continue <label>`) (§49.6 rule 10, §17.4, S473)")
         for (const rsite of returnSites(f.body)) {
-            st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute the loop in a function and render its result")
+            st = addDiag(st, env.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a `return` inside a " + tier0Name(f) + " in markup has no function to leave (§49.6 rule 6 names a function's exits; a render position has none) — compute it in a function and render its result")
         }
         for (const fsp of failSpansIn(f.body)) {
-            st = addDiag(st, env.file, fsp, "E-BOOTSTRAP-UNSUPPORTED", "a `fail` inside a `" + "$" + "{ for … }` in markup has no function to leave (§49.6 rule 6) — compute the loop in a function and render its result")
+            st = addDiag(st, env.file, fsp, "E-BOOTSTRAP-UNSUPPORTED", "a `fail` inside a " + tier0Name(f) + " in markup has no function to leave (§49.6 rule 6) — compute it in a function and render its result")
         }
         // s474 (#1700 review F2): in a KEYED loop a row is named by (key, its
         // template, its place among the iteration's lifts of that template). An
@@ -21732,6 +21732,21 @@ ${
     type LoopFrame:struct = { label: string, sym: Sym, wall: boolean }
     type LabelAt:struct = { name: string, span: ASpan }
 
+    // s478 (markup-in-logic, #1919 review F1) — the reserved label of the
+    // one-pass loop a `${ if … }` in markup stands in (parse.scrml
+    // tier0IfLabel, the same string). `#` starts no identifier, so no source
+    // `break` / `continue` can name it; loopJump passes over its frame for an
+    // unlabelled jump.
+    fn tier0IfLabel() -> string { return "#if" }
+
+    fn isTier0If(f: AFor) -> boolean { return f.label == tier0IfLabel() }
+
+    // How a diagnostic names a Tier-0 region: the `${ if … }` for the one-pass loop.
+    fn tier0Name(f: AFor) -> string {
+        if (isTier0If(f)) return "`" + "$" + "{ if … }`"
+        return "`" + "$" + "{ for … }`"
+    }
+
     fn loopChecks(file: string, b: ABlock, st0: AS) -> AS {
         const st: AS = loopDupLabels(file, loopLabelsIn(b), st0)
         return loopCopyStmts(file, b.stmts, loopBlock(file, b, [], false, st))
@@ -21956,7 +21971,7 @@ ${
             const k: AStmtK = s.k
             const f: AFor | not = forOf(k)
             if (f is given) {
-                if (f.label != "") out = out.concat([{ name: f.label, span: f.span }])
+                if (f.label != "" && f.label != tier0IfLabel()) out = out.concat([{ name: f.label, span: f.span }])
             }
             for (const nb of nestedBlocks(s)) { out = out.concat(loopLabelsIn(nb)) }
         }
@@ -22048,10 +22063,20 @@ ${
         let kw: string = "continue"
         if (isBreak) kw = "break"
         if (label == "") {
-            if (stack.length > 0) return addBind(st, s.nid, BindFact.BJump(stack[stack.length - 1].sym))
+            // s478 (markup-in-logic, #1919 review F1): the one-pass loop of a
+            // `${ if … }` in markup (parse.scrml parseTier0If) is no loop of the
+            // program's — an unlabelled jump passes over its frame (§49.9)
+            let j: int = stack.length - 1
+            let overIf = false
+            while (j >= 0 && stack[j].label == tier0IfLabel()) {
+                overIf = true
+                j = j - 1
+            }
+            if (j >= 0) return addBind(st, s.nid, BindFact.BJump(stack[j].sym))
             if (inDefer) return st          // E-DEFER-CONTROL-FLOW: the deferred-body rule's (deferBodyRule)
             let code: string = "E-LOOP-002"
             if (isBreak) code = "E-LOOP-001"
+            if (overIf) return addDiag(st, file, s.span, code, "`" + kw + "` is not inside any loop — this `" + "$" + "{ if … }` in markup is not a loop, so there is nothing to " + (isBreak ? "leave" : "continue") + "; `" + kw + "` may only appear inside a `for` loop body (§49.4.1, §49.9)")
             return addDiag(st, file, s.span, code, "`" + kw + "` is not inside any loop — `" + kw + "` may only appear inside a `for` loop body (§49.4.1)")
         }
         let i: int = stack.length - 1
@@ -22074,7 +22099,7 @@ ${
     fn labelsHere(stack: LoopFrame[]) -> string {
         let names: string[] = []
         for (const fr of stack) {
-            if (fr.label != "") names = names.concat(["`" + fr.label + "`"])
+            if (fr.label != "" && fr.label != tier0IfLabel()) names = names.concat(["`" + fr.label + "`"])
         }
         if (names.length == 0) return "no enclosing loop here has a label"
         return "the labels of the loops enclosing it are " + names.join(", ")
@@ -37834,7 +37859,9 @@ ${
     // head, body and lifted values — and every render position of its rows.
     fn tier0Positions(t: Tables, f: AFor, span: ASpan, file: string) -> ValuePos[] {
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] }
-        let out: ValuePos[] = [{ what: "the `" + "$" + "{ for … }` loop", vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop, ""), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]
+        let what: string = "the `" + "$" + "{ for … }` loop"
+        if (isTier0If(f)) what = "the `" + "$" + "{ if … }`"
+        let out: ValuePos[] = [{ what: what, vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop, ""), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)) }
         return out
     }
