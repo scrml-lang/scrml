@@ -615,7 +615,7 @@ ${
         return match c {
             .DateNow :> jcall(jmember(jid("Date"), "now"), [])
             // s478 (s478-boot-fn-values) — the listener's event argument (handlerParams)
-            .EventRead(member: m) :> jmember(jid(eventVar()), m)
+            .EventRead(member: m) :> eventPath(m)
             .EventCall(member: m) :> jcall(jmember(jid(eventVar()), m), [])
             // unreachable (checkCore C-R1 refuses it before printing); if ever printed
             // it fails loudly (a ReferenceError), never as a silent value
@@ -3442,6 +3442,14 @@ ${
             .Assigned(local: x) :> false
             .Foreign(slice: x) :> false
         }
+    }
+
+    // s478 (open-Qs ruling item 9) — an event read's member path (`type`, `target.value`) off the
+    // listener's event argument, one `.` hop per segment
+    fn eventPath(m: string) -> JsExpr {
+        let x: JsExpr = jid(eventVar())
+        for (const seg of m.split(".")) { x = jmember(x, seg) }
+        return x
     }
 
     fn isEventCall(c: HostCall) -> boolean {

@@ -72,10 +72,30 @@ describe("1 — arms switch when the matched-on cell changes", () => {
     expect($('[data-arm="idle"]')).not.toBeNull();
     expect($$("[data-arm]").length).toBe(1);
   });
-  test("the arms mount inside one `<div data-scrml-match-mount>`", async () => {
+  // S478 open-Qs ruling item 13 — §18.0.1 (amended S478): "The dispatched arm's content renders
+  // in place of the `<match>`, with no wrapper element around it". (Red on base: the bootstrap
+  // mounted the arms in a `<div data-scrml-match-mount>`.)
+  test("S478 item 13: no wrapper element — the arm renders in place of the `<match>`", async () => {
     await load(SRC);
-    expect($$("[data-scrml-match-mount]").length).toBe(1);
-    expect($("[data-scrml-match-mount]").querySelector('[data-arm="idle"]')).not.toBeNull();
+    expect($$("[data-scrml-match-mount]").length).toBe(0);
+    expect($('[data-arm="idle"]').parentElement.tagName).toBe("BODY");
+  });
+  test("S478 item 13: a `<match>` in a `<ul>` / `<select>` puts its `<li>` / `<option>` directly in it", async () => {
+    await load(prog(`${PHASE_BTNS}<ul id="l"><match for=Phase on=@ph>
+    <Idle><li id="a">a</li></>
+    <_><li id="b">b</li></>
+</match></ul>
+<select id="s"><match for=Phase on=@ph>
+    <Idle><option id="oa">a</option></>
+    <_><option id="ob">b</option></>
+</match></select>`));
+    expect($("#a").parentElement.id).toBe("l");
+    expect($("#oa").parentElement.id).toBe("s");
+    click($("#to-loading"));
+    expect($("#a")).toBeNull();
+    expect($("#b").parentElement.id).toBe("l");
+    expect($("#ob").parentElement.id).toBe("s");
+    expect($$("#l > div").length).toBe(0);
   });
   test("`:`-shorthand display-text arms, a self-closing arm (renders nothing) and the wildcard `<_>`", async () => {
     await load(prog(`${PHASE_BTNS}<div id="m"><match for=Phase on=@ph>
@@ -233,10 +253,26 @@ describe("4 — the checks (same arm reader as the §18 `match`)", () => {
   test("E-MATCH-ON-REQUIRED: no `on=` (no `<engine>` can imply it)", () => {
     expect(codes(M(`<Idle : "i">\n<_ : "x">`, "for=Phase"))).toEqual(["E-MATCH-ON-REQUIRED"]);
   });
-  test("no `for=`: refused by name (§18.0.1 REQUIRED — the SPEC names no code)", () => {
-    const e = errs(M(`<Idle : "i">\n<_ : "x">`, "on=@ph"));
+  // S478 open-Qs ruling item 12 (a) — §18.0.1 (amended S478): "`for=` MAY be omitted when `on=`
+  // is provably of one enum type; the match is then over that type". (Red on base: refused by name.)
+  test("S478 item 12: no `for=` over an enum-typed cell compiles, and is judged as `for=` that type", () => {
+    expect(errs(M(`<Idle : "i">\n<_ : "x">`, "on=@ph"))).toEqual([]);
+    expect(codes(M(`<Idle : "i">\n<Loading : "l">`, "on=@ph"))).toEqual(["E-MATCH-NOT-EXHAUSTIVE"]);
+    expect(codes(M(`<Loaded(n)><p>${"${"}n}</p></>\n<_ : "">`, "on=@ld"))).toEqual(["E-TYPE-021"]);
+  });
+  test("S478 item 12: no `for=` and an `on=` the bootstrap cannot prove one enum type stays refused by name", () => {
+    let e = errs(prog(`let <n:int=0/>\n<match on=@n>\n<_ : "x">\n</match>`));
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("not an enum");
+    e = errs(M(`<_ : "x">`, "on=(true ? @ph : @ph)"));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(e[0].message).toContain("for=");
+  });
+  test("S478 item 12: no `for=` renders the arm for the cell's variant", async () => {
+    await load(prog(`${PHASE_BTNS}<div id="m"><match on=@ph>\n<Idle : "idle!">\n<_ : "other">\n</match></div>`));
+    expect($("#m").textContent).toBe("idle!");
+    click($("#to-loading"));
+    expect($("#m").textContent).toBe("other");
   });
   test("`for=` naming an unknown type / a struct", () => {
     expect(codes(M(`<_ : "x">`, "for=Nope on=@ph"))).toEqual(["E-TYPE-UNKNOWN"]);
@@ -283,8 +319,12 @@ describe("4 — the checks (same arm reader as the §18 `match`)", () => {
     expect(errs(CARD(`<div><match for=Phase on=p>\n<Idle><p><slot/></p></>\n<_><i><slot/></i></>\n</match></div>`)).map((d) => d.code)).toEqual([]);
     expect(errs(CARD(`<div><slot/><match for=Phase on=p>\n<Idle><p><slot/></p></>\n<_ : "">\n</match></div>`)).map((d) => d.code)).toEqual(["E-COMPONENT-020"]);
   });
-  test("§24.5: the mount is a `<div>` — a `<match>` directly in a `<p>` is E-HTML-PARSER-REPAIR", () => {
-    expect(codes(prog(`<p>x <match for=Phase on=@ph>\n<Idle : "i">\n<_ : "x">\n</match></p>`))).toEqual(["E-HTML-PARSER-REPAIR"]);
+  // S478 item 13: no wrapper, so the parent's content model applies to each arm's content (§24.5)
+  // (an arm's content is a branch template, judged as an `if=` branch's is: no parser repair applies
+  // to content the runtime inserts — the same answer `<p>x <div if=@a>…</div></p>` gets)
+  test("§24.5 (S478 item 13): a `<match>` directly in a `<p>` is no longer E-HTML-PARSER-REPAIR (no `<div>` mount)", () => {
+    expect(codes(prog(`<p>x <match for=Phase on=@ph>\n<Idle : "i">\n<_ : "x">\n</match></p>`))).toEqual([]);
+    expect(codes(prog(`<p>x <match for=Phase on=@ph>\n<Idle><div>i</div></>\n<_ : "x">\n</match></p>`))).toEqual(codes(prog(`<p>x <div if=@ph>i</div></p>`).replace("<div if=@ph>", "<div if=(@ph == .Idle)>")));
   });
 });
 

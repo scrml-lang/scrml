@@ -3,7 +3,8 @@
   "description": "The `style=` attribute and a `#{}` CSS block are the sanctioned forms and are not refused.",
   "language-version": "1.0",
   "spec": "§4.17",
-  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built, decided on the parsed element, never on text.",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 1 (g-boot-body-top-lift-render-s478, option (b)) — migrated: a body-top `${ … }` renders nothing (§17.3 amended S478)",
+  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built, decided on the parsed element, never on text. (S478 open-Qs ruling item 1: the lifted elements moved from a body-top `${ lift … }`, which renders nothing there and is E-MARKUP-STATEMENT-NOT-RENDERED (§17.3 amended S478), into a `${ … lift … }` in a markup body — still a lifted position.)",
   "expect": {
     "codes": [],
     "notCodes": [

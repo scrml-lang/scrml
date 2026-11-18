@@ -4,9 +4,12 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/type-system.test.js",
   "spec": "§42.10",
-  "rationale": "§42.10 `expr is not` is the sanctioned absence check; E-TYPE-045 fires only on the forbidden PREFIX `not expr` negation form.",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 1 (g-boot-body-top-lift-render-s478, option (b)) — migrated: a body-top `${ … }` renders nothing (§17.3 amended S478)",
+  "rationale": "§42.10 `expr is not` is the sanctioned absence check; E-TYPE-045 fires only on the forbidden PREFIX `not expr` negation form. (S478 open-Qs ruling item 1: migrated from a body-top `${ if (…) { <p/> } }`, which renders nothing there and is E-MARKUP-STATEMENT-NOT-RENDERED (§17.3 amended S478), to the `if=` attribute form.)",
   "expect": {
     "codes": [],
-    "notCodes": ["E-TYPE-045"]
+    "notCodes": [
+      "E-TYPE-045"
+    ]
   }
 }

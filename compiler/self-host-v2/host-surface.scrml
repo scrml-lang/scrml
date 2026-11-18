@@ -506,6 +506,37 @@ ${
         ]
     }
 
+    // S478 (open-Qs ruling item 9) — Appendix H.6, the event interfaces of a listener: "A
+    // listener's event … has the interface this table gives its event name (the attribute name
+    // without `on`, compared lowercase); every other event name is `Event`". One row per event
+    // (`tag` holds the event name); slice-m4/host-surface-appendix-h.test.js diffs it with H.6.
+    export fn eventInterfaces() -> HTag[] {
+        return [
+            tag("auxclick", "MouseEvent"),
+            tag("click", "MouseEvent"),
+            tag("contextmenu", "MouseEvent"),
+            tag("dblclick", "MouseEvent"),
+            tag("keydown", "KeyboardEvent"),
+            tag("keypress", "KeyboardEvent"),
+            tag("keyup", "KeyboardEvent"),
+            tag("mousedown", "MouseEvent"),
+            tag("mouseenter", "MouseEvent"),
+            tag("mouseleave", "MouseEvent"),
+            tag("mousemove", "MouseEvent"),
+            tag("mouseout", "MouseEvent"),
+            tag("mouseover", "MouseEvent"),
+            tag("mouseup", "MouseEvent"),
+        ]
+    }
+
+    export fn eventIfaceOf(ev: string) -> string {
+        const n: string = ev.toLowerCase()
+        for (const x of eventInterfaces()) {
+            if (x.tag == n) return x.iface
+        }
+        return "Event"
+    }
+
     export fn inertElements() -> HTag[] {
         return [
             tag("a", "HTMLAnchorElement"),
