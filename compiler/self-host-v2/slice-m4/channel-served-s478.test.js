@@ -69,7 +69,7 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       expect(server.js).toContain(`channels: [{ path: "/_scrml_ws/chat" }]`);
       expect(server.js).toContain(`rt.channel(channel$0)`);
       expect(server.js).toContain(`{ key: "count", table: { defs: [], root: { k: "int" } }, ops: ["replace"] }`);
-      expect(client.js).toContain(`rt.channel(program$.scope, { name: "chat", reconnect: 2000, cells: [{ key: "count", cell: program$.fields[`);
+      expect(client.js).toContain(`rt.channel(program$.scope, { name: "chat", reconnect: 2000, limits: { maxFrame: 65536, rate: 50, burst: 100 }, cells: [{ key: "count", cell: program$.fields[`);
       expect(client.js).toContain(`table: { defs: [], root: { k: "int" } }, ops: ["replace"], edges: null }`);
     } finally { bun.stop(true); }
   });
@@ -107,7 +107,9 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
     ["a wrong type (a string for an int cell)", sync("count", "7"), 1007],
     ["a non-integer for an int cell", sync("count", 1.5), 1007],
     ["an object for a string cell", sync("note", { a: 1 }), 1007],
-    ["a frame over the size bound", sync("note", "x".repeat(70000)), 1009],
+    // one byte over the bound: read and closed 1009 (S478 fix r1: a frame past the host's cap of
+    // bound + 1 is dropped unread instead — 1006 — see channel-pacing-s478.test.js)
+    ["a frame over the size bound", sync("note", "x".repeat(65537 - sync("note", "").length)), 1009],
   ];
   for (const [what, frame, code] of BAD) {
     test(`fail closed: ${what} → the connection is closed (${code}) and nothing is relayed`, async () => {
