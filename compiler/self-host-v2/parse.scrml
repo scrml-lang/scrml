@@ -2365,8 +2365,10 @@ ${
     // backtick inside the body, or no `}` right after the closing backtick". It is
     // the more specific code for that shape there (ruling S473 D29: "one code per
     // rule, the more specific winning"), so the E-SQL-003 a condition's `?{ … }`
-    // drew (the reports from diags[n0] on) is re-coded. The template-literal slot
-    // and `match` arm body positions are not re-coded yet
+    // drew (the reports from diags[n0] on) is re-coded. `while` is retired; its
+    // condition is the `for (cond)` head's (§49.3.1: "This is the loop the retired
+    // `while (cond)` spelled"), so that head is covered too (s479 r1, LOW-4). The
+    // template-literal slot and `match` arm body positions are not re-coded yet
     // (g-boot-sql-query-not-readable-positions-s479).
     fn sqlInCondition(n0: int, r: RExpr) -> RExpr {
         const ds: Diag[] = r.tp.diags
@@ -2376,7 +2378,7 @@ ${
         for (const d of ds.slice(n0)) {
             if (d.code == "E-SQL-003" && d.message.indexOf(sqlShapeHead()) == 0) {
                 changed = true
-                out = out.concat([newDiag("E-SQL-QUERY-NOT-READABLE", "this `?{ … }` in an `if` condition is not written `?{` + ONE backtick SQL template + `}` (the report is at the text that breaks that shape), so no check can read it, and it is refused (§8.1.2). Write the backtick form (`?{`SELECT …`}`), or bind the query to a local first (`const row = ?{`…`}.get();`)", d.file, d.span)])
+                out = out.concat([newDiag("E-SQL-QUERY-NOT-READABLE", "this `?{ … }` in an `if` / `for` condition is not written `?{` + ONE backtick SQL template + `}` (the report is at the text that breaks that shape), so no check can read it, and it is refused (§8.1.2). Write the backtick form (`?{`SELECT …`}`), or bind the query to a local first (`const row = ?{`…`}.get();`)", d.file, d.span)])
             } else {
                 out = out.concat([d])
             }
@@ -4624,7 +4626,10 @@ ${
         if (destructAhead(t)) return parseDestructIter(t, label, start)   // s478-boot-destructuring
         if (binderThen(t, "of") >= 0) return parseIterHead(t, label, start)
         // the condition head (§49.3.1); s474: its kept assignments (§50, D10)
-        const cond0: RExpr = parseAssign(adv(t))
+        // s479 r1 (LOW-4): §49.3.1 "This is the loop the retired `while (cond)` spelled",
+        // so its unreadable `?{ … }` is §34 E-SQL-QUERY-NOT-READABLE as an `if`'s is
+        const tc: TP = adv(t)
+        const cond0: RExpr = sqlInCondition(tc.diags.length, parseAssign(tc))
         const cond: RExpr = { e: keptHead(cond0.e), tp: cond0.tp }
         let t2: TP = cond.tp
         if (!isP(t2, ")")) {
@@ -8784,20 +8789,33 @@ ${
         return mkItem(bumpId(t), start, AItemK.TypeItem(td))
     }
 
-    // s479 — the rest of a type alias's line after its missing `;` (`type N = number
+    // s479 (r1 LOW-3) — the tokens after a type alias's missing `;` (`type N = number
     // extra`): S478 open-Qs ruling item 2 — "E-STMT-MISSING-SEMICOLON (after `number`
     // …; the bootstrap's E-PARSE-ITEM / E-PARSE-TYPE follow-ons on `extra` / `more
-    // words` are a separate cascade to quiet)". The tokens after the alias on ITS line
-    // are skipped, up to (not past) a `}` / `)` / `]` closing an enclosing group, and
-    // through a `;` that ends them; a token on a later line starts the next statement
-    // and is read as one. The missing `;` already covers the line with an error (§40.8's
-    // coverage invariant, as the ruling notes).
+    // words` are a separate cascade to quiet)". The run of tokens on the alias's line
+    // that cannot start a statement or item is skipped (aliasSkipEnd), and through a
+    // `;` that ends it; reading resumes at the first token that can (`const`, `@n`,
+    // a `<`, a `}` …), which is read as the statement that follows — §7.2.2 rule 7
+    // ("`let a = 1 let b = 2;` is E-STMT-MISSING-SEMICOLON after `1`"): a valid
+    // declaration after the alias on its line is still declared. The missing `;`
+    // covers the skipped text with an error and names it (§40.8: "a statement whose
+    // head expression was parsed as a valid prefix with the rest discarded is not
+    // compiled unless an error reports the discarded text").
     fn aliasTrailing(tp: TP) -> TP {
         const from: int = tp.i
-        const t: TP = declRestEnd(tp)
-        // the skipped text is named in the `;` report (§40.8: "a statement whose head
-        // expression was parsed as a valid prefix with the rest discarded is not compiled
-        // unless an error reports the discarded text")
+        if (atEnd(tp) || from == 0) return tp
+        const line: int = tp.toks[from - 1].line
+        let t: TP = aliasSkipEnd(tp, line, true)
+        let unclosed = ""
+        // a group opened in the skipped text and never closed (`type A = number extra(`):
+        // the skip is bounded by the alias's line — no opener swallows the rest of the
+        // region — and the report says so; a statement start after it is not hidden by it
+        const g: string = openGroupOnLine(tp, from, t.i)
+        if (g != "") {
+            unclosed = g
+            t = aliasSkipEnd(tp, line, false)
+        }
+        if (isP(t, ";")) t = adv(t)
         let to: int = t.i
         if (to > from && tk(t.toks[to - 1], ";")) to = to - 1
         if (to == from || t.diags.length == 0) return t
@@ -8805,8 +8823,83 @@ ${
         if (last.code != "E-STMT-MISSING-SEMICOLON") return t
         let skipped: string = tokText(t, from, to)
         if (skipped.length > 48) skipped = skipped.substring(0, 45) + "…"
-        const nd: Diag = newDiag(last.code, last.message + " The rest of the line, `" + skipped + "`, is not read: a `type` alias ends where its type expression ends (§40.8).", last.file, last.span)
+        let why: string = " The text after it, `" + skipped + "`, is not read: a `type` alias ends where its type expression ends (§40.8)"
+        if (unclosed != "") why = why + ", and its `" + unclosed + "` is not closed"
+        if (!atEnd(t) && cur(t).line == line && !closerAt(t)) why = why + "; `" + cur(t).text + "` is read as the statement that follows"
+        const nd: Diag = newDiag(last.code, last.message + why + ".", last.file, last.span)
         return { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.slice(0, t.diags.length - 1).concat([nd]), file: t.file, ns: t.ns, inFn: t.inFn }
+    }
+
+    // Past the tokens on `line` from `tp` that cannot start a statement or item: it stops
+    // at the line's end, at a `;` (not past it), at a `}` / `)` / `]` closing an
+    // enclosing group, and at a token that starts a statement or item (aliasStopAt).
+    // With `groups`, a group opened in the run is skipped whole, to its closer
+    // (`extra(a) const Q = 1;` resumes at `const`; the legacy `type Order = struct {
+    // …⏎}` skips its braced body) — aliasTrailing re-reads by line when there is none.
+    // A closer that does not match the innermost open group (the `}` of an enclosing
+    // `${ … }` after `extra(`) ends the run there, the group left unclosed.
+    fn aliasSkipEnd(tp: TP, line: int, groups: boolean) -> TP {
+        let t: TP = tp
+        let opens: string[] = []
+        let going = true
+        while (going && !atEnd(t) && (opens.length > 0 || cur(t).line == line)) {
+            const c: PTok = cur(t)
+            if (opens.length == 0 && (isP(t, ";") || closerAt(t) || aliasStopAt(t))) {
+                going = false
+            } else if (groups && closerAt(t)) {
+                if (opens[opens.length - 1] == openerOf(c.text)) {
+                    opens = opens.slice(0, opens.length - 1)
+                    t = adv(t)
+                } else {
+                    going = false
+                }
+            } else {
+                if (groups && (isP(t, "(") || isP(t, "[") || isP(t, "{"))) opens = opens.concat([c.text])
+                t = adv(t)
+            }
+        }
+        return t
+    }
+
+    fn openerOf(closer: string) -> string {
+        if (closer == ")") return "("
+        if (closer == "]") return "["
+        return "{"
+    }
+
+    fn closerAt(tp: TP) -> boolean {
+        return isP(tp, "}") || isP(tp, ")") || isP(tp, "]")
+    }
+
+    // The opener (`(` / `[` / `{`) of a group opened in toks[from, to) and not closed
+    // there, or "".
+    fn openGroupOnLine(tp: TP, from: int, to: int) -> string {
+        let opens: string[] = []
+        let i: int = from
+        while (i < to) {
+            const x: PTok = tp.toks[i]
+            if (x.cls == TC.Punct && (x.text == "(" || x.text == "[" || x.text == "{")) opens = opens.concat([x.text])
+            if (x.cls == TC.Punct && (x.text == ")" || x.text == "]" || x.text == "}") && opens.length > 0 && opens[opens.length - 1] == openerOf(x.text)) opens = opens.slice(0, opens.length - 1)
+            i = i + 1
+        }
+        if (opens.length == 0) return ""
+        return opens[0]
+    }
+
+    // A token that can start a statement or item after an alias (aliasSkipEnd): a
+    // declaration or statement keyword, a cell (`@n = …`), a name written to (`x = …`,
+    // the §50.8.5 keywordless form), a markup `<`, a `${`.
+    fn aliasStopAt(tp: TP) -> boolean {
+        if (logicItemAhead(tp)) return true
+        const c: PTok = cur(tp)
+        if (c.cls == TC.At) return true
+        if (c.cls == TC.Ident || c.cls == TC.Keyword) {
+            if (["lin", "fail", "transaction", "lift", "return", "for", "while", "do", "break", "continue", "if", "given", "match", "server", "defer"].indexOf(c.v) >= 0) return true
+            if (c.text == "$" && isP(adv(tp), "{")) return true
+            if (c.cls == TC.Ident && isP(adv(tp), "=")) return true
+        }
+        if (isP(tp, "<")) return true
+        return false
     }
 
     // Past the rest of a broken declaration's line (aliasTrailing; a declaration whose
@@ -14232,14 +14325,26 @@ ${
     // a terminator one — `throw` E-THROW-NOT-IN-SCRML, a by-name
     // E-BOOTSTRAP-UNSUPPORTED) is code, written wrong or not built: it keeps its
     // diagnostics, never read as display text.
+    // s479 r1 (MED-1) — a statement that OPENS with a prefix `not` (notPrimary's
+    // E-TYPE-045 at its first token: `not a clue`, the `not need a validator.` of
+    // `It does not need a validator.`) is read as `not` + its operand only to name
+    // the §42.10 refusal; as a statement it is the absence value followed by more
+    // words — before notPrimary, the literal `not` (literalOnly) that made the line
+    // display text. So that E-TYPE-045 does not make it code: §4.18.7 "One diagnostic
+    // covers each maximal run of consecutive statements that are not valid code, and
+    // the statements it covers raise no other diagnostic". A `not` inside code that
+    // is otherwise valid (`@a = not @b;`, `if (not (x))`) keeps its E-TYPE-045.
     fn notCode(before: TP, r: RStmt) -> boolean {
         if (r.tp.i == before.i) return true
         let generic = false
         let i: int = before.diags.length
+        const lead: PTok = before.toks[before.i]
         while (i < r.tp.diags.length) {
             const d: Diag = r.tp.diags[i]
             if (d.severity == Severity.Error) {
                 if (d.code.startsWith("E-PARSE-")) {
+                    generic = true
+                } else if (d.code == "E-TYPE-045" && d.span.start == lead.start && lead.text == "not") {
                     generic = true
                 } else if (!softError(d.code)) {
                     return false

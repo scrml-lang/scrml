@@ -148,3 +148,101 @@ describe("§42.10 — a prefix `not` is E-TYPE-045, once, with the operand read"
     expect(codes(r)).toContain("E-STMT-MISSING-SEMICOLON");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round r1 (review s479-1963). Each red on c75c7eaa.
+
+// MED-1 — §4.18.7: "One diagnostic covers each maximal run of consecutive statements that are not valid
+//   code, and the statements it covers raise no other diagnostic". RED ON c75c7eaa: a prose line with a
+//   `not` before a word drew E-TYPE-045 plus E-STMT-MISSING-SEMICOLON / E-SCOPE-001.
+describe("§4.18.7 — a body-top prose line with `not word` is ONE E-UNQUOTED-DISPLAY-TEXT", () => {
+  test("`It does not need a validator.`", () => {
+    const src = P(`It does not need a validator.`);
+    const r = run(src);
+    expect(codes(r)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    const d = errs(r)[0];
+    expect(src.slice(d.span.start, d.span.end)).toBe("It does not need a validator.");
+  });
+
+  test("`not a clue` (the `not` opens the line)", () => {
+    const r = run(P(`not a clue`));
+    expect(codes(r)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+  });
+
+  test("a prefix `not` in valid body-top code keeps E-TYPE-045 (and is not display text)", () => {
+    const r = run(P(`let <b:bool=true/>\nlet <a:bool=true/>\n@a = not @b;\n<p>\${@a}</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045"]);
+  });
+
+  test("a prefix `not` in a `\${ }` block keeps E-TYPE-045 in each position", () => {
+    const r = run(P(`let <b:bool=true/>\n\${\n    if (not (@b)) { @b = false; }\n    @b = not @b;\n}\n<p>\${@b}</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045", "E-TYPE-045"]);
+  });
+});
+
+// LOW-3 — §7.2.2 rule 7: "`let a = 1 let b = 2;` is E-STMT-MISSING-SEMICOLON after `1`"; the §7.2.2 newline
+//   table row: "the remainder is then read as the statement that follows it". RED ON c75c7eaa: the rest of the
+//   alias's line was skipped whole, so a declaration on it was lost (E-SCOPE-001 at its uses).
+describe("§7.2.2 — after an alias's missing `;`, the next statement on its line is read", () => {
+  test("`type A = number const QQK = 1;` declares QQK", () => {
+    const r = run(P(`let <count:int=1/>\ntype A = number const QQK = 1;\n@count = QQK;\n<p>\${@count}</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+  });
+
+  test("in a `\${ }` block too", () => {
+    const r = run(P(`let <count:int=1/>\n\${\n    type A = number const QQK = 1;\n    @count = QQK;\n}\n<p>\${@count}</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+  });
+
+  test("words before the statement are skipped and named; a group they open and close is skipped whole", () => {
+    const r = run(P(`let <count:int=1/>\ntype A = number extra(a) const QQK = 1;\n@count = QQK;\n<p>\${@count}</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(errs(r)[0].message).toContain("`extra(a)`");
+    expect(errs(r)[0].message).toContain("`const` is read as the statement that follows");
+  });
+
+  test("an opener left unclosed on the line is reported and swallows nothing past the line", () => {
+    const r = run(P(`let <count:int=1/>\ntype A = number extra(\n@count = "x";\n<p>\${@count}</p>`));
+    const [a] = errs(r);
+    expect(a.code).toBe("E-STMT-MISSING-SEMICOLON");
+    expect(a.message).toContain("`(` is not closed");
+    // the write on the next line is still read and checked
+    expect(codes(r).length).toBeGreaterThan(1);
+  });
+
+  test("a group the skipped text opens and closes on a later line is skipped whole (legacy `= struct { … }`)", () => {
+    const r = run(P(`let <count:int=1/>\ntype Order = struct {\n    id: number,\n    amount: number\n}\n@count = 2;\n<p>\${@count}</p>`));
+    // (`struct` is read as the aliased type name: E-TYPE-UNKNOWN; no parse cascade from the body)
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON", "E-TYPE-UNKNOWN"]);
+    expect(errs(r)[0].message).toContain("`{ id: number, amount: number }`, is not read");
+  });
+
+  test("an unclosed opener in a `\${ }` block skips only its line", () => {
+    const r = run(P(`let <count:int=1/>\n\${\n    type A = number extra(\n    @count = 2;\n}\n<p>\${@count}</p>`));
+    const [a] = errs(r);
+    expect(a.code).toBe("E-STMT-MISSING-SEMICOLON");
+    expect(a.message).toContain("`extra(`, is not read");
+    expect(a.message).toContain("`(` is not closed");
+  });
+
+  test("an unclosed opener hides no statement start after it on the line", () => {
+    const r = run(P(`let <count:int=1/>\ntype A = number extra( const QQK = 1;\n@count = QQK;\n<p>\${@count}</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(errs(r)[0].message).toContain("`(` is not closed");
+  });
+});
+
+// LOW-4 — §49.3.1: "This is the loop the retired `while (cond)` spelled", so the §34 E-SQL-QUERY-NOT-READABLE
+//   "`if` / `while` condition" covers a `for (cond)` head. RED ON c75c7eaa: E-SQL-003.
+describe("§34 — an unreadable `?{ … }` in a `for (cond)` head is E-SQL-QUERY-NOT-READABLE", () => {
+  test("an unbackticked body in a `for` condition head", () => {
+    const r = run(DB(`for (?{ SELECT 1 }.get()) { break; }\n        return 0;`));
+    expect(codes(r)).toContain("E-SQL-QUERY-NOT-READABLE");
+    expect(codes(r)).not.toContain("E-SQL-003");
+  });
+
+  test("outside the condition head (a counted loop's body) E-SQL-003 stands", () => {
+    const r = run(DB(`for (let i = 0; i < 1; i = i + 1) { const row = ?{ SELECT 1 }.get(); }\n        return 0;`));
+    expect(codes(r)).toContain("E-SQL-003");
+  });
+});
