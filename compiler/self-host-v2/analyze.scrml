@@ -10357,20 +10357,18 @@ ${
             if (rt.diags.length > st.diags.length) return plain(not, addValue(rt, e.nid, ValueFact.VParseVariant(not)))
             return plain(not, addValue(addDiag(rt, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", "the second argument of `parseVariant(json, EnumType)` is not a type — it SHALL be a bare `:enum` type identifier (§41.13); a value, a literal or a type expression is not accepted"), e.nid, ValueFact.VParseVariant(not)))
         }
-        const es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
-        // s478 #1948 review LOW-4: an alias is refused — §41.13 "The second argument SHALL be a bare
-        // scrml-native `:enum` type identifier", and §19.3.3: "`type A = E` is not a `:enum`
-        // declaration" (whether an alias of an enum is accepted anywhere is OPEN there) — but the
-        // message says it is an alias, and of what, rather than claiming the type "is not an enum"
+        let es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+        // S479 ruling (user-voice) §3.A item 6 — §41.13 "An alias of an enum": "A bare identifier
+        // naming a type alias whose right-hand side is a bare `:enum` type name — directly, or
+        // through a chain of such aliases (`type A = B`, `type B = E`) — is accepted in argument-2
+        // position and is that enum". The chain is followed (aliasedTypeSym); an alias whose
+        // right-hand side is anything else "is still `E-PARSEVARIANT-TYPE-NOT-ENUM`".
         const stb: TypeStub | not = stubNamed(teAt(env.g.te, env.file), n)
         if (es is not && stb is given) {
             if (aliasRhs(stb) is given) {
                 const asym: Sym | not = aliasedTypeSym(env.g.te, stb)
-                let aes: Sym | not = not
-                if (asym is given) aes = isEnumType(env.g.types, Type.Named(asym))
-                let why = "`" + n + "` is a type alias of a type that is not an `:enum`"
-                if (aes is given) why = "`" + n + "` is a type alias of the enum `" + aes.hint + "` — an alias is not accepted here; name the enum itself (`parseVariant(json, " + aes.hint + ")`)"
-                return plain(not, addValue(addDiag(st, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", why + " — the second argument of `parseVariant(json, EnumType)` SHALL be a bare `:enum` type identifier (§41.13), and `type A = E` is not a `:enum` declaration (§19.3.3)"), e.nid, ValueFact.VParseVariant(not)))
+                if (asym is given) es = isEnumType(env.g.types, Type.Named(asym))
+                if (es is not) return plain(not, addValue(addDiag(st, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", "`" + n + "` is a type alias whose right-hand side is not a bare `:enum` type name (directly or through other aliases) — the second argument of `parseVariant(json, EnumType)` SHALL be a `:enum` type identifier or an alias of one (§41.13)"), e.nid, ValueFact.VParseVariant(not)))
             }
         }
         if (es is not) return plain(not, addValue(addDiag(st, env.file, ta.span, "E-PARSEVARIANT-TYPE-NOT-ENUM", "`" + n + "` is not an `:enum` type — the second argument of `parseVariant(json, EnumType)` SHALL be a bare `:enum` type identifier; a struct, a named shape, a refinement type or any other type is not accepted (§41.13). For a struct-shaped boundary, normalize in a server function"), e.nid, ValueFact.VParseVariant(not)))
@@ -10396,7 +10394,7 @@ ${
     // s478 #1948 review LOW-4 — the type an alias `s0` names through a chain of aliases whose
     // right-hand sides are each a bare type name (`type A = B`, `type B = E`): the first non-alias
     // type's Sym; `not` when a right-hand side is anything else, names no type, or the chain cycles.
-    // (Read only to word the refusal of an alias as `parseVariant`'s type argument.)
+    // (S479 ruling §3.A item 6: resolves an alias of an enum as `parseVariant`'s type argument.)
     fn aliasedTypeSym(te: TypeEnv, s0: TypeStub) -> Sym | not {
         let s: TypeStub = s0
         let hops: int = 0
@@ -49235,8 +49233,9 @@ ${
     //    `/_scrml/` / `/_scrml_ws/` (E-ENDPOINT-ROUTE-DUPLICATE, §61.7), an arm
     //    with no value (E-ENDPOINT-ARM-NO-VALUE, §61.2), a `tag` payload field
     //    (E-PARSEVARIANT-TAG-FIELD, §61.3);
-    //  - a `path=` outside the §61.7 grammar — refused under E-BOOTSTRAP-UNSUPPORTED
-    //    because the SPEC names no code for it yet (owner question, g-boot-endpoint-s478);
+    //  - a `path=` outside the §61.7 grammar (E-ENDPOINT-PATH-INVALID — the S479 ruling
+    //    (user-voice) §3.A item 5 names the code), and `/_scrml_local/` reserved beside
+    //    `/_scrml/` and `/_scrml_ws/` (the same item);
     //  - what the bootstrap does not build, refused by name (INTERIM, gap
     //    g-boot-endpoint-s478): an `accepts=` enum not declared in the endpoint's
     //    own file, a payload field the request decode does not read.
@@ -49260,17 +49259,19 @@ ${
                     // file's `<program>`, §40.8)" — one in another file's `<program>` is misplaced
                     if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to an imported module; move it into the entry file's `<program>`")])
                     if (ep.path != "") {
-                        // §61.7 (S478 open-Qs ruling (user-voice), item 34): "A `path=` that is
-                        // `/_scrml` or `/_scrml_ws`, or begins with `/_scrml/` or `/_scrml_ws/`, is
-                        // `E-ENDPOINT-ROUTE-DUPLICATE`"
+                        // §61.7 (S478 open-Qs ruling (user-voice), item 34; `/_scrml_local/` by the
+                        // S479 ruling, §3.A item 5): "A `path=` that is `/_scrml`, `/_scrml_ws` or
+                        // `/_scrml_local`, or begins with `/_scrml/`, `/_scrml_ws/` or `/_scrml_local/`,
+                        // is `E-ENDPOINT-ROUTE-DUPLICATE`"
                         const rsv: string = endpointReservedWhy(ep.path)
                         if (rsv != "") {
                             diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-ROUTE-DUPLICATE", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + rsv + "; an `<endpoint>` may not mount there (§61.7). Choose another path")])
                         } else {
-                            // §61.7 (item 37): the `path=` grammar. A path outside it "is refused at
-                            // compile time — an Error whose code is not yet named (owner question)"
+                            // §61.7 (S478 item 37; the code by the S479 ruling, §3.A item 5): "A
+                            // `path=` outside this grammar is `E-ENDPOINT-PATH-INVALID` (§61.9),
+                            // reported at the `<endpoint>` opener."
                             const why: string = endpointPathRefusal(ep.path)
-                            if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no empty, `.` or `..` segment; the SPEC names no code for this refusal yet — g-boot-endpoint-s478)")])
+                            if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-PATH-INVALID", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no `.`, `..` or empty segment; a trailing `/` is allowed)")])
                         }
                     }
                     if (ep.path != "" && ep.method != "") {
@@ -50120,6 +50121,10 @@ ${
     fn endpointReservedWhy(p: string) -> string {
         if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
         if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
+        // S479 ruling (user-voice) §3.A item 5 — §61.7: the compiler "serves the client helpers it
+        // copies into the build output under `/_scrml_local/` (§21.3)"; an endpoint there would
+        // answer the GET for the author's own helper (review #1940 (2))
+        if (p == "/_scrml_local" || p.indexOf("/_scrml_local/") == 0) return "`/_scrml_local/` is where the compiler serves the client helpers it copies into the build output (§21.3)"
         return ""
     }
 
@@ -50130,7 +50135,7 @@ ${
         while (i < p.length) {
             const c: int = p.charCodeAt(i)
             const ok: boolean = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 95 || c == 126 || c == 47
-            if (!ok) return "`" + p.substring(i, i + 1) + "` is not a character the bootstrap matches a path on (it matches unreserved characters and `/` only — no query, fragment, percent-escape or path parameter)"
+            if (!ok) return "`" + p.substring(i, i + 1) + "` is not a path character (only unreserved characters and `/` — no query, fragment, percent-escape or path parameter)"
             i = i + 1
         }
         const segs: string[] = p.substring(1).split("/")
@@ -50138,7 +50143,7 @@ ${
         for (const sg of segs) {
             const last: boolean = k == segs.length - 1
             if (sg == "." || sg == "..") return "a `" + sg + "` segment is removed when the request URL is normalized, so the path would never match"
-            if (sg == "" && !last) return "an empty segment (`//`) is not a path the bootstrap matches"
+            if (sg == "" && !last) return "an empty segment (`//`) is not part of the grammar — no segment but the last may be empty"
             k = k + 1
         }
         return ""

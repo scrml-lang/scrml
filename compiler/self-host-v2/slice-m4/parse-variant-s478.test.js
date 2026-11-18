@@ -100,6 +100,23 @@ describe("the decode, compiled and RUN (client side)", () => {
     }
   });
 
+  // S479 ruling (user-voice) §3.A item 6 — §41.13: `parseVariant(json, A)` with `type A =
+  // LoadResult` "decodes into `LoadResult`": the same routes, run through a two-alias chain
+  test("S479: decoding through an alias chain routes exactly as the enum (strict keys included)", async () => {
+    const src = decoder(TYPES + "\n    ${ type LR1 = LoadResult; type LR2 = LR1; }\n", "LoadResult").replace("parseVariant(@raw, LoadResult)", "parseVariant(@raw, LR2)");
+    expect(src).toContain("parseVariant(@raw, LR2)");
+    const r = clean(src);
+    await loadProgram(r.core, "s479pv-" + k++);
+    for (const [raw, want] of cases) {
+      const inp = document.querySelector("#raw");
+      inp.value = raw;
+      inp.dispatchEvent(new Event("input"));
+      click(document.querySelector("#go"));
+      await settle();
+      expect([raw, document.querySelector("#out").textContent]).toEqual([raw, want]);
+    }
+  });
+
   test("every payload field type the decode reads: int, number, string, bool", async () => {
     const types = `    type V:enum = {
         A(i: int, n: number, s: string, b: bool)
@@ -209,10 +226,12 @@ ${types}
     expect(rr.some((d) => d.message.includes("`parseVariant` decode does not read"))).toBe(true);
   });
 
-  test("the call is failable: unhandled is E-ERROR-002; a non-exhaustive handler is refused", () => {
+  // S479 ruling (user-voice) §3.A item 6 — §41.13: "a non-exhaustive handler is `E-TYPE-080` (the
+  // §19.7 code for every non-exhaustive `!{}` handler)"
+  test("the call is failable: unhandled is E-ERROR-002; a non-exhaustive handler is E-TYPE-080", () => {
     expect(codes(call("LoadResult", TYPES, ""))).toEqual(["E-ERROR-002"]);
-    const partial = "!{ ::Malformed(reason) :> { return; } }";
-    expect(codes(call("LoadResult", TYPES, partial)).length).toBeGreaterThan(0);
+    expect(codes(call("LoadResult", TYPES, "!{ ::Malformed(reason) :> { return; } }"))).toEqual(["E-TYPE-080"]);
+    expect(codes(call("LoadResult", TYPES, "!{ ::MissingDiscriminator :> { return; }, ::UnknownVariant(t) :> { return; }, ::InvalidPayload(f, r) :> { return; } }"))).toEqual(["E-TYPE-080"]);
   });
 
   test("the JSON argument is text: a non-`string` argument is refused", () => {
@@ -237,22 +256,70 @@ ${types}
     expect(codes(src)).toEqual(["E-CALL-ARITY"]);
   });
 
-  // #1948 review LOW-4: an alias is refused (§41.13 "a bare scrml-native `:enum` type identifier";
-  // §19.3.3 "`type A = E` is not a `:enum` declaration") — with a message that says it is an alias
-  // (and of which enum), never the untrue "is not an `:enum` type"
-  test("a type alias is refused, and the message says it is an alias", () => {
+  // S479 ruling (user-voice) §3.A item 6 — §41.13 "An alias of an enum": "A bare identifier naming a
+  // type alias whose right-hand side is a bare `:enum` type name — directly, or through a chain of
+  // such aliases (`type A = B`, `type B = E`) — is accepted in argument-2 position and is that enum
+  // … An alias whose right-hand side is anything else (a refinement, a union, a struct, a type
+  // expression) is still `E-PARSEVARIANT-TYPE-NOT-ENUM`." (Was refused: #1948 review LOW-4.)
+  test("S479: an alias of an enum — directly or through a chain — is accepted and is that enum", () => {
+    const with_ = (arg, decl, handler) => call(arg, TYPES + "\n    ${ " + decl + " }\n", handler);
+    for (const [arg, decl] of [
+      ["LR2", "type LR2 = LoadResult;"],
+      ["LR3", "type LR2 = LoadResult; type LR3 = LR2;"],
+      ["LR4", "type LR4 = LR3; type LR3 = LR2; type LR2 = LoadResult;"],   // declared in any order
+    ]) {
+      expect([arg, codes(with_(arg, decl))]).toEqual([arg, []]);
+      // its `!{}` handler is checked as for the enum itself: unhandled, non-exhaustive
+      expect([arg, codes(with_(arg, decl, ""))]).toEqual([arg, ["E-ERROR-002"]]);
+      expect([arg, codes(with_(arg, decl, "!{ ::Malformed(reason) :> { return; } }"))]).toEqual([arg, ["E-TYPE-080"]]);
+    }
+  });
+
+  test("S479: an alias imported from another file, naming an enum declared there, is accepted", () => {
+    const lib = `\${
+    export type LoadResult:enum = {
+        Success(rows: int)
+        Empty
+    }
+    export type LR = LoadResult;
+}
+`;
+    const app = `<program>
+import { parseVariant } from 'scrml:data';
+import { LR } from './types.scrml';
+    function decode() {
+        parseVariant('{}', LR) !{ _ :> { return; } };
+    }
+    <button onclick=decode()>go</button>
+</program>
+`;
+    const r = frontEndStdlib(mods(), [{ path: ENTRY, src: app }, { path: "types.scrml", src: lib }], ENTRY);
+    expect(errs(r).map((d) => `${d.code} ${d.file}: ${d.message}`)).toEqual([]);
+  });
+
+  test("S479: an alias of an enum whose variant has a `tag` field is E-PARSEVARIANT-TAG-FIELD, as for the enum", () => {
+    const types = `    type T:enum = {
+        A(tag: string)
+        B
+    }
+    \${ type TA = T; }`;
+    expect(codes(call("TA", types))).toEqual(["E-PARSEVARIANT-TAG-FIELD"]);
+  });
+
+  test("S479: an alias of anything but a bare enum name is still E-PARSEVARIANT-TYPE-NOT-ENUM, and says so", () => {
     const one = (arg, decl) => errs(fe(call(arg, TYPES + "\n    ${ " + decl + " }\n")));
-    for (const [arg, decl, says] of [
-      ["LR2", "type LR2 = LoadResult;", "`LR2` is a type alias of the enum `LoadResult` — an alias is not accepted here; name the enum itself (`parseVariant(json, LoadResult)`)"],
-      ["LR3", "type LR2 = LoadResult; type LR3 = LR2;", "`LR3` is a type alias of the enum `LoadResult`"],
-      ["UR", "type UR = UserRow;", "`UR` is a type alias of a type that is not an `:enum`"],
-      ["ML", "type ML = LoadResult | not;", "`ML` is a type alias of a type that is not an `:enum`"],
+    for (const [arg, decl] of [
+      ["UR", "type UR = UserRow;"],                                    // a struct
+      ["UR2", "type UR1 = UserRow; type UR2 = UR1;"],                  // a chain ending at a struct
+      ["ML", "type ML = LoadResult | not;"],                           // a union with `not`
+      ["IN", "type IN = int;"],                                        // a primitive
     ]) {
       const e = one(arg, decl);
-      expect(e.map((d) => d.code)).toEqual(["E-PARSEVARIANT-TYPE-NOT-ENUM"]);
-      expect(e[0].message).toContain(says);
-      expect(e[0].message).not.toContain("is not an `:enum` type");
+      expect([arg, e.map((d) => d.code)]).toEqual([arg, ["E-PARSEVARIANT-TYPE-NOT-ENUM"]]);
+      expect(e[0].message).toContain("`" + arg + "` is a type alias whose right-hand side is not a bare `:enum` type name");
     }
+    // a cycle of aliases names no type: refused here too (beside the cycle's own refusals)
+    expect(one("CY", "type CY = CZ; type CZ = CY;").map((d) => d.code)).toContain("E-PARSEVARIANT-TYPE-NOT-ENUM");
   });
 });
 
