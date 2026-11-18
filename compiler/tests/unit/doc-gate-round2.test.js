@@ -305,21 +305,31 @@ describe("claim-gate end to end", () => {
 });
 
 describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCOPE-001 now fails both gates", () => {
-  // the tutorial's own chapter 7 (channels) and its own pin, verbatim from docs/tutorial.md
-  const SNIP = "docs/tutorial-snippets/07-channel-chat.scrml";
-  const tutorial = () => readFileSync(join(ROOT, "docs/tutorial.md"), "utf8").split(/\r?\n/); // CRLF on a Windows checkout
-  const marker = () => {
-    const t = tutorial();
-    const at = t.indexOf(`<!-- snippet: ${SNIP} -->`);
-    expect(at).toBeGreaterThan(0);
-    expect(t[at - 1]).toContain("E-SCOPE-001");
-    return t[at - 1];
-  };
-  const text = () => readFileSync(join(ROOT, SNIP), "utf8");
+  // A spec-ahead block whose pin already holds an E-SCOPE-001. (Until S478 this was the tutorial's
+  // own chapter 7 and its pin; s478-boot-channel built `<channel>`, so that chapter compiles on the
+  // bootstrap and carries no pin. The fixture keeps the shape: a channel the bootstrap refuses by
+  // name — `auth=`, g-boot-channel-s478 — and a call of an undeclared helper, pinned E-SCOPE-001.)
+  const FIXTURE = [
+    "<program>",
+    "  <channel name=\"chat\" auth=\"required\">",
+    "    let <n:int=0/>",
+    "    function postMessage(body: string) { @n = @n + 1; }",
+    "  </channel>",
+    "  function send() {",
+    "    postMessage(\"hi\");",
+    "    later();",
+    "  }",
+    "  <p>${@n}</p>",
+    "  <button onclick=send()>Send</button>",
+    "</program>",
+    "",
+  ].join("\n");
+  const marker = () => "<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001(later)] — the bootstrap has no channel auth= yet -->";
+  const text = () => FIXTURE;
   const typo = () => {
     const t = text();
-    expect(t).toContain("postMessage(@username");
-    return t.replace("postMessage(@username", "postMesage(@username");
+    expect(t).toContain("postMessage(\"hi\")");
+    return t.replace("postMessage(\"hi\")", "postMesage(\"hi\")");
   };
 
   test("snippet-gate: the pinned file passes as spec-ahead; with `postMesage` it is a pin mismatch", () => {
@@ -335,7 +345,7 @@ describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCO
     const md = write("cites-07-typo.md", ["<!-- dialect: ruled -->", marker(), `<!-- snippet: ${bad} -->`, ...fence("x")]);
     const r = snippet(`--docs=${md}`, bad);
     expect(r.stdout).toContain("spec-ahead pin-mismatch");
-    expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
+    expect(r.stderr).toMatch(/E-SCOPE-001\([^)]*postMesage/);
     expect(r.status).toBe(1);
   }, 120_000);
 
@@ -343,7 +353,7 @@ describe("#1489-1 — a typo in a spec-ahead block whose pin already holds E-SCO
     const md = write("inline-07-typo.md", ["<!-- dialect: ruled -->", marker(), ...fence(...typo().split(/\r?\n/))]);
     const r = claim(md);
     expect(r.stderr).toContain("spec-ahead pin-mismatch");
-    expect(r.stderr).toContain("E-SCOPE-001(postMesage)");
+    expect(r.stderr).toMatch(/E-SCOPE-001\([^)]*postMesage/);
     expect(r.status).toBe(1);
   }, 120_000);
 });

@@ -1251,7 +1251,7 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
   const log = (s: string) => console.error(s);
   let current: CompileResult | null = null;
   let assets: Set<string> = new Set();
-  let server: { fetch(req: Request): Promise<Response> } | null = null;
+  let server: { fetch(req: Request, upgrader?: unknown): Promise<Response | undefined> } | null = null;
   // the §61 endpoint paths of the current build (its server manifest's `endpoints`)
   let endpointPaths: Set<string> = new Set();
   let generation = 0;
@@ -1322,7 +1322,16 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
   const srv = Bun.serve({
     port: opts.port,
     hostname: "127.0.0.1",
-    async fetch(req) {
+    // s478 (s478-boot-channel): the channels' sockets — each socket carries the handlers of the
+    // server that upgraded it (server-runtime.js `channelSockets`), so a rebuild does not re-route
+    // a socket already open
+    websocket: {
+      maxPayloadLength: 262144,
+      open(ws: any) { ws.data?.scrmlSockets?.open(ws); },
+      message(ws: any, m: any) { ws.data?.scrmlSockets?.message(ws, m); },
+      close(ws: any) { ws.data?.scrmlSockets?.close(ws); },
+    },
+    async fetch(req, bunServer) {
       const url = new URL(req.url);
       if (url.pathname === RELOAD_PATH) {
         let ctl: ReadableStreamDefaultController;
@@ -1333,6 +1342,13 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
         return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
       }
       if (server !== null && endpointPaths.has(url.pathname)) return server.fetch(req);
+      // s478 (s478-boot-channel): a §38 channel's WebSocket upgrade route — the program's own server
+      // answers it (its Origin check, SPEC §40.2: "The development server SHALL apply the same rule to
+      // the upgrade it proxies, before accepting the browser's socket"), upgrading through this server
+      if (url.pathname.startsWith("/_scrml_ws/")) {
+        if (server === null) return new Response("this program has no channels", { status: 404 });
+        return server.fetch(req, bunServer);
+      }
       if (url.pathname.startsWith("/_scrml/")) {
         // s472 (boot-math-port): a stdlib host module the CLIENT imports is a static file (SPEC §21.3.1)
         // — admitted by the §47.13 policy as a client asset (a host file only the server imports is

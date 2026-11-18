@@ -36,7 +36,7 @@ const STRUCTURAL = [
 ];
 
 describe("(1) a scrml structural element is never an HTML element", () => {
-  for (const tag of STRUCTURAL) {
+  for (const tag of STRUCTURAL.filter((t) => t !== "onchange")) {
     test(`<${tag}> → exactly one E-BOOTSTRAP-UNSUPPORTED naming it (was: rendered as markup, no diagnostic)`, () => {
       const d = run(inMain(`<${tag} x="1"><p>inside</p></${tag}>`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -44,6 +44,11 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(d[0].message).toContain("structural element");
     });
   }
+  test("s478: an `<onchange>` inside markup is never an HTML element — E-STRUCTURAL-ELEMENT-MISPLACED (§38.13.3)", () => {
+    const d = run(inMain(`<onchange x="1"><p>inside</p></onchange>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
+    expect(d[0].message).toContain("`<onchange>`");
+  });
   test("s478: an `<onIdle>` inside markup is never an HTML element — E-IDLE-MISPLACED (§51.0.R)", () => {
     const d = run(inMain(`<onIdle x="1"><p>inside</p></onIdle>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-IDLE-MISPLACED"]);

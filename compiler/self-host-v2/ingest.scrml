@@ -1214,7 +1214,7 @@ ${
 
     export fn ingest(files: IFile[]) -> Ingested {
         const prog: Sym = mkSym(0, "program")
-        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
@@ -1272,7 +1272,7 @@ ${
             sym: prog, key: prog.hint, kind: DeclKind.Program, single: true, fields: fs.fields,
             renders: vs.views, wiring: [], handles: [],
         }
-        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         return { core: core, why: dedupeStr(why) }
     }
 

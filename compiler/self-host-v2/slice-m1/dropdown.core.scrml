@@ -405,6 +405,7 @@ ${
             head: plainHead(),
             tool: not,
             endpoints: [],
+            channels: [],
         }
     }
 

@@ -651,9 +651,29 @@ ${
     export type AEndpoint:struct = { nid: int, span: ASpan, opener: ASpan, path: string, method: string, accepts: string, acceptsSpan: ASpan,
                                      arms: AEpArm[], top: boolean, lowered: boolean }
 
+    // s478 (s478-boot-channel) — §38 `<channel>`. A `<channel>` written as a direct
+    // child of the top-level `<program>` (§38.1: "the channel is a CHILD of
+    // `<program>`") is read like a `<page>` (§40.8 S441: "A `<page>` body … and a
+    // `<channel>` body … are the same locus and follow the same rule"): its body is
+    // read by the program body's own reader and its items JOIN the program's items
+    // in place — §38.1 rule 4: "Channel-declared state is reachable from any `<page>`
+    // body and any logic context in the same `<program>` via canonical `@` access".
+    // This record keeps what the flattening loses: the opener (`opener`), its
+    // attributes, and `body` — the extent; a cell of the program whose declaration
+    // lies in `body` is a CHANNEL cell (§38.4: auto-synchronized "by virtue of being
+    // declared inside the channel body"). `ctx` — where it stood ("program" the
+    // top-level program's body; "nested" a nested program's; "channel" another
+    // channel's body). analyze.scrml channelPass judges it (§38.3 / §38.9 / §38.13)
+    // and hands Core the channel (CoreChannel); print / print-server emit its halves.
+    // AOnchange — a §38.13.3 `<onchange>` read in a channel body: its arms (the
+    // §18.0.1 arm grammar, the shape `<endpoint>` arms take — AEpArm).
+    export type AChannel:struct = { nid: int, span: ASpan, opener: ASpan, attrs: AAttr[], body: ASpan, ctx: string }
+    export type AOnchange:struct = { nid: int, span: ASpan, arms: AEpArm[] }
+
     // s478-boot-sql-row-types — `tables`: the file's `<schema>` tables (§39.11), read whole
     // (parse.scrml finishSchema keeps them only when the first `<schema>` read clean); [] none.
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], first: int, tables: SchemaTable[] }
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], first: int, tables: SchemaTable[],
+                                   chans: AChannel[], onchs: AOnchange[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)

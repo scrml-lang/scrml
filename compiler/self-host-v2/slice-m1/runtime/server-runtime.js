@@ -1411,7 +1411,13 @@ export function tenantGate(host, conns) {
 // — a WinterCG handler (Bun.serve's `fetch`, or a test calling it directly).
 // The request is read through `url`, `method`, `headers.get(name)` and `text()`
 // only. `conns` (s473): the program's database connections — the tenant gate's.
-export function server(host, routes, conns = [], endpoints = []) {
+// s478 (s478-boot-channel): `channels` — the §38 channels (rt.channel); their WebSocket
+// upgrade route `/_scrml_ws/<name>` is answered HERE, by this one `fetch` (no second
+// router), which then needs the host's upgrader: Bun.serve passes its server as `fetch`'s
+// second argument (`server.upgrade(request, { data })`), and the host passes this server's
+// `websocket` handlers as Bun.serve's `websocket:` option (§38.8: "a `_scrml_ws_handlers`
+// export for `Bun.serve()`'s `websocket:` option").
+export function server(host, routes, conns = [], endpoints = [], channels = []) {
   const byPath = new Map();
   for (const r of routes) byPath.set(r.path, r);
   // s478 (s478-boot-endpoint): the §61 endpoints, by path, then method (§61.7 — "mounted for
@@ -1422,9 +1428,13 @@ export function server(host, routes, conns = [], endpoints = []) {
     byEndpoint.get(ep.path).set(ep.method, ep);
   }
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
+  const byChannel = new Map();
+  for (const ch of channels) byChannel.set(CHANNEL_PREFIX + ch.name, ch);
+  const websocket = channelSockets(host);
   return {
-    routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))),
-    async fetch(request) {
+    routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))).concat(channels.map((ch) => ({ path: CHANNEL_PREFIX + ch.name, method: "GET" }))),
+    websocket,
+    async fetch(request, upgrader) {
       let path;
       try { path = new URL(request.url, "http://localhost").pathname; } catch { return jsonResponse(host, 400, FIXED[400]); }
       if (conns.length > 0) {
@@ -1437,6 +1447,18 @@ export function server(host, routes, conns = [], endpoints = []) {
           return admitted ? jsonResponse(host, 200, { status: "ok" }) : jsonResponse(host, 503, { error: "Service Unavailable", undeclared: gate.count });
         }
         if (!admitted) return jsonResponse(host, 503, FIXED[503]);
+      }
+      // s478 #1928 fix r1 (MED-1): the prefix is intercepted only in a program that HAS channels
+      // (a program without one answers `/_scrml_ws/…` as any other path, unchanged from before
+      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (endpointPathRefusal),
+      // so no endpoint is ever shadowed here. Refusal order (LOW-1): 403 (Origin, §40.2 — first,
+      // before anything about the request is answered), then 404 (no such channel), 405
+      // (non-GET), 426 (no `Upgrade: websocket`); only then the upgrade.
+      if (channels.length > 0 && path.startsWith(CHANNEL_PREFIX)) {
+        if (!originOk(request)) return jsonResponse(host, 403, FIXED[403]);
+        const ch = byChannel.get(path);
+        if (ch === undefined) return jsonResponse(host, 404, FIXED[404]);
+        return upgradeChannel(host, ch, request, upgrader, websocket);
       }
       const em = byEndpoint.get(path);
       if (em !== undefined) {
@@ -1460,6 +1482,119 @@ export function server(host, routes, conns = [], endpoints = []) {
         logLine(host, `scrml server: ${path} — ${messageOf(e)}`);
         return jsonResponse(host, 500, FIXED[500]);
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// s478 (s478-boot-channel) — SPEC §38 `<channel>`: the SERVER half.
+// `desc` (print-server.scrml channelConsts): the channel's `name`, its `topic` and
+// per synced cell (§38.4) its key and §57 wire table.
+//   §38.1: "a server-side upgrade route at `/_scrml_ws/<name>`".
+//   §40.2 (S441): "Every compiler-emitted WebSocket upgrade route of a web-application
+//   program … SHALL accept the upgrade only when the request's `Origin` names the
+//   server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy
+//   sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`,
+//   else the request's — except that an `https` origin SHALL be accepted on a request
+//   that arrived as plain `http` … Default ports compare equal to their omitted form. A
+//   mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before
+//   the upgrade and before any channel handler runs. A handshake with NO `Origin` header
+//   is a non-browser client … it SHALL be accepted".
+//   §38.4: the server relays a client's `{ __type: "__sync", __key, __val }` to the
+//   channel's other subscribers ("the server-side router for client-originated
+//   writes"; "distributes the new value to every other subscriber") — channel cells are
+//   CLIENT-HELD: the server keeps no value.
+// Fail closed where the SPEC is silent (owner questions, g-boot-channel-s478): a frame
+// is decoded STRICTLY — text only, at most CHANNEL_MAX_FRAME characters, a JSON object
+// of exactly `__type` / `__key` / `__val`, `__type` "__sync", `__key` a cell the
+// channel declares, `__val` decoding canonically against that cell's table (§57.5) —
+// and the relayed frame is RE-ENCODED from the decoded value, never the raw text. Any
+// other frame closes the connection (1003 / 1007 / 1008 / 1009) and is relayed to no
+// one. Each channel publishes on its own topic key (`[name, topic]`), so two channels
+// naming one `topic=` never exchange frames.
+// ---------------------------------------------------------------------------
+const CHANNEL_PREFIX = "/_scrml_ws/";
+export const CHANNEL_MAX_FRAME = 65536;
+
+export function channel(desc) {
+  const cells = new Map();
+  for (const c of desc.cells) cells.set(c.key, c.table);
+  return { name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells };
+}
+
+function originOk(request) {
+  const origin = request.headers.get("Origin");
+  if (origin === null) return true;
+  try {
+    const o = new URL(origin);
+    if (o.origin === "null") return false;
+    const u = new URL(request.url, "http://localhost");
+    const fwdHost = (request.headers.get("X-Forwarded-Host") ?? "").split(",")[0].trim();
+    const fwdProto = (request.headers.get("X-Forwarded-Proto") ?? "").split(",")[0].trim().toLowerCase();
+    let proto = fwdProto !== "" ? fwdProto : u.protocol.replace(":", "").toLowerCase();
+    if (proto === "ws") proto = "http";
+    if (proto === "wss") proto = "https";
+    if (proto !== "http" && proto !== "https") return false;
+    const self = new URL(proto + "://" + (fwdHost !== "" ? fwdHost : u.host));
+    if (o.host !== self.host) return false;
+    return o.protocol === self.protocol || (o.protocol === "https:" && self.protocol === "http:");
+  } catch {
+    return false;
+  }
+}
+
+// Called after `fetch` has applied the §40.2 Origin check (403) and found the channel (404):
+// "refused with `403` before the upgrade and before any channel handler runs".
+function upgradeChannel(host, ch, request, upgrader, websocket) {
+  if (request.method !== "GET") return jsonResponse(host, 405, FIXED[405], { Allow: "GET" });
+  const up = (request.headers.get("Upgrade") ?? "").toLowerCase();
+  if (up !== "websocket") return jsonResponse(host, 426, { error: "Upgrade Required" }, { Upgrade: "websocket" });
+  if (upgrader === null || upgrader === undefined || typeof upgrader.upgrade !== "function") {
+    logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the host passed no WebSocket upgrader (Bun.serve's server, as fetch's second argument)`);
+    return jsonResponse(host, 500, FIXED[500]);
+  }
+  if (upgrader.upgrade(request, { data: { scrmlChannel: ch, scrmlSockets: websocket } })) return undefined;
+  return jsonResponse(host, 400, FIXED[400]);
+}
+
+function closeSocket(host, ws, code, why) {
+  logLine(host, `scrml server: ${CHANNEL_PREFIX}${ws.data.scrmlChannel.name} — closed a connection: ${why}`);
+  try { ws.close(code, why.slice(0, 120)); } catch { /* already closed */ }
+}
+
+// The frame a client sent, or why it is refused ({ code, why }).
+function channelFrame(ch, raw) {
+  if (typeof raw !== "string") return { code: 1003, why: "a non-text frame" };
+  if (raw.length > CHANNEL_MAX_FRAME) return { code: 1009, why: "a frame over " + CHANNEL_MAX_FRAME + " characters" };
+  let v;
+  try { v = JSON.parse(raw); } catch { return { code: 1007, why: "a frame that is not JSON" }; }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return { code: 1008, why: "a frame that is not a JSON object" };
+  const keys = Object.keys(v);
+  if (keys.length !== 3 || !own(v, "__type") || !own(v, "__key") || !own(v, "__val")) return { code: 1008, why: "a frame that is not exactly {__type, __key, __val}" };
+  if (v.__type !== "__sync") return { code: 1008, why: "a frame whose __type is not __sync" };
+  if (typeof v.__key !== "string" || !ch.cells.has(v.__key)) return { code: 1008, why: "a __sync for a cell the channel does not declare" };
+  const table = ch.cells.get(v.__key);
+  const d = decode(table, v.__val, { canonicalOnly: true });
+  if (!d.ok) return { code: 1007, why: `a __sync whose value does not decode against @${v.__key}'s type` };
+  const e = encode(table, d.value);
+  if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
+  return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __val: e.wire }) };
+}
+
+function channelSockets(host) {
+  return {
+    maxPayloadLength: CHANNEL_MAX_FRAME * 4,
+    open(ws) {
+      ws.subscribe(ws.data.scrmlChannel.key);
+    },
+    message(ws, raw) {
+      const ch = ws.data.scrmlChannel;
+      const f = channelFrame(ch, raw);
+      if (f.text === undefined) return closeSocket(host, ws, f.code, f.why);
+      ws.publish(ch.key, f.text);
+    },
+    close(ws) {
+      try { ws.unsubscribe(ws.data.scrmlChannel.key); } catch { /* the socket is gone */ }
     },
   };
 }
