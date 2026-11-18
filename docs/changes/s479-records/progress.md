@@ -12,6 +12,7 @@ Lane brief: S479 records lane (§3.B items 12/14/18/19/22/23/26; #1963 follow-up
 - [x] B item 19 — s34 census code-shaped string occurrences (5 tests red on base; --check-all stale count 2 → 2)
 - [x] B item 22 — url(#ident) (browser check: Chromium 152, 0 fetches under static <base> on another origin, control url(x.svg#g) fetched; opt-in test url-fragment-chromium-s479; runtime cssAttrValue; 12 tests red on base)
 - [x] D new gaps (#1962 LOWs ×4, #1957 LOW-2, body-top let after type alias — reproduced with corrected shape; + hook flake g-impl1-dbvar-tag-mutates-shared-builtin-type-s479, bisected to endpoint-415-strict-keys-served + snippet-slot)
-- [ ] CI gates + comp.sh + PR
+- [x] merged origin/main (8f1668ca9); comp.sh green: self-host-v2 8636 pass / 0 fail; conformance PASS 681→682 (+1 new case), FAIL 7→7, UNSUPPORTED 556, CRASH 0; hgs/severity/claim/snippet/types/floor/mdshim/§34.0 all pass
+- [ ] PR (do not merge)
 
 Hook note: commit 1 needed SCRML_HOOK_SHARDS=12 — the default/4/6 plans put endpoint-415-strict-keys-served.test.js and snippet-slot.test.js in one process (deterministic failure, pre-existing on main).
