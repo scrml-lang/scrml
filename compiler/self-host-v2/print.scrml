@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice,
+             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml"
     import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -40,7 +40,7 @@ ${
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
     import { emitCss } from "./css.scrml"
-    import { checkCore } from "./check.scrml"
+    import { checkCore, writtenCaps } from "./check.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
     import { htmlNs, childNs, isHtmlInNs } from "./elements.scrml"
 
@@ -4700,6 +4700,350 @@ ${
             }
         }
         return -1
+    }
+
+    // =========================================================================
+    // S479 (s479-channel-relay-fold) — SPEC §38.4.2 "The relay's fold" (ruling: user-voice S479
+    // "⭐ RULED — S478 hand-off §3.A and §3.B", item 7: "the relay fold — a relay-computed state used
+    // to judge and close senders of refused frames, and as a compaction base in the replay"). The
+    // relay folds a channel only when the source alone fixes the value every client starts the
+    // channel from and every write that applying a frame causes: "A channel has a fold when each of
+    // its cells is initialized by a literal value, … no body-top statement writes one of its cells,
+    // no `<request>` writes one, and every `reset-on=` rule that resets one of its cells is
+    // triggered only by cells of the same channel and resets it to a literal value." `chFoldWhy`:
+    // "" when it does, else why not (the server desc's `noFold` — the relay then judges nothing and
+    // truncates at the log bound, as before). `chResets`: the `reset-on=` rules the fold makes.
+    // =========================================================================
+    export type ChReset:struct = { cell: string, on: string[], rank: int, value: Expr }
+    type ChWrite:struct = { cap: Sym, edit: EditKind, value: Expr }
+
+    export fn chFoldWhy(p: CoreProgram, ch: CoreChannel) -> string {
+        for (const c of ch.cells) {
+            const fd: Field | not = programField(p, c)
+            if (fd is not) return "@" + c.hint + " is not a field of the program"
+            const init: Expr | not = fd.init
+            if (init is not) return "@" + c.hint + " has no initializer"
+            if (!chConstExpr(init)) return "@" + c.hint + "'s initializer is not a literal value, so the relay cannot know the value clients start it from"
+        }
+        const all: Node[] = allNodes(Node.NProgram(p))
+        let runs: Block[] = []
+        for (const n of all) {
+            const why: string = chNodeWhy(p, ch, n)
+            if (why != "") return why
+            runs = runs.concat(nodeRunBody(n))
+        }
+        const caps: int[] = chCaps(p, ch)
+        for (const id of writtenCaps(p, runs)) {
+            if (caps.indexOf(id) >= 0) return "a body-top statement (§40.8) writes a cell of the channel when the page mounts, so a client may start the channel from a value the source does not fix"
+        }
+        return ""
+    }
+
+    export fn chResets(p: CoreProgram, ch: CoreChannel) -> ChReset[] {
+        let out: ChReset[] = []
+        for (const n of allNodes(Node.NProgram(p))) { out = out.concat(chNodeReset(p, ch, n)) }
+        return out
+    }
+
+    // The channel desc's `init` / reset value of a cell (a literal, chConstExpr), as the client prints it.
+    export fn chValueJs(ctx: Ctx, e: Expr) -> JsExpr { return exprJs(ctx, e) }
+
+    // A `rule=` field's edge table, by variant tag (the SAME table the client's `<field>_edges` holds), or null.
+    export fn chEdgesJs(ctx: Ctx, f: Field) -> JsExpr {
+        const g: TransitionGraph | not = f.graph
+        if (g is not) return JsExpr.JNull
+        let props: JsProp[] = []
+        for (const e of g.edges) {
+            let targets: JsExpr[] = []
+            for (const t of e.targets) { targets = targets.concat([jstr(variantTag(ctx, g.enumSym, t))]) }
+            props = props.concat([{ key: variantTag(ctx, g.enumSym, e.origin), value: JsExpr.JArray(targets) }])
+        }
+        return JsExpr.JObject(props)
+    }
+
+    fn chConstExpr(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: x) :> true
+            .ArrayOf(elems: es) :> chConstAll(es)
+            .StructOf(ty: x, fields: fs) :> chConstAll(fs)
+            .VariantOf(enumSym: x, idx: y, args: va) :> chConstAll(va)
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .Refetch(req: x) :> false
+            .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
+            .Assigned(local: x) :> false
+            .Foreign(slice: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
+            .FCall(fn: x) :> false
+            .FSettled(outcome: x) :> false
+            .FParse(json: x) :> false
+            .FCallV(f: x) :> false
+        }
+    }
+
+    fn chConstAll(es: Expr[]) -> boolean {
+        for (const e of es) { if (!chConstExpr(e)) return false }
+        return true
+    }
+
+    // The write capabilities (sym ids) of the channel's cells.
+    fn chCaps(p: CoreProgram, ch: CoreChannel) -> int[] {
+        let out: int[] = []
+        for (const c of ch.cells) {
+            const fd: Field | not = programField(p, c)
+            if (fd is given) {
+                const w: Sym | not = fd.wcap
+                if (w is given) out = out.concat([w.id])
+            }
+        }
+        return out
+    }
+
+    // The program field a write capability writes, or not.
+    fn chCapField(p: CoreProgram, cap: Sym) -> Field | not {
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id) {
+                for (const f of d.fields) {
+                    const w: Sym | not = f.wcap
+                    if (w is given && w.id == cap.id) return f
+                }
+            }
+        }
+        return not
+    }
+
+    // The program field a dependency names, when it is a cell of `ch`.
+    fn chDepCell(p: CoreProgram, ch: CoreChannel, d: EffectDep) -> Sym | not {
+        if (d.decl.id != p.program.id) return not
+        for (const pd of p.decls) {
+            if (pd.sym.id == p.program.id && d.idx >= 0 && d.idx < pd.fields.length) {
+                const s: Sym = pd.fields[d.idx].sym
+                for (const c of ch.cells) { if (c.id == s.id) return s }
+            }
+        }
+        return not
+    }
+
+    fn chIsCell(ch: CoreChannel, s: Sym) -> boolean {
+        for (const c of ch.cells) { if (c.id == s.id) return true }
+        return false
+    }
+
+    fn nodeRunBody(n: Node) -> Block[] {
+        return match n {
+            .NView(v: v) :> viewRunBody(v)
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NStmt(s: x) :> []
+            .NExpr(e: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn viewRunBody(v: View) -> Block[] {
+        return match v {
+            .Run(body: b) :> [b]
+            .El :> []
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Instance :> []
+            .Slot :> []
+            .Star :> []
+            .Effect :> []
+            .Request :> []
+            .ResetOn :> []
+            .Errors :> []
+            .Reach :> []
+            .Gather :> []
+        }
+    }
+
+    fn chNodeWhy(p: CoreProgram, ch: CoreChannel, n: Node) -> string {
+        return match n {
+            .NView(v: v) :> chViewWhy(p, ch, v)
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> ""
+            .NServerFn(f: x) :> ""
+            .NBlock(b: x) :> ""
+            .NStmt(s: x) :> ""
+            .NExpr(e: x) :> ""
+            .NPlace(pl: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NAttr(a: x) :> ""
+        }
+    }
+
+    fn chViewWhy(p: CoreProgram, ch: CoreChannel, v: View) -> string {
+        return match v {
+            .Request(target: t) :> chRequestWhy(p, ch, t)
+            .ResetOn(triggers: ds, reset: b) :> chResetWhy(p, ch, ds, b)
+            .El :> ""
+            .Text :> ""
+            .RawText :> ""
+            .Dyn :> ""
+            .Cond :> ""
+            .Each :> ""
+            .Instance :> ""
+            .Slot :> ""
+            .Star :> ""
+            .Effect :> ""
+            .Run :> ""
+            .Errors :> ""
+            .Reach :> ""
+            .Gather :> ""
+        }
+    }
+
+    fn chRequestWhy(p: CoreProgram, ch: CoreChannel, t: EffectDep) -> string {
+        const s: Sym | not = chDepCell(p, ch, t)
+        if (s is given) return "@" + s.hint + " is the target of a <request>, whose result is written on each client"
+        return ""
+    }
+
+    fn chResetWhy(p: CoreProgram, ch: CoreChannel, ds: EffectDep[], b: Block) -> string {
+        const w: ChWrite | not = chResetWrite(b)
+        if (w is not) return ""
+        const f: Field | not = chCapField(p, w.cap)
+        if (f is not) return ""
+        if (!chIsCell(ch, f.sym)) return ""
+        for (const d of ds) {
+            if (chDepCell(p, ch, d) is not) return "@" + f.sym.hint + "'s reset-on= has a trigger that is not a cell of this channel, so it is reset on each client by a change the relay does not see"
+        }
+        if (!editIsReplace(w.edit)) return "@" + f.sym.hint + "'s reset-on= reset is a move along its rule= graph, which the relay does not make"
+        if (!chConstExpr(w.value)) return "@" + f.sym.hint + "'s reset-on= value is not a literal value"
+        return ""
+    }
+
+    fn chNodeReset(p: CoreProgram, ch: CoreChannel, n: Node) -> ChReset[] {
+        return match n {
+            .NView(v: v) :> chViewReset(p, ch, v)
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NStmt(s: x) :> []
+            .NExpr(e: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn chViewReset(p: CoreProgram, ch: CoreChannel, v: View) -> ChReset[] {
+        return match v {
+            .ResetOn(triggers: ds, reset: b, rank: r) :> chResetOf(p, ch, ds, b, r)
+            .El :> []
+            .Text :> []
+            .RawText :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Instance :> []
+            .Slot :> []
+            .Star :> []
+            .Effect :> []
+            .Run :> []
+            .Request :> []
+            .Errors :> []
+            .Reach :> []
+            .Gather :> []
+        }
+    }
+
+    fn chResetOf(p: CoreProgram, ch: CoreChannel, ds: EffectDep[], b: Block, rank: int) -> ChReset[] {
+        const w: ChWrite | not = chResetWrite(b)
+        if (w is not) return []
+        const f: Field | not = chCapField(p, w.cap)
+        if (f is not) return []
+        if (!chIsCell(ch, f.sym)) return []
+        let on: string[] = []
+        for (const d of ds) {
+            const s: Sym | not = chDepCell(p, ch, d)
+            if (s is given) on = on.concat([s.hint])
+        }
+        const r: ChReset = { cell: f.sym.hint, on: on, rank: rank, value: w.value }
+        return [r]
+    }
+
+    // A `reset-on=` rule's ONE Write (check.scrml C13).
+    fn chResetWrite(b: Block) -> ChWrite | not {
+        if (b.stmts.length != 1) return not
+        return match b.stmts[0] {
+            .Write(cap: c, edit: k, value: v) :> chWrite(c, k, v)
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Gather(g: x) :> not
+            .Lift(into: x) :> not
+            .LocalFn(f: x) :> not
+        }
+    }
+
+    fn chWrite(c: Sym, k: EditKind, v: Expr) -> ChWrite | not {
+        const w: ChWrite = { cap: c, edit: k, value: v }
+        return w
+    }
+
+    fn editIsReplace(k: EditKind) -> boolean {
+        return match k {
+            .Replace :> true
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .PositionWrite :> false
+            .FieldAt(path: x) :> false
+            .Transition :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .ElemAt(index: x) :> false
+            .PositionAt(index: x) :> false
+        }
     }
 
     fn channelBoot(ctx: Ctx, p: CoreProgram, progLocal: string) -> JsStmt[] {

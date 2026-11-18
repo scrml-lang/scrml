@@ -5644,6 +5644,55 @@ function utf8Over(s, max) {
   return false;
 }
 
+/**
+ * §38.4.2 receiver check (3): the edit `op` / `val` applied to `cur`, the cell's CURRENT value —
+ * `{ next }`, or why it is refused (a string). `c`: `{ key, table, edges }` (a channel cell's desc).
+ * Pure: it writes nothing. The client applies a relayed frame, and re-applies a pending edit, through
+ * it. The JUDGEMENT is `channelJudge`, which the relay's fold (server-runtime.js `channelSockets`,
+ * S479 — §38.4.2 "The relay's fold") calls too, so the relay refuses exactly what a receiver would;
+ * the relay then applies an edit it accepts to its own fold IN PLACE (it owns that value — s479 fix
+ * r1, MED-1: a copy per frame made one frame cost the tape's length), where a client builds the new
+ * value here.
+ */
+export function channelStep(c, cur, op, val) {
+  const why = channelJudge(c, cur, op, val);
+  if (why !== null) return why;
+  if (op === "replace" || op === "transition") return { next: val };
+  if (op === "append") return { next: [...cur, val] };
+  if (op === "prepend") return { next: [val, ...cur] };
+  const left = Math.max(0, cur.length - val);
+  return { next: op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left) };
+}
+
+// A tape the relay's fold holds in place of an array (server-runtime.js `FoldTape`) says so with this
+// key and has a `length` — all `channelJudge` reads of a tape.
+export const CHANNEL_TAPE = Symbol.for("scrml.channel.foldTape");
+
+/**
+ * §38.4.2 receiver check (3), the judgement alone: null when the edit `op` / `val` applies to `cur`
+ * (the cell's CURRENT value), else why it is refused (a string). It never writes `cur`; of a tape it
+ * reads only that it is one and its length. The client (through `channelStep`) and the relay's fold
+ * both judge by it — one rule, never two copies.
+ */
+export function channelJudge(c, cur, op, val) {
+  if (op === "replace") return null;
+  if (op === "transition") {
+    try { checkEdge({ peek: () => cur }, c.edges, val); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
+    return null;
+  }
+  if (!Array.isArray(cur) && !(cur !== null && typeof cur === "object" && cur[CHANNEL_TAPE] === true)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
+  const bound = lengthBound(c.table);
+  if (bound === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
+  if (op === "append" || op === "prepend") {
+    if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
+    return null;
+  }
+  if (op !== "pop" && op !== "shift") return `an op \`${op}\` the bootstrap does not apply`;
+  const left = Math.max(0, cur.length - val);
+  if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
+  return null;
+}
+
 // The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.
 const RELAY_CLOSES = new Map([
   [1003, "it sent a binary frame"],
@@ -5743,22 +5792,8 @@ export function channel(scope, desc) {
   }
 
   // Receiver check (3): the edit applied to `cur` (the cell's CURRENT value) — { next } or why refused.
-  function step(c, cur, op, val) {
-    if (op === "replace") return { next: val };
-    if (op === "transition") {
-      try { checkEdge({ peek: () => cur }, c.edges, val); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
-      return { next: val };
-    }
-    if (!Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
-    const bound = lengthBound(c.table);
-    if (op === "append" || op === "prepend") {
-      if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
-      return { next: op === "append" ? [...cur, val] : [val, ...cur] };
-    }
-    const left = Math.max(0, cur.length - val);
-    if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
-    return { next: op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left) };
-  }
+  // ONE function with the relay's fold (server-runtime.js `channelSockets`, S479): `channelStep`.
+  const step = channelStep;
 
   // One relayed frame applied to the cells (which hold the confirmed value), as the local write of
   // the same edit would be — `Cell.set`, so the writes it causes (`reset-on=`) are made too.
@@ -5819,30 +5854,73 @@ export function channel(scope, desc) {
     }
   }
 
+  // A replay's `__base` (S479, §38.4.2 "The frame log"): `{ seq, cells }` (`cells` null: the initial
+  // values; else a Map from each channel cell to its decoded value), or why the stream is broken.
+  function baseOf(b, last) {
+    if (b === null) return { seq: 0, cells: null };
+    if (typeof b !== "object" || Array.isArray(b) || Object.keys(b).length !== 2 || !Number.isSafeInteger(b.__seq) || b.__seq < 0 || b.__seq > last
+      || b.__cells === null || typeof b.__cells !== "object" || Array.isArray(b.__cells)) {
+      return "a replay whose __base is not {__seq, __cells}";
+    }
+    if (Object.keys(b.__cells).length !== desc.cells.length) return "a replay whose __base does not hold exactly the channel's cells";
+    const cells = new Map();
+    for (const c of desc.cells) {
+      if (!hasOwn(b.__cells, c.key)) return `a replay whose __base has no @${c.key}`;
+      const d = decode(c.table, b.__cells[c.key], { canonicalOnly: true });
+      if (!d.ok) return `a replay whose __base value of @${c.key} does not decode`;
+      cells.set(c, d.value);
+    }
+    return { seq: b.__seq, cells };
+  }
+
   // A message on connection `s`: "" or why the stream is broken.
   function receive(text) {
     if (typeof text !== "string") return "a non-text frame";
     let v;
     try { v = JSON.parse(text); } catch { return "a frame that is not JSON"; }
     if (!live) {
-      if (v === null || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length !== 4 || v.__type !== "__replay"
-        || typeof v.__complete !== "boolean" || !Number.isSafeInteger(v.__seq) || v.__seq < 0 || !Array.isArray(v.__frames)) {
-        return "a connection whose first frame is not the relay's __replay {__type, __complete, __seq, __frames}";
+      if (v === null || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length !== 5 || v.__type !== "__replay"
+        || typeof v.__complete !== "boolean" || !Number.isSafeInteger(v.__seq) || v.__seq < 0 || !hasOwn(v, "__base") || !Array.isArray(v.__frames)) {
+        return "a connection whose first frame is not the relay's __replay {__type, __complete, __seq, __base, __frames}";
       }
       if (!v.__complete) return "TRUNCATED";
+      // S479 (s479-channel-relay-fold), §38.4.2 "The frame log": `__base` is null (the log starts at
+      // sequence 0, from the cells' initial values) or the relay's COMPACTION BASE — `{ __seq: k,
+      // __cells: { <key>: <value> } }`, the relay's fold after frame k, one value per channel cell, each
+      // decoded canonically against its type — and the frames are then numbered k + 1 to `__seq`.
+      const start = baseOf(v.__base, v.__seq);
+      if (typeof start === "string") return start;
       const frames = v.__frames;
-      if (frames.length !== v.__seq) return `a replay of ${frames.length} frames that says it ends at ${v.__seq}`;
+      if (frames.length !== v.__seq - start.seq) return `a replay of ${frames.length} frames from ${start.seq} that says it ends at ${v.__seq}`;
       for (let i = 0; i < frames.length; i++) {
-        if (!relayedShape(frames[i]) || frames[i].__seq !== i + 1 || frames[i].__own !== false) return `a replay whose frame ${i + 1} is not the relayed frame numbered ${i + 1}`;
+        const n = start.seq + i + 1;
+        if (!relayedShape(frames[i]) || frames[i].__seq !== n || frames[i].__own !== false) return `a replay whose frame ${i + 1} is not the relayed frame numbered ${n}`;
       }
       live = true;
       seq = v.__seq;
       pending = [];
-      for (const c of desc.cells) conf.set(c, init.get(c));
+      for (const c of desc.cells) conf.set(c, start.cells === null ? init.get(c) : start.cells.get(c));
       const early = held;
       held = [];
       unit(() => { for (const f of frames) apply(f, false); }, () => resendHeld(early));
       return "REPLAYED";
+    }
+    // S479 (s479-channel-relay-fold), §38.4.2 "The relay's fold": `{ __type: "__refused", __key, __op,
+    // __val, __why }` — the relay's fold refused this client's OLDEST pending edit (a concurrent edit
+    // came first in relay order): it was relayed to no one and took no sequence number. It stops being
+    // pending and is not shown (as its own copy refused at the confirmed value would be), and it is
+    // reported. It must name that oldest pending edit, or the stream is broken.
+    if (v !== null && typeof v === "object" && !Array.isArray(v) && v.__type === "__refused") {
+      if (Object.keys(v).length !== 5 || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val") || typeof v.__why !== "string") {
+        return "a __refused that is not exactly {__type, __key, __op, __val, __why}";
+      }
+      const p = pending[0];
+      if (p === undefined || p.c.key !== v.__key || p.op !== v.__op || JSON.stringify(p.wire) !== JSON.stringify(v.__val)) {
+        return "a __refused that is not this client's oldest pending edit";
+      }
+      unit(() => { pending.shift(); });
+      refused(`this client's own edit, by the relay (a concurrent edit came first in relay order): ${v.__why.slice(0, 300)}`);
+      return "";
     }
     if (!relayedShape(v)) return "a frame that is not exactly {__type, __seq, __key, __op, __val, __own}";
     if (v.__seq !== seq + 1) return `a frame numbered ${v.__seq} after ${seq}`;

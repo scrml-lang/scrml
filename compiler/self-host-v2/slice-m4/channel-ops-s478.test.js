@@ -117,7 +117,7 @@ const tick = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const frame = (key, op, val) => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
 // A socket stand-in's delivery as the relay makes it (§38.4.2): the replay first, then each frame
 // numbered in turn (`__seq`), as a peer's (`__own: false`) unless `own`.
-const EMPTY_REPLAY = JSON.stringify({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+const EMPTY_REPLAY = JSON.stringify({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
 function relayer(sock) {
   let seq = 0;
   sock.onmessage({ data: EMPTY_REPLAY });
@@ -134,8 +134,10 @@ describe("E — §38.4.2 op sync end to end (compiled from source, served)", () 
     const { client, server } = compile();
     expect(client.js).toContain(`{ key: "xs", cell: program$.fields[0 /* xs */], table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } }, ops: ["append"], edges: null }`);
     expect(client.js).toContain(`ops: ["transition"], edges: program_phase_edges }`);
-    expect(server.js).toContain(`{ key: "ps", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "free" } } }, ops: ["pop"] }`);
-    expect(server.js).toContain(`{ key: "ys", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "bounded", min: 1, max: 3 } } }, ops: ["append"] }`);
+    expect(server.js).toContain(`{ key: "ps", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "free" } } }, ops: ["pop"], edges: null, init: [1, 2, 3] }`);
+    // S479: the relay's fold — each cell's literal initializer and a `rule=` field's edge table
+    expect(server.js).toContain(`ops: ["transition"], edges: { Idle: ["Loading"], Loading: ["Done"], Done: [] }, init: "Idle" }], resets: [], noFold: ""`);
+    expect(server.js).toContain(`{ key: "ys", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "bounded", min: 1, max: 3 } } }, ops: ["append"], edges: null, init: [1] }`);
   });
 
   async function twoClients() {
@@ -228,7 +230,10 @@ describe("E — §38.4.2 op sync end to end (compiled from source, served)", () 
     });
   }
 
-  test("a frame the relay must pass (its op is granted) but the receiver's CURRENT value forbids — an illegal move — is refused by every receiver", async () => {
+  // S479 (s479-channel-relay-fold) — §38.4.2 "The relay's fold": the relay now judges a frame
+  // against its fold of the cells, by the receiver's own check (3). Before S479 this frame was
+  // relayed and refused by every receiver (red on base: the forger stayed open, both peers got it).
+  test("a frame the relay's op check passes but the CURRENT value forbids — an illegal move — is refused by the relay's fold: relayed to no one, its sender closed 1008", async () => {
     const t = await twoClients();
     const errs = [];
     const saved = console.error;
@@ -237,13 +242,14 @@ describe("E — §38.4.2 op sync end to end (compiled from source, served)", () 
       const evil = await connect(t.s.base, "/_scrml_ws/c");
       await tick();
       evil.ws.send(frame("phase", "transition", "Done"));   // .Idle → .Done is not an edge
-      await tick(200);
-      expect(evil.closed()).toBe(null);                      // the server cannot judge it (stateless)
-      expect(t.raw.got).toEqual([{ __type: "__sync", __key: "phase", __op: "transition", __val: "Done" }]);
+      for (let k = 0; k < 40 && evil.closed() === null; k++) await tick(25);
+      expect(evil.closed().code).toBe(1008);
+      expect(evil.closed().reason).toContain("the relay's fold refuses");
+      await tick(100);
+      expect(t.raw.got).toEqual([]);                         // relayed to no one
       expect(t.a.cells.phase.peek()).toBe("Idle");
       expect(t.b.cells.phase.peek()).toBe("Idle");
-      expect(errs.filter((e) => e.includes("refused a `transition` of @phase")).length).toBe(2);
-      evil.ws.close();
+      expect(errs.filter((e) => e.includes("refused a `transition` of @phase")).length).toBe(0);
     } finally { console.error = saved; t.done(); }
   });
 });
@@ -370,7 +376,7 @@ describe("G — #1937 fix r1: fixed-length tapes and `rule=` writes", () => {
     const r = frontEnd(mods(), [{ path: "app.scrml", src: FIXED }], "app.scrml");
     expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
     const { server } = artifacts(r.core);
-    const fixedRoot = `{ key: "fx", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "fixed" } } }, ops: ["replace"] }`;
+    const fixedRoot = `{ key: "fx", table: { defs: [], root: { k: "seq", elem: { k: "int" }, bound: { k: "fixed" } } }, ops: ["replace"], edges: null, init: [1, 2, 3] }`;
     expect(server.js).toContain(fixedRoot);
     const forgedJs = server.js.replace(fixedRoot, fixedRoot.replace(`ops: ["replace"]`, `ops: ["replace", "append", "prepend", "pop", "shift"]`));
     const mod = await loadServer(forgedJs, r.core);
@@ -491,20 +497,25 @@ type Phase:enum = { Idle, Loading, Done }
 <p>\${@xs.length} \${@ys.length} \${@dq.length} \${@n} \${@m}</p>
 </program>
 `;
+// S479 (s479-channel-relay-fold): the same channel with NO relay fold (§38.4.2 "The relay's fold"):
+// @n is initialized from a cell outside the channel, so the source does not fix the value a client
+// starts it from (print.scrml chFoldWhy). The relay then judges nothing and TRUNCATES at the log
+// bound (the S478 behaviour these tests pin); CONV, which has a fold, compacts instead.
+const CONV_NOFOLD = CONV.replace("<channel name=\"c\">", "let <seed:int=0/>\n<channel name=\"c\">").replace("let <n:int=0/>", "let <n:int=@seed/>");
 const CONV_EDGES = { Idle: ["Loading", "Done"], Loading: ["Done"], Done: [] };
 const convInit = () => ({ xs: [], ys: [1], dq: [1, 2, 3], n: 0, m: 5, phase: "Idle" });
-let convCompiled;
-function compileConv() {
-  if (convCompiled) return convCompiled;
-  const r = frontEnd(mods(), [{ path: "app.scrml", src: CONV }], "app.scrml");
+const convCompiled = new Map();
+function compileConv(src = CONV) {
+  if (convCompiled.has(src)) return convCompiled.get(src);
+  const r = frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
   expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
   const { client, server } = artifacts(r.core);
   expect(client.refused).toEqual([]);
   expect(server.refused).toEqual([]);
   expect(client.js).toContain(`const program_phase_edges = rt.edges({ Idle: ["Loading", "Done"], Loading: ["Done"], Done: [] });`);
   expect(client.js).toContain(`ops: ["append", "prepend", "pop", "shift"]`);
-  convCompiled = { r, client, server };
-  return convCompiled;
+  convCompiled.set(src, { r, client, server });
+  return convCompiled.get(src);
 }
 function convDesc(clientJs) {
   const line = clientJs.split("\n").find((l) => l.startsWith("rt.channel(program$.scope, "));
@@ -516,8 +527,8 @@ function convDesc(clientJs) {
 
 // A served relay and a client factory. Every socket a client opens is recorded (`made`) so a test
 // can drop one; the `reset-on=[@n]` rule of @m is wired by hand, as the program body would.
-async function convWorld(host = {}) {
-  const { r, client, server } = compileConv();
+async function convWorld(host = {}, src = CONV) {
+  const { r, client, server } = compileConv(src);
   const logs = [];
   const mod = await loadServer(server.js, r.core);
   const srv = mod.createServer({ root: "/tmp", log: (s) => logs.push(s), ...host });
@@ -699,8 +710,8 @@ describe("I — §38.4.2 the frame log: a late joiner and a reconnecting client 
     } finally { w.done(); }
   });
 
-  test("forged frames in the log (relayed — the relay holds no value to judge them) are refused again by a joiner's receiver", async () => {
-    const w = await convWorld();
+  test("a channel with NO relay fold: forged frames in the log (relayed — the relay holds no value to judge them) are refused again by a joiner's receiver", async () => {
+    const w = await convWorld({}, CONV_NOFOLD);
     try {
       const A = w.live();
       await tick(250);
@@ -735,8 +746,8 @@ describe("I — §38.4.2 the frame log: a late joiner and a reconnecting client 
   // as in sync". The test lowers the bound through the server's test-only symbol seam (it can only
   // lower; #1941 fix r1 LOW-2: a string-keyed `channelLog` option is not read).
   for (const [what, host] of [["frame-count", { [LOG_HOOK]: { frames: 3 } }], ["byte", { [LOG_HOOK]: { bytes: 200 } }]]) {
-    test(`past the ${what} bound the log is truncated: live clients carry on, a joiner is told it is incomplete and stops (fail closed)`, async () => {
-      const w = await convWorld(host);
+    test(`a channel with NO relay fold: past the ${what} bound the log is truncated: live clients carry on, a joiner is told it is incomplete and stops (fail closed)`, async () => {
+      const w = await convWorld(host, CONV_NOFOLD);
       try {
         const A = w.live();
         const B = w.live();
@@ -747,7 +758,7 @@ describe("I — §38.4.2 the frame log: a late joiner and a reconnecting client 
         expect(w.logs.join("\n")).toContain("the frame log passed its bound");
         const raw = await connect(w.base, "/_scrml_ws/c");
         await tick();
-        expect(raw.replays).toEqual([{ __type: "__replay", __complete: false, __seq: 4, __frames: [] }]);
+        expect(raw.replays).toEqual([{ __type: "__replay", __complete: false, __seq: 4, __base: null, __frames: [] }]);
         raw.ws.close();
         const C = w.live({ reconnect: 50 });
         await tick(300);
@@ -843,7 +854,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     const xs = rt.cell([]);
     const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
     try {
-      c.raw({ __type: "__replay", __complete: true, __seq: 4, __frames: [sf(1, "xs", "append", "a"), sf(2, "xs", "replace", ["forged"]), sf(3, "xs", "append", 5), sf(4, "xs", "append", "b")] });
+      c.raw({ __type: "__replay", __complete: true, __seq: 4, __base: null, __frames: [sf(1, "xs", "append", "a"), sf(2, "xs", "replace", ["forged"]), sf(3, "xs", "append", 5), sf(4, "xs", "append", "b")] });
       expect(xs.peek()).toEqual(["a", "b"]);
       expect(c.errs.join("\n")).toContain("refused a `replace` of @xs, whose grants do not admit it");
       expect(c.errs.join("\n")).toContain("whose element does not decode");
@@ -853,11 +864,11 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
 
   const BROKEN = [
     ["a first frame that is not the replay", [sf(1, "xs", "append", "a")], "first frame is not the relay's __replay"],
-    ["a replay that skips a number", [{ __type: "__replay", __complete: true, __seq: 2, __frames: [sf(1, "xs", "append", "a"), sf(3, "xs", "append", "b")] }], "is not the relayed frame numbered 2"],
-    ["a replay whose count disagrees with its __seq", [{ __type: "__replay", __complete: true, __seq: 5, __frames: [sf(1, "xs", "append", "a")] }], "says it ends at 5"],
-    ["a live frame out of sequence", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, sf(2, "xs", "append", "a")], "a frame numbered 2 after 0"],
-    ["an own frame with no pending edit", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, sf(1, "xs", "append", "a", true)], "not this client's oldest pending edit"],
-    ["a frame with an extra key", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, { ...sf(1, "xs", "append", "a"), x: 1 }], "not exactly {__type, __seq, __key, __op, __val, __own}"],
+    ["a replay that skips a number", [{ __type: "__replay", __complete: true, __seq: 2, __base: null, __frames: [sf(1, "xs", "append", "a"), sf(3, "xs", "append", "b")] }], "is not the relayed frame numbered 2"],
+    ["a replay whose count disagrees with its __seq", [{ __type: "__replay", __complete: true, __seq: 5, __base: null, __frames: [sf(1, "xs", "append", "a")] }], "says it ends at 5"],
+    ["a live frame out of sequence", [{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }, sf(2, "xs", "append", "a")], "a frame numbered 2 after 0"],
+    ["an own frame with no pending edit", [{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }, sf(1, "xs", "append", "a", true)], "not this client's oldest pending edit"],
+    ["a frame with an extra key", [{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }, { ...sf(1, "xs", "append", "a"), x: 1 }], "not exactly {__type, __seq, __key, __op, __val, __own}"],
   ];
   for (const [what, msgs, needle] of BROKEN) {
     test(`a broken stream — ${what} — applies nothing and closes the connection`, () => {
@@ -868,7 +879,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
         expect(xs.peek()).toEqual([]);
         expect(c.sock.closed).toBe(1);
         expect(c.errs.join("\n")).toContain(needle);
-        c.raw({ __type: "__replay", __complete: true, __seq: 1, __frames: [sf(1, "xs", "append", "late")] });   // nothing more from that connection
+        c.raw({ __type: "__replay", __complete: true, __seq: 1, __base: null, __frames: [sf(1, "xs", "append", "late")] });   // nothing more from that connection
         expect(xs.peek()).toEqual([]);
       } finally { c.done(); }
     });
@@ -878,7 +889,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     const xs = rt.cell([]);
     const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
     try {
-      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
       rt.batch(() => rt.append(xs, "mine"));
       expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "mine" }]);
       c.raw(sf(1, "xs", "append", "not-mine", true));
@@ -891,7 +902,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     const xs = rt.cell([]);
     const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
     try {
-      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
       rt.batch(() => rt.append(xs, "mine"));
       expect(xs.peek()).toEqual(["mine"]);                       // optimistic local apply
       c.raw(sf(1, "xs", "append", "peer"));                       // the relay put the peer's first
@@ -909,7 +920,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     const xs = rt.cell(["kept"]);
     const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
     try {
-      c.raw({ __type: "__replay", __complete: false, __seq: 12000, __frames: [] });
+      c.raw({ __type: "__replay", __complete: false, __seq: 12000, __base: null, __frames: [] });
       expect(xs.peek()).toEqual(["kept"]);
       expect(c.hooks.errors).toBe(1);
       expect(c.sock.closed).toBe(1);
@@ -922,7 +933,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     const xs = rt.cell([]);
     const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
     try {
-      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
       for (let i = 1; i <= 40; i++) c.raw(sf(i, "xs", "replace", ["forged"]));
       expect(xs.peek()).toEqual([]);
       expect(c.errs.filter((e) => e.includes("refused a `replace`")).length).toBe(5);
@@ -937,8 +948,8 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
 describe("L — #1941 fix r1: epoch reset, held edits, onclient:open after the replay, non-channel resets, byte bound, test-only seam", () => {
   // HIGH-1 — §38.4.2 "When the last subscriber of a channel whose log was truncated leaves, the
   // relay SHALL start the channel again: a new, empty, complete log at sequence `0`".
-  test("HIGH-1 (attack A3 shape): one peer floods past the frame bound; while anyone is subscribed a joiner fails closed; once all leave, a new joiner syncs again", async () => {
-    const w = await convWorld({ [LOG_HOOK]: { frames: 50 } });
+  test("HIGH-1 (attack A3 shape), a channel with NO relay fold: one peer floods past the frame bound; while anyone is subscribed a joiner fails closed; once all leave, a new joiner syncs again", async () => {
+    const w = await convWorld({ [LOG_HOOK]: { frames: 50 } }, CONV_NOFOLD);
     try {
       const A = w.live();
       await tick(200);
@@ -958,7 +969,7 @@ describe("L — #1941 fix r1: epoch reset, held edits, onclient:open after the r
       expect(w.logs.join("\n")).toContain("starts again with an empty log at sequence 0");
       const raw = await connect(w.base, "/_scrml_ws/c");
       await tick();
-      expect(raw.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
+      expect(raw.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }]);
       const K = w.live();
       const L = w.live();
       await tick(300);
@@ -1207,8 +1218,8 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
 
   // The relay's websocket handlers, driven directly: a fake upgrader that reserves a place but
   // whose socket the test opens (or never opens) when it chooses.
-  async function relay(host) {
-    const { r, server } = compileConv();
+  async function relay(host, src = CONV) {
+    const { r, server } = compileConv(src);
     const logs = [];
     const mod = await loadServer(server.js, r.core);
     const srv = mod.createServer({ root: "/tmp", log: (s) => logs.push(s), ...host });
@@ -1223,7 +1234,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
   const replayOf = (s) => JSON.parse(s.sent[0]);
 
   test("a truncated channel starts again when the last reserved subscriber leaves — never while an upgrade holds a place", async () => {
-    const R = await relay({ [LOG_HOOK]: { frames: 2 } });
+    const R = await relay({ [LOG_HOOK]: { frames: 2 } }, CONV_NOFOLD);
     const u1 = await R.upgrade();
     expect(u1.res).toBe(undefined);
     const s1 = R.sock(u1.data); R.ws.open(s1);
@@ -1236,7 +1247,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     // a third, opened beside the reserved one, is told the log is incomplete (fail closed)
     const u3 = await R.upgrade();
     const s3 = R.sock(u3.data); R.ws.open(s3);
-    expect(replayOf(s3)).toEqual({ __type: "__replay", __complete: false, __seq: 3, __frames: [] });
+    expect(replayOf(s3)).toEqual({ __type: "__replay", __complete: false, __seq: 3, __base: null, __frames: [] });
     R.ws.close(s3);
     expect(R.logs.join("\n")).not.toContain("starts again with an empty log");
     // the reserved socket closes WITHOUT ever opening: its place is released, and it was the last
@@ -1244,13 +1255,13 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     expect(R.logs.join("\n")).toContain("the last subscriber left a channel whose frame log was truncated");
     const u4 = await R.upgrade();
     const s4 = R.sock(u4.data); R.ws.open(s4);
-    expect(replayOf(s4)).toEqual({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+    expect(replayOf(s4)).toEqual({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
     R.ws.message(s4, frame("n", "replace", 7));
     expect(JSON.parse(s4.sent[1])).toEqual({ __type: "__sync", __seq: 1, __key: "n", __op: "replace", __val: 7, __own: true });
   });
 
   test("a failed upgrade releases its place; the next socket that opens alone on a truncated channel starts it again", async () => {
-    const R = await relay({ [LOG_HOOK]: { frames: 1 } });
+    const R = await relay({ [LOG_HOOK]: { frames: 1 } }, CONV_NOFOLD);
     const u1 = await R.upgrade();
     const s1 = R.sock(u1.data); R.ws.open(s1);
     R.ws.message(s1, frame("n", "replace", 1)); R.ws.message(s1, frame("n", "replace", 2));
@@ -1317,7 +1328,7 @@ describe("K — #1941 × #1942: held and pending edits through the pacer (client
     const echo = (from) => { for (const t of s.sent.slice(from)) { const f = JSON.parse(t); s.onmessage({ data: JSON.stringify({ __type: "__sync", __seq: ++seq, __key: f.__key, __op: f.__op, __val: f.__val, __own: true }) }); } };
     return { s, xs, n, errs, echo, done: () => { scope.dispose(); globalThis.WebSocket = prevWs; globalThis.location = prevLoc; console.error = prevErr; } };
   }
-  const REPLAY0 = '{"__type":"__replay","__complete":true,"__seq":0,"__frames":[]}';
+  const REPLAY0 = '{"__type":"__replay","__complete":true,"__seq":0,"__base":null,"__frames":[]}';
 
   test("held pre-replay edits are paced: after the replay only the bucket goes out, the rest drain in order", async () => {
     const W = world({ maxFrame: 65536, rate: 20, burst: 3 });

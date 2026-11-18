@@ -83,14 +83,21 @@ describe("A — §38.4.3 bounds: the attributes (front end)", () => {
   });
 });
 
-async function served(s) {
+// S479 (s479-channel-relay-fold): every test client here connects from 127.0.0.1, and §38.4.3's
+// per-address bound (INTERIM) gives one address at most a tenth of a channel's places. A test of the
+// CHANNEL-WIDE cap stands each connection at its own address through the registered test seam.
+const ADDRESS_HOOK = Symbol.for("scrml.test.channelAddress");
+let addressN = 0;
+const distinctAddresses = () => ({ [ADDRESS_HOOK]: () => `10.0.${Math.floor(++addressN / 250)}.${addressN % 250}` });
+
+async function served(s, host = {}) {
   const r = frontEnd(mods(), [{ path: "app.scrml", src: s }], "app.scrml");
   expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
   const { server } = artifacts(r.core);
   expect(server.refused).toEqual([]);
   const logs = [];
   const mod = await loadServer(server.js, r.core);
-  const srv = mod.createServer({ root: "/tmp", log: (x) => logs.push(x) });
+  const srv = mod.createServer({ root: "/tmp", log: (x) => logs.push(x), ...host });
   const bun = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req, sv) => srv.fetch(req, sv), websocket: srv.websocket });
   return { srv, bun, base: `127.0.0.1:${bun.port}`, logs };
 }
@@ -159,7 +166,7 @@ describe("B — §38.4.3 bounds, served", () => {
   });
 
   test("the subscriber cap: a further upgrade is answered 503 (after 403/404/405/426); a closed connection frees its place", async () => {
-    const { srv, bun, base } = await served(src(" max-subscribers=2"));
+    const { srv, bun, base } = await served(src(" max-subscribers=2"), distinctAddresses());
     try {
       const a = await connect(base, "/_scrml_ws/chat");
       const b = await connect(base, "/_scrml_ws/chat");
