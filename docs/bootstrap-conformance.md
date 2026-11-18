@@ -11,22 +11,22 @@ Scope: **1868 of 1868 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 602 | 32.2% |
+| PASS | 614 | 32.9% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 18 | 1.0% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 613 | 32.8% |
+| UNSUPPORTED | 601 | 32.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 620; of those, 602 hold (97.1%). Runtime half executed on the bootstrap for 205 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 632; of those, 614 hold (97.2%). Runtime half executed on the bootstrap for 205 case(s).
 
-- **Vacuous** passes: 13 of 602 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **589**.
+- **Vacuous** passes: 13 of 614 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **601**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 18; the other 12 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 613.
+UNSUPPORTED by reason: bootstrap-unsupported 601.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -107,7 +107,7 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | block-grammar | 14 | 10 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | 19 | · | 1 | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
-| channel | 49 | · | · | · | · | 37 | 12 | · | · |
+| channel | 49 | 12 | · | · | · | 37 | · | · | · |
 | codegen | 4 | · | · | 1 | · | 3 | · | · | · |
 | components | 68 | 1 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
@@ -231,7 +231,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (602)
+### PASS / CODES-ONLY (614)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -288,6 +288,18 @@ none
 - `capability/unknown-token` — PASS
 - `capability/unknown-token-mixed-with-valid` — PASS
 - `capability/valid-clean` — PASS
+- `channel/onchange-misplaced` — PASS
+- `channel/onchange-not-exhaustive` — PASS
+- `channel/onchange-wildcard-exhaustive` — PASS (also emitted, unasserted: W-COLON-SHORTHAND-LEGACY-PLACEMENT)
+- `channel/shared-modifier` — PASS (also emitted, unasserted: E-STATE-UNDECLARED)
+- `channel/watches-broadcast-forbidden` — PASS
+- `channel/watches-broadcast-member-call-ok` — PASS
+- `channel/watches-clean` — PASS
+- `channel/watches-driver-non-postgres` — PASS
+- `channel/watches-key-override` — PASS (also emitted, unasserted: W-SCHEMA-001)
+- `channel/watches-no-consumer` — PASS
+- `channel/watches-no-pk` — PASS (also emitted, unasserted: W-SCHEMA-001)
+- `channel/watches-unknown-table` — PASS
 - `components/post-ce-residual-component-reject` — PASS
 - `condition/bang-on-optional-neg` — PASS
 - `condition/bool-condition-pos` — PASS
@@ -836,7 +848,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (613)
+### UNSUPPORTED (601)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -912,18 +924,6 @@ none
 - `capability/inline-block-covered` — bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
 - `capability/inline-block-undeclared` — bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
 - `capability/undeclared-with-foreign` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
-- `channel/onchange-misplaced` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/onchange-not-exhaustive` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/onchange-wildcard-exhaustive` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/shared-modifier` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-broadcast-forbidden` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-broadcast-member-call-ok` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-clean` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-driver-non-postgres` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-key-override` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-no-consumer` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-no-pk` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-unknown-table` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `components/invalid-prop-decl-syntax-clean` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `components/invalid-prop-decl-syntax-reject` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `condition/given-cell-guard-multi-all-or-nothing-pos` — twin · bootstrap-unsupported: the markup presence guard `given @a, @b :> { … }` (§42.2.3, deprecated) is not in the bootstrap — write `${ if (@a is given) { … } }` (its canonical form), or `<p if=@a>…</p>`.
