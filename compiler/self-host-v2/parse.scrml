@@ -4786,7 +4786,8 @@ ${
     }
 
     fn locusTag(tag: string) -> boolean {
-        return tag == "onTransition" || tag == "onTimeout" || tag == "onIdle" || tag == "page" || tag == "onchange" || tag == "theme" || tag == "defaults"
+        // s478-ruled-endpoint — `endpoint`: §61.2 "a direct child of the top-level `<program>`"
+        return tag == "onTransition" || tag == "onTimeout" || tag == "onIdle" || tag == "page" || tag == "onchange" || tag == "theme" || tag == "defaults" || tag == "endpoint"
     }
 
     // The row mark for an element node: its locus mark when its tag is locus-bound, else "".
@@ -14451,11 +14452,11 @@ ${
         let m: MP = mp
         const tagEnd: int = o.start + 9
         if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<endpoint>`", o.start, tagEnd)
-        // §61.2 — the declaration's place. The SPEC names none beyond "a
-        // scrml-defined structural element (§4.15 / §24.4)", and the bootstrap
-        // serves the routes of the top-level `<program>` only: anywhere else it is
-        // refused by name (INTERIM — g-boot-endpoint-s478 owner question 4)
-        if (ctx != "program") m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " is not in the bootstrap — it serves an `<endpoint>` written directly in the top-level `<program>` body only (§61.2 names no other place; INTERIM)", o.start, tagEnd)
+        // §61.2 (S478 open-Qs ruling (user-voice), item 36): "An `<endpoint>`
+        // declaration SHALL be a direct child of the top-level `<program>` … An
+        // `<endpoint>` anywhere else … is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)".
+        // A non-entry file's `<program>` is judged in analyze (endpointPass).
+        if (ctx != "program") m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to a page, a channel or a nested program; move it into the `<program>` body", o.start, tagEnd)
         for (const v of o.vals) {
             m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", v.span.start, v.span.end)
         }

@@ -28,10 +28,13 @@ const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\
 // s478: `match` left it — the block-form `<match for=Type on=expr>` is built (match-block-s478.test.js).
 // s478: `schema` left it — `<schema>` (§39) is read (schema-s478.test.js); in markup, as here, it
 // is E-SCHEMA-003 (§39.3) — still never an HTML element.
+// s478-ruled-endpoint: `endpoint` left it — §61.2 (S478 open-Qs ruling (user-voice), item 36): an
+// `<endpoint>` that is not a direct child of the top-level `<program>` — in markup, as here — is
+// E-STRUCTURAL-ELEMENT-MISPLACED (§4.15).
 const STRUCTURAL = [
   "poll", "timer", "timeout", "machine", "errorBoundary", "channel", "onchange", "auth",
   "engine", "onTransition", "onTimeout", "empty", "render", "outlet", "column",
-  "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
+  "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
 ];
 
@@ -53,6 +56,11 @@ describe("(1) a scrml structural element is never an HTML element", () => {
     const d = run(inMain(`<onIdle x="1"><p>inside</p></onIdle>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-IDLE-MISPLACED"]);
     expect(d[0].message).toContain("`<onIdle>`");
+  });
+  test("s478-ruled-endpoint: an `<endpoint>` inside markup is never an HTML element — E-STRUCTURAL-ELEMENT-MISPLACED (§61.2)", () => {
+    const d = run(inMain(`<endpoint x="1"><p>inside</p></endpoint>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
+    expect(d[0].message).toContain("`<endpoint>`");
   });
   test("s476: a `<page>` inside markup is never an HTML element — E-STRUCTURAL-ELEMENT-MISPLACED (§4.15)", () => {
     const d = run(inMain(`<page x="1"><p>inside</p></page>`)).diags;
@@ -90,7 +98,7 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(mods.check.checkCore(r.core)).toEqual([]);
     });
   }
-  for (const name of [...STRUCTURAL, "errors", "Page"].filter(reserved)) {
+  for (const name of [...STRUCTURAL, "errors", "Page", "endpoint"].filter(reserved)) {
     test(`a user declaration named \`${name}\` is E-NAME-COLLIDES-RESERVED (§4.15, §24.4)`, () => {
       expect(run(declSrc(name)).diags.map((x) => x.code)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
     });
