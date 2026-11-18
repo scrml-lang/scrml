@@ -279,7 +279,6 @@ describe("initializers: the compile-time-constant class only — everything else
   const refused = {
     "a call": P("    const A = f();", "    fn f() -> int { return 1; }", "<p>${A}</p>"),
     "a cell read": P("    const A = @n;", "", "<p>${A}</p>"),
-    "a query": P(`    const A = ${SQ}\`SELECT 1\`}.get();`),
     "a tape literal": P("    const A = [1, 2];"),
     "a struct literal": P("    const A: Pt = { x: 1 };", "    type Pt:struct = { x: int }"),
     "an index read": P("    const S = \"ab\";\n    const A = S[0];"),
@@ -299,11 +298,18 @@ describe("initializers: the compile-time-constant class only — everything else
     });
   }
 
+  // S478 open-Qs ruling (user-voice) item 59 (a): a query is E-FILE-SCOPE-SERVER-REACH (§7.6), no longer by name.
+  test("a query: E-FILE-SCOPE-SERVER-REACH, and nothing else", () => {
+    const r = one(P(`    const A = ${SQ}\`SELECT 1\`}.get();`));
+    expect(codes(r)).toEqual(["E-FILE-SCOPE-SERVER-REACH"]);
+    expect(r.core).toBeFalsy();
+  });
+
   test("a cell read is refused citing §6.6.2's snapshot meaning (and the derived-cell spelling), not the placement silence", () => {
     const r = one(P("    const A = @n;", "", "<p>${A}</p>"));
     expect(r.diags[0].message).toContain("§6.6.2");
     const q = one(P("    const A = f();", "    fn f() -> int { return 1; }", "<p>${A}</p>"));
-    expect(q.diags[0].message).toContain("the SPEC does not say where such an initializer runs");
+    expect(q.diags[0].message).toContain("evaluated once at module initialization in every artifact");   // S478 ruling item 59 (b)
   });
 
   test("a read of a constant initialized LATER (or of itself) is E-SCOPE-001 — no cycle, no uninitialized read", () => {

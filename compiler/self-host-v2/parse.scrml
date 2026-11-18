@@ -8220,7 +8220,7 @@ ${
         if (destructDeclAhead(tp)) return refusedDestructItem(tp, d0, "a destructuring `let` at the top level of a logic block (module-level mutable state, as a file-scope `let` is)")
         const r: RStmt = parseLocal(tp)
         const t: TP = termAfter(r.tp, r.s, d0)
-        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per request) is not settled (§12 places functions, not bindings), so the bootstrap does not build it. Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
+        const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, and (S478) rules it per-artifact state that a server function may not write (E-FILE-SCOPE-LET-SERVER-WRITE), evaluated once at module initialization in each artifact that reads it; the bootstrap does not build that yet (INTERIM, g-boot-file-scope-init-eval-s478). Write `const` if the value never changes, or declare a cell (`<x:T=…/>`, §66) in the `<program>`", kw)
         return { items: [], tp: d }
     }
 

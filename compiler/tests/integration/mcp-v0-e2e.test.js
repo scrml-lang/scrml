@@ -52,7 +52,7 @@ import {
   registerMcpTools,
   TOOL_NAMES,
   _resetForTests,
-} from "../../runtime/stdlib/mcp.js";
+} from "../../runtime/stdlib/mcp/internal.js";
 
 // ---------------------------------------------------------------------------
 // Fixture wiring — the canonical 3-file routes/ multi-page app under

@@ -5048,7 +5048,97 @@ ${
             const vi: ValInfo | not = r.v
             if (vi is given) out = out.concat([vi])
         }
-        return { vs: out, st: st }
+        return { vs: out, st: contradictoryVals(file, name, out, st) }
+    }
+
+    // S478 open-Qs ruling (user-voice) item 61 — §55.12: "Validators whose literal bounds
+    // no value can satisfy together … SHALL be `E-VALIDATOR-CONTRADICTORY`". The bounds the
+    // bootstrap reads are literals: `length(op N)` on a string (an integer length range) and
+    // `min(n)` / `max(n)` on a number. Reported once, at the validator that empties the range.
+    fn contradictoryVals(file: string, name: string, vs: ValInfo[], st0: AS) -> AS {
+        let lo: int = 0
+        let hi: int = -1                 // -1: no upper length bound
+        let loBy: string = ""
+        let hiBy: string = ""
+        let nlo: number = 0
+        let nhi: number = 0
+        let hasNlo = false
+        let hasNhi = false
+        let nloBy: string = ""
+        let nhiBy: string = ""
+        for (const v of vs) {
+            const c: Validator = v.core
+            const text: string = validatorText(c)
+            const bounds: int[] = match c {
+                .LengthCmp(op: op, n: n) :> lengthRange(op, n)
+                .Req :> [0, -1]
+                .Min(n: x) :> [0, -1]
+                .Max(n: x) :> [0, -1]
+                .Pattern(source: x) :> [0, -1]
+            }
+            if (bounds[0] > lo) {
+                lo = bounds[0]
+                loBy = text
+            }
+            if (bounds[1] >= 0 && (hi < 0 || bounds[1] < hi)) {
+                hi = bounds[1]
+                hiBy = text
+            }
+            if (hi >= 0 && lo > hi) return addDiag(st0, file, v.span, "E-VALIDATOR-CONTRADICTORY", "`" + name + "`'s validators cannot all hold: `" + loBy + "` needs a length of at least " + lo + " and `" + hiBy + "` a length of at most " + hi + ", so no value is valid (§55.12). Drop or correct one of them")
+            const mn: boolean = match c {
+                .Min(n: x) :> true
+                .Max(n: x) :> false
+                .LengthCmp(op: op, n: n) :> false
+                .Req :> false
+                .Pattern(source: x) :> false
+            }
+            const mx: boolean = match c {
+                .Max(n: x) :> true
+                .Min(n: x) :> false
+                .LengthCmp(op: op, n: n) :> false
+                .Req :> false
+                .Pattern(source: x) :> false
+            }
+            const bn: number = match c {
+                .Min(n: x) :> x
+                .Max(n: x) :> x
+                .LengthCmp(op: op, n: n) :> 0
+                .Req :> 0
+                .Pattern(source: x) :> 0
+            }
+            if (mn && (!hasNlo || bn > nlo)) {
+                nlo = bn
+                hasNlo = true
+                nloBy = text
+            }
+            if (mx && (!hasNhi || bn < nhi)) {
+                nhi = bn
+                hasNhi = true
+                nhiBy = text
+            }
+            if (hasNlo && hasNhi && nlo > nhi) return addDiag(st0, file, v.span, "E-VALIDATOR-CONTRADICTORY", "`" + name + "`'s validators cannot all hold: `" + nloBy + "` needs a value of at least " + nlo + " and `" + nhiBy + "` one of at most " + nhi + ", so no value is valid (§55.12). Drop or correct one of them")
+        }
+        return st0
+    }
+
+    // `length(op N)` as an integer length range [lo, hi] (hi -1: unbounded).
+    fn lengthRange(op: string, n: int) -> int[] {
+        if (op == ">=") return [n, -1]
+        if (op == ">") return [n + 1, -1]
+        if (op == "<=") return [0, n]
+        if (op == "<") return [0, n - 1]
+        if (op == "==") return [n, n]
+        return [0, -1]
+    }
+
+    fn validatorText(c: Validator) -> string {
+        return match c {
+            .LengthCmp(op: op, n: n) :> "length(" + op + n + ")"
+            .Min(n: x) :> "min(" + x + ")"
+            .Max(n: x) :> "max(" + x + ")"
+            .Req :> "req"
+            .Pattern(source: x) :> "pattern(/" + x + "/)"
+        }
     }
 
     // s449 — B3 is RULED (S447, user-voice "validated top-level cells get a
@@ -5391,7 +5481,14 @@ ${
                         // g-boot-rule-quoted-spelling-s478): refused by name. The state is then treated as
                         // admitting every target, so no edge / reachability / literal-write report cascades
                         // from the refused attribute — the refusal is the one report.
-                        st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is not a `rule=` form the bootstrap reads — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`, written unquoted; the attribute would be read as no rule at all")
+                        // S478 open-Qs ruling (user-voice) item 30 — §51.0.F: "A `rule=` value written
+                        // QUOTED … SHALL be `E-ENGINE-RULE-QUOTED`". A braced value is none of the forms
+                        // either, and stays refused by name.
+                        if (ruleQuoted(a.value)) {
+                            st = addDiag(st, te.file, a.span, "E-ENGINE-RULE-QUOTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is quoted — a `rule=` target is written unquoted: `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*` (§51.0.F). A quoted value is the legacy event-arrow spelling's shape (E-ENGINE-RULE-LEGACY-SYNTAX), not an alias; drop the quotes")
+                        } else {
+                            st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`rule=" + ruleSpelling(a.value) + "` on the state-child `<" + c.name + ">` is not a `rule=` form the bootstrap reads — §51.0.F accepts `rule=.NextVariant`, `rule=(.A | .B | .C)` or `rule=*`, written unquoted; the attribute would be read as no rule at all")
+                        }
                         const tiq: TypeInfo | not = typeInfoOf(g, es)
                         if (tiq is given) {
                             let vq = 0
@@ -5585,6 +5682,18 @@ ${
             .Quoted(v: s) :> false
             .Dur(text: s) :> false
             .Braced(b: b) :> false
+        }
+    }
+
+    // A quoted `rule=` value (`rule=".V"`, `rule="*"`, `rule="a -> B"`) — S478 ruling item 30.
+    fn ruleQuoted(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: s) :> true
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+            .NoValue :> false
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
         }
     }
 
@@ -7835,6 +7944,32 @@ ${
         }
     }
 
+    // S478 ruling item 26 (1) — §21.5: a file "that contains only `${ export type ... }` and
+    // `${ export function ... }` blocks (no markup, no CSS) is a pure-type file … library
+    // files, not pages". Library items: anything but markup and a `<program>`.
+    fn isLibraryEntry(files: FileAst[], entry: string) -> boolean {
+        for (const f of files) {
+            if (f.path == entry) {
+                if (f.items.length == 0) return false
+                for (const it of f.items) {
+                    const k: AItemK = it.k
+                    const lib: boolean = match k {
+                        .ImportItem(i: x) :> true
+                        .TypeItem(t: x) :> true
+                        .FnItem(f: x) :> true
+                        .DeclItem(d: x) :> true
+                        .ConstItem(c: x) :> true
+                        .MarkupItem(n: x) :> false
+                        .ProgramItem(p: x) :> false
+                    }
+                    if (!lib) return false
+                }
+                return true
+            }
+        }
+        return false
+    }
+
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
@@ -7863,7 +7998,11 @@ ${
         const rl: RLinkage = linkage(files, ownNames(files, rs.stubs, rd.ds), st)
         st = rl.st
         const lk: Linkage = rl.lk
-        if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
+        // S478 open-Qs ruling (user-voice) item 26 (1): "compile a library-file entry as a
+        // library (§21.5)" — an entry with no `<program>` whose items are all library items
+        // (imports, types, functions, constants, declarations — no markup) is compiled for its
+        // own checks; any other entry without a `<program>` is E-PROGRAM-MISSING (§34).
+        if (!hasProgram && !isLibraryEntry(files, entry)) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>` — a page or app entry holds one `<program>` (§4.12); a file with only imports, types, functions, constants and declarations is a library (§21.5), and compiles as one")
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, declFiles: declFiles, link: lk, file: entry }
         st = namedInstanceDiags(te0, rd.ds, declNames, files, st)
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
@@ -14066,11 +14205,103 @@ ${
         if (lockedLife(f) && isSelfSpread(target, value)) return partRefused(env, value, target.span, "E-WRITE-NOT-GRANTED", lifeEditMsg(f, "`" + placeKey(target) + " = { ..." + placeKey(target) + ", … }` is a field write"), st)
         if (p.path.length == 0 && isSelfSpread(target, value)) return resolveSpread(env, e, p, f, value, st)
         if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, placeKey(target), st)
-        const rv: RX = resolveExpr(env, value, f.ty, st)
+        const rv0: RX = resolveExpr(env, value, f.ty, st)
+        const rv: RX = { x: rv0.x, st: timedSelfRead(env, p, f, value, e.span, rv0.st) }
         const rw: RWriteFact = wholeFieldWrite(env, p, f, value, placeKey(target), rv.st, e.span)
         const w: WriteFact | not = rw.w
         if (w is given) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
+    }
+
+    // S478 open-Qs ruling (user-voice) item 32 — §6.13.6: "A write to a `debounced=` /
+    // `throttled=` cell whose right-hand side reads the SAME cell … SHALL produce the lint
+    // `W-TIMED-READ-MODIFY-WRITE` (Warning) at the write." Program cells only (§6.13 times a
+    // program cell; timingPass). A read inside a lambda in the value is not an immediate read.
+    fn timedSelfRead(env: Env, p: WPlace, f: FieldInfo, value: AExpr, span: ASpan, st: AS) -> AS {
+        if (p.decl.sym.id != env.g.program.id) return st
+        const n: string = f.sym.hint
+        if (!readsAtName(value, n)) return st
+        const prog: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (prog is not) return st
+        const ap: AProgram | not = prog.p
+        if (ap is not) return st
+        let w: string = ""
+        for (const it of ap.items) {
+            for (const d of declsOfItem(it)) {
+                if (d.name == n && !isNestedUserDecl(d)) {
+                    if (attrNamed(d.mods, "debounced") is given) w = "debounced"
+                    if (attrNamed(d.mods, "throttled") is given) w = "throttled"
+                }
+            }
+        }
+        if (w == "") return st
+        return addDiag(st, env.file, span, "W-TIMED-READ-MODIFY-WRITE", "this write to `@" + n + "` reads `@" + n + "`, a `" + w + "=` cell — reads see the timed value (§6.13.4), so a write still pending in the window is invisible here and the updates made inside one window are lost (three `@" + n + " = @" + n + " + 1` in one window commit `+1`). Keep a plain source cell for the read-modify-write and time a copy of it (§6.13.6)")
+    }
+
+    fn readsAtName(e: AExpr, n: string) -> boolean {
+        const k: AExprK = e.k
+        const here: boolean = match k {
+            .At(name: m) :> m == n
+            .Lambda(params: lp) :> false
+            .Name(name: m) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .BlockLambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: m) :> false
+        }
+        if (here) return true
+        const lam: boolean = match k {
+            .Lambda(params: lp) :> true
+            .BlockLambda(params: lp) :> true
+            .At(name: m) :> false
+            .Name(name: m) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Sql(q: q) :> false
+            .Handled(h: h) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: m) :> false
+        }
+        if (lam) return false
+        for (const x of exprKids(e)) {
+            if (readsAtName(x, n)) return true
+        }
+        return false
     }
 
     // s475 — the elements of `xs = [...xs, e…]` / `xs = [e…, ...xs]` on a local `xs`:
@@ -27051,6 +27282,10 @@ ${
     }
 
     fn constValue(g: Globals, c: ConstInfo, st0: AS) -> RConst1 {
+        // S478 open-Qs ruling (user-voice) item 59 (a) — §7.6: "An initializer that reaches a
+        // server-only resource — a `?{}` query … SHALL be a compile error, `E-FILE-SCOPE-SERVER-REACH`"
+        const q: AExpr | not = sqlIn(c.init)
+        if (q is given) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-REACH", "the initializer of the file-scope constant `" + c.name + "` runs a query (`?{ … }`) — a file-scope initializer runs at module initialization, which is synchronous and cannot wait on the server (§7.6 rule (a), as §6.6.19 refuses a derived cell). Run the query in a server function and call it where the value is needed") }
         const b: AExpr | not = constBlocker(c.init)
         if (b is given) {
             const st1: AS = addDiag(st0, c.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "the initializer of the file-scope constant `" + c.name + "` holds " + blockerWhat(b) + " — the bootstrap builds a file-scope `const` whose value is fixed at compile time: literals, unit enum variants, other constants, a member read and the operators over them (§7.4.2: \"a literal, `const`-bound to a literal, simple arithmetic on constants\"). Anything else would have to be evaluated at module initialization, which the bootstrap does not build for a file-scope binding" + blockerWhy(b) + ". Compute the value in a function and call it where it is needed")
@@ -27142,6 +27377,46 @@ ${
         }
     }
 
+    // S478 ruling item 59 (a): the first `?{}` the expression evaluates (not inside a function value).
+    fn sqlIn(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        const own: int = match k {
+            .Sql(q: x) :> 1
+            .Lambda(params: x) :> 2
+            .BlockLambda(params: x) :> 2
+            .Name(name: n) :> 0
+            .Num(raw: r) :> 0
+            .Str(v: v) :> 0
+            .Bool(v: v) :> 0
+            .NotLit :> 0
+            .Recovered :> 0
+            .Variant(name: n) :> 0
+            .Member(obj: o) :> 0
+            .Unary(op: o) :> 0
+            .Binary(op: o) :> 0
+            .Ternary(test: t) :> 0
+            .Template(quasis: q) :> 0
+            .HashRef(id: hr0) :> 0
+            .Foreign(f: fb0) :> 0
+            .At(name: n) :> 0
+            .AtItem :> 0
+            .Call(callee: c) :> 0
+            .Assign(target: t) :> 0
+            .ArrayLit(elems: x) :> 0
+            .ObjectLit(props: x) :> 0
+            .Spread(e: x) :> 0
+            .Index(obj: o) :> 0
+            .Handled(h: x) :> 0
+        }
+        if (own == 1) return e
+        if (own == 2) return not
+        for (const x of exprKids(e)) {
+            const r: AExpr | not = sqlIn(x)
+            if (r is given) return r
+        }
+        return not
+    }
+
     // `x |> f` is a call (§ pipe); every other operator is a value.
     fn binaryBlocker(e: AExpr, op: BinOp, l: AExpr, r: AExpr) -> AExpr | not {
         if (op == BinOp.Pipe) return e
@@ -27194,7 +27469,7 @@ ${
     // say where a file-scope initializer runs (g-spec-file-scope-binding-placement-s472).
     fn blockerWhy(b: AExpr) -> string {
         if (atName(b) != "") return " (§6.6.2: `const x = @c` is a snapshot taken at declaration time; for a value that follows `@c`, declare a derived cell `<x:T = @c/>`)"
-        return " — and the SPEC does not say where such an initializer runs: the client, the server, or both (§12 places functions, not bindings)"
+        return " — §7.6 (S478) rules it is evaluated once at module initialization in every artifact that reads it, which the bootstrap does not build yet (INTERIM, g-boot-file-scope-init-eval-s478)"
     }
 
     // s472 (after #1608): `.V(args)` / `E.V(args)` is a payload-variant VALUE, not a call.

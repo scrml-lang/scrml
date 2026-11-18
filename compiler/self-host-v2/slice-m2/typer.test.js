@@ -307,7 +307,9 @@ const BASE_66_19 = [
   [],
   // §66.19.2: s444 — the binds are Core (Phase A) and the validators land per dpa-058 (Phase B): clean.
   [],
-  ["E-PROGRAM-MISSING"],
+  // S478 ruling item 26 (1): a library-file block (no `<program>`, only exports) compiles as a library (§21.5) —
+  // no E-PROGRAM-MISSING (was ["E-PROGRAM-MISSING"]).
+  [],
   // s471: the block's `import … from "./…"` names a file the block does not supply — ONE E-IMPORT-006 at the import
   // (link.scrml importTarget resolves nothing), where it was one E-IMPORT-NOT-EXPORTED per name (judged "exported
   // by any file"); the bootstrap now spells §21.6's E-IMPORT-004 for a name the resolved file does not export.
@@ -327,7 +329,8 @@ const BASE_66_19 = [
   // value, so `toggleMode`'s `@mode` read and its same-file write `@mode = …` (§66.14 rule 2; it was "writing a
   // whole instance is not in bootstrap slice M2") both compile. Left: `<theme>`, the `style="…${hex}"` template,
   // the two named shared instances.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
+  // S478 ruling item 26 (1): - E-PROGRAM-MISSING — the block is a library file (§21.5).
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-STATE-UNDECLARED"],
   // s471: one E-IMPORT-006 at the unsupplied import (was seven per-name E-IMPORT-NOT-EXPORTED), and two uses of
   // names only that refused import brings are no longer also E-SCOPE-001 (analyze.scrml importRefusesName).
   // s473 D29: both are `@_x` reads naming nothing in scope — E-STATE-UNDECLARED (were E-SCOPE-001).

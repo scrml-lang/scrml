@@ -39,7 +39,7 @@ import {
   getFormStatus,
   getChannelState,
   _resetForTests,
-} from "../../runtime/stdlib/mcp.js";
+} from "../../runtime/stdlib/mcp/internal.js";
 
 // ---------------------------------------------------------------------------
 // Mock runtime — plain object + reactive_get / derived_get closures over a
