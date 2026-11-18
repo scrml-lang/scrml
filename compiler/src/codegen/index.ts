@@ -137,6 +137,7 @@ import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { resolveDbScopes } from "../db-ownership.ts";
+import { isSharedTypeObject } from "../type-system.ts";
 import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
 import { lowerDefers } from "./lower-defer.ts";
@@ -2078,9 +2079,14 @@ export function runCG(input: CgInput): CgOutput {
       // Tag every node under a database scope with its nearest scope's handle — the
       // whole subtree (statement bodies, nested blocks, expression trees), not one
       // level of it, so no lowering path falls through to the file default.
+      // The walk STOPS at a process-lifetime type object (`isSharedTypeObject` — e.g. the
+      // built-in `string` type an endpoint arm's `payloadBindingTypes` holds): it is shared
+      // by every compile, so tagging it would leak this file's handle into later compiles
+      // (g-impl1-dbvar-tag-mutates-shared-type-s479). A type is never a lowering site.
       const seen = new WeakSet<object>();
       const tag = (value: unknown): void => {
         if (value === null || typeof value !== "object" || seen.has(value as object)) return;
+        if (isSharedTypeObject(value)) return;
         seen.add(value as object);
         if (Array.isArray(value)) { for (const v of value) tag(v); return; }
         const h = _dbResolution.scopeOf.get(value as object);
