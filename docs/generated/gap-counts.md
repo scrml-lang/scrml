@@ -13,7 +13,7 @@ PR's own ledger edits.
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 271 | 6 |
-| MED | 779 | 13 |
-| LOW | 803 | 7 |
+| MED | 782 | 13 |
+| LOW | 816 | 7 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
