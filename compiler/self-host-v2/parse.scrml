@@ -1685,6 +1685,7 @@ ${
                 if (b.cls != TC.Ident) {
                     t = adv(diagAt(t, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + b.text + "`", b))
                 } else {
+                    if (binderRepeated(binds, b.v)) t = diagAt(t, "E-SCOPE-REDECLARE", binderDupMsg(b.v, "." + name + "(…)"), b)
                     binds = binds.concat([{ nid: t.nid, span: mkSpan(b.start, b.end), name: b.v }])
                     t = bumpId(adv(t))
                 }
@@ -1707,6 +1708,22 @@ ${
             return { pat: APat.PName(name, [bnd], false, qual), tp: bumpId(adv(tp)) }
         }
         return { pat: APat.PName(name, [], false, qual), tp: tp }
+    }
+
+    // s479 — SPEC §7.3.3: "a binder that repeats an earlier binder of the SAME arm is
+    // E-SCOPE-REDECLARE, reported at the repeat … The wildcard `_` binds nothing and may repeat"
+    // (§18.7; ruling: user-voice S478 open-Qs item 14; code PA-chosen S479).
+    // Shared by the `match` / `!{}` pattern (patBinds) and the `<match>` arm (parseArmBinds).
+    fn binderRepeated(bs: ABind[], name: string) -> boolean {
+        if (name == "_") return false
+        for (const x of bs) {
+            if (x.name == name) return true
+        }
+        return false
+    }
+
+    fn binderDupMsg(name: string, pat: string) -> string {
+        return "`" + name + "` is bound twice in the arm pattern `" + pat + "` — the second binder would silently shadow the first, so the arm would read the wrong field. Give each binder its own name, or `_` for a field the arm does not read (§7.3.3, §18.7)"
     }
 
     // An arm's body: a `{ block }`, or one expression read up to `armEnd`.
@@ -10335,8 +10352,11 @@ ${
                     m = mAt(mDiag(m, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + w.w + "`", m.pos, w.mp.pos), after.pos)
                     if (nc == ",") m = mAdv(m, 1)
                 } else if (w.w != "" && isIdentStartCh(w.w.substring(0, 1)) && (nc == "," || nc == ")")) {
+                    const dup: boolean = binderRepeated(out, w.w)
+                    const from: int = m.pos
                     out = out.concat([{ nid: m.nid, span: mkSpan(m.pos, w.mp.pos), name: w.w }])
                     m = mBump(after)
+                    if (dup) m = mDiag(m, "E-SCOPE-REDECLARE", binderDupMsg(w.w, "<" + tag + "(…)>"), from, w.mp.pos)
                     if (nc == ",") m = mAdv(m, 1)
                 } else {
                     // not a positional binder: refused by name, skipped to the `)`
