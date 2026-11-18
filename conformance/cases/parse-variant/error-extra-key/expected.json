@@ -1,0 +1,38 @@
+{
+  "id": "parse-variant-error-extra-key",
+  "description": "§41.13 strict keys — '{\"tag\":\"Success\",\"rows\":42,\"extra\":true}' carries a key that is neither `tag` nor a payload field of Success: a decode failure, ::InvalidPayload with field `extra`; @result stays .Empty.",
+  "language-version": "1.0",
+  "spec": "§41.13, §61.3",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 6 (§41.13 strict keys + E-TYPE-080; `parseVariant` accepts an enum alias); ruling:user-voice-scrml.md-S478-open-Qs-item-35 (the §61.3 sentence)",
+  "rationale": "§41.13 Strict keys (allow-list): \"The decoded object's keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is neither is a decode failure — `::InvalidPayload`\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#decode"
+      }
+    ],
+    "state": {
+      "result": "Empty",
+      "parseError": "invalid-payload:extra"
+    },
+    "domAnchored": [
+      {
+        "selector": "#status",
+        "text": "Parse status: invalid-payload:extra"
+      },
+      {
+        "selector": "#out",
+        "text": "No rows loaded"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-parsevariant-strict-keys-s479",
+      "fails": {
+        "runtime": "sha256:f2e9a47bdcafa410"
+      }
+    }
+  }
+}

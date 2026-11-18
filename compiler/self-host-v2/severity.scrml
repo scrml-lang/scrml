@@ -188,6 +188,7 @@ ${
             "E-ENDPOINT-METHOD-INVALID" :> Severity.Error
             "E-ENDPOINT-MULTI-STATEMENT-ARM" :> Severity.Error
             "E-ENDPOINT-NOT-EXHAUSTIVE" :> Severity.Error
+            "E-ENDPOINT-PATH-INVALID" :> Severity.Error
             "E-ENDPOINT-PATH-MISSING" :> Severity.Error
             "E-ENDPOINT-ROUTE-DUPLICATE" :> Severity.Error
             "E-ENGINE-MOUNT-NOT-ENGINE" :> Severity.Error

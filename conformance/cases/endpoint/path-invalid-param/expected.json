@@ -1,0 +1,36 @@
+{
+  "id": "endpoint-path-invalid-param",
+  "description": "§61.7 — an `<endpoint>` whose `path=` (`/rpc/:id`) has a path parameter (`:param`) is outside the §61.7 path grammar: E-ENDPOINT-PATH-INVALID (Error), and nothing else.",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 5 (`E-ENDPOINT-PATH-INVALID`; reserve `/_scrml_local/`); ruling:user-voice-scrml.md-S478-open-Qs-item-37 (the grammar)",
+  "rationale": "§61.7: \"A `path=` SHALL be an absolute path: it begins with `/`, and every other character is an RFC 3986 unreserved character (`A`–`Z`, `a`–`z`, `0`–`9`, `-`, `.`, `_`, `~`) or `/`. No segment is empty (`//`), `.` or `..` … A `path=` outside this grammar is `E-ENDPOINT-PATH-INVALID` (§61.9), reported at the `<endpoint>` opener.\"",
+  "expect": {
+    "codes": [
+      "E-ENDPOINT-PATH-INVALID"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED",
+      "E-ENDPOINT-ROUTE-DUPLICATE",
+      "E-ENDPOINT-PATH-MISSING"
+    ],
+    "severity": {
+      "E-ENDPOINT-PATH-INVALID": "error"
+    },
+    "codeCounts": {
+      "E-ENDPOINT-PATH-INVALID": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-endpoint-path-rules-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-ENDPOINT-PATH-INVALID' fired 0 time(s), expected exactly 1",
+          "missing:E-ENDPOINT-PATH-INVALID",
+          "severity:code 'E-ENDPOINT-PATH-INVALID' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}
