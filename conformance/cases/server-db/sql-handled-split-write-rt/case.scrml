@@ -2,7 +2,7 @@
     <schema>
         notes {
             id: integer primary key
-            body: text
+            body: text not null
         }
     </schema>
     <status> = "init"

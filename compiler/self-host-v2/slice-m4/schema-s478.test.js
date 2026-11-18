@@ -16,7 +16,10 @@
 //          warning (W-SCHEMA-001)."
 //   §39.5.5 references targets (E-SCHEMA-006) and the only FK production (E-SCHEMA-011).
 //   §39.7  "validate the `<schema>` block against itself … no duplicate column names within a
-//          table, no duplicate table names" (no §34 code — refused by name, owner question).
+//          table, no duplicate table names" — S478 open-Qs ruling item 18: a table declared twice is
+//          E-SCHEMA-016, a column declared twice in one table E-SCHEMA-017.
+//   §39.2  (S478 open-Qs ruling item 17) "An optional `,` between column declarations".
+//   §4.15  (S478 open-Qs ruling item 19) `schema` is a reserved structural-element name.
 //   §8.1.1 Ownership: a `<schema>` block makes its file the database's owner.
 // Everything whose meaning lives in a consumer the bootstrap does not build is refused by name.
 
@@ -125,12 +128,31 @@ describe("§39.4 / §39.5 / §39.7 declaration checks", () => {
     expect(errsOf(P("        données {\n            id: integer primary key\n        }"))).toEqual(["E-SCHEMA-013"]);
   });
 
-  test("duplicate tables / columns (§39.7) are refused by name — no §34 code exists", () => {
+  test("S478 ruling 18 — a table declared twice is E-SCHEMA-016, a column declared twice E-SCHEMA-017 (§39.7)", () => {
     const dupT = P(USERS + "\n        Users {\n            id: integer primary key\n        }");
-    expect(errsOf(dupT)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msgOf(dupT, "E-BOOTSTRAP-UNSUPPORTED")).toContain("twice");
+    expect(errsOf(dupT)).toEqual(["E-SCHEMA-016"]);
+    expect(msgOf(dupT, "E-SCHEMA-016")).toContain("twice");
     const dupC = P("        users {\n            id: integer primary key\n            ID: text\n        }");
-    expect(errsOf(dupC)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errsOf(dupC)).toEqual(["E-SCHEMA-017"]);
+    expect(errsOf(P("        CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, A TEXT)"))).toEqual(["E-SCHEMA-017"]);
+  });
+
+  test("S478 ruling 18 — a second `primary key` in one table stays refused by name (its code is still OPEN)", () => {
+    expect(errsOf(P("        t {\n            id: integer primary key\n            k: integer primary key\n        }"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("S478 ruling 17 — one `,` between column declarations (§39.2 `column-declaration (','? column-declaration)*`)", () => {
+    expect(run(P("        t { id: integer primary key, done: integer not null }")).diags.map((d) => d.code)).toEqual([]);
+    expect(run(P("        t {\n            id: integer primary key,\n            done: integer not null,\n            x: text default('a,b')\n        }")).diags.map((d) => d.code)).toEqual([]);
+    // the same table with and without the `,`: one more column is never dropped
+    expect(errsOf(P("        t { id: integer primary key, id: integer }"))).toEqual(["E-SCHEMA-017"]);
+  });
+
+  test("S478 ruling 17 — a `,` before `}` or a doubled `,` is outside the grammar (refused by name)", () => {
+    const trail = P("        t { id: integer primary key, done: integer, }");
+    expect(errsOf(trail)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(msgOf(trail, "E-BOOTSTRAP-UNSUPPORTED")).toContain("BETWEEN two column declarations");
+    expect(errsOf(P("        t { id: integer primary key,, done: integer }"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("W-SCHEMA-NO-TABLES-DECLARED: content that declares no table (alongside its refusal)", () => {
@@ -158,7 +180,6 @@ describe("refused by name — never read past silently", () => {
     // §39.2: the floors read a commented-out `CREATE TABLE` as a declaration
     refused(USERS + "\n        // CREATE TABLE assets (id INTEGER, tenant_id TEXT)", "commented-out one included");
   });
-  test("a `,` between columns (owner question)", () => refused("        tasks { id: integer primary key, done: integer }", "g-boot-schema-column-comma-s478"));
   test("shared-core vocabulary, `rename from`, `immutable`", () => {
     refused("        users {\n            id: integer primary key\n            name: text req\n        }", "shared-core");
     refused("        users {\n            id: integer primary key\n            name: text rename from nm\n        }", "rename from");
@@ -174,10 +195,11 @@ describe("refused by name — never read past silently", () => {
 });
 
 // s478 fix round 1 (review of #1908).
-describe("fix-1: a user declaration named `schema` is refused, never rendered as nothing (F1)", () => {
-  // Base (before the lane) rendered "COMP x"; the lane's first head read the use as an empty
-  // §39 block and rendered NOTHING, clean. §4.15 does not reserve `schema` (owner question
-  // g-boot-schema-user-decl-name-s478), so both the declaration and the use are refused by name.
+describe("S478 ruling 19 — `schema` is a reserved structural-element name (§4.15, E-NAME-COLLIDES-RESERVED)", () => {
+  // Base (before s478-boot-schema) rendered "COMP x"; the lane's first head read the use as an empty
+  // §39 block and rendered NOTHING, clean (#1908 F1); fix-1 refused both by name. S478 open-Qs ruling
+  // item 19: "add `schema` to §4.15's reserved list (`E-NAME-COLLIDES-RESERVED`, compared lowercase
+  // per §24.4)" — the declaration is the error, and a use names the structural element.
   const DECL = `<schema label:string="x"/>\nrenders <p id="z">COMP \${label}</p>\n`;
   const cases = {
     "user-comp-schema-top": `${DECL}<program db="./app.db">\n<schema/>\n<p>x</p>\n</program>\n`,
@@ -187,11 +209,14 @@ describe("fix-1: a user declaration named `schema` is refused, never rendered as
   };
   for (const [name, src] of Object.entries(cases)) {
     test(name, () => {
-      const ms = run(src).diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").map((d) => d.message);
-      expect(ms.some((m) => m.includes("user declaration named `schema`"))).toBe(true);
-      expect(ms.some((m) => m.includes("refuses the use rather than render nothing"))).toBe(true);
+      const r = run(src);
+      expect(errsOf(src)).toContain("E-NAME-COLLIDES-RESERVED");
+      expect(r.diags.find((d) => d.code === "E-NAME-COLLIDES-RESERVED").span.start).toBe(0);
     });
   }
+  test("compared lowercase (§24.4): `<Schema …>` is reserved too", () => {
+    expect(errsOf(`<Schema label:string="x"/>\nrenders <p>\${label}</p>\n<program>\n<p>x</p>\n</program>\n`)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
+  });
   test("a CELL named `schema` (`@schema`) is not a declaration a tag names — unchanged", () => {
     expect(errsOf(`<program db="./app.db">\n let <schema:int=3/>\n<p id="z">\${@schema}</p>\n</program>\n`)).toEqual([]);
   });
@@ -261,8 +286,8 @@ describe("fix-1: the closer is found outside comments and literals (F3)", () => 
 });
 
 describe("fix-1: a refusal does not cascade into W-SCHEMA-001 / E-SCHEMA-006 (F5)", () => {
-  test("`, ` after a `primary key` column keeps the key", () => {
-    expect(run(P("        t { id: integer primary key, done: integer }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a trailing `, ` after a `primary key` column keeps the key (no W-SCHEMA-001 cascade)", () => {
+    expect(run(P("        t { id: integer primary key, }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("an unread `PRIMARY KEY` does not also warn W-SCHEMA-001", () => {
     expect(run(P("        users {\n            id: integer PRIMARY KEY\n        }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

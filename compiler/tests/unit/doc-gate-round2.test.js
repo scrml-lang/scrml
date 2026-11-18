@@ -452,17 +452,18 @@ describe("S475 — pins catch a typo'd name; a parse cascade count is a ceiling"
   // waiting initializer of the `(not to int)` cell is a pending cell (§13.9.1: "no longer
   // E-VALUE-SERVER-CALL"), not built yet — one more E-BOOTSTRAP-UNSUPPORTED (×3). The typo is
   // still caught: `loadCunt` is a new E-SCOPE-001 name, so the pin no longer matches.
-  test("tutorial :160 — the block passes its pin; `loadCount` → `loadCunt` (pin-blind in the #1723 r1 sweep) now fails it", async () => {
+  // S478 open-Qs ruling item 20 (`integer` → `int`): the 02b block now compiles CLEAN on the bootstrap,
+  // so its spec-ahead marker is gone. An empty pin is the strictest pin: the typo is still caught —
+  // `loadCunt` is a new E-SCOPE-001 name, so the (empty) pin no longer matches.
+  test("tutorial :160 — the 02b block compiles clean; `loadCount` → `loadCunt` fails an empty pin", async () => {
     await loadBoot();
-    const doc = parseDocMarkers(readFileSync(join(ROOT, "docs", "tutorial.md"), "utf8"));
-    const b = doc.blocks.find((x) => x.gate?.kind === "spec-ahead" && x.body.includes("=(loadCount()"));
-    expect(b).toBeDefined();
+    const body = readFileSync(join(ROOT, "docs", "tutorial-snippets", "02b-counter-persisted.scrml"), "utf8");
     const path = join(ROOT, "docs", "tutorial-block.scrml");
-    expect(classifySpecAhead(await bootCheck(path, b.body), b.gate.codes).verdict).toBe("expected");
+    expect(classifySpecAhead(await bootCheck(path, body), []).verdict).toBe("stale");   // "stale" = it compiles clean
     // the CALL in the opener (`=(loadCount() !{ … })`), not the comment or the declaration
-    expect(b.body.includes("=(loadCount()")).toBe(true);
-    const typo = b.body.replace("=(loadCount()", "=(loadCunt()");
-    const c = classifySpecAhead(await bootCheck(path, typo), b.gate.codes);
+    expect(body.includes("=(loadCount()")).toBe(true);
+    const typo = body.replace("=(loadCount()", "=(loadCunt()");
+    const c = classifySpecAhead(await bootCheck(path, typo), []);
     expect(c.verdict).toBe("pin-mismatch");
     expect(c.message).toContain("E-SCOPE-001(loadCunt)");
   }, 120_000);

@@ -439,7 +439,20 @@ ${
         let slots: JsExpr[] = []
         for (const i of q.slots) { slots = slots.concat([jnum(i)]) }
         let args: JsExpr[] = [jid(dbVarName(q.db)), jstr(sqlModeName(q.mode)), jid(sqlTextName(q.site.n)), JsExpr.JArray(exprsJs(ctx, q.params)), JsExpr.JArray(slots)]
-        if (q.handled) args = args.concat([JsExpr.JAnnot(JsExpr.JBool(true), "handled at its site")])
+        const rt: Type | not = q.row
+        let rowWire: JsExpr | not = not
+        if (rt is given) {
+            // S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): the row type's §57
+            // descriptor — the runtime checks each row against it (server-runtime.js checkRows)
+            const wt: WireTable | not = wireBuild(ctx.p, rt).table
+            if (wt is given) rowWire = wireTableJs(wt)
+        }
+        if (q.handled) {
+            args = args.concat([JsExpr.JAnnot(JsExpr.JBool(true), "handled at its site")])
+        } else if (rowWire is given) {
+            args = args.concat([JsExpr.JBool(false)])
+        }
+        if (rowWire is given) args = args.concat([JsExpr.JAnnot(rowWire, "the row type, checked as each row is read (§14.8.3)")])
         return rtCall(ctx, "query", args)
     }
 

@@ -337,12 +337,12 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" };\n    }`))).toEqual(["W-ARM-PIPE-LEGACY"]);
   });
   // s478 (s478-boot-syntax-batch): `transaction { … }` is BUILT as a savepoint of its function's
-  // envelope (§8.9.2 "Amendment S474" item 3) — one in a `!` function with NO envelope (it reaches no
-  // query) is refused by name (syntax-batch-s478.test.js covers the built block)
-  test("`transaction { … }` in a `!` function that reaches no query is refused by name", () => {
+  // envelope (§8.9.2 "Amendment S474" item 3). S478 open-Qs ruling item 21 (a) — §19.10.4: one in a
+  // `!` function that reaches no query "SHALL compile as a plain block" (it was refused by name;
+  // syntax-batch-s478.test.js runs it)
+  test("`transaction { … }` in a `!` function that reaches no query compiles as a plain block (S478)", () => {
     const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1;\n        }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("runs in no transaction of its own");
+    expect(codes(src)).toEqual([]);
   });
 });
 

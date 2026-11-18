@@ -499,6 +499,10 @@ ${
         nobatch: boolean,
         handled: boolean,
         site: NodeId,
+        // S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): the result type of a
+        // query whose rows are typed from a `<schema>` table (analyze.scrml rowTypes) — `Row[]` or
+        // `Row | not` — else `not`. The server checks each row against it as the row is read.
+        row: Type | not,
     }
 
     // s451 (U1a) — a database a program's queries run on (§8.1.1, §44.2):

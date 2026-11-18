@@ -31,12 +31,12 @@
 //                 longer token (§39.2 "Declarative heads are read whole"); a
 //                 qualified / unreadable raw `CREATE TABLE` head;
 //   E-SCHEMA-014  a raw `CREATE TABLE` that is not a plain declaration (§39.2);
+//   E-SCHEMA-016  a table declared twice (§39.7, S478 open-Qs ruling item 18);
+//   E-SCHEMA-017  a column declared twice in one table (§39.7, S478 ruling item 18);
 //   W-SCHEMA-001  a table with no `primary key` column (§38.5.1);
 //   W-SCHEMA-NO-TABLES-DECLARED  content that declares no table (§34).
 //
 // WHAT IT REFUSES BY NAME (E-BOOTSTRAP-UNSUPPORTED — never read past silently):
-//   - duplicate table / column names: §39.7 says the compiler SHALL validate
-//     them, and §34 names no code (owner question g-boot-schema-dup-code-s478);
 //   - every form whose meaning lives in a consumer the bootstrap does not build:
 //     raw DDL the whitelist does not read (readDdl lists it — any statement but
 //     `CREATE TABLE`, `CREATE TABLE` text outside a live declaration, the
@@ -50,9 +50,11 @@
 //     the §39.5.7 shared-core vocabulary, `immutable`, `rename from` (§38.5.6 —
 //     decided against the live database), a `references` target not declared
 //     here (§39.5.5 allows "the existing database schema", which the bootstrap
-//     does not read), a second `primary key` in one table;
-//   - anything else the grammar does not produce (a `,` between columns among
-//     them — owner question g-boot-schema-column-comma-s478).
+//     does not read), a second `primary key` in one table (its code is still an
+//     OPEN owner question — S478 ruling item 18 left it hedged);
+//   - anything else the grammar does not produce (a `,` before `}` or a
+//     doubled `,` among them — S478 ruling item 17 admits ONE `,` between two
+//     column declarations: `column-declaration (','? column-declaration)*`).
 //
 // impl#1 workaround: `${` in a string literal is assembled from pieces.
 // =============================================================================
@@ -533,7 +535,18 @@ ${
                 if (c == "}") {
                     going = false
                 } else if (c == ",") {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` — §39.2's grammar separates column declarations by nothing (`column-declaration*`), so a `,` is not part of it; the bootstrap does not read it (owner question g-boot-schema-column-comma-s478). Put each column on its own line, without commas", k, k + 1), k)
+                    // S478 open-Qs ruling item 17 — §39.2: "table-declaration ::= table-name '{'
+                    // ( column-declaration ( ','? column-declaration )* )? '}'". One `,` stands only
+                    // BETWEEN two column declarations: what follows it must be the next one
+                    // (`name :`); a `,` before `}` or a second `,` is outside the grammar.
+                    const nx: int = skip(s, k + 1, to)
+                    const nxe: int = wordEnd(s, nx, to)
+                    if (nx < to && isWordStart(ch(s, nx)) && ch(s, skip(s, nxe, to)) == ":") {
+                        k = nx
+                        going = false
+                    } else {
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` that is not followed by another column declaration — §39.2 admits one `,` only BETWEEN two column declarations (`column-declaration (','? column-declaration)*`, S478), so a trailing `,` before `}` or a doubled `,` is not part of the grammar. Remove it", k, k + 1), k)
+                    }
                 } else if (!isWordStart(c)) {
                     return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
                 } else {
@@ -629,7 +642,7 @@ ${
                 const c: SchemaCol | not = rc.col
                 if (c is given) {
                     for (const prior of cols) {
-                        if (sameName(prior.name, c.name)) errs = errs.concat([refuse("table `" + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate column names within a table\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", c.start, c.end)])
+                        if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "table `" + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", c.start, c.end)])
                     }
                     cols = cols.concat([c])
                     refs = refs.concat(rc.refs)
@@ -1174,7 +1187,7 @@ ${
                     const c: SchemaCol | not = rcol.col
                     if (c is given) {
                         for (const prior of cols) {
-                            if (sameName(prior.name, c.name)) errs = errs.concat([refuse("`CREATE TABLE " + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate column names within a table\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", start, end)])
+                            if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "`CREATE TABLE " + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", start, end)])
                         }
                         cols = cols.concat([c])
                         refs = refs.concat(rcol.refs)
@@ -1413,7 +1426,7 @@ ${
                     const dt: SchemaTable | not = rd.t
                     if (dt is given) {
                         for (const prior of tables) {
-                            if (sameName(prior.name, dt.name)) errs = errs.concat([refuse("`<schema>` declares table `" + dt.name + "` twice (table names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate table names\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", i, stEnd)])
+                            if (sameName(prior.name, dt.name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + dt.name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, stEnd)])
                         }
                         tables = tables.concat([dt])
                         refs = refs.concat(rd.refs)
@@ -1461,7 +1474,7 @@ ${
                 const name: string = hName
                 const rt: RTable = readTable(s, name, i, hEnd, hOpen, to)
                 for (const prior of tables) {
-                    if (sameName(prior.name, name)) errs = errs.concat([refuse("`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: the compiler SHALL validate \"no duplicate table names\"; the SPEC names no code for it (owner question g-boot-schema-dup-code-s478)", i, hEnd)])
+                    if (sameName(prior.name, name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, hEnd)])
                 }
                 tables = tables.concat([rt.t])
                 refs = refs.concat(rt.refs)
