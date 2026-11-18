@@ -1619,8 +1619,23 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
     logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the host passed no WebSocket upgrader (Bun.serve's server, as fetch's second argument)`);
     return jsonResponse(host, 500, FIXED[500]);
   }
-  if (upgrader.upgrade(request, { data: { scrmlChannel: ch, scrmlSockets: websocket } })) return undefined;
+  // §38.4.3 (S478 fix r1, LOW-4): the subscriber's place is RESERVED before the upgrade (the
+  // check above and this count are one synchronous step), so "answered `503` before the
+  // upgrade" holds for every racing upgrade; a failed upgrade, and the socket's `close`,
+  // release it.
+  ch.subs += 1;
+  const data = { scrmlChannel: ch, scrmlSockets: websocket, scrmlCounted: true };
+  let ok = false;
+  try { ok = upgrader.upgrade(request, { data }) === true; } finally { if (!ok) releaseSub(data); }
+  if (ok) return undefined;
   return jsonResponse(host, 400, FIXED[400]);
+}
+
+// Frees a subscriber's place (§38.4.3 "A closed connection frees its place") — once.
+function releaseSub(data) {
+  if (data.scrmlCounted !== true) return;
+  data.scrmlCounted = false;
+  data.scrmlChannel.subs -= 1;
 }
 
 function closeSocket(host, ws, code, why) {
@@ -1674,22 +1689,20 @@ function channelFrame(ch, raw) {
   return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __op: op, __val: wire }) };
 }
 
-// `maxPayloadLength` (Bun's own cap, bytes) sits above every channel's frame bound, so a frame
-// over the bound reaches `channelFrame` and is closed with 1009 by it; one past the host's cap
-// is closed by the host.
+// `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
+// LOW-5), so no more than the bound (+1) is ever buffered for one frame. A frame one byte over a
+// channel's bound reaches `channelFrame` and is closed 1009; a larger one is dropped by Bun
+// before it is read in full — the TCP connection is closed with no close frame (the client sees
+// 1006). §38.4.3 admits both ("the host MAY drop it unread"); a conforming client sends neither.
 function channelSockets(host, channels = []) {
   let most = CHANNEL_MAX_FRAME;
   for (const ch of channels) if (ch.maxFrame > most) most = ch.maxFrame;
   const now = clockOf(host);
   return {
-    maxPayloadLength: most * 4,
+    maxPayloadLength: most + 1,
     open(ws) {
-      const ch = ws.data.scrmlChannel;
-      // the cap is checked at the upgrade (503); two upgrades racing past it are closed here
-      if (ch.subs >= ch.maxSubs) return closeSocket(host, ws, 1013, `the channel is at its ${ch.maxSubs}-subscriber cap`);
-      ch.subs += 1;
-      ws.data.scrmlCounted = true;
-      ws.subscribe(ch.key);
+      // the place was reserved at the upgrade (upgradeChannel) — the cap needs no check here
+      ws.subscribe(ws.data.scrmlChannel.key);
     },
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
@@ -1700,7 +1713,7 @@ function channelSockets(host, channels = []) {
     },
     close(ws) {
       const ch = ws.data.scrmlChannel;
-      if (ws.data.scrmlCounted === true) { ws.data.scrmlCounted = false; ch.subs -= 1; }
+      releaseSub(ws.data);
       try { ws.unsubscribe(ch.key); } catch { /* the socket is gone */ }
     },
   };

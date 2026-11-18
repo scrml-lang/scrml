@@ -11,7 +11,7 @@
   <channel name="orders-feed" watches=orders>
     <onchange>
       <Inserted(row) : audit.broadcast(row)>
-      <Updated(row) : print(row)>
+      <Updated(row) : print(row.id)>
       <Deleted(key) : print(key)>
     </onchange>
   </channel>

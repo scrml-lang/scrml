@@ -3113,7 +3113,7 @@ ${
                 // s478 (S478 open-Qs ruling items 42, 49) — §38.4.3: the program-wide channel
                 // bounds, read by channelPass; "a value that is not a bare positive integer
                 // literal within the bound's range SHALL be a compile error, `E-CHANNEL-LIMIT-INVALID`"
-                if (chLimit(a.value, chLimitMax(a.name)) < 0) st = addDiag(st, file, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<program " + a.name + "=…>", a.name))
+                if (chLimit(a.value, a.name) < 0) st = addDiag(st, file, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<program " + a.name + "=…>", a.name))
             } else if (a.name == "mcp") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
@@ -48308,7 +48308,7 @@ ${
                             diags = diags.concat([mkDiag(f.path, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reconnect=` on `<channel>` is a non-negative integer number of milliseconds written bare (`reconnect=2000`, §38.3, §38.3.1); the bootstrap does not fall back silently on any other value (INTERIM, g-boot-channel-s478)")])
                         }
                     } else if (a.name == "frame-rate" || a.name == "frame-burst" || a.name == "max-subscribers") {
-                        const lv: int = chLimit(a.value, chLimitMax(a.name))
+                        const lv: int = chLimit(a.value, a.name)
                         if (lv < 0) {
                             diags = diags.concat([mkDiag(f.path, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<channel " + a.name + "=…>", a.name))])
                         } else if (a.name == "frame-rate") {
@@ -48565,8 +48565,16 @@ ${
         }
     }
 
+    // §38.4.3 (S478 fix r1, LOW-9): a bound's smallest legal value. A frame bound below 256 bytes
+    // admits no useful op frame (the envelope `{"__type":"__sync","__key":…,"__op":…,"__val":…}`
+    // alone is ~50 bytes), so it would compile a channel that closes its every sender (1009).
+    fn chLimitMin(name: string) -> int {
+        if (name == "channel-max-frame") return 256
+        return 1
+    }
+
     fn chLimitMsg(at: string, name: string) -> string {
-        return "`" + at + "` is a bare positive integer literal from 1 to " + chLimitMax(name) + " (§38.4.3) — a channel bound has no \"off\" and no silent fallback: write it bare, e.g. `" + name + "=" + chLimitExample(name) + "`"
+        return "`" + at + "` is a bare positive integer literal from " + chLimitMin(name) + " to " + chLimitMax(name) + " (§38.4.3) — a channel bound has no \"off\" and no silent fallback: write it bare, e.g. `" + name + "=" + chLimitExample(name) + "`"
     }
 
     fn chLimitExample(name: string) -> string {
@@ -48576,8 +48584,11 @@ ${
         return "1000"
     }
 
-    // A bound's value: a bare integer literal of digits only in [1, max], else -1.
-    fn chLimit(v: AAttrValue, max: int) -> int {
+    // A bound's value: a bare integer literal of digits only in [chLimitMin, chLimitMax] of the
+    // bound `name`, else -1.
+    fn chLimit(v: AAttrValue, name: string) -> int {
+        const max: int = chLimitMax(name)
+        const min: int = chLimitMin(name)
         const e: AExpr | not = match v {
             .Bare(e: x) :> x
             .Quoted(v: s) :> not
@@ -48601,7 +48612,7 @@ ${
             n = n * 10 + (c - 48)
             i = i + 1
         }
-        if (n < 1 || n > max) return -1
+        if (n < min || n > max) return -1
         return n
     }
 
@@ -48615,7 +48626,7 @@ ${
                     if (p is given) {
                         for (const a of p.attrs) {
                             if (a.name == name) {
-                                const v: int = chLimit(a.value, chLimitMax(name))
+                                const v: int = chLimit(a.value, name)
                                 if (v > 0) return v
                             }
                         }

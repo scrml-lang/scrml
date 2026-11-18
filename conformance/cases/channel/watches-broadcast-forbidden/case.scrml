@@ -11,8 +11,8 @@
   <channel name="orders-feed" watches=orders>
     ${ function ping() { broadcast({ x: 1 }); } }
     <onchange>
-      <Inserted(row) : print(row)>
-      <Updated(row) : print(row)>
+      <Inserted(row) : print(row.id)>
+      <Updated(row) : print(row.id)>
       <Deleted(key) : print(key)>
     </onchange>
   </channel>

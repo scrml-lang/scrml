@@ -9,5 +9,11 @@ Lane: S478 open-Qs rulings (user-voice items 41–49) on `<channel>` + the dev s
 - [x] tests: slice-m4/channel-limits-s478.test.js
 - [x] Q7 onchange desugar (parse onchangeDesugar)
 - [x] known-gaps markers, severity regen, CI gates (all OK), conformance: PASS 614→613 (watches-broadcast-member-call-ok PASS→UNSUPPORTED, explained), 0 PASS→FAIL
-- [ ] commit (hook), PR
+- [x] commit (hook), PR #1942
+- Fix r1 (review ~/.cache/scrml/review/s478-1942/review.md):
+  - [x] MED-3a onclose reports 1003/1007/1008/1009; MED-3b channelPacer (runtime.js) + client desc limits (print.scrml) + §38.4.3 normative pacing
+  - [x] LOW-4 reserve ch.subs in upgradeChannel (1013 path removed); LOW-5 maxPayloadLength most+1; LOW-9 channel-max-frame min 256
+  - [x] LOW-8 conformance print(row) → print(row.id) / literal
+  - [x] gaps: g-boot-channel-client-bound-s478 (MED-1/2), dev-rebuild-subs (LOW-6), onchange-row-type (LOW-7), conformance PASS-with-errors
+  - [ ] hook + CI gates + conformance delta, push
 - Q6 OPEN (not touched). impl#1 parity of Q1 recorded as impl#1-owed.

@@ -51,6 +51,8 @@ describe("A — §38.4.3 bounds: the attributes (front end)", () => {
     ["max-subscribers=0", ""],
     ["max-subscribers=@n", ""],
     ["", " channel-max-frame=0"],
+    ["", " channel-max-frame=1"],
+    ["", " channel-max-frame=255"],          // S478 fix r1 (LOW-9): below the 256-byte minimum
     ["", " channel-max-frame=16777217"],
     ["", " channel-max-frame=\"64kb\""],
     ["", " channel-frame-rate=(50)"],
@@ -170,19 +172,19 @@ describe("B — §38.4.3 bounds, served", () => {
   });
 
   test("the frame-size bound counts UTF-8 bytes, not characters (1009), from `<program channel-max-frame=>`", async () => {
-    const { bun, base } = await served(src("", " channel-max-frame=120"));
+    const { bun, base } = await served(src("", " channel-max-frame=300"));
     try {
       const a = await connect(base, "/_scrml_ws/chat");
       const b = await connect(base, "/_scrml_ws/chat");
       await tick();
-      const ascii = sync("note", "x".repeat(40));         // ≈ 90 bytes: under the bound
-      expect(new TextEncoder().encode(ascii).length).toBeLessThanOrEqual(120);
+      const ascii = sync("note", "x".repeat(200));        // ≈ 250 bytes: under the bound
+      expect(new TextEncoder().encode(ascii).length).toBeLessThanOrEqual(300);
       a.ws.send(ascii);
       await tick();
       expect(b.got.length).toBe(1);
-      const wide = sync("note", "€".repeat(30));           // under 120 characters, over 120 bytes
-      expect(wide.length).toBeLessThanOrEqual(120);
-      expect(new TextEncoder().encode(wide).length).toBeGreaterThan(120);
+      const wide = sync("note", "€".repeat(90));           // under 300 characters, over 300 bytes
+      expect(wide.length).toBeLessThanOrEqual(300);
+      expect(new TextEncoder().encode(wide).length).toBeGreaterThan(300);
       a.ws.send(wide);
       await tick(150);
       expect(b.got.length).toBe(1);
