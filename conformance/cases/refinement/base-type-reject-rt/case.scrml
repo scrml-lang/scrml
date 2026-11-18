@@ -1,13 +1,19 @@
 ${
     <num>: number = 7
-    <text>: string = "9"
     <shown>: number = 0
+    server function loadAmount() -> number {
+        return 9;
+    }
     function take(n: number(>0)) {
         @shown = n;
+    }
+    function fromServer() {
+        const v: number = loadAmount() !{ _ :> 0 };
+        take(v);
     }
 }
 <program>
 <button id="num" onclick=${take(@num)}>Number</button>
-<button id="text" onclick=${take(@text)}>Text</button>
+<button id="server" onclick=${fromServer()}>Server</button>
 <p id="out">${@shown}</p>
 </program>

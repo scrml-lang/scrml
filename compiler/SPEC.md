@@ -28198,6 +28198,12 @@ SHALL emit a warning (W-FOREIGN-001) when a level-0 `_{}` block is used, recomme
   type-check the content. The compiler SHALL extract the verbatim source slice between the
   opener and closer as a raw string.
 - A mismatched level (opener `_={` with closer `}==`) SHALL be a compile error (E-FOREIGN-001).
+- **A glued `=` run after a closing `}` is the closer, whole.** The `=` characters that follow a
+  `}` with no space between are read together as one closer, at every level, level 0 included. So
+  `_{ 1 }==2` is the closer `}==` against the opener `_{` — a mismatched level, E-FOREIGN-001 — and
+  never the closer `}` followed by the scrml operator `==`. To compare a foreign value, write the
+  level-1 form with a spaced operator (`_={ 1 }= == 2`) or bind the value first. (S478 open-Qs ruling (user-voice) item 58: "keep the
+  error — `_{ … }==x` is unreadable either way; write `_={ … }=`.")
 - A `_{}` block that reaches end-of-file without a matching closer SHALL be a compile error
   (E-FOREIGN-002: unclosed foreign code block at line N).
 - The compiler SHALL emit W-FOREIGN-001 on any level-0 `_{` block, recommending `_={}=`.
@@ -28332,6 +28338,10 @@ scrml local:
 slice is declared ONCE, at the top of the block, inside the braces, as `in: { name, name }`. The
 named values are the ONLY things that cross — there is NO free lexical capture (the slice sees only
 what `in:{}` names). The header is optional (`in: {}` or omitted = no crossings).
+JavaScript comments (`/* … */`, `// …` to the line end) MAY stand between the header's tokens —
+after `in`, around the `:`, the braces, each name and each `,` (`in: { a /* the row */, b }`). They
+are whitespace to the JavaScript the header becomes, and an implementation SHALL read the header
+the same with or without them. (S478 open-Qs ruling (user-voice) item 27.)
 
 **The sealed scope (what a slice can name).** A slice is evaluated in a SEALED scope. The names it
 can resolve are exactly:
@@ -30301,7 +30311,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-VALUE-FUNCTION-STORED | §14.3, §15.11.5.1, §59.3 | A VALUE stores a function: an object, array or map literal holds a function in a field, element or entry (directly, through a spread, a method / getter, or a ternary / `??` / logical-or choosing one); a state cell is initialised or assigned one (`<f> = g`, `@f = g`); a field / element write puts one into a value (`o.f = g`, `@o["k"] = g`, `@fs[0] = g`); an enum payload holds one (`Op.Apply(g)`); a method puts one into a scrml value (on a known scrml value every method except the closed calling set `map` / `filter` / `forEach` / `then` / … / `update` / `sortedBy`; on a receiver of unknown provenance the storing methods `push` / `concat` / `with` / `insert` / `add` / …); a host call whose argument literal held one has its RESULT kept as a scrml value (`const o = Object.freeze({ f: g })`, `Array.of(g)`, `new Set().add(g)`); a host call writes one into a scrml value (`Object.assign(o, { f: g })`, `Object.defineProperty`, `Reflect.set`); a value is BUILT FROM a callback that returns functions (`xs.map(() => g)`, `Array.from(xs, f)`, `m.update(k, f)` — S464 "(a) Close it", the closure-array entry); the dot-shorthand enum payload (`.Apply(g)`); or a known host callable is stored (`{ f: Math.max }`). A `match` arm value, a value-form `if` lift and a `for` lift count as the value. Function facts cross imports, re-exports (`export … from`, `export *`) and local export lists, and are read for `scrml:` stdlib modules from their source; an unknown cross-module value name fails closed. Function-ness is read from the tree and solved to a fixpoint over the file, failing closed: an arrow / `fn` / `function` expression (block bodies included), or a name that may hold one — an alias, a reassigned binding, a destructuring / parameter default, a function-typed parameter, a parameter a call site hands a function — or a call of a file function that may return one. NOT fired for a function PASSED as an argument or callback, wired as a prop / event handler, CALLED, or bound to a local name; nor for a literal handed to a host-JS call in statement position (the host boundary), nor for a write or method whose target is rooted in a host binding. The sibling of `E-STRUCT-FUNCTION-FIELD` (which stays the type-annotation code). Fix: pass the function instead (hand it to the call that uses it), wire it as a prop / handler, or store an enum tag and `match` on it. Partitions into `result.errors`. (Ruling S462 "a" + S464; emitted at `compiler/src/value-function-stored.ts` via `compiler/src/type-system.ts` `checkValueFunctionStored`.) **S474 (§14.3; S469 R2′, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a pure `fn` value in a cell or struct field is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474), and so is a local binding holding any function value (R2′); an impure function value in a cell or field is INTERIM until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474); any function-holding value at `==` / ordering, a map key or a serialization sink stays refused, PERMANENT (semantic impossibility: function `==` is undecidable; a closure cannot be serialized — ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). | Error |
 | E-TIMER-STRUCT-MISUSE | §41.21 | A `scrml:time` `Debouncer` / `Throttler` (a name or state cell initialised by `debounce(…)` / `throttle(…)` imported from `scrml:time`) is CALLED (`d(q)`, `@d(q)`) or has a method called on it (`d.cancel()`, `d.flush()`, `d.run()`). The struct is data, not a function: the message names the free function to use — `run(d, …)`, `cancel(d)`, `flush(d)`. Retires the pre-S464 callable-with-methods shape at compile time (it threw at run time). Partitions into `result.errors`. (Ruling S464 "(a) Struct + free fns" / "(a) Fix + land + type rule"; emitted at `compiler/src/value-function-stored.ts` via `checkTimerMisuse`.) | Error |
 | E-STRUCT-DUPLICATE-KEY | §14.3, §66.11.3 | A struct literal names the same key twice — a plain literal (`{ x: 5, x: 6 }`), a nested one, or the spread-override shape (`{ ...@g, phase: .Gone, phase: .Live }`). Not a map literal (that is `W-MAP-DUPLICATE-LITERAL-KEY`, §59.3). **Provenance:** ruling:user-voice-scrml.md S440 — "duplicate keys are an error in ANY struct literal" + the six-open-questions "all recs" (S440, second entry), item 2. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). | Error |
-| E-PRINT-NON-PRIMITIVE | §20.7.2 | A `print()` / `println()` argument is not a `string` / ~~`number` / `boolean`~~ `int` / `number` / `bool` / unit enum value *(S469)* — a struct, ~~enum, array~~ payload enum value, tape *(S469)*, value-native map (§59), markup-as-value, or the absence value `not`. `print` / `println` write RAW stdout (§20.7), machine-parsed program output, so structured data SHALL be serialized explicitly (a JSON or custom serializer of the author's choosing) rather than rendered to a human-readable projection — the deliberate divergence from `log()`'s value-faithful §20.6.4 render (a *human* projection, the wrong shape for a consumed stream). The typer classifier is conservative: it flags only positively-provable non-primitive shapes (a collection/markup/`not` literal, or an identifier bound to a non-primitive-typed decl); an unresolvable expression (member access, a call result, `asIs`) is left unflagged so the check never false-positives. Partitions into `result.errors`. (S241 — SPEC §20.7 fork B(i); emitted at `compiler/src/type-system.ts` `checkPrintArgs`.) **(S469)** The accepted set is `string`, `int`, `number`, `bool` and a unit enum value (§20.7.2, §14.13.2): `int` and the unit enum are newly accepted — **Nominal on impl#1** for the unit enum (ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*; direction of change: newly-accepting). | Error |
+| E-PRINT-NON-PRIMITIVE | §20.7.2 | A `print()` / `println()` argument is not a `string` / ~~`number` / `boolean`~~ `int` / `number` / `bool` / unit enum value *(S469)* — a struct, ~~enum, array~~ payload enum value, tape *(S469)*, value-native map (§59), markup-as-value, or the absence value `not`. `print` / `println` write RAW stdout (§20.7), machine-parsed program output, so structured data SHALL be serialized explicitly (a JSON or custom serializer of the author's choosing) rather than rendered to a human-readable projection — the deliberate divergence from `log()`'s value-faithful §20.6.4 render (a *human* projection, the wrong shape for a consumed stream). ~~The typer classifier is conservative: it flags only positively-provable non-primitive shapes (a collection/markup/`not` literal, or an identifier bound to a non-primitive-typed decl); an unresolvable expression (member access, a call result, `asIs`) is left unflagged so the check never false-positives.~~ *(S478 open-Qs ruling (user-voice) item 23: struck — it described impl#1's classifier, not the rule. The rule is §20.7.2's allow-list with §14.13.2's fail-closed limb: an argument whose type the compiler cannot resolve — an unannotated foreign (`asIs`) value included — is `E-PRINT-NON-PRIMITIVE`; annotate the value (`const out: int = _={ … }=`, §23.2.4a). impl#1 still leaves an unresolvable argument unflagged — a carried divergence, impl#1-owed under the S471 policy.)* Partitions into `result.errors`. (S241 — SPEC §20.7 fork B(i); emitted at `compiler/src/type-system.ts` `checkPrintArgs`.) **(S469)** The accepted set is `string`, `int`, `number`, `bool` and a unit enum value (§20.7.2, §14.13.2): `int` and the unit enum are newly accepted — **Nominal on impl#1** for the unit enum (ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*; direction of change: newly-accepting). | Error |
 | W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
@@ -30563,7 +30573,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-FN-001 | §48.3.1 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | §48.3.2 | DOM mutation call inside a `fn` body | Error |
 | E-FN-003 | §48.3.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function | Error |
-| E-FN-004 | §48.3.4 | Non-deterministic call — or read of mutable browser/global state (`window.*`/`document.*`/`navigator.*`/`location.*`) — inside a `fn` body | Error |
+| E-FN-004 | §48.3.4 | Non-deterministic call — or read of mutable browser/global state (`window.*`/`document.*`/`navigator.*`/`location.*`), or a `print` / `println` call (§20.7, S478 open-Qs ruling item 24) — inside a `fn` body | Error |
 | E-FN-005 | §48.3.5 | `async` on a `fn` declaration, or `await` inside a `fn` body. The `fn`-scope manifestation of §19.9.8 (S114 — the language-wide rule). | Error |
 | E-ASYNC-NOT-IN-SCRML | §19.9.8 | The `async` keyword appears on any function or arrow declaration in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted at the native parser's expression / declaration heads — `compiler/native-parser/parse-stmt.js` + `parse-expr.js`.) | Error |
 | E-AWAIT-NOT-IN-SCRML | §19.9.8 | The `await` keyword appears in any expression context in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted in `parseUnary` at `compiler/native-parser/parse-expr.js`.) | Error |
@@ -36470,7 +36480,7 @@ optional-access ::= expr '?.' identifier          // property:  recv?.field
 - **Short-circuit is chain-wide from the `?.` point, but each hop is guarded only against its own receiver.** In `a?.b.c`, if `a` is `not` the entire expression is `not` and `b`/`c` are never touched; but the `.c` hop is guarded ONLY against `a` being `not`, NOT against `b` being `not`. If an intermediate hop is itself optional it needs its own `?.` (the §42.3.5 per-hop rule) — `a?.b?.c`.
 - **Result type.** `recv?.field` has type `F | not` where `F` is the declared type of `field` — absence propagates into the result type. Because the result admits `not`, a further BARE dereference on it fires E-TYPE-046 (§42.3.5); continue the chain with `?.` or narrow it.
 
-**Codegen.** `recv?.field` / `recv?.[key]` / `recv?.method(...)` SHALL lower to the corresponding JavaScript optional-chaining form (`recv?.field`, `recv?.[key]`, `recv?.method(...)`). The JS `?.` operator short-circuits on both `null` and `undefined`, matching the `not` runtime representation of §42.8. A `not` result renders as nothing in a `${...}` interpolation context (§6), consistent with the no-value-no-output rule.
+**Codegen.** `recv?.field` / `recv?.[key]` / `recv?.method(...)` SHALL short-circuit as the corresponding JavaScript optional-chaining form (`recv?.field`, `recv?.[key]`, `recv?.method(...)`) does. The normative content is the short-circuit; the emitted spelling is the implementation's (a presence test and a plain access is conforming; a literal JS `?.` is too). (S478 open-Qs ruling (user-voice) item 29.) The JS `?.` operator short-circuits on both `null` and `undefined`, matching the `not` runtime representation of §42.8. A `not` result renders as nothing in a `${...}` interpolation context (§6), consistent with the no-value-no-output rule.
 
 **Relationship to the guards.** `?.` and the narrowing guards are complementary, not competing. Use `?.` when the natural handling of absence is "produce nothing / propagate" (a render that shows nothing when the datum is absent). Use a narrowing guard (`if=` / `given` / `is not` / `match`) when a block of logic should run ONLY when the value is present. Either form satisfies the §42.3.5 absence-handling requirement.
 
@@ -36533,7 +36543,7 @@ unresolved source statement 5 lists, so the example still shows case 3.)*
 - `given x :> body` → `if (x !== null && x !== undefined) { body }` in JavaScript output
 - `given x, y :> body` → `if (x !== null && x !== undefined && y !== null && y !== undefined) { body }` in JavaScript output
 - `given x` in a match arm → the arm's generated condition is `x !== null && x !== undefined`
-- `recv?.field` / `recv?.[key]` / `recv?.method(...)` (optional chaining, §42.3.6) → the corresponding JavaScript optional-chaining form `recv?.field` / `recv?.[key]` / `recv?.method(...)` (JS `?.` short-circuits on both `null` and `undefined`, matching the `not` representation)
+- `recv?.field` / `recv?.[key]` / `recv?.method(...)` (optional chaining, §42.3.6) → code that short-circuits as the JavaScript optional-chaining form `recv?.field` / `recv?.[key]` / `recv?.method(...)` does (JS `?.` short-circuits on both `null` and `undefined`, matching the `not` representation; informative — the normative content is §42.3.6's short-circuit)
 
 ### 42.6 Error Codes
 
@@ -38010,6 +38020,11 @@ The following built-in calls are known to be non-deterministic and SHALL NOT app
 | `performance.now()` | Returns elapsed time — varies per call |
 
 This list is exhaustive for the initial version. Future amendments MAY extend it.
+
+**`print` / `println` (S478 open-Qs ruling (user-voice) item 24).** A `print` / `println` call
+(§20.7) SHALL NOT appear inside a `fn` body (nested functions included); it is `E-FN-004`. A print
+writes host stdout — an effect, not a value computed from the `fn`'s inputs — so it is barred for
+the same reason as the calls above. Print from a `function` that calls the `fn`.
 
 ```scrml
 // Invalid — E-FN-004
@@ -42286,13 +42301,17 @@ fires `E-IDLE-MISPLACED`. For per-state timer-fire-on-state-entry semantics, use
 
 ```scrml
 ${
-  type Phase:enum = { Active, Idle }
-  function refresh() { @phase = Phase.Active; }
+  type Phase:enum = { Active, Busy, Idle }
+  function startTask() { @phase = Phase.Busy; }
+  function finishTask() { @phase = Phase.Active; }
 }
 
 <engine for=Phase initial=.Active>
-  <Active rule=.Idle>
-    <button onclick=refresh()>I'm here</button>
+  <Active rule=(.Busy | .Idle)>
+    <button onclick=startTask()>Start a task</button>
+  </>
+  <Busy rule=(.Active | .Idle)>
+    <button onclick=finishTask()>Done</button>
   </>
   <Idle></>
   <onIdle after=5m to=.Idle/>
@@ -42300,9 +42319,13 @@ ${
 ```
 
 When the engine's variant cell initializes (`Active`), the watchdog arms with full 5-minute
-remaining. Each call to `refresh()` (which transitions `.Active → .Active`) RESETS the
-watchdog — fresh 5 minutes from each reset. After 5 minutes of no transitions, the watchdog
-fires `@phase = Phase.Idle`.
+remaining. Each call to `startTask()` (`.Active → .Busy`) or `finishTask()` (`.Busy → .Active`)
+is a transition and RESETS the watchdog — fresh 5 minutes from each reset. After 5 minutes of no
+transitions, the watchdog fires `@phase = Phase.Idle`. A self-write does NOT reset it: a
+`refresh()` that writes `@phase = Phase.Active` while the engine is already `.Active` is a no-op
+(§51.0.F.1), not a transition, so it does not hold the watchdog off. To count a same-state action
+as activity, send a handled engine message (§51.0.S; see "Handled-message reset" below).
+(S478 open-Qs ruling (user-voice) item 31: the example is fixed, and the self-write no-op stays.)
 
 **Semantics:**
 
@@ -44082,6 +44105,15 @@ The unit suffix is required. Supported units:
 
 Fractional numbers are permitted (`0.5s` is 500 ms). The compiler converts
 to integer milliseconds via `Math.round(n × multiplier)`.
+
+**Unit case and the quoted form (S478 open-Qs ruling (user-voice) item 28).** These rules apply to
+every DURATION position (`after=`, `debounced=`, `throttled=`, and the other attributes that take
+a DURATION):
+
+1. A **quoted** duration is the same literal as the bare one: `debounced="300ms"` is
+   `debounced=300ms`. The quotes add nothing; a duration attribute has no string meaning.
+2. Units are **lowercase only**. `300MS`, `2S`, `1M` and `1H` are not durations and SHALL be
+   refused with `E-SYNTAX-DURATION`; the message SHALL name the lowercase unit (`write 300ms`).
 
 ##### 51.12.3.1 Computed-delay form (S67 amendment, 2026-05-07)
 

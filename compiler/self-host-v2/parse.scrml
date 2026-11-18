@@ -2728,6 +2728,9 @@ ${
     //     is declared "at the top of the block, inside the braces", so a comment
     //     ahead of it leaves `in:` inside the slice text, and `in` is a reserved
     //     word: not JavaScript.
+    // S478 open-Qs ruling (user-voice) item 27: JS comments BETWEEN the header's
+    // names (after `in`, around `:`, `{`, each name, `,` and `}`) are admitted —
+    // "they are whitespace to the JavaScript the header becomes" (§23.2.4a).
     fn foreignHeader(body: string) -> FHeader {
         const none: FHeader = { names: [], starts: [], bodyAt: 0, ok: true, why: "" }
         const i: int = skipBlankChars(body, 0)
@@ -2736,12 +2739,12 @@ ${
             if (ci > i && headerAt(body, ci)) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block's `in:` header follows a comment — the crossing header is declared \"at the top of the block, inside the braces\" (§23.2.4a), so after a comment it is not read as one: `in:` stays in the slice, which is then not JavaScript (`in` is a reserved word) and cannot be built (E-FOREIGN-007). Put the comment after the header, or before the block" }
             return none
         }
-        let j: int = skipBlankChars(body, i + 2)
+        let j: int = skipBlankAndComments(body, i + 2)
         if (body.substring(j, j + 1) != ":") return none
         const bad: FHeader = { names: [], starts: [], bodyAt: 0, ok: false, why: "" }
-        j = skipBlankChars(body, j + 1)
+        j = skipBlankAndComments(body, j + 1)
         if (body.substring(j, j + 1) != "{") return bad
-        j = skipBlankChars(body, j + 1)
+        j = skipBlankAndComments(body, j + 1)
         let names: string[] = []
         let starts: int[] = []
         let ok: boolean = true
@@ -2754,10 +2757,10 @@ ${
                 while (isIdentCh(body.substring(j, j + 1))) { j = j + 1 }
                 names = names.concat([body.substring(n0, j)])
                 starts = starts.concat([n0])
-                j = skipBlankChars(body, j)
+                j = skipBlankAndComments(body, j)
                 const c: string = body.substring(j, j + 1)
                 if (c == ",") {
-                    j = skipBlankChars(body, j + 1)
+                    j = skipBlankAndComments(body, j + 1)
                     if (body.substring(j, j + 1) == "}") done = true
                 } else if (c == "}") {
                     done = true
@@ -2780,7 +2783,7 @@ ${
     // `in` + blanks + `:` at offset `at`
     fn headerAt(body: string, at: int) -> boolean {
         if (body.substring(at, at + 2) != "in" || isIdentCh(body.substring(at + 2, at + 3))) return false
-        const j: int = skipBlankChars(body, at + 2)
+        const j: int = skipBlankAndComments(body, at + 2)
         return body.substring(j, j + 1) == ":"
     }
 

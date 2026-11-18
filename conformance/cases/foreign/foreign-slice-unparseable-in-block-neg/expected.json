@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
   "spec": "§23.2.4a",
-  "rationale": "§23.2.4a: a slice that is not valid JavaScript as the body of a strict-mode async function of its crossings SHALL be a compile error (E-FOREIGN-007). §2.2.1: a codegen path that cannot lower a construct SHALL emit a hard diagnostic rather than a silent stub, and a compile reporting an Error SHALL NOT produce a runnable artifact. Neither depends on the block nesting of the slice.",
+  "rationale": "§23.2.4a: a slice that is not valid JavaScript as the body of a strict-mode async function of its crossings SHALL be a compile error (E-FOREIGN-007). §2.2.1: a codegen path that cannot lower a construct SHALL emit a hard diagnostic rather than a silent stub, and a compile reporting an Error SHALL NOT produce a runnable artifact. Neither depends on the block nesting of the slice. S478 open-Qs ruling (user-voice) item 23: each printed foreign value is annotated at its binding (the §23.2.4a call-site override) — an unannotated foreign value is `asIs`, and a `print` / `println` argument of unresolved type is E-PRINT-NON-PRIMITIVE (§20.7.2, §14.13.2, fail closed).",
   "provenance": "adopter:flogence-S56",
   "expect": {
     "codes": ["E-FOREIGN-007"],

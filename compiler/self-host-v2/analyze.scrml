@@ -9142,19 +9142,18 @@ ${
     // exactly those as their one honest text (Core Text, §20.7.2).
     fn resolvePrint(env: Env, e: AExpr, nl: boolean, args: AExpr[], st0: AS) -> RX {
         const w: string = nl ? "println" : "print"
+        // S478 open-Qs ruling (user-voice) item 24 — §48.3.4: "A `print` / `println` call (§20.7)
+        // SHALL NOT appear inside a `fn` body (nested functions included); it is `E-FN-004`."
+        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-FN-004", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, an effect and not a value computed from the inputs, so " + (env.nest.pureFn != "" && env.nest.pureFn != env.fx.fnName ? "the nested function `" + env.fx.fnName + "` inside `fn " + env.nest.pureFn + "` (pure, nested functions included, §48.3)" : "`fn " + env.fx.fnName + "` (pure)") + " cannot call it (§48.3.4). Print from a `function` that calls the `fn`", resolveExprs(env, args, not, st0))
         if (env.fx.stmtCall != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` used as a value — §20.7.1 makes it a statement (\"Statement-position; no usable return value\"), and the bootstrap builds it only as a statement of its own (INTERIM). Call it on its own line", resolveExprs(env, args, not, st0))
-        if (env.host == HostCtx.HostPure) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` in a `fn` body — `" + w + "` writes host stdout, a server-only resource (§20.7.3), and the SPEC does not say whether a pure `fn` (§48.3) may call it; the bootstrap does not build it there (INTERIM). Call it from a `function`", resolveExprs(env, args, not, st0))
         if (!env.fx.inFn || env.fx.fnSym < 0 || env.inEffect || env.host != HostCtx.HostOk) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(…)` outside a `function` body — §20.7.3 places it by the function that calls it (\"a `function` that calls `print` / `println` is server-placed\"), and the bootstrap builds it only in a `function` body (INTERIM: an event handler, a body-top statement or an initializer is not one). Move it into a `function`", resolveExprs(env, args, not, st0))
         // s478 r1: the placement pre-scan (printScans) is what server-placed this function; a call it
         // did not read as the built-in has no server body to stand in (fail closed, INTERIM)
         if (env.g.printCalls.indexOf(e.nid) < 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", printScanWhy(w, "the built-in", "a user binding"), resolveExprs(env, args, not, st0))
-        // s478 r1 (#1900 review MED) — an UNANNOTATED foreign value (`asIs`, §23.2.4a) as an argument: the
-        // SPEC disagrees with itself on it (g-boot-print-asis-arg-s478, owner question) — §20.7.2's allow-list
-        // and §14.13.2 ("a value whose type the compiler cannot resolve") refuse it, the §34
-        // E-PRINT-NON-PRIMITIVE row leaves "`asIs` … unflagged". Until the owner rules, it is refused BY
-        // NAME (INTERIM), never with a code the SPEC may not mean here.
-        const fa: string = printForeignArg(env, args)
-        if (fa != "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + w + "(" + fa + ")` — `" + fa + "` is the unannotated value of a foreign block, typed `asIs` by default (§23.2.4a), and the SPEC does not settle whether a `print` / `println` argument may be `asIs` (§20.7.2's allow-list and §14.13.2 refuse it; the §34 `E-PRINT-NON-PRIMITIVE` row leaves `asIs` unflagged — owner question g-boot-print-asis-arg-s478). The bootstrap does not build it (INTERIM). State its type at the binding (`const " + fa + ": string = _={ … }=`, the §23.2.4a call-site annotation)", resolveExprs(env, args, not, st0))
+        // S478 open-Qs ruling (user-voice) item 23: an UNANNOTATED foreign value (`asIs`, §23.2.4a)
+        // as an argument is NOT special-cased — "keep the fail-closed rule (§20.7.2 allow-list,
+        // §14.13.2)": the typer refuses it with E-PRINT-NON-PRIMITIVE (printArgCheck), as any
+        // argument whose type it cannot resolve.
         let st: AS = st0
         let text: boolean[] = []
         for (const a of args) {
@@ -9163,20 +9162,6 @@ ${
             st = r.st
         }
         return plain(not, addValue(st, e.nid, ValueFact.VPrint(text, nl)))
-    }
-
-    // s478 r1 — the first argument that is a local bound, unannotated, to a foreign block's value ("" none).
-    fn printForeignArg(env: Env, args: AExpr[]) -> string {
-        for (const a of args) {
-            const n: string = exprName(a)
-            if (n != "") {
-                const l: LocalB | not = lookupLocal(env, n)
-                if (l is given) {
-                    if (l.foreign) return n
-                }
-            }
-        }
-        return ""
     }
 
     // s478 r1 — the placement pre-scan and the binder read one `print` call differently (printScans).
@@ -39301,8 +39286,8 @@ ${
     // compile error" (§6.13.6) — E-SYNTAX-DURATION (§34: "neither literal-form
     // … nor computed-form … parses cleanly"). The computed form `${expr}<unit>`
     // (§51.12.3.1) is not built: refused by name (computed = true).
-    // A quoted value is read as its text (impl#1's shared parser takes the
-    // attribute's text with the quotes stripped).
+    // A quoted value is the same literal (§51.12.3, S478 open-Qs ruling
+    // (user-voice) item 28: "a quoted duration is accepted as the same literal").
     // =========================================================================
     type DurParse:struct = { ms: int, why: string, computed: boolean }
 
@@ -39354,6 +39339,10 @@ ${
         if (unit == "m") mult = 60000
         if (unit == "h") mult = 3600000
         if (unit == "") return durBad("`" + s + "` has no unit — the unit suffix is required: `ms`, `s`, `m` or `h` (§51.12.3)")
+        // S478 open-Qs ruling (user-voice) item 28: "units stay lowercase-only,
+        // and the refusal names the lowercase unit" (§51.12.3).
+        const lu: string = unit.toLowerCase()
+        if (mult == 0 && (lu == "ms" || lu == "s" || lu == "m" || lu == "h")) return durBad("`" + unit + "` in `" + s + "` is not a duration unit — units are lowercase only: write `" + s.substring(0, i) + lu + "` (§51.12.3)")
         if (mult == 0) return durBad("`" + unit + "` in `" + s + "` is not a duration unit — `ms`, `s`, `m` or `h` (§51.12.3)")
         const n: number = Number(s.substring(0, i))
         return { ms: Math.floor(n * mult + 0.5), why: "", computed: false }
