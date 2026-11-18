@@ -152,7 +152,12 @@ ${
             rowG("use foreign:", "§23.4", U, ["use", "foreign"], "lead", ""),
             rowG("use", "§41.2", U, ["use", "$w"], "lead", "import the names you need: `import { … } from \"scrml:…\"` (§41.3)"),
             row("~ pipeline accumulator", "§32", U, ["~"], ""),
-            rowOn("?. optional chaining", "§42.3.6", U, ["?."], [], true, "test presence first: `if (x is given) { … x.f … }` (§42.2)"),
+            // s478 (s478-boot-optional-chain): `?.` optional chaining (§42.3.6) is BUILT (parse.scrml
+            // optHop / closeOpt); the receivers it does not build are refused where they stand. The
+            // optional CALL `f?.(…)` is refused by the parser (optHop, INTERIM g-boot-optional-call-s478);
+            // this row only re-labels that refusal so the misread rest of its line (a `match` over
+            // the refused subject, its arms) is not reported beside it (`on` = the parser's own code).
+            rowOn("?.(…) optional call", "§42.3.6", U, ["?.", "("], [U], true, "call it plainly (`f(args)`), or narrow the value first (`if (f is given) { f(args) }`) — INTERIM, g-boot-optional-call-s478"),
             // s478 (s478-boot-syntax-batch): `yield` — §10.1: "JavaScript `yield` works only inside
             // generator functions; scrml logic contexts accept real JS generators". The bootstrap
             // builds no generator, so a `yield` is refused by name rather than read as an
