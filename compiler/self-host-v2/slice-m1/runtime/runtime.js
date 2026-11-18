@@ -3837,13 +3837,27 @@ const CSS_ATTR_FUNCTIONS = new Set([
   "inset", "circle", "ellipse", "polygon",
 ]);
 
+// s479 (s479-records; RULED S479 §3.B item 22 — "admit exactly `url(#ident)`, after a browser
+// check that it does not fetch under a static `<base>`"; SPEC §5.2 "Data-supplied CSS-url
+// attributes", INTERIM): a same-document fragment reference, `url(#grad)`, is admitted — the whole
+// value (or `values` entry), ASCII whitespace around it trimmed, and nothing else: no quotes, no
+// space inside the parentheses, no fallback paint after it, lower-case `url`. The ident is an
+// ASCII letter or `_`, then letters, digits, `_` or `-`. Chromium 152 (puppeteer probe, recorded
+// in docs/changes/s479-records/progress.md): a data-written `fill` / `stroke` / `filter` / `mask` /
+// `clip-path` / `marker*` / `cursor` / `color-profile` = `url(#ident)` and a SMIL `<set to=>` of
+// one fetch NOTHING with a static `<base href>` on another origin (the control,
+// `url(x.svg#g)`, fetches from the base origin).
+const LOCAL_FRAGMENT_URL = /^url\(#[A-Za-z_][A-Za-z0-9_-]*\)$/;
+const trimAsciiWs = (s) => s.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
+
 /** The value text for a CSS-url attribute write, or null when `cssValueOf` refuses an entry. */
 function cssAttrValue(el, name, text, perEntry) {
   const entries = perEntry ? text.split(";") : [text];
   for (const e of entries) {
+    if (LOCAL_FRAGMENT_URL.test(trimAsciiWs(e))) continue;
     if (cssValueOf(e, CSS_ATTR_FUNCTIONS) === null) {
       const tag = el && typeof el.tagName === "string" ? "<" + el.tagName.toLowerCase() + "> " : "";
-      console.warn("[scrml css-guard] refused a data-supplied value for " + tag + String(name) + "=: the browser reads this attribute as CSS, and only a finite number or a plain CSS value (no url(), image-set(), var(), quotes, escapes, ; { } < or !) is written there from data. The attribute was removed.");
+      console.warn("[scrml css-guard] refused a data-supplied value for " + tag + String(name) + "=: the browser reads this attribute as CSS, and only a finite number, a plain CSS value (no url(), image-set(), var(), quotes, escapes, ; { } < or !) or exactly a same-document url(#id) is written there from data. The attribute was removed.");
       return null;
     }
   }

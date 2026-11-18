@@ -272,3 +272,58 @@ describe("bare-filename resolution on a fixture tree", () => {
     expect(staleReasons(row("`testonly.ts` `inTest`"), ctx)[0]).toContain("matches no non-test source file");
   });
 });
+
+// s479 (s479-records; gap g-s34-census-string-occurrence-vouches-s474; ruling:user-voice-scrml.md
+// "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted (S479, 2026-11-18)" item 19 — "a
+// string-only occurrence vouches only when code-shaped"). Red on base: every "does NOT vouch" case.
+describe("S479 item 19 — a name only inside a literal vouches only when it is code-shaped", () => {
+  test("JS: a name a message string merely mentions is not an identifier", () => {
+    const s = ids(`const reason = "if-expression-value binding (prosyName lowers to null)";\nexport function real() {}\n`, "a.ts");
+    expect(s.has("prosyName")).toBe(false);
+    expect(s.has("lowers")).toBe(false);
+    expect(s.has("real")).toBe(true);
+    expect(s.has("reason")).toBe(true); // code, not literal
+  });
+
+  test("JS: each code shape inside a literal vouches — `function X`, `function* X`, `fn X`, `class X`, `X(`, `X =`, `.X`", () => {
+    const src = [
+      `const a = "function _scrml_def(p) {";`,
+      `const b = 'function* _scrml_gen() {}';`,
+      "const c = `fn scrmlFn(x: int) -> int`;",
+      `const d = "class ScrmlClass {}";`,
+      `const e = "  _scrml_call (x);";`,
+      `const f = "let _scrml_assigned = 1;";`,
+      `const g = "obj._scrml_member";`,
+    ].join("\n");
+    const s = ids(src, "a.ts");
+    for (const k of ["_scrml_def", "_scrml_gen", "scrmlFn", "ScrmlClass", "_scrml_call", "_scrml_assigned", "_scrml_member"]) expect(s.has(k)).toBe(true);
+  });
+
+  test("JS: `X ==` / `X ===` / `X <=` in a literal is not code-shaped; a name inside a word is not matched", () => {
+    const s = ids(`const a = "cmpName == 1 && otherName === 2 && le <= 3";\nconst b = "xfooBar(";\n`, "a.ts");
+    for (const k of ["cmpName", "otherName", "le", "fooBar"]) expect(s.has(k)).toBe(false);
+    expect(s.has("xfooBar")).toBe(true);
+  });
+
+  test("JS: a name in a template's `${ … }` is code; the text around it is literal", () => {
+    const s = ids("const t = `function _scrml_tmpl_${id}() { ${inner} } just words`;\n", "a.ts");
+    expect(s.has("inner")).toBe(true);
+    expect(s.has("id")).toBe(true);
+    expect(s.has("_scrml_tmpl_$")).toBe(true); // the head before `${` keeps its `$` (as before S479)
+    expect(s.has("words")).toBe(false);
+  });
+
+  test("scrml: a name only in a quoted string is not an identifier unless code-shaped", () => {
+    const s = ids(`\${ fn kept() { return "mentionedOnly here"; } }\n\${ const k = "called(" ; }\n`, "a.scrml");
+    expect(s.has("kept")).toBe(true);
+    expect(s.has("mentionedOnly")).toBe(false);
+    expect(s.has("called")).toBe(true);
+  });
+
+  test("real tree: the gap's own example no longer resolves; the defining file does", () => {
+    const ctx = { root: ROOT, treeIdents: new Set() };
+    // compiler/src/codegen/emit-library.ts names emitIfExprDecl only in comments and in a reason string
+    expect(staleReasons(row("`compiler/src/codegen/emit-library.ts` `emitIfExprDecl`"), ctx).length).toBe(1);
+    expect(staleReasons(row("`compiler/src/codegen/emit-logic.ts` `emitIfExprDecl`"), ctx)).toEqual([]);
+  });
+});
