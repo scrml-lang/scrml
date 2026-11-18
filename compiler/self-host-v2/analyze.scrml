@@ -13561,15 +13561,12 @@ ${
     //   §51.0.F.1: "A self-write to the current variant is a runtime NO-OP, NOT a `rule=`
     //   violation. This holds REGARDLESS of whether the from-state's `rule=` lists the
     //   current variant" — and the Info lint W-ENGINE-SELF-WRITE-DETECTED "Inside a
-    //   state-child body … fires when `@var = .CurrentVariant` … STRICT"; "Outside any
-    //   state-child body … fires CONSERVATIVELY when `@var = .Variant` … and `.Variant` is
-    //   one of the engine's declared variants". The site is "inside" when the write's span
-    //   lies in the body of one of THIS field's state-children (same file).
+    //   state-child body … fires when `@var = .CurrentVariant` … STRICT". The site is "inside"
+    //   when the write's span lies in the body of one of THIS field's state-children (same file).
+    //   S479 (ruling §3.B item 7; §51.0.F.1): "Outside any state-child body (function bodies,
+    //   top-level logic, …) the lint does NOT fire" — the CONSERVATIVE outside firing is struck.
     // `not` — the write is not a literal declared variant, or stands outside every state-child
-    // body of the field: transitionCheck decides alone. INTERIM (gap
-    // g-boot-engine-self-write-outside-lint-s478): the CONSERVATIVE outside-body Info lint is
-    // not emitted yet — it would fire on every literal engine write in a function body
-    // (§66.19.6's own `load()` / `finish()`); Info-level, so no program the SPEC rejects is accepted.
+    // body of the field: transitionCheck decides alone, and no lint fires.
     fn literalStateWrite(env: Env, p: WPlace, f: FieldInfo, g: TransitionGraph, value: AExpr, key: string, st: AS) -> RCheck | not {
         const lit: string = variantLitName(value.k)
         if (lit == "") return not
