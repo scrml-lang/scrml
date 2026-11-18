@@ -34,3 +34,19 @@ Scratch: `~/.cache/scrml/review/s479-parse-fails/r1/` (base = c75c7eaa tree, mai
 - [x] tests (8 red on c75c7eaa), conformance 0 bucket/code changes vs c75c7eaa, corpus 0 newly rejecting,
   severity --check, s34-census, claim/snippet/types/corpus-floor/md-shim gates.
 - [ ] commit (hook), push to s479-parse-fails.
+  (r1 landed as 66d1b3ef3.)
+
+## Fix round r2 (review s479-1963-r1) — branch s479-parse-fails-r2 off 66d1b3ef3
+Scratch: `~/.cache/scrml/review/s479-parse-fails/r2/` (base66 = 66d1b3ef3 tree, p/ probes).
+- [x] MED-A — `notStmtIsCode`: a body-top `not` statement is code (E-TYPE-045 stands, §42.10 + D29) when it ends
+  with its own `;`, or ends its line with an `@` / `(` / `[` / literal operand; else prose (one E-UNQUOTED-DISPLAY-TEXT).
+- [x] LOW-B — `aliasStopAt` stops at a `<` only by the tokenizer's tag-open rule (lex.scrml `opensTag`, shared with
+  `startsMarkup`).
+- [x] LOW-C — the alias-skip E-STMT-MISSING-SEMICOLON spans the whole skipped text, names the line a multi-line skip
+  ends on and every declaration swallowed in it.
+- [x] NIT — no resume at a name right after `.` / `?.`.
+- [x] tests (9 red on 66d1b3ef3, 41 green on head).
+- [x] conformance vs 66d1b3ef3: 0 bucket / code changes (PASS 648, FAIL 9; 3 targets PASS); corpus 3152 files: 0 code-set / count changes,
+  md-article 38 (pre-PR); r0+r1 probe sets: only the span widening, the MED-A / LOW-B / NIT cases, and a1 `qqb` now unresolved
+  (it was falsely declared by the resume at `qqb`). Gates: severity, s34-census, types, snippet, claim, corpus-floor, md-shim.
+- [ ] commit (hook), push.

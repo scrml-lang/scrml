@@ -232,6 +232,92 @@ describe("§7.2.2 — after an alias's missing `;`, the next statement on its li
   });
 });
 
+// r2 MED-A — §42.10: "The compiler SHALL emit E-TYPE-045 in all such positions"; the more specific code
+//   wins (D29) over §4.18.7's E-UNQUOTED-DISPLAY-TEXT, which covers only "statements that are not valid code".
+//   The rule (parse.scrml notStmtIsCode): a body-top statement opening with `not` is CODE when it ends with its
+//   own `;` (§7.2.2 rule 6: "`;` is never text"), or — with nothing after it on its line — when its operand
+//   opens with a token no prose word does (`@x`, `(`, `[`, a literal). Otherwise (more words after it on the
+//   line, or a bare-word operand with no `;`) it is prose. RED ON 66d1b3ef3: each code case below was ONE
+//   E-UNQUOTED-DISPLAY-TEXT advising `<p>not @x;</p>`.
+describe("§42.10 / D29 — a body-top `not` STATEMENT is code (E-TYPE-045), prose stays display text", () => {
+  test("`not @x;` is E-TYPE-045, not display text", () => {
+    const r = run(P(`let <x:number=1/>\nnot @x;\n<p>QQB</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045"]);
+  });
+
+  test("`not (@x);` and `not @x` (line end, cell operand) are two statements, each E-TYPE-045", () => {
+    const r = run(P(`let <x:number=1/>\nnot (@x);\nnot @x\n<p>QQB</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045", "E-TYPE-045"]);
+  });
+
+  test("`not @x = 3;` and `not x;` are each E-TYPE-045", () => {
+    const r = run(P(`let <x:number=1/>\nnot @x = 3;\nnot x;\n<p>QQB</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045", "E-TYPE-045"]);
+  });
+
+  test("`not done;` (bare word, closed by its `;`) is code: E-TYPE-045", () => {
+    const r = run(P(`let <done:bool=false/>\nnot done;\n<p>QQB</p>`));
+    expect(codes(r)).toEqual(["E-TYPE-045"]);
+  });
+
+  test("`not 5;` is code: E-TYPE-045", () => {
+    expect(codes(run(P(`not 5;\n<p>QQB</p>`)))).toEqual(["E-TYPE-045"]);
+  });
+
+  test("`not done` (bare word, no `;`) is prose: one E-UNQUOTED-DISPLAY-TEXT", () => {
+    expect(codes(run(P(`not done\n<p>QQB</p>`)))).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+  });
+
+  test("`not @x and more words` (words follow on its line) is prose", () => {
+    const src = P(`let <x:number=1/>\nnot @x and more words\n<p>QQB</p>`);
+    const r = run(src);
+    expect(codes(r)).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    expect(src.slice(errs(r)[0].span.start, errs(r)[0].span.end)).toBe("not @x and more words");
+  });
+
+  test("prose, then a real statement: one display run, the statement kept", () => {
+    const src = P(`let <x:number=1/>\nIt does not need a validator.\nnot a clue\n@x = "s";\n<p>QQB</p>`);
+    const r = run(src);
+    expect(codes(r)[0]).toBe("E-UNQUOTED-DISPLAY-TEXT");
+    expect(src.slice(errs(r)[0].span.start, errs(r)[0].span.end)).toBe("It does not need a validator.\nnot a clue");
+    // the write is still read and type-checked
+    expect(codes(r).length).toBe(2);
+  });
+});
+
+// r2 LOW-B / LOW-C / NIT — the alias skip (parse.scrml aliasStopAt / aliasTrailing). RED ON 66d1b3ef3:
+//   `x < y` resumed at `<` (E-PARSE-TAG ×2 + E-PARSE-CLOSER); a multi-line skip was a zero-width span with
+//   the swallowed declarations unnamed; `extra.qqb = 3` resumed at `qqb` (a second E-STMT-MISSING-SEMICOLON).
+describe("§40.8 — an alias's skipped text: a `<` opens a tag only by the tag-open rule; the report covers it all", () => {
+  test("`type A = number x < y`: one E-STMT-MISSING-SEMICOLON, no markup cascade", () => {
+    const src = P(`type A = number x < y\n<p>QQB</p>`);
+    const r = run(src);
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(src.slice(errs(r)[0].span.start, errs(r)[0].span.end).trim()).toBe("x < y");
+  });
+
+  test("in a `\${ }` block: no E-PARSE-EXPR at `<`, and the declaration after it is read", () => {
+    const r = run(P(`\${\n  type A = number x < y\n  const Q = 2;\n}\n<p>\${Q} QQB</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+  });
+
+  test("a name after `.` is a member, never a statement start (`extra.qqb = 3`)", () => {
+    const r = run(P(`\${\n  type A = number extra.qqb = 3\n}\n<p>QQB</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(errs(r)[0].message).toContain("`extra.qqb = 3`, is not read");
+  });
+
+  test("a skip across lines: the span covers it, the end line is named, swallowed declarations named", () => {
+    const src = P(`\${\n  type A = number extra(\n    const QQZ = 1;\n    const QQW = 3;\n  )\n  function g() -> number { return QQZ + QQW; }\n}\n<p>\${g()} QQB</p>`);
+    const r = run(src);
+    const a = errs(r)[0];
+    expect(a.code).toBe("E-STMT-MISSING-SEMICOLON");
+    expect(src.slice(a.span.start, a.span.end).trim()).toBe("extra(\n    const QQZ = 1;\n    const QQW = 3;\n  )");
+    expect(a.message).toContain("runs through the `)` on line 6");
+    expect(a.message).toContain("(`const QQZ`, `const QQW`) are not declared");
+  });
+});
+
 // LOW-4 — §49.3.1: "This is the loop the retired `while (cond)` spelled", so the §34 E-SQL-QUERY-NOT-READABLE
 //   "`if` / `while` condition" covers a `for (cond)` head. RED ON c75c7eaa: E-SQL-003.
 describe("§34 — an unreadable `?{ … }` in a `for (cond)` head is E-SQL-QUERY-NOT-READABLE", () => {

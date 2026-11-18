@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword, markupOpensAt } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -8825,9 +8825,36 @@ ${
         if (skipped.length > 48) skipped = skipped.substring(0, 45) + "…"
         let why: string = " The text after it, `" + skipped + "`, is not read: a `type` alias ends where its type expression ends (§40.8)"
         if (unclosed != "") why = why + ", and its `" + unclosed + "` is not closed"
+        // s479 r2 (LOW-C) — §40.8: "a statement whose head expression was parsed as a valid
+        // prefix with the rest discarded is not compiled unless an error reports the
+        // discarded text". The report covers ALL of it: its span runs from the missing `;`
+        // through the last skipped token, a skip that crosses lines names the line it ends
+        // on and its last token, and every declaration inside the skipped text is named —
+        // none of them is declared (g2: `extra(⏎ const QQZ = 1; … const QQW = 3;⏎)`).
+        const endTok: PTok = t.toks[to - 1]
+        if (endTok.line != line) why = why + "; the skipped text runs through the `" + endTok.text + "` on line " + endTok.line
+        const swallowed: string = skippedDecls(t, from, to)
+        if (swallowed != "") why = why + ", and the declarations in it (" + swallowed + ") are not declared"
         if (!atEnd(t) && cur(t).line == line && !closerAt(t)) why = why + "; `" + cur(t).text + "` is read as the statement that follows"
-        const nd: Diag = newDiag(last.code, last.message + why + ".", last.file, last.span)
+        const nd: Diag = newDiag(last.code, last.message + why + ".", last.file, mkSpan(last.span.start, endTok.end))
         return { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.slice(0, t.diags.length - 1).concat([nd]), file: t.file, ns: t.ns, inFn: t.inFn }
+    }
+
+    // s479 r2 (LOW-C) — the declarations in toks[from, to) (aliasTrailing's skipped
+    // text), each as its keyword and name: "`const QQZ`, `function qqf`", or "".
+    fn skippedDecls(tp: TP, from: int, to: int) -> string {
+        let out: string = ""
+        let i: int = from
+        while (i + 1 < to) {
+            const k: PTok = tp.toks[i]
+            const n: PTok = tp.toks[i + 1]
+            if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0 && n.cls == TC.Ident) {
+                if (out != "") out = out + ", "
+                out = out + "`" + k.text + " " + n.text + "`"
+            }
+            i = i + 1
+        }
+        return out
     }
 
     // Past the tokens on `line` from `tp` that cannot start a statement or item: it stops
@@ -8889,7 +8916,17 @@ ${
     // A token that can start a statement or item after an alias (aliasSkipEnd): a
     // declaration or statement keyword, a cell (`@n = …`), a name written to (`x = …`,
     // the §50.8.5 keywordless form), a markup `<`, a `${`.
+    // s479 r2 (NIT) — a name directly after `.` / `?.` is a member (`extra.qqb = 3`),
+    // never a statement start. (LOW-B) — a `<` is markup only where the tokenizer's
+    // tag-open rule reads one (lex.scrml markupOpensAt — the rule its startsMarkup ends a
+    // code region by: `<` followed immediately by `/`, `!` or a letter; §4.18.1 "spaced
+    // `< tag>` is text"); `x < y` is a comparison. (Not the free-text opensTag below: an
+    // alias's text is a code region.)
     fn aliasStopAt(tp: TP) -> boolean {
+        if (tp.i > 0) {
+            const pv: PTok = tp.toks[tp.i - 1]
+            if (pv.cls == TC.Punct && (pv.text == "." || pv.text == "?.")) return false
+        }
         if (logicItemAhead(tp)) return true
         const c: PTok = cur(tp)
         if (c.cls == TC.At) return true
@@ -8898,7 +8935,10 @@ ${
             if (c.text == "$" && isP(adv(tp), "{")) return true
             if (c.cls == TC.Ident && isP(adv(tp), "=")) return true
         }
-        if (isP(tp, "<")) return true
+        if (isP(tp, "<")) {
+            const nx: PTok = adv(tp).toks[adv(tp).i]
+            return nx.start == c.end && nx.text.length > 0 && markupOpensAt(60, nx.text.charCodeAt(0))
+        }
         return false
     }
 
@@ -14334,6 +14374,8 @@ ${
     // covers each maximal run of consecutive statements that are not valid code, and
     // the statements it covers raise no other diagnostic". A `not` inside code that
     // is otherwise valid (`@a = not @b;`, `if (not (x))`) keeps its E-TYPE-045.
+    // s479 r2 (MED-A) — and so does a `not` statement that is code (notStmtIsCode:
+    // `not @x;`, `not (@x)` at its line's end): only a prose-shaped one is display text.
     fn notCode(before: TP, r: RStmt) -> boolean {
         if (r.tp.i == before.i) return true
         let generic = false
@@ -14344,7 +14386,7 @@ ${
             if (d.severity == Severity.Error) {
                 if (d.code.startsWith("E-PARSE-")) {
                     generic = true
-                } else if (d.code == "E-TYPE-045" && d.span.start == lead.start && lead.text == "not") {
+                } else if (d.code == "E-TYPE-045" && d.span.start == lead.start && lead.text == "not" && !notStmtIsCode(before, r)) {
                     generic = true
                 } else if (!softError(d.code)) {
                     return false
@@ -14362,6 +14404,31 @@ ${
         const x: AExpr | not = stmtExpr(r.s)
         if (x is given) return literalOnly(x)
         return false
+    }
+
+    // s479 r2 (MED-A) — is a body-top statement that opens with a prefix `not` (its only
+    // error notPrimary's E-TYPE-045) CODE, so its E-TYPE-045 stands? §42.10: "`not` SHALL
+    // NOT appear in prefix position before a boolean expression … The compiler SHALL emit
+    // E-TYPE-045 in all such positions" — and the more specific code wins (D29) over
+    // §4.18.7's E-UNQUOTED-DISPLAY-TEXT, which covers "statements that are not valid code".
+    // The rule (structural — the statement's own tokens, never a word list):
+    //  - it ended with its own `;` → code (`not @x;`, `not (@x);`, `not done;`, `not 5;`):
+    //    §7.2.2 rule 6 "`;` is never text" — the `;` closed it as a statement, as a lone
+    //    `done;` at a body top is code (E-STMT-NO-EFFECT, §4.18.7), not display text;
+    //  - else, nothing follows it on its line (it ends at the line's end or the region's)
+    //    and its operand opens with a token no prose word does — a cell `@x`, a `(`, a
+    //    `[`, a number or a string literal (`not @x⏎`, `not (@x)⏎`) → code;
+    //  - else → prose: more words follow it on its line (`not a clue`, the `not need a
+    //    validator.` of `It does not need a validator.`), or its operand is a bare word
+    //    with no `;` (`not done⏎`) — a sentence fragment, never a statement written as one.
+    fn notStmtIsCode(before: TP, r: RStmt) -> boolean {
+        if (r.tp.i <= before.i + 1) return false
+        const last: PTok = r.tp.toks[r.tp.i - 1]
+        if (tk(last, ";")) return true
+        if (!atEnd(r.tp) && cur(r.tp).line == last.line) return false
+        const op: PTok = before.toks[before.i + 1]
+        if (op.cls == TC.At || op.cls == TC.Num || op.cls == TC.Str || op.cls == TC.TChunk || op.cls == TC.TIStart) return true
+        return op.cls == TC.Punct && (op.text == "(" || op.text == "[")
     }
 
     // §40.8: "A bare expression statement at this body-top built only from
