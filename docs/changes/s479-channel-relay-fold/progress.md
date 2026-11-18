@@ -24,6 +24,17 @@ upgradeChannel, takeToken); client = runtime.js `channel`; server desc printer =
 - [x] 9 gaps: relay-order-residue + client-bound resolved; residue g-boot-channel-relay-fold-residue-s479, g-boot-channel-client-bound-residue-s479.
 - [ ] 10 gates (comp.sh), base/head conformance, merge origin/main, PR.
 
+## Review fix r1 (#1967; branch s479-relay-fold-r1 → pushed to s479-channel-relay-fold)
+- [x] HIGH-1: fold value = decode(JSON.parse(the relay's own outbound `__val` text)) (`onWire`); the relayed /
+      own / `__refused` frames splice that same text; foldOf checks init/reset values read back as themselves.
+      Tests F (-0 forger; lone surrogate, int past 2^53, duplicate key; 1e400 → 1007). Commit eb16f89e3.
+- [x] MED-1: runtime.js `channelStep` = `channelJudge` (shared rule) + client copy; relay applies in place on a
+      ring buffer (`FoldTape`, `foldApply`). Tests G (op-for-op vs channelStep; cost 10k vs 1M). 1M append:
+      7.5 ms → 0.05 µs per frame.
+- [x] LOW-2: SPEC §38.4.3 who-pays + g-boot-channel-client-bound-residue-s479 (c) IPv6 /64 rotation.
+- [x] LOW-1: g-boot-channel-relay-fold-residue-s479 item 1 quantified (~1 µs CPU / refused frame).
+- [x] conformance vs 89af3f69: identical (PASS 645 / FAIL 12 / CRASH 0; 0 PASS→FAIL). comp.sh gates all green.
+
 ## Decisions taken (report as owner-visible choices)
 - Fold refusal: close 1008 only when no concurrent edit can explain the frame; else `__refused` to the sender
   (an honest client that lost a race is not closed). Forged frames are never relayed or logged either way.
