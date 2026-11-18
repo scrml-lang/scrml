@@ -1,0 +1,34 @@
+{
+  "id": "components-name-collides-reserved-db-neg",
+  "description": "§4.15 / §24.4 (S479) — a user declaration named `db` (`<db label:string=\"x\"/> renders …`) is E-NAME-COLLIDES-RESERVED: `db` is the §4 built-in state block, whose body mode is chosen at the `<db>` opener before any declaration is bound, so a declaration of that name could never be used as one. Mirrors S478's `schema`.",
+  "language-version": "1.0",
+  "spec": "§4.15, §24.4",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 15 (gap g-bootstrap-user-db-decl-takes-db-body-mode-s472)",
+  "rationale": "§4.15: \"registering a user component named `engine`, … `md` (S462, §67), `schema` (S478, §39), or `db` (S479, §4) is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers; compared lowercase, §24.4).\"",
+  "expect": {
+    "codes": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "codeCounts": {
+      "E-NAME-COLLIDES-RESERVED": 1
+    },
+    "severity": {
+      "E-NAME-COLLIDES-RESERVED": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-reserved-db-name-unemitted-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-NAME-COLLIDES-RESERVED' fired 0 time(s), expected exactly 1",
+          "emitted:E-PA-006=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:E-NAME-COLLIDES-RESERVED",
+          "severity:code 'E-NAME-COLLIDES-RESERVED' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

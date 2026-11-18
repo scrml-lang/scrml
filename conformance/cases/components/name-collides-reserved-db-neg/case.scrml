@@ -1,0 +1,5 @@
+<program>
+    <db label:string="x"/>
+    renders <p>${label}</p>
+    <main><p>hi</p></main>
+</program>
