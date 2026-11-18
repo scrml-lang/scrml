@@ -247,6 +247,7 @@ ${
         return match c {
             .FCall(fn: f, args: args) :> exprNodes(args)
             .FSettled(outcome: o) :> []                 // s454 (U1b): a local, read where it settled
+            .FCallV(f: f, args: args) :> exprNodes([f].concat(args))   // s478-ruled-fn-types
         }
     }
 
