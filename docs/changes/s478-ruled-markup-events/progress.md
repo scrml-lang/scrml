@@ -22,3 +22,7 @@ Base conformance (b04fdc27a): PASS 614, FAIL 18, NOT-TWINNED 635, UNSUPPORTED 60
 ## Corpus (old vs new bootstrap; base-tree inputs: samples, examples, conformance cases + twins, acceptance — 4035)
 newly-rejecting 0; newly-accepting 2 (match-without-for twins); 13 code-set changes on already-rejected files.
 Scripts: ~/.cache/scrml/review/s478-ruled-markup-events/corpus.ts, corpus-{old,new}.json.
+
+## Conformance (bootstrap, head vs base b04fdc27a)
+PASS 614→629, FAIL 18→15, UNSUPPORTED 601→591, NOT-TWINNED 635, CRASH 0. 0 PASS→FAIL. 2 new cases (both PASS).
+CI checks (types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim, severity): all green.
