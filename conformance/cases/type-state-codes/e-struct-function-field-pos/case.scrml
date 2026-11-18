@@ -1,4 +1,4 @@
 ${
-    type T:struct = { cb: fn(), label: string }
+    type T:struct = { cb: () => void, label: string }
 }
 <program><p id="p">ok</></>

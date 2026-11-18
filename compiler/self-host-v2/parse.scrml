@@ -46,7 +46,7 @@
 ${
     import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword } from "./lex.scrml"
     import { Severity } from "./severity.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
@@ -6909,7 +6909,13 @@ ${
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
         if (lifeAhead(tp)) return parseLifeType(tp)
-        if (fnTypeAhead(tp)) return parseFnType(tp)        // s478 (s478-boot-fn-type)
+        if (fnTypeAhead(tp)) return parseFnType(tp, start, false, false)        // s478 (s478-boot-fn-type)
+        // s478-ruled-fn-types — §7.5 "Function types (S478)": `fn (x: T) => R`, the pure function
+        // type; and the two retired spellings, `(…) -> R` and `fn(…)` with no `=>`, which are
+        // E-PARSE-TYPE naming the `=>` fix (read whole, so nothing cascades)
+        if (isWord(tp, "fn") && fnTypeAhead(adv(tp))) return parseFnType(adv(tp), start, true, false)
+        if (thinFnTypeAhead(tp)) return parseFnType(tp, start, false, true)
+        if (isWord(tp, "fn") && isP(adv(tp), "(")) return parseRetiredFnKw(tp, start)
         let t: TP = tp
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
@@ -7755,7 +7761,60 @@ ${
         if (!isP(tp, "(")) return false
         const close: int = parenClose(tp)
         if (close < 0) return false
-        return tk(peekAt(tp, close + 1), "=>")
+        return fnArrowAt(tp, close + 1) > 0
+    }
+
+    // s478-ruled-fn-types — after a function type's `)`, at offset `k`: `=>`, or the failable
+    // modifier `!` / `! E` then `=>` (§7.5 "Function types (S478)": `(x: T)! E => R`, spelled as
+    // the declaration is, §19.4.1). The offset just past the `=>`, else 0.
+    fn fnArrowAt(tp: TP, k: int) -> int {
+        let j: int = k
+        if (tk(peekAt(tp, j), "!")) {
+            j = j + 1
+            const e: PTok = peekAt(tp, j)
+            if ((e.cls == TC.Ident || e.cls == TC.Keyword) && tk(peekAt(tp, j + 1), "=>")) j = j + 1
+        }
+        if (tk(peekAt(tp, j), "=>")) return j + 1
+        return 0
+    }
+
+    // s478-ruled-fn-types — the RETIRED thin-arrow spelling `(…) -> R` in a type: a `(` whose
+    // matching `)` is followed by a glued `->` (a lifecycle `(A -> B)` is lifeAhead's, tested
+    // first: its arrow is INSIDE the parentheses).
+    fn thinFnTypeAhead(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return thinArrowAt(tp, close + 1) > 0
+    }
+
+    // s478-ruled-fn-types r1 (review LOW-1) — after a function type's `)`, at offset `k`: the
+    // retired glued `->`, past an optional failable modifier `!` / `! E` (`(x: int)! E -> int`
+    // is the retired spelling of `(x: int)! E => int`, §7.5). The offset of the `-`, else 0.
+    fn thinArrowAt(tp: TP, k: int) -> int {
+        let j: int = k
+        if (tk(peekAt(tp, j), "!")) {
+            j = j + 1
+            const e: PTok = peekAt(tp, j)
+            if ((e.cls == TC.Ident || e.cls == TC.Keyword) && tk(peekAt(tp, j + 1), "-")) j = j + 1
+        }
+        const a: PTok = peekAt(tp, j)
+        if (tk(a, "-") && tk(peekAt(tp, j + 1), ">") && touching(a, peekAt(tp, j + 1))) return j
+        return 0
+    }
+
+    fn thinArrowFix() -> string {
+        return "a function type is written with `=>`, never `->` (§7.5 \"Function types\", S478: `=>` is the one spelling; `->` is the return-type annotation of a function DECLARATION only). Write `(x: T) => R` — `() => void` for a function that gives no value"
+    }
+
+    // s478-ruled-fn-types — the RETIRED `fn(…)` spelling (no `=>` after its `)`): E-PARSE-TYPE
+    // naming the fix, then the rest read as a function type (a following `-> R` is its result)
+    // so nothing cascades.
+    fn parseRetiredFnKw(tp: TP, start: int) -> RType {
+        const t0: TP = diagAt(tp, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value; `fn (x: T) => R` (with `=>`) is the PURE function type (§48.6.3)", cur(tp))
+        const close: int = parenClose(adv(t0))
+        if (close > 0 && thinArrowAt(adv(t0), close + 1) > 0) return parseFnTypeAt(adv(t0), start, false, true, false)
+        return parseFnTypeAt(adv(t0), start, false, false, true)
     }
 
     // The offset (from `tp`, at a `(`) of the `)` that closes it, else -1 (a `{`, `}` or `;`
@@ -7786,8 +7845,17 @@ ${
     // are built on a declaration's own parameters only). `void` as the return: a function that
     // gives no value. A failable function type has no spelling in the SPEC (§19.4.4 puts `!` in
     // a function's type signature but names no type syntax): nothing is read for it here.
-    fn parseFnType(tp: TP) -> RType {
-        const start: int = cur(tp).start
+    fn parseFnType(tp: TP, start: int, pure: boolean, thin: boolean) -> RType {
+        if (!thin) return parseFnTypeAt(tp, start, pure, false, false)
+        // the retired `(…) -> R`: reported at its `->`, then read as `(…) => R`
+        const close: int = parenClose(tp)
+        const t1: TP = diagAt(tp, "E-PARSE-TYPE", thinArrowFix(), peekAt(tp, thinArrowAt(tp, close + 1)))
+        return parseFnTypeAt(t1, start, pure, true, false)
+    }
+
+    // `thin`: the arrow is the retired `->` (already reported); `bare`: no arrow at all (the
+    // retired `fn(…)`, already reported) — the type gives no value.
+    fn parseFnTypeAt(tp: TP, start: int, pure: boolean, thin: boolean, bare: boolean) -> RType {
         let t: TP = adv(tp)
         let ps: AType[] = []
         while (!isP(t, ")") && !atEnd(t)) {
@@ -7808,10 +7876,30 @@ ${
             }
         }
         t = expectP(t, ")")
-        t = expectP(t, "=>")
-        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not))
+        // s478-ruled-fn-types — the failable modifier `!` / `! E` (§7.5 "Function types (S478)",
+        // spelled as a `!` declaration is, §19.4.1): `err` the error enum's NAME, `not` for the
+        // built-in `Error` (§19.4.2)
+        let isFail = false
+        let err: AType | not = not
+        if (!bare && isP(t, "!")) {
+            isFail = true
+            t = adv(t)
+            const et: PTok = cur(t)
+            if ((et.cls == TC.Ident || et.cls == TC.Keyword) && (tk(peekAt(t, 1), "=>") || (thin && tk(peekAt(t, 1), "-")))) {
+                err = { nid: t.nid, span: mkSpan(et.start, et.end), k: ATypeK.TName(et.v) }
+                t = bumpId(adv(t))
+            }
+        }
+        const fx: AFnFx = { pure: pure, failable: isFail, err: err }
+        if (bare) return mkT(t, start, ATypeK.TFn(ps, not, fx))
+        if (thin) {
+            t = adv(adv(t))
+        } else {
+            t = expectP(t, "=>")
+        }
+        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not, fx))
         const rr: RType = parseTypeBody(t)
-        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t))
+        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t, fx))
     }
 
     fn lifeAhead(tp: TP) -> boolean {
@@ -9922,6 +10010,24 @@ ${
         let m: MP = nm.mp
         if (nm.w == "") {
             m = mDiag(m, "E-PARSE-TYPE", "expected a type after " + after, start, start + 1)
+        }
+        // s478-ruled-fn-types r1 (review MED-2) — the RETIRED `fn(…)` spelling on a declaration
+        // attribute (`<btn act:fn()/>`, §66): E-PARSE-TYPE naming the fix (§7.5 "Function types":
+        // "the `fn(…)` spelling with no `=>` (`cb: fn()`) SHALL be a parse error, E-PARSE-TYPE, whose
+        // message names the fix"). The `(…)` — and a glued `-> R` after it — is read past, so nothing
+        // cascades; the type is blank (already reported).
+        if (nm.w == "fn" && chAt(m, 0) == "(") {
+            const fclose: int = lifeCloseCh(mp.src, m.pos)
+            if (fclose >= 0) {
+                m = mAt(m, fclose + 1)
+                if (chAt(m, 0) == "-" && chAt(m, 1) == ">") {
+                    const rr: RMType = openerTypeMember(mAdv(m, 2), "`->`")
+                    m = rr.mp
+                }
+                m = mDiag(m, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value. (The bootstrap does not yet read a function type on a declaration attribute — INTERIM, g-boot-opener-fn-type-s478.)", start, m.pos)
+                const bt: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName("") }
+                return { t: bt, mp: mBump(m) }
+            }
         }
         let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
         m = mBump(m)
@@ -12607,17 +12713,24 @@ ${
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
             .TRefine(base: b, pred: p) :> typeNameText(b) + "(" + p + ")"
-            .TFn(params: ps, ret: r) :> fnTypeText(ps, r)
+            .TFn(params: ps, ret: r, fx: x) :> fnTypeText(ps, r, x)
         }
     }
 
-    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`
-    fn fnTypeText(ps: AType[], ret: AType | not) -> string {
+    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`; s478-ruled-fn-types: `fn (…) => R`
+    // (pure), `(…)! E => R` (failable)
+    fn fnTypeText(ps: AType[], ret: AType | not, fx: AFnFx) -> string {
         let parts: string[] = []
         for (const p of ps) { parts = parts.concat([typeNameText(p)]) }
         let r: string = "void"
         if (ret is given) r = typeNameText(ret)
-        return "(" + parts.join(", ") + ") => " + r
+        let lead: string = ""
+        if (fx.pure) lead = "fn "
+        let bang: string = ""
+        if (fx.failable) bang = "!"
+        const e: AType | not = fx.err
+        if (e is given) bang = "! " + typeNameText(e)
+        return lead + "(" + parts.join(", ") + ")" + bang + " => " + r
     }
 
     // ---- the target checks (rules 4, 5, 6, 8, 11) — the target's view is ast.scrml hostView / hostTargetParts ----
@@ -14994,7 +15107,7 @@ ${
             .TMaybe(inner: i) :> cloneMaybe(t.span, i, nid0)
             .TLife(pre: a, post: b) :> cloneLife(t.span, a, b, nid0)
             .TRefine(base: b, pred: p) :> cloneRefine(t.span, b, p, nid0)
-            .TFn(params: ps, ret: r) :> cloneFnType(t.span, ps, r, nid0)
+            .TFn(params: ps, ret: r, fx: x) :> cloneFnType(t.span, ps, r, x, nid0)
         }
     }
 
@@ -15020,7 +15133,7 @@ ${
     }
 
     // s478 (s478-boot-fn-type)
-    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, nid0: int) -> RClone {
+    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, fx: AFnFx, nid0: int) -> RClone {
         let nid: int = nid0
         let out: AType[] = []
         for (const p of ps) {
@@ -15028,9 +15141,9 @@ ${
             out = out.concat([r.t])
             nid = r.nid
         }
-        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not) }, nid: nid + 1 }
+        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not, fx) }, nid: nid + 1 }
         const rr: RClone = cloneType(ret, nid)
-        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t) }, nid: rr.nid + 1 }
+        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t, fx) }, nid: rr.nid + 1 }
     }
 
     // =========================================================================

@@ -807,12 +807,12 @@ export async function txEnd(h, ok) {
 // A SQLite error that ended the whole transaction (ON CONFLICT ROLLBACK, SQLITE_FULL, …) is found by
 // runQuery's probe, which throws: the savepoint went with the transaction, and the envelope rolls
 // back and answers a server error. A ROLLBACK TO / RELEASE that fails throws the same way.
-async function statement(tx, mode, text, params, slots) {
+async function statement(tx, mode, text, params, slots, row = null) {
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
   await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
-  const result = await runQuery(tx.conn, mode, text, params, slots, tx);
+  const result = await runQuery(tx.conn, mode, text, params, slots, tx, row);
   if (failed(result)) {
     await undoSavepoint(tx, name);
     return result;
@@ -924,23 +924,25 @@ function logLine(host, line) {
 // handled where it is written (a `!{}` on it, a `match` on its result). Inside a transaction this
 // scope owns it runs under a statement savepoint of its own (`statement`); outside one it runs as
 // any other query (one statement undoes only itself).
-export async function query(conn, mode, text, params, slots, handled = false) {
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): `row` — the §57 wire table of the
+// query's result type when its rows are typed from a `<schema>` table (print.scrml queryJs), else null.
+export async function query(conn, mode, text, params, slots, handled = false, row = null) {
   const tx = ownTx(conn);
   if (tx !== null) {
     if (tx.broken) throw brokenError(conn);
-    if (handled === true) return statement(tx, mode, text, params, slots);
-    return runQuery(conn, mode, text, params, slots, tx);
+    if (handled === true) return statement(tx, mode, text, params, slots, row);
+    return runQuery(conn, mode, text, params, slots, tx, row);
   }
-  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null);
+  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null, row);
   await conn.gate.acquire();
   try {
-    return await runQuery(conn, mode, text, params, slots, null);
+    return await runQuery(conn, mode, text, params, slots, null, row);
   } finally {
     conn.gate.release();
   }
 }
 
-async function runQuery(conn, mode, text, params, slots, tx) {
+async function runQuery(conn, mode, text, params, slots, tx, row = null) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
@@ -960,8 +962,103 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   if (mode === "run") return null;
   const list = [];
   for (const r of rows ?? []) list.push(plainRow(r));
-  if (mode === "get") return list.length > 0 ? list[0] : null;
-  return list;
+  const value = mode === "get" ? (list.length > 0 ? list[0] : null) : list;
+  if (row === null) return value;
+  return checkRows(conn, row, value);
+}
+
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM — ruling:user-voice-scrml.md S478
+// open-Qs item 20, option (b): "validate each typed row value at the query boundary, server-side, as
+// the row is read"). A non-STRICT SQLite table stores any storage class in any column (an INTEGER
+// column holding 'abc' or 1.5, a TEXT column holding a blob), so a row typed off the `<schema>`
+// declaration is checked against its §57 descriptor — the decoder's own check (an `int` an integer,
+// a `number` finite, a `string` a string, `T | not` null or a T; a declared field the row lacks
+// refused) — before the program sees it. Two row-only rules run first (fitRow):
+//   * an `int` field holds an integer within ±(2^53−1) (§21.3.1.1, "integral, within ±(2^53−1)"):
+//     a stored 64-bit INTEGER outside that range reaches us already rounded by the driver
+//     (9007199254740993 reads as …992), and a rounded id selects the WRONG row (#1944 review MED-1);
+//   * a column the declared type does not declare (a live table with a column `<schema>` does not
+//     list, read by `SELECT *`) is DROPPED, not refused: the row is still a row of the declared
+//     type, and the program sees only the declared fields (#1944 review MED-2).
+// A value that fails fails the QUERY as SqlError::QueryFailed, as a driver error does (handled where
+// the query is, propagated where it propagates), with a server log line naming the field path and
+// the stored value's storage class, never the value (#1944 review LOW-3); the program never sees it.
+// The decoded value (the codec's runtime layout) is what the query returns. STRICT DDL from
+// `<schema>` (the ruling's option (a)) would make the storage-class part redundant; the int range,
+// a missing / renamed column and the dropped extras are row rules a STRICT table still needs.
+function checkRows(conn, row, value) {
+  const fit = fitRow(row, row.root, value, "$");
+  const r = fit.ok ? decode(row, fit.value) : fit;
+  if (r.ok) return r.value;
+  const path = r.error.path;
+  const stored = fit.ok ? storageClass(valueAt(fit.value, path)) : r.error.stored;
+  conn.log(`scrml server: a query on ${conn.desc.driver}:${conn.desc.file} read a row value that does not fit its declared type — ${path}: the stored value is ${stored} (§14.8.3: a typed row is checked as it is read; a table that is not STRICT stores any value in any column)`);
+  const err = { variant: "QueryFailed", data: [`a row value does not fit its declared type at ${path} (§14.8.3)`] };
+  noteDriverText({ message: err.data[0] }, err);
+  return failure(err);
+}
+
+// The row-only rules (checkRows above), over the row's §57 descriptor: drops the undeclared keys of
+// each struct row and refuses an `int` outside the safe range. Everything else is left to `decode`.
+function fitRow(table, ty, v, path) {
+  switch (ty.k) {
+    case "maybe":
+      return v === null ? { ok: true, value: v } : fitRow(table, ty.inner, v, path);
+    case "int":
+      if (typeof v === "number" && Number.isInteger(v) && !Number.isSafeInteger(v)) {
+        return { ok: false, error: { path, stored: "an integer outside ±(2^53−1), which the driver reads lossily" } };
+      }
+      return { ok: true, value: v };
+    case "seq": {
+      if (!Array.isArray(v)) return { ok: true, value: v };
+      const out = [];
+      for (let i = 0; i < v.length; i++) {
+        const r = fitRow(table, ty.elem, v[i], `${path}[${i}]`);
+        if (!r.ok) return r;
+        out.push(r.value);
+      }
+      return { ok: true, value: out };
+    }
+    case "ref": {
+      const d = table.defs[ty.def];
+      if (d === undefined || d.k !== "struct" || v === null || typeof v !== "object" || Array.isArray(v)) return { ok: true, value: v };
+      const out = {};
+      for (const f of d.fields) {
+        if (!Object.hasOwn(v, f.name)) continue; // decode reports the missing field
+        const r = fitRow(table, f.ty, v[f.name], `${path}.${f.name}`);
+        if (!r.ok) return r;
+        Object.defineProperty(out, f.name, { value: r.value, enumerable: true, writable: true, configurable: true });
+      }
+      return { ok: true, value: out };
+    }
+    default:
+      return { ok: true, value: v };
+  }
+}
+
+// The value a decode failure path (`$`, `.name`, `[i]`) names, or undefined where there is none.
+function valueAt(v, path) {
+  let cur = v;
+  const re = /\.([A-Za-z_$][A-Za-z0-9_$]*)|\[(\d+)\]/g;
+  let m;
+  while ((m = re.exec(path)) !== null) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    const k = m[1] !== undefined ? m[1] : Number(m[2]);
+    if (!Object.hasOwn(cur, k)) return undefined;
+    cur = cur[k];
+  }
+  return cur;
+}
+
+// A stored value's SQLite storage class, for the log line — never the value itself.
+function storageClass(v) {
+  if (v === undefined) return "absent (the row has no such column)";
+  if (v === null) return "NULL";
+  if (typeof v === "number") return Number.isInteger(v) ? "an integer" : "a real";
+  if (typeof v === "bigint") return "an integer";
+  if (typeof v === "string") return "text";
+  if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return "a blob";
+  return `a ${typeof v}`;
 }
 
 // A row as a value: a fresh plain object of the row's own columns.

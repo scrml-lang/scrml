@@ -14,7 +14,7 @@
 //          "Comments and literals" — a SQL `--` line comment, a closed `/* … */` block comment;
 //          "every `CREATE TABLE` head in the body text is read as a declaration wherever it appears
 //          — including inside comments".
-//   §14.8.3 the SQLite type mapping (INTEGER / INT → number, TEXT / CHAR / VARCHAR / CLOB → string,
+//   §14.8.3 the SQLite type mapping (INTEGER / INT → int (S478 ruling 20; was number), TEXT / CHAR / VARCHAR / CLOB → string,
 //          REAL → number) and "A `ColumnDef` with `nullable: true` SHALL produce a field type of
 //          `T | not`".
 //   §39.11 "The compiler generates struct types for each table in `<schema>`" — DDL tables type rows
@@ -81,8 +81,10 @@ describe("DDL tables type rows (§39.11, §14.8.3)", () => {
   test("TEXT NOT NULL is `string` (used as `int`: E-TYPE-031)", () => {
     expect(errsOf(fnP(W(NOTES), "f() -> int", [getRow("body"), "if (r is not) return 0;", "const n: int = r.body;", "return n;"]))).toEqual(["E-TYPE-031"]);
   });
-  test("INTEGER PRIMARY KEY (the rowid) and REAL NOT NULL are `number`", () => {
+  test("INTEGER PRIMARY KEY (the rowid) is `int` (S478 ruling 20) and REAL NOT NULL is `number`", () => {
     expect(errsOf(fnP("        " + NOTES, "f() -> number", [getRow("id, score"), "if (r is not) return 0;", "const n: number = r.id + r.score;", "return n;"]))).toEqual([]);
+    expect(errsOf(fnP("        " + NOTES, "f() -> int", [getRow("id"), "if (r is not) return 0;", "const n: int = r.id;", "return n;"]))).toEqual([]);
+    expect(errsOf(fnP("        " + NOTES, "f() -> int", [getRow("score"), "if (r is not) return 0;", "const n: int = r.score;", "return n;"]))).toEqual(["E-TYPE-031"]);
   });
   test("a nullable column is `T | not` — read as `string` it is a type error", () => {
     const es = errsOf(fnP("        " + NOTES, "f() -> string", [getRow("note"), `if (r is not) return "";`, "const s: string = r.note;", "return s;"]));
@@ -168,10 +170,10 @@ describe("negative probes — fails CLOSED (refused by name)", () => {
     expect(errsOf(P(`        CREATE TABLE a (id INTEGER PRIMARY KEY, "x y" TEXT)`))).toEqual([UNSUP]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, `b` TEXT)"))).toEqual([UNSUP]);
   });
-  test("two primary keys, a duplicate column, a duplicate table", () => {
+  test("two primary keys (code still OPEN — refused by name); a duplicate column E-SCHEMA-017 and table E-SCHEMA-016 (S478 ruling 18)", () => {
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, PRIMARY KEY (b))"))).toEqual([UNSUP]);
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, B TEXT)"))).toEqual([UNSUP]);
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY)\n        CREATE TABLE A (id INTEGER PRIMARY KEY)"))).toEqual([UNSUP]);
+    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, B TEXT)"))).toEqual(["E-SCHEMA-017"]);
+    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY)\n        CREATE TABLE A (id INTEGER PRIMARY KEY)"))).toEqual(["E-SCHEMA-016"]);
   });
   test("a REFERENCES target this `<schema>` does not declare", () => {
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, z INTEGER REFERENCES zz(id))"))).toEqual([UNSUP]);
