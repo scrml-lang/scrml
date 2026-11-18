@@ -598,7 +598,7 @@ ${
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
-        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false))
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false, false))
     }
 
     // s469 (§49.2.5): `a..b` / `a..=b` is legal ONLY as the whole iterable of a
@@ -657,10 +657,17 @@ ${
     fn parsePostfixFrom(first: RExpr, start: int) -> RExpr {
         let r: RExpr = first
         let going = true
+        // s478 (s478-boot-syntax-batch, landed s478-boot-optional-chain) — optional chaining (§42.3.6): the receivers of this
+        // chain's `?.` hops, in order (see optHop / closeOpt)
+        let opts: AExpr[] = []
         while (going) {
             const t: PTok = cur(r.tp)
             const prev: PTok = peekAt(r.tp, -1)
-            if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Ident) {
+            if (t.cls == TC.Punct && tk(t, "?.")) {
+                const oh: ROpt = optHop(r, start)
+                r = oh.r
+                if (oh.ok) opts = opts.concat([oh.recv])
+            } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Ident) {
                 const name: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, name))
             } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Keyword) {
@@ -677,6 +684,11 @@ ${
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else if (opts.length > 0) {
+                // the chain ends here: what follows (`!{`, `?`, `is given`, an operator) applies
+                // to the WHOLE optional chain (§42.3.6 "Short-circuit is chain-wide")
+                r = closeOpt(r, opts)
+                opts = []
             } else if (t.cls == TC.TChunk && t.line == endLine(prev)) {
                 // s469 — `tag`…`` (a tagged template: the tag CALLED with the
                 // template's pieces) is not a text template; refused by name, the
@@ -714,7 +726,308 @@ ${
                 going = false
             }
         }
+        if (opts.length > 0) r = closeOpt(r, opts)
         return r
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-syntax-batch; landed by s478-boot-optional-chain on #1917's member access
+    // through a narrowed `T | not`) — OPTIONAL CHAINING, `?.` (SPEC §42.3.6):
+    //   optional-access ::= expr '?.' identifier | expr '?.' '[' expr ']' | expr '?.' arguments
+    // "When the receiver `expr` is `not`, the access short-circuits: the whole optional-chain
+    // expression evaluates to `not`, and the remainder of the chain is NOT evaluated (no field
+    // read, no index, no call, no argument evaluation, no side effects past the `?.`)." "Short-
+    // circuit is chain-wide from the `?.` point, but each hop is guarded only against its own
+    // receiver." "Result type. `recv?.field` has type `F | not` where `F` is the declared type of
+    // `field` … a further BARE dereference on it fires E-TYPE-046 (§42.3.5)."
+    //
+    // The bootstrap reads a chain holding `?.` hops as the presence tests of their receivers
+    // around the chain read plainly — `a?.b.c` is `a is given ? a.b.c : not`, `a?.b?.c` is
+    // `a is given ? (a.b is given ? a.b.c : not) : not` — a value-position conditional (§42.4
+    // statement 8: "`x is given` narrows it to `T` where the test is true", a member path
+    // included). That IS each SPEC sentence: the rest of the chain runs only where every tested
+    // receiver is present; a hop after a `?.` is guarded against that receiver only (the next
+    // hop's own receiver is not narrowed, so a bare `.c` on an optional `b` is still E-TYPE-046);
+    // and the conditional's type joins the chain's type with `not` — `F | not`. A `?.` ends at
+    // the chain's end: `(a?.b).c` dereferences the conditional's `F | not`, E-TYPE-046.
+    //
+    // The receiver is evaluated twice (its test, then the chain), so it is built only for a
+    // receiver whose evaluation does nothing but read: a name, `@cell`, a `<#id>`
+    // reference, a member path of those, an index by a literal or such a path (an `<each>` row
+    // read `@.` is refused by name — INTERIM g-boot-optional-chain-atitem-s478). Any other receiver
+    // (a call, a conditional …; parentheses alone are grouping) is refused by name — INTERIM,
+    // g-boot-optional-chain-receiver-s478 (the capable form binds it once: `const u = f(); u?.x`).
+    // (§42.3.6 "Codegen" — "SHALL lower to the corresponding JavaScript optional-chaining form" —
+    // is about the emitted JavaScript; the bootstrap prints its presence test and the plain
+    // access, which short-circuit identically on `not` — owner question g-boot-optional-chain-js-form-s478.)
+    // Every read in the chain is a PLAIN member read typed by analyze.scrml typeMember, so the
+    // receiver-type check (memberRecvMismatch, #1917 H1) and E-TYPE-046 apply to it unchanged.
+    // =========================================================================
+    type ROpt:struct = { r: RExpr, recv: AExpr, ok: boolean }
+
+    // One `?.` hop: `?.name`, `?.[i]` or `?.(args)` read as the plain hop on the receiver, which is
+    // returned (`recv`) so closeOpt can test it. `ok` false: refused (the hop is read past).
+    fn optHop(r0: RExpr, start: int) -> ROpt {
+        const recv: AExpr = r0.e
+        const q: PTok = cur(r0.tp)
+        let t: TP = r0.tp
+        // s478 (s478-boot-optional-chain): an OPTIONAL CALL `f?.(args)` is refused by name —
+        // INTERIM, g-boot-optional-call-s478. Its receiver is a function value that may be `not`
+        // (§42.3.6 "recv?.method(args)"); the bootstrap types no `fn | not` value, and a function
+        // DECLARATION (never `not`) read through `?.(` would test a function for presence and put a
+        // server call in a conditional arm (the s474 H1 shape, foreign-content-s474.test.js: `match check?.(p) { … }`) — so the
+        // whole hop is refused, fail closed. The capable form: call it plainly, or narrow the
+        // function value first.
+        const isCall: boolean = peekAt(t, 1).cls == TC.Punct && tk(peekAt(t, 1), "(")
+        if (isCall) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?.(…) optional call` (§42.3.6) is not in the bootstrap yet — the bootstrap builds `?.` member and index reads, not a call through a function value that may be `not`; it is refused here by name rather than misread (INTERIM, g-boot-optional-call-s478). Call it plainly (`f(args)`), or narrow the value first (`if (f is given) { f(args) }`)", q)
+        } else if (optAtItemRooted(recv)) {
+            // s478 fix round 1 (#1927 review LOW-3): an `<each>` row read `@.` / `@.addr` is no
+            // place the typer narrows (analyze.scrml nKey: `@.` has no key), so the presence
+            // test would not reach the hop and the user would get E-TYPE-046 at a hop they did
+            // not write — refused by name, INTERIM g-boot-optional-chain-atitem-s478; the named
+            // row binding (`<each in=@xs as u>` … `u.addr?.city`) is built.
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on an `@.` row read` (§42.3.6) is not in the bootstrap yet — it cannot narrow an `<each>` row read `@.` (or a member path of it) by the presence test `?.` makes; it is refused here by name rather than misreported (INTERIM, g-boot-optional-chain-atitem-s478). Name the row: `<each in=@xs as u>` … `u.addr?.city`", q)
+        } else if (!optRecvOk(recv)) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on a computed receiver` (§42.3.6) is not in the bootstrap yet — it builds `?.` on a name, `@cell`, a `<#id>` reference, or a member path / literal index of those, whose presence it can test before reading it; it is refused here by name rather than misread (INTERIM, g-boot-optional-chain-receiver-s478). Bind the receiver first: `const r = …; r?.x`", q)
+        }
+        const n: PTok = peekAt(t, 1)
+        let out: RExpr = { e: recv, tp: t }
+        if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+            out = mkE(adv(adv(t)), start, AExprK.Member(recv, n.v))
+        } else if (n.cls == TC.Punct && tk(n, "[")) {
+            const ix: RExpr = parseAssign(adv(adv(t)))
+            out = mkE(expectP(ix.tp, "]"), start, AExprK.Index(recv, ix.e))
+        } else if (n.cls == TC.Punct && tk(n, "(")) {
+            const args: RExprs = parseList(adv(adv(t)), ")")
+            out = mkE(args.tp, start, AExprK.Call(recv, args.es))
+        } else {
+            const dt: TP = diagAt(t, "E-PARSE-EXPECTED", "expected a field name, `[` or `(` after `?.` (§42.3.6: `recv?.field`, `recv?.[key]`, `recv?.method(args)`)", n)
+            return { r: mkE(adv(dt), start, AExprK.Recovered), recv: recv, ok: false }
+        }
+        if (isCall || optAtItemRooted(recv) || !optRecvOk(recv)) return { r: mkE(out.tp, start, AExprK.Recovered), recv: recv, ok: false }
+        return { r: out, recv: recv, ok: true }
+    }
+
+    // A receiver whose evaluation only reads (so testing it, then reading it again, is one read).
+    fn optRecvOk(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> true
+            .At(name: n) :> true
+            .AtItem :> true
+            .HashRef(id: h) :> true
+            .Member(obj: o) :> optRecvOk(o)
+            .Index(obj: o, idx: i) :> optRecvOk(o) && optIndexOk(i)
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+            .Foreign(f: x) :> false
+        }
+    }
+
+    // Is the receiver an `<each>` row read `@.`, or a member path / index of one?
+    fn optAtItemRooted(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const ob: AExpr | not = recvObj(e)
+        if (ob is given) return optAtItemRooted(ob)
+        return match k {
+            .AtItem :> true
+            // no-default-arm: one question of the receiver's root — is it `@.`
+            _ :> false
+        }
+    }
+
+    fn optIndexOk(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const lit: boolean = match k {
+            .Num(raw: x) :> true
+            .Str(v: x) :> true
+            .Name(name: x) :> false
+            .At(name: x) :> false
+            .AtItem :> false
+            .HashRef(id: x) :> false
+            .Member(obj: x) :> false
+            .Index(obj: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+            .Foreign(f: x) :> false
+        }
+        return lit || optRecvOk(e)
+    }
+
+    // The chain `r.e` with its `?.` receivers `opts` (shortest first): each receiver's presence
+    // test around the rest, the first receiver's outermost — `opts[0] is given ? (… ? r.e : not) : not`.
+    // Each test reads a COPY of its receiver with fresh node ids (a node is typed once; the test
+    // and the chain read the receiver at two places). The conditional is marked `optChain`: the
+    // analyzer counts the test and the chain's read of the receiver as ONE use of a `lin` binding
+    // (linOptWalk, #1927 review MED-1), and the test narrows the receiver only where the chain's
+    // SPINE reads it, never inside a hop's argument or index (optSpineKeys — §42.3.6 "each hop is
+    // guarded only against its own receiver", #1927 review LOW-2).
+    fn closeOpt(r: RExpr, opts: AExpr[]) -> RExpr {
+        let t: TP = r.tp
+        let inner: AExpr = r.e
+        let i: int = opts.length - 1
+        while (i >= 0) {
+            const rc: RExpr = cloneRecv(t, opts[i])
+            t = rc.tp
+            const test: AExpr = { nid: t.nid, span: opts[i].span, k: AExprK.Unary(UnOp.IsGiven, rc.e) }
+            t = bumpId(t)
+            const none: AExpr = { nid: t.nid, span: r.e.span, k: AExprK.NotLit }
+            t = bumpId(t)
+            inner = { nid: t.nid, span: r.e.span, k: AExprK.Ternary(test, inner, none, false, true) }
+            t = bumpId(t)
+            i = i - 1
+        }
+        return { e: inner, tp: t }
+    }
+
+    // A copy of a receiver optRecvOk admits, every node with a fresh id.
+    fn cloneRecv(tp: TP, e: AExpr) -> RExpr {
+        let t: TP = tp
+        let k2: AExprK = e.k
+        const ob: AExpr | not = recvObj(e)
+        if (ob is given) {
+            const co: RExpr = cloneRecv(t, ob)
+            t = co.tp
+            const ix: AExpr | not = recvIdx(e)
+            if (ix is given) {
+                const ci: RExpr = cloneRecv(t, ix)
+                t = ci.tp
+                k2 = AExprK.Index(co.e, ci.e)
+            } else {
+                k2 = AExprK.Member(co.e, recvName(e))
+            }
+        }
+        const out: AExpr = { nid: t.nid, span: e.span, k: k2 }
+        return { e: out, tp: bumpId(t) }
+    }
+
+    fn recvObj(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> o
+            .Index(obj: o) :> o
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .HashRef(id: x) :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    fn recvIdx(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Index(obj: o, idx: i) :> i
+            .Member(obj: x) :> not
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .HashRef(id: x) :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    fn recvName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o, name: n) :> n
+            .Index(obj: x) :> ""
+            .Name(name: x) :> ""
+            .At(name: x) :> ""
+            .AtItem :> ""
+            .HashRef(id: x) :> ""
+            .Num(raw: x) :> ""
+            .Str(v: x) :> ""
+            .Bool(v: x) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: x) :> ""
+            .Call(callee: x) :> ""
+            .Unary(op: x) :> ""
+            .Binary(op: x) :> ""
+            .Ternary(test: x) :> ""
+            .Assign(target: x) :> ""
+            .ArrayLit(elems: x) :> ""
+            .ObjectLit(props: x) :> ""
+            .Spread(e: x) :> ""
+            .Lambda(params: x) :> ""
+            .BlockLambda(params: x) :> ""
+            .Sql(q: x) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: x) :> ""
+            .Foreign(f: x) :> ""
+        }
     }
 
     // =========================================================================
@@ -2120,6 +2433,10 @@ ${
         if (isP(tp, "(")) {
             const ps: string[] | not = lambdaParams(tp)
             if (ps is given) return parseLambda(skipParams(tp), start, ps)
+            // s478 (s478-boot-fn-type) — an arrow that WRITES its parameters' types,
+            // `(x: int, y: string) => …` (§7.5 S469: "A standalone lambda (`const f = (x) =>
+            // …`) must annotate its parameters"): read as a declaration's parameters are
+            if (typedArrowAhead(tp)) return parseTypedLambda(tp, start)
             const inner: RExpr = parseAssign(adv(tp))
             return { e: parenMark(inner.e), tp: expectP(inner.tp, ")") }
         }
@@ -2699,6 +3016,33 @@ ${
         return names
     }
 
+    // s478 (s478-boot-fn-type) — `(` [`lin`] name `:` … `)` `=>`: an arrow with written
+    // parameter types.
+    fn typedArrowAhead(tp: TP) -> boolean {
+        const a: PTok = peekAt(tp, 1)
+        let named: boolean = a.cls == TC.Ident && tk(peekAt(tp, 2), ":")
+        if (a.cls == TC.Keyword && a.v == "lin" && peekAt(tp, 2).cls == TC.Ident && tk(peekAt(tp, 3), ":")) named = true
+        if (!named) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return tk(peekAt(tp, close + 1), "=>")
+    }
+
+    fn parseTypedLambda(tp: TP, start: int) -> RExpr {
+        const rp: RParams = parseParamList(adv(tp), false)
+        const t: TP = expectP(rp.tp, ")")
+        let names: string[] = []
+        for (const p of rp.ps) { names = names.concat([p.name]) }
+        const at: TP = adv(t)       // past `=>`
+        if (isP(at, "{")) {
+            // §19.16.3 rule 4: an arrow body is no defer site (analyze reports one)
+            const b: RBlock = parseBlock(withInFn(at, 2))
+            return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, false))
+        }
+        const body: RExpr = parseAssign(at)
+        return mkE(body.tp, start, AExprK.Lambda(names, body.e, rp.ps))
+    }
+
     // Past a lambda's `( … )` (lambdaParams said it is one), at its `=>`.
     fn skipParams(tp: TP) -> TP {
         let t: TP = adv(tp)
@@ -2721,7 +3065,7 @@ ${
             return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, false))
         }
         const body: RExpr = parseAssign(t)
-        return mkE(body.tp, start, AExprK.Lambda(params, body.e))
+        return mkE(body.tp, start, AExprK.Lambda(params, body.e, []))
     }
 
     // s478 — an arrow's bare parameters as AParams (no type: the position fixes
@@ -6038,7 +6382,7 @@ ${
                 t = eb.tp
             }
         }
-        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true))
+        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true, false))
     }
 
     // s475 (#1762 review item 2) — at the token after `if`: is the head a BARE
@@ -6488,6 +6832,7 @@ ${
         const start: int = cur(tp).start
         const nameTok: PTok = cur(tp)
         if (lifeAhead(tp)) return parseLifeType(tp)
+        if (fnTypeAhead(tp)) return parseFnType(tp)        // s478 (s478-boot-fn-type)
         let t: TP = tp
         if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
             t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
@@ -7075,6 +7420,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> p != ""
+            .TFn(params: ps) :> false
         }
     }
 
@@ -7086,12 +7432,24 @@ ${
             .TMaybe(inner: i) :> refineInside(i)
             .TLife(pre: f, post: x) :> not      // a lifecycle refuses a refinement in it by name (lifeRefineWhy)
             .TRefine(base: b, pred: p) :> refineSpanIf(t, p)
+            .TFn(params: ps, ret: r) :> refineInFn(ps, r)
         }
     }
 
     fn refineSpanIf(t: AType, p: string) -> ASpan | not {
         if (p == "") return not
         return t.span
+    }
+
+    // s478 (s478-boot-fn-type) — a standing refinement in a function type's parameter or return
+    // type: refused where the function type stands, as in any other position it reaches unproven.
+    fn refineInFn(ps: AType[], ret: AType | not) -> ASpan | not {
+        for (const p of ps) {
+            const s: ASpan | not = refineInside(p)
+            if (s is given) return s
+        }
+        if (ret is not) return not
+        return refineInside(ret)
     }
 
     // Base name and predicate of a refinement node (`base` "" when `t` is none).
@@ -7102,6 +7460,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> typeNameText(b)
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -7112,6 +7471,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> p
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -7123,6 +7483,7 @@ ${
             .TMaybe(inner: i) :> t
             .TLife(pre: f, post: x) :> t
             .TRefine(base: b, pred: p) :> { nid: t.nid, span: t.span, k: ATypeK.TRefine(b, "") }
+            .TFn(params: ps) :> t
         }
     }
 
@@ -7309,6 +7670,73 @@ ${
     // A malformed inside is E-PARSE-TYPE; the reader resumes after the `)`.
     // At `(`, A, then the glyph `to` or `->`: the head of a lifecycle type. Any
     // other `(` (a function type `(T, U) -> R`, …) keeps its old reading.
+    // s478 (s478-boot-fn-type) — a FUNCTION type: `(` … `)` `=>` R (§7.5: "the spelling is the
+    // §15.11.4 signature type, `f: (x: int) => int`"; §15.11.4 `fn-prop-decl ::= identifier ':'
+    // '(' param-type-list ')' '=>' return-type`). At a `(` whose matching `)` is followed by `=>`
+    // (a lifecycle `(A to B)` is lifeAhead's, tested first). The lexer reads `=>` as one token.
+    fn fnTypeAhead(tp: TP) -> boolean {
+        if (!isP(tp, "(")) return false
+        const close: int = parenClose(tp)
+        if (close < 0) return false
+        return tk(peekAt(tp, close + 1), "=>")
+    }
+
+    // The offset (from `tp`, at a `(`) of the `)` that closes it, else -1 (a `{`, `}` or `;`
+    // before it, or the end of input: no parameter list).
+    fn parenClose(tp: TP) -> int {
+        let k: int = 1
+        let depth: int = 1
+        while (k < 4096) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.End) return -1
+            if (tk(x, "{") || tk(x, "}") || tk(x, ";")) return -1
+            if (tk(x, "(") || tk(x, "[")) depth = depth + 1
+            if (tk(x, ")") || tk(x, "]")) {
+                depth = depth - 1
+                if (depth == 0) {
+                    if (tk(x, ")")) return k
+                    return -1
+                }
+            }
+            k = k + 1
+        }
+        return -1
+    }
+
+    // `(T1, T2) => R` / `(a: T1, b: T2) => R` / `() => void`. A parameter's written NAME is
+    // read past (it is no part of the type); `lin` on one is refused by name — a function type
+    // that carries a `lin` parameter is not in the bootstrap (INTERIM: §35.2.1 lin parameters
+    // are built on a declaration's own parameters only). `void` as the return: a function that
+    // gives no value. A failable function type has no spelling in the SPEC (§19.4.4 puts `!` in
+    // a function's type signature but names no type syntax): nothing is read for it here.
+    fn parseFnType(tp: TP) -> RType {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let ps: AType[] = []
+        while (!isP(t, ")") && !atEnd(t)) {
+            const lt: PTok = cur(t)
+            if (lt.cls == TC.Keyword && lt.v == "lin") {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter in a function type is not in the bootstrap (INTERIM — §35.2.1 builds `lin` on a declaration's own parameters; a function TYPE does not carry it). Drop `lin` here, or call the function by its name", lt)
+                t = adv(t)
+            }
+            if ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && tk(peekAt(t, 1), ":")) t = adv(adv(t))
+            const r: RType = parseTypeBody(t)
+            ps = ps.concat([r.t])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else if (!isP(t, ")")) {
+                t = diagAt(t, "E-PARSE-TYPE", "expected `,` or `)` in a function type's parameter list, found `" + cur(t).text + "`", cur(t))
+                while (!isP(t, ")") && !atEnd(t)) { t = adv(t) }
+            }
+        }
+        t = expectP(t, ")")
+        t = expectP(t, "=>")
+        if (isWord(t, "void")) return mkT(adv(t), start, ATypeK.TFn(ps, not))
+        const rr: RType = parseTypeBody(t)
+        return mkT(rr.tp, start, ATypeK.TFn(ps, rr.t))
+    }
+
     fn lifeAhead(tp: TP) -> boolean {
         if (!isP(tp, "(")) return false
         const a: PTok = peekAt(tp, 1)
@@ -7461,6 +7889,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -7495,6 +7924,7 @@ ${
             .TMaybe(inner: i) :> grantedSeq(i)
             .TLife(pre: f, post: x) :> grantedSeq(x)
             .TRefine(base: b, pred: p) :> grantedSeq(b)
+            .TFn(params: ps) :> false
         }
     }
 
@@ -9043,6 +9473,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -9286,6 +9717,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> true
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -9379,6 +9811,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -9389,6 +9822,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -9399,6 +9833,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -12095,7 +12530,17 @@ ${
             .TMaybe(inner: i) :> typeNameText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeNameText(f) + " to " + typeNameText(x) + ")"
             .TRefine(base: b, pred: p) :> typeNameText(b) + "(" + p + ")"
+            .TFn(params: ps, ret: r) :> fnTypeText(ps, r)
         }
+    }
+
+    // s478 (s478-boot-fn-type) — `(T1, T2) => R` / `() => void`
+    fn fnTypeText(ps: AType[], ret: AType | not) -> string {
+        let parts: string[] = []
+        for (const p of ps) { parts = parts.concat([typeNameText(p)]) }
+        let r: string = "void"
+        if (ret is given) r = typeNameText(ret)
+        return "(" + parts.join(", ") + ") => " + r
     }
 
     // ---- the target checks (rules 4, 5, 6, 8, 11) — the target's view is ast.scrml hostView / hostTargetParts ----
@@ -14469,6 +14914,7 @@ ${
             .TMaybe(inner: i) :> cloneMaybe(t.span, i, nid0)
             .TLife(pre: a, post: b) :> cloneLife(t.span, a, b, nid0)
             .TRefine(base: b, pred: p) :> cloneRefine(t.span, b, p, nid0)
+            .TFn(params: ps, ret: r) :> cloneFnType(t.span, ps, r, nid0)
         }
     }
 
@@ -14491,6 +14937,20 @@ ${
     fn cloneRefine(sp: ASpan, b: AType, p: string, nid0: int) -> RClone {
         const r: RClone = cloneType(b, nid0)
         return { t: { nid: r.nid, span: sp, k: ATypeK.TRefine(r.t, p) }, nid: r.nid + 1 }
+    }
+
+    // s478 (s478-boot-fn-type)
+    fn cloneFnType(sp: ASpan, ps: AType[], ret: AType | not, nid0: int) -> RClone {
+        let nid: int = nid0
+        let out: AType[] = []
+        for (const p of ps) {
+            const r: RClone = cloneType(p, nid)
+            out = out.concat([r.t])
+            nid = r.nid
+        }
+        if (ret is not) return { t: { nid: nid, span: sp, k: ATypeK.TFn(out, not) }, nid: nid + 1 }
+        const rr: RClone = cloneType(ret, nid)
+        return { t: { nid: rr.nid, span: sp, k: ATypeK.TFn(out, rr.t) }, nid: rr.nid + 1 }
     }
 
     // =========================================================================

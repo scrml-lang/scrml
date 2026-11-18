@@ -383,6 +383,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -694,6 +696,8 @@ ${
     fn exprCallee(e: Expr) -> Sym | not {
         return match e {
             .Call(callee: f) :> f
+            .FnRef(fn: f) :> f      // s478: a function named as a value is reached as if called
+            .CallV(f: x) :> not
             .ServerCall(fn: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
@@ -799,6 +803,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -870,6 +876,8 @@ ${
             .Local(sym: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false

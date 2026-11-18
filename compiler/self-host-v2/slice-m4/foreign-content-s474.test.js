@@ -14,7 +14,7 @@
 //
 // H1 — `return match check?.(p) { … }` (an OPTIONAL server call as a match subject) — and H2 — a
 // nested function's parameter default that is a server call — are SAFE on the bootstrap: `?.` is
-// refused by name (§42.3.6, refusals.scrml), a parameter default is not in the bootstrap, and a
+// refused by name (§42.3.6, refusals.scrml; since s478 the optional CALL `?.(` — parse.scrml optHop), a parameter default is not in the bootstrap, and a
 // nested function declaration does not parse; every shape fails the compile. The guards keep it so.
 
 import { describe, test, expect, beforeAll } from "bun:test";
@@ -194,7 +194,8 @@ describe("H1 guard — an optional (`?.`) server call as a match subject is refu
     test(name, () => {
       const errs = errorsOf(login(body));
       expect(errs.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(errs[0].message).toContain("`?. optional chaining` (§42.3.6)");
+      // s478 (s478-boot-optional-chain): `?.` member reads are built; the optional CALL `?.(` stays refused by name
+      expect(errs[0].message).toContain("`?.(…) optional call` (§42.3.6)");
     });
   }
   test("control: the plain (awaited) subject compiles clean", () => {

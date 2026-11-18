@@ -64,7 +64,11 @@ ${
         // `not` of §17.6.4 (parse.scrml parseValueIfExpr). §17.6.8: "For simple
         // single-lift arms, the compiler MAY optimize to a JavaScript ternary".
         // The flag only names the form in diagnostics ("an `if` condition").
-        Ternary(test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean),
+        // s478 (s478-boot-optional-chain, #1927 review MED-1 / LOW-2) — `optChain`: the choice
+        // is the presence test of an optional chain's receiver (`a?.b` read as
+        // `a is given ? a.b : not`, parse.scrml closeOpt) — the test is that receiver's one
+        // read, and its narrowing holds only at the chain's spine (§42.3.6).
+        Ternary(test: AExpr, yes: AExpr, no: AExpr, viaIf: boolean, optChain: boolean),
         // statement position only (analyze checks) — except the §50 kept form
         // (S473 D10). s474: `paren` — the assignment stood in its own parentheses
         // (`(x = e)`); `kept` — a parenthesized one at a kept place of a `for (…)` /
@@ -79,7 +83,11 @@ ${
         // (an edit shape, §66.11.2) — Core has no spread, index or function value.
         Spread(e: AExpr),
         Index(obj: AExpr, idx: AExpr),
-        Lambda(params: string[], body: AExpr),
+        // s478 (s478-boot-fn-type): `typed` — the parameters as AParams when the arrow
+        // WRITES their types (`(x: int) => e`, §7.5 "a standalone lambda … must annotate
+        // its parameters"); empty for a bare arrow (`x => e`, `(a, b) => e`), whose types
+        // its position fixes.
+        Lambda(params: string[], body: AExpr, typed: AParam[]),
         // s478 (s478-boot-block-lambda) — a BLOCK-bodied arrow `(a, b) => { … }`, or a
         // function expression `function (a, b) { … }` (`viaFunction`): §7.2 "All
         // JavaScript that is valid in a Bun execution context is valid inside `${ }`,
@@ -328,6 +336,15 @@ ${
         // does not trust it (no second report). Any other resolves as its base —
         // "the constrained type is a subtype of the base type" (§53.3.4).
         TRefine(base: AType, pred: string),
+        // s478 (s478-boot-fn-type) — a FUNCTION type `(T1, T2) => R` / `(a: T1) => R`
+        // (§7.5: "A function-valued parameter is annotated with a function signature
+        // type … the spelling is the §15.11.4 signature type, `f: (x: int) => int`";
+        // §15.11.4 `'(' param-type-list ')' '=>' return-type`). `params` the parameter
+        // types in order (a written name is dropped — it is no part of the type);
+        // `ret` the return type, `not` for `void`. Where one may stand is analyze's
+        // (resolveFnType): a parameter, a local's annotation, a return type, and the
+        // parts of another function type.
+        TFn(params: AType[], ret: AType | not),
     }
 
     // s478 — `vals`: the validator words written after a struct / variant field's

@@ -67,6 +67,16 @@ ${
         Named(sym: Sym),
         Seq(elem: Type, grants: SeqGrants),
         Maybe(inner: Type),
+        // s478 (s478-boot-fn-type) — a FUNCTION type (§7.5 "the §15.11.4 signature type,
+        // `f: (x: int) => int`"): its parameter types in order and its return type (`not`:
+        // `void`, a function that gives no value). S469 R2′ (§14.3): a function value "MAY be
+        // bound, passed, returned and called" — so this type stands only on a local, a
+        // parameter and a return; no cell, struct field, tape element, `| not` member or wire
+        // table ever holds one (analyze refuses each; check.scrml C-FV1 re-verifies the cells).
+        // Every function value the bootstrap builds is synchronous (never waits, §13.2) and
+        // never fails (§19.4.3) — analyze refuses the others by name — so the type carries
+        // neither colour.
+        Fn(params: Type[], ret: Type | not),
     }
 
     // A struct field carries its OWN write contract (O3 ruled: struct fields take
@@ -318,13 +328,13 @@ ${
         // s444: a host call (the closed HostCall set; never in a pure `fn`).
         Host(call: HostCall),
         // s444: a function value — its parameters are binder-minted locals;
-        // the body is ONE expression. Only as a SeqCall's argument.
+        // the body is ONE expression. A SeqCall's argument, or (s478-boot-fn-type) a function VALUE (bound, passed, returned — analyze admits it only there; it never waits and never fails).
         Lambda(params: Sym[], body: Expr),
         // s478 (s478-boot-block-lambda) — a BLOCK-bodied function value, `x => { … }` /
         // `function (x) { … }` (§7.2: "All JavaScript that is valid in a Bun execution
         // context is valid inside `${ }`"). Its parameters are binder-minted locals; its
         // body is a statement block whose Returns are its OWN (the function's value),
-        // never the enclosing function's. Only as a SeqCall's argument, as Lambda;
+        // never the enclosing function's. Where a Lambda may stand;
         // check.scrml C-L1 says what the body may hold.
         BlockLambda(params: Sym[], body: Block),
         // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
@@ -370,6 +380,16 @@ ${
         // where it stands. `args[i]` is the value of crossing `slice.params[i]`.
         // Built in a `kind="tool"` program only (§64; analyze refuses it elsewhere).
         Foreign(slice: ForeignSlice, args: Expr[]),
+        // s478 (s478-boot-fn-type) — a declared scrml function used as a VALUE (§14.3 S469 R2′:
+        // "A function-holding value MAY be bound, passed, returned and called"): `fn` names a
+        // Fn of CoreProgram.fns that never waits and never fails (check.scrml C-FV2) — the
+        // value is that function itself.
+        FnRef(fn: Sym),
+        // s478 (s478-boot-fn-type) — a call THROUGH a function value: `f` evaluates to a
+        // function (a Local of a function type, check.scrml C-FV3), called with `args`. Every
+        // function value is synchronous and never fails (FnRef / Lambda / BlockLambda), so the
+        // call is an ordinary synchronous call — no Suspend, no Attempt.
+        CallV(f: Expr, args: Expr[]),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 

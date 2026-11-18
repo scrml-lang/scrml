@@ -124,9 +124,12 @@ describe("§7.2 — a `function (…) { … }` expression bound by `let` is refu
   test("one E-BOOTSTRAP-UNSUPPORTED naming the construct; no `function`-is-not-declared cascade", () => {
     const r = run(FN(`        let helper = function(v) {\n            return "pos";\n        };\n        @trace = helper(1);`));
     const cs = r.diags.map((d) => d.code).filter((c) => c !== "E-DG-002");
-    // the value, and the call through the local that holds it — each refused by name (function values)
-    expect([...new Set(cs)]).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("function expression `function (x: T) { … }`, §7.2"))).toBe(true);
+    // s478-boot-fn-type: a function expression bound by `let` is a function VALUE now — its bare
+    // parameter is E-PARAM-TYPE-REQUIRED (§7.5 S469: "Every parameter of a `function` / `fn`
+    // declaration or expression … SHALL carry `: T`"), and the call through the untyped local is
+    // refused by name; still no `function`-is-not-declared cascade
+    expect([...new Set(cs)].sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PARAM-TYPE-REQUIRED"]);
+    expect(cs).not.toContain("E-SCOPE-001");
   });
 
   test("a nested function DECLARATION (§7.3.1) is untouched", () => {
