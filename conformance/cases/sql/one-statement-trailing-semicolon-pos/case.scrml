@@ -3,14 +3,14 @@
     // inside a string literal is data, not a separator (§8.1.2). Two writes that belong together
     // are two ?{}s in a transaction block.
     ${
-        function record() {
+        function record()! -> SqlError {
             ?{`INSERT INTO log (msg) VALUES ('a;b'); -- one statement`}.run();
             transaction {
                 ?{`INSERT INTO log (msg) VALUES ('c');`}.run();
                 ?{`INSERT INTO log (msg) VALUES ('d')`}.run();
             }
-            return 1
+            return 1;
         }
     }
-    <button onclick=${ record() }>record</button>
+    <button onclick=${ record() !{ _ :> 0 } }>record</button>
 </program>
