@@ -30,11 +30,12 @@ afterEach(() => expectNoPageErrors());
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const diagsOf = (src) => run(src).diags;
 
-// s451 (Ue, review HIGH-2): a function named without a call is refused (Core has no
-// function value — it was lowered as `null`). The tests below pin what the no-write
-// rule says about such a value; they first check the refusal is there, then read the rest.
+// s451 (Ue, review HIGH-2): a function named without a call was refused (Core had no
+// function value — it was lowered as `null`). s478-boot-fn-type: function values are built
+// (Core FnRef / CallV) — a function whose signature the bootstrap cannot read (an inferred
+// return type) is still refused by name. The tests below pin what the no-write rule says
+// about such a value; any such refusal is set aside before they read the rest.
 const fnValueRefused = (ds) => {
-  expect(ds.some((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it"))).toBe(true);
   // s469: a call THROUGH that local is refused too (only a declared function is callable) — the same root
   return ds.filter((d) => !(d.code === "E-BOOTSTRAP-UNSUPPORTED" && (d.message.includes("names a function without calling it") || d.message.includes("only a declared scrml function is callable"))));
 };

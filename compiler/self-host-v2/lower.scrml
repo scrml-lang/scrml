@@ -191,6 +191,8 @@ ${
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -225,6 +227,8 @@ ${
             .Lit(lit: x) :> op
             .Local(sym: x) :> op
             .Call(callee: x) :> op
+            .FnRef(fn: x) :> op
+            .CallV(f: x) :> op
             .Prim(op: x) :> op
             .Match(scrut: x) :> op
             .ArrayOf(elems: x) :> op
@@ -289,6 +293,8 @@ ${
             .Lit(lit: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -693,7 +699,7 @@ ${
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NInst(decl: d, inst: i) :> cellRead(c, d, instOf(c, i), [])
             .NStruct(owner: o) :> missing()
-            .NFn(sym: s) :> missing()
+            .NFn(sym: s) :> Expr.FnRef(s)      // s478 (s478-boot-fn-type): a function named as a VALUE (analyze admitted it)
             .NLength :> missing()
             .NSurface(of: x) :> missing()
             .NReq(id: rq0, sig: rs0) :> missing()
@@ -810,6 +816,8 @@ ${
             .Read(place: p) :> Expr.Read(extendPlace(p, step))
             .Lit(lit: l) :> missing()
             .Call(callee: x) :> missing()
+            .FnRef(fn: x) :> missing()
+            .CallV(f: x) :> missing()
             .Prim(op: o) :> missing()
             .Match(scrut: s) :> missing()
             .ArrayOf(elems: es) :> missing()
@@ -841,7 +849,7 @@ ${
     fn callExpr(c: LC, f: NameFact | not, args: AExpr[]) -> Expr {
         return match f {
             .NFn(sym: s) :> Expr.Call(s, lowerExprs(c, args))
-            .NLocal(sym: s) :> missing()
+            .NLocal(sym: s) :> Expr.CallV(Expr.Local(s), lowerExprs(c, args))   // s478 (s478-boot-fn-type): a call through a function value
             .NField(decl: d) :> missing()
             .NInst(decl: d) :> missing()
             .NStruct(owner: o) :> missing()
@@ -1631,6 +1639,8 @@ ${
             .Lit(lit: x) :> missing()
             .Local(sym: x) :> missing()
             .Call(callee: x) :> missing()
+            .FnRef(fn: x) :> missing()
+            .CallV(f: x) :> missing()
             .Prim(op: x) :> missing()
             .Match(scrut: x) :> missing()
             .ArrayOf(elems: x) :> missing()
@@ -3933,11 +3943,20 @@ ${
         }
     }
 
+    // s478 (s478-boot-fn-type) — the named types a function type's parts name
+    fn namedSymsFn(ps: Type[], ret: Type | not) -> int[] {
+        let out: int[] = []
+        for (const p of ps) { out = out.concat(namedSyms(p)) }
+        if (ret is given) out = out.concat(namedSyms(ret))
+        return out
+    }
+
     fn namedSyms(ty: Type) -> int[] {
         return match ty {
             .Named(sym: s) :> [s.id]
             .Seq(elem: e) :> namedSyms(e)
             .Maybe(inner: i) :> namedSyms(i)
+            .Fn(params: ps, ret: r) :> namedSymsFn(ps, r)
             .Int :> []
             .Num :> []
             .Str :> []
@@ -5047,6 +5066,8 @@ ${
             .Lit(lit: x) :> []
             .Local(sym: x) :> []
             .Call(callee: x) :> []
+            .FnRef(fn: x) :> []
+            .CallV(f: x) :> []
             .Prim(op: x) :> []
             .Match(scrut: x) :> []
             .ArrayOf(elems: x) :> []

@@ -373,7 +373,7 @@ describe("1489-A — a swapped name under E-TYPE-UNKNOWN / E-VALUE-WRITES-STATE 
     expect(ok.status).toBe(0);
     const r = run("ks-req-typo.md", b, "(req: Request)", "(req: Requst)");
     expect(r.stderr).toContain("spec-ahead pin-mismatch");
-    expect(r.stderr).toContain("E-TYPE-UNKNOWN(Request, Requst)");
+    expect(r.stderr).toContain("E-TYPE-UNKNOWN(Request, Requst, Response, Response)");   // s478-boot-fn-type: the function-typed parameter is read, so `Response` is a type name there too
     expect(r.status).toBe(1);
   }, 120_000);
 

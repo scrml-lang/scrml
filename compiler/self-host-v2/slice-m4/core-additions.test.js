@@ -448,7 +448,9 @@ describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Exp
   });
 
   test("refused: a lambda outside `.filter` / `.map`, two parameters, a non-sequence receiver", () => {
-    expect(codes(P(`    let <n:int=0/>\n    function f() { let g = x => x; }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s478-boot-fn-type: a lambda outside a tape method is a function VALUE now, and a standalone
+    // one annotates its parameters (§7.5 S469) — the bare one is E-PARAM-TYPE-REQUIRED
+    expect(codes(P(`    let <n:int=0/>\n    function f() { let g = x => x; }`, `        <p>x</p>`))).toEqual(["E-PARAM-TYPE-REQUIRED"]);
     expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter((a, b) => true).length; }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`    let <n:int=0/>\n    function f() -> int { return @n.filter(x => true).length; }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });

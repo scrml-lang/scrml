@@ -188,6 +188,8 @@ ${
             .Lit(lit: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -423,6 +425,8 @@ ${
             .Local(sym: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -540,6 +544,8 @@ ${
             .Lit(lit: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
@@ -724,6 +730,7 @@ ${
             .Bool :> false
             .Seq(elem: e) :> false
             .Maybe(inner: i) :> false
+            .Fn(params: ps) :> false
         }
     }
 
@@ -758,6 +765,7 @@ ${
             .Num :> true
             .Str :> true
             .Bool :> true
+            .Fn(params: ps) :> false
         }
     }
 
@@ -796,6 +804,7 @@ ${
             .Named(sym: s) :> false
             .Seq(elem: e) :> false
             .Maybe(inner: i) :> false
+            .Fn(params: ps) :> false
         }
     }
 
@@ -808,6 +817,7 @@ ${
             .Bool :> not
             .Named(sym: s) :> not
             .Seq(elem: e) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -1351,6 +1361,8 @@ ${
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
             .Call(callee: x) :> ""
+            .FnRef(fn: x) :> ""
+            .CallV(f: x) :> ""
             .Prim(op: x) :> ""
             .Match(scrut: x) :> ""
             .ArrayOf(elems: x) :> ""
@@ -1430,6 +1442,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -1457,6 +1471,8 @@ ${
             .Local(sym: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
@@ -1483,6 +1499,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -1558,6 +1576,8 @@ ${
     fn exprCallee(e: Expr) -> Sym | not {
         return match e {
             .Call(callee: c) :> c
+            .FnRef(fn: c) :> c      // s478: a function named as a value counts as called (§6.7.4 rule 3)
+            .CallV(f: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -1708,6 +1728,8 @@ ${
             .Lit(lit: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -1735,6 +1757,8 @@ ${
             .Lit(lit: x) :> "(not a cell read)"
             .Local(sym: x) :> "(not a cell read)"
             .Call(callee: x) :> "(not a cell read)"
+            .FnRef(fn: x) :> "(not a cell read)"
+            .CallV(f: x) :> "(not a cell read)"
             .Prim(op: x) :> "(not a cell read)"
             .Match(scrut: x) :> "(not a cell read)"
             .ArrayOf(elems: x) :> "(not a cell read)"
@@ -2906,6 +2930,8 @@ ${
         return match e {
             .Refetch(req: r) :> r
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -3030,6 +3056,8 @@ ${
     fn calledSym(e: Expr) -> Sym | not {
         return match e {
             .Call(callee: c) :> c
+            .FnRef(fn: c) :> c      // s478: §6.7.4 rule 3 — a function VALUE counts as called
+            .CallV(f: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -3622,6 +3650,8 @@ ${
             .Lit(lit: x) :> false
             .Read(place: x) :> false
             .Call(callee: x) :> false
+            .FnRef(fn: x) :> false
+            .CallV(f: x) :> false
             .Prim(op: x) :> false
             .Match(scrut: x) :> false
             .ArrayOf(elems: x) :> false
@@ -3788,6 +3818,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -4022,6 +4054,8 @@ ${
             .Local(sym: x) :> -1
             .Read(place: x) :> -1
             .Call(callee: x) :> -1
+            .FnRef(fn: x) :> -1
+            .CallV(f: x) :> -1
             .Prim(op: x) :> -1
             .Match(scrut: x) :> -1
             .ArrayOf(elems: x) :> -1
@@ -4066,6 +4100,8 @@ ${
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
             .Call(callee: x) :> ""
+            .FnRef(fn: x) :> ""
+            .CallV(f: x) :> ""
             .Prim(op: x) :> ""
             .Match(scrut: x) :> ""
             .ArrayOf(elems: x) :> ""
@@ -5039,6 +5075,8 @@ ${
             .Lit(lit: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Read(place: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Call(callee: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .FnRef(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .CallV(f: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Prim(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Match(scrut: x) :> "a Commit write's value is not a Local (the snapshot)"
             .ArrayOf(elems: x) :> "a Commit write's value is not a Local (the snapshot)"
@@ -5131,6 +5169,8 @@ ${
             .Local(sym: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Read(place: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Call(callee: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .FnRef(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .CallV(f: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Prim(op: o, args: xs) :> checkedFilterProblem(d, idx, o, xs)      // s477: a bound-checked filter
             .Match(scrut: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ArrayOf(elems: x) :> "a shrink-anywhere's value is not a filter of the field"
@@ -5182,6 +5222,8 @@ ${
             .Local(sym: x) :> bad
             .Read(place: x) :> bad
             .Call(callee: x) :> bad
+            .FnRef(fn: x) :> bad
+            .CallV(f: x) :> bad
             .Match(scrut: x) :> bad
             .ArrayOf(elems: x) :> bad
             .StructOf(ty: x) :> bad
@@ -5361,6 +5403,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
@@ -5401,6 +5445,7 @@ ${
             .Seq(elem: e, grants: g) :> g.replace
             .Named(sym: s) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
             .Int :> not
             .Num :> not
             .Str :> not
@@ -5413,6 +5458,7 @@ ${
             .Seq(elem: e) :> e
             .Named(sym: s) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
             .Int :> not
             .Num :> not
             .Str :> not
@@ -5442,6 +5488,7 @@ ${
             .Named(sym: s) :> s
             .Seq(elem: e) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
             .Int :> not
             .Num :> not
             .Str :> not
@@ -5651,6 +5698,8 @@ ${
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -5689,6 +5738,8 @@ ${
             .Lit(lit: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -5799,6 +5850,7 @@ ${
             .Bool :> t
             .Named(sym: s) :> t
             .Seq(elem: e) :> t
+            .Fn(params: ps) :> t
         }
     }
 
@@ -5810,6 +5862,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -5971,6 +6025,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
@@ -6001,6 +6057,29 @@ ${
         }
     }
 
+    // s478 (s478-boot-fn-type) — C-FV2: a FnRef names a Fn of `p.fns` (never a ServerFn) that
+    // never waits and never fails: every function value is synchronous and total, so a call
+    // through it needs no Suspend and no Attempt (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE's hazard — a
+    // call that would hand its caller an unawaited Promise — and §19.4.3's — a failure read as a
+    // value — are unrepresentable).
+    fn fnRefProblems(p: CoreProgram, f: Sym) -> string[] {
+        for (const fd of p.fns) {
+            if (fd.sym.id == f.id) {
+                if (fd.waits) return ["C-FV2: the function value `" + f.hint + "` waits (§13.2) — a function value is never async-coloured in the bootstrap"]
+                if (fd.err is given) return ["C-FV2: the function value `" + f.hint + "` is failable (§19.4) — a function value never fails in the bootstrap"]
+                if (fd.host is given) return ["C-FV2: the function value `" + f.hint + "` is host-backed — not a function value the bootstrap builds"]
+                return []
+            }
+        }
+        return ["C-FV2: the function value `" + f.hint + "` names no client-side function of the program (a server function, a nested function or an unknown symbol)"]
+    }
+
+    // C-FV3: a CallV calls through a LOCAL (a binding of a function value).
+    fn callVProblems(f: Expr) -> string[] {
+        if (exprLocalId(f) >= 0) return []
+        return ["C-FV3: a call through a function value calls something other than a local binding"]
+    }
+
     fn checkExpr(p: CoreProgram, encl: Decl[], e: Expr) -> string[] {
         return match e {
             .InitOf(decl: d, inst: i, idx: x) :> checkCellRead(p, encl, d, i, [{ owner: d, idx: x }])
@@ -6008,6 +6087,8 @@ ${
             .Local(sym: s) :> []
             .Read(place: pl) :> []
             .Call(callee: c) :> []
+            .FnRef(fn: f) :> fnRefProblems(p, f)
+            .CallV(f: f, args: args) :> callVProblems(f)
             .Prim(op: o) :> []
             .Match(scrut: s) :> []
             .ArrayOf(elems: es) :> []
@@ -6099,6 +6180,7 @@ ${
             .Str :> false
             .Bool :> false
             .Named(sym: s) :> false
+            .Fn(params: ps) :> false
             .Maybe(inner: i) :> false
         }
         if (!ok) return "a RuntimeLength check whose bound is not the field's tape length bound"
@@ -6131,6 +6213,8 @@ ${
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
+            .FnRef(fn: x) :> not
+            .CallV(f: x) :> not
             .Prim(op: x) :> not
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not

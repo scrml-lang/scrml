@@ -319,6 +319,7 @@ ${
             .Named(sym: x) :> "named"
             .Seq(elem: x) :> "seq"
             .Maybe(inner: x) :> "maybe"
+            .Fn(params: x) :> "fn"
         }
     }
 
@@ -1003,6 +1004,7 @@ ${
             .Bool :> replaceOnly()
             .Named(sym: s) :> replaceOnly()
             .Maybe(inner: i) :> replaceOnly()
+            .Fn(params: ps) :> replaceOnly()
         }
     }
 
@@ -1048,6 +1050,8 @@ ${
     fn isCallExpr(e: Expr) -> boolean {
         return match e {
             .Call(callee: x) :> true
+            .CallV(f: x) :> true
+            .FnRef(fn: x) :> false
             .Lit(lit: x) :> false
             .Local(sym: x) :> false
             .Read(place: x) :> false
@@ -1320,6 +1324,8 @@ ${
             .Local(sym: x) :> "Expr.Local"
             .Read(place: x) :> "Expr.Read"
             .Call(callee: x) :> "Expr.Call"
+            .FnRef(fn: x) :> "Expr.FnRef"
+            .CallV(f: x) :> "Expr.CallV"
             .Match(scrut: x) :> "Expr.Match"
             .ArrayOf(elems: x) :> "Expr.ArrayOf"
             .StructOf(ty: x) :> "Expr.StructOf"
