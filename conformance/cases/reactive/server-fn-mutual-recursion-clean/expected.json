@@ -1,0 +1,25 @@
+{
+  "id": "reactive-server-fn-mutual-recursion-clean",
+  "description": "Two db-touching (server-escalated, §12.2 T1) functions that call each other — mutual recursion, terminated by an early `return` — compile clean. A cycle of calls is recursion, not a dependency-graph cycle (§31.2), and E-DG-001 is retired. Replaces the retired reactive/dg-001-cyclic-pos, which read the call cycle as an E-DG-001 `awaits` cycle. Both calls are statement-level, the shape impl#1's awaits-edge check fires on. Incidental W-PROGRAM-SPA-INFERRED / W-SQL-ROW-UNTYPED ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§31.2, §13.4, §34",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — S479 batch items 1 and 2, PA recs adopted\" item 2 — 'recursion between server functions is NOT E-DG-001'.",
+  "rationale": "§31.2 (S479): 'A cycle of calls between functions — direct recursion, or mutual recursion such as two server functions that call each other (§13.4) — is recursion, not a dependency cycle. The compiler SHALL NOT reject it.' §13.4: 'A server-escalated function MAY call another server-escalated function.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-001"],
+    "notCodePrefixes": ["E-DG-"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-error-kind-and-dg-001-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-DG-001=1",
+          "forbidden:E-DG-001",
+          "prefix:E-DG-001 (matches forbidden E-DG-*)"
+        ]
+      }
+    }
+  }
+}

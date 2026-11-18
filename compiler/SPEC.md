@@ -12724,7 +12724,7 @@ Parallel shape to the other "what scrml is NOT" rules: §14.1.2 (no unrecognized
 
 Before this rule, an unrecognized type name fell through `resolveTypeExpr`'s unresolvable path to `asIs` with **no diagnostic** — silently masquerading as the sanctioned `asIs` escape hatch, exactly as the literal `any` token did before §14.1.1. This is the *separate, broader gap* §14.1.1 deferred; it is now closed. The sanctioned untyped escape hatch remains **`asIs`** — a deliberate, *named*, greppable opt-out; a misspelled name is not.
 
-**Loci.** The rule fires at every type-annotation position, symmetric with §14.1.1 (`E-TYPE-ANY-FORBIDDEN` covers the same set): named `:struct` / `:error` / `:enum` / `:tuple` declaration bodies (including **enum-variant payload field types**, `Variant(field: Type)`), **type-alias** right-hand sides (`type A = Type`), state-cell / `let` / `const` type annotations, `fn` / `function` parameter and return types, and the recursive leaf positions (inline-struct field types, array element, **map value**, union members, snippet parameter, lifecycle post-type).
+**Loci.** The rule fires at every type-annotation position, symmetric with §14.1.1 (`E-TYPE-ANY-FORBIDDEN` covers the same set): named `:struct` / `:enum` / `:tuple` declaration bodies (including **enum-variant payload field types**, `Variant(field: Type)`), **type-alias** right-hand sides (`type A = Type`), state-cell / `let` / `const` type annotations, `fn` / `function` parameter and return types, and the recursive leaf positions (inline-struct field types, array element, **map value**, union members, snippet parameter, lifecycle post-type).
 
 **Resolution.** Resolution is against the file's `typeRegistry` (the same registry the type-as-argument family resolves through, §53.14.5), built with a forward-reference-safe placeholder pass so a forward reference never mis-fires. Cross-file imported types resolve via the §21.8 import protocol; in a single-file compile (where a dependency was not processed into the registry) an **imported specifier name** is exempt regardless — the import statement is the proof the name is defined elsewhere. This also covers renamed re-exports, `export *`, and stdlib re-export chains.
 
@@ -12747,6 +12747,7 @@ type name:kind = { ... }
 
 - `name` — the type name.
 - `:kind` — the kind annotation. Defined kinds: `:struct`, `:enum`. Additional kinds TBD.
+- **There is no `:error` kind.** Error types are enum types (§19.1): an error type is declared `type Name:enum = { … }`, and a variant that carries data declares it as payload fields, `Failed(message: string)` (§14.4). `type Name:error = { … }` is not a type declaration — it is `E-PARSE-TYPE` (a type kind other than `:enum` / `:struct`), and the message gives the enum form. **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S479 batch items 1 and 2, PA recs adopted" item 1 — *"error types are enums — strike `:error` from §14.1.2, retire E-ERROR-008"*. (impl#1 still accepts `:error` — a carried divergence, `g-impl1-error-kind-and-dg-001-s479`.)
 - `{ ... }` — the type body (kind-dependent syntax).
 
 ### 14.3 Struct Types
@@ -29931,6 +29932,7 @@ The compiler builds a single dependency graph of all operations in the program. 
 - The graph SHALL represent all data dependencies: every operation that consumes the output of another operation is a dependent edge.
 - The graph SHALL represent all reactive dependencies: every expression that reads a `@variable` is a dependent edge on that variable.
 - The graph SHALL be complete before any pass reads it. Partial graph construction is not permitted.
+- A cycle of calls between functions — direct recursion, or mutual recursion such as two server functions that call each other (§13.4) — is recursion, not a dependency cycle. The compiler SHALL NOT reject it. The reactive-graph cycles that are errors each have their own code: `E-DERIVED-CIRCULAR-DEP` (§6.6.10), `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J), `E-RESET-ON-CYCLE` (§6.8.4), `E-TRANSITION-WRITE-CYCLE` (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S479 batch items 1 and 2, PA recs adopted" item 2.
 
 ### 31.3 Route Analysis From the Graph
 
@@ -30905,8 +30907,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-COMPONENT-033 | §16.8 | `render` call references unknown snippet | Error |
 | E-COMPONENT-034 | §16.8 | `render` call arity mismatch with snippet declaration | Error |
 | E-COMPONENT-035 | §15.14 | Post-CE invariant: residual `isComponent: true` markup node survived component expansion | Error |
-| E-DG-001 | §31 | Dependency graph: circular dependency in reactive graph | Error |
-| E-ERROR-008 | §19.2 | Error type variant uses reserved field name | Error |
+| ~~E-DG-001~~ | §31 | ~~Dependency graph: circular dependency in reactive graph~~ **Retired S479:** every reactive-graph cycle the SPEC names has its own code — a derived-cell cycle is `E-DERIVED-CIRCULAR-DEP` (§6.6.10, §31.5), a derived-engine cycle `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J), a `reset-on=` cycle `E-RESET-ON-CYCLE` (§6.8.4), a transition-write cycle `E-TRANSITION-WRITE-CYCLE` (§6.7.4) — and no SPEC text gave E-DG-001 a fire condition of its own. A cycle of CALLS between functions, server functions included, is recursion and is not an error (§31.2). **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S479 batch items 1 and 2, PA recs adopted" item 2 — *"recursion between server functions is NOT E-DG-001; re-scope the §34 row to the reactive-graph sense (or retire it for E-DERIVED-CIRCULAR-DEP / E-RESET-ON-CYCLE) and retire the case"*. The bootstrap never emitted it; impl#1 still emits it on an `awaits`-edge (call) cycle (carried divergence, `g-impl1-error-kind-and-dg-001-s479`). | — |
+| ~~E-ERROR-008~~ | §19.2 | ~~Error type variant uses reserved field name~~ **Retired S479:** there is no `:error` declaration kind — error types are enums (§19.1, §14.2) — and no normative text reserves `message` / `type`, so an enum variant MAY carry a `message` or `type` payload field (`Failed(message: string)`). **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S479 batch items 1 and 2, PA recs adopted" item 1 — *"error types are enums — strike `:error` from §14.1.2, retire E-ERROR-008, rewrite the neg case to `:enum`, retire the pos case"*. The bootstrap never emitted it; impl#1 still does on a `:error` declaration (carried divergence, `g-impl1-error-kind-and-dg-001-s479`). | — |
 | ~~E-MARKUP-003~~ | §24.1 | **Retired 2026-07-16 (S263).** Unknown-attribute-on-known-HTML-element is owned by **E-HTML-001** (§24.2, aspirational — VP-1 deliberately passes plain-HTML attributes through). The dead impl squatter (`validateMarkupAttributes`, `type-system.ts`) that carried this code would false-fire on scrml's own `if`/`else`/`each` directives (176 corpus files). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-MU-001 | §35 | Must-use: return value of `!` function not captured | Error |
 | E-PA-002 | §11.3 | Protect analyzer: invalid `protect=` syntax | Error |

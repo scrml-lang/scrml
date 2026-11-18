@@ -8692,6 +8692,16 @@ ${
             const r2: RFields = parseTypeFields(expectP(t, "{"), "}")
             body = ATypeBody.StructBody(r2.fs)
             t = expectP(r2.tp, "}")
+        } else if (kind.v == "error") {
+            // s479 (§14.2, ruling S479 batch item 1): "There is no `:error` kind. Error types
+            // are enum types (§19.1) … `type Name:error = { … }` is … `E-PARSE-TYPE` …, and the
+            // message gives the enum form." The `{ … }` body is read as fields and dropped, so
+            // the refusal is the one report (no cascade on the `{`).
+            t = diagAt(t, "E-PARSE-TYPE", "`:error` is not a type kind — error types are enums (§19.1, §14.2): write `type " + nameTok.v + ":enum = { Failed(reason: string), … }`, with the data on payload fields of each variant", kind)
+            if (isP(t, "{")) {
+                const r3: RFields = parseTypeFields(adv(t), "}")
+                t = expectP(r3.tp, "}")
+            }
         } else {
             t = diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind)
         }
