@@ -30653,7 +30653,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-CHANNEL-WATCHES-NO-CONSUMER | §38.13.3 | A `<channel watches=<table>>` feed declares no `<onchange>` handler — nothing consumes the change feed. Per §38.13.3 a `watches=` channel body contains exactly one `<onchange>` element (the typed dispatch over the synthesized `RowChange`). Add an `<onchange>` handler, or drop `watches=`. (§38.13.8.) | Warning |
 | E-FN-001 | §48.3.1 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | §48.3.2 | DOM mutation call inside a `fn` body | Error |
-| E-FN-003 | §48.3.3, §48.6.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through a function value whose type is not the pure function type, and a `fn` (or a pure function type) whose result is an impure function type (S478, §48.6.3) | Error |
+| E-FN-003 | §48.3.3, §48.6.3 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through a function value whose type is not the pure function type, and a `fn` (or a pure function type) whose result is an impure function type (S478, §48.6.3; the S478 call-through and result cases are emitted at `compiler/self-host-v2/analyze.scrml` (pure-type result check and `fn` result check, `E-FN-003`); impl#1 does not emit them yet.) | Error |
 | E-FN-004 | §48.3.4 | Non-deterministic call — or read of mutable browser/global state (`window.*`/`document.*`/`navigator.*`/`location.*`) — inside a `fn` body | Error |
 | E-FN-005 | §48.3.5 | `async` on a `fn` declaration, or `await` inside a `fn` body. The `fn`-scope manifestation of §19.9.8 (S114 — the language-wide rule). | Error |
 | E-ASYNC-NOT-IN-SCRML | §19.9.8 | The `async` keyword appears on any function or arrow declaration in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted at the native parser's expression / declaration heads — `compiler/native-parser/parse-stmt.js` + `parse-expr.js`.) | Error |
@@ -38466,7 +38466,7 @@ newly-rejecting, as §48's amendment states.)
 |------|---------|----------|
 | E-FN-001 | `?{}` SQL access inside a `fn` body | Error |
 | E-FN-002 | DOM mutation call inside a `fn` body | Error |
-| E-FN-003 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through an impure function value, and an impure function type as a `fn`'s result (S478, §48.6.3) | Error |
+| E-FN-003 | Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function — including a call through an impure function value, and an impure function type as a `fn`'s result (S478, §48.6.3; the S478 call-through and result cases are emitted at `compiler/self-host-v2/analyze.scrml` (pure-type result check and `fn` result check, `E-FN-003`); impl#1 does not emit them yet.) | Error |
 | E-FN-004 | Non-deterministic call (`Date.now`, `Math.random`, `crypto.randomUUID`, etc.) inside a `fn` body | Error |
 | E-FN-005 | `async` on a `fn` declaration, or `await` inside a `fn` body | Error |
 | ~~E-FN-006~~ | **Retired 2026-04-20 (S32).** Relocated to E-STATE-COMPLETE at every state literal site (§54.6.1). | — |
