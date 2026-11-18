@@ -3,10 +3,10 @@ type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
 ${
-    function show(cb: () -> void) {
+    function show(cb: () => void) {
         if (@user is given) {
-            cb()
-            @out = @user.name
+            cb();
+            @out = @user.name;
         }
     }
     function noop() { }

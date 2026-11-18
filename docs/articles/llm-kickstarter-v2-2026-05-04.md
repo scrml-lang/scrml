@@ -1364,7 +1364,7 @@ If the user's prompt mentions auth, real-time, reactive state, schema, multi-pag
 
 This is the **first recipe to reach for** when the UI has more than one mode, lifecycle phase, or screen state. If you're writing more than two booleans that gate the same UI, you want an engine.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-TYPE-031] — the bootstrap has no <db tables=>; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Row's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no <db tables=> yet (its `integer` row field is `int` since the S478 ruling, so Row's `id: int` fits) -->
 ```scrml
 <program db="items.db">
 
@@ -1831,7 +1831,7 @@ A `lin` declared outside a loop may not be consumed inside the loop body (E-LIN-
 
 When you need to render a list, reach for the **Tier-1 `<each>` structural element** — NOT `.map()`, NOT `${ for (...) { lift ... } }`. `<each>` reads as a markup tree, composes with `<empty>` for the zero-items case, and gets keyed DOM reconciliation for free. (The `${for/lift}` form is the valid Tier-0 fallback — see the anti-pattern table and the promotion note below.)
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-TYPE-031] — the bootstrap has no <db tables=> or <empty> yet; it types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Contact's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no <db tables=> or <empty> yet (its `integer` row field is `int` since the S478 ruling, so Contact's `id: int` fits) -->
 ```scrml
 <program db="contacts.db">
 

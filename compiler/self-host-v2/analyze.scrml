@@ -48,7 +48,7 @@ ${
              SqlKind, SqlTables, SqlColumns, Db, Driver, DbLoad, Envelope, CoreTool, CoreEndpoint, CoreEpArm, CoreChannel,
              CssPart, CssDecl, StyleRule, CssImport, ScopeSheet, SimpleSel, Combinator, Compound, ComplexSel,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
@@ -1810,7 +1810,7 @@ ${
         const k: ATypeK = at.k
         const fp: ATypeK = k
         const parts: FnATypeParts | not = match fp {
-            .TFn(params: ps, ret: r) :> { ps: ps, ret: r }
+            .TFn(params: ps, ret: r, fx: x) :> { ps: ps, ret: r, fx: x }
             // no-default-arm: one question of a type — is it a function type
             _ :> not
         }
@@ -1824,13 +1824,43 @@ ${
             if (rp.unresolved) bad = true
             tys = tys.concat([rp.t])
         }
+        // s478-ruled-fn-types — §7.5 "Function types (S478)": the failable modifier's error enum
+        // (§19.4.4.1: "The error type after `!` SHALL be an enum type", E-ERROR-011 otherwise; a
+        // bare `!` is the built-in `Error`, §19.4.2)
+        let err: Sym | not = not
+        if (parts.fx.failable) {
+            const ea: AType | not = parts.fx.err
+            if (ea is not) {
+                err = builtinSym(te.stubs, "Error")
+            } else {
+                const re: RType = resolveType(te, ea, st)
+                st = re.st
+                if (re.unresolved) {
+                    bad = true
+                } else {
+                    err = enumStubSym(te, re.t)
+                    if (err is not) {
+                        bad = true
+                        st = addDiag(st, te.file, ea.span, "E-ERROR-011", "the error type of the failable function type `" + typeText(at) + "` is not an enum — §19.4.4.1: \"The error type after `!` SHALL be an enum type\" (a `:enum` declaration, or the built-in `Error` when it is omitted)")
+                    }
+                }
+            }
+        }
+        const pure: boolean = parts.fx.pure
         const ra: AType | not = parts.ret
-        if (ra is not) return { t: Type.Fn(tys, not), st: st, unresolved: bad }
+        if (ra is not) return { t: Type.Fn(tys, not, pure, err), st: st, unresolved: bad }
         const rr: RType = resolveTypeFn(te, ra, st)
-        return { t: Type.Fn(tys, rr.t), st: rr.st, unresolved: bad || rr.unresolved }
+        st = rr.st
+        // §48.6.3 "The pure function type (S478)" rule 2: a pure function type's result SHALL NOT be
+        // an impure function type (E-FN-003)
+        if (pure && !rr.unresolved) {
+            const rf: FnTypeParts | not = fnTypeOf(rr.t)
+            if (rf is given && !rf.pure) st = addDiag(st, te.file, ra.span, "E-FN-003", "the pure function type `" + typeText(at) + "` gives an IMPURE function value (`" + typeName(rr.t) + "`) — a pure function returns only a pure function value (§48.6.3, S478): a later call of the result would run an impure body on the pure function's behalf. Make the result type `fn " + typeName(rr.t) + "`")
+        }
+        return { t: Type.Fn(tys, rr.t, pure, err), st: st, unresolved: bad || rr.unresolved }
     }
 
-    type FnATypeParts:struct = { ps: AType[], ret: AType | not }
+    type FnATypeParts:struct = { ps: AType[], ret: AType | not, fx: AFnFx }
 
     fn aliasCyclesFn(te: TypeEnv, s: TypeStub, ps: AType[], ret: AType | not, seen: int[]) -> boolean {
         for (const p of ps) {
@@ -1840,20 +1870,30 @@ ${
         return aliasCycles(te, s, ret, seen)
     }
 
-    fn fnATypeText(ps: AType[], ret: AType | not) -> string {
+    fn fnATypeText(ps: AType[], ret: AType | not, fx: AFnFx) -> string {
         let parts: string[] = []
         for (const p of ps) { parts = parts.concat([typeText(p)]) }
         let r: string = "void"
         if (ret is given) r = typeText(ret)
-        return "(" + parts.join(", ") + ") => " + r
+        let lead: string = ""
+        if (fx.pure) lead = "fn "
+        let bang: string = ""
+        if (fx.failable) bang = "!"
+        const e: AType | not = fx.err
+        if (e is given) bang = "! " + typeText(e)
+        return lead + "(" + parts.join(", ") + ")" + bang + " => " + r
     }
 
-    fn fnTypeName(ps: Type[], ret: Type | not) -> string {
+    fn fnTypeName(ps: Type[], ret: Type | not, pure: boolean, err: Sym | not) -> string {
         let parts: string[] = []
         for (const p of ps) { parts = parts.concat([typeName(p)]) }
         let r: string = "void"
         if (ret is given) r = typeName(ret)
-        return "(" + parts.join(", ") + ") => " + r
+        let lead: string = ""
+        if (pure) lead = "fn "
+        let bang: string = ""
+        if (err is given) bang = "! " + err.hint
+        return lead + "(" + parts.join(", ") + ")" + bang + " => " + r
     }
 
     // The parts of a function type, else `not`.
@@ -1861,13 +1901,13 @@ ${
         if (t is not) return not
         const u: Type = t
         return match u {
-            .Fn(params: ps, ret: r) :> { ps: ps, ret: r }
+            .Fn(params: ps, ret: r, pure: pu, err: er) :> { ps: ps, ret: r, pure: pu, err: er }
             // no-default-arm: one question of a type — is it a function type
             _ :> not
         }
     }
 
-    type FnTypeParts:struct = { ps: Type[], ret: Type | not }
+    type FnTypeParts:struct = { ps: Type[], ret: Type | not, pure: boolean, err: Sym | not }
 
     fn isFnType(t: Type | not) -> boolean { return fnTypeOf(t) is given }
 
@@ -2499,16 +2539,7 @@ ${
     fn userDeclStub(d: ADecl, file: string, st0: AS) -> RDeclStubs {
         let st: AS = st0
         if (reservedElementName(d.name)) {
-            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
-        }
-        // s478 fix-1 (F1) — a user declaration named `schema`: the parser reads
-        // every `<schema>` use as the §39 schema block (its body is §39.2's
-        // declaration language, never markup), so the declaration could never
-        // be used — a use would render nothing, silently. §4.15's reserved list
-        // does not name `schema` (owner question g-boot-schema-user-decl-name-s478),
-        // so this is refused by name (INTERIM), not E-NAME-COLLIDES-RESERVED.
-        if (d.name == "schema") {
-            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a user declaration named `schema` is not in the bootstrap (INTERIM) — the bootstrap reads every `<schema>` as the §39 schema block, so a use `<schema …/>` would never reach this declaration. §4.15's reserved structural-element list does not name `schema` (owner question g-boot-schema-user-decl-name-s478). Rename the declaration")
+            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, `schema`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
         }
         const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
@@ -2518,7 +2549,10 @@ ${
     // declaration may not take: §4.15's list ("registering a user component
     // named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`,
     // `onIdle`, `onMount` (S449), `render`, `page`, `endpoint`, `onchange`,
-    // `theme`, `defaults`, or `md` (S462, §67) is `E-NAME-COLLIDES-RESERVED`").
+    // `theme`, `defaults`, `md` (S462, §67), or `schema` (S478, §39) is `E-NAME-COLLIDES-RESERVED`").
+    // S478 open-Qs ruling item 19 reserves `schema`: every `<schema>` is read as the §39
+    // schema block at parse time (its body is §39.2's declaration language), so a user
+    // declaration of that name could never be used.
     // Compared lowercase: §24.4 extends it to the capitalised spellings
     // (`const Engine = <div>`, `OnMount`, `Page`, `Theme`, …).
     fn reservedElementName(name: string) -> boolean {
@@ -2539,6 +2573,7 @@ ${
             "theme"        :> true
             "defaults"     :> true
             "md"           :> true
+            "schema"       :> true
             _              :> false
         }
     }
@@ -6151,6 +6186,12 @@ ${
                         // left unresolved — never checked against, never trusted
                         if (!rt.unresolved) ret = rt.t
                         st = rt.st
+                        // s478-ruled-fn-types — §48.6.3 "The pure function type (S478)" rule 2: "A `fn`
+                        // SHALL return only a value of a pure function type" (E-FN-003)
+                        const rf: FnTypeParts | not = fnTypeOf(ret)
+                        if (af.pure && rf is given) {
+                            if (!rf.pure) st = addDiag(st, f.path, at.span, "E-FN-003", "the `fn` `" + af.name + "` returns an IMPURE function value (`" + typeName(rt.t) + "`) — a `fn` returns only a value of the pure function type (§48.6.3, S478): a later call of the result would run an impure body on the `fn`'s behalf. Declare the result `fn " + typeName(rt.t) + "` (and return a `fn`), or make `" + af.name + "` a `function`")
+                        }
                     }
                 }
                 let arity: int = af.params.length
@@ -7161,11 +7202,12 @@ ${
                 const r: Type | not = fs.info.ret
                 if (r is given) {
                     if (containsHost(g.types, r, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
-                    // s478 (s478-boot-fn-type) — §14.3 (PERMANENT): "a closure cannot be serialized — its
-                    // code and captured environment have no wire form"; the SPEC names no code for a server
-                    // function's function-typed RESULT (§12.5's E-ROUTE-004 names parameters), so it is
-                    // refused by name
-                    if (isFnType(r)) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, a function — its result crosses the server→client boundary as JSON (§12.5), and a closure cannot be serialized (§14.3: \"its code and captured environment have no wire form\"). Return the data, and keep the behaviour on the client", fs.info.file, fs.info.span)])
+                    // s478-ruled-fn-types — §12.5.3 "A function-typed result is E-ROUTE-003 (S478)": "Return
+                    // types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003 …). The
+                    // non-serializable kinds are: a **function** …" (impl#1 reports E-ROUTE-003 for this
+                    // shape too). The S478 ruling's "widen E-ROUTE-004" rested on "a function-typed return
+                    // has no code" — it has this one; the reading is flagged for the PA's veto there.
+                    if (isFnType(r)) out = out.concat([newDiag("E-ROUTE-003", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, a function — its result crosses the server→client boundary as JSON (§12.5.3), and a function value has no wire form (§14.3: \"its code and captured environment have no wire form\"). Return the data, and keep the behaviour on the client", fs.info.file, fs.info.span)])
                 }
             }
         }
@@ -9025,7 +9067,12 @@ ${
         // (§19.4.3 / §19.4.4: an unhandled `!` call SHALL be E-ERROR-002);
         // any other function value is refused. (s477: so a nested function
         // never escapes the activation of the function that declares it.)
-        if (f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-ERROR-002", "the failable function '" + f.name + "' is used as a value — whatever calls it later would discard its error. Call it here and handle the result (`" + f.name + "(…) !{ … }`, `match`, `?`) (§19.4.3)"))
+        // s478-ruled-fn-types — §19.4.3 "The failable function type (S478)": a `!` function used
+        // as a value is typed `(…)! E => R` (fnValueType); every call through it is a failable
+        // call (resolveCallV / resolveHandled), and §7.5.1's invariance keeps it out of any
+        // position whose type does not fail. (Before: E-ERROR-002 here — no failable type existed.)
+        // A `!` function whose error is the composed client carrier (it waits) is refused below.
+        if (f.failable && f.err is not) return plain(not, st2)          // E-ERROR-011 reported at the declaration
         // s478 (s478-boot-fn-type) — §14.3 (S469 R2′): "A function-holding value MAY be bound,
         // passed, returned and called". The function itself is the value (Core FnRef), typed by
         // its signature; what the bootstrap cannot prove about it is refused by name.
@@ -9033,6 +9080,9 @@ ${
         if (why != "") return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — " + why))
         if (env.fx.fnVal != e.nid) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + name + "` (a function named without a call)")))
         const ft: Type | not = fnValueType(env, f)
+        // s478-ruled-fn-types r1 (review LOW-3): a `!` function has no `-> T` slot (§19.4.1; E-PARSE-FN
+        // if written) — its success type is the one its returns prove, so the fix is not `-> T`
+        if (ft is not && f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — the bootstrap types a function VALUE by its signature, and the `!` function `" + f.name + "` has no success type it can read yet: every parameter's type must be written, and a `!` function has no `-> T` slot (§19.4.1) — its success type is the one its `return <value>`s prove, which is not proven here (a return through a value of the function itself, recursion through a value, INTERIM). Write every parameter's type on `" + f.name + "`, or call it by its name rather than through a value"))
         if (ft is not) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — the bootstrap types a function VALUE by its signature, and `" + f.name + "` does not write one it can read: every parameter's type, and the return type (`-> T`, or no `return <value>` at all) (INTERIM — an inferred return type is the typer's, after binding). Write `-> T` on `" + f.name + "`"))
         const st3: AS = addPending(st2, PendRule.FnValue(f.sym.id, env.fx.fnSym, env.file, e.span, f.name))
         return plain(ft, st3)
@@ -9093,9 +9143,19 @@ ${
             ps = ps.concat([t])
         }
         if (ps.length != f.arity) return not
+        // s478-ruled-fn-types — a `fn` names the pure function type (§48.6.3), a `!` function the
+        // failable one (§19.4.3 "The failable function type (S478)")
+        let err: Sym | not = not
+        if (f.failable) err = f.err
         const r: Type | not = f.ret
-        if (r is given) return Type.Fn(ps, r)
-        if (isVoidFn(env.g, f.sym.id)) return Type.Fn(ps, not)
+        if (r is given) return Type.Fn(ps, r, f.pure, err)
+        if (isVoidFn(env.g, f.sym.id)) return Type.Fn(ps, not, f.pure, err)
+        if (f.failable) {
+            // a `!` function has no success-type slot (§19.4.1): its success type is the one its
+            // returns prove (failableSuccs)
+            const sr: Type | not = succOf(env.g, f)
+            if (sr is given) return Type.Fn(ps, sr, f.pure, err)
+        }
         return not
     }
 
@@ -10249,10 +10309,10 @@ ${
     // as a direct call would be (the typer, typeCallV). Its arguments are positions whose type
     // is the signature's (an arrow there takes its parameter types from it, §7.5 S469 (3)).
     // Refused by name:
-    //   - in a pure `fn` body — §48.6.2 "A `fn` body SHALL NOT call a `function`-declared
-    //     callable … unless the compiler can statically verify" its purity; a function type
-    //     carries no purity in the bootstrap (§48.6.3 "the returned `fn` carries its
-    //     constraints" names no spelling for it — owner question), so nothing is verified;
+    //   - in a pure `fn` body, a callee whose type is not the pure function type — E-FN-003
+    //     (§48.6.3 "The pure function type (S478)" rule 1; s478-ruled-fn-types);
+    //   - a callee of a failable function type, unless the call is a handling form's subject —
+    //     E-ERROR-002 (§19.4.3 "The failable function type (S478)"; s478-ruled-fn-types);
     //   - when the local's NAME is also a function's in scope: the narrowing pass reads a
     //     call's write set by the callee's NAME (fnWrites / callKeys), so it would read that
     //     function's, not the value's (INTERIM — rename the local);
@@ -10270,7 +10330,14 @@ ${
             .HostOk :> false
             .HostNo :> false
         }
-        if (pure) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "(…)` calls through a function value inside a `fn` body — §48.6.2: a `fn` calls only what the compiler can verify is pure, and a function type in the bootstrap does not carry purity (INTERIM; §48.6.3 \"the returned `fn` carries its constraints\" names no spelling for a pure function type). Call a `fn` by its name, or make the caller a `function`"))
+        // s478-ruled-fn-types — §48.6.3 "The pure function type (S478)" rule 1: "Inside a `fn` body,
+        // a call through a function value SHALL have a callee of a pure function type. A call
+        // through a value of an impure function type is E-FN-003"
+        if (pure && !ft.pure) return plain(not, addDiag(st, env.file, e.span, "E-FN-003", "`" + name + "(…)` calls through a function value of the IMPURE type `" + fnTypeName(ft.ps, ft.ret, ft.pure, ft.err) + "` inside a `fn` body — a `fn` calls through a value of the pure function type only (§48.6.3, S478; §48.6.2: an impure function may run any of the five prohibited constructs). Declare it `fn " + fnTypeName(ft.ps, ft.ret, ft.pure, ft.err) + "` (and pass a `fn`), or make the caller a `function`"))
+        // s478-ruled-fn-types — §19.4.3 "The failable function type (S478)": "A call through a value
+        // of a failable function type is a call to a `!` function under this section … an unhandled
+        // one is E-ERROR-002"
+        if (ft.err is given && env.fx.subject != e.nid) return plain(not, unhandledCall(env, e, name, st))
         if (fnNamedIn(env, name) is given) return plain(not, addDiag(st, env.file, callee.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "(…)` calls through the local `" + name + "`, whose name is also a function's in scope here — the bootstrap's narrowing pass reads a call's writes by the callee's name, so it would read that function's instead of the value's (INTERIM). Rename the local"))
         if (ft.ret is not && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-TYPE-001", "`" + name + "(…)` is `void` (its function type returns no value) — it cannot be used as a value (§18.3); call it as a statement"))
         st = addPending(st, PendRule.FnValue(-2, env.fx.fnSym, env.file, e.span, name))
@@ -10489,6 +10556,24 @@ ${
             const cx: TxCx = { file: fs.info.file, fname: fs.info.name, fx: fs.info.failable, tx: false, loops: [], stmtArm: false, stmtArmTx: false, armTx: false }
             out = out.concat(txBlock(cx, fs.f.body))
         }
+        // S478 (#1920 review MED-1, g-boot-transaction-in-handler-no-diagnostic-s478) — §19.10.4: "An
+        // event-handler attribute body (`onclick={ … }`), an action or an `<effect>` body is not a `!`
+        // function, so a `transaction` block there is E-ERROR-001". The parser refuses a block only at
+        // TP.inFn 0; a handler value is read as a text-lowered body (inFn 2), so it is judged here, as
+        // a body of no function (`fname` "": txIf names the handler, not a function).
+        for (const a of actionPositions(g)) {
+            const cx: TxCx = { file: a.file, fname: "", fx: false, tx: false, loops: [], stmtArm: false, stmtArmTx: false, armTx: false }
+            const v: AAttrValue = a.v
+            const d: Diag[] = match v {
+                .Braced(b: b) :> txBlock(cx, b)
+                .Bare(e: e) :> txExpr(cx, e)
+                .Paren(e: e) :> txExpr(cx, e)
+                .NoValue :> []
+                .Quoted(v: x) :> []
+                .Dur(text: x) :> []
+            }
+            out = out.concat(d)
+        }
         return out
     }
 
@@ -10563,7 +10648,9 @@ ${
     fn txIf(cx: TxCx, c: AExpr, t: ABlock, e: ABlock | not, fm: IfForm) -> Diag[] {
         if (!isTxForm(fm)) return txExpr(cx, c).concat(txBlock(cx, t)).concat(txMaybe(cx, e))
         let out: Diag[] = []
-        if (!cx.fx) {
+        if (!cx.fx && cx.fname == "") {
+            out = out.concat([mkDiag(cx.file, c.span, "E-ERROR-001", "a `transaction { … }` block in an event handler or `<effect>` body, which is not a `!` function — a `transaction` block is valid only inside a `!` function (§19.10.4): its commit-or-rollback promise is a failure-handling promise, and here a failure inside it has nowhere to go. Move the block into a function declared with '!' — 'function save(...)! ErrorType { transaction { … } }' — and call it from the handler")])
+        } else if (!cx.fx) {
             out = out.concat([mkDiag(cx.file, c.span, "E-ERROR-001", "a `transaction { … }` block in function '" + cx.fname + "', which is not declared as failable — a `transaction` block is valid only inside a `!` function (§19.10.4): its commit-or-rollback promise is a failure-handling promise, and outside a `!` function a failure inside it has nowhere to go. Add '!' to the function signature: 'function " + cx.fname + "(...)! ErrorType' (§19.3.3)")])
         } else if (cx.tx) {
             out = out.concat([mkDiag(cx.file, c.span, "E-ERROR-007", "Nested 'transaction' blocks are not supported yet. Move the inner block into a function the outer block calls (it runs as a savepoint), or use '?{SAVEPOINT name}' … '?{RELEASE name}' inside the block.")])
@@ -10653,13 +10740,19 @@ ${
     // they are the top-level statements written here.)" The bootstrap builds the block INSIDE ITS
     // FUNCTION'S ENVELOPE — the savepoint form — on the envelope's database: every `!` server body
     // whose transitive query set is non-empty has one (§8.9.2 "Amendment S474" item 1), so a block
-    // whose function reaches a query is always inside one. A `!` function the compiler gave NO
-    // envelope (it reaches no query, it is client-placed, or its envelope was refused — reported
-    // where it was) is REFUSED by name, fail closed (INTERIM, g-boot-transaction-block-no-envelope-s478,
-    // owner question): §19.10.3 does not say what a block with no database to roll back means —
-    // which connection its BEGIN opens when the function reaches none, or how a client-placed
-    // function's block could roll back writes its server calls already committed.
-    export type TxAt:struct = { nid: int, db: Sym }
+    // whose function reaches a query on the server is always inside one.
+    // A `!` function the compiler gave NO envelope (S478 open-Qs ruling item 21):
+    //  - it reaches no query (its transitive query set is empty) — §19.10.4 "A `!` function that
+    //    reaches no query (S478)": the block "SHALL compile as a plain block … There is nothing to
+    //    roll back, so the commit-or-rollback promise holds vacuously" (TxAt.db = not; lower.scrml
+    //    txOfIf lowers it as a bare block);
+    //  - it is client-placed and reaches a query through the server functions it calls — §19.10.4
+    //    "A client-placed `!` function SHALL NOT hold a `transaction` block — PERMANENT (S478)":
+    //    E-TX-CLIENT-PLACED (no transaction spans two requests, §19.10.5);
+    //  - otherwise its envelope was refused (reported where it stands) or it holds manual
+    //    transaction control: the block is refused by name, a cascade of that refusal.
+    // `db`: not = the block is a plain block (the no-query case).
+    export type TxAt:struct = { nid: int, db: Sym | not }
 
     export fn txAtOf(t: Tables, nid: int) -> Sym | not {
         for (const x of t.server.txs) {
@@ -10668,9 +10761,17 @@ ${
         return not
     }
 
+    // S478 ruling item 21 (a): the block compiles as a plain block (its function reaches no query)
+    export fn txPlainAt(t: Tables, nid: int) -> boolean {
+        for (const x of t.server.txs) {
+            if (x.nid == nid && x.db is not) return true
+        }
+        return false
+    }
+
     type RTxPlace:struct = { txs: TxAt[], st: AS }
 
-    fn txPlacePass(g: Globals, envs: Envelope[], st0: AS) -> RTxPlace {
+    fn txPlacePass(g: Globals, envs: Envelope[], sum: Summary, tq: TxQ, places: PlaceFact[], sqls: SqlInfo[], st0: AS) -> RTxPlace {
         let st: AS = st0
         let txs: TxAt[] = []
         for (const fs of g.fns) {
@@ -10681,11 +10782,20 @@ ${
                     for (const e of envs) {
                         if (e.fn.id == fs.info.sym.id) db = e.db
                     }
+                    const i: int = nodeIdx(sum.nodes, fs.info.sym.id)
                     if (db is given) {
                         for (const b of blocks) { txs = txs.concat([{ nid: b.nid, db: db }]) }
+                        // S478 ruling item 22 — W-TX-EXIT-ROLLS-BACK (§19.10.3)
+                        if (i >= 0) st = txExitWarns(fs, blocks, txWritesAt(sum, tq, sqls, i), st)
+                    } else if (i >= 0 && tq.all[i].length == 0) {
+                        for (const b of blocks) { txs = txs.concat([{ nid: b.nid, db: not }]) }
+                    } else if (i >= 0 && txClientPlaced(sum, tq, places, i)) {
+                        for (const b of blocks) {
+                            st = addDiag(st, fs.info.file, b.span, "E-TX-CLIENT-PLACED", "this `transaction { … }` block is in '" + fs.info.name + "', a `!` function placed on the client that reaches a query through the server functions it calls. Each server call is its own request, and no transaction spans two requests (§19.10.5), so a `fail` after one call could not roll back what that call already committed — the block would promise a rollback it cannot keep (§19.10.4, PERMANENT). Move the block into a `!` server function (it then runs as a savepoint of that function's transaction) and call that function from '" + fs.info.name + "'")
+                        }
                     } else {
                         for (const b of blocks) {
-                            st = addDiag(st, fs.info.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "this `transaction { … }` block (§19.10.2) is in '" + fs.info.name + "', which runs in no transaction of its own: the bootstrap builds the block as a savepoint inside its function's implicit per-handler transaction (§19.10.3, §8.9.2 'Amendment S474' items 1 and 3), and '" + fs.info.name + "' has none — it reaches no `?{}` query, or it is placed on the client, where no transaction can hold a server's writes. §19.10.3 does not say what the block rolls back then, so it is refused rather than compiled as a plain block. Put the queries the block should hold inside it, in a `!` server function")
+                            st = addDiag(st, fs.info.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "this `transaction { … }` block (§19.10.2) is in '" + fs.info.name + "', which runs in no transaction of its own: the bootstrap builds the block as a savepoint inside its function's implicit per-handler transaction (§19.10.3, §8.9.2 'Amendment S474' items 1 and 3), and '" + fs.info.name + "' reaches a query but has none — its transaction was refused (reported where it stands) or it holds manual transaction control. Fix that first")
                         }
                     }
                 }
@@ -10694,16 +10804,125 @@ ${
         return { txs: txs, st: st }
     }
 
+    // A client-placed `!` callable (as envelopeOf reads placement): not server-placed, not
+    // server-placed by inheritance, and not called in place by a server-run function.
+    fn txClientPlaced(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> boolean {
+        const fsym: int = sum.nodes[i].f.sym
+        if (isServerPlace(placeOf(places, fsym))) return false
+        if (sum.inherited.indexOf(fsym) >= 0) return false
+        return !calledInPlace(sum, tq, places, i)
+    }
+
+    // S478 ruling item 22 — where callable i WRITES, by source offset: each of its own `?{}` that
+    // writes, and each reference to a function whose transitive query set holds a write.
+    fn txWritesAt(sum: Summary, tq: TxQ, sqls: SqlInfo[], i: int) -> int[] {
+        let out: int[] = []
+        const f: FnFacts = sum.nodes[i].f
+        for (const site of f.sqls) {
+            for (const si of sqls) {
+                if (si.nid == site.nid && si.kind == SqlKind.SqlWrite) out = out.concat([site.span.start])
+            }
+        }
+        for (const r of f.scan.refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym)
+            if (isFnNode(sum.nodes, j)) {
+                let w = false
+                for (const ri of atomInfos(sum, tq.all[j], sqls)) {
+                    if (ri.kind == SqlKind.SqlWrite) w = true
+                }
+                if (w) out = out.concat([r.span.start])
+            }
+        }
+        return out
+    }
+
+    // §19.10.3 (S478): "A `return`, or a `break` / `continue` whose target is outside the block, that
+    // leaves a `transaction { … }` block after the block wrote SHALL be reported as the Warning
+    // W-TX-EXIT-ROLLS-BACK … "The block wrote" means a write query of the block … stands before the
+    // exit in source order."
+    fn txExitWarns(fs: FnSrc, blocks: TxSite[], writes: int[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const b of blocks) {
+            for (const x of txExitsIn(b.body, [])) {
+                let wrote = false
+                for (const w of writes) {
+                    if (w >= b.body.span.start && w < x.span.start) wrote = true
+                }
+                if (wrote) {
+                    st = addDiag(st, fs.info.file, x.span, "W-TX-EXIT-ROLLS-BACK", "this `" + x.kw + "` leaves the `transaction { … }` block in '" + fs.info.name + "' after the block wrote, so the block ROLLS BACK its writes (§19.10.3: only normal completion commits; the `" + x.kw + "` still " + (x.kw == "return" ? "returns" : "jumps") + "). If the writes should stand, let the block complete and put the `" + x.kw + "` after it")
+                }
+            }
+        }
+        return st
+    }
+
+    type TxExit:struct = { span: ASpan, kw: string }
+
+    // The exits out of a transaction block's own statements: a `return`, or a `break` / `continue`
+    // whose loop is not inside the block (`loops`: the labels of the loops entered inside it, ""
+    // for an unlabeled one). A nested function's, a lambda's and an effect's body are their own;
+    // a `match` arm is not walked (an exit there is E-TRANSACTION-CONTROL-FLOW, txRulesPass).
+    fn txExitsIn(b: ABlock, loops: string[]) -> TxExit[] {
+        let out: TxExit[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const here: TxExit[] = match k {
+                .Return(e: x) :> [{ span: s.span, kw: "return" }]
+                .Break(label: l) :> txJumpOut(s, l, loops, "break")
+                .Continue(label: l) :> txJumpOut(s, l, loops, "continue")
+                .If(cond: x) :> []
+                .Eval(e: x) :> []
+                .Local(name: x) :> []
+                .Given(name: x) :> []
+                .For(f: x) :> []
+                .Lift(what: x) :> []
+                .LocalFn(f: x) :> []
+                .EffectStmt(w: x) :> []
+                .Defer(body: x) :> []
+                .Fail(f: x) :> []
+            }
+            out = out.concat(here)
+            const kids: TxExit[] = match k {
+                .If(cond: c, thenB: t, elseB: e) :> txExitsIn(t, loops).concat(txExitsMaybe(e, loops))
+                .Given(name: n, body: gb) :> txExitsIn(gb, loops)
+                .For(f: lf) :> txExitsIn(lf.body, loops.concat([lf.label]))
+                .Defer(body: x) :> []
+                .Eval(e: x) :> []
+                .Local(name: x) :> []
+                .Return(e: x) :> []
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
+                .Lift(what: x) :> []
+                .LocalFn(f: x) :> []
+                .EffectStmt(w: x) :> []
+                .Fail(f: x) :> []
+            }
+            out = out.concat(kids)
+        }
+        return out
+    }
+
+    fn txExitsMaybe(b: ABlock | not, loops: string[]) -> TxExit[] {
+        if (b is not) return []
+        return txExitsIn(b, loops)
+    }
+
+    fn txJumpOut(s: AStmt, label: string, loops: string[], kw: string) -> TxExit[] {
+        if (label == "" && loops.length > 0) return []
+        if (label != "" && loops.indexOf(label) >= 0) return []
+        return [{ span: s.span, kw: kw }]
+    }
+
     // The transaction blocks of a function's OWN body (not a nested function's, a lambda's or an
     // effect's — txRulesPass refuses a block there, E-ERROR-001).
-    type TxSite:struct = { nid: int, span: ASpan }
+    type TxSite:struct = { nid: int, span: ASpan, body: ABlock }
 
     fn txSitesIn(b: ABlock) -> TxSite[] {
         let out: TxSite[] = []
         for (const s of b.stmts) {
             const k: AStmtK = s.k
             const here: TxSite[] = match k {
-                .If(cond: c, form: fm) :> isTxForm(fm) ? [{ nid: s.nid, span: c.span }] : []
+                .If(cond: c, thenB: tb, form: fm) :> isTxForm(fm) ? [{ nid: s.nid, span: c.span, body: tb }] : []
                 .Eval(e: x) :> []
                 .Local(name: x) :> []
                 .Return(e: x) :> []
@@ -10806,7 +11025,7 @@ ${
             .TMaybe(inner: i) :> typeText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeText(f) + " to " + typeText(x) + ")"
             .TRefine(base: b, pred: p) :> typeText(b) + "(" + p + ")"
-            .TFn(params: ps, ret: r) :> fnATypeText(ps, r)
+            .TFn(params: ps, ret: r, fx: x) :> fnATypeText(ps, r, x)
         }
     }
 
@@ -11979,6 +12198,15 @@ ${
         if (via) what = "a function expression"
         if (env.fx.fnVal != lam.nid) return diagX(env, lam, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy(what), st0)
         const want: FnTypeParts | not = fnTypeOf(expected)
+        // s478-ruled-fn-types — §7.5 "Function types (S478)". An arrow cannot `fail` (`fail` is a `!`
+        // function's, §19.4.4: E-ERROR-001 elsewhere), so it is never a value of a FAILABLE function
+        // type — §7.5.1 "Function types — invariance (S478)": "a non-failable value never satisfies a
+        // failable type" (E-TYPE-031). A PURE target (`fn (…) => R`) is refused by name (INTERIM): the
+        // bootstrap checks §48's five prohibitions on a `fn` DECLARATION's body, not an arrow's.
+        if (want is given) {
+            if (want.err is given) return diagX(env, lam, "E-TYPE-031", what + " stands where the FAILABLE function type `" + fnTypeName(want.ps, want.ret, want.pure, want.err) + "` is declared, but it cannot fail (`fail` belongs to a `!` function, §19.4.4) — a value that does not fail never satisfies a failable function type (§7.5.1, S478 invariance). Declare a `!` function and name it here, or drop the `!` from the type", st0)
+            if (want.pure) return diagX(env, lam, "E-BOOTSTRAP-UNSUPPORTED", what + " as a value of the PURE function type `" + fnTypeName(want.ps, want.ret, want.pure, want.err) + "` is not in the bootstrap (INTERIM — the bootstrap checks §48's prohibitions on a `fn` declaration's body, not an arrow's, so it cannot prove this one keeps the `fn` contract). Declare a `fn` and name it here", st0)
+        }
         let st: AS = st0
         let env2: Env = noNarrows(sealEvent(env))
         let syms: Sym[] = []
@@ -12057,7 +12285,7 @@ ${
         }
         if (!typed) return plain(not, addValue(st, lam.nid, ValueFact.VLambda(syms, not)))
         if (want is not && rty is not) return plain(not, addValue(st, lam.nid, ValueFact.VLambda(syms, not)))
-        const ft: Type = Type.Fn(pts, rty)
+        const ft: Type = Type.Fn(pts, rty, false, not)
         st = addValue(st, lam.nid, ValueFact.VLambda(syms, ft))
         st = addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""))
         return plain(ft, st)
@@ -18040,11 +18268,17 @@ ${
         const rs: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
         st = rs.st
         const f: FnInfo | not = failableCallee(env, st, subj)
+        // s478-ruled-fn-types — a call THROUGH a value of a failable function type (§19.4.3 "The
+        // failable function type (S478)"): its error enum is the type's
+        const fv: FnTypeParts | not = failableValueCallee(env, st, subj)
         let failable = false
         let err: Sym | not = not
         if (f is given) {
             failable = true
             err = f.err
+        } else if (fv is given) {
+            failable = true
+            err = fv.err
         } else if (sqlOfK(subj.k) is given) {
             failable = true
             err = env.g.sqlErrorSym
@@ -18052,6 +18286,7 @@ ${
         // s469 (#1471 round-2 MED-2): a `!` function that never returns a value has NO success
         // value — reading it (the handled form's value, or a `.Ok(v)` binder) would be `undefined`
         if (f is given) st = noSuccessUse(env, e, h, f, stmt, st)
+        if (fv is given && fv.ret is not) st = noSuccessUseOf(env, e, h, exprName(calleeOrSelf(subj)), stmt, st)
         const how: AHow = h.how
         // s475: a `!` callee's success type is its returns' (failableSuccs) — the value
         // of `?` / `!{}` on success, as a declared `-> T` is for any other callee
@@ -18233,6 +18468,30 @@ ${
     fn noSuccessUse(env: Env, e: AExpr, h: AHandled, f: FnInfo, stmt: boolean, st: AS) -> AS {
         if (!f.failable) return st
         if (!isVoidFn(env.g, f.sym.id)) return st
+        return noSuccessUseOf(env, e, h, f.name, stmt, st)
+    }
+
+    // s478-ruled-fn-types — the call through a local of a failable function type, else `not`.
+    fn failableValueCallee(env: Env, st: AS, e: AExpr) -> FnTypeParts | not {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return not
+        if (nameLocalSym(nameFactIn(st, c.nid)) is not) return not
+        const l: LocalB | not = lookupLocal(env, exprName(c))
+        if (l is not) return not
+        const ft: FnTypeParts | not = fnTypeOf(l.ty)
+        if (ft is not) return not
+        if (ft.err is not) return not
+        return ft
+    }
+
+    fn calleeOrSelf(e: AExpr) -> AExpr {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is given) return c
+        return e
+    }
+
+    // A handled call whose callee succeeds with no value (`name`): reading the success value is E-TYPE-001.
+    fn noSuccessUseOf(env: Env, e: AExpr, h: AHandled, fname: string, stmt: boolean, st: AS) -> AS {
         // `?` / `!{}` in a value position yield the success value; a `match`'s value is its arms'
         // (it reads the success value only through a bound `.Ok(v)`)
         let reads: boolean = !stmt
@@ -18251,7 +18510,7 @@ ${
             }
         }
         if (!reads) return st
-        return addDiag(st, env.file, e.span, "E-TYPE-001", "`" + f.name + "(…)` succeeds with no value (no path of it returns one) — its success value cannot be read here (§18.3: void is not assignable); handle it as a statement (`" + f.name + "(…) !{ … }` alone), or bind `.Ok` with `_`")
+        return addDiag(st, env.file, e.span, "E-TYPE-001", "`" + fname + "(…)` succeeds with no value (no path of it returns one) — its success value cannot be read here (§18.3: void is not assignable); handle it as a statement (`" + fname + "(…) !{ … }` alone), or bind `.Ok` with `_`")
     }
 
 
@@ -18313,7 +18572,13 @@ ${
         if (c is not) return false
         const n: string = exprName(c)
         if (n == "") return false
-        if (lookupLocal(env, n) is given) return false
+        const l: LocalB | not = lookupLocal(env, n)
+        if (l is given) {
+            // s478-ruled-fn-types — a local of a failable function type: a failable call
+            const ft: FnTypeParts | not = fnTypeOf(l.ty)
+            if (ft is given) return ft.err is given
+            return false
+        }
         const f: FnInfo | not = fnNamedIn(env, n)
         if (f is not) return false
         return f.failable
@@ -19992,10 +20257,15 @@ ${
         return ty == "integer" || ty == "real" || ty == "text" || ty == "timestamp"
     }
 
-    // §39.4 → §14.8.3: INTEGER / REAL → `number`, TEXT → `string`; nullable → `T | not`.
+    // §39.4 → §14.8.3: INTEGER → `int` (S478 open-Qs ruling item 20 — "map `integer` to `int`
+    // (amend §14.8.3 …), keep `real` → `number`"), REAL → `number`, TEXT → `string`; nullable →
+    // `T | not` (kept: "keep §14.8.3's nullability"). A stored value of another kind (a non-STRICT
+    // table) is caught as the row is read (§14.8.3 "A typed row is checked as it is read",
+    // server-runtime.js checkRows — the row's wire table, print.scrml queryJs).
     fn colType(c: SchemaCol) -> Type {
         let t: Type = Type.Str
-        if (c.ty == "integer" || c.ty == "real") t = Type.Num
+        if (c.ty == "integer") t = Type.Int
+        if (c.ty == "real") t = Type.Num
         if (c.nn || (c.pk && c.ty == "integer")) return t
         return Type.Maybe(t)
     }
@@ -20009,7 +20279,7 @@ ${
         return out
     }
 
-    fn rowOfSite(rows: RowOf[], nid: int) -> Type | not {
+    export fn rowOfSite(rows: RowOf[], nid: int) -> Type | not {
         for (const r of rows) {
             if (r.nid == nid) return r.ty
         }
@@ -23998,15 +24268,10 @@ ${
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return resolveSlot(env, e, st)
-        // s478 — `<schema>` (§39): the parser read its body as §39.2 declarations
-        // whatever a declaration of that name says. A user declaration in scope
-        // wins over every built-in reading of a tag (below), so with one named
-        // `schema` in scope the use is ambiguous and refused (fix-1 F1) — never
-        // rendered as nothing.
+        // s478 — `<schema>` (§39): the parser read its body as §39.2 declarations. `schema` is a
+        // reserved structural-element name (§4.15, S478 open-Qs ruling item 19): a user declaration
+        // of it is E-NAME-COLLIDES-RESERVED (userDeclStub), and a use names the structural element.
         if (e.tag == "schema") {
-            if (!e.star && declNamed(env.g, env.file, "schema") is given) {
-                return addElem(addDiag(st, env.file, mkSpan(e.span.start, e.span.start + 7), "E-BOOTSTRAP-UNSUPPORTED", "this `<schema>` names a user declaration `schema` in scope, and the bootstrap reads every `<schema>` as the §39 schema block — it refuses the use rather than render nothing (INTERIM; owner question g-boot-schema-user-decl-name-s478: §4.15's reserved list does not name `schema`). Rename the declaration"), e.nid, ElemFact.MSchema)
-            }
             return resolveSchema(env, e, st)
         }
         // A user declaration in scope wins over every built-in reading of the
@@ -31053,7 +31318,7 @@ ${
             .Named(sym: s) :> s.hint
             .Seq(elem: e) :> elemName(e) + "[]"
             .Maybe(inner: i) :> typeName(i) + " | not"
-            .Fn(params: ps, ret: r) :> fnTypeName(ps, r)
+            .Fn(params: ps, ret: r, pure: pu, err: er) :> fnTypeName(ps, r, pu, er)
         }
     }
 
@@ -31069,7 +31334,7 @@ ${
             .Named(sym: s) :> aliasName(al, file, s)
             .Seq(elem: e) :> elemNameIn(al, file, e) + "[]"
             .Maybe(inner: i) :> typeNameIn(al, file, i) + " | not"
-            .Fn(params: ps, ret: r) :> fnTypeName(ps, r)
+            .Fn(params: ps, ret: r, pure: pu, err: er) :> fnTypeName(ps, r, pu, er)
         }
     }
 
@@ -31200,10 +31465,21 @@ ${
     // return (both `void`, or the same type). §7.5.1 names no variance for function types (the
     // SPEC states no subtyping rule between signatures), so none is assumed — fail closed:
     // `(x: int) => int` does not fit `(x: number) => int`, nor `() => int` fit `() => void`.
+    // s478-ruled-fn-types — §7.5.1 "Function types — invariance (S478)": failability is
+    // invariant (the same error enum, or neither fails); purity widens one way only — a pure
+    // value fits the impure type of its signature, never the reverse.
     fn fnFits(v: Type, target: Type) -> Verdict {
         const a: FnTypeParts | not = fnTypeOf(v)
         const b: FnTypeParts | not = fnTypeOf(target)
         if (a is not || b is not) return Verdict.Fails
+        if (b.pure && !a.pure) return Verdict.Fails
+        const ea: Sym | not = a.err
+        const eb: Sym | not = b.err
+        if (ea is not && eb is given) return Verdict.Fails
+        if (ea is given && eb is not) return Verdict.Fails
+        if (ea is given && eb is given) {
+            if (ea.id != eb.id) return Verdict.Fails
+        }
         if (a.ps.length != b.ps.length) return Verdict.Fails
         let i = 0
         while (i < a.ps.length) {
@@ -34267,7 +34543,7 @@ ${
     fn fnValueVType(env: TEnv, s: Sym) -> VType {
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return VType.Unknown
-        if (fi.failable || fi.outer >= 0 || fi.host is given) return VType.Unknown    // refused by the binder (fnNameRef)
+        if (fi.outer >= 0 || fi.host is given) return VType.Unknown    // refused by the binder (fnNameRef)
         let ps: Type[] = []
         let found = false
         for (const w of env.fnw) {
@@ -34281,7 +34557,20 @@ ${
             }
         }
         if (!found) return VType.Unknown
-        return known(Type.Fn(ps, fi.ret))
+        // s478-ruled-fn-types — the purity and failability the binder's fnValueType gives it
+        let err: Sym | not = not
+        if (fi.failable) err = fi.err
+        let r: Type | not = fi.ret
+        if (r is not && fi.failable) {
+            // a `!` function's success type is its returns' join (inferReturn, settled under
+            // retKey); none settled — a void success (no value return), or not proven yet
+            const inf: VType | not = findLocalT(env.settled, retKey(fi.sym).id)
+            if (inf is given) {
+                r = knownOf(inf)
+                if (r is not) return VType.Unknown
+            }
+        }
+        return known(Type.Fn(ps, r, fi.pure, err))
     }
 
     // s478 (s478-boot-fn-type) — a call through a function value: its arity and each argument
@@ -34290,7 +34579,7 @@ ${
     fn typeCallV(env: TEnv, e: AExpr, name: string, ft: FnTypeParts, args: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = ts0
         const n: int = ft.ps.length
-        if (n != args.length) ts = report(ts, env, e.span, "E-CALL-ARITY", "the function value `" + name + "` is `" + fnTypeName(ft.ps, ft.ret) + "`, which takes " + n + " argument(s), and is called with " + args.length + " (§7.3, E-CALL-ARITY: a call is checked against the signature it calls)")
+        if (n != args.length) ts = report(ts, env, e.span, "E-CALL-ARITY", "the function value `" + name + "` is `" + fnTypeName(ft.ps, ft.ret, ft.pure, ft.err) + "`, which takes " + n + " argument(s), and is called with " + args.length + " (§7.3, E-CALL-ARITY: a call is checked against the signature it calls)")
         if (n == args.length) {
             let i = 0
             while (i < args.length) {
@@ -41230,7 +41519,7 @@ ${
         const ep: REnv = envelopePass(sum, tq, all, places, sqls, dbs, rd, st)
         st = ep.st
         // s478 (s478-boot-syntax-batch): each `transaction { … }` block's database — its function's envelope's
-        const tp0: RTxPlace = txPlacePass(g, ep.envs, st)
+        const tp0: RTxPlace = txPlacePass(g, ep.envs, sum, tq, places, sqls, st)
         st = tp0.st
         // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there,
         // or a `<schema>` block declares for it (s478 — schemaDbs)
@@ -41474,6 +41763,9 @@ ${
     }
 
     fn wireDiag(cx: PlaceCx, f: FnFacts, ty: Type, code: string, what: string, span: ASpan, st: AS) -> AS {
+        // s478-ruled-fn-types — a function-typed parameter / result is E-ROUTE-004 / E-ROUTE-003
+        // already (hostServerDiags); not refused a second time as "no wire descriptor"
+        if (isFnType(ty)) return st
         const state: string = stateTypeIn(cx.g, ty)
         if (state != "") return addDiag(st, f.file, span, code, "server function `" + f.name + "()`'s " + what + " is not serializable: it holds `" + state + "`, a declaration's instance — a live state object (it has identity; it is not a value), with no wire form (§12.5.3). Pass the values it holds instead")
         const wb: WireBuild = wireBuild(typesProgram(cx.g), ty)

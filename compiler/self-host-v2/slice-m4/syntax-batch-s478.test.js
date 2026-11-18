@@ -457,15 +457,140 @@ ${E}
     expect(flows.length).toBe(4);
   });
 
-  test("NEGATIVE — a block in a `!` function that reaches no query has no transaction to be a savepoint of: refused by name", () => {
-    expect(codes(fn("noDb(a: int)! E", `        transaction {
-            if (a > 1) { fail .Bad; }
+  // S478 open-Qs ruling item 21 (a) — §19.10.4 "A `!` function that reaches no query (S478)": the
+  // block "SHALL compile as a plain block: its statements run once, in order, and its exits keep
+  // their ordinary meaning" (before: refused by name, E-BOOTSTRAP-UNSUPPORTED).
+  test("S478 ruling 21 (a) — a block in a `!` function that reaches no query compiles as a plain block", async () => {
+    const src = `<program>
+${E}
+    function noDb(a: int)! E {
+        let n: int = a;
+        transaction {
+            n = n * 10;
+            if (a > 5) { fail .Bad; }
+            n = n + 2;
         }
-        return 1;`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+        return n;
+    }
+    let <r:int=0/>
+    <button id="b" onclick={ @r = noDb(3) !{ _ :> -1, }; }>x</button>
+    <button id="c" onclick={ @r = noDb(9) !{ _ :> -1, }; }>y</button>
+    <p id="o">\${@r}</p>
+</program>
+`;
+    const r = fe(src);
+    expect(errs(r).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+    expect(mods().check.checkCore(r.core)).toEqual([]);
+    await loadProgram(r.core, "s478-sb-" + k++);
+    click($("#b"));
+    expect($("#o").textContent).toBe("32");
+    click($("#c"));
+    expect($("#o").textContent).toBe("-1");
+  });
+
+  // S478 open-Qs ruling item 21 (b) — §19.10.4 "A client-placed `!` function SHALL NOT hold a
+  // `transaction` block — PERMANENT (S478)": E-TX-CLIENT-PLACED.
+  test("S478 ruling 21 (b) — a block in a client-placed `!` function that reaches a query: E-TX-CLIENT-PLACED", () => {
+    const src = `<program db="./app.db">
+${E}
+    function save(a: int)! E {
+        ${ins("${a}")}
+        return 1;
+    }
+    function onClient(a: int)! E {
+        transaction {
+            const x: int = save(a)?;
+            @r = x;
+        }
+        return 1;
+    }
+    let <r:int=0/>
+    <button onclick={ @r = onClient(1) !{ _ :> 0, }; }>x</button>
+</program>
+`;
+    const all = errs(fe(src));
+    const c = all.filter((d) => d.code === "E-TX-CLIENT-PLACED");
+    expect(c.length).toBe(1);
+    expect(c[0].message).toContain("Move the block into a `!` server function");
+    expect(all.map((d) => d.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  // S478 (#1920 review MED-1, g-boot-transaction-in-handler-no-diagnostic-s478) — §19.10.4: "An
+  // event-handler attribute body (`onclick={ … }`) … is not a `!` function, so a `transaction`
+  // block there is E-ERROR-001". Before: no front-end diagnostic, then C-TX4 "a compiler defect".
+  test("S478 — a block in an event-handler body: E-ERROR-001 (not a Core defect)", () => {
+    for (const h of ["{ transaction { @r = 1; } }", "{ if (@r > 0) { transaction { @r = 1; } } }"]) {
+      const c = codes(`<program>
+    let <r:int=0/>
+    <button onclick=${h}>x</button>
+</program>
+`);
+      expect(c).toEqual(["E-ERROR-001"]);
+    }
   });
 
   test("a block in a `!` server body compiles clean (no refusal)", () => {
     expect(codes(fn("fine(a: int)! E", `        transaction {
+            ${ins("${a}")}
+        }
+        return 1;`))).toEqual([]);
+  });
+});
+
+// S478 open-Qs ruling item 22 — §19.10.3 "An exit after a write warns (S478)": W-TX-EXIT-ROLLS-BACK
+// when a `return` / `break` / `continue` leaves a `transaction { … }` block after the block wrote.
+describe("§19.10.3 — W-TX-EXIT-ROLLS-BACK (S478 ruling 22)", () => {
+  const warns = (src) => fe(src).diags.filter((d) => d.code === "W-TX-EXIT-ROLLS-BACK");
+  test("the three exits of the runtime program each warn once, as a Warning", () => {
+    const w = warns(TX);
+    expect(w.map((d) => d.severity)).toEqual(["Warning", "Warning", "Warning"]);
+    expect(w.map((d) => d.message.match(/in '(\w+)'/)[1]).sort()).toEqual(["breaksOut", "continuesOut", "returnsOut"]);
+    expect(w[0].message).toContain("ROLLS BACK");
+    expect(w[0].message).toContain("after it");
+  });
+  const one = (body, extra = "") => `<program db="./app.db">
+${E}${extra}
+    function f(a: int)! E {
+${body}
+    }
+    let <r:int=0/>
+    <button onclick={ @r = f(1) !{ _ :> 0, }; }>x</button>
+</program>
+`;
+  test("an exit BEFORE every write (an early-return guard) is not reported", () => {
+    expect(warns(one(`        transaction {
+            if (a > 5) { return 0; }
+            ${ins("${a}")}
+        }
+        return 1;`))).toEqual([]);
+  });
+  test("a `return` after the block, and a `continue` whose loop is inside the block, are not reported", () => {
+    expect(warns(one(`        transaction {
+            ${ins("${a}")}
+            for (let i = 0; i < 3; i = i + 1) {
+                if (i == 1) { continue; }
+            }
+        }
+        return 1;`))).toEqual([]);
+  });
+  test("a write through a call (the callee's transitive query set holds a write) counts", () => {
+    // (f reads first, so it is server-placed: a client `!` function may not hold a block at all)
+    const w = warns(one(`        const n = ${SQ}\`SELECT a FROM log\`}.all();
+        transaction {
+            const x: int = g(a)?;
+            if (x > 0) { return x; }
+        }
+        return 1;`, `
+    function g(a: int)! E {
+        ${ins("${a}")}
+        return a;
+    }`));
+    expect(w.length).toBe(1);
+  });
+  test("a read before the exit is not a write", () => {
+    expect(warns(one(`        transaction {
+            const n = ${SQ}\`SELECT a FROM log\`}.all();
+            if (a > 0) { return 2; }
             ${ins("${a}")}
         }
         return 1;`))).toEqual([]);
