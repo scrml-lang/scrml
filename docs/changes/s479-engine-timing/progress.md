@@ -13,7 +13,12 @@ Baseline bootstrap conformance (base): PASS 651 · FAIL 6 · NOT-TWINNED 637 · 
 - Website page W-ENGINE-SELF-WRITE-DETECTED updated.
 - No conformance case pinned the outside firing (grep of expected.json: only self-write-pos/neg + self-target-ontransition-pos, all inside-state-child).
 
-## Item 8 — g-boot-timing-compositions-s478 (engine part) (IN PROGRESS)
-- SPEC §6.13.5 / §6.13.6 / §51.0.F / §34 E-ENGINE-INVALID-TRANSITION: written.
-- Plan: analyze — drop the engine refusal in timingCellProblem (keep a refusal for an engine with `<onIdle>`: owner Q); `heldWriteCheck` (literal target unreachable from initial → E-ENGINE-INVALID-TRANSITION). print — pass the edge table to rt.timed. runtime — commit-time checkEdge; transition() skips the write-time check on a timed graph cell.
-- `<onTransition>` is not in the bootstrap at all (E-BOOTSTRAP-UNSUPPORTED) → the onTransition-at-commit half is owed with it.
+## Item 8 — g-boot-timing-compositions-s478 (engine part) (DONE, committed with item-8 commit)
+- SPEC §6.13.5 / §6.13.6 / §51.0.F / §34 E-ENGINE-INVALID-TRANSITION: written (committed with item 7).
+- analyze: `timingCellProblem` no longer refuses an engine (refuses engine + `<onIdle>` — owner Q); `heldWriteCheck` + `reachableVariants` (literal held write to a variant no reachable state is/admits → E-ENGINE-INVALID-TRANSITION, the existing static rule-violation code).
+- print: `fieldCtor` passes the edge table to `rt.timed` for a graph field.
+- runtime: `timed(…, table)`; `commitTimed` (checkEdge at commit, then write); leading throttle commit throws into the handler, trailing commits report via `reportLater`; refused commit opens no window; `transition` skips the write-time check on a timed engine.
+- tests: slice-m4/timed-engine-s479.test.js (17, FakeClock); durations F5 updated.
+- conformance: engine/timed-debounce-held-until-commit-rt, timed-throttle-trailing-judged-at-commit-rt, timed-throttle-leading-violation-rt, timed-held-write-unreachable-pos/-neg — bootstrap PASS; impl#1 XFAIL (carried g-impl1-timed-engine-commit-s479) for 4, -neg passes on impl#1.
+- gaps: g-boot-timing-compositions-s478 narrowed; residue g-boot-timed-engine-residue-s479 (onIdle composition owner Q; onTransition owed with onTransition).
+- CI gates run locally: severity --check, s34-census --check-new, gen-md-shim, snippet-gate, claim-gate, types-gate, corpus-compile-floor, host-global-scan --check — all pass. spec-coverage totals STALE (bot-owned).

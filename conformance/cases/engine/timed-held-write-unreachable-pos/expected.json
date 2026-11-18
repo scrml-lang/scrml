@@ -1,0 +1,31 @@
+{
+  "id": "engine-timed-held-write-unreachable-pos",
+  "description": "§6.13.5 (S479) static check of a LITERAL held write: on a `debounced=` engine, `@doc = .Archived` names a variant that no state reachable from `.Draft` (Draft, Review, Published) is or admits — its only incoming edge is from `.Purged`, which is itself unreachable. Every commit of it would be refused, so it is E-ENGINE-INVALID-TRANSITION at the write site. XFAIL on impl#1: it parses neither the §66 `single` engine opener nor a timed engine (S471 policy: impl#1 is frozen; carried gap g-impl1-timed-engine-commit-s479).",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.5: \"Static check of LITERAL held writes: a write `@var = .Variant` to a timed engine cell, where no variant reachable from the cell's initial variant along its `rule=` edges is `.Variant` or has `.Variant` in its `rule=`, could never commit and SHALL be `E-ENGINE-INVALID-TRANSITION` (§34) at the write site.\" ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 8 (\"Mitigate with a static check of literal held writes\").",
+  "expect": {
+    "codes": [
+      "E-ENGINE-INVALID-TRANSITION"
+    ],
+    "codeCounts": {
+      "E-ENGINE-INVALID-TRANSITION": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-timed-engine-commit-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-ENGINE-INVALID-TRANSITION' fired 0 time(s), expected exactly 1",
+          "emitted:E-ATTR-001=5",
+          "emitted:E-COMPONENT-035=5",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-VARIANT-AMBIGUOUS=1",
+          "missing:E-ENGINE-INVALID-TRANSITION"
+        ]
+      }
+    }
+  }
+}

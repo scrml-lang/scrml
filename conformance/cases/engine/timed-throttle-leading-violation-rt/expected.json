@@ -1,0 +1,45 @@
+{
+  "id": "engine-timed-throttle-leading-violation-rt",
+  "description": "§6.13.5 (S479): a `throttled=1s` engine cell at Idle. Click #finish: the leading write commits at once and Idle -> Done violates `rule=` — the runtime E-ENGINE-INVALID-TRANSITION is a trap of the click handler and the cell keeps .Idle. Click #load with no time advanced: the refused commit opened no window, so this write is a leading commit too (Idle -> Loading, at once). XFAIL on impl#1: it parses neither the §66 `single` engine opener nor a timed engine (S471 policy: impl#1 is frozen; carried gap g-impl1-timed-engine-commit-s479).",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.5: \"A committed write that violates `rule=` is the runtime `E-ENGINE-INVALID-TRANSITION`: the cell keeps its prior value, no `<onTransition>` handler runs, and the violation is a trap (§19.17) of the unit the commit runs in — the event handler for a commit that lands at once (a throttle's leading write)\". ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 8. (That a refused leading commit opens no window is the bootstrap's reading: nothing was emitted, §6.13.2.)",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#finish"
+      },
+      {
+        "click": "#load"
+      }
+    ],
+    "state": {
+      "phase": "Loading"
+    },
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "Loading"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-timed-engine-commit-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=4",
+          "emitted:E-COMPONENT-035=3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-VARIANT-AMBIGUOUS=2"
+        ],
+        "runtime": "sha256:1433d26a7e3b7d03"
+      }
+    }
+  }
+}
