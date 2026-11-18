@@ -60,6 +60,78 @@ describe("item 15 — §18.10: `| <non-pattern>` after an arm pattern is E-SYNTA
   test("the `if` guard keeps its E-SYNTAX-011", () => {
     expect(codes(FN(`.Admin if p.active :> "admin",\n        _ :> "x"`))).toContain("E-SYNTAX-011");
   });
+  // fix round 1 of #1945 (review MED-1): §18.2 `variant-pattern ::= … | TypeName ('.' | '::') VariantName`
+  test("qualified-alt: `Role.Admin | Role.Editor :>` is alternation (E-PARSE-ARM), not a guard", () => {
+    for (const alt of ["Role.Admin | Role.Editor", ".Admin | Role.Editor", "Role::Admin | Role::Editor"]) {
+      const c = codes(FN(`${alt} :> "staff",\n        .Viewer :> "viewer"`));
+      expect(c).toContain("E-PARSE-ARM");
+      expect(c).not.toContain("E-SYNTAX-011");
+    }
+  });
+  test("a real guard after `|` still gets E-SYNTAX-011 (`| x > 1`, `| p.active`, lowercase member)", () => {
+    expect(codes(FN(`.Admin | x > 1 :> "admin",\n        _ :> "x"`))).toContain("E-SYNTAX-011");
+    expect(codes(FN(`Role.Admin | p.active :> "admin",\n        _ :> "x"`))).toContain("E-SYNTAX-011");
+  });
+});
+
+// fix round 1 of #1945 (review MED-2) — §18.0.1 (amended S478): "the parent's content model applies to
+// each arm's content where the `<match>` stands"; §24.2 / §28.1: a content-model violation is W-HTML-001
+// under the default `html-content-model = warn`. A branch is its own template (§24.5 item 2), so its own
+// parse errors are unchanged and what only its placement breaks is the warning.
+const HM = (body) => `<program>
+type Ph:enum = { A, B }
+let <ph:Ph=.A/>
+let <c:bool=true/>
+<xs:int[]=([1])/>
+${body}
+</program>
+`;
+const diagsOf = (src) => run(src).diags.filter((d) => d.severity === "Error" || d.code === "W-HTML-001");
+const warnCodes = (src) => diagsOf(src).map((d) => d.code + ":" + d.severity);
+describe("MED-2 — a branch's content is judged in its parent's content model (W-HTML-001)", () => {
+  test.each([
+    ["div arm in <p>", `<p>x<match on=@ph><A><div>a</div></><B : "b"></match></p>`],
+    ["div arm in <tbody>", `<table><tbody><match on=@ph><A><div>a</div></><B><tr><td>b</td></tr></></match></tbody></table>`],
+    ["text arm in <tbody>", `<table><tbody><match on=@ph><A : "text"><B><tr><td>b</td></tr></></match></tbody></table>`],
+    ["a > a arm", `<a href="/x"><match on=@ph><A><a href="/y">in</a></><B : "b"></match></a>`],
+    ["button > button arm", `<button><match on=@ph><A><button>in</button></><B : "b"></match></button>`],
+    ["nested match in <p>", `<p><match on=@ph><A><match on=@ph><A><div>a</div></><B : "x"></match></><B : "b"></match></p>`],
+    ["if= div in <p>", `<p>x<div if=@c>a</div></p>`],
+    ["if= div in <tbody>", `<table><tbody><div if=@c>a</div></tbody></table>`],
+    ["each row div in <p>", `<p><each in=@xs as x><div>a</div></each></p>`],
+    ["if= a in <a>", `<a href="/x"><a href="/y" if=@c>in</a></a>`],
+  ])("%s → one W-HTML-001 (Warning), no error", (_n, body) => {
+    expect(warnCodes(HM(body))).toEqual(["W-HTML-001:Warning"]);
+    expect(diagsOf(HM(body))[0].message).toContain("§24.2");
+  });
+  test.each([
+    ["li arms in <ul>", `<ul><li>h</li><match on=@ph><A><li>a</li></><B><li>b</li></></match></ul>`],
+    ["span arm in <p>", `<p>x<match on=@ph><A><span>a</span></><B : "b"></match></p>`],
+    ["tr arms in <tbody>", `<table><tbody><match on=@ph><A><tr><td>a</td></tr></><B><tr><td>b</td></tr></></match></tbody></table>`],
+    ["option arms in <select>", `<select><match on=@ph><A><option>a</option></><B><option>b</option></></match></select>`],
+    ["if= tr in <tbody>", `<table><tbody><tr if=@c><td>a</td></tr></tbody></table>`],
+  ])("%s → clean", (_n, body) => {
+    expect(warnCodes(HM(body))).toEqual([]);
+  });
+  test("a direct child keeps its §24.5 error; a foreign breakout in an arm keeps its error", () => {
+    expect(warnCodes(HM(`<p>x<div>a</div></p>`))).toEqual(["E-HTML-PARSER-REPAIR:Error"]);
+    expect(warnCodes(HM(`<svg><match on=@ph><A><div>a</div></><B><rect/></></match></svg>`))).toEqual(["E-HTML-FOREIGN-BREAKOUT:Error"]);
+  });
+});
+
+// fix round 1 of #1945 (review LOW-8): no second report beside E-MATCH-ON-REQUIRED / E-TYPE-UNKNOWN
+describe("LOW-8 — `<match>` without `for=`: one report per fault", () => {
+  test("no `on=`: E-MATCH-ON-REQUIRED alone", () => {
+    expect(codes(HM(`<div><match><A>"a"</><B>"b"</></match></div>`))).toEqual(["E-MATCH-ON-REQUIRED"]);
+  });
+  test("a cell whose type did not resolve: E-TYPE-UNKNOWN, no \"`string`, not an enum\"", () => {
+    const c = codes(HM(`let <q:Nope=.B/>\n<div><match on=@q><A>"a"</><B>"b"</></match></div>`));
+    expect(c).toContain("E-TYPE-UNKNOWN");
+    expect(c).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+  test("an int cell still gets the named refusal", () => {
+    expect(codes(HM(`let <q:int=1/>\n<div><match on=@q><A>"a"</><B>"b"</></match></div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
 });
 
 const EV = (body) => `<program>

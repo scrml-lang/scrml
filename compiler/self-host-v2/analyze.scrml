@@ -17589,6 +17589,15 @@ ${
     // has for them". The event local's `via` carries both: `<via>|<event iface>|<target iface>`
     // (the target iface "" when the element can hold others — `target` stays `EventTarget | not`).
     // =========================================================================
+    // fix round 1 of #1945 (review LOW-7): the element a handler sits on narrows `event.target`
+    // (H.6) only when the tag IS that HTML element — a user declaration of the same name (`<Input>`,
+    // whose renders root may be a `<div>`) is not, wherever it is declared ("" — no element).
+    fn htmlTagOrNone(g: Globals, file: string, tag: string) -> string {
+        if (!isHtmlElementName(tag)) return ""
+        if (declNamed(g, file, tag) is given || declAnywhere(g, tag)) return ""
+        return tag
+    }
+
     fn evIfaceVia(evName: string, tag: string) -> string {
         let tgt: string = ""
         if (isVoidName(tag.toLowerCase())) tgt = inertTagIface(tag.toLowerCase())
@@ -23904,6 +23913,11 @@ ${
         // `E-STRUCTURAL-ELEMENT-MISPLACED` elsewhere)". One standing in a channel body is
         // read by the parser (onchangeItem) and judged by channelPass; this one is in markup.
         if (!e.star && e.tag == "onchange") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<onchange>` in markup — it is valid only inside a `<channel watches=…>` body, where it dispatches the feed's row changes (§38.13.3, §4.15)")
+        // s478-ruled-endpoint — §61.2 (S478 open-Qs ruling (user-voice), item 36): "An
+        // `<endpoint>` anywhere else — inside … an element … — is
+        // `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)". parse.scrml endpointItem reads every
+        // `<endpoint>` at an item position; this one is in markup. Its arms are not judged.
+        if (!e.star && e.tag == "endpoint") return addDiag(st, env.file, e.span, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` inside markup — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15); move it out of the enclosing element")
         const owner: string = structuralOwner(e.tag)
         if (owner != "") {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
@@ -24117,7 +24131,7 @@ ${
     //          template judged in the element it is inserted into).
     type MkCx:struct = { ns: string, parent: string, inP: boolean, inA: boolean, inLi: boolean, inDd: boolean,
                          inButton: boolean, inNobr: boolean, tbl: string, depth: int, raw: string,
-                         inSel: boolean, root: boolean, tmode: boolean, selT: string }
+                         inSel: boolean, root: boolean, tmode: boolean, selT: string, carry: boolean }
     type MkFault:struct = { nid: int, file: string, span: ASpan, code: string, msg: string }
 
     fn mkRoot(ns: string, depth: int) -> MkCx {
@@ -24127,7 +24141,7 @@ ${
     // A template's root context, placed at `place` (`mkPlaceOf` of where it is inserted).
     fn mkRootAt(ns: string, depth: int, place: string) -> MkCx {
         return { ns: ns, parent: "", inP: false, inA: false, inLi: false, inDd: false, inButton: false, inNobr: false, tbl: "", depth: depth, raw: "",
-                 inSel: false, root: true, tmode: false, selT: place }
+                 inSel: false, root: true, tmode: false, selT: place, carry: false }
     }
 
     // Where a template inserted at context `c` is placed: "" when no `<select>` holds that point
@@ -24220,7 +24234,7 @@ ${
                         out = out.concat(mkRepairFault(file, e, rootTableMsg(e.tag, mode)))
                     }
                     cn = { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT }
+                           tbl: c.tbl, depth: c.depth, raw: c.raw, inSel: c.inSel, root: true, tmode: mode != "" && mode != "-", selT: c.selT, carry: c.carry }
                 }
             } else if (mode == "col") {
                 const tx: string | not = mkTextOf(k)
@@ -24299,14 +24313,28 @@ ${
         return match k {
             .Elem(e: e) :> mkElem(g, sa, file, e, c)
             .Text(text: t) :> mkText(file, n, t, c)
-            .Interp(e: x) :> []
+            .Interp(e: x) :> mkLitText(file, n, x, c)
             .DeclNode(d: x) :> []
             .Effect(w: x) :> []
             .Run(b: rb0) :> []
             .Request(r: x) :> []
             .Css(c: x) :> []
-            .Gather(f: lf) :> mkNodes(g, sa, file, rowsOfBlock(lf.body), mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
+            .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         }
+    }
+
+    // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string
+    // literal) judged where the branch stands — text in a table part (mkBranch's `carry` pass only;
+    // as the branch's own template it is a hole, which the parser does not move).
+    fn mkLitText(file: string, n: ANode, x: AExpr, c: MkCx) -> MkFault[] {
+        if (!c.carry) return []
+        const k: AExprK = x.k
+        const t: string = match k {
+            .Str(v: v) :> v
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> ""
+        }
+        return mkText(file, n, t, c)
     }
 
     // "in table" text (HTML §13.2.6.4.10): a character that is not white space
@@ -24343,10 +24371,62 @@ ${
         // element — an element written there (a `show=` / `if=` hole, a use, an `<each>`) is not on the page
         if (c0.raw != "") return [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg(e.tag, c0.raw) }]
         // an `if=` / `else-if=` / `else` element is its arm's own template
-        let c: MkCx = c0
-        if (isArmElem(e)) c = mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))
+        if (isArmElem(e)) {
+            if (c0.carry) return mkElemAt(g, sa, file, e, mkCarryRoot(c0))
+            return mkSoft(mkElemAt(g, sa, file, e, mkRootAt(c0.ns, c0.depth, mkPlaceOf(c0))), mkElemAt(g, sa, file, e, mkCarryRoot(c0)))
+        }
+        return mkElemAt(g, sa, file, e, c0)
+    }
+
+    // fix round 1 of #1945 (review MED-2) — a BRANCH's content (a `<match>` arm, an `if=` branch,
+    // an `<each>` / `${ for … lift }` row) is a template of its own, parsed apart and inserted by DOM
+    // calls where the branch stands. Its parse is judged as one template's (§24.5 item 2: "The rule
+    // applies within one template's static markup: an `if=` arm, an `<each>` row, a `${ for … lift }`
+    // row … are each parsed apart and inserted by DOM calls, which repair nothing"). Its CONTENT MODEL
+    // is the parent's: §18.0.1 (amended S478) "the parent's content model applies to each arm's content
+    // where the `<match>` stands", and §24.2 makes a content-model violation W-HTML-001 under the default
+    // `html-content-model = warn` (§28.1). So the content is judged twice: as its own template (the
+    // §24.5 errors), and again in the context where it stands (`carry`); a fault only the second pass
+    // finds is the nesting the page holds as written — W-HTML-001. INTERIM: the nesting rules judged are
+    // §24.5 item 2's (`<div>` in `<p>`, text / a non-row in a table part, `a > a`, `button > button`, …);
+    // the full content-model table is g-boot-html-content-model-unchecked-s473.
+    fn mkBranch(g: Globals, sa: AS, file: string, nodes: ANode[], c: MkCx) -> MkFault[] {
+        if (c.carry) return mkNodes(g, sa, file, nodes, mkCarryRoot(c))
+        return mkSoft(mkNodes(g, sa, file, nodes, mkRootAt(c.ns, c.depth, mkPlaceOf(c))), mkNodes(g, sa, file, nodes, mkCarryRoot(c)))
+    }
+
+    // The root of a branch template judged where it stands: the parent's context, carried.
+    fn mkCarryRoot(c: MkCx) -> MkCx {
+        return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
+                 tbl: c.tbl, depth: c.depth, raw: "", inSel: c.inSel, root: true, tmode: c.tmode, selT: mkPlaceOf(c), carry: true }
+    }
+
+    // `own` (the branch judged as its own template) plus each repair fault of `placed` (judged where
+    // it stands) at a node `own` does not fault — reported as the content-model warning.
+    fn mkSoft(own: MkFault[], placed: MkFault[]) -> MkFault[] {
+        let out: MkFault[] = own
+        for (const f of placed) {
+            let seen: boolean = false
+            for (const x of own) { if (x.nid == f.nid) seen = true }
+            for (const x of out) { if (x.nid == f.nid) seen = true }
+            if (!seen && f.code == "E-HTML-PARSER-REPAIR") {
+                out = out.concat([{ nid: f.nid, file: f.file, span: f.span, code: "W-HTML-001", msg: mkSoftMsg(f.msg) }])
+            }
+        }
+        return out
+    }
+
+    fn mkSoftMsg(why: string) -> string {
+        const tail: string = " — the page would not hold the tree written here, so a hole after it (a `show=`, an `if=`, a `${}`) would address the wrong node (SPEC §24.5)"
+        let w: string = why
+        const i: int = w.indexOf(tail)
+        if (i >= 0) w = w.substring(0, i)
+        return "content-model violation (§24.2; W-HTML-001 under the default `html-content-model = warn`, §28.1): this is a branch's content — a `<match>` arm, an `if=` branch or an `<each>` row — which renders where the branch stands, inside an element whose content model does not allow it. Written there directly, " + w + ". Inserted by the branch, the page holds the nesting as written, which no HTML parser would build — restructure it so the parent can hold it"
+    }
+
+    fn mkElemAt(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
         if (e.star) return mkStar(g, sa, file, e, c)
-        if (e.tag == "each") return mkNodes(g, sa, file, e.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c)))
+        if (e.tag == "each") return mkBranch(g, sa, file, e.kids, c)
         if (e.tag == "match") return mkMatch(g, sa, file, e, c)
         if (e.tag == "slot" || e.tag == "errors" || e.tag == "db") return []
         const d: DeclSrc | not = declNamed(g, file, e.tag)
@@ -24381,19 +24461,16 @@ ${
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)))
     }
 
-    // s478 — a block-form `<match>` prints as its mount, a `<div>` (lower.scrml
-    // matchView), so the page holds it where a `<div>` is held (SPEC §24.5): judged
-    // as a `<div>` in its context, and each arm's body as a template of its own
-    // inserted into that `<div>` (as an `if=` arm's is).
     // S478 open-Qs ruling item 13 — §18.0.1 (amended S478): a `<match>` has no
     // wrapper element ("The dispatched arm's content renders in place of the
     // `<match>`"), so each arm's content is judged where the `<match>` stands, as
-    // the template of a branch there (an `if=` arm's, an `<each>` row's).
+    // the template of a branch there (an `if=` arm's, an `<each>` row's) — mkBranch:
+    // its own template's §24.5 errors, and the parent's content model (W-HTML-001).
     fn mkMatch(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
         for (const k of e.kids) {
             const arm: AElem | not = elemOfANode(k)
-            if (arm is given) out = out.concat(mkNodes(g, sa, file, arm.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c))))
+            if (arm is given) out = out.concat(mkBranch(g, sa, file, arm.kids, c))
         }
         return out
     }
@@ -24419,7 +24496,7 @@ ${
             const bound: boolean = boundsScope(ns, t)
             return { ns: kns, parent: t, inP: c.inP && !bound, inA: c.inA, inLi: c.inLi && !bound, inDd: c.inDd && !bound,
                      inButton: c.inButton && !bound, inNobr: c.inNobr && !bound, tbl: "", depth: c.depth, raw: "",
-                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT }
+                     inSel: c.inSel && !bound, root: false, tmode: c.tmode, selT: bound ? "" : c.selT, carry: c.carry }
         }
         const bound: boolean = boundsScope(htmlNs(), t)
         const special: boolean = isSpecialHtml(t) && t != "address" && t != "div" && t != "p"
@@ -24435,7 +24512,7 @@ ${
                  inSel: t == "select" || (c.inSel && !bound),
                  root: false,
                  tmode: c.tmode && t != "td" && t != "th" && t != "caption",
-                 selT: bound ? "" : c.selT }
+                 selT: bound ? "" : c.selT, carry: c.carry }
     }
 
     fn mkRepairFault(file: string, e: AElem, why: string) -> MkFault[] {
@@ -24598,7 +24675,7 @@ ${
     // `c` one level deeper (the inlined markup stands where the `<*x/>` does).
     fn mkKidOf(c: MkCx) -> MkCx {
         return { ns: c.ns, parent: c.parent, inP: c.inP, inA: c.inA, inLi: c.inLi, inDd: c.inDd, inButton: c.inButton, inNobr: c.inNobr,
-                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT }
+                 tbl: c.tbl, depth: c.depth + 1, raw: c.raw, inSel: c.inSel, root: c.root, tmode: c.tmode, selT: c.selT, carry: c.carry }
     }
 
     fn nsWords(ns: string) -> string {
@@ -26228,7 +26305,7 @@ ${
             } else if (a.name == "show") {
                 st = resolveShow(penv, e, a, st)
             } else if (ev != "") {
-                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, ev, e.tag, st)
+                st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, ev, htmlTagOrNone(env.g, env.file, e.tag), st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.substring(0, 5) == "bind:") {
                 // r2 F6: one element writes back to ONE place — a second
@@ -26864,7 +26941,10 @@ ${
             const ie: RMatchEnum = matchEnumFromOn(env, onA)
             if (ie.es is given) {
                 es = ie.es
-            } else {
+            } else if (ie.code != "" && !(ie.typeless && fileHasCode(st, env.file, "E-TYPE-UNKNOWN"))) {
+                // fix round 1 of #1945 (review LOW-8): no second report on a `<match>` with no
+                // `on=` (E-MATCH-ON-REQUIRED is its report), nor a "not an enum" on a cell whose
+                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type)
                 st = addDiag(st, env.file, e.span, ie.code, ie.why)
             }
         } else {
@@ -26945,31 +27025,36 @@ ${
     // S478 (open-Qs ruling item 12) — the enum a `<match>` with no `for=` is over,
     // read from its `on=` (resolveMatchBlock): `es` when proven, else the code and
     // message of the refusal.
-    type RMatchEnum:struct = { es: Sym | not, code: string, why: string }
+    type RMatchEnum:struct = { es: Sym | not, code: string, why: string, typeless: boolean }
+
+    fn fileHasCode(st: AS, file: string, code: string) -> boolean {
+        for (const d of st.diags) { if (d.file == file && d.code == code) return true }
+        return false
+    }
 
     fn matchEnumFromOn(env: Env, onA: AAttr | not) -> RMatchEnum {
         const unproven: string = "`<match>` without `for=` — §18.0.1 (amended S478) lets `for=` be omitted when `on=` is provably of one enum type; the bootstrap proves it only for `on=@cell`, a cell of this program declared with an enum type — write `<match for=Type on=…>`"
-        if (onA is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        if (onA is not) return { es: not, code: "", why: "", typeless: false }
         const ox: AExpr | not = valueExpr(onA.value)
-        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
         const n: string = atName(ox)
-        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
         // an `as=` handle of that name in scope is not the cell
         for (const h of env.handles) {
-            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
         }
         for (const d of env.g.decls) {
             if (d.isProgram && d.file == env.file) {
                 for (const fi of d.info.fields) {
                     if (fi.sym.hint == n) {
                         const es: Sym | not = isEnumType(env.g.types, fi.ty)
-                        if (es is given) return { es: es, code: "", why: "" }
-                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)" }
+                        if (es is given) return { es: es, code: "", why: "", typeless: false }
+                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)", typeless: fi.ty is Type.Str }
                     }
                 }
             }
         }
-        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
     }
 
     // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a
@@ -48324,12 +48409,17 @@ ${
     //    exhaustiveness … A dead/duplicate arm reuses the §18.0.1 arm-validity
     //    diagnostics — `E-MATCH-SUBSET-DEAD-ARM` / `E-TYPE-023`"; §18.7's
     //    E-TYPE-021 for binders that do not match the payload);
+    //  - the S478 open-Qs rulings (user-voice, items 34–38, 40): an endpoint
+    //    outside the entry file's `<program>` (E-STRUCTURAL-ELEMENT-MISPLACED,
+    //    §61.2), two endpoints at one path and method or a `path=` under
+    //    `/_scrml/` / `/_scrml_ws/` (E-ENDPOINT-ROUTE-DUPLICATE, §61.7), an arm
+    //    with no value (E-ENDPOINT-ARM-NO-VALUE, §61.2), a `tag` payload field
+    //    (E-PARSEVARIANT-TAG-FIELD, §61.3);
+    //  - a `path=` outside the §61.7 grammar — refused under E-BOOTSTRAP-UNSUPPORTED
+    //    because the SPEC names no code for it yet (owner question, g-boot-endpoint-s478);
     //  - what the bootstrap does not build, refused by name (INTERIM, gap
     //    g-boot-endpoint-s478): an `accepts=` enum not declared in the endpoint's
-    //    own file, a payload field the request decode does not read, a `path=` the
-    //    URL parser would rewrite or that names the compiler's own `/_scrml/`
-    //    routes, two endpoints at one path and method, an endpoint outside the
-    //    entry file.
+    //    own file, a payload field the request decode does not read.
     // Each clean endpoint becomes a CoreEndpoint (the route print-server serves).
     // =========================================================================
     type REps:struct = { diags: Diag[], eps: CoreEndpoint[] }
@@ -48341,31 +48431,76 @@ ${
         for (const f of files) {
             for (const ep of f.eps) {
                 const d0: int = diags.length
-                if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — the bootstrap serves the endpoints of the entry file's `<program>` only (§61.2 names no rule for an endpoint in an imported file; INTERIM, g-boot-endpoint-s478)")])
-                if (ep.path != "") {
-                    const why: string = endpointPathRefusal(ep.path)
-                    if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7 makes `path=` the author-stable contract URL and names no URL syntax; the bootstrap admits a plain absolute path only — INTERIM, g-boot-endpoint-s478)")])
-                }
-                if (ep.path != "" && ep.method != "") {
-                    const key: string = ep.method + " " + ep.path
-                    if (seen.indexOf(key) >= 0) {
-                        diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "a second `<endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">` — the SPEC names no rule for two endpoints mounted at one path and method (§61.7), so the bootstrap refuses it rather than pick one (INTERIM, g-boot-endpoint-s478 owner question)")])
+                // A misplaced `<endpoint>` (parse.scrml endpointItem: not a direct child of the
+                // top-level `<program>`, E-STRUCTURAL-ELEMENT-MISPLACED) is not mounted and its arms
+                // are not desugared, so nothing more is judged of it (one report per fault).
+                if (ep.top) {
+                    // §61.2 (S478 open-Qs ruling (user-voice), item 36): "An `<endpoint>`
+                    // declaration SHALL be a direct child of the top-level `<program>` (the entry
+                    // file's `<program>`, §40.8)" — one in another file's `<program>` is misplaced
+                    if (ep.top && f.path != g.entry) diags = diags.concat([mkDiag(f.path, ep.opener, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` in `" + f.path + "`, which is not the program's entry file — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to an imported module; move it into the entry file's `<program>`")])
+                    if (ep.path != "") {
+                        // §61.7 (S478 open-Qs ruling (user-voice), item 34): "A `path=` that is
+                        // `/_scrml` or `/_scrml_ws`, or begins with `/_scrml/` or `/_scrml_ws/`, is
+                        // `E-ENDPOINT-ROUTE-DUPLICATE`"
+                        const rsv: string = endpointReservedWhy(ep.path)
+                        if (rsv != "") {
+                            diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-ROUTE-DUPLICATE", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + rsv + "; an `<endpoint>` may not mount there (§61.7). Choose another path")])
+                        } else {
+                            // §61.7 (item 37): the `path=` grammar. A path outside it "is refused at
+                            // compile time — an Error whose code is not yet named (owner question)"
+                            const why: string = endpointPathRefusal(ep.path)
+                            if (why != "") diags = diags.concat([mkDiag(f.path, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "`path=\"" + ep.path + "\"` on `<endpoint>` — " + why + " (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no empty, `.` or `..` segment; the SPEC names no code for this refusal yet — g-boot-endpoint-s478)")])
+                        }
                     }
-                    seen = seen.concat([key])
-                }
-                const ra: REpAccepts = endpointAccepts(g, f.path, ep)
-                diags = diags.concat(ra.diags)
-                const es: Sym | not = ra.sym
-                if (es is given) {
-                    const ad: Diag[] = endpointArmDiags(g, f.path, ep, es)
-                    diags = diags.concat(ad)
-                    if (!hasErrorDiag(diags.slice(d0)) && ep.top && ep.path != "" && ep.method != "") {
-                        out = out.concat([{ path: ep.path, method: ep.method, accepts: es, arms: coreEpArms(g, f.path, ep, es), file: f.path }])
+                    if (ep.path != "" && ep.method != "") {
+                        // §61.7 (item 34): "Two `<endpoint>` declarations of one program with the
+                        // same `path=` and the same `method=` are `E-ENDPOINT-ROUTE-DUPLICATE`
+                        // (§61.9), reported at the second"
+                        const key: string = ep.method + " " + ep.path
+                        if (seen.indexOf(key) >= 0) {
+                            diags = diags.concat([mkDiag(f.path, ep.opener, "E-ENDPOINT-ROUTE-DUPLICATE", "a second `<endpoint path=\"" + ep.path + "\" method=\"" + ep.method + "\">` — one path and method has one handler (§61.7); give this endpoint another path or method, or merge its arms into the first")])
+                        }
+                        seen = seen.concat([key])
+                    }
+                    diags = diags.concat(endpointNoValueDiags(g, f.path, ep))
+                    const ra: REpAccepts = endpointAccepts(g, f.path, ep)
+                    diags = diags.concat(ra.diags)
+                    const es: Sym | not = ra.sym
+                    if (es is given) {
+                        const ad: Diag[] = endpointArmDiags(g, f.path, ep, es)
+                        diags = diags.concat(ad)
+                        if (!hasErrorDiag(diags.slice(d0)) && ep.top && ep.path != "" && ep.method != "") {
+                            out = out.concat([{ path: ep.path, method: ep.method, accepts: es, arms: coreEpArms(g, f.path, ep, es), file: f.path }])
+                        }
                     }
                 }
             }
         }
         return { diags: diags, eps: out }
+    }
+
+    // s478-ruled-endpoint — §61.2 (S478 open-Qs ruling (user-voice), item 38): "An arm
+    // whose body has no value — a `:`-shorthand or bare body that is a call of a function
+    // returning nothing (`void`, §18.3) — is `E-ENDPOINT-ARM-NO-VALUE` (§61.9) … It is NOT
+    // read as a silent 204; the arm that answers 204 is the self-closing `<Variant/>`".
+    // The arm's desugared function (`return <body>`) is void exactly when its body is a
+    // call of a void function (voidFns: `return f()` of a void `f` passes `void` on).
+    // Anchored at the body, so epRetFiles's not-proven-type refusal stays quiet (one
+    // report per fault).
+    fn endpointNoValueDiags(g: Globals, file: string, ep: AEndpoint) -> Diag[] {
+        let out: Diag[] = []
+        for (const a of ep.arms) {
+            const body: AExpr | not = a.body
+            if (a.fn != "" && body is given) {
+                for (const f of g.fns) {
+                    if (f.info.file == file && f.info.name == a.fn && isVoidFn(g, f.info.sym.id)) {
+                        out = out.concat([mkDiag(file, body.span, "E-ENDPOINT-ARM-NO-VALUE", "the `<" + a.variant + ">` arm of this `<endpoint>` has no value — its body calls a function that returns nothing, and §61.5 answers with the arm's value (§61.2). Return a value from that function, or write the self-closing `<" + a.variant + "/>` arm for a 204 No Content answer")])
+                    }
+                }
+            }
+        }
+        return out
     }
 
     // s478 — a synthesized `<endpoint>` arm function (parse.scrml endpointDesugar)
@@ -49055,12 +49190,18 @@ ${
     // unreserved characters (RFC 3986 `A-Z a-z 0-9 - . _ ~`) and `/`, with no empty,
     // `.` or `..` segment (the request's URL is normalized before it is matched, so
     // such a path would never match), outside the compiler's own `/_scrml/` routes.
+    // §61.7 (S478 open-Qs ruling (user-voice), item 34): the reserved prefixes — why `p`
+    // is under one, else "". (#1928 fix r1 MED-1 — §38.1: "a server-side upgrade route at
+    // `/_scrml_ws/<name>`": the prefix is the compiler's channel mount.)
+    fn endpointReservedWhy(p: string) -> string {
+        if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
+        if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
+        return ""
+    }
+
+    // §61.7 (item 37): why `p` is outside the `path=` grammar, else "".
     fn endpointPathRefusal(p: string) -> string {
         if (p.substring(0, 1) != "/") return "it does not begin with `/`"
-        if (p == "/_scrml" || p.indexOf("/_scrml/") == 0) return "`/_scrml/` is where the compiler mounts its own routes (§12.3)"
-        // s478 #1928 fix r1 (MED-1) — §38.1: "a server-side upgrade route at `/_scrml_ws/<name>`":
-        // the prefix is the compiler's channel mount, reserved like `/_scrml/`
-        if (p == "/_scrml_ws" || p.indexOf("/_scrml_ws/") == 0) return "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"
         let i = 0
         while (i < p.length) {
             const c: int = p.charCodeAt(i)
@@ -49159,7 +49300,9 @@ ${
                     // review #1916 L1: §41.13 / §61.3 — the request's `tag` key names the
                     // variant ("a JSON object whose `tag` field names the variant"), so a
                     // payload field of that name can never carry a value of its own
-                    out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value; rename the field (INTERIM — the SPEC names no code for it, g-boot-endpoint-s478)")])
+                    // S478 open-Qs ruling (user-voice), item 40 — §61.3: "An `accepts=` enum …
+                    // with a variant payload field named `tag` is `E-PARSEVARIANT-TAG-FIELD`"
+                    out = out.concat([mkDiag(file, ep.opener, "E-PARSEVARIANT-TAG-FIELD", "the payload field `" + v.sym.hint + ".tag` of `" + es.hint + "` shares its name with the request's variant discriminator — §61.3 decodes the body via parseVariant (§41.13), whose `tag` key names the variant, so this field could never carry a value of its own; rename the field")])
                 } else if (!isWirePrim(fd.ty)) {
                     out = out.concat([mkDiag(file, ep.opener, "E-BOOTSTRAP-UNSUPPORTED", "the payload field `" + v.sym.hint + "." + fd.sym.hint + "` of `" + es.hint + "` is of a type the bootstrap's `<endpoint>` request decode does not read — it decodes `int`, `number`, `string` and `bool` fields (§41.13: parseVariant \"does NOT auto-recurse into payload fields whose type is itself an enum\"; INTERIM, g-boot-endpoint-s478)")])
                 } else if (bound.indexOf(k) < 0 && !plainFieldType(src, v.sym.hint, fi)) {
@@ -49356,7 +49499,7 @@ ${
                             if (tn != "") {
                                 reps = reps.concat([{ fn: a.fn, decls: [], root: tn }])
                             } else if (!epErrorWithin(tp.diags, f.path, body.span)) {
-                                diags = diags.concat([mkDiag(f.path, body.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's value has no proven type the bootstrap can serialize — §61.5 serializes the arm's typed value-return; the bootstrap builds an `int`, `number`, `string` or `bool` value, a value of a type declared in this file, or an object literal of those (INTERIM, g-boot-endpoint-s478). A call of a function that returns nothing has no value: use the self-closing `<V/>` arm for a 204")])
+                                diags = diags.concat([mkDiag(f.path, body.span, "E-BOOTSTRAP-UNSUPPORTED", "this `<endpoint>` arm's value has no proven type the bootstrap can serialize — §61.5 serializes the arm's typed value-return; the bootstrap builds an `int`, `number`, `string` or `bool` value, a value of a type declared in this file, or an object literal of those (INTERIM, g-boot-endpoint-s478)")])
                             }
                         }
                     }
