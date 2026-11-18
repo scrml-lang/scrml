@@ -12,5 +12,5 @@ Gaps: g-boot-channel-op-order-joiner-s478, g-boot-channel-derived-write-resend-s
 5. Tutorial §8, known-gaps markers, PR.
 
 ## Status
-- [ ] 1 SPEC  - [ ] 2 relay  - [ ] 3 client  - [ ] 4 tests  - [ ] 5 docs/PR
+- [x] 1 SPEC  - [x] 2 relay  - [x] 3 client  - [x] 4 tests (channel-ops-s478 H–K; 35 red on b04fdc27a)  - [ ] 5 docs/PR
 Base conformance (b04fdc27a): PASS 614 FAIL 18 CRASH 0 (~/.cache/scrml/review/s478-ruled-channel-sync2/conf-base-cases.json)

@@ -1430,7 +1430,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
   const gate = tenantGate(host, [...new Set(conns)]);   // s474 r1: two scopes on one database are one connection
   const byChannel = new Map();
   for (const ch of channels) byChannel.set(CHANNEL_PREFIX + ch.name, ch);
-  const websocket = channelSockets(host);
+  const websocket = channelSockets(host, host.channelLog ?? {});
   return {
     routes: routes.map((r) => ({ path: r.path, method: "POST" })).concat(endpoints.map((ep) => ({ path: ep.path, method: ep.method }))).concat(channels.map((ch) => ({ path: CHANNEL_PREFIX + ch.name, method: "GET" }))),
     websocket,
@@ -1518,9 +1518,23 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 // other frame closes the connection (1003 / 1007 / 1008 / 1009) and is relayed to no
 // one. Each channel publishes on its own topic key (`[name, topic]`), so two channels
 // naming one `topic=` never exchange frames.
+//   S478 open-Qs ruling (user-voice), items 50–51 (s478-ruled-channel-sync2), §38.4.2:
+//   "A frame that passes is given the channel's next SEQUENCE NUMBER (1 for the channel's first
+//   relayed frame, then 2, 3, … with no gap …) and is relayed RE-ENCODED from the decoded payload
+//   to EVERY subscriber of the channel, its sender included" — `__own: true` on the sender's copy.
+//   "The relay SHALL keep, per channel, a log of the frames it has relayed … When a client
+//   subscribes … the relay SHALL send it, before any other frame, ONE replay message" — `__replay`,
+//   sent in `open` before the socket subscribes, so every live frame it gets follows the log.
+//   "A channel's log SHALL hold at most 10,000 frames and at most 8,388,608 characters … A frame
+//   that would take the log past either bound is still relayed live, but the log is TRUNCATED: the
+//   relay drops the whole log, and from then on every replay message … says `__complete: false`."
+//   The log is a FRAME log (§38.4, amended): the relay never applies a frame to a value. Its
+//   state lives per `server()` call (channelSockets), never at module scope.
 // ---------------------------------------------------------------------------
 const CHANNEL_PREFIX = "/_scrml_ws/";
 export const CHANNEL_MAX_FRAME = 65536;
+export const CHANNEL_MAX_LOG_FRAMES = 10000;
+export const CHANNEL_MAX_LOG_CHARS = 8388608;
 
 export function channel(desc) {
   const cells = new Map();
@@ -1611,20 +1625,52 @@ function channelFrame(ch, raw) {
   } else {
     return { code: 1008, why: `a __sync whose __op the server does not relay` };
   }
-  return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __op: op, __val: wire }) };
+  return { key: v.__key, op, wire };
 }
 
-function channelSockets(host) {
+function channelSockets(host, limits = {}) {
+  // `host.channelLog` (a test seam) may only LOWER the §38.4.2 bounds, never raise them
+  const lower = (v, max) => (Number.isSafeInteger(v) && v >= 0 && v < max ? v : max);
+  const maxFrames = lower(limits.frames, CHANNEL_MAX_LOG_FRAMES);
+  const maxChars = lower(limits.chars, CHANNEL_MAX_LOG_CHARS);
+  // per channel (its topic key): the last sequence number and the frame log (null once truncated)
+  const relays = new Map();
+  const relayOf = (ch) => {
+    let r = relays.get(ch.key);
+    if (r === undefined) { r = { seq: 0, log: [], chars: 0 }; relays.set(ch.key, r); }
+    return r;
+  };
   return {
     maxPayloadLength: CHANNEL_MAX_FRAME * 4,
     open(ws) {
-      ws.subscribe(ws.data.scrmlChannel.key);
+      const ch = ws.data.scrmlChannel;
+      const r = relayOf(ch);
+      const frames = r.log === null ? "" : r.log.join(",");
+      ws.send(`{"__type":"__replay","__complete":${r.log !== null},"__seq":${r.seq},"__frames":[${frames}]}`);
+      ws.subscribe(ch.key);
     },
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
       const f = channelFrame(ch, raw);
-      if (f.text === undefined) return closeSocket(host, ws, f.code, f.why);
-      ws.publish(ch.key, f.text);
+      if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
+      const r = relayOf(ch);
+      r.seq += 1;
+      const body = { __type: "__sync", __seq: r.seq, __key: f.key, __op: f.op, __val: f.wire, __own: false };
+      const peer = JSON.stringify(body);
+      body.__own = true;
+      const own = JSON.stringify(body);
+      if (r.log !== null) {
+        if (r.log.length + 1 > maxFrames || r.chars + peer.length > maxChars) {
+          r.log = null;
+          r.chars = 0;
+          logLine(host, `scrml server: ${CHANNEL_PREFIX}${ch.name} — the frame log passed its bound (${maxFrames} frames / ${maxChars} characters) and was truncated; a client that connects from now on is told the log is incomplete (§38.4.2)`);
+        } else {
+          r.log.push(peer);
+          r.chars += peer.length;
+        }
+      }
+      ws.publish(ch.key, peer);
+      ws.send(own);
     },
     close(ws) {
       try { ws.unsubscribe(ws.data.scrmlChannel.key); } catch { /* the socket is gone */ }
