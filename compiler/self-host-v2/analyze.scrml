@@ -13829,7 +13829,16 @@ ${
         const from: int = variantIndex(env.g.types, g.enumSym, sc.name)
         if (from < 0) return not
         if (to == from) {
-            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1). Informational: remove the write, or check its target if a state change was expected")
+            // r1 (#1972 N2): on a `debounced=` / `throttled=` engine the write is not a no-op AT
+            // the write — §6.13.5: "A write to it is held by the timing rule like any other local
+            // write, and the transition happens when the held value commits … A self-write at
+            // commit is a no-op (§51.0.F.1)." It replaces a write already held in the window
+            // (§6.13.1 debounce: "Each new write within the window restarts the timer"; §6.13.2 throttle: "the most recent suppressed value is held"), so the message says so.
+            let what: string = "a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1)"
+            if (p.decl.sym.id == env.g.program.id && isTimedProgramCell(env.g, f)) {
+                what = "`@" + f.sym.hint + "` is `debounced=` / `throttled=`, so the write is HELD, not dropped: it replaces any write already held in the window, and only when it commits is it judged — a no-op then if `@" + f.sym.hint + "` still holds `." + lit + "`, not a `rule=` violation (§6.13.5, §51.0.F.1)"
+            }
+            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — " + what + ". Informational: remove the write, or check its target if a state change was expected")
             return { check: Check.RuntimeEdge, st: st2 }
         }
         let targets: int[] = []

@@ -88,6 +88,22 @@ describe("static check of LITERAL held writes (§6.13.5) — E-ENGINE-INVALID-TR
     const src = ENGINE("debounced=1s", "", "", `<button onclick=\${@phase = .Done}>x</>`);
     expect(diags(src)).toEqual([["E-ENGINE-INVALID-TRANSITION", "Error"]]);
   });
+  // r1 (#1972 N2): the inside-state-child self-write lint names the HELD write on a timed engine
+  // (§6.13.5 — held, replaces a pending held write, judged at commit), not "a runtime no-op".
+  for (const timing of ["debounced=1s", "throttled=1s"]) {
+    test(`inside a state-child self-write on a ${timing} engine: the Info lint says the write is held, not a no-op`, () => {
+      const r = run(ENGINE(timing, "", "", `<button onclick=\${@phase = .Idle}>x</>`));
+      expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-ENGINE-SELF-WRITE-DETECTED", "Info"]]);
+      expect(r.diags[0].message).toContain("HELD, not dropped");
+      expect(r.diags[0].message).toContain("replaces any write already held");
+      expect(r.diags[0].message).not.toContain("a self-write is a runtime no-op");
+    });
+  }
+  test("the same self-write on an UNTIMED engine keeps the runtime-no-op message", () => {
+    const r = run(ENGINE("", "", "", `<button onclick=\${@phase = .Idle}>x</>`));
+    expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-ENGINE-SELF-WRITE-DETECTED", "Info"]]);
+    expect(r.diags[0].message).toContain("a self-write is a runtime no-op");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -221,9 +237,9 @@ describe("throttled engine — leading commit in the handler, trailing commit in
 });
 
 // r1 (F1, PR #1972 review): a commit whose downstream EFFECT throws still committed — the value
-// landed, so it is an emit and (on a throttle) opens the window. §6.13.3: "a `throttled=` cell
-// emits at most once per window"; the window is opened by the emit, not undone by an effect that
-// throws during it. Only a REFUSED edge (an engine's commit-time `rule=` check) opens no window.
+// landed, so it is an emit and (on a throttle) opens the window. §6.13.2: "subsequent writes within
+// `DURATION` of the last emit are suppressed but the most recent suppressed value is held" — the
+// window runs from the emit, and an effect that throws during the emit does not undo it. Only a REFUSED edge (an engine's commit-time `rule=` check) opens no window.
 // The effect error itself surfaces as on base: thrown into the handler for a leading commit, out
 // of the timer for a trailing one — never swallowed into the commit gate's refusal report.
 // Red on c773540cb (head before r1): the throttle cases commit every write.
