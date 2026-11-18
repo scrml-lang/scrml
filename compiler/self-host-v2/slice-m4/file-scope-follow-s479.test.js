@@ -100,6 +100,30 @@ describe("A — item 1: a tool's functions may write a file-scope `let` (§7.6 r
 `);
     expect(codes(r)).toEqual(["E-FILE-SCOPE-LET-SERVER-WRITE"]);
   });
+
+  // r1 (#1975 review F1) — the ruling's reason ("a tool has no requests and no other users")
+  // does not hold for a §64.9 `serve=` tool, which mounts routes: rule (c) stays, whatever the
+  // `serve=` value (beside the serve refusal itself). RED on edfae4e6: only the serve refusal.
+  const SERVED = (attr) => `<program kind="tool" lang="js" ${attr}>
+    \${
+        let n = 0;
+        function bump() { n = n + 1; }
+    }
+    function main(args: string[]) -> number {
+        bump();
+        return n;
+    }
+</program>
+`;
+  for (const [what, attr, serveCode] of [
+    ["a well-formed `serve=7878`", "serve=7878", "E-BOOTSTRAP-UNSUPPORTED"],
+    ["a misshapen `serve=\"x\"`", `serve="x"`, "E-TOOL-SERVE-PORT-INVALID"],
+  ]) {
+    test(`a \`serve=\` tool (${what}) is NOT exempt: E-FILE-SCOPE-LET-SERVER-WRITE beside the serve refusal`, () => {
+      const r = run([{ path: "t.scrml", src: SERVED(attr) }]);
+      expect(codes(r).sort()).toEqual([serveCode, "E-FILE-SCOPE-LET-SERVER-WRITE"].sort());
+    });
+  }
 });
 
 // =============================================================================
@@ -142,6 +166,47 @@ describe("B — item 2: E-SCOPE-001 through a call, as for the direct read (§7.
     expect(codes(r)).toEqual([]);
     await loadProgram(r.core, "fsf-early-chain");
     expect(textOf("#v")).toBe("12");
+  });
+});
+
+// r1 (#1975 review F2) — E-SCOPE-001 is a permanent language code: it is reported only for a use
+// reached through DIRECT calls. A use reached only through a function value (an arrow function,
+// a block lambda) or a nested function declaration is not proven to run at module
+// initialization (`const g = () => Z;` stored, never called, is legal), so it keeps the by-name
+// INTERIM refusal (E-BOOTSTRAP-UNSUPPORTED, g-boot-file-scope-init-residue-s479) — never admitted
+// (a function value that IS called at init would read `Z` in its temporal dead zone).
+// RED on edfae4e6: E-SCOPE-001 for every "INTERIM" case below.
+describe("B2 — r1: E-SCOPE-001 only for a direct reach; a function value's reach stays INTERIM", () => {
+  const interim = {
+    "a stored arrow function reading `Z`": "    function mk() -> int { const g = () => Z; return 1; }\n    const A: int = mk();\n    const Z: int = 2;",
+    "a stored arrow function calling a function that reads `Z`": "    function h() -> int { return Z; }\n    function mk() -> int { const g = () => h(); return 1; }\n    const A: int = mk();\n    const Z: int = 2;",
+    "a nested function reading `Z`, never called": "    function mk() -> int { function inner() -> int { return Z; } return 1; }\n    const A: int = mk();\n    const Z: int = 2;",
+    "a callback handed to a sequence method (called now — still not E-SCOPE-001's proof)": "    const XS: int[] = [1, 2];\n    function mk() -> int { const ys: int[] = XS.map(x => x + Z); return ys.length; }\n    const A: int = mk();\n    const Z: int = 2;",
+  };
+  for (const [what, logic] of Object.entries(interim)) {
+    test(`${what}: E-BOOTSTRAP-UNSUPPORTED by name (INTERIM), not E-SCOPE-001`, () => {
+      const r = one(logicProg(logic));
+      expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags[0].message).toContain("g-boot-file-scope-init-residue-s479");
+      expect(r.diags[0].message).toContain("`Z`");
+    });
+  }
+
+  const proven = {
+    "a direct read beside a stored arrow function": "    function mk() -> int { const g = () => Z; return Z + 1; }\n    const A: int = mk();\n    const Z: int = 2;",
+    "a nested function that is called": "    function mk() -> int { function inner() -> int { return Z; } return inner(); }\n    const A: int = mk();\n    const Z: int = 2;",
+    // over-approximation, pinned: `f(false)` never takes the branch that reads `Z`, but the
+    // reach is static (gap g-boot-file-scope-init-residue-s479, the r1 note)
+    "a read in a branch the call does not take (`f(false)`)": "    function f(b: boolean) -> int { if (b) { return Z; } return 0; }\n    const A: int = f(false);\n    const Z: int = 2;",
+  };
+  for (const [what, logic] of Object.entries(proven)) {
+    test(`${what}: E-SCOPE-001`, () => {
+      expect(codes(one(logicProg(logic)))).toEqual(["E-SCOPE-001"]);
+    });
+  }
+
+  test("the stored arrow function with `Z` declared BEFORE `A` compiles", () => {
+    expect(codes(one(logicProg("    const Z: int = 2;\n    function mk() -> int { const g = () => Z; return 1; }\n    const A: int = mk();")))).toEqual([]);
   });
 });
 

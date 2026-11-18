@@ -33,3 +33,8 @@ module/file-scope-let-foreign-write-{named,alias,namespace}-pos, -neg; module/e-
 
 ## Todo
 - commit (hook), PR.
+
+## r1 (#1975 review) — branch s479-file-scope-follow-r1
+- F1: rule (c) tool exemption only for a tool WITHOUT `serve=` (any form) — analyze `fileIsServelessTool`; §7.6 + §34 row qualified (§64.9, g-boot-tool-serve-unbuilt-s477 note). Tests A (2), red on edfae4e6.
+- F2: E-SCOPE-001 only for a direct reach (fileScopePass `usesD`: no function value / nested fn decl on the way); a reach only through a function value keeps the by-name INTERIM refusal. Tests B2 (4 INTERIM red on edfae4e6; 3 E-SCOPE-001 + 1 clean). guardedBranch stays E-SCOPE-001 (over-approx noted in g-boot-file-scope-init-residue-s479).
+- F3: merge origin/main (#1974 duplicate gap ids — keep this PR's resolved entries).

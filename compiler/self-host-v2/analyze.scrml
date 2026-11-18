@@ -10672,7 +10672,7 @@ ${
     //   (c) "A server function SHALL NOT write a file-scope `let`,
     //       `E-FILE-SCOPE-LET-SERVER-WRITE`": a `let` written — `=`, a compound assignment,
     //       `++` / `--`, a tape edit (`append` …) — by a server-placed function's body or by
-    //       any function it reaches (the call runs on the server, in the server artifact — the static call graph §12.4 judges a server function by). Exempt: a `kind="tool"` program (§64; ruling #1962 item 1).
+    //       any function it reaches (the call runs on the server, in the server artifact — the static call graph §12.4 judges a server function by). Exempt: a `kind="tool"` program without `serve=` (§64; ruling #1962 item 1; a §64.9 `serve=` tool answers requests and is not exempt — #1975 review F1).
     // And §48.3.3 (E-FN-003): "A `fn` body SHALL NOT write to any variable declared outside
     // the `fn`'s own scope boundary. This includes: Assignment (`x = value`) where `x` is
     // declared in an enclosing `${}` logic context or file scope."
@@ -10695,11 +10695,20 @@ ${
         let ownB: FxAtom[][] = []
         let ownS: FxAtom[][] = []
         let fnE: int[][] = []
+        // s479 r1 (#1975 review F2) — the DIRECT dimension: the bindings a body uses, and the
+        // functions it calls, OUTSIDE its function values (an arrow function, a block lambda) and
+        // its nested function declarations (deferredSpansIn) — code that runs when the body runs.
+        // A use reached only through a function value may never run at module initialization
+        // (`const g = () => Z;` stored, not called): E-SCOPE-001 is not proven for it.
+        let ownBD: FxAtom[][] = []
+        let fnED: int[][] = []
         let i: int = 0
         for (const c of sum.nodes) {
             fnE = fnE.concat([refTargets(sum.nodes, c.f.scan.refs, false)])
             let ws: LetW[] = []
             let bs: FxAtom[] = []
+            let bd: FxAtom[] = []
+            let defer: ASpan[] = []
             const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym)
             if (c.kind == CallableK.KFn && fsrc is given) {
                 ws = letWritesIn(t, fsrc.f.body, lets, fsrc.info.file)
@@ -10708,7 +10717,15 @@ ${
                     bs = bs.concat([ownAtom("b:" + id, i, k)])
                     k = k + 1
                 }
+                defer = deferredSpansIn(fsrc.f.body)
+                let kd: int = 0
+                for (const id of bindingUsesDirect(t, fsrc.f.body, binds, defer)) {
+                    bd = bd.concat([ownAtom("b:" + id, i, kd)])
+                    kd = kd + 1
+                }
             }
+            ownBD = ownBD.concat([bd])
+            fnED = fnED.concat([directCallTargets(sum.nodes, c.f.scan.refs, defer)])
             let wa: FxAtom[] = []
             let k2: int = 0
             for (const w of ws) {
@@ -10726,6 +10743,7 @@ ${
         }
         const writes: FxAtom[][] = closeDim(ownW, fnE)
         const uses: FxAtom[][] = closeDim(ownB, fnE)
+        const usesD: FxAtom[][] = closeDim(ownBD, fnED)
         const servers: FxAtom[][] = closeDim(ownS, fnE)
         // §48.3.3 — a `fn` body's own write of a file-scope `let`
         for (const fs of g.fns) {
@@ -10737,10 +10755,16 @@ ${
         }
         // (c) — a server-placed function's body, or a function it reaches, writes a file-scope `let`.
         // s479 (s479-file-scope-follow; ruling #1962 item 1) — §7.6 rule (c): "A `kind="tool"`
-        // program (§64) is exempt from this rule … a file-scope `let` its functions write is the
-        // one process's own state, not state shared across requests": a tool's every `function`
+        // program (§64) with no `serve=` attribute has no client boundary (§64.5.1), no requests
+        // and no other users: a file-scope `let` its functions write is the one process's own
+        // state, not state shared across requests, so rule (c) does not apply to it. A
+        // `kind="tool"` program WITH `serve=` (§64.9, in any form …) is NOT exempt": a tool's every `function`
         // is server-placed (FnFacts.tool), and none of them is refused here.
-        const exempt: boolean = fileIsTool(g, g.entry)
+        // s479 r1 (#1975 review F1) — only a tool WITHOUT `serve=`: the ruling's reason ("a tool
+        // has no requests and no other users") does not hold for a §64.9 `serve=` tool, which
+        // mounts routes and answers requests — a `serve=` in any form (well-formed or not) keeps
+        // rule (c) (fail closed; g-boot-tool-serve-unbuilt-s477).
+        const exempt: boolean = fileIsServelessTool(g, g.entry)
         let seen: string[] = []
         let j: int = 0
         for (const c of sum.nodes) {
@@ -10762,7 +10786,7 @@ ${
         // (a) / (b) — what each initializer reaches through the functions it names
         let ci: int = 0
         for (const kc of g.consts) {
-            if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, binds, kc, ci))
+            if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, usesD, binds, kc, ci))
             ci = ci + 1
         }
         return out
@@ -10814,9 +10838,13 @@ ${
     }
 
     // The initializer of the constant at index `ci` of g.consts: (a), then the (b) refusals.
-    fn initReachDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][], servers: FxAtom[][], uses: FxAtom[][], binds: int[], kc: ConstInfo, ci: int) -> Diag[] {
+    fn initReachDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][], servers: FxAtom[][], uses: FxAtom[][], usesD: FxAtom[][], binds: int[], kc: ConstInfo, ci: int) -> Diag[] {
         const scan: BodyScan = scanExpr({ t: t, file: kc.file }, kc.init, emptyScan())
         const what: string = bindingWhat(kc)
+        const initDefer: ASpan[] = deferredSpansInExpr(kc.init)
+        // s479 r1 (#1975 review F2): a later binding reached only through a function value —
+        // the first such, refused by name after every ref is judged (a proven reach wins)
+        let lamLate: Diag | not = not
         if (scan.unproven.length > 0) {
             const u: USite = scan.unproven[0]
             return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " makes a call the analysis cannot resolve (" + u.what + ") — it runs at module initialization (§7.6 rule (b)), and the bootstrap evaluates only a call whose callee it knows there (INTERIM, g-boot-file-scope-init-residue-s479)", u.file, u.span)]
@@ -10837,7 +10865,14 @@ ${
                     return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which reaches client-only state (`" + sum.nodes[ca.root].label + "` " + clientWhatAt(sum.nodes[ca.root].f, ca.pos) + ") — the initializer runs at module initialization in every artifact that reads the binding (§7.6 rule (b)): before the program instance exists, and on the server, which has no cells or DOM. The bootstrap does not evaluate it there (INTERIM, g-boot-file-scope-init-residue-s479); read the cell where the value is needed", r.file, r.span)]
                 }
                 if (sum.routeOpen[j].length > 0) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which makes a call the analysis cannot resolve — the bootstrap evaluates at module initialization (§7.6 rule (b)) only code whose callees it knows (INTERIM, g-boot-file-scope-init-residue-s479)", r.file, r.span)]
-                for (const ua of uses[j]) {
+                // s479 r1 (#1975 review F2) — E-SCOPE-001 only for a use reached through DIRECT
+                // calls (usesD: no function value, no nested declaration on the way; the call
+                // itself not inside a function value of the initializer, nor a function named
+                // without a call). A use reached only through a function value is not proven to
+                // run at module initialization — refused by name below, INTERIM.
+                let direct: FxAtom[] = []
+                if (!r.asValue && !spanInAny(r.span, initDefer)) direct = usesD[j]
+                for (const ua of direct) {
                     const used: int = atomBinding(ua.key)
                     const ui: int = constIndexOf(g, used)
                     if (ui >= ci) {
@@ -10857,9 +10892,81 @@ ${
                         return [newDiag("E-SCOPE-001", un + " is used before it is initialized — the initializer of " + what + " calls `" + c.label + "`" + via + " which uses " + un + ", and " + un + self + ", so it is not initialized when this initializer runs at module initialization (§7.6: an initializer reads only the file-scope bindings initialized before it, directly or through the functions it calls). " + fix, r.file, r.span)]
                     }
                 }
+                if (lamLate is not) {
+                    for (const ua of uses[j]) {
+                        const used: int = atomBinding(ua.key)
+                        const ui: int = constIndexOf(g, used)
+                        if (ui >= ci && lamLate is not) {
+                            const uk: ConstInfo | not = constOfSym(g, used)
+                            let un: string = "a file-scope binding"
+                            if (uk is given) un = "`" + uk.name + "`"
+                            let self: string = " is declared after `" + kc.name + "`"
+                            if (ui == ci) self = " is the binding being initialized"
+                            lamLate = newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which uses " + un + " only inside a function value (an arrow function, a block lambda) or a nested function — and " + un + self + ", so it is not initialized when this initializer runs at module initialization. Whether that code runs then (a function value may be stored and called later, or handed to a method that calls it now) is not decided by the bootstrap, so it refuses this by name (INTERIM, g-boot-file-scope-init-residue-s479; §7.6 rule (b)). Declare " + un + " before `" + kc.name + "`", r.file, r.span)
+                        }
+                    }
+                }
             }
         }
+        if (lamLate is given) return [lamLate]
         return []
+    }
+
+    // s479 r1 (#1975 review F2) — the spans of a body whose code does NOT run when the body
+    // runs: a function value (an arrow function, a block lambda — it runs when it is called, if
+    // ever) and a nested function declaration (its own callable: a call of it is an edge).
+    fn deferredSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) {
+                out = out.concat([lf.span])
+            } else {
+                for (const e of stmtExprs(s)) { out = out.concat(deferredSpansInExpr(e)) }
+                for (const nb of nestedBlocks(s)) { out = out.concat(deferredSpansIn(nb)) }
+            }
+        }
+        return out
+    }
+
+    fn deferredSpansInExpr(e: AExpr) -> ASpan[] {
+        if (isLambda(e)) return [e.span]
+        let out: ASpan[] = []
+        for (const x of exprKids(e)) { out = out.concat(deferredSpansInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(deferredSpansIn(b)) }
+        return out
+    }
+
+    fn spanInAny(s: ASpan, spans: ASpan[]) -> boolean {
+        for (const d of spans) {
+            if (d.start <= s.start && s.end <= d.end) return true
+        }
+        return false
+    }
+
+    // bindingUsesIn, outside the spans `defer` (deferredSpansIn).
+    fn bindingUsesDirect(t: Tables, b: ABlock, binds: int[], defer: ASpan[]) -> int[] {
+        let out: int[] = []
+        for (const e of nameExprsIn(b)) {
+            const f: NameFact | not = nameFact(t.names, e.nid)
+            const id: int = constSymOfFact(f)
+            if (id >= 0 && binds.indexOf(id) >= 0 && out.indexOf(id) < 0 && !spanInAny(e.span, defer)) out = out.concat([id])
+        }
+        for (const w of letWritesIn(t, b, binds, "")) {
+            if (out.indexOf(w.sym) < 0 && !spanInAny(w.span, defer)) out = out.concat([w.sym])
+        }
+        return out
+    }
+
+    // The callables a body CALLS outside the spans `defer` (a function named without a call
+    // is no edge: it is a value, not a run).
+    fn directCallTargets(nodes: Callable[], refs: FnRef[], defer: ASpan[]) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (j >= 0 && !r.asValue && !spanInAny(r.span, defer)) out = out.concat([j])
+        }
+        return out
     }
 
     fn atomBinding(key: string) -> int { return Number(key.substring(2)) }
@@ -13423,6 +13530,27 @@ ${
                         const k: string | not = quotedAttr(p.attrs, "kind")
                         if (k is given) return k == "tool"
                         return false
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    // s479 r1 (#1975 review F1) — is `file`'s top-level `<program>` a `kind="tool"` program
+    // with NO `serve=` attribute, in any form (§64.9)? Such a tool has no requests (§7.6 rule
+    // (c)'s tool exemption); a `serve=` tool answers requests, so it is not exempt.
+    fn fileIsServelessTool(g: Globals, file: string) -> boolean {
+        if (!fileIsTool(g, file)) return false
+        for (const fa of g.files) {
+            if (fa.path == file) {
+                for (const it of fa.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const a of p.attrs) {
+                            if (a.name == "serve") return false
+                        }
+                        return true
                     }
                 }
             }
