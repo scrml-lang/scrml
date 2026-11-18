@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S478 — 2026-11-14 → 11-17 (bryan · theRog) — 48 PRs (+2 queued): the bootstrap reads `<schema>` / typed `?{}` / raw DDL, `<endpoint>`, `<match for=>`, `?.`, event listeners, markup in `${ if }`, bare + `transaction` blocks, destructuring, block lambdas, refinement runtime checks, print; conformance PASS 336 → 599
+
+- **Bootstrap language:** re-exports + import cycles (#1863); attribute-value forms (#1865); durations, debounced=/throttled=, `<onIdle>` (#1875); body-top statements + display literals (#1876, #1886); `${}` hoisting (#1880); markup in value positions (#1885); keywordless declarations, §20 built-ins (#1887); refinement types + runtime checks (#1888, #1911); print/println (#1900); object destructuring (#1901); block lambdas + function expressions (#1905); `<schema>` §39 (#1908), typed SELECT (#1915), raw CREATE TABLE (#1925); `<match for= on=>` (#1909); `<endpoint>` §61 (#1916); `T | not` member access E-TYPE-046 (#1917) and `?.` (#1927); `${(e) => …}` listeners + E-EVENT-CONTROL-AFTER-AWAIT (#1918); markup in `${ if … }` (#1919); bare blocks + `transaction { }` (#1920). Queued: `<channel>` §38 (#1928), function types/values (#1929).
+- **Rulings built:** negative `insert` literal (#1846); bounded branch literals option A (#1850, #1857); pending `[replace]` + reset/reload order (#1852, #1860, #1864).
+- **impl#1 (bootstrap build tool only):** text rewrites skip string literals (#1853, #1869); the bootstrap workarounds removed (#1862, #1872).
+- **Conformance:** `;` migration, honest fixtures, false-positive FAILs (#1866 #1871 #1879 #1895 #1897); PASS 336 / FAIL 260 → 599 / 18, CRASH 0.
+- **Tooling:** hook shard pollution, memory ceiling, pre-push exit (#1855).
+- **Rulings (user-voice §S478):** S477 Q1/Q2; bounded branches option A, rule 4 reload at the write; body-top Qs 1–4; raw-DDL column types (E-SCHEMA-004; WITHOUT ROWID / STRICT admitted).
+- **Lessons:** `pretest` exits 0 on a failed bootstrap bundle — `(fail) (unnamed)` files mean a build break, not load; grep constructions of any variant that gained a field after a merge; keep the main checkout on current main (hooks run from it).
+
 ## S476 + S477 — 2026-11-08 → 11-14 (bryan · theRog) — 13 code/records PRs: bootstrap `<page>`, `kind="tool"`, nested functions, bounded tapes + `insert`, tape forms, pending-cell residue; bootstrap compile near-linear (2,720-line app 16.6 s → 1.0 s)
 
 - **Bootstrap language:** `<page>` inside `<program>` (#1821); call and literal loop sources keep their element type (#1823); `<program kind="tool">` per §64 (#1828); nested function declarations, §7.3.1 (#1831); `): T` return named as E-PARSE-FN (#1841, in queue at wrap).
