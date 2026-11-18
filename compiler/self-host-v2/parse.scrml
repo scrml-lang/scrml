@@ -56,6 +56,7 @@ ${
     import { SchemaErr, SchemaRead, SchemaTable, readSchemaBody, schemaCloseAt } from "./schema.scrml"
     import { logicWriteSink, executableAttrName } from "./url.scrml"
     import { isSurfaceIface } from "./host-surface.scrml"
+    import { isKnownElementName } from "./elements.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -3536,7 +3537,12 @@ ${
         const t: PTok = cur(tp)
         const start: int = t.start
         // s478 — bare markup / an implied-`lift` arm in a body-top logic block (logicBlockTP)
-        if (isLogicRowTok(t)) return logicRowStmt(tp, start, "markup standing as a statement in a `" + interpOpen() + " … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)")
+        // s478 (markup-in-logic) — a bare row of a Tier-0 region (parseTier0 /
+        // parseTier0If): one a value-form branch did not take (§17.6.10.1)
+        if (isBareRowOther(t)) return logicRowStmt(tp, start, notMarkupWhy())
+        if (isBareRowTok(t)) return unrenderedRowStmt(tp, start, false)
+        if (isLocusRow(t)) return misplacedRowStmt(tp, start)
+        if (isLogicRowTok(t)) return logicBareStmt(tp, start, "markup standing as a statement in a `" + interpOpen() + " … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)")
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (isWord(tp, "lin")) return parseLinLocal(tp)   // s471 (§35.2)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
@@ -4285,7 +4291,15 @@ ${
             const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
             return mkS(adv(adv(t)), kw.start, AStmtK.Lift(ALift.LiftNode(stand)))
         }
-        // s478 — `lift <markup>` in a body-top logic block (logicBlockTP)
+        // s478 — `lift <markup>` in a body-top logic block (logicBlockTP). s478
+        // (markup-in-logic): an ELEMENT operand stands as the lift's node, so
+        // analyze judges where the `lift` is (resolveLift: E-SYNTAX-002 in a bare
+        // `function` body, §10.4; refused by name where no Tier-0 loop takes it)
+        if (isLocusRow(nx)) return misplacedRowStmt(adv(t), kw.start)
+        if (nx.cls == TC.Other && nx.v == logicRowMark(false)) {
+            const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
+            return mkS(adv(adv(t)), kw.start, AStmtK.Lift(ALift.LiftNode(stand)))
+        }
         if (isLogicRowTok(nx)) return logicRowStmt(adv(t), kw.start, "lifting MARKUP is in the bootstrap only in a Tier-0 `" + interpOpen() + " for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `" + interpOpen() + " … }` logic block (§10, §17.4) is not")
         if (tk(nx, "<") && nx.cls == TC.Punct) {
             const tn: PTok = peekAt(tp, 2)
@@ -4369,7 +4383,7 @@ ${
     }
 
     fn isLogicRowTok(t: PTok) -> boolean {
-        return t.cls == TC.Other && (t.v == logicRowMark(true) || t.v == logicRowMark(false))
+        return t.cls == TC.Other && (t.v == logicRowMark(true) || t.v == logicRowMark(false) || t.v == logicRowOther() || isLocusRow(t))
     }
 
     fn refusedRowNode(n: ANode) -> boolean {
@@ -4417,7 +4431,15 @@ ${
                 if (text.length > 24 || text.indexOf("\n") >= 0) text = "<…>"
                 // refused: the element itself, or one inside it (`<svg><script>…`) — rejected by §4.17
                 const refused: boolean = refusedRowNode(rn.n) || refusalSince(m.diags, d0)
-                const rt: PTok = { cls: TC.Other, v: logicRowMark(refused), text: text, start: p.end, end: m.pos, line: p.line, bad: "" }
+                let mark: string = logicRowMark(refused)
+                if (!refused && !rowIsElem(rn.n)) mark = logicRowOther()
+                // #1919 review F2: an element that is not markup (a §52 state
+                // type, a `<x> = …` declaration, a §55 compound, a `renders`
+                // clause, a component) — refused by name, as before
+                const lifted: boolean = toks.length > 0 && isLiftWord(toks[toks.length - 1])
+                if (!refused && !lifted && rowIsElem(rn.n) && !rowIsMarkup(rn.n, mp.src, m.pos, toks)) mark = logicRowOther()
+                if (!refused && locusMarkOf(rn.n) != "") mark = locusMarkOf(rn.n)
+                const rt: PTok = { cls: TC.Other, v: mark, text: text, start: p.end, end: m.pos, line: p.line, bad: "" }
                 toks = toks.concat([rt])
                 pos = m.pos
                 depth = p.depth
@@ -4427,19 +4449,221 @@ ${
         return { tp: t, mp: m }
     }
 
+    // s478 (markup-in-logic) — a row whose node is not a markup ELEMENT (a §66
+    // declaration `<x=…/>`, an `<effect>` / `<request>`, …): not markup, so
+    // §17.6.10.1 does not judge it — refused by name as before.
+    fn logicRowOther() -> string { return "logic-row-other" }
+
+    // s478 (markup-in-logic) — a scrml-defined structural element bound to an
+    // owning locus, standing in a logic block. SPEC §4.15: "These element names
+    // are ONLY recognised in their owning loci; e.g., `<onTransition>` is
+    // grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical
+    // only as a child of an engine state-child; `<onIdle>` is grammatical only
+    // at engine root …; `<page>` is grammatical only as a child of `<program>`
+    // … Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED`" (also
+    // `<onchange>`, §33.x, and `<theme>` / `<defaults>`, §65). A logic block is
+    // none of those loci — the specific code, not §17.6.10.1's.
+    fn locusRowPrefix() -> string { return "logic-row-locus:" }
+
+    fn isLocusRow(t: PTok) -> boolean {
+        return t.cls == TC.Other && t.v.startsWith(locusRowPrefix())
+    }
+
+    fn locusTag(tag: string) -> boolean {
+        return tag == "onTransition" || tag == "onTimeout" || tag == "onIdle" || tag == "page" || tag == "onchange" || tag == "theme" || tag == "defaults"
+    }
+
+    // The row mark for an element node: its locus mark when its tag is locus-bound, else "".
+    fn locusMarkOf(n: ANode) -> string {
+        const k: ANodeK = n.k
+        const tag: string = match k {
+            .Elem(e: x) :> x.tag
+            .Text(text: s) :> ""
+            .Interp(e: x) :> ""
+            .DeclNode(d: x) :> ""
+            .Css(c: x) :> ""
+            .Effect(w: x) :> ""
+            .Request(r: x) :> ""
+            .Gather(f: x) :> ""
+            .Run(b: x) :> ""
+        }
+        if (locusTag(tag)) return locusRowPrefix() + tag
+        return ""
+    }
+
+    fn misplacedRowStmt(tp: TP, start: int) -> RStmt {
+        const row: PTok = cur(tp)
+        const tag: string = row.v.substring(locusRowPrefix().length)
+        const t: TP = diagAt(tp, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<" + tag + ">` in a `" + interpOpen() + " … }` logic block — `<" + tag + ">` is a scrml-defined structural element, grammatical only in its owning locus (§4.15); move it there", row)
+        const re: RExpr = mkE(adv(t), start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    // s478 (#1919 review F2) — is the element row MARKUP, which §17.6.10.1
+    // judges ("A markup element in statement position …")? An element of the
+    // §24.1 registry (elements.scrml isKnownElementName: HTML, SVG, MathML, a
+    // custom element), written lower-case first, that is neither followed by
+    // `=` (a `<x> = …` cell / legacy `<query default=…> = "v"` declaration)
+    // nor the operand of a §19.2 `renders` clause. Not markup, so refused by
+    // name as before (INTERIM — the by-name refusal is what BASE gave): a
+    // capitalised §52 state-type declaration (`<Account authority=…> id: number
+    // …</>`), a §55 compound declaration's parent (`<signup> … </>`), and a
+    // component (its name is known only to analysis).
+    fn rowIsMarkup(n: ANode, src: string, end: int, before: PTok[]) -> boolean {
+        const k: ANodeK = n.k
+        const tag: string = match k {
+            .Elem(e: x) :> x.tag
+            .Text(text: s) :> ""
+            .Interp(e: x) :> ""
+            .DeclNode(d: x) :> ""
+            .Css(c: x) :> ""
+            .Effect(w: x) :> ""
+            .Request(r: x) :> ""
+            .Gather(f: x) :> ""
+            .Run(b: x) :> ""
+        }
+        if (tag == "") return false
+        if (declShaped(n)) return false
+        const c0: string = tag.substring(0, 1)
+        if (c0 != c0.toLowerCase()) return false
+        if (!isKnownElementName(tag)) return false
+        if (before.length > 0) {
+            const pv: PTok = before[before.length - 1]
+            if ((pv.cls == TC.Ident || pv.cls == TC.Keyword) && pv.v == "renders") return false
+        }
+        let i: int = end
+        while (i < src.length && (src.substring(i, i + 1) == " " || src.substring(i, i + 1) == "\t" || src.substring(i, i + 1) == "\n" || src.substring(i, i + 1) == "\r")) { i = i + 1 }
+        if (src.substring(i, i + 1) == "=" && src.substring(i + 1, i + 2) != "=") return false
+        return true
+    }
+
+    // A declaration read as an element: a text child that starts with `=` —
+    // an unclosed `<label min(3)> = "hi"` (its `= …` read as the element's
+    // text), or a §55 compound `<form> <name default=…> = "v" … </>` (a
+    // child's `= …`). Markup text does not start with `=`.
+    fn declShaped(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        const kids: ANode[] = match k {
+            .Elem(e: x) :> x.kids
+            .Text(text: s) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: x) :> []
+            .Css(c: x) :> []
+            .Effect(w: x) :> []
+            .Request(r: x) :> []
+            .Gather(f: x) :> []
+            .Run(b: x) :> []
+        }
+        for (const c of kids) {
+            const ck: ANodeK = c.k
+            const txt: string = match ck {
+                .Text(text: s) :> s
+                .Elem(e: x) :> ""
+                .Interp(e: x) :> ""
+                .DeclNode(d: x) :> ""
+                .Css(c: x) :> ""
+                .Effect(w: x) :> ""
+                .Request(r: x) :> ""
+                .Gather(f: x) :> ""
+                .Run(b: x) :> ""
+            }
+            const tt: string = txt.trim()
+            if (tt.startsWith("=") && !tt.startsWith("==")) return true
+            if (declShaped(c)) return true
+        }
+        return false
+    }
+
+    fn notMarkupWhy() -> string {
+        return "this element standing as a statement in a `" + interpOpen() + " … }` logic block is not one the bootstrap reads there (a declaration written as markup — a §52 state type, a `<x> = …` cell, a §55 compound — or a component; §10, §17.6.10.1) — write it where it is read: a declaration at a body top, markup in the body"
+    }
+
+    fn rowIsElem(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: x) :> true
+            .Text(text: s) :> false
+            .Interp(e: x) :> false
+            .DeclNode(d: x) :> false
+            .Css(c: x) :> false
+            .Effect(w: x) :> false
+            .Request(r: x) :> false
+            .Gather(f: x) :> false
+            .Run(b: x) :> false
+        }
+    }
+
     // The logic-row token at the cursor as the statement it stands for: nothing
     // to run (a Recovered placeholder — no `;` owed, no E-STMT-NO-EFFECT); a
     // refused element is already reported, any other is refused by name here.
     fn logicRowStmt(tp: TP, start: int, why: string) -> RStmt {
         const row: PTok = cur(tp)
         let t: TP = tp
-        if (row.v == logicRowMark(false)) t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, row)
+        if (row.v == logicRowMark(false) || row.v == logicRowOther() || row.v == bareRowOtherMark()) t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", why, row)
         const re: RExpr = mkE(adv(t), start, AExprK.Recovered)
         return mkS(re.tp, start, AStmtK.Eval(re.e))
     }
 
+    // s478 (markup-in-logic) — a markup ELEMENT standing as a statement in a
+    // logic block read by logicBlockTP (a body-top `${ … }`, a declaration
+    // block in markup) or in a Tier-0 region (a bare row). SPEC §17.6.10.1: "A
+    // markup element in statement position in a logic body that no `lift`
+    // names and that is not the single-element branch of a value-form (this
+    // section) SHALL be a compile error, E-MARKUP-STATEMENT-NOT-RENDERED"; the
+    // shapes it reaches "include: `${ <p>hello</p> }`; two elements in one
+    // branch; an element after a statement in a branch or block …; a `for` /
+    // `while` body without `lift`; … and markup in statement position in a
+    // `function` body". A body-top `${ … }` is "a statement list, evaluated, not
+    // rendered" (§17.3, S449), so it holds no value-form. One shape is held back
+    // (refused by name, INTERIM — owner question, see the lane's progress note):
+    // an element that is the ONLY statement of a nested block at a body top
+    // (`${ if (c) { <p/> } }` there) — the conformance corpus reads it as
+    // rendered, §17.3 + §17.6.10.1 read it as not rendered.
+    fn logicBareStmt(tp: TP, start: int, why: string) -> RStmt {
+        const row: PTok = cur(tp)
+        if (isLocusRow(row)) return misplacedRowStmt(tp, start)
+        if (row.v != logicRowMark(false)) return logicRowStmt(tp, start, why)
+        if (tp.inFn == 0 && soleInNestedBlock(tp)) return logicRowStmt(tp, start, why)
+        return unrenderedRowStmt(tp, start, true)
+    }
+
+    // The row at the cursor is the one statement of a `{ … }` that is not the
+    // region's own opening brace (token 0).
+    fn soleInNestedBlock(tp: TP) -> boolean {
+        if (tp.i < 2) return false
+        if (!tk(tp.toks[tp.i - 1], "{")) return false
+        const nx: TP = adv(tp)
+        if (isP(nx, "}")) return true
+        return isP(nx, ";") && isP(adv(nx), "}")
+    }
+
+    // E-MARKUP-STATEMENT-NOT-RENDERED at the element; the statement is a
+    // Recovered placeholder (no `;` owed). §17.6.10.1: "Its message SHALL say
+    // the markup is not rendered and SHALL name the fix that works where it
+    // stands: `lift <tag>…</tag>` (or making it the branch's single element) in
+    // a `${ }` or `fn` body; `return` it and render the call in markup
+    // (`${f()}`) in a `function` declaration body, where `lift` is not valid
+    // (§10.4); … in an event handler …, a `when` body … change state there and
+    // render the markup from that state in markup."
+    fn unrenderedRowStmt(tp: TP, start: int, bodyTop: boolean) -> RStmt {
+        const row: PTok = cur(tp)
+        const t: TP = diagAt(tp, "E-MARKUP-STATEMENT-NOT-RENDERED", unrenderedMsg(tp.inFn, bodyTop), row)
+        const re: RExpr = mkE(adv(t), start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    fn unrenderedMsg(inFn: int, bodyTop: boolean) -> string {
+        const head: string = "this markup stands as a statement and no `lift` names it, so it is not rendered (§17.6.10.1) — "
+        if (inFn == 1) return head + "`lift` is not valid in a `function` body (§10.4): `return` the markup and render the call in markup (`" + interpOpen() + "f()}`)"
+        if (inFn == 2) return head + "this body runs for its effects and renders nothing: change state here, and render the markup from that state in markup"
+        if (bodyTop) return head + "a body-top `" + interpOpen() + " … }` is evaluated, not rendered (§17.3): write the element in the body itself (under `if=`, §17.1, when it is conditional)"
+        return head + "write `lift <tag>…</tag>;` to render it, or make it the single element of a branch of a value-form `" + interpOpen() + " if … }` (§17.6.10)"
+    }
+
     fn parseInterpOrTier0(mp: MP) -> RNodeOne {
         if (tier0Ahead(mp)) return parseTier0(mp)
+        if (tier0IfAhead(mp)) return parseTier0If(mp)
+        if (tier0BareAhead(mp)) return parseTier0Bare(mp)
         return parseInterp(mp)
     }
 
@@ -4526,31 +4750,107 @@ ${
         return { cls: TC.Other, v: rowMark(), text: text, start: start, end: end, line: line, bad: "" }
     }
 
-    fn parseTier0(mp: MP) -> RNodeOne {
-        const start: int = mp.pos
+    // s478 (markup-in-logic) — a Tier-0 region's tokens: the run pauses before a
+    // `lift` operand element (a row) AND before an element that starts a
+    // statement (lexTier0X `bare`), each read as markup. A bare ELEMENT stands as
+    // a bare-row token (a value-form branch takes it, parseTier0Branch; anywhere
+    // else parseStmt reports it, §17.6.10.1); a bare element §4.17 refused, or a
+    // bare node that is not an element, as a logic-row token (logicRowStmt).
+    type RT0Region:struct = { tp: TP, rows: ANode[], mp: MP, bad: boolean }
+
+    fn bareRowMark() -> string { return "bare-row" }
+
+    // s478 (#1919 review F2) — a bare element that is not markup (rowIsMarkup).
+    fn bareRowOtherMark() -> string { return "bare-row-other" }
+
+    fn isBareRowTok(t: PTok) -> boolean { return t.cls == TC.Other && (t.v == bareRowMark() || t.v == bareRowOtherMark()) }
+
+    fn isBareRowOther(t: PTok) -> boolean { return t.cls == TC.Other && t.v == bareRowOtherMark() }
+
+    fn isLiftWord(t: PTok) -> boolean {
+        return (t.cls == TC.Keyword || t.cls == TC.Ident) && t.v == "lift"
+    }
+
+    fn tier0Region(mp: MP) -> RT0Region {
         let pos: int = mp.pos + 1
         let depth: int = 0
         let toks: PTok[] = []
         let rows: ANode[] = []
         let m: MP = mp
+        let bad = false
         let going = true
         while (going) {
-            const p: LexPause = lexTier0(mp.src, pos, depth)
+            const p: LexPause = lexTier0X(mp.src, pos, depth, true)
             const pt: PTok[] = nsToks(mp.ns, toPToks(p.tokens))
             toks = toks.concat(pt.slice(0, pt.length - 1))
             if (!p.paused) {
                 toks = toks.concat([pt[pt.length - 1]])
                 going = false
             } else {
+                const lifted: boolean = toks.length > 0 && isLiftWord(toks[toks.length - 1])
+                const d0: int = m.diags.length
                 const rn: RNodeOne = parseMarkupNode(mAt(m, p.end))
-                rows = rows.concat([rn.n])
                 m = rn.mp
-                toks = toks.concat([rowTok(mp.src, p.end, m.pos, p.line)])
+                let rt: PTok = rowTok(mp.src, p.end, m.pos, p.line)
+                const locus: string = locusMarkOf(rn.n)
+                if (locus != "") {
+                    // §4.15: a structural element outside its owning locus (misplacedRowStmt)
+                    bad = true
+                    rt = { cls: TC.Other, v: locus, text: rt.text, start: rt.start, end: rt.end, line: rt.line, bad: "" }
+                } else if (lifted) {
+                    rows = rows.concat([rn.n])
+                } else {
+                    const refused: boolean = refusedRowNode(rn.n) || refusalSince(m.diags, d0)
+                    if (refused) bad = true
+                    let mark: string = bareRowMark()
+                    if (refused) {
+                        mark = logicRowMark(true)
+                    } else if (!rowIsElem(rn.n)) {
+                        mark = logicRowOther()
+                    } else {
+                        // #1919 review F2: an element that is not markup still
+                        // stands as a value-form branch's one item; in statement
+                        // position it is refused by name (parseStmt)
+                        if (!rowIsMarkup(rn.n, mp.src, m.pos, toks)) mark = bareRowOtherMark()
+                        rows = rows.concat([rn.n])
+                    }
+                    rt = { cls: TC.Other, v: mark, text: rt.text, start: rt.start, end: rt.end, line: rt.line, bad: "" }
+                }
+                toks = toks.concat([rt])
                 pos = m.pos
                 depth = p.depth
             }
         }
-        let t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: 0 }
+        const t: TP = { toks: toks, i: 0, nid: m.nid, diags: m.diags, file: m.file, ns: m.ns, inFn: 0 }
+        return { tp: t, rows: rows, mp: m, bad: bad }
+    }
+
+    // Did the region report markup it does not render (§17.6.10.1)? Then it
+    // renders nothing (a Recovered interpolation): its loop would only add a
+    // second report (E-LOOP-007) for the same root cause.
+    fn unrenderedSince(ds: Diag[], from: int) -> boolean {
+        let i: int = from
+        while (i < ds.length) {
+            if (ds[i].code == "E-MARKUP-STATEMENT-NOT-RENDERED") return true
+            i = i + 1
+        }
+        return false
+    }
+
+    fn recoveredInterp(mb: MP, start: int) -> RNodeOne {
+        const re: AExpr = { nid: mb.nid, span: mkSpan(start, mb.pos), k: AExprK.Recovered }
+        const mr: MP = mBump(mb)
+        const nr: ANode = { nid: mr.nid, span: mkSpan(start, mr.pos), k: ANodeK.Interp(re) }
+        return { n: nr, mp: mBump(mr) }
+    }
+
+    fn parseTier0(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const rr: RT0Region = tier0Region(mp)
+        const rows: ANode[] = rr.rows
+        const m: MP = rr.mp
+        const d0: int = rr.tp.diags.length
+        let t: TP = rr.tp
         t = expectP(t, "{")
         const rs: RStmt = parseStmt(t)
         t = rs.tp
@@ -4564,14 +4864,259 @@ ${
         // items (MP.hoist), which must reach the item list, never be dropped
         const mb: MP = backToMarkup(m, t)
         const f: AFor | not = forOfStmt(rs.s)
-        if (f is not) {
-            const re: AExpr = { nid: mb.nid, span: mkSpan(start, mb.pos), k: AExprK.Recovered }
-            const mr: MP = mBump(mb)
-            const nr: ANode = { nid: mr.nid, span: mkSpan(start, mr.pos), k: ANodeK.Interp(re) }
-            return { n: nr, mp: mBump(mr) }
-        }
+        if (f is not || rr.bad || unrenderedSince(t.diags, d0)) return recoveredInterp(mb, start)
         const n: ANode = { nid: mb.nid, span: mkSpan(start, mb.pos), k: ANodeK.Gather(fillRowsFor(f, rows)) }
         return { n: n, mp: mBump(mb) }
+    }
+
+    // =========================================================================
+    // s478 (markup-in-logic) — a `${ if … }` in markup whose branches hold
+    // MARKUP, read on the Tier-0 path (no second markup-in-logic path). SPEC:
+    //   §10.1: "When `lift` appears in an anonymous `${}` block whose parent is a
+    //   markup or style context, `lift` appends the value to the block's
+    //   accumulator array"; §10.8.2: "When `lift` appears in an `if`/`else` body,
+    //   only the taken branch's `lift` calls SHALL be added to the accumulator.
+    //   The not-taken branch SHALL contribute zero values"; §10.8.1: they
+    //   "accumulate in evaluation order".
+    //   §17.6.10: "A control-flow statement that is the sole content of a markup
+    //   `${…}` interpolation and whose every branch is exactly one expression
+    //   SHALL be a value-form"; "A branch body that is exactly one expression
+    //   SHALL be equivalent to `{ lift <expression> }`"; "When the `else` is
+    //   absent, the false path SHALL contribute `not` … and SHALL render as
+    //   nothing"; "A value-form SHALL re-evaluate reactively on change of any
+    //   reactive cell it reads". §17.6.10.1: a single element is rendered "as
+    //   the single element of an `if` / `given` branch (the implied `lift`
+    //   above), or named by a `lift`"; a single-element branch beside a sibling
+    //   that "is not (it uses `lift`, or holds statements)" is
+    //   E-MARKUP-STATEMENT-NOT-RENDERED, whose message names that cause; and "A
+    //   single-element branch is a value-form in every markup `${…}` position,
+    //   including a `${ if }` nested inside the element of an enclosing
+    //   single-element branch" (a nested interpolation is read by
+    //   parseMarkupNode, so it is its own region).
+    // The Tier-0 loop (§17.4) is already that accumulator — rows lifted in
+    // order, the whole re-run when a cell it reads changes, each row's own reads
+    // its own — so the `if` stands in a ONE-PASS loop, `for { <the if> break; }`
+    // (§49.2: the infinite head, ended by `break`): a View.Gather like any
+    // Tier-0 loop. A value-form branch `{ e }` is `{ lift e; }`; a branch `{ <p/> }`
+    // is `{ lift <p/>; }`. A branch that holds statements is a statement list
+    // (its `lift`s take their `;`, §7.2.2 rule 2). Only a chain that holds
+    // markup comes here (tier0IfAhead); `${ if c { "A" } else { "B" } }` stays
+    // the expression value-form (parseValueIfExpr).
+    // =========================================================================
+    fn tier0IfAhead(mp: MP) -> boolean {
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        if (!isP(tp, "{")) return false
+        if (!isWord(adv(tp), "if")) return false
+        const p: LexPause = lexTier0X(mp.src, mp.pos + 1, 0, true)
+        return p.paused
+    }
+
+    // `${ <p>hello</p> }` — an element STARTS the interpolation's content: a
+    // statement (§17.6.10.1 lists "`${ <p>hello</p> }`" first among the shapes
+    // E-MARKUP-STATEMENT-NOT-RENDERED reaches), so the run pauses before it
+    // with only the `{` lexed.
+    fn tier0BareAhead(mp: MP) -> boolean {
+        const p: LexPause = lexTier0X(mp.src, mp.pos + 1, 0, true)
+        return p.paused && p.tokens.length == 2
+    }
+
+    // Every statement of the block is read (each element in it is reported);
+    // it renders nothing.
+    fn parseTier0Bare(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const rr: RT0Region = tier0Region(mp)
+        let t: TP = expectP(rr.tp, "{")
+        const b0: int = hardErrors(t.diags)
+        while (!isP(t, "}") && !atEnd(t)) {
+            const before: int = t.i
+            if (isP(t, ";")) {
+                t = adv(t)
+            } else {
+                const r: RStmts = parseTermStmts(t, b0)
+                t = r.tp
+            }
+            if (t.i == before) t = adv(t)
+        }
+        t = expectRegionEnd(expectP(t, "}"))
+        return recoveredInterp(backToMarkup(rr.mp, t), start)
+    }
+
+    type RT0If:struct = { s: AStmt, tp: TP, single: boolean }
+    type RT0Branch:struct = { b: ABlock, tp: TP, single: boolean }
+
+    // The one-pass loop's label: `#` starts no identifier, and a loop label is
+    // one (parseJump reads an identifier), so no source jump can name it.
+    // analyze.scrml tier0IfLabel() is the same string.
+    fn tier0IfLabel() -> string { return "#if" }
+
+    fn parseTier0If(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const rr: RT0Region = tier0Region(mp)
+        const d0: int = rr.tp.diags.length
+        const t0: TP = expectP(rr.tp, "{")
+        // every branch ONE item: the value-form; otherwise every branch is a
+        // statement list (accumulation, §10.1) — re-read from the same tokens
+        let ri: RT0If = parseTier0IfChain(t0, true, false)
+        // #1919 review F3: the message names the sibling's cause — an empty
+        // branch is not one item either
+        if (!ri.single) ri = parseTier0IfChain(t0, false, chainHasEmpty(ri.s))
+        let t: TP = ri.tp
+        if (isP(t, ";")) t = adv(t)
+        if (!isP(t, "}") && !atEnd(t)) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + " if … }` in markup holds the `if` and nothing else (§17.6.10: the control-flow statement is \"the sole content of a markup `" + interpOpen() + "…}` interpolation\") — compute the rest in a function, or give it its own block", cur(t))
+            while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
+        }
+        t = expectRegionEnd(expectP(t, "}"))
+        if (rr.bad || unrenderedSince(t.diags, d0)) return recoveredInterp(backToMarkup(rr.mp, t), start)
+        // the one-pass loop: `for { <if> break; }`. It is no loop of the
+        // program's (§49.9: a `break` / `continue` in the `if` has none to
+        // leave), so it and its own `break` carry the reserved label
+        // `tier0IfLabel()`, which no source label can spell: analyze's
+        // loop-control pass (loopJump) passes over its frame for an unlabelled
+        // jump — E-LOOP-001 / -002 when no loop of the program's encloses it,
+        // at ANY depth (a `match` / `!{}` arm, an initializer) — and no
+        // labelled jump can name it
+        const brk: AStmt = { nid: t.nid, span: mkSpan(ri.s.span.end, ri.s.span.end), k: AStmtK.Break(tier0IfLabel()) }
+        t = bumpId(t)
+        const body: ABlock = { nid: t.nid, span: ri.s.span, stmts: [ri.s, brk] }
+        t = bumpId(t)
+        const f: AFor = { nid: t.nid, span: ri.s.span, label: tier0IfLabel(), head: AForHead.HForever, body: body, bound: not }
+        t = bumpId(t)
+        const mb: MP = backToMarkup(rr.mp, t)
+        const n: ANode = { nid: mb.nid, span: mkSpan(start, mb.pos), k: ANodeK.Gather(fillRowsFor(f, rr.rows)) }
+        return { n: n, mp: mBump(mb) }
+    }
+
+    // At `if`: the chain (`else if` nested in `else`). `vf`: read a branch that
+    // is ONE item — one element, one expression, or a nested value-form `if` —
+    // as its `lift` (§17.6.10); `single`: every branch was one.
+    fn parseTier0IfChain(tp: TP, vf: boolean, emptySib: boolean) -> RT0If {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let cond: AExpr = mkE(t, start, AExprK.Recovered).e
+        // §17.6.10 `value-form-if ::= 'if' condition '{' …` — the head's
+        // parentheses may be dropped (parseValueIfExpr's rule, bareHeadAt)
+        if (bareHeadAt(t)) {
+            const cb: RExpr = parseTernary(t)
+            cond = cb.e
+            t = cb.tp
+        } else {
+            t = bumpId(expectP(t, "("))
+            const c0: RExpr = parseAssign(t)
+            cond = keptHead(c0.e)                                       // §50, D10: a condition head
+            t = expectP(c0.tp, ")")
+        }
+        const yes: RT0Branch = parseTier0Branch(t, vf, emptySib)
+        t = yes.tp
+        let single: boolean = yes.single
+        let elseB: ABlock | not = not
+        if (isWord(t, "else")) {
+            t = adv(t)
+            if (isWord(t, "if")) {
+                const inner: RT0If = parseTier0IfChain(t, vf, emptySib)
+                single = single && inner.single
+                elseB = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
+                t = bumpId(inner.tp)
+            } else {
+                const eb: RT0Branch = parseTier0Branch(t, vf, emptySib)
+                single = single && eb.single
+                elseB = eb.b
+                t = eb.tp
+            }
+        }
+        const r: RStmt = mkS(t, start, AStmtK.If(cond, yes.b, elseB, IfForm.Written))
+        return { s: r.s, tp: r.tp, single: single }
+    }
+
+    // One branch. With `vf`, a branch that is ONE item is that item's `lift`;
+    // any other branch (or any branch, without `vf`) is a statement list.
+    fn parseTier0Branch(tp: TP, vf: boolean, emptySib: boolean) -> RT0Branch {
+        const start: int = cur(tp).start
+        if (!isP(tp, "{")) {
+            // §17.6.10: every branch is braced (`'{' expression '}'`)
+            const d: TP = diagAt(tp, "E-PARSE-EXPECTED", "expected `{` to open a branch of the `if`, found `" + cur(tp).text + "` — every branch of a `" + interpOpen() + " if … }` in markup is braced (§17.6.10): `if (c) { <p>…</p> } else { … }`", cur(tp))
+            const rb: RBlock = parseBlockOrStmt(d)
+            return { b: rb.b, tp: rb.tp, single: false }
+        }
+        const inner: TP = adv(tp)
+        // one element: `{ <p>…</p> }` (an optional `;`)
+        if (isBareRowTok(cur(inner)) && closesAfterOne(adv(inner))) {
+            const row: PTok = cur(inner)
+            if (!vf && isBareRowOther(row)) return oneItemBranch(logicRowStmt(inner, row.start, notMarkupWhy()), start, false)
+            if (vf) {
+                const stand: ANode = { nid: -1, span: mkSpan(row.start, row.end), k: ANodeK.Text("") }
+                const ls: RStmt = mkS(adv(inner), row.start, AStmtK.Lift(ALift.LiftNode(stand)))
+                return oneItemBranch(ls, start, true)
+            }
+            // a sibling branch is not one item (§17.6.10.1, the sibling sentence)
+            let why: string = "this element is the single element of its branch, but a sibling branch of the same `if` is not (it uses `lift`, or holds statements) — a single-element branch renders only when every branch is one (§17.6.10.1): make every branch a single element, or `lift` in every branch (`lift <tag>…</tag>;`)"
+            if (emptySib) why = "this element is the single element of its branch, but a sibling branch of the same `if` is empty, and an empty branch is not one item — a single-element branch renders only when every branch is one (§17.6.10.1): drop the empty branch (an `if` with no `else` renders nothing when false, §17.6.10), or write its value (`{ not }`)"
+            const dt: TP = diagAt(inner, "E-MARKUP-STATEMENT-NOT-RENDERED", why, row)
+            const re: RExpr = mkE(adv(dt), row.start, AExprK.Recovered)
+            return oneItemBranch(mkS(re.tp, row.start, AStmtK.Eval(re.e)), start, false)
+        }
+        if (vf) {
+            const h0: int = hardErrors(tp.diags)
+            // a nested value-form `if` as the branch's one item
+            if (isWord(inner, "if")) {
+                const ni: RT0If = parseTier0IfChain(inner, true, false)
+                if (ni.single && closesAfterOne(ni.tp) && hardErrors(ni.tp.diags) == h0) {
+                    return oneItemBranch({ s: ni.s, tp: ni.tp }, start, true)
+                }
+            } else if (!isWord(inner, "lift") && !isP(inner, "}") && !isLogicRowTok(cur(inner))) {
+                // one expression: `{ e }` / `{ e; }` — `{ lift e; }` (§17.6.10). Read
+                // as a statement, so a statement keyword (`break`, `let`, …) is one
+                const rx: RStmt = parseStmt(inner)
+                const x: AExpr | not = stmtExpr(rx.s)
+                if (x is given && closesAfterOne(rx.tp) && hardErrors(rx.tp.diags) == h0) {
+                    const ls: RStmt = mkS(rx.tp, cur(inner).start, AStmtK.Lift(ALift.LiftExpr(x)))
+                    return oneItemBranch(ls, start, true)
+                }
+            }
+        }
+        const rb: RBlock = parseBlock(tp)
+        return { b: rb.b, tp: rb.tp, single: false }
+    }
+
+    // Does the chain at `s` have an empty branch (`{ }`)?
+    fn chainHasEmpty(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: tb, elseB: el) :> tb.stmts.length == 0 || elseHasEmpty(el)
+            .Break(label: l) :> false
+            .Continue(label: l) :> false
+            .Given(name: n) :> false
+            .Defer(body: b) :> false
+            .For(f: lf) :> false
+            .LocalFn(f: x) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Return(e: x) :> false
+            .EffectStmt(w: w) :> false
+            .Fail(f: x) :> false
+            .Lift(what: w) :> false
+        }
+    }
+
+    fn elseHasEmpty(el: ABlock | not) -> boolean {
+        if (el is not) return false
+        if (el.stmts.length == 0) return true
+        if (el.stmts.length == 1) return chainHasEmpty(el.stmts[0])
+        return false
+    }
+
+    // `}` — or `;` then `}` — closes the branch after its one item.
+    fn closesAfterOne(tp: TP) -> boolean {
+        if (isP(tp, "}")) return true
+        return isP(tp, ";") && isP(adv(tp), "}")
+    }
+
+    fn oneItemBranch(rs: RStmt, start: int, single: boolean) -> RT0Branch {
+        let t: TP = rs.tp
+        if (isP(t, ";")) t = adv(t)
+        t = expectP(t, "}")
+        const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: [rs.s] }
+        return { b: b, tp: bumpId(t), single: single }
     }
 
     // Each row placeholder's stand-in node, replaced by the element read at its offset.
