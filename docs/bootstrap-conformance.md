@@ -11,26 +11,26 @@ Scope: **1870 of 1870 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 629 | 33.6% |
+| PASS | 638 | 34.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 16 | 0.9% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 635 | 34.0% |
-| UNSUPPORTED | 590 | 31.6% |
+| UNSUPPORTED | 581 | 31.1% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 645; of those, 629 hold (97.5%). Runtime half executed on the bootstrap for 208 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 654; of those, 638 hold (97.6%). Runtime half executed on the bootstrap for 215 case(s).
 
-- **Vacuous** passes: 14 of 629 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **615**.
+- **Vacuous** passes: 14 of 638 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **624**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 6 of 16; the other 10 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 590.
+UNSUPPORTED by reason: bootstrap-unsupported 581.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **876** — PASS 419 · FAIL 13 · UNSUPPORTED 444. Twin holds 419 (non-vacuous 408). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **876** — PASS 428 · FAIL 13 · UNSUPPORTED 435. Twin holds 428 (non-vacuous 417). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 4 replace a twin's expectations · 11 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -141,13 +141,13 @@ NOT-TWINNED by reason (635 cases; a case counts once per distinct reason):
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 24 | · | 2 | · | 8 | 11 | · | · |
+| module | 45 | 25 | · | 2 | · | 8 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
-| parse-variant | 8 | · | · | · | · | · | 8 | · | · |
+| parse-variant | 8 | 8 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
@@ -228,7 +228,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (629)
+### PASS / CODES-ONLY (638)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -679,6 +679,7 @@ none
 - `module/e-import-004-reexport-ambiguous-star-reject` — PASS · TWIN
 - `module/e-import-004-reexport-chain-clean` — PASS · TWIN
 - `module/e-import-004-reexport-missing-name-reject` — PASS · TWIN
+- `module/e-import-004-stdlib-name-not-exported-reject` — PASS · TWIN
 - `module/e-import-005-bare-specifier-reject` — PASS · TWIN
 - `module/e-import-005-relative-specifier-clean` — PASS · TWIN
 - `module/e-import-006-missing-file-reject` — PASS · TWIN
@@ -700,6 +701,14 @@ none
 - `own-value-type/not-inferable-unproven-call-neg` — PASS
 - `own-value-type/unproven-annotation-neg` — PASS
 - `own-value-type/unproven-annotation-pos` — PASS
+- `parse-variant/error-invalid-payload` — PASS · TWIN
+- `parse-variant/error-malformed-json` — PASS · TWIN
+- `parse-variant/error-missing-discriminator` — PASS · TWIN
+- `parse-variant/error-unknown-variant` — PASS · TWIN
+- `parse-variant/happy-payload-variant` — PASS · TWIN
+- `parse-variant/happy-unit-variant` — PASS · TWIN
+- `parse-variant/misuse-non-enum-type` — PASS · TWIN
+- `parse-variant/single-field-payload-bind` — PASS · TWIN
 - `persist/counter-persist-local-pos` — PASS
 - `persist/hold-without-persist-neg` — PASS
 - `persist/key-required-neg` — PASS
@@ -860,7 +869,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (590)
+### UNSUPPORTED (581)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1064,7 +1073,7 @@ none
 - `form-for/formfor-pick-valid-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-slot-unknown` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-submit-collects-values` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
-- `form-for/formfor-type-not-struct` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `form-for/formfor-type-not-struct` — twin · bootstrap-unsupported: `formFor` cannot be imported from `scrml:data` on the bootstrap: its source `scrml:data/form-for.scrml` does not compile on the bootstrap yet (4 errors; the first: [E-PARAM-TYPE-REQUIRED] the paramete
 - `form-for/formfor-typing-errors` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-valid-enables-submit` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
 - `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `req` on the field `name` (of type `string`, which can hold `""` or `not`) is a refinement checked wherever a value of the type is built (§53.6.1: E-CONTRACT-001 at compile time, E-CONTRACT-001-RT at 
@@ -1226,8 +1235,7 @@ none
 - `module/e-export-002-component-multiroot-reject` — twin · bootstrap-unsupported: `<Card>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `module/e-export-002-component-single-root-clean` — twin · bootstrap-unsupported: `<Card>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `module/e-import-004-stdlib-name-exported-clean` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `module/e-import-004-stdlib-name-not-exported-reject` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `module/e-import-004-stdlib-name-exported-clean` — twin · bootstrap-unsupported: `isValid` cannot be imported from `scrml:data` on the bootstrap: its source `scrml:data/validate.scrml` does not compile on the bootstrap yet (81 errors; the first: [E-STMT-MISSING-SEMICOLON] Expected
 - `module/e-import-004-stdlib-reexport-missing-name-reject` — twin · bootstrap-unsupported: `scrml:crypto` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling f
 - `module/e-import-004-stdlib-submodule-only-name-reject` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `module/e-import-004-stdlib-subpath-name-clean` — twin · bootstrap-unsupported: `scrml:auth/jwt` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling
@@ -1245,14 +1253,6 @@ none
 - `outlet/recognized-clean` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `parse-syntax/e-syntax-042-not-value-position-neg` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
 - `parse-syntax/e-syntax-042-null-value-position-pos` — twin · bootstrap-unsupported: a `let` at the top level of a logic block — §7.6 admits a file-scope `let`, but it is module-level mutable state, and where that state lives (the client, the server, or both; once per process or per r
-- `parse-variant/error-invalid-payload` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/error-malformed-json` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/error-missing-discriminator` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/error-unknown-variant` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/happy-payload-variant` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/misuse-non-enum-type` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `parse-variant/single-field-payload-bind` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/cte-strip-info` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/e-pa-002-neg` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
@@ -1407,9 +1407,9 @@ none
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `style/theme-name-collision` — bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
-- `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `table-for/tablefor-rows-wrong-type` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
-- `table-for/tablefor-sortable-requires-cell-rows` — twin · bootstrap-unsupported: `scrml:data` — the bootstrap cannot import this stdlib module: the build supplied no source for it that the bootstrap compiles, so none of its names are imported (§41.5)
+- `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `tableFor` cannot be imported from `scrml:data` on the bootstrap: its source `scrml:data/table-for.scrml` does not compile on the bootstrap yet (4 errors; the first: [E-BOOTSTRAP-UNSUPPORTED] `req` on
+- `table-for/tablefor-rows-wrong-type` — twin · bootstrap-unsupported: `tableFor` cannot be imported from `scrml:data` on the bootstrap: its source `scrml:data/table-for.scrml` does not compile on the bootstrap yet (4 errors; the first: [E-BOOTSTRAP-UNSUPPORTED] `req` on
+- `table-for/tablefor-sortable-requires-cell-rows` — twin · bootstrap-unsupported: `tableFor` cannot be imported from `scrml:data` on the bootstrap: its source `scrml:data/table-for.scrml` does not compile on the bootstrap yet (4 errors; the first: [E-BOOTSTRAP-UNSUPPORTED] `req` on
 - `tenant/floor-alter-add-tenant-column-neg` — twin · bootstrap-unsupported: the SQL statement `ALTER TABLE notes ADD COLUMN tenant_id TEXT` in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: the §14.8.10 s
 - `tenant/floor-alter-add-tenant-column-pos` — twin · bootstrap-unsupported: the SQL statement `ALTER TABLE notes ADD COLUMN tenant_id TEXT` in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: the §14.8.10 s
 - `tenant/floor-imported-module-read-pos` — twin · bootstrap-unsupported: column `assets.tenant_id` makes `assets` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — acce

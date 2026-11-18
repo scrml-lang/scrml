@@ -91,19 +91,43 @@ async function served() {
   return { client, bun, base: `127.0.0.1:${bun.port}`, logs };
 }
 
+// S478 open-Qs items 50–51 (§38.4.2): the relay's first message is the `__replay` of its frame log
+// (`replays`); every relayed frame carries `__seq` and `__own` — `frames` keeps them whole, `got`
+// keeps the relayed edit without them.
 function connect(base, path) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://${base}${path}`);
     const got = [];
+    const frames = [];
+    const replays = [];
     let closed = null;
-    ws.onmessage = (ev) => got.push(JSON.parse(String(ev.data)));
+    ws.onmessage = (ev) => {
+      const v = JSON.parse(String(ev.data));
+      if (v.__type === "__replay") { replays.push(v); return; }
+      frames.push(v);
+      const { __seq, __own, ...edit } = v;
+      got.push(edit);
+    };
     ws.onclose = (ev) => { closed = { code: ev.code, reason: ev.reason }; };
-    ws.onopen = () => resolve({ ws, got, closed: () => closed });
+    ws.onopen = () => resolve({ ws, got, frames, replays, closed: () => closed });
     ws.onerror = () => reject(new Error("refused"));
   });
 }
 const tick = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const frame = (key, op, val) => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
+// A socket stand-in's delivery as the relay makes it (§38.4.2): the replay first, then each frame
+// numbered in turn (`__seq`), as a peer's (`__own: false`) unless `own`.
+const EMPTY_REPLAY = JSON.stringify({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+function relayer(sock) {
+  let seq = 0;
+  sock.onmessage({ data: EMPTY_REPLAY });
+  return (text, own = false) => {
+    let v = null;
+    try { v = JSON.parse(text); } catch { /* delivered as is */ }
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) { seq += 1; text = JSON.stringify({ ...v, __seq: seq, __own: own }); }
+    sock.onmessage({ data: text });
+  };
+}
 
 describe("E — §38.4.2 op sync end to end (compiled from source, served)", () => {
   test("the printed client desc names each cell's ops (and the engine's edge table); the server's too", () => {
@@ -241,9 +265,10 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
       rt.channel(scope, printedDesc(compile().client.js)(cells));
     } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; }
     const sock = socks[0];
+    const deliver = relayer(sock);
     return {
       cells, sock, errs,
-      deliver: (text) => sock.onmessage({ data: text }),
+      deliver,
       done: () => { console.error = savedErr; scope.dispose(); },
     };
   }
@@ -257,7 +282,7 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
     ["a move to a variant the enum has not", "phase", frame("phase", "transition", "Gone"), "does not decode"],
     ["a pop count that is not an int ≥ 1", "ps", frame("ps", "pop", 0), "not an int ≥ 1"],
     ["a wrong-typed element", "xs", frame("xs", "append", 5), "does not decode"],
-    ["the pre-§38.4.2 whole-value frame (no __op)", "n", JSON.stringify({ __type: "__sync", __key: "n", __val: 3 }), "not exactly {__type, __key, __op, __val}"],
+    ["the pre-§38.4.2 whole-value frame (no __op) — a broken stream: the connection is closed", "n", JSON.stringify({ __type: "__sync", __key: "n", __val: 3 }), "closed the connection: a frame that is not exactly {__type, __seq, __key, __op, __val, __own}"],
     ["an op the bootstrap does not apply, on a cell that syncs `replace`", "n", frame("n", "set", 3), "whose grants do not admit it"],
   ];
   for (const [what, key, f, needle] of REFUSED) {
@@ -315,6 +340,7 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
     const PT = { defs: [{ k: "struct", name: "Pt", fields: [{ name: "x", ty: { k: "int" } }, { name: "y", ty: { k: "int" } }] }], root: { k: "ref", def: 0 } };
     try {
       rt.channel(scope, { name: "p", reconnect: 0, cells: [{ key: "pt", cell: pt, table: PT, ops: ["replace"], edges: null }], open: null, close: null, error: null });
+      relayer(socks[0]);
       rt.batch(() => rt.setIn(pt, ["x"], 5));
       expect(socks[0].sent).toEqual([{ __type: "__sync", __key: "pt", __op: "replace", __val: { x: 5, y: 2 } }]);
     } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; scope.dispose(); }
@@ -390,7 +416,7 @@ describe("G — #1937 fix r1: fixed-length tapes and `rule=` writes", () => {
       rt.channel(scope, { name: "c", reconnect: 0, cells, open: null, close: null, error: null });
     } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; }
     const sock = socks[0];
-    return { sock, errs, deliver: (t) => sock.onmessage({ data: t }), done: () => { console.error = savedErr; scope.dispose(); } };
+    return { sock, errs, deliver: relayer(sock), done: () => { console.error = savedErr; scope.dispose(); } };
   }
 
   test("the receiver refuses a length-changing op of a FIXED-length tape (the review's fixedpop frames), even when its desc lists the op", () => {
@@ -430,4 +456,918 @@ describe("G — #1937 fix r1: fixed-length tapes and `rule=` writes", () => {
     expect(m).not.toBe(null);
     return new Function(`return (${m[1]});`)();
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// S478 open-Qs ruling (user-voice), items 50–53 (s478-ruled-channel-sync2) — §38.4.2 "Ordering —
+// relay order", "What converges", "The frame log", "The log bound", the derived-write sentence and
+// the rate-limited report. Every client below is `rt.channel` built from the desc the client
+// artifact prints, over a real Bun.serve relay with real WebSockets.
+//   item 50: "the relay echoes every frame to ALL subscribers, the sender included, with a
+//   per-channel sequence number. Each client keeps its own pending edits and rebases them onto the
+//   relayed order, so every client converges on relay order."
+//   item 51: "the relay keeps a bounded per-channel log of the relayed (already validated) frames
+//   and replays it to a new subscriber on open. Each frame is re-checked by the joiner's receiver"
+//   item 53: "it stays local and is not sent, because every receiver derives it itself from the
+//   same received edit … `applying` would cover the whole received batch"
+// RED ON b04fdc27a: two concurrent edits left the clients with different values (H), a joiner or a
+// reconnecting client started from the initializers and never caught up (I), and in the reset-on
+// cascade every receiver re-sent its own reset, so A's later write lost (J).
+// ---------------------------------------------------------------------------------------------
+const CONV = `<program>
+type Phase:enum = { Idle, Loading, Done }
+<channel name="c">
+  <xs:string[free, append]=[]/>
+  <ys:int[1..=3, append]=([1])/>
+  <dq:int[free, append, prepend, pop, shift]=([1, 2, 3])/>
+  let <n:int=0/>
+  let <m:int=5 reset-on=[@n]/>
+  <phase:Phase=.Idle single>
+    <Idle rule=(.Loading | .Done)></>
+    <Loading rule=.Done></>
+    <Done></>
+  </>
+</channel>
+<p>\${@xs.length} \${@ys.length} \${@dq.length} \${@n} \${@m}</p>
+</program>
+`;
+const CONV_EDGES = { Idle: ["Loading", "Done"], Loading: ["Done"], Done: [] };
+const convInit = () => ({ xs: [], ys: [1], dq: [1, 2, 3], n: 0, m: 5, phase: "Idle" });
+let convCompiled;
+function compileConv() {
+  if (convCompiled) return convCompiled;
+  const r = frontEnd(mods(), [{ path: "app.scrml", src: CONV }], "app.scrml");
+  expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+  const { client, server } = artifacts(r.core);
+  expect(client.refused).toEqual([]);
+  expect(server.refused).toEqual([]);
+  expect(client.js).toContain(`const program_phase_edges = rt.edges({ Idle: ["Loading", "Done"], Loading: ["Done"], Done: [] });`);
+  expect(client.js).toContain(`ops: ["append", "prepend", "pop", "shift"]`);
+  convCompiled = { r, client, server };
+  return convCompiled;
+}
+function convDesc(clientJs) {
+  const line = clientJs.split("\n").find((l) => l.startsWith("rt.channel(program$.scope, "));
+  const lit = line.slice("rt.channel(program$.scope, ".length, -2)
+    .replace(/program\$\.fields\[(\d+) \/\* (\w+) \*\/\]/g, (_, i, name) => `fields[${JSON.stringify(name)}]`)
+    .replace(/program_phase_edges/g, "edges");
+  return (fields) => new Function("fields", "edges", `return (${lit});`)(fields, rt.edges(CONV_EDGES));
+}
+
+// A served relay and a client factory. Every socket a client opens is recorded (`made`) so a test
+// can drop one; the `reset-on=[@n]` rule of @m is wired by hand, as the program body would.
+async function convWorld(host = {}) {
+  const { r, client, server } = compileConv();
+  const logs = [];
+  const mod = await loadServer(server.js, r.core);
+  const srv = mod.createServer({ root: "/tmp", log: (s) => logs.push(s), ...host });
+  const bun = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req, s) => srv.fetch(req, s), websocket: srv.websocket });
+  const base = `127.0.0.1:${bun.port}`;
+  const savedLoc = globalThis.location;
+  const savedWs = globalThis.WebSocket;
+  const savedErr = console.error;
+  const errs = [];
+  console.error = (m) => errs.push(String(m));
+  globalThis.location = { protocol: "http:", host: base };
+  const made = [];
+  globalThis.WebSocket = class extends savedWs { constructor(u) { super(u); made.push(this); } };
+  const mk = convDesc(client.js);
+  const clients = [];
+  const live = (opts = {}) => {
+    const scope = rt.root.child();
+    const cells = {};
+    for (const [k, v] of Object.entries(convInit())) cells[k] = rt.cell(v);
+    rt.resetOn(scope, [cells.n], () => { cells.m.set(5); }, 0);
+    if (opts.wire) opts.wire(scope, cells);
+    const hooks = { opens: 0, closes: 0, errors: 0 };
+    const desc = mk(cells);
+    desc.reconnect = opts.reconnect ?? 0;
+    desc.open = () => { hooks.opens++; if (opts.open) opts.open(cells); };
+    desc.close = () => { hooks.closes++; };
+    desc.error = () => { hooks.errors++; };
+    const first = made.length;
+    rt.channel(scope, desc);
+    const X = { scope, cells, hooks, socket: () => made[first], val: (k) => cells[k].peek(), state: () => Object.fromEntries(Object.keys(cells).map((k) => [k, cells[k].peek()])) };
+    clients.push(X);
+    return X;
+  };
+  return {
+    base, logs, errs, made, live,
+    done: () => {
+      for (const X of clients) X.scope.dispose();
+      globalThis.location = savedLoc;
+      globalThis.WebSocket = savedWs;
+      console.error = savedErr;
+      bun.stop(true);
+    },
+  };
+}
+const E = rt.edges(CONV_EDGES);
+const LOG_HOOK = Symbol.for("scrml.test.channelLog");
+
+describe("H — §38.4.2 relay order: two concurrent edits of every kind converge on every client", () => {
+  const CASES = [
+    ["two end-appends to a free tape", (A, B) => { rt.batch(() => rt.append(A.cells.xs, "a")); rt.batch(() => rt.append(B.cells.xs, "b")); },
+      "xs", (v) => [JSON.stringify(["a", "b"]), JSON.stringify(["b", "a"])].includes(JSON.stringify(v))],
+    ["two appends to a bounded tape one short of its bound (one wins, everywhere)", (A, B) => { rt.batch(() => rt.appendWithin(A.cells.ys, 10, 1, 3, "t")); rt.batch(() => rt.appendWithin(B.cells.ys, 20, 1, 3, "t")); },
+      "ys", (v) => [JSON.stringify([1, 2, 10]), JSON.stringify([1, 2, 20])].includes(JSON.stringify(v)), (A) => rt.batch(() => rt.append(A.cells.ys, 2))],
+    ["a `pop` against an `append` on a deque", (A, B) => { rt.batch(() => rt.removeEnd(A.cells.dq, 1)); rt.batch(() => rt.append(B.cells.dq, 4)); },
+      "dq", (v) => [JSON.stringify([1, 2, 4]), JSON.stringify([1, 2, 3])].includes(JSON.stringify(v))],
+    ["a `shift` against a `prepend` on a deque", (A, B) => { rt.batch(() => rt.removeFront(A.cells.dq, 1)); rt.batch(() => rt.prepend(B.cells.dq, 0)); },
+      "dq", (v) => [JSON.stringify([0, 2, 3]), JSON.stringify([1, 2, 3])].includes(JSON.stringify(v))],
+    ["two pops", (A, B) => { rt.batch(() => rt.removeEnd(A.cells.dq, 1)); rt.batch(() => rt.removeEnd(B.cells.dq, 1)); },
+      "dq", (v) => JSON.stringify(v) === JSON.stringify([1])],
+    ["two `rule=` moves from one variant (.Idle → .Loading against .Idle → .Done)", (A, B) => { rt.batch(() => rt.transition(A.cells.phase, E, "Loading")); rt.batch(() => rt.transition(B.cells.phase, E, "Done")); },
+      "phase", (v) => v === "Done"],
+    ["two `replace`s", (A, B) => { rt.batch(() => A.cells.n.set(1)); rt.batch(() => B.cells.n.set(2)); },
+      "n", (v) => v === 1 || v === 2],
+  ];
+  for (const [what, edits, key, ok, setup] of CASES) {
+    test(`${what}: every client (both writers and a bystander) ends on the same value`, async () => {
+      const w = await convWorld();
+      try {
+        const A = w.live();
+        const B = w.live();
+        const C = w.live();
+        await tick(250);
+        if (setup) { setup(A); await tick(200); }
+        edits(A, B);                     // both sent before either comes back: they cross
+        await tick(300);
+        const vals = [A, B, C].map((X) => JSON.stringify(X.val(key)));
+        expect(new Set(vals).size).toBe(1);
+        expect(ok(A.val(key))).toBe(true);
+        // and every other cell too
+        expect(JSON.stringify(B.state())).toBe(JSON.stringify(A.state()));
+        expect(JSON.stringify(C.state())).toBe(JSON.stringify(A.state()));
+      } finally { w.done(); }
+    });
+  }
+
+  test("a burst of interleaved edits from three clients converges (seeded)", async () => {
+    const w = await convWorld();
+    try {
+      const cl = [w.live(), w.live(), w.live()];
+      await tick(250);
+      let seed = 7;
+      const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+      const OPS = [
+        (X, i) => rt.append(X.cells.xs, `x${i}`),
+        (X, i) => rt.appendWithin(X.cells.ys, i, 1, 3, "t"),
+        (X) => rt.removeEnd(X.cells.dq, 1),
+        (X, i) => rt.prepend(X.cells.dq, i),
+        (X) => rt.removeFront(X.cells.dq, 1),
+        (X, i) => X.cells.n.set(i),
+        (X, i) => X.cells.m.set(100 + i),
+      ];
+      for (let i = 0; i < 60; i++) {
+        const X = cl[rnd(3)];
+        try { rt.batch(() => OPS[rnd(OPS.length)](X, i)); } catch { /* a local bound trap: nothing written */ }
+        if (rnd(4) === 0) await tick(5);
+      }
+      await tick(500);
+      const s0 = JSON.stringify(cl[0].state());
+      for (const X of cl) expect(JSON.stringify(X.state())).toBe(s0);
+    } finally { w.done(); }
+  });
+});
+
+describe("I — §38.4.2 the frame log: a late joiner and a reconnecting client reach the same state", () => {
+  async function busy(w) {
+    const A = w.live();
+    const B = w.live();
+    await tick(250);
+    rt.batch(() => rt.append(A.cells.xs, "a1"));
+    rt.batch(() => rt.append(B.cells.xs, "b1"));
+    rt.batch(() => rt.removeEnd(B.cells.dq, 1));
+    rt.batch(() => rt.prepend(A.cells.dq, 0));
+    rt.batch(() => rt.transition(A.cells.phase, E, "Loading"));
+    rt.batch(() => A.cells.n.set(3));
+    rt.batch(() => B.cells.m.set(9));
+    await tick(300);
+    return { A, B };
+  }
+
+  test("a client that connects late replays the log and shows the same state as the clients that saw every edit", async () => {
+    const w = await convWorld();
+    try {
+      const { A, B } = await busy(w);
+      expect(JSON.stringify(B.state())).toBe(JSON.stringify(A.state()));
+      expect(A.val("xs").length).toBe(2);
+      const C = w.live();
+      await tick(300);
+      expect(JSON.stringify(C.state())).toBe(JSON.stringify(A.state()));
+      // and it is live from there: its own edit reaches the others, theirs reach it
+      rt.batch(() => rt.append(C.cells.xs, "c1"));
+      rt.batch(() => rt.append(A.cells.xs, "a2"));
+      await tick(300);
+      expect(JSON.stringify(C.state())).toBe(JSON.stringify(A.state()));
+      expect(JSON.stringify(B.state())).toBe(JSON.stringify(A.state()));
+      // a raw subscriber's first message is the log: every frame relayed so far, numbered 1.., as peers'
+      const raw = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      expect(raw.replays.length).toBe(1);
+      const rep = raw.replays[0];
+      expect(rep.__complete).toBe(true);
+      expect(rep.__seq).toBe(rep.__frames.length);
+      expect(rep.__frames.map((f) => f.__seq)).toEqual(rep.__frames.map((_, i) => i + 1));
+      expect(rep.__frames.every((f) => f.__own === false)).toBe(true);
+      raw.ws.close();
+    } finally { w.done(); }
+  });
+
+  test("a client whose connection drops reconnects, rebuilds from the log, and drops the write it made while closed", async () => {
+    const w = await convWorld();
+    try {
+      const { A } = await busy(w);
+      const R = w.live({ reconnect: 60 });
+      await tick(300);
+      expect(JSON.stringify(R.state())).toBe(JSON.stringify(A.state()));
+      R.socket().close();                                     // the drop
+      await tick(20);
+      rt.batch(() => rt.append(A.cells.xs, "while-down"));   // an edit R misses live
+      rt.batch(() => rt.append(R.cells.xs, "local-only"));   // R's write while closed: never sent (§38.10.4)
+      await tick(500);
+      expect(R.hooks.opens).toBe(2);
+      expect(R.hooks.closes).toBe(1);
+      expect(JSON.stringify(R.state())).toBe(JSON.stringify(A.state()));
+      expect(R.val("xs")).toContain("while-down");
+      expect(R.val("xs")).not.toContain("local-only");
+      // live again after the reconnect
+      rt.batch(() => rt.append(R.cells.xs, "after"));
+      await tick(300);
+      expect(JSON.stringify(A.state())).toBe(JSON.stringify(R.state()));
+    } finally { w.done(); }
+  });
+
+  test("forged frames in the log (relayed — the relay holds no value to judge them) are refused again by a joiner's receiver", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(250);
+      const evil = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      // each passes the relay (granted op, decodes) but is refused at its point of relay order
+      evil.ws.send(frame("ys", "append", 2));
+      evil.ws.send(frame("ys", "append", 3));
+      evil.ws.send(frame("ys", "append", 4));                  // past the bound 1..=3
+      evil.ws.send(frame("phase", "transition", "Done"));       // legal from .Idle
+      evil.ws.send(frame("phase", "transition", "Loading"));    // .Done → .Loading: no such edge
+      evil.ws.send(frame("dq", "pop", 9));                      // clamped: empties the deque (legal, §38.4.2)
+      evil.ws.send(frame("dq", "prepend", 7));
+      await tick(300);
+      expect(evil.closed()).toBe(null);
+      expect(A.val("ys")).toEqual([1, 2, 3]);
+      expect(A.val("phase")).toBe("Done");
+      expect(A.val("dq")).toEqual([7]);
+      const before = w.errs.length;
+      const C = w.live();
+      await tick(300);
+      expect(JSON.stringify(C.state())).toBe(JSON.stringify(A.state()));
+      const cErrs = w.errs.slice(before).join("\n");
+      expect(cErrs).toContain("refused an `append` of @ys past its length bound 1..=3");
+      expect(cErrs).toContain("refused a `transition` of @phase its rule= graph forbids");
+      evil.ws.close();
+    } finally { w.done(); }
+  });
+
+  // §38.4.2 "The log bound": "A frame that would take the log past either bound is still relayed
+  // live, but the log is TRUNCATED … A client given an incomplete replay SHALL NOT show the channel
+  // as in sync". The test lowers the bound through the server's test-only symbol seam (it can only
+  // lower; #1941 fix r1 LOW-2: a string-keyed `channelLog` option is not read).
+  for (const [what, host] of [["frame-count", { [LOG_HOOK]: { frames: 3 } }], ["byte", { [LOG_HOOK]: { bytes: 200 } }]]) {
+    test(`past the ${what} bound the log is truncated: live clients carry on, a joiner is told it is incomplete and stops (fail closed)`, async () => {
+      const w = await convWorld(host);
+      try {
+        const A = w.live();
+        const B = w.live();
+        await tick(250);
+        for (const s of ["one", "two", "three", "four-is-past-the-bound"]) rt.batch(() => rt.append(A.cells.xs, s));
+        await tick(300);
+        expect(B.val("xs")).toEqual(["one", "two", "three", "four-is-past-the-bound"]);   // still relayed live
+        expect(w.logs.join("\n")).toContain("the frame log passed its bound");
+        const raw = await connect(w.base, "/_scrml_ws/c");
+        await tick();
+        expect(raw.replays).toEqual([{ __type: "__replay", __complete: false, __seq: 4, __frames: [] }]);
+        raw.ws.close();
+        const C = w.live({ reconnect: 50 });
+        await tick(300);
+        expect(C.val("xs")).toEqual([]);                      // nothing from an incomplete log is applied
+        expect(C.hooks.errors).toBe(1);                        // onclient:error ran
+        expect(w.errs.join("\n")).toContain("frame log for this channel was truncated");
+        // sync stopped: no reconnect, its writes are not sent, live frames are not applied
+        const made = w.made.length;
+        rt.batch(() => rt.append(C.cells.xs, "from-c"));
+        rt.batch(() => rt.append(A.cells.xs, "five"));
+        await tick(300);
+        expect(w.made.length).toBe(made);
+        expect(A.val("xs")).not.toContain("from-c");
+        expect(C.val("xs")).toEqual(["from-c"]);
+      } finally { w.done(); }
+    });
+  }
+});
+
+describe("J — §38.4.2 derived writes stay local (item 53): the 4-client `reset-on=` cascade", () => {
+  test("A sets n then at once m: three frames on the wire (no receiver re-sends its reset) and A's m wins on every client", async () => {
+    const w = await convWorld();
+    try {
+      const cl = [w.live(), w.live(), w.live(), w.live()];
+      for (const X of cl) rt.batch(() => X.cells.m.set(9));   // start every client away from the reset value (local, before any frame)
+      await tick(300);
+      const obs = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      // the m = 9 writes were made before each client's replay: HELD, re-applied on the rebuilt value
+      // and sent after it (#1941 fix r1 MED-1, §38.4.2 "held"), so they survive on every client
+      expect(cl.map((X) => X.val("m"))).toEqual([9, 9, 9, 9]);
+      rt.batch(() => cl[0].cells.m.set(9));
+      await tick(200);
+      expect(cl.map((X) => X.val("m"))).toEqual([9, 9, 9, 9]);
+      obs.got.length = 0;
+      rt.batch(() => cl[0].cells.n.set(1));                   // resets A's m to 5 (A's own write's reset: sent)
+      rt.batch(() => cl[0].cells.m.set(7));
+      await tick(400);
+      expect(obs.got.map((f) => `${f.__key}=${f.__val}`)).toEqual(["n=1", "m=5", "m=7"]);
+      expect(cl.map((X) => X.val("m"))).toEqual([7, 7, 7, 7]);
+      expect(cl.map((X) => X.val("n"))).toEqual([1, 1, 1, 1]);
+      obs.ws.close();
+    } finally { w.done(); }
+  });
+
+  test("a received frame's reset, and every write in the flush it starts, is not sent (stand-in socket)", () => {
+    const saved = globalThis.WebSocket;
+    const socks = [];
+    globalThis.WebSocket = class { constructor() { this.readyState = 1; this.sent = []; socks.push(this); } send(t) { this.sent.push(JSON.parse(t)); } close() {} };
+    const savedLoc = globalThis.location;
+    globalThis.location = { protocol: "http:", host: "127.0.0.1:1" };
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    const m = rt.cell(9);
+    const INT = { defs: [], root: { k: "int" } };
+    try {
+      rt.resetOn(scope, [n], () => { m.set(5); }, 0);
+      rt.channel(scope, { name: "r", reconnect: 0, cells: [{ key: "n", cell: n, table: INT, ops: ["replace"], edges: null }, { key: "m", cell: m, table: INT, ops: ["replace"], edges: null }], open: null, close: null, error: null });
+      const deliver = relayer(socks[0]);
+      deliver(frame("n", "replace", 4));
+      expect(n.peek()).toBe(4);
+      expect(m.peek()).toBe(5);                                // derived locally …
+      expect(socks[0].sent).toEqual([]);                       // … and not sent
+      // a LOCAL write's reset is an ordinary local write: sent
+      rt.batch(() => m.set(8));
+      rt.batch(() => n.set(6));
+      expect(socks[0].sent.map((f) => `${f.__key}=${f.__val}`)).toEqual(["m=8", "n=6", "m=5"]);
+    } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; scope.dispose(); }
+  });
+});
+
+describe("K — §38.4.2 the client's stream checks and the rate-limited report (stand-in socket)", () => {
+  function standIn(cellsDesc) {
+    const saved = globalThis.WebSocket;
+    const socks = [];
+    globalThis.WebSocket = class { constructor() { this.readyState = 1; this.sent = []; this.closed = 0; socks.push(this); } send(t) { this.sent.push(JSON.parse(t)); } close() { this.closed++; } };
+    const savedLoc = globalThis.location;
+    globalThis.location = { protocol: "http:", host: "127.0.0.1:1" };
+    const errs = [];
+    const savedErr = console.error;
+    console.error = (m) => errs.push(String(m));
+    const scope = rt.root.child();
+    const hooks = { errors: 0 };
+    try {
+      rt.channel(scope, { name: "k", reconnect: 0, cells: cellsDesc, open: null, close: null, error: () => { hooks.errors++; } });
+    } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; }
+    return { sock: socks[0], errs, hooks, raw: (v) => socks[0].onmessage({ data: typeof v === "string" ? v : JSON.stringify(v) }), done: () => { console.error = savedErr; scope.dispose(); } };
+  }
+  const XS = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
+  const sf = (seq, key, op, val, own = false) => ({ __type: "__sync", __seq: seq, __key: key, __op: op, __val: val, __own: own });
+
+  test("a forged replay (a compromised relay): each frame is re-checked — the refused ones are not applied, the rest are", () => {
+    const xs = rt.cell([]);
+    const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+    try {
+      c.raw({ __type: "__replay", __complete: true, __seq: 4, __frames: [sf(1, "xs", "append", "a"), sf(2, "xs", "replace", ["forged"]), sf(3, "xs", "append", 5), sf(4, "xs", "append", "b")] });
+      expect(xs.peek()).toEqual(["a", "b"]);
+      expect(c.errs.join("\n")).toContain("refused a `replace` of @xs, whose grants do not admit it");
+      expect(c.errs.join("\n")).toContain("whose element does not decode");
+      expect(c.sock.closed).toBe(0);
+    } finally { c.done(); }
+  });
+
+  const BROKEN = [
+    ["a first frame that is not the replay", [sf(1, "xs", "append", "a")], "first frame is not the relay's __replay"],
+    ["a replay that skips a number", [{ __type: "__replay", __complete: true, __seq: 2, __frames: [sf(1, "xs", "append", "a"), sf(3, "xs", "append", "b")] }], "is not the relayed frame numbered 2"],
+    ["a replay whose count disagrees with its __seq", [{ __type: "__replay", __complete: true, __seq: 5, __frames: [sf(1, "xs", "append", "a")] }], "says it ends at 5"],
+    ["a live frame out of sequence", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, sf(2, "xs", "append", "a")], "a frame numbered 2 after 0"],
+    ["an own frame with no pending edit", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, sf(1, "xs", "append", "a", true)], "not this client's oldest pending edit"],
+    ["a frame with an extra key", [{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }, { ...sf(1, "xs", "append", "a"), x: 1 }], "not exactly {__type, __seq, __key, __op, __val, __own}"],
+  ];
+  for (const [what, msgs, needle] of BROKEN) {
+    test(`a broken stream — ${what} — applies nothing and closes the connection`, () => {
+      const xs = rt.cell([]);
+      const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+      try {
+        for (const m of msgs) c.raw(m);
+        expect(xs.peek()).toEqual([]);
+        expect(c.sock.closed).toBe(1);
+        expect(c.errs.join("\n")).toContain(needle);
+        c.raw({ __type: "__replay", __complete: true, __seq: 1, __frames: [sf(1, "xs", "append", "late")] });   // nothing more from that connection
+        expect(xs.peek()).toEqual([]);
+      } finally { c.done(); }
+    });
+  }
+
+  test("an own frame whose payload is not the pending edit's is a broken stream", () => {
+    const xs = rt.cell([]);
+    const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+    try {
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      rt.batch(() => rt.append(xs, "mine"));
+      expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "mine" }]);
+      c.raw(sf(1, "xs", "append", "not-mine", true));
+      expect(c.sock.closed).toBe(1);
+      expect(c.errs.join("\n")).toContain("not this client's oldest pending edit");
+    } finally { c.done(); }
+  });
+
+  test("a pending edit is shown on top of the confirmed value, rebased under a peer's frame, and retired by its own echo", () => {
+    const xs = rt.cell([]);
+    const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+    try {
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      rt.batch(() => rt.append(xs, "mine"));
+      expect(xs.peek()).toEqual(["mine"]);                       // optimistic local apply
+      c.raw(sf(1, "xs", "append", "peer"));                       // the relay put the peer's first
+      expect(xs.peek()).toEqual(["peer", "mine"]);               // rebased onto relay order
+      c.raw(sf(2, "xs", "append", "mine", true));
+      expect(xs.peek()).toEqual(["peer", "mine"]);
+      c.raw(sf(3, "xs", "append", "later"));
+      expect(xs.peek()).toEqual(["peer", "mine", "later"]);
+      expect(c.sock.sent.length).toBe(1);
+      expect(c.errs).toEqual([]);
+    } finally { c.done(); }
+  });
+
+  test("an incomplete replay: nothing applied, onclient:error, no later frame applied or sent", () => {
+    const xs = rt.cell(["kept"]);
+    const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+    try {
+      c.raw({ __type: "__replay", __complete: false, __seq: 12000, __frames: [] });
+      expect(xs.peek()).toEqual(["kept"]);
+      expect(c.hooks.errors).toBe(1);
+      expect(c.sock.closed).toBe(1);
+      rt.batch(() => rt.append(xs, "local"));
+      expect(c.sock.sent).toEqual([]);
+    } finally { c.done(); }
+  });
+
+  test("item 52: refused frames are reported at most 5 times per 10 s per channel, then one line", () => {
+    const xs = rt.cell([]);
+    const c = standIn([{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }]);
+    try {
+      c.raw({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+      for (let i = 1; i <= 40; i++) c.raw(sf(i, "xs", "replace", ["forged"]));
+      expect(xs.peek()).toEqual([]);
+      expect(c.errs.filter((e) => e.includes("refused a `replace`")).length).toBe(5);
+      expect(c.errs.filter((e) => e.includes("further refused frames are not reported")).length).toBe(1);
+      expect(c.errs.length).toBe(6);
+      expect(c.sock.closed).toBe(0);                              // a refusal is not a broken stream
+    } finally { c.done(); }
+  });
+});
+
+// #1941 fix round 1 (review ~/.cache/scrml/review/s478-1941/review.md).
+describe("L — #1941 fix r1: epoch reset, held edits, onclient:open after the replay, non-channel resets, byte bound, test-only seam", () => {
+  // HIGH-1 — §38.4.2 "When the last subscriber of a channel whose log was truncated leaves, the
+  // relay SHALL start the channel again: a new, empty, complete log at sequence `0`".
+  test("HIGH-1 (attack A3 shape): one peer floods past the frame bound; while anyone is subscribed a joiner fails closed; once all leave, a new joiner syncs again", async () => {
+    const w = await convWorld({ [LOG_HOOK]: { frames: 50 } });
+    try {
+      const A = w.live();
+      await tick(200);
+      const P = await connect(w.base, "/_scrml_ws/c");
+      for (let i = 0; i < 51; i++) P.ws.send(frame("n", "replace", i % 2));
+      for (let k = 0; k < 100 && P.got.length < 51; k++) await tick(20);
+      P.ws.close();
+      await tick(100);
+      // A is still subscribed: a joiner is told the log is incomplete and stops (the INTERIM fail-closed)
+      const J = w.live({ reconnect: 50 });
+      await tick(300);
+      expect(J.hooks.errors).toBe(1);
+      expect(J.hooks.opens).toBe(0);
+      A.scope.dispose();
+      J.scope.dispose();
+      await tick(200);
+      expect(w.logs.join("\n")).toContain("starts again with an empty log at sequence 0");
+      const raw = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      expect(raw.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
+      const K = w.live();
+      const L = w.live();
+      await tick(300);
+      expect(K.hooks.errors).toBe(0);
+      expect(K.hooks.opens).toBe(1);
+      rt.batch(() => rt.append(K.cells.xs, "back"));
+      await tick(300);
+      expect(L.val("xs")).toEqual(["back"]);
+      expect(K.val("xs")).toEqual(["back"]);
+      raw.ws.close();
+    } finally { w.done(); }
+  });
+
+  test("HIGH-1 (attack A3b shape): past the byte bound the same — fail closed while subscribed, a new epoch once the channel is empty", async () => {
+    const w = await convWorld({ [LOG_HOOK]: { bytes: 4000 } });
+    try {
+      const P = await connect(w.base, "/_scrml_ws/c");
+      const big = "x".repeat(1000);
+      for (let i = 0; i < 5; i++) P.ws.send(frame("xs", "append", big));
+      for (let k = 0; k < 100 && P.got.length < 5; k++) await tick(20);
+      expect(w.logs.join("\n")).toContain("the frame log passed its bound");
+      const J = w.live();
+      await tick(300);
+      expect(J.hooks.errors).toBe(1);
+      P.ws.close();
+      await tick(200);
+      const K = w.live();
+      await tick(300);
+      expect(K.hooks.errors).toBe(0);
+      expect(K.val("xs")).toEqual([]);
+    } finally { w.done(); }
+  });
+
+  test("HIGH-1: an untruncated channel keeps its log when every subscriber leaves (a later joiner still gets the history)", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(200);
+      rt.batch(() => rt.append(A.cells.xs, "kept"));
+      await tick(200);
+      A.scope.dispose();
+      await tick(150);
+      const B = w.live();
+      await tick(300);
+      expect(B.val("xs")).toEqual(["kept"]);
+    } finally { w.done(); }
+  });
+
+  // LOW-1 — §38.4.2 "at most 8,388,608 bytes of relayed frame text (… UTF-8 encoded, summed)"
+  test("LOW-1: the log bound counts UTF-8 bytes — a CJK frame under the bound in UTF-16 units but over it in bytes truncates", async () => {
+    const w = await convWorld({ [LOG_HOOK]: { bytes: 300 } });
+    try {
+      const P = await connect(w.base, "/_scrml_ws/c");
+      const cjk = "漢".repeat(90);                          // ~180 UTF-16 units of frame text, ~350 bytes
+      P.ws.send(frame("xs", "append", cjk));
+      for (let k = 0; k < 50 && P.got.length < 1; k++) await tick(20);
+      expect(w.logs.join("\n")).toContain("the frame log passed its bound");
+      const raw = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      expect(raw.replays[0].__complete).toBe(false);
+      raw.ws.close();
+      P.ws.close();
+    } finally { w.done(); }
+  });
+
+  // LOW-2 — the bound seam is a registered symbol, never a string option a deployment config could set
+  test("LOW-2: a string-keyed `channelLog` option in createServer's options is not read", async () => {
+    const w = await convWorld({ channelLog: { frames: 0, bytes: 0 } });
+    try {
+      const A = w.live();
+      await tick(200);
+      rt.batch(() => rt.append(A.cells.xs, "one"));
+      await tick(200);
+      expect(w.logs.join("\n")).not.toContain("the frame log passed its bound");
+      const B = w.live();
+      await tick(300);
+      expect(B.hooks.errors).toBe(0);
+      expect(B.val("xs")).toEqual(["one"]);
+    } finally { w.done(); }
+  });
+
+  // MED-3 — the replay text is built once per log change (cached), and a new frame invalidates it
+  test("MED-3: every open is sent the same replay text, and a frame relayed after it is in the next one", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(200);
+      rt.batch(() => rt.append(A.cells.xs, "a"));
+      await tick(150);
+      const r1 = await connect(w.base, "/_scrml_ws/c");
+      const r2 = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      expect(JSON.stringify(r1.replays)).toBe(JSON.stringify(r2.replays));
+      expect(r1.replays[0].__seq).toBe(1);
+      rt.batch(() => rt.append(A.cells.xs, "b"));
+      await tick(150);
+      const r3 = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      expect(r3.replays[0].__seq).toBe(2);
+      expect(r3.replays[0].__frames.map((f) => f.__val)).toEqual(["a", "b"]);
+      for (const r of [r1, r2, r3]) r.ws.close();
+    } finally { w.done(); }
+  });
+
+  // MED-1 — §38.10 `onclient:open` runs after the replay; §38.4.2 a write before the replay is held
+  test("MED-1: a channel write in `onclient:open` (presence announce) is sent and kept on every client", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(200);
+      const B = w.live({ open: (cells) => { rt.batch(() => rt.append(cells.xs, "B-joined")); } });
+      await tick(400);
+      expect(A.val("xs")).toEqual(["B-joined"]);
+      expect(B.val("xs")).toEqual(["B-joined"]);
+    } finally { w.done(); }
+  });
+
+  test("MED-1 (onopen probe shape): a write between the socket's open and the replay is held and sent after it, on top of the history", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(200);
+      rt.batch(() => rt.append(A.cells.xs, "history"));
+      await tick(150);
+      const B = w.live();
+      rt.batch(() => rt.append(B.cells.xs, "connecting"));        // the socket is still CONNECTING
+      B.socket().addEventListener("open", () => { rt.batch(() => rt.append(B.cells.xs, "B-joined")); });
+      await tick(400);
+      expect(A.val("xs")).toEqual(["history", "connecting", "B-joined"]);
+      expect(B.val("xs")).toEqual(["history", "connecting", "B-joined"]);
+    } finally { w.done(); }
+  });
+
+  test("MED-1: a held edit that no longer applies on top of the history is not shown, not sent, and reported", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      await tick(200);
+      rt.batch(() => rt.append(A.cells.ys, 2));
+      rt.batch(() => rt.append(A.cells.ys, 3));                  // ys at its bound 1..=3
+      await tick(200);
+      const B = w.live();
+      rt.batch(() => rt.append(B.cells.ys, 9));                  // held: fine on [1], past the bound on [1,2,3]
+      await tick(400);
+      expect(B.val("ys")).toEqual([1, 2, 3]);
+      expect(A.val("ys")).toEqual([1, 2, 3]);
+      expect(w.errs.join("\n")).toContain("no longer applies to it — not sent");
+    } finally { w.done(); }
+  });
+
+  // MED-2 — §38.4.2: a NON-channel `reset-on=` reset is made only when the trigger's SHOWN value changes
+  test("MED-2 (attack A5 shape): the writer's own echo does not re-make a non-channel reset; a peer's change of the trigger does", async () => {
+    const wire = (scope, cells) => { cells.d = rt.cell(0); rt.resetOn(scope, [cells.n], () => { cells.d.set(0); }, 0); };
+    const w = await convWorld();
+    try {
+      const A = w.live({ wire });
+      const B = w.live({ wire });
+      await tick(250);
+      rt.batch(() => A.cells.n.set(1));                          // local: resets d (already 0)
+      rt.batch(() => A.cells.d.set(42));                         // typed before the echo returns
+      await tick(250);
+      expect(A.val("n")).toBe(1);
+      expect(A.val("d")).toBe(42);                               // the echo did not wipe it
+      expect(A.val("m")).toBe(5);                                // the channel cell's reset still holds
+      rt.batch(() => A.cells.d.set(43));
+      rt.batch(() => rt.append(B.cells.xs, "z"));                // a peer edit that does not touch n
+      await tick(250);
+      expect(A.val("d")).toBe(43);
+      rt.batch(() => B.cells.n.set(2));                          // a peer changes the trigger: A shows n 1 -> 2
+      await tick(250);
+      expect(A.val("n")).toBe(2);
+      expect(A.val("d")).toBe(0);                                // reset, as a local change of n would
+    } finally { w.done(); }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// K — #1941 × #1942 integration (S478): relay order (§38.4.2) over the relay bounds and client
+// pacing (§38.4.3). §38.4.3: "A conforming client paces its frames to the bound … While a `replace`
+// of a cell is queued, a later `replace` of the same cell supersedes it … A superseded `replace` is
+// never sent, so it is not a pending edit (§38.4.2) … The held edits of §38.4.2 are paced as every
+// other edit is". §38.4.3 subscriber cap: "This count is the one §38.4.2's 'last subscriber of a
+// channel whose log was truncated leaves' reads: a reserved place counts as a subscriber from the
+// reservation". RED before the integration: `send` bypassed the pacer (a 200-append burst from one
+// client was closed 1008), a coalesced `replace` left its pending entry waiting for an echo that
+// never came (the next own frame broke the stream), and the two subscriber counts disagreed.
+// ---------------------------------------------------------------------------------------------
+describe("K — #1941 × #1942: relay order over the bounds and client pacing", () => {
+  test("a 200-append burst from each of two clients converges on 3 clients, none lost, across a reconnect mid-burst", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      const B = w.live();
+      const C = w.live({ reconnect: 60 });
+      await tick(300);
+      for (let i = 0; i < 200; i++) { rt.batch(() => rt.append(A.cells.xs, "a" + i)); rt.batch(() => rt.append(B.cells.xs, "b" + i)); }
+      await tick(900);                                       // mid-burst: the pacers are draining
+      expect(A.val("xs").filter((x) => x[0] === "a").length).toBe(200);   // A's own edits shown at once (optimistic)
+      C.socket().close();                                    // C drops and reconnects mid-burst
+      const done = async () => {
+        for (let t = 0; t < 120; t++) {
+          if ([A, B, C].every((X) => X.val("xs").length === 400) && new Set([A, B, C].map((X) => JSON.stringify(X.val("xs")))).size === 1) return true;
+          await tick(100);
+        }
+        return false;
+      };
+      expect(await done()).toBe(true);
+      const xs = A.val("xs");
+      for (let i = 0; i < 200; i++) { expect(xs).toContain("a" + i); expect(xs).toContain("b" + i); }
+      // each sender's own appends keep their order (FIFO pacing, relay order)
+      expect(xs.filter((s) => s[0] === "a")).toEqual(Array.from({ length: 200 }, (_, i) => "a" + i));
+      expect(C.hooks.opens).toBe(2);
+      expect(w.logs.join("\n")).not.toContain("rate limit");
+      expect(w.errs.join("\n")).not.toContain("closed the connection");
+      expect(w.errs.join("\n")).not.toContain("dropped when the connection closed");
+    } finally { w.done(); }
+  }, 60000);
+
+  test("a coalesced `replace` burst converges with no broken-stream close (a superseded frame is not pending)", async () => {
+    const w = await convWorld();
+    try {
+      const A = w.live();
+      const B = w.live();
+      const C = w.live();
+      await tick(300);
+      const obs = await connect(w.base, "/_scrml_ws/c");
+      await tick();
+      for (let i = 1; i <= 300; i++) { rt.batch(() => A.cells.n.set(i)); if (i % 3 === 0) rt.batch(() => B.cells.n.set(1000 + i)); }
+      rt.batch(() => rt.append(A.cells.xs, "after"));       // an own echo AFTER the coalesced ones must still match
+      let ok = false;
+      for (let t = 0; t < 80 && !ok; t++) {
+        await tick(100);
+        ok = obs.got.some((f) => f.__key === "xs") && new Set([A, B, C].map((X) => JSON.stringify(X.state()))).size === 1;
+      }
+      expect(ok).toBe(true);
+      const ns = obs.got.filter((f) => f.__key === "n");
+      expect(ns.length).toBeLessThan(400);                   // coalesced: not every write went on the wire
+      expect([300, 1300]).toContain(A.val("n"));             // the last write of one of them wins, everywhere
+      expect(A.val("n")).toBe(ns[ns.length - 1].__val);
+      expect(A.val("xs")).toEqual(["after"]);
+      expect(w.errs.join("\n")).not.toContain("closed the connection");
+      expect(w.errs.join("\n")).not.toContain("not this client's oldest pending edit");
+      obs.ws.close();
+    } finally { w.done(); }
+  }, 30000);
+
+  // The relay's websocket handlers, driven directly: a fake upgrader that reserves a place but
+  // whose socket the test opens (or never opens) when it chooses.
+  async function relay(host) {
+    const { r, server } = compileConv();
+    const logs = [];
+    const mod = await loadServer(server.js, r.core);
+    const srv = mod.createServer({ root: "/tmp", log: (s) => logs.push(s), ...host });
+    const upgrade = async (accept = true) => {
+      let data = null;
+      const res = await srv.fetch(new Request("http://x.test/_scrml_ws/c", { headers: { Upgrade: "websocket" } }), { upgrade: (_req, o) => { data = o.data; return accept; } });
+      return { res, data };
+    };
+    const sock = (data) => ({ data, sent: [], closed: null, send(t) { this.sent.push(t); return t.length; }, subscribe() {}, unsubscribe() {}, publish() {}, close(c) { this.closed = c; } });
+    return { srv, logs, upgrade, sock, ws: srv.websocket };
+  }
+  const replayOf = (s) => JSON.parse(s.sent[0]);
+
+  test("a truncated channel starts again when the last reserved subscriber leaves — never while an upgrade holds a place", async () => {
+    const R = await relay({ [LOG_HOOK]: { frames: 2 } });
+    const u1 = await R.upgrade();
+    expect(u1.res).toBe(undefined);
+    const s1 = R.sock(u1.data); R.ws.open(s1);
+    for (let i = 1; i <= 3; i++) R.ws.message(s1, frame("n", "replace", i));
+    expect(R.logs.join("\n")).toContain("the frame log passed its bound");
+    // a second socket reserved (mid-upgrade, not yet opened) when the first leaves: no reset
+    const u2 = await R.upgrade();
+    R.ws.close(s1);
+    expect(R.logs.join("\n")).not.toContain("starts again with an empty log");
+    // a third, opened beside the reserved one, is told the log is incomplete (fail closed)
+    const u3 = await R.upgrade();
+    const s3 = R.sock(u3.data); R.ws.open(s3);
+    expect(replayOf(s3)).toEqual({ __type: "__replay", __complete: false, __seq: 3, __frames: [] });
+    R.ws.close(s3);
+    expect(R.logs.join("\n")).not.toContain("starts again with an empty log");
+    // the reserved socket closes WITHOUT ever opening: its place is released, and it was the last
+    R.ws.close(R.sock(u2.data));
+    expect(R.logs.join("\n")).toContain("the last subscriber left a channel whose frame log was truncated");
+    const u4 = await R.upgrade();
+    const s4 = R.sock(u4.data); R.ws.open(s4);
+    expect(replayOf(s4)).toEqual({ __type: "__replay", __complete: true, __seq: 0, __frames: [] });
+    R.ws.message(s4, frame("n", "replace", 7));
+    expect(JSON.parse(s4.sent[1])).toEqual({ __type: "__sync", __seq: 1, __key: "n", __op: "replace", __val: 7, __own: true });
+  });
+
+  test("a failed upgrade releases its place; the next socket that opens alone on a truncated channel starts it again", async () => {
+    const R = await relay({ [LOG_HOOK]: { frames: 1 } });
+    const u1 = await R.upgrade();
+    const s1 = R.sock(u1.data); R.ws.open(s1);
+    R.ws.message(s1, frame("n", "replace", 1)); R.ws.message(s1, frame("n", "replace", 2));
+    const bad = await R.upgrade(false);
+    expect(bad.res.status).toBe(400);
+    R.ws.close(s1);
+    expect(R.logs.join("\n")).toContain("the last subscriber left");
+    // the cap counted the failed one only while it was reserved: a full cap is free again
+    const u2 = await R.upgrade();
+    const s2 = R.sock(u2.data); R.ws.open(s2);
+    expect(replayOf(s2).__complete).toBe(true);
+    expect(replayOf(s2).__seq).toBe(0);
+  });
+
+  test("a relay echo spends no token: a sender at its full bucket is not closed by its own `__seq` echoes", async () => {
+    const R = await relay({});
+    const u = await R.upgrade();
+    const s = R.sock(u.data); R.ws.open(s);
+    for (let i = 1; i <= 100; i++) R.ws.message(s, frame("n", "replace", i));   // the default burst, exactly
+    expect(s.closed).toBe(null);
+    expect(s.sent.length).toBe(101);                       // the replay + 100 own echoes
+    R.ws.message(s, frame("n", "replace", 101));            // the 101st client frame finds no token
+    expect(s.closed).toBe(1008);
+  });
+
+  test("a replay larger than the frame-size bound is sent as ONE message and applied by the client", async () => {
+    const R = await relay({});
+    const u = await R.upgrade();
+    const s = R.sock(u.data); R.ws.open(s);
+    const big = "x".repeat(60000);                         // each frame under 65 536 bytes; the log well over
+    for (let i = 0; i < 4; i++) R.ws.message(s, frame("xs", "append", big + i));
+    const u2 = await R.upgrade();
+    const s2 = R.sock(u2.data); R.ws.open(s2);
+    expect(s2.sent.length).toBe(1);
+    expect(new TextEncoder().encode(s2.sent[0]).length).toBeGreaterThan(65536);
+    const rep = JSON.parse(s2.sent[0]);
+    expect(rep.__complete).toBe(true);
+    expect(rep.__frames.length).toBe(4);
+  });
+});
+
+describe("K — #1941 × #1942: held and pending edits through the pacer (client, driven socket)", () => {
+  class FakeSocket {
+    static last = null;
+    constructor(url) { this.url = url; this.readyState = 0; this.sent = []; FakeSocket.last = this; }
+    send(t) { this.sent.push(t); }
+    close() { this.readyState = 3; }
+  }
+  const XS = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
+  const NT = { defs: [], root: { k: "int" } };
+  function world(limits) {
+    const prevWs = globalThis.WebSocket, prevLoc = globalThis.location, prevErr = console.error;
+    const errs = [];
+    globalThis.WebSocket = FakeSocket;
+    globalThis.location = { protocol: "http:", host: "x.test" };
+    console.error = (m) => errs.push(String(m));
+    const scope = rt.root.child();
+    const xs = rt.cell([]), n = rt.cell(0);
+    rt.channel(scope, { name: "c", reconnect: 0, limits, open: null, close: null, error: null,
+      cells: [{ key: "xs", cell: xs, table: XS, ops: ["append"], edges: null }, { key: "n", cell: n, table: NT, ops: ["replace"], edges: null }] });
+    const s = FakeSocket.last;
+    let seq = 0;
+    // the relay's copy of each frame the client sent, back to it (`__own: true`), in order
+    const echo = (from) => { for (const t of s.sent.slice(from)) { const f = JSON.parse(t); s.onmessage({ data: JSON.stringify({ __type: "__sync", __seq: ++seq, __key: f.__key, __op: f.__op, __val: f.__val, __own: true }) }); } };
+    return { s, xs, n, errs, echo, done: () => { scope.dispose(); globalThis.WebSocket = prevWs; globalThis.location = prevLoc; console.error = prevErr; } };
+  }
+  const REPLAY0 = '{"__type":"__replay","__complete":true,"__seq":0,"__frames":[]}';
+
+  test("held pre-replay edits are paced: after the replay only the bucket goes out, the rest drain in order", async () => {
+    const W = world({ maxFrame: 65536, rate: 20, burst: 3 });
+    try {
+      W.s.readyState = 1; W.s.onopen();
+      for (let i = 0; i < 6; i++) rt.batch(() => rt.append(W.xs, "h" + i));   // before the replay: HELD
+      expect(W.s.sent).toEqual([]);
+      W.s.onmessage({ data: REPLAY0 });
+      expect(W.xs.peek()).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);       // re-applied on the rebuilt value
+      expect(W.s.sent.length).toBe(2);                                         // burst 3 less 5% (rounded up) = 2
+      await tick(400);
+      expect(W.s.sent.map((t) => JSON.parse(t).__val)).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);
+      W.echo(0);
+      expect(W.errs.join("\n")).not.toContain("closed the connection");
+      expect(W.xs.peek()).toEqual(["h0", "h1", "h2", "h3", "h4", "h5"]);
+    } finally { W.done(); }
+  });
+
+  test("a superseded queued `replace` leaves no pending entry: the echoes of the frames actually sent match in order", async () => {
+    const W = world({ maxFrame: 65536, rate: 20, burst: 2 });                  // a 1-token client bucket
+    try {
+      W.s.readyState = 1; W.s.onopen(); W.s.onmessage({ data: REPLAY0 });
+      rt.batch(() => W.n.set(1));                                              // sent
+      rt.batch(() => W.n.set(2));                                              // queued
+      rt.batch(() => rt.append(W.xs, "a"));                                    // queued
+      rt.batch(() => W.n.set(3));                                              // supersedes n=2: never sent
+      expect(W.s.sent.length).toBe(1);
+      W.echo(0);                                                               // n=1 comes back
+      expect(W.n.peek()).toBe(3);                                              // pending a, n=3 re-applied on top
+      await tick(300);
+      expect(W.s.sent.map((t) => JSON.parse(t).__val)).toEqual([1, "a", 3]);
+      W.echo(1);                                                               // a, then n=3: each the oldest pending
+      expect(W.errs).toEqual([]);
+      expect(W.n.peek()).toBe(3);
+      expect(W.xs.peek()).toEqual(["a"]);
+    } finally { W.done(); }
+  });
+
+  test("a close drops the queued frames and their pending entries; the next replay rebuilds without them", () => {
+    const W = world({ maxFrame: 65536, rate: 1, burst: 2 });
+    try {
+      W.s.readyState = 1; W.s.onopen(); W.s.onmessage({ data: REPLAY0 });
+      rt.batch(() => rt.append(W.xs, "sent"));
+      rt.batch(() => rt.append(W.xs, "queued1"));
+      rt.batch(() => rt.append(W.xs, "queued2"));
+      expect(W.s.sent.length).toBe(1);
+      W.s.readyState = 3; W.s.onclose({ code: 1006, reason: "", wasClean: false });
+      expect(W.errs.join("\n")).toContain("2 edits not yet sent were dropped");
+      rt.batch(() => rt.append(W.xs, "while-closed"));                         // not sent, not queued
+      expect(W.s.sent.length).toBe(1);
+    } finally { W.done(); }
+  });
 });

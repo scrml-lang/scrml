@@ -100,7 +100,14 @@ function connect(base, path) {
     const ws = new WebSocket(`ws://${base}${path}`);
     const got = [];
     let closed = null;
-    ws.onmessage = (ev) => got.push(JSON.parse(String(ev.data)));
+    // #1941 × #1942 integration: the relay's first message is the §38.4.2 `__replay`, and every
+    // relayed frame carries `__seq` / `__own`; these bounds tests read the relayed op frames only
+    ws.onmessage = (ev) => {
+      const f = JSON.parse(String(ev.data));
+      if (f.__type === "__replay") return;
+      const { __seq, __own, ...op } = f;
+      got.push(op);
+    };
     ws.onclose = (ev) => { closed = { code: ev.code, reason: ev.reason }; };
     ws.onopen = () => resolveP({ ws, got, closed: () => closed });
     ws.onerror = () => reject(new Error("refused"));

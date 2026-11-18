@@ -207,6 +207,7 @@ export class Cell {
   /** The current value without subscribing (used by writes). */
   peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    if (resetGuard !== null && runningReset !== null && !resetGuard.cells.has(this)) { resetGuard.deferred.add(runningReset); return; }
     if (this.timing !== null) { timedWrite(this, v); return; }
     this.write(v);
   }
@@ -1029,6 +1030,13 @@ export function reportHostError(e) {
 // ---------------------------------------------------------------------------
 const pendingResets = new Set();
 let drainingResets = false;
+// #1941 fix r1 (MED-2) — §38.4.2 "A `reset-on=` reset of a cell that is NOT a channel cell is made
+// when, and only when, the value the client SHOWS of a trigger changes across the received unit": while a channel applies a
+// received unit, `resetGuard` holds that channel's cells; a reset that would write any other cell
+// is not made then (`Cell.set`), but deferred to the unit's end (`channel` — unit). `runningReset`
+// is the reset `drainResets` is running (a drain never nests, so its writes are that reset's own).
+let resetGuard = null;
+let runningReset = null;
 
 class ResetOn {
   constructor(scope, triggers, reset, rank) {
@@ -1059,7 +1067,10 @@ function drainResets() {
       let next = null;
       for (const r of pendingResets) if (next === null || r.rank < next.rank) next = r;
       pendingResets.delete(next);
-      if (!next.disposed) batch(() => untrack(next.reset));
+      if (!next.disposed) {
+        runningReset = next;
+        try { batch(() => untrack(next.reset)); } finally { runningReset = null; }
+      }
     }
   } finally {
     drainingResets = false;
@@ -5438,15 +5449,17 @@ export function classify(route, status, text) {
 //   write) sends `{ __type: "__sync", __key, __op, __val }`. A `rule=` field sends every write
 //   as `transition`. An edit the cell does not sync as its own op (a part write of a `replace`
 //   cell) is sent as `replace` — the whole new value (INTERIM, g-boot-channel-op-residue-s478).
-//   "The sender applies its own edit first … a sender never receives, and never re-applies,
-//   its own edit" — the relay publishes to the channel's OTHER subscribers.
+//   "The sender applies its own edit first … The edit is then PENDING on the sender until the
+//   relay's copy of it comes back" — the relay echoes every frame to every subscriber, the
+//   sender included (S478 open-Qs ruling (user-voice), item 50; see `unit` below).
 //   "The receiver SHALL, before it applies a frame, check: (1) … `__op` is an op its declared
 //   grants admit; (2) the payload decodes canonically against its type; (3) the edit, applied
 //   to the cell's CURRENT value, keeps every invariant a local write of the same edit is
 //   checked against" — `receive`. "A refused frame … SHALL NOT be applied, in whole or in part,
 //   and SHALL be reported to the developer … The connection stays open."
 //   §38.10.4: "Sync of channel-scoped cells (§38.4) is suspended when the connection is closed
-//   and resumes when it reopens" — a write while closed is not queued.
+//   and resumes when it reopens: a write made while the connection is closed is not sent (nor
+//   queued), and on reopening the client rebuilds its channel cells from the relay's frame log".
 // ---------------------------------------------------------------------------
 const CHANNEL_EDITS = new Set(["append", "prepend", "pop", "shift"]);
 
@@ -5467,6 +5480,43 @@ function lengthBound(table) {
   return b.k === "bounded" ? [b.min, b.max] : null;
 }
 
+// S478 open-Qs ruling (user-voice), items 50–53 (s478-ruled-channel-sync2) — §38.4.2:
+//   "Ordering — relay order … Each client keeps two things for the channel's cells: the CONFIRMED
+//   value … and its PENDING edits … The value a client shows is the confirmed value with its
+//   pending edits re-applied on top, in order, each checked against the value before it" —
+//   `conf`, `pending`, `unit` (restore → apply → record → re-apply). "A frame with `__own: true`
+//   is the client's oldest pending edit coming back … if it does not name the same cell, op and
+//   payload as that oldest pending edit, or there is no pending edit, the stream is broken".
+//   "Re-applying a pending edit makes that edit again and nothing else" — `rebaseSet` (no
+//   `reset-on=` rule, no op sink). "Applying a relayed frame — the client's own included — makes
+//   the writes it causes" — `apply` writes through `Cell.set`.
+//   "A write made while applying a received frame — a `reset-on=` reset, an edge effect — is local
+//   and is not sent … 'While applying' covers the whole received unit … up to and including the
+//   flush" — `applying` is held across the whole `batch(…)` call of a unit, its flush included.
+//   "The frame log … ONE replay message … The client SHALL set every channel cell back to its
+//   initial value, drop its pending edits, and apply the logged frames … as ONE unit" — the first
+//   message of every connection. "A client given an incomplete replay SHALL NOT show the channel
+//   as in sync: it applies no frame from the replay, applies and sends no frame of the channel from
+//   then on, does not reconnect the channel, reports …, and runs `onclient:error`" — `stopped`.
+//   "a `__seq` that is not one more than the last one it applied, as a broken stream: it applies
+//   nothing more from that connection and closes it" — `broken`.
+//   "The report is rate-limited per channel: … at most 5 refused frames of one channel in any
+//   10-second window, then one line" — `refused`.
+const CHANNEL_REPORTS = 5;
+const CHANNEL_REPORT_WINDOW_MS = 10000;
+
+/**
+ * A rebase write of a channel cell (§38.4.2: restoring the confirmed value, re-applying a pending
+ * edit): the value and its observers, never a `reset-on=` rule (it makes that edit again and
+ * nothing else) and never the op sink (it is not a new edit).
+ */
+function rebaseSet(cell, v) {
+  cell.peek();
+  if (Object.is(v, cell.value)) return;
+  cell.value = v;
+  for (const o of [...cell.observers]) if (!(o instanceof ResetOn)) o.markStale();
+}
+
 // §38.4.3 (S478 fix r1, MED-3): "A conforming client paces its frames to the bound; an honest
 // client SHALL NOT be closed by it." The client mirrors the relay's token bucket (`desc.limits`)
 // with a margin — a bucket of `burst` less 5% (at least 1) refilled at 95% of `rate` — so frames
@@ -5478,7 +5528,11 @@ function lengthBound(table) {
 // relay's does, §38.4.3); a close drops the frames still queued (§38.10.4: sync is suspended
 // while closed) and returns how many. Self-contained, so a resend on reconnect can go through
 // `push` and be paced like any edit.
-//   io: { now() → ms, later(fn, ms) → handle, cancel(handle), send(text) }
+//   io: { now() → ms, later(fn, ms) → handle, cancel(handle), send(text, ref), superseded?(ref) }
+// Integration (#1941 × #1942, S478): each queued frame carries the caller's `ref` (#1941's pending
+// entry); `send(text, ref)` is told which frame went on the wire, and `superseded(ref)` which queued
+// `replace` a later one superseded — that frame is never sent, so the caller drops its pending
+// entry rather than wait for an echo that cannot come. `close()` returns how many were dropped.
 export function channelPacer(limits, io) {
   const lim = limits !== null && typeof limits === "object" ? limits : {};
   const pos = (v, d) => (Number.isSafeInteger(v) && v >= 1 ? v : d);
@@ -5498,7 +5552,8 @@ export function channelPacer(limits, io) {
     at = t;
     while (q.length > 0 && tokens >= 1) {
       tokens -= 1;
-      io.send(q.shift().text);
+      const f = q.shift();
+      io.send(f.text, f.ref);
     }
     if (q.length > 0) timer = io.later(pump, Math.max(1, Math.ceil(((1 - tokens) * 1000) / rate)));
   }
@@ -5519,10 +5574,16 @@ export function channelPacer(limits, io) {
       return n;
     },
     // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
-    push(key, op, text) {
+    push(key, op, text, ref) {
       if (!open) return false;
-      if (op === "replace") q = q.filter((f) => !(f.key === key && f.op === "replace"));
-      q.push({ key, op, text });
+      if (op === "replace") {
+        q = q.filter((f) => {
+          if (!(f.key === key && f.op === "replace")) return true;
+          if (typeof io.superseded === "function") io.superseded(f.ref);
+          return false;
+        });
+      }
+      q.push({ key, op, text, ref });
       if (timer === null) pump();
       return true;
     },
@@ -5560,11 +5621,34 @@ export function channel(scope, desc) {
   const g = globalThis;
   const byKey = new Map();
   for (const c of desc.cells) byKey.set(c.key, c);
+  // the initial values (a subscribing client starts from them, §38.4.2 "The frame log") and the
+  // confirmed value of each cell; the pending edits ({ c, op, val, wire }), oldest first
+  const init = new Map();
+  for (const c of desc.cells) init.set(c, c.cell.peek());
+  const conf = new Map(init);
+  const chanCells = new Set(desc.cells.map((c) => c.cell));
+  let pending = [];
+  // #1941 fix r1 (MED-1): the edits made on a connection that is open (or opening) but whose replay
+  // has not been applied — §38.4.2 "held"; re-applied on the rebuilt value and sent after the replay
+  let held = [];
+  let seq = 0;              // the last sequence number applied on this connection
+  let live = false;         // this connection's replay has been applied
+  let stopped = false;      // a truncated frame log: the channel is out of sync for good
   let ws = null;
   let timer = null;
   let disposed = false;
-  let applying = null;
-  const warn = (msg) => { try { g.console.error(`scrml channel ${desc.name}: ${msg}`); } catch { /* nothing to do */ } };
+  let applying = false;
+  let windowFrom = 0;
+  let reports = 0;
+  const report = (msg) => { try { g.console.error(`scrml channel ${desc.name}: ${msg}`); } catch { /* nothing to do */ } };
+  const warn = report;
+  function refused(why) {
+    const now = Date.now();
+    if (now - windowFrom >= CHANNEL_REPORT_WINDOW_MS) { windowFrom = now; reports = 0; }
+    reports += 1;
+    if (reports <= CHANNEL_REPORTS) report(`refused ${why}`);
+    else if (reports === CHANNEL_REPORTS + 1) report(`further refused frames are not reported for ${CHANNEL_REPORT_WINDOW_MS / 1000} s (at most ${CHANNEL_REPORTS} per window, §38.4.2)`);
+  }
   const hook = (f) => { if (typeof f === "function") batch(() => { f(); }); };
   const url = () => (g.location.protocol === "https:" ? "wss:" : "ws:") + "//" + g.location.host + "/_scrml_ws/" + desc.name;
   const has = (c, op) => Array.isArray(c.ops) && c.ops.includes(op);
@@ -5574,55 +5658,168 @@ export function channel(scope, desc) {
     now: () => (g.performance !== undefined && typeof g.performance.now === "function" ? g.performance.now() : Date.now()),
     later: (f, ms) => g.setTimeout(f, ms),
     cancel: (h) => g.clearTimeout(h),
-    send: (text) => { if (ws !== null && ws.readyState === 1) ws.send(text); },
+    send: (text, p) => {
+      if (ws === null || ws.readyState !== 1) return;
+      ws.send(text);
+      if (p !== undefined && p !== null) p.sent = true;
+    },
+    // a queued `replace` superseded by a later one is never sent: it stops being pending (#1941 × #1942)
+    superseded: (p) => { const i = pending.indexOf(p); if (i >= 0) pending.splice(i, 1); },
   });
 
-  // The §38.4.2 receiver checks, then the edit applied as the local write would make it. "" or why refused.
-  function receive(text) {
-    if (typeof text !== "string") return "a non-text frame";
-    let v;
-    try { v = JSON.parse(text); } catch { return "a frame that is not JSON"; }
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return "a frame that is not an object";
+  // A relayed frame's shape (§38.4.2 "The relayed frame"): exactly __type, __seq, __key, __op,
+  // __val, __own. Anything else is a broken stream, not a refusal.
+  function relayedShape(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
     const keys = Object.keys(v);
-    if (keys.length !== 4 || !hasOwn(v, "__type") || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val")) return "a frame that is not exactly {__type, __key, __op, __val}";
-    if (v.__type !== "__sync" || typeof v.__key !== "string" || typeof v.__op !== "string") return "a frame that is not a __sync";
+    if (keys.length !== 6) return false;
+    for (const k of ["__type", "__seq", "__key", "__op", "__val", "__own"]) if (!hasOwn(v, k)) return false;
+    return v.__type === "__sync" && Number.isSafeInteger(v.__seq) && v.__seq >= 1 && typeof v.__key === "string" && typeof v.__op === "string" && typeof v.__own === "boolean";
+  }
+
+  // Receiver checks (1) and (2) of §38.4.2, and the fixed-length check the type alone decides:
+  // the edit { c, op, val } or why it is refused.
+  function edit(v) {
     const c = byKey.get(v.__key);
     if (c === undefined) return "a __sync for a cell this channel does not declare";
     const op = v.__op;
     if (!has(c, op)) return `a \`${op}\` of @${c.key}, whose grants do not admit it`;
-    const cur = c.cell.peek();
-    let next;
     if (op === "replace" || op === "transition") {
       const d = decode(c.table, v.__val, { canonicalOnly: true });
       if (!d.ok) return `a \`${op}\` of @${c.key} whose value does not decode`;
-      if (op === "transition") {
-        if (c.edges === null || c.edges === undefined) return `a \`transition\` of @${c.key}, which has no rule= graph`;
-        try { checkEdge(c.cell, c.edges, d.value); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
-      }
-      next = d.value;
-    } else if (CHANNEL_EDITS.has(op)) {
+      if (op === "transition" && (c.edges === null || c.edges === undefined)) return `a \`transition\` of @${c.key}, which has no rule= graph`;
+      return { c, op, val: d.value };
+    }
+    if (CHANNEL_EDITS.has(op)) {
       const et = elemTable(c.table);
-      if (et === null || !Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
-      const bound = lengthBound(c.table);
-      if (bound === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
+      if (et === null) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
+      if (lengthBound(c.table) === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
       if (op === "append" || op === "prepend") {
         const d = decode(et, v.__val, { canonicalOnly: true });
         if (!d.ok) return `an \`${op}\` of @${c.key} whose element does not decode`;
-        if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
-        next = op === "append" ? [...cur, d.value] : [d.value, ...cur];
-      } else {
-        const n = v.__val;
-        if (!Number.isSafeInteger(n) || n < 1) return `a \`${op}\` of @${c.key} whose count is not an int ≥ 1`;
-        const left = Math.max(0, cur.length - n);
-        if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
-        next = op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left);
+        return { c, op, val: d.value };
       }
-    } else {
-      return `an op \`${op}\` the bootstrap does not apply`;
+      const n = v.__val;
+      if (!Number.isSafeInteger(n) || n < 1) return `a \`${op}\` of @${c.key} whose count is not an int ≥ 1`;
+      return { c, op, val: n };
     }
-    batch(() => {
-      applying = c.cell;
-      try { c.cell.set(next); } finally { applying = null; }
+    return `an op \`${op}\` the bootstrap does not apply`;
+  }
+
+  // Receiver check (3): the edit applied to `cur` (the cell's CURRENT value) — { next } or why refused.
+  function step(c, cur, op, val) {
+    if (op === "replace") return { next: val };
+    if (op === "transition") {
+      try { checkEdge({ peek: () => cur }, c.edges, val); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
+      return { next: val };
+    }
+    if (!Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
+    const bound = lengthBound(c.table);
+    if (op === "append" || op === "prepend") {
+      if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
+      return { next: op === "append" ? [...cur, val] : [val, ...cur] };
+    }
+    const left = Math.max(0, cur.length - val);
+    if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
+    return { next: op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left) };
+  }
+
+  // One relayed frame applied to the cells (which hold the confirmed value), as the local write of
+  // the same edit would be — `Cell.set`, so the writes it causes (`reset-on=`) are made too.
+  function apply(v, own) {
+    const e = edit(v);
+    const why = typeof e === "string" ? e : step(e.c, e.c.cell.peek(), e.op, e.val);
+    if (typeof why === "string") { refused(own ? `this client's own edit (a concurrent edit came first in relay order): ${why}` : why); return; }
+    try { e.c.cell.set(why.next); } catch (err) { report(`applying a \`${e.op}\` of @${e.c.key} failed: ${err && err.message ? err.message : err}`); }
+  }
+
+  // Two values of a channel cell are the same value (its §57 wire form; a rebuilt tape is a new array)
+  function same(c, a, b) {
+    if (Object.is(a, b)) return true;
+    const ea = encode(c.table, a);
+    const eb = encode(c.table, b);
+    return ea.ok && eb.ok && JSON.stringify(ea.wire) === JSON.stringify(eb.wire);
+  }
+
+  // One received unit (a relayed frame, or a whole replay): restore the confirmed value, apply,
+  // record the new confirmed value, re-apply the pending edits — one batch, `applying` held across it.
+  //   #1941 fix r1 (MED-2), §38.4.2: "A `reset-on=` reset of a cell that is NOT a channel cell is
+  //   made when, and only when, the value the client SHOWS of a trigger changes across the received unit" —
+  //   such a reset is not made inside the unit (`resetGuard`); at its end, one whose trigger's shown
+  //   value changed is made (still `applying`, so a channel write it causes stays local). A
+  //   channel cell's own reset is made as the frame is applied, as before: that keeps it convergent.
+  //   `after` (the replay's held edits) runs in the same batch, after the pending edits.
+  function unit(fn, after) {
+    const shown = new Map();
+    for (const c of desc.cells) shown.set(c.cell, c);
+    const before = new Map();
+    for (const c of desc.cells) before.set(c, c.cell.peek());
+    const guard = { cells: chanCells, deferred: new Set() };
+    applying = true;
+    try {
+      batch(() => {
+        const outer = resetGuard;
+        resetGuard = guard;
+        try {
+          for (const c of desc.cells) rebaseSet(c.cell, conf.get(c));
+          fn();
+          for (const c of desc.cells) conf.set(c, c.cell.peek());
+          for (const p of pending) {
+            const s = step(p.c, p.c.cell.peek(), p.op, p.val);
+            if (typeof s !== "string") rebaseSet(p.c.cell, s.next);
+          }
+          if (after !== undefined) after();
+        } finally {
+          resetGuard = outer;
+        }
+        for (const r of guard.deferred) {
+          if (r.disposed) continue;
+          if (r.triggers.some((t) => { const c = shown.get(t); return c !== undefined && !same(c, before.get(c), t.peek()); })) pendingResets.add(r);
+        }
+        drainResets();
+      });
+    } finally {
+      applying = false;
+    }
+  }
+
+  // A message on connection `s`: "" or why the stream is broken.
+  function receive(text) {
+    if (typeof text !== "string") return "a non-text frame";
+    let v;
+    try { v = JSON.parse(text); } catch { return "a frame that is not JSON"; }
+    if (!live) {
+      if (v === null || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length !== 4 || v.__type !== "__replay"
+        || typeof v.__complete !== "boolean" || !Number.isSafeInteger(v.__seq) || v.__seq < 0 || !Array.isArray(v.__frames)) {
+        return "a connection whose first frame is not the relay's __replay {__type, __complete, __seq, __frames}";
+      }
+      if (!v.__complete) return "TRUNCATED";
+      const frames = v.__frames;
+      if (frames.length !== v.__seq) return `a replay of ${frames.length} frames that says it ends at ${v.__seq}`;
+      for (let i = 0; i < frames.length; i++) {
+        if (!relayedShape(frames[i]) || frames[i].__seq !== i + 1 || frames[i].__own !== false) return `a replay whose frame ${i + 1} is not the relayed frame numbered ${i + 1}`;
+      }
+      live = true;
+      seq = v.__seq;
+      pending = [];
+      for (const c of desc.cells) conf.set(c, init.get(c));
+      const early = held;
+      held = [];
+      unit(() => { for (const f of frames) apply(f, false); }, () => resendHeld(early));
+      return "REPLAYED";
+    }
+    if (!relayedShape(v)) return "a frame that is not exactly {__type, __seq, __key, __op, __val, __own}";
+    if (v.__seq !== seq + 1) return `a frame numbered ${v.__seq} after ${seq}`;
+    if (v.__own) {
+      const p = pending[0];
+      if (p === undefined || p.c.key !== v.__key || p.op !== v.__op || JSON.stringify(p.wire) !== JSON.stringify(v.__val)) {
+        return "an own frame that is not this client's oldest pending edit";
+      }
+    }
+    seq = v.__seq;
+    unit(() => {
+      if (v.__own) pending.shift();
+      apply(v, v.__own);
     });
     return "";
   }
@@ -5640,7 +5837,7 @@ export function channel(scope, desc) {
   }
   function sink(c) {
     return (o, prev) => {
-      if (applying === c.cell) return;                 // a received edit is not sent on
+      if (applying || stopped) return;                 // a write made while applying a received unit is not sent
       let op;
       let val;
       if (has(c, "transition")) {
@@ -5661,7 +5858,8 @@ export function channel(scope, desc) {
       if ((op === "pop" || op === "shift") && val === 0) return;   // nothing was removed
       let wire;
       if (op === "replace" || op === "transition") {
-        const e = encode(c.table, c.cell.value);
+        val = c.cell.value;
+        const e = encode(c.table, val);
         if (!e.ok) { warn(`@${c.key} does not encode — not synced`); return; }
         wire = e.wire;
       } else if (op === "append" || op === "prepend") {
@@ -5672,36 +5870,91 @@ export function channel(scope, desc) {
       } else {
         wire = val;
       }
-      if (ws === null || ws.readyState !== 1) return;   // §38.10.4: suspended while closed
-      const text = JSON.stringify({ __type: "__sync", __key: c.key, __op: op, __val: wire });
-      // §38.4.3 (S478 fix r1): a conforming client never sends a frame over the bound — the relay
-      // would close it (1009, or the host drops it unread) — it reports the edit, not synced
-      if (utf8Over(text, maxFrame)) { warn(`@${c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return; }
-      if (!pacer.isOpen()) pacer.open();
-      pacer.push(c.key, op, text);
+      // §38.10.4: not sent while the connection is closed. #1941 fix r1 (MED-1): on a connection
+      // that is open (or opening) but whose replay is not applied yet, the edit is HELD (§38.4.2) —
+      // sending it now would number it after the log the replay is about to rebuild from
+      if (ws === null || ws.readyState > 1) return;
+      if (!live) { held.push({ c, op, val, wire }); return; }
+      send({ c, op, val, wire });
     };
+  }
+
+  // The ONE place an edit goes on the wire (the op sink, and the held edits after a replay): it
+  // becomes pending and is handed to the pacer (§38.4.3, #1942), which sends it as the bucket
+  // allows — so the sink path and `resendHeld` are paced alike. `p.sent` turns true when the pacer
+  // puts it on the wire; a queued `replace` a later `replace` of the same cell supersedes is never
+  // sent, and its pending entry is removed (`superseded`), so no echo is waited for. Pending order
+  // is still send order: the queue is FIFO, and a supersede only removes an entry.
+  //   §38.4.3: "A conforming client never sends a frame over the frame-size bound. An edit whose
+  //   frame would be over it is not sent; the client reports it" — it is not pending either, so the
+  //   next received unit's rebase drops it from the shown value (it never reaches a peer). Returns
+  //   whether the edit was queued.
+  function send(p) {
+    const text = JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire });
+    if (utf8Over(text, maxFrame)) { warn(`@${p.c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return false; }
+    if (!pacer.isOpen()) pacer.open();
+    p.sent = false;
+    pending.push(p);
+    if (!pacer.push(p.c.key, p.op, text, p)) { pending.pop(); return false; }
+    return true;
+  }
+
+  // §38.4.2 (#1941 fix r1, MED-1): "after the replay is applied, each held edit, in order, is
+  // re-applied on top of the rebuilt value, checked as a pending edit is, and sent — it is then
+  // pending — in the same unit as the replay … A held edit that no longer passes on the rebuilt
+  // value is not shown, not sent, and reported".
+  function resendHeld(early) {
+    for (const p of early) {
+      const s = step(p.c, p.c.cell.peek(), p.op, p.val);
+      if (typeof s === "string") { warn(`an edit made before the channel's history arrived no longer applies to it — not sent: ${s}`); continue; }
+      if (send(p)) rebaseSet(p.c.cell, s.next);
+    }
   }
 
   function connect() {
     timer = null;
-    if (disposed) return;
+    if (disposed || stopped) return;
     const s = new g.WebSocket(url());
     ws = s;
+    live = false;
+    seq = 0;
+    let ok = true;
+    held = [];
+    // §38.4.3 (#1942): the pacer opens with the connection (a full bucket, as the relay's is). No
+    // frame is pushed to it before the replay is applied (the edits until then are HELD, §38.4.2).
     s.onopen = () => {
       if (ws !== s) return;
       pacer.open();
-      hook(desc.open);
     };
+    // #1941 fix r1 (MED-1), §38.10.2: "the handler SHALL run when the connection's replay message
+    // has been applied … a connection given an incomplete replay … runs `onclient:error`, not
+    // `onclient:open`" — so a channel write it makes is sent, not undone by the replay
     s.onmessage = (ev) => {
-      if (ws !== s) return;
+      if (ws !== s || !ok) return;
       const why = receive(ev.data);
-      if (why !== "") warn(`refused ${why}`);
+      if (why === "REPLAYED") { hook(desc.open); return; }
+      if (why === "") return;
+      ok = false;
+      if (why === "TRUNCATED") {
+        stopped = true;
+        report("the relay's frame log for this channel was truncated at its bound (§38.4.2), so this client cannot rebuild the channel's state — sync of the channel is stopped; its cells keep the values they had");
+        hook(desc.error);
+      } else {
+        report(`closed the connection: ${why}`);
+      }
+      try { s.close(); } catch { /* already closing */ }
     };
     s.onerror = () => { if (ws === s) hook(desc.error); };
     s.onclose = (ev) => {
       if (ws !== s) return;
       ws = null;
+      live = false;
+      held = [];                                        // never sent: dropped, as a write while closed is
+      // §38.4.3 (#1942): the frames still queued are dropped (§38.10.4) — and so are their pending
+      // entries (#1941): a frame never sent has no relayed copy to wait for. The sent ones stay
+      // pending until the replay of the next connection drops them (§38.4.2 "The frame log").
       const dropped = pacer.close();
+      pending = pending.filter((p) => p.sent === true);
       // S478 fix r1 (MED-3a): a relay close (§38.4.3) is reported, naming why — never silent
       const code = ev !== null && typeof ev === "object" ? ev.code : undefined;
       if (RELAY_CLOSES.has(code)) {
@@ -5710,7 +5963,7 @@ export function channel(scope, desc) {
       }
       if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed)`);
       hook(desc.close);
-      if (!disposed && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
+      if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
     };
   }
   for (const c of desc.cells) c.cell.sync = sink(c);

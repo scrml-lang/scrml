@@ -272,6 +272,7 @@ describe("B — a relay close is reported (MED-3a)", () => {
         cells: [{ key: "note", cell: note, table: { defs: [], root: { k: "str" } }, ops: ["replace"], edges: null }], open: null, close: null, error: null });
       const s = FakeSocket.last;
       s.readyState = 1; s.onopen();
+      s.onmessage({ data: '{"__type":"__replay","__complete":true,"__seq":0,"__frames":[]}' });   // #1941: live after the replay
       rt.batch(() => note.set("x".repeat(100)));
       rt.batch(() => note.set("€".repeat(90)));             // under 300 characters, over 300 bytes
       expect(s.sent.length).toBe(1);
@@ -353,7 +354,7 @@ describe("C, D — the relay: the cap is reserved before the upgrade (LOW-4); th
       a.ws.send(JSON.stringify({ __type: "__sync", __key: "count", __op: "replace", __val: "x".repeat(300000) }));
       await tick(300);
       expect([1006, 1009]).toContain(a.closed());
-      expect(b.got).toEqual([]);
+      expect(b.got.filter((t) => !t.startsWith('{"__type":"__replay"'))).toEqual([]);   // #1941: the replay is not a relayed frame
       b.ws.close();
     } finally { bun.stop(true); }
   });
