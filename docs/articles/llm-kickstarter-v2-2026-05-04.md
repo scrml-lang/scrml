@@ -1576,7 +1576,6 @@ For per-role markup variance, the `<auth role="X">` element exists, but **it is 
 
 Channels live **inside `<program>`** — a sibling of `<page>` (SPEC §38.1). A `<channel>` placed outside `<program>` in a file that *has* a `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; one inside a `<page>` fires `E-CHANNEL-INSIDE-PAGE`; a file-top `<channel>` is canonical only in a pure-channel module file that has no `<program>` (§38.12.6). A channel auto-creates a WebSocket endpoint. State declared inside a channel body syncs across every connected client. **There is no `@shared` modifier; the synchronization comes from being declared inside a channel body.**
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap syncs a channel cell only when it grants `replace` — an `append`-only tape in a channel body is refused by name until each client enforces the cell's capability on a received frame (INTERIM, g-boot-channel-capability-sync-s478) -->
 ```scrml
 <program>
 
@@ -1614,7 +1613,7 @@ function send() {
 ```
 
 Notes:
-- `<messages:Message[free, append]=[]/>` declares a channel-scoped tape. It is auto-synced to every connected client. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message.
+- `<messages:Message[free, append]=[]/>` declares a channel-scoped tape. Each write to it is sent as the edit it made (an `append`, SPEC §38.4.2) to every client connected at the time, and each receiver checks it against the type before applying it. Two concurrent appends can land in a different order on different clients, and a client that connects later is not sent earlier messages. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message.
 - `let` declarations are allowed inside `<channel>` (and `<db>`, `<page>`, `<theme>`) too (O61): the block owns and syncs them, and the rest of the program can read them.
 - Read it as `@messages` from anywhere in the file (including outside the channel).
 - Server functions inside the channel body see `broadcast(data)` and `disconnect()` auto-injected.

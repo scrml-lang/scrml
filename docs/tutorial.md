@@ -1003,7 +1003,6 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap syncs a channel cell only when it grants `replace` — an `append`-only tape in a channel body is refused by name until each client enforces the cell's capability on a received frame (INTERIM, g-boot-channel-capability-sync-s478) -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
@@ -1048,7 +1047,7 @@ Real-time sync over a WebSocket connection is built into the language as a `<cha
 Three things to notice:
 
 1. **`<channel>` lives inside `<program>`.** Channels are descendants of the entry-file `<program>` — app-scope shared-state vehicles, siblings of `<page>` declarations. Putting a channel at file top level in a file that already declares `<program>` fires `E-CHANNEL-OUTSIDE-PROGRAM`; putting one inside an individual `<page>` fires `E-CHANNEL-INSIDE-PAGE`. (A separate module file that contains no `<program>` may declare a `<channel>` at file top — the "pure channel file" shape, §38.12.6 — but that is a sharing pattern beyond this tutorial.)
-2. **`<messages:Message[free, append]=[]/>`** declared inside the channel body is auto-synced. Every connected client sees the same `@messages`; an append from any client propagates to all the others. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message. There is no `@shared` modifier — synchronization comes from being inside the channel body.
+2. **`<messages:Message[free, append]=[]/>`** declared inside the channel body is auto-synced. Each append is sent as an append: every client connected at the time receives it and adds it to its own `@messages`. Two messages sent at the same moment can land in a different order on different clients, and a client that connects (or reconnects) later starts from an empty log — it is not sent the messages it missed. Its type grants `append` and nothing else, so the chat log can only grow — no client can delete or rewrite a message. There is no `@shared` modifier — synchronization comes from being inside the channel body.
 3. **`@messages` is reachable from the rest of `<program>`** via canonical `@messages` access. The channel-declared cells are program-scope visible.
 
 The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), the message-broadcast plumbing, and the reconnection logic. You declare what state is shared; the compiler handles the transport.
@@ -1105,7 +1104,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-TYPE-031] — the bootstrap syncs a channel cell only when it grants `replace` — the `append`-only `saved` tape in a channel body is refused by name until each client enforces the cell's capability on a received frame (INTERIM, g-boot-channel-capability-sync-s478); and the bootstrap types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Note's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
+<!-- gate: spec-ahead [E-TYPE-031] — the bootstrap types the ?{} rows from the <schema> (S478), but an `integer` column is `number` there (§14.8.3), which does not fit Note's `id: int` (owner question g-boot-sql-row-field-types-owner-s478) -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.

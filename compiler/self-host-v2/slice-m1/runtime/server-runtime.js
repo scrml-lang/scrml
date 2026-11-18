@@ -1500,15 +1500,21 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before
 //   the upgrade and before any channel handler runs. A handshake with NO `Origin` header
 //   is a non-browser client … it SHALL be accepted".
-//   §38.4: the server relays a client's `{ __type: "__sync", __key, __val }` to the
-//   channel's other subscribers ("the server-side router for client-originated
-//   writes"; "distributes the new value to every other subscriber") — channel cells are
-//   CLIENT-HELD: the server keeps no value.
+//   §38.4 / §38.4.2 (RULED S478 "op-based channel sync"): the server relays a client's op
+//   frame `{ __type: "__sync", __key, __op, __val }` to the channel's other subscribers.
+//   "The relay … SHALL check a client's frame against the frame shape, that `__key` names a
+//   cell of the channel, that `__op` is an op the cell's declared grants admit, and that each
+//   payload part decodes canonically against its type (§57.5); it relays the frame
+//   RE-ENCODED from the decoded payload … The server holds no cell value (§38.4), so it SHALL
+//   NOT be relied on for a check that needs one" — the length bound after an edit and a
+//   `rule=` edge are each receiver's checks (runtime.js `channel`).
 // Fail closed where the SPEC is silent (owner questions, g-boot-channel-s478): a frame
 // is decoded STRICTLY — text only, at most CHANNEL_MAX_FRAME characters, a JSON object
-// of exactly `__type` / `__key` / `__val`, `__type` "__sync", `__key` a cell the
-// channel declares, `__val` decoding canonically against that cell's table (§57.5) —
-// and the relayed frame is RE-ENCODED from the decoded value, never the raw text. Any
+// of exactly `__type` / `__key` / `__op` / `__val`, `__type` "__sync", `__key` a cell the
+// channel declares, `__op` one of the ops that cell syncs (`desc.cells[i].ops`), `__val`
+// decoding canonically against that cell's table (`replace` / `transition`), its element
+// table (`append` / `prepend`) or an int ≥ 1 (`pop` / `shift`) — and the relayed frame is
+// RE-ENCODED from the decoded payload, never the raw text. Any
 // other frame closes the connection (1003 / 1007 / 1008 / 1009) and is relayed to no
 // one. Each channel publishes on its own topic key (`[name, topic]`), so two channels
 // naming one `topic=` never exchange frames.
@@ -1518,7 +1524,7 @@ export const CHANNEL_MAX_FRAME = 65536;
 
 export function channel(desc) {
   const cells = new Map();
-  for (const c of desc.cells) cells.set(c.key, c.table);
+  for (const c of desc.cells) cells.set(c.key, { table: c.table, ops: Array.isArray(c.ops) ? c.ops : [] });
   return { name: desc.name, topic: desc.topic, key: JSON.stringify([desc.name, desc.topic]), cells };
 }
 
@@ -1570,15 +1576,42 @@ function channelFrame(ch, raw) {
   try { v = JSON.parse(raw); } catch { return { code: 1007, why: "a frame that is not JSON" }; }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return { code: 1008, why: "a frame that is not a JSON object" };
   const keys = Object.keys(v);
-  if (keys.length !== 3 || !own(v, "__type") || !own(v, "__key") || !own(v, "__val")) return { code: 1008, why: "a frame that is not exactly {__type, __key, __val}" };
+  if (keys.length !== 4 || !own(v, "__type") || !own(v, "__key") || !own(v, "__op") || !own(v, "__val")) return { code: 1008, why: "a frame that is not exactly {__type, __key, __op, __val}" };
   if (v.__type !== "__sync") return { code: 1008, why: "a frame whose __type is not __sync" };
   if (typeof v.__key !== "string" || !ch.cells.has(v.__key)) return { code: 1008, why: "a __sync for a cell the channel does not declare" };
-  const table = ch.cells.get(v.__key);
-  const d = decode(table, v.__val, { canonicalOnly: true });
-  if (!d.ok) return { code: 1007, why: `a __sync whose value does not decode against @${v.__key}'s type` };
-  const e = encode(table, d.value);
-  if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
-  return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __val: e.wire }) };
+  const cell = ch.cells.get(v.__key);
+  const op = v.__op;
+  if (typeof op !== "string" || !cell.ops.includes(op)) return { code: 1008, why: `a __sync whose __op is not an op @${v.__key} syncs` };
+  let wire;
+  // #1937 fix r1 (HIGH-1): a length-changing op of a FIXED-length tape (no `free` / bound grant,
+  // §66.12.1–§66.12.2 — no local write may change its length) is refused from the table the relay
+  // holds; it needs no cell value. (The compiler syncs no such op — analyze chSyncOps — so only a
+  // forged frame names one.)
+  if (op === "append" || op === "prepend" || op === "pop" || op === "shift") {
+    const b = cell.table !== null && cell.table.root.k === "seq" ? cell.table.root.bound : null;
+    if (b === null || typeof b !== "object" || b.k === "fixed") return { code: 1008, why: `a __sync whose __op changes the length of @${v.__key}, a fixed-length tape` };
+  }
+  if (op === "replace" || op === "transition") {
+    const d = decode(cell.table, v.__val, { canonicalOnly: true });
+    if (!d.ok) return { code: 1007, why: `a __sync whose value does not decode against @${v.__key}'s type` };
+    const e = encode(cell.table, d.value);
+    if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
+    wire = e.wire;
+  } else if (op === "append" || op === "prepend") {
+    if (cell.table === null || cell.table.root.k !== "seq") return { code: 1011, why: `an element op for @${v.__key}, which is not a tape` };
+    const et = { defs: cell.table.defs, root: cell.table.root.elem };
+    const d = decode(et, v.__val, { canonicalOnly: true });
+    if (!d.ok) return { code: 1007, why: `a __sync whose element does not decode against @${v.__key}'s element type` };
+    const e = encode(et, d.value);
+    if (!e.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode` };
+    wire = e.wire;
+  } else if (op === "pop" || op === "shift") {
+    if (!Number.isSafeInteger(v.__val) || v.__val < 1) return { code: 1007, why: `a __sync whose count for @${v.__key} is not an int ≥ 1` };
+    wire = v.__val;
+  } else {
+    return { code: 1008, why: `a __sync whose __op the server does not relay` };
+  }
+  return { text: JSON.stringify({ __type: "__sync", __key: v.__key, __op: op, __val: wire }) };
 }
 
 function channelSockets(host) {

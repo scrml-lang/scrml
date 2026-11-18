@@ -199,6 +199,9 @@ export class Cell {
     this.pend = null;
     // s478: a `debounced=` / `throttled=` cell's timing record (§6.13; `timed`) — null otherwise
     this.timing = null;
+    // s478 (s478-boot-channel-ops): a §38 channel cell's op sink (`channel`) — called with the
+    // §38.4.2 op of each committed write (`syncOp`, or null: a whole-value write) — null otherwise
+    this.sync = null;
   }
   get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
@@ -222,7 +225,9 @@ export class Cell {
   land(v) {
     this.pending = null;
     if (Object.is(v, this.value)) return;
+    const prev = this.value;
     this.value = v;
+    if (this.sync !== null) this.sync(syncOp !== null && syncOp.target === this ? syncOp : null, prev);
     // Every observer is marked first, then the `reset-on=` resets this write
     // triggered are applied — all of them, in rank order — still inside this
     // batch, so its flush sees the trigger and the resets as one change.
@@ -1612,7 +1617,7 @@ function variantTag(v) {
 /** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
 export function transition(target, table, to) {
   checkEdge(target, table, to);
-  target.set(to);
+  asOp(target, "transition", to, () => target.set(to));
 }
 
 // ---------------------------------------------------------------------------
@@ -1666,14 +1671,31 @@ export function idleWatch(scope, c, table, ms, to) {
   return w;
 }
 
+// s478 (s478-boot-channel-ops) — SPEC §38.4.2: a write to a channel cell is sent as the EDIT it
+// made. The edit helpers below name their op around their one `set` (`syncOp`, read by
+// `Cell.land` for that target only); every other write reaches a channel cell's sink as null —
+// a whole-value write. A cell outside a channel (`sync` null) pays one property read.
+let syncOp = null;
+function asOp(target, k, val, write) {
+  if (!target.sync) { write(); return; }
+  const prev = syncOp;
+  syncOp = { target, k, val };
+  try { write(); } finally { syncOp = prev; }
+}
 /** An end-append edit: a new array one longer (O(n) copy — dpa-051 §6.1). */
-export function append(target, element) { target.set([...target.peek(), element]); }
+export function append(target, element) { asOp(target, "append", element, () => target.set([...target.peek(), element])); }
 /** A front-prepend edit. */
-export function prepend(target, element) { target.set([element, ...target.peek()]); }
+export function prepend(target, element) { asOp(target, "prepend", element, () => target.set([element, ...target.peek()])); }
 /** A removal of `n` elements at the end (`pop()`, n = 1): a new, shorter array. An empty sequence stays empty. */
-export function removeEnd(target, n) { const xs = target.peek(); target.set(xs.slice(0, Math.max(0, xs.length - n))); }
+export function removeEnd(target, n) {
+  const xs = target.peek();
+  asOp(target, "pop", Math.min(n, xs.length), () => target.set(xs.slice(0, Math.max(0, xs.length - n))));
+}
 /** A removal of `n` elements at the front (`shift()`, n = 1). */
-export function removeFront(target, n) { target.set(target.peek().slice(n)); }
+export function removeFront(target, n) {
+  const xs = target.peek();
+  asOp(target, "shift", Math.min(Math.max(0, n), xs.length), () => target.set(xs.slice(n)));
+}
 /**
  * A write of struct path `path` inside the element at position `index`
  * (`@xs[i].f = v`, dpa-052 Q3). s473 — a position outside the sequence
@@ -5335,53 +5357,161 @@ export function classify(route, status, text) {
 }
 
 // ---------------------------------------------------------------------------
-// s478 (s478-boot-channel) — SPEC §38 `<channel>`: the CLIENT half. The compiler
-// emits one `rt.channel(scope, desc)` per channel (print.scrml channelBoot):
-// `desc.name` (the route `/_scrml_ws/<name>`, §38.1), `desc.reconnect` (ms; 0 =
-// none, §38.3.1), `desc.cells` — per channel cell its sync key, its signal and
-// its §57 wire table — and the `onclient:*` hooks (`open` / `close` / `error`,
-// §38.10, each `null` or a function called with no argument).
-//   §38.4: "On every local write to a channel-declared cell, the compiler emits a
-//   sync message via WebSocket. The sync wire format is: `{ __type: "__sync",
-//   __key: "<varName>", __val: <value> }`" — `__val` is the value ENCODED against
-//   the cell's type (§57); "the client-side IIFE for server-originated writes …
-//   updates the corresponding cell" — an inbound frame is decoded STRICTLY
-//   against that table (canonical only, §57.5; a key the channel does not
-//   declare, an extra key, a wrong type: the frame is not applied).
-//   §38.10.4: "Sync of channel-scoped cells (§38.4) is suspended when the
-//   connection is closed and resumes when it reopens" — a write while closed is
-//   not queued.
-//   Echo dedup: the JSON of the value last synced per cell (inbound or outbound)
-//   — a value just applied from the wire is not sent back.
+// s478 (s478-boot-channel; ops: s478-boot-channel-ops) — SPEC §38 `<channel>`: the CLIENT half.
+// The compiler emits one `rt.channel(scope, desc)` per channel (print.scrml channelBoot):
+// `desc.name` (the route `/_scrml_ws/<name>`, §38.1), `desc.reconnect` (ms; 0 = none,
+// §38.3.1), `desc.cells` — per channel cell its sync key, its signal, its §57 wire table,
+// `ops` (the §38.4.2 op kinds it syncs — analyze chSyncOps) and `edges` (a `rule=` field's
+// edge table, else null) — and the `onclient:*` hooks (`open` / `close` / `error`, §38.10,
+// each `null` or a function called with no argument).
+//   §38.4.2 (RULED S478 "op-based channel sync"): "A local write to a channel-declared cell
+//   SHALL send one frame per edit, naming the narrowest op … Edits are sent in the order the
+//   writes happen" — the cell's op sink (`Cell.sync`, called by `land` at each committed
+//   write) sends `{ __type: "__sync", __key, __op, __val }`. A `rule=` field sends every write
+//   as `transition`. An edit the cell does not sync as its own op (a part write of a `replace`
+//   cell) is sent as `replace` — the whole new value (INTERIM, g-boot-channel-op-residue-s478).
+//   "The sender applies its own edit first … a sender never receives, and never re-applies,
+//   its own edit" — the relay publishes to the channel's OTHER subscribers.
+//   "The receiver SHALL, before it applies a frame, check: (1) … `__op` is an op its declared
+//   grants admit; (2) the payload decodes canonically against its type; (3) the edit, applied
+//   to the cell's CURRENT value, keeps every invariant a local write of the same edit is
+//   checked against" — `receive`. "A refused frame … SHALL NOT be applied, in whole or in part,
+//   and SHALL be reported to the developer … The connection stays open."
+//   §38.10.4: "Sync of channel-scoped cells (§38.4) is suspended when the connection is closed
+//   and resumes when it reopens" — a write while closed is not queued.
 // ---------------------------------------------------------------------------
+const CHANNEL_EDITS = new Set(["append", "prepend", "pop", "shift"]);
+
+/** A tape cell's element table, or null when the cell's type is not a tape (§57 table shape). */
+function elemTable(table) {
+  return table !== null && table.root.k === "seq" ? { defs: table.defs, root: table.root.elem } : null;
+}
+
+/**
+ * A tape table's length axis (§66.12.2 "fixed · bounded · free"): [min, max] for a bounded tape,
+ * "fixed" for a tape with no `free` / bound grant (§66.12.1: its length is fixed — no edit may
+ * change it, E-WRITE-INVARIANT locally), null for a free one. #1937 fix r1 (HIGH-1): a fixed tape
+ * was read as unbounded, so a forged `pop` emptied it on every receiver.
+ */
+function lengthBound(table) {
+  const b = table.root.bound;
+  if (b === null || typeof b !== "object" || b.k === "fixed") return "fixed";
+  return b.k === "bounded" ? [b.min, b.max] : null;
+}
+
 export function channel(scope, desc) {
   requireScope(scope, "a channel");
   const g = globalThis;
   const byKey = new Map();
   for (const c of desc.cells) byKey.set(c.key, c);
-  const last = new Map();
   let ws = null;
   let timer = null;
   let disposed = false;
+  let applying = null;
+  const warn = (msg) => { try { g.console.error(`scrml channel ${desc.name}: ${msg}`); } catch { /* nothing to do */ } };
   const hook = (f) => { if (typeof f === "function") batch(() => { f(); }); };
   const url = () => (g.location.protocol === "https:" ? "wss:" : "ws:") + "//" + g.location.host + "/_scrml_ws/" + desc.name;
+  const has = (c, op) => Array.isArray(c.ops) && c.ops.includes(op);
+
+  // The §38.4.2 receiver checks, then the edit applied as the local write would make it. "" or why refused.
   function receive(text) {
     if (typeof text !== "string") return "a non-text frame";
     let v;
     try { v = JSON.parse(text); } catch { return "a frame that is not JSON"; }
     if (v === null || typeof v !== "object" || Array.isArray(v)) return "a frame that is not an object";
     const keys = Object.keys(v);
-    if (keys.length !== 3 || !hasOwn(v, "__type") || !hasOwn(v, "__key") || !hasOwn(v, "__val")) return "a frame that is not exactly {__type, __key, __val}";
-    if (v.__type !== "__sync" || typeof v.__key !== "string") return "a frame that is not a __sync";
+    if (keys.length !== 4 || !hasOwn(v, "__type") || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val")) return "a frame that is not exactly {__type, __key, __op, __val}";
+    if (v.__type !== "__sync" || typeof v.__key !== "string" || typeof v.__op !== "string") return "a frame that is not a __sync";
     const c = byKey.get(v.__key);
     if (c === undefined) return "a __sync for a cell this channel does not declare";
-    const d = decode(c.table, v.__val, { canonicalOnly: true });
-    if (!d.ok) return "a __sync whose value does not decode";
-    const e = encode(c.table, d.value);
-    if (e.ok) last.set(c.key, JSON.stringify(e.wire));
-    batch(() => { c.cell.set(d.value); });
+    const op = v.__op;
+    if (!has(c, op)) return `a \`${op}\` of @${c.key}, whose grants do not admit it`;
+    const cur = c.cell.peek();
+    let next;
+    if (op === "replace" || op === "transition") {
+      const d = decode(c.table, v.__val, { canonicalOnly: true });
+      if (!d.ok) return `a \`${op}\` of @${c.key} whose value does not decode`;
+      if (op === "transition") {
+        if (c.edges === null || c.edges === undefined) return `a \`transition\` of @${c.key}, which has no rule= graph`;
+        try { checkEdge(c.cell, c.edges, d.value); } catch (e) { return `a \`transition\` of @${c.key} its rule= graph forbids from the current variant (${e && e.message ? e.message : e})`; }
+      }
+      next = d.value;
+    } else if (CHANNEL_EDITS.has(op)) {
+      const et = elemTable(c.table);
+      if (et === null || !Array.isArray(cur)) return `an \`${op}\` of @${c.key}, which does not hold a tape`;
+      const bound = lengthBound(c.table);
+      if (bound === "fixed") return `an \`${op}\` of @${c.key}, a fixed-length tape (no edit may change its length, §66.12.1–§66.12.2)`;
+      if (op === "append" || op === "prepend") {
+        const d = decode(et, v.__val, { canonicalOnly: true });
+        if (!d.ok) return `an \`${op}\` of @${c.key} whose element does not decode`;
+        if (bound !== null && cur.length + 1 > bound[1]) return `an \`${op}\` of @${c.key} past its length bound ${bound[0]}..=${bound[1]}`;
+        next = op === "append" ? [...cur, d.value] : [d.value, ...cur];
+      } else {
+        const n = v.__val;
+        if (!Number.isSafeInteger(n) || n < 1) return `a \`${op}\` of @${c.key} whose count is not an int ≥ 1`;
+        const left = Math.max(0, cur.length - n);
+        if (bound !== null && left < bound[0]) return `a \`${op}\` of @${c.key} below its length bound ${bound[0]}..=${bound[1]}`;
+        next = op === "pop" ? cur.slice(0, left) : cur.slice(cur.length - left);
+      }
+    } else {
+      return `an op \`${op}\` the bootstrap does not apply`;
+    }
+    batch(() => {
+      applying = c.cell;
+      try { c.cell.set(next); } finally { applying = null; }
+    });
     return "";
   }
+
+  // The op sink of one cell: the frame of one committed write (§38.4.2), or nothing.
+  // #1937 fix r1 (MED-1): the op sent is the grant the write used — never a relabel. A `rule=`
+  // field's write is a `transition` when `rt.transition` made it (tagged) or when it follows an
+  // edge of the graph from the value it replaced (a statically checked move, printed as a plain
+  // set); any other write of it (not a move) is reported and not sent, because every receiver
+  // would refuse it (§66.13.2) and the clients would diverge silently.
+  function isMove(c, prev, to) {
+    if (c.edges === null || c.edges === undefined) return false;
+    const probe = { peek: () => prev };
+    try { checkEdge(probe, c.edges, to); return true; } catch { return false; }
+  }
+  function sink(c) {
+    return (o, prev) => {
+      if (applying === c.cell) return;                 // a received edit is not sent on
+      let op;
+      let val;
+      if (has(c, "transition")) {
+        if (!(o !== null && o.k === "transition") && !isMove(c, prev, c.cell.value)) {
+          warn(`@${c.key} — a write that is not a move along its rule= graph (§66.13.2) — not synced`);
+          return;
+        }
+        op = "transition";
+      } else if (o !== null && has(c, o.k)) {
+        op = o.k;
+        val = o.val;
+      } else if (has(c, "replace")) {
+        op = "replace";
+      } else {
+        warn(`@${c.key} — a write this cell does not sync as an op (${o === null ? "a whole-value write" : o.k}) — not synced`);
+        return;
+      }
+      if ((op === "pop" || op === "shift") && val === 0) return;   // nothing was removed
+      let wire;
+      if (op === "replace" || op === "transition") {
+        const e = encode(c.table, c.cell.value);
+        if (!e.ok) { warn(`@${c.key} does not encode — not synced`); return; }
+        wire = e.wire;
+      } else if (op === "append" || op === "prepend") {
+        const et = elemTable(c.table);
+        const e = et === null ? { ok: false } : encode(et, val);
+        if (!e.ok) { warn(`@${c.key}'s element does not encode — not synced`); return; }
+        wire = e.wire;
+      } else {
+        wire = val;
+      }
+      if (ws !== null && ws.readyState === 1) ws.send(JSON.stringify({ __type: "__sync", __key: c.key, __op: op, __val: wire }));
+    };
+  }
+
   function connect() {
     timer = null;
     if (disposed) return;
@@ -5391,7 +5521,7 @@ export function channel(scope, desc) {
     s.onmessage = (ev) => {
       if (ws !== s) return;
       const why = receive(ev.data);
-      if (why !== "") g.console.error(`scrml channel ${desc.name}: ignored ${why}`);
+      if (why !== "") warn(`refused ${why}`);
     };
     s.onerror = () => { if (ws === s) hook(desc.error); };
     s.onclose = () => {
@@ -5401,21 +5531,10 @@ export function channel(scope, desc) {
       if (!disposed && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
     };
   }
-  for (const c of desc.cells) {
-    effect(scope, () => {
-      const v = c.cell.get();
-      const e = encode(c.table, v);
-      if (!e.ok) { g.console.error(`scrml channel ${desc.name}: @${c.key} does not encode — not synced`); return; }
-      const j = JSON.stringify(e.wire);
-      if (last.get(c.key) === j) return;
-      if (ws !== null && ws.readyState === 1) {
-        ws.send(JSON.stringify({ __type: "__sync", __key: c.key, __val: e.wire }));
-        last.set(c.key, j);
-      }
-    });
-  }
+  for (const c of desc.cells) c.cell.sync = sink(c);
   scope.own(() => {
     disposed = true;
+    for (const c of desc.cells) c.cell.sync = null;
     if (timer !== null) g.clearTimeout(timer);
     const s = ws;
     ws = null;

@@ -15667,18 +15667,81 @@ ${
         return { ty: { nid: r.next, span: sp, k: ATypeK.TSeq(r.ty, gs) }, next: r.next + 1 }
     }
 
-    // s478 #1928 fix r1 (HIGH-1) — why channel cell `fi` cannot be value-synced, else "" (a reader
+    // s478 (s478-boot-channel-ops) — why channel cell `fi` cannot be synced, else "" (a reader
     // function: channelPass asks it, and no grant is read outside this range).
-    // A sync frame is the cell's whole value, applied by each receiving client as a whole
-    // write (§38.4), so the cell must grant `replace` and carry no contract a whole write
-    // may not bypass: a `rule=` graph (§66.13.2), a lifecycle (§66.11.6), or a tape inside
-    // its value whose type grants no `replace` (§66.12.6 rule 4: "a whole-struct write never
-    // gets around a tape field's grants").
+    // §38.4.2 (RULED S478 "op-based channel sync"): a frame names the EDIT the writer's grant
+    // allowed, and each receiving client checks it against the cell's declared grants and its
+    // CURRENT value before applying it. The bootstrap builds the ops `replace`, `append`,
+    // `prepend`, `pop`, `shift` and `transition` (chSyncOps). Refused by name (INTERIM,
+    // g-boot-channel-op-residue-s478): a lifecycle cell (its path check on receive is not
+    // built), an engine field with an `<onIdle>` watchdog (each client's own watchdog would fire
+    // the same move), a transition contract with no graph to check against, a cell WITHOUT
+    // `replace` whose grants name an edit the bootstrap cannot send as its op (`insert` /
+    // `remove` / `write` / a field's own contract — §38.4.2 `insert` / `remove` / `set`), and a
+    // `replace` cell holding a tape whose type grants no `replace` (§66.12.6 rule 4: a frame
+    // `replace` would get around its grants).
     fn chSyncWhy(g: Globals, fi: FieldInfo) -> string {
-        if (fi.graph is given || hasEditKind(fi.grants.edits, EditKind.Transition)) return "is an engine field with a `rule=` transition graph"
-        if (fi.life) return "carries a lifecycle type (its writes follow the lifecycle's path, §66.11.6)"
-        if (!fi.grants.replace) return "grants only edits (an `append` / `pop` tape grant, a struct field's own `let`), not `replace`"
+        if (fi.life) return "carries a lifecycle type (its writes follow the lifecycle's path, §66.11.6, and the receiver's check of that path against the current state is not built)"
+        const gr: TransitionGraph | not = fi.graph
+        if (gr is given) {
+            if (gr.idle is given) return "is an engine field with an `<onIdle>` watchdog — every client's own watchdog would fire the same transition, and the bootstrap does not decide whose counts"
+            // #1937 fix r1 (MED-1): a `let` graph field also grants `replace` (§66.9 rule 2), and
+            // its `reset(@f)` is a replace (§66.11.2) the bootstrap writes without an edge check —
+            // while every receiver judges the frame by §66.13.2 ("A write to such a field is valid
+            // iff it follows an edge of the graph from the current state"). A replace frame would
+            // get around the graph, and a transition frame for a non-edge reset is refused by every
+            // peer (silent divergence), so the cell is refused until reset is edge-checked (INTERIM)
+            if (fi.grants.replace) return "is a `let` engine field — `let` also grants `replace` (`reset(@f)`, §66.11.2), which the bootstrap writes without the `rule=` edge check (§66.13.2) every receiver applies, so the sender and its peers would diverge; declare it without `let`"
+            return ""
+        }
+        if (hasEditKind(fi.grants.edits, EditKind.Transition)) return "carries a transition contract with no `rule=` graph the receiver can check a move against"
+        if (!fi.grants.replace) {
+            for (const e of fi.grants.edits) {
+                if (!chOpEdit(e)) return "grants an edit with no `replace` that the bootstrap cannot send as its own op (`insert` / `remove` / `write` / a part edit — §38.4.2 `insert` / `remove` / `set`)"
+            }
+            const t: Type = fi.ty
+            // #1937 fix r1 (HIGH-1): §66.12.1 "a sequence with no grants is fully constrained —
+            // immutable", and the length axis is "fixed · bounded · free" (§66.12.2): with no `free`
+            // or bound grant a tape's length is fixed, so a local grow or shrink is E-WRITE-INVARIANT
+            // (growsFixed — the same predicate) and chSyncOps syncs none of them. With no `replace`
+            // the cell then has no op a frame may name, and it does have grants, so it is not the
+            // §38.4.2 "cell with no write capability (no `let`, no grant)" — refused by name
+            if (growsFixed(t)) return "is a fixed-length tape (no `free` or bound grant — §66.12.1–§66.12.2) whose grants are only length-changing edits; no write may change its length (`E-WRITE-INVARIANT`), so it has no op to sync"
+            return match t {
+                .Seq(elem: e, grants: gs) :> ""
+                .Maybe(inner: i) :> "is a `| not` tape with edit grants only (the receiver's edit of a `not` value is not built)"
+                .Named(sym: s) :> "grants edits only on a struct value (a field's own contract — §38.4.2 `set` is not built)"
+                .Int :> "grants edits only"
+                .Num :> "grants edits only"
+                .Str :> "grants edits only"
+                .Bool :> "grants edits only"
+                .Fn :> "holds a function value (no wire form, §14.3)"
+            }
+        }
         return chInnerContract(g, fi.ty, [], true)
+    }
+
+    // An edit the bootstrap sends as its own §38.4.2 op: an end / front grow or shrink.
+    fn chOpEdit(e: EditKind) -> boolean {
+        return e == EditKind.Append || e == EditKind.Prepend || e == EditKind.RemoveEnd || e == EditKind.RemoveFront
+    }
+
+    // s478 (s478-boot-channel-ops) — the §38.4.2 op kinds a synced channel cell (chSyncWhy "")
+    // carries, space-separated: what the sender may send and every receiver checks a frame's
+    // `__op` against. A `rule=` field: `transition` only (every write of it is a move, §66.13.2).
+    // #1937 fix r1 (HIGH-1): a FIXED-length tape (growsFixed: no `free` / bound grant, §66.12.1–
+    // §66.12.2) syncs no `append` / `prepend` / `pop` / `shift` — no local write may change its
+    // length (E-WRITE-INVARIANT), so no peer's frame may either (§38.4.2 receiver check (3)).
+    fn chSyncOps(fi: FieldInfo) -> string {
+        if (fi.graph is given) return "transition"
+        let out: string[] = []
+        if (fi.grants.replace) out = out.concat(["replace"])
+        if (growsFixed(fi.ty)) return out.join(" ")
+        if (hasEditKind(fi.grants.edits, EditKind.Append)) out = out.concat(["append"])
+        if (hasEditKind(fi.grants.edits, EditKind.Prepend)) out = out.concat(["prepend"])
+        if (hasEditKind(fi.grants.edits, EditKind.RemoveEnd)) out = out.concat(["pop"])
+        if (hasEditKind(fi.grants.edits, EditKind.RemoveFront)) out = out.concat(["shift"])
+        return out.join(" ")
     }
 
     // A tape without `replace` inside type `t` (through `| not`, tape elements and struct
@@ -48149,8 +48212,9 @@ ${
     //    g-boot-channel-s478): `auth=`, a reactive / `not` `topic=`, the `onserver:*`
     //    handlers, an `onclient:*` call that binds the event object or passes a
     //    value, `broadcast()` / `disconnect()` themselves, a channel cell whose grants are not a
-    //    plain whole-value `replace` (chSyncWhy: edit-only tapes, engine / lifecycle
-    //    fields, a tape inside without `replace`), markup in a channel body (§38.2: it "SHALL NOT contain
+    //    §38.4.2 op the bootstrap builds (chSyncWhy: a lifecycle, an `<onIdle>` engine
+    //    field, `insert` / `remove` / `write` / part edits without `replace`, a tape inside
+    //    a `replace` cell without `replace`), markup in a channel body (§38.2: it "SHALL NOT contain
     //    markup that emits HTML" — no code is named).
     // A clean channel becomes a CoreChannel (print emits the client half, print-server
     // the WebSocket route). `quiet` — the spans of the `broadcast` / `disconnect`
@@ -48262,17 +48326,17 @@ ${
                 }
                 // the body: its cells, its markup, its `<onchange>`s
                 let cells: Sym[] = []
+                let ops: string[] = []
                 let cellDecl = false
                 for (const fi of prog) {
                     if (f.path == g.entry && chSpanIn(fi.span, ch.body)) {
                         cellDecl = true
                         if (watches == "") {
                             // §38.4: "On every local write to a channel-declared cell, the compiler emits
-                            // a sync message" — the message carries the cell's WHOLE value, and a peer's
-                            // frame is applied on the receiving client as a whole-value write. So a cell
-                            // is synced only when a whole-value write is a capability it grants: `replace`
-                            // (§66.9 rule 2: "On a scalar, `let` IS the `replace` grant"), with no
-                            // contract that a whole write may not bypass (s478 #1928 review HIGH-1). One
+                            // a sync message" — since §38.4.2 (S478) the message names the EDIT the
+                            // writer's grant allowed, checked by every receiver; chSyncWhy names a cell
+                            // whose edits the bootstrap cannot sync without letting a peer's frame past
+                            // its contract (s478 #1928 review HIGH-1, #1937 review HIGH-1). One
                             // with no write capability is never written, so it has nothing to carry (and
                             // its peers' frames for it are refused, print-server).
                             if (fi.mode == FieldMode.Derived) {
@@ -48281,8 +48345,9 @@ ${
                                 const why: string = chSyncWhy(g, fi)
                                 if (why == "") {
                                     cells = cells.concat([fi.sym])
+                                    ops = ops.concat([chSyncOps(fi)])
                                 } else {
-                                    diags = diags.concat([mkDiag(f.path, fi.span, "E-BOOTSTRAP-UNSUPPORTED", "the channel cell `" + fi.sym.hint + "` " + why + " — the bootstrap syncs a channel cell as its whole value (§38.4), and a peer's frame would be applied as a whole-value write the cell's contract forbids; only a cell that grants `replace` (`let` on a scalar or struct, `[replace]` in a tape type) and carries no `rule=` graph or lifecycle is synced. The capable form — each client enforcing the cell's capability on a received frame (an `append` must extend the current value, a `pop` / `shift` must shrink it, a `rule=` move must be a legal transition) — is not built (INTERIM, g-boot-channel-capability-sync-s478)")])
+                                    diags = diags.concat([mkDiag(f.path, fi.span, "E-BOOTSTRAP-UNSUPPORTED", "the channel cell `" + fi.sym.hint + "` " + why + " — a channel cell syncs the EDIT its grant allowed, checked by every receiver against the cell's grants and current value (§38.4.2); the bootstrap builds the ops `replace`, `append`, `prepend`, `pop`, `shift` and a `rule=` `transition`, and refuses a cell it could not sync without letting a peer's frame past its contract (INTERIM, g-boot-channel-op-residue-s478)")])
                                 }
                             }
                         }
@@ -48301,7 +48366,7 @@ ${
                     }
                 }
                 if (!hasErrorDiag(diags.slice(d0)) && ch.ctx == "program" && f.path == g.entry && name != "") {
-                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, open: open, close: close, error: error, file: f.path, watches: watches }])
+                    out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches }])
                 }
             }
         }
