@@ -66,8 +66,10 @@ describe("§61 <endpoint> malformed body → 400 (g-endpoint-malformed-json-body
     // The endpoint handler reads ONLY `_scrml_req.text()`, so a minimal duck-typed request
     // drives it — no dependency on the global Request (happy-dom-safe → runs in full-suite,
     // unlike a `.json()`-consuming server-fn handler which needs bun's native Request).
+    // S479: the request carries `Content-Type: application/json` — §61.5 refuses any
+    // other media type 415 before the body is read (endpoint-415-strict-keys-served).
     const call = (body) =>
-      route.handler({ method: "POST", url: `http://localhost${route.path}`, headers: new Headers(), text: async () => body });
+      route.handler({ method: "POST", url: `http://localhost${route.path}`, headers: new Headers({ "Content-Type": "application/json" }), text: async () => body });
 
     // Valid — unchanged behavior.
     const ok = await call(JSON.stringify({ tag: "Ping" }));
