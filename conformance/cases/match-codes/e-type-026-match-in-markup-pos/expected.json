@@ -1,14 +1,29 @@
 {
   "id": "match-codes-e-type-026-match-in-markup-pos",
-  "description": "§18.9 — a bare `match ...` written DIRECTLY in markup content (a <div> body, not inside a `${...}` logic interpolation) is kept as text by the block-splitter and SHALL fire E-TYPE-026. (S441: moved from the <program> body, which is code now, into a <div>.)",
+  "description": "§18.9 / §34 — a bare `match subject { … }` statement written DIRECTLY in markup content (a <div> body, not inside a `${...}` logic interpolation) is E-CONTROL-FLOW-IN-MARKUP: it would ship as page text. (E-TYPE-026 is retired, S473 D19.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/type-system.test.js",
-  "spec": "§18.9",
-  "rationale": "§18.9: `match` is not valid directly in markup; wrap it in a logic interpolation (`${ match subject { ... } }`) so the parser recognises it as a statement rather than text content. A bare markup-level `match` fires E-TYPE-026. ⛑ S441: a `<program>` body is no longer markup content (§40.8 S441 bullet — a bare run there is code), so the case now places the match in a <div> body, the markup locus E-TYPE-026 names.",
+  "spec": "§18.9, §34",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 16 (g-conf-e-type-026-case-asserts-retired-code-s478) — retargeted from the retired E-TYPE-026",
+  "rationale": "S478 open-Qs ruling item 16: the hazard is the one E-CONTROL-FLOW-IN-MARKUP exists for — the statement ships as page text — so `match … { … }` joins `for` / `if` / `while` in that §34 row. Wrap it in a logic interpolation (`${ match subject { ... } }`).",
   "expect": {
     "codes": [
-      "E-TYPE-026"
+      "E-CONTROL-FLOW-IN-MARKUP"
     ],
-    "notCodes": []
+    "notCodes": [
+      "E-TYPE-026"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-in-markup-control-flow-s478",
+      "fails": {
+        "codes": [
+          "emitted:E-TYPE-026=1",
+          "forbidden:E-TYPE-026",
+          "missing:E-CONTROL-FLOW-IN-MARKUP"
+        ]
+      }
+    }
   }
 }

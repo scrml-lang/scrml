@@ -4,9 +4,14 @@
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
   "spec": "§13.2",
-  "rationale": "§13.2: preventDefault / stopPropagation / stopImmediatePropagation on the handler's event parameter after its first await SHALL be a compile error (E-EVENT-CONTROL-AFTER-AWAIT, §34).",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 10 (g-boot-event-cases-unhandled-server-call-s478)",
+  "rationale": "§13.2: preventDefault / stopPropagation / stopImmediatePropagation on the handler's event parameter after its first await SHALL be a compile error (E-EVENT-CONTROL-AFTER-AWAIT, §34). (S478 open-Qs ruling item 10: the server call is written as a handled statement — `const ok: bool = isOk(1) !{ _ :> false };` then `@verdict = ok ? … : …;` — since §19.9.10 makes an unhandled client call of a server function E-ERROR-002; the case's point is unchanged.)",
   "expect": {
-    "codes": ["E-EVENT-CONTROL-AFTER-AWAIT"],
-    "severity": { "E-EVENT-CONTROL-AFTER-AWAIT": "error" }
+    "codes": [
+      "E-EVENT-CONTROL-AFTER-AWAIT"
+    ],
+    "severity": {
+      "E-EVENT-CONTROL-AFTER-AWAIT": "error"
+    }
   }
 }

@@ -56,6 +56,15 @@ describe("Appendix H ⇄ host-surface.scrml (one-to-one)", () => {
     expect([...HOST_INERT_ELEMENTS]).toEqual(S.inertElements().map((t) => t.tag));
   });
 
+  // S478 (open-Qs ruling item 9) — H.6: the event interfaces of a listener
+  test("H.6 the event interfaces — Appendix H ⇄ host-surface.scrml eventInterfaces", () => {
+    expect(S.eventInterfaces().map((t) => [t.tag, t.iface])).toEqual(rows(section("H.6")));
+    const names = new Set(S.surfaceInterfaces().map((f) => f.name));
+    for (const t of S.eventInterfaces()) expect(names.has(t.iface) && S.ifaceInherits(t.iface, "Event")).toBe(true);
+    expect(S.eventIfaceOf("KeyDown")).toBe("KeyboardEvent");
+    expect(S.eventIfaceOf("input")).toBe("Event");
+  });
+
   test("H.5 the dictionaries", () => {
     expect(S.surfaceDicts().map((d) => [d.name, d.keys.map((k) => "`" + k + "`").join(", ")]))
       .toEqual(rows(section("H.5")).map(([n, ks]) => [n, ks.startsWith("`") ? ks : "`" + ks + "`"]));

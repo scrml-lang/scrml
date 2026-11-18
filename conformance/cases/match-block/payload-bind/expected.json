@@ -3,16 +3,41 @@
   "description": "Block-form <match> payload binding (§18.0.1 / §18.1a). A click sets @load = Load.Loaded(\"report.pdf\"); the <Loaded(name)> arm binds name and interpolates it. The snapshot stores the payload variant as { variant, data } (author-visible shape).",
   "language-version": "1.0",
   "spec": "§18.0.1",
-  "rationale": "§18.0.1 a payload-bearing variant arm <Loaded(name)> destructures the payload into the arm scope; ${name} reads \"report.pdf\". The cell snapshot is the canonical { variant, data } representation.",
+  "rationale": "§18.0.1 a payload-bearing variant arm <Loaded(name)> destructures the payload into the arm scope; ${name} reads \"report.pdf\". The cell snapshot is the canonical { variant, data } representation. S478 open-Qs ruling item 13 (§18.0.1 amended S478): the dispatched arm renders in place of the `<match>`, with no wrapper element — the whole-tree `dom` no longer holds impl#1's match-mount `<div>`.",
   "expect": {
     "codes": [],
     "notCodes": [],
-    "input": [{ "click": "#load-btn" }],
-    "state": { "load": { "variant": "Loaded", "data": { "name": "report.pdf" } } },
-    "dom": "<button id=\"load-btn\">Load</button><div><p data-arm=\"loaded\">Loaded: report.pdf</p></div>",
+    "input": [
+      {
+        "click": "#load-btn"
+      }
+    ],
+    "state": {
+      "load": {
+        "variant": "Loaded",
+        "data": {
+          "name": "report.pdf"
+        }
+      }
+    },
+    "dom": "<button id=\"load-btn\">Load</button><p data-arm=\"loaded\">Loaded: report.pdf</p>",
     "domAnchored": [
-      { "selector": "[data-arm=\"loaded\"]", "text": "Loaded: report.pdf" },
-      { "selector": "[data-arm=\"idle\"]", "count": 0 }
+      {
+        "selector": "[data-arm=\"loaded\"]",
+        "text": "Loaded: report.pdf"
+      },
+      {
+        "selector": "[data-arm=\"idle\"]",
+        "count": 0
+      }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-mount-wrapper-div-s478",
+      "fails": {
+        "runtime": "sha256:b3a8fc2eb283638f"
+      }
+    }
   }
 }

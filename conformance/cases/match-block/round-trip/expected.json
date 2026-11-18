@@ -3,17 +3,46 @@
   "description": "Block-form <match> arm round-trip (§18.0.1). Idle -> Loading -> Ready -> Idle via three clicks; the dispatcher swaps the mounted arm each time and correctly RE-MOUNTS the idle arm after it was torn down. Final state Idle, only the idle arm present.",
   "language-version": "1.0",
   "spec": "§18.0.1",
-  "rationale": "§18.0.1 repeated arm swaps must tear down the prior arm and re-mount the target; returning to the initial arm re-renders it cleanly (no stale Loading/Ready bodies linger).",
+  "rationale": "§18.0.1 repeated arm swaps must tear down the prior arm and re-mount the target; returning to the initial arm re-renders it cleanly (no stale Loading/Ready bodies linger). S478 open-Qs ruling item 13 (§18.0.1 amended S478): the dispatched arm renders in place of the `<match>`, with no wrapper element — the whole-tree `dom` no longer holds impl#1's match-mount `<div>`.",
   "expect": {
     "codes": [],
     "notCodes": [],
-    "input": [{ "click": "#to-loading" }, { "click": "#to-ready" }, { "click": "#to-idle" }],
-    "state": { "phase": "Idle" },
-    "dom": "<button id=\"to-loading\">Load</button><button id=\"to-ready\">Ready</button><button id=\"to-idle\">Idle</button><div><p data-arm=\"idle\">Idle</p></div>",
+    "input": [
+      {
+        "click": "#to-loading"
+      },
+      {
+        "click": "#to-ready"
+      },
+      {
+        "click": "#to-idle"
+      }
+    ],
+    "state": {
+      "phase": "Idle"
+    },
+    "dom": "<button id=\"to-loading\">Load</button><button id=\"to-ready\">Ready</button><button id=\"to-idle\">Idle</button><p data-arm=\"idle\">Idle</p>",
     "domAnchored": [
-      { "selector": "[data-arm=\"idle\"]", "text": "Idle" },
-      { "selector": "[data-arm=\"loading\"]", "count": 0 },
-      { "selector": "[data-arm=\"ready\"]", "count": 0 }
+      {
+        "selector": "[data-arm=\"idle\"]",
+        "text": "Idle"
+      },
+      {
+        "selector": "[data-arm=\"loading\"]",
+        "count": 0
+      },
+      {
+        "selector": "[data-arm=\"ready\"]",
+        "count": 0
+      }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-mount-wrapper-div-s478",
+      "fails": {
+        "runtime": "sha256:b66e7132c184f64c"
+      }
+    }
   }
 }

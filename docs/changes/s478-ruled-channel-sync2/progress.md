@@ -31,4 +31,4 @@ Head conformance (c5729242f): PASS 614 FAIL 18 CRASH 0 — per-case identical to
 - [x] pacing: `send(p)` → `channelPacer.push(…, ref)`; superseded `replace` drops its pending entry; close drops queued pending
 - [x] replay: one message, not a client frame (no bucket, no frame bound); a replay `send` → 0 closes 1011 unsubscribed
 - [x] tests: channel-ops-s478 K (8 tests); #1942 bounds tests adapted to the `__replay` / `__seq` / `__own` protocol
-- [ ] probes, conformance, CI gates, hook, push
+- [x] probes (see report), conformance 0 PASS→FAIL (1b080b24f and 53778e521), CI gates green, hook green; merged 53778e521 + severity regen (main was stale: 407→408)

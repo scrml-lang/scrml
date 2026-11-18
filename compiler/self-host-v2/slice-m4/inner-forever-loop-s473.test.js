@@ -61,8 +61,8 @@ describe("stranded by an inner forever loop: E-LOOP-008 (red on base)", () => {
   test("review #1631 F3 / A40: `for (y of ys) { lift y; for { } }`", () => {
     expect(bound(`for (y of ys) { lift y; for { } }`)).toEqual(["E-LOOP-008"]);
   });
-  test("review #1631 F3 / A41: the Tier-0 form `${ for (z of @zs) { lift <li>x</li>; for { } } }`", () => {
-    expect(codes(t0Prog(`\${ for (z of @zs) { lift <li>x</li>; for { } } }`))).toEqual(["E-LOOP-008"]);
+  test("review #1631 F3 / A41: the Tier-0 form `${ for (z of @zs) { lift <span>x</span>; for { } } }` (fix round 1 of #1945: an `<li>` row in the fixture `<p>` is W-HTML-001)", () => {
+    expect(codes(t0Prog(`\${ for (z of @zs) { lift <span>x</span>; for { } } }`))).toEqual(["E-LOOP-008"]);
   });
   test("every forever head of the inner loop: `for (true)`, `for (;;)`, `for (;true;)`", () => {
     expect(bound(`for (y of ys) { lift y; for (true) { } }`)).toEqual(["E-LOOP-008"]);
@@ -156,7 +156,7 @@ describe("legal: an inner forever loop that does exit, or a path that gets past 
     expect(fnCodes(`        for (y of ys) { for { } }\n        return 1;`)).toEqual([]);
   });
   test("a Tier-0 loop whose inner forever loop `break`s", () => {
-    expect(codes(t0Prog(`\${ for (z of @zs) { lift <li>x</li>; for { break; } } }`))).toEqual([]);
+    expect(codes(t0Prog(`\${ for (z of @zs) { lift <span>x</span>; for { break; } } }`))).toEqual([]);
   });
   test("a forever outer loop with a `break` reached before a stranding inner loop (some path leaves)", () => {
     expect(bound(`for { lift 1; if (ys.length > 0) { break; } for { } }`)).toEqual([]);

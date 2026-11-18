@@ -1,18 +1,38 @@
 {
   "id": "match-block-phase-arm-swap",
-  "description": "Block-form <match for=Phase on=@phase> arm swap (§18.0.1). A click sets @phase = Phase.Loading; the matching arm body swaps into the mount slot (idle arm gone, loading arm present). Whole-tree mode captures the impl#1 match-mount <div>; anchored asserts on the author's data-arm.",
+  "description": "Block-form <match for=Phase on=@phase> arm swap (§18.0.1). A click sets @phase = Phase.Loading; the matching arm body swaps into the mount slot (idle arm gone, loading arm present). Whole-tree mode captures the arm in place (no wrapper, §18.0.1 amended S478); anchored asserts on the author's data-arm.",
   "language-version": "1.0",
   "spec": "§18.0.1",
-  "rationale": "§18.0.1 match block-form: the dispatcher subscribes to @phase and swaps the matching arm on change. Driven by a user click (NOT a banned direct state-set).",
+  "rationale": "§18.0.1 match block-form: the dispatcher subscribes to @phase and swaps the matching arm on change. Driven by a user click (NOT a banned direct state-set). S478 open-Qs ruling item 13 (§18.0.1 amended S478): the dispatched arm renders in place of the `<match>`, with no wrapper element — the whole-tree `dom` no longer holds impl#1's match-mount `<div>`.",
   "expect": {
     "codes": [],
     "notCodes": [],
-    "input": [{ "click": "#to-loading" }],
-    "state": { "phase": "Loading" },
-    "dom": "<button id=\"to-loading\">Load</button><button id=\"to-ready\">Ready</button><div><p data-arm=\"loading\">Loading now</p></div>",
+    "input": [
+      {
+        "click": "#to-loading"
+      }
+    ],
+    "state": {
+      "phase": "Loading"
+    },
+    "dom": "<button id=\"to-loading\">Load</button><button id=\"to-ready\">Ready</button><p data-arm=\"loading\">Loading now</p>",
     "domAnchored": [
-      { "selector": "[data-arm=\"loading\"]", "text": "Loading now" },
-      { "selector": "[data-arm=\"idle\"]", "count": 0 }
+      {
+        "selector": "[data-arm=\"loading\"]",
+        "text": "Loading now"
+      },
+      {
+        "selector": "[data-arm=\"idle\"]",
+        "count": 0
+      }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-match-mount-wrapper-div-s478",
+      "fails": {
+        "runtime": "sha256:99e746864ef3706d"
+      }
+    }
   }
 }
