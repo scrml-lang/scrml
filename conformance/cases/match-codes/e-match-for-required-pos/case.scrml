@@ -1,0 +1,13 @@
+<program>
+type Phase:enum = { Open, Closed }
+type Mode:enum = { Edit, View }
+let <phase:Phase=.Open/>
+let <mode:Mode=.Edit/>
+let <flag:bool=true/>
+<button id="t" onclick=${@flag = !@flag}>"t"</>
+<match on=(@flag ? @phase : @mode)>
+    <_>
+        <p>"x"</p>
+    </>
+</match>
+</program>
