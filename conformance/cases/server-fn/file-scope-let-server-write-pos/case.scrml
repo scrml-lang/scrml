@@ -1,0 +1,11 @@
+// §7.6 rule (c) — a server-placed function (it prints, §20.7.3) writes a file-scope `let` through a helper it calls: E-FILE-SCOPE-LET-SERVER-WRITE.
+<program>
+    ${
+        let n = 0;
+        function bump() { n = n + 1; }
+        function srv() -> int { println("x"); bump(); return n; }
+    }
+    <main>
+        <button onclick={ const v = srv() !{ _ :> return }; }>b</button>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "module-file-scope-let-foreign-write-neg",
+  "description": "§7.6 (S479): the capable form — app reads lib.scrml's file-scope `let` and writes it through `setShared`, a function lib.scrml exports (§66.19) — is clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/file-scope-follow-s479.test.js",
+  "spec": "§7.6",
+  "rationale": "§7.6: \"A file-scope `let` is written only in the file that declares it (S479) … A write of it from another file — through a named import, an `as` alias or a namespace import (§21.3), and in any write form … — SHALL be a compile error, **`E-FILE-SCOPE-LET-FOREIGN-WRITE`**.\" ruling:user-voice-scrml.md S479 \"⭐ RULED — #1962 file-scope questions 1–4 + `parseVariant` duplicate keys, PA recs adopted\" item 3. An import makes the binding readable; the declaring file's exported function writes it.",
+  "provenance": "dispatch:s479-file-scope-follow",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-FILE-SCOPE-LET-FOREIGN-WRITE"
+    ]
+  }
+}

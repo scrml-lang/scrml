@@ -1,0 +1,8 @@
+// §7.6 (S479) — reading another file's file-scope `let`, and writing it through a function that file exports (§66.19), is clean.
+import { shared, setShared } from "./lib.scrml";
+<program>
+    <main>
+        <button onclick={ setShared(shared + 1); }>b</button>
+        <p>${shared}</p>
+    </main>
+</program>

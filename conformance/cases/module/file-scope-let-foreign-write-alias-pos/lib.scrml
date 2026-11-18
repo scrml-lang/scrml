@@ -1,0 +1,4 @@
+${
+    export let shared = 0;
+    export function setShared(v: int) { shared = v; }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "module-file-scope-let-foreign-write-alias-pos",
+  "description": "§7.6 (S479): writing `shared`, a file-scope `let` declared in lib.scrml, from app through an `as` alias is E-FILE-SCOPE-LET-FOREIGN-WRITE (PERMANENT; the capable form is a function lib.scrml exports, §66.19).",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/file-scope-follow-s479.test.js",
+  "spec": "§7.6",
+  "rationale": "§7.6: \"A file-scope `let` is written only in the file that declares it (S479) … A write of it from another file — through a named import, an `as` alias or a namespace import (§21.3), and in any write form … — SHALL be a compile error, **`E-FILE-SCOPE-LET-FOREIGN-WRITE`**.\" ruling:user-voice-scrml.md S479 \"⭐ RULED — #1962 file-scope questions 1–4 + `parseVariant` duplicate keys, PA recs adopted\" item 3.",
+  "provenance": "dispatch:s479-file-scope-follow",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-LET-FOREIGN-WRITE"
+    ],
+    "codeCounts": {
+      "E-FILE-SCOPE-LET-FOREIGN-WRITE": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-file-scope-codes-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-FILE-SCOPE-LET-FOREIGN-WRITE' fired 0 time(s), expected exactly 1",
+          "emitted:E-MU-001=1",
+          "missing:E-FILE-SCOPE-LET-FOREIGN-WRITE"
+        ]
+      }
+    }
+  }
+}
