@@ -278,7 +278,7 @@ ${
         VConstruct(enumSym: Sym, idx: int),               // s472: a payload-variant construction `E.V(…)` / `.V(…)` (§14.4) — a call node; Core VariantOf
         VHost(call: HostCall),                            // s444: a host call (`Date.now()`) — the closed HostCall set
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
-        VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
+        VLambda(params: Sym[], fnTy: Type | not),   // s478 (s478-boot-fn-type): `fnTy` — a function VALUE's type (not a tape callback's: `not`)                           // s444: `x => e` as a SeqCall's argument — its parameter locals
         VToEnum(enumSym: Sym),                            // s469: `E.toEnum(s)` (§14.4.1) — a call node: `string -> E | not`
         VMethod(op: PrimOp),                              // s469: a typed built-in method (`s.slice(1)`, `xs.sort()`) — a call node; Core Prim(op, [receiver, …args])
         VIndex(loc: string),                              // s469: `xs[i]` read (§49.13) — an index node; `loc` "file:line" for the trap (§19.17)
@@ -1071,6 +1071,7 @@ ${
             .TMaybe(inner: i) :> aliasCycles(te, s, i, seen)
             .TLife(pre: f, post: x) :> aliasCycles(te, s, f, seen) || aliasCycles(te, s, x, seen)
             .TRefine(base: b, pred: p) :> aliasCycles(te, s, b, seen)
+            .TFn(params: ps, ret: r) :> aliasCyclesFn(te, s, ps, r, seen)
         }
     }
 
@@ -1765,6 +1766,7 @@ ${
             .TMaybe(inner: i) :> resolveMaybe(te, i, st)
             .TLife(pre: f, post: x) :> resolveLife(te, f, x, st)
             .TRefine(base: b, pred: p) :> resolveRefine(te, b, p, st)
+            .TFn(params: ps, ret: r) :> fnTypeRefused(te, at, st)
         }
     }
 
@@ -1785,6 +1787,89 @@ ${
         const r: RType = resolveType(te, inner, st)
         return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
     }
+
+    // =========================================================================
+    // s478 (s478-boot-fn-type) — FUNCTION TYPES. §7.5: "A function-valued parameter is
+    // annotated with a function signature type … the spelling is the §15.11.4 signature
+    // type, `f: (x: int) => int`". §14.3 (S469 R2′): "A function-holding value MAY be
+    // bound, passed, returned and called. It SHALL NOT reach a cell, a struct field, `==` /
+    // ordering, a map key, any serialization …". So a function type resolves only where a
+    // function value may stand: a function's parameter, a local's annotation, a function's
+    // return type (resolveTypeFn), and the parts of another function type. Everywhere else
+    // (resolveType — a cell, a struct or variant field, a tape element, a `| not` member, a
+    // type alias) it is refused by name; a pure `fn` value in a cell or struct field is
+    // INTERIM-refused by §14.3 S474 itself (g-pure-fn-values-in-cells-unbuilt-s474).
+    // =========================================================================
+    fn fnTypeRefused(te: TypeEnv, at: AType, st: AS) -> RType {
+        return { t: Type.Int, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the function type `" + typeText(at) + "` here — a function value may be bound by a local, passed to a parameter and returned (§14.3, S469 R2′); a function type in any other position (a cell, a struct or variant field, a tape element, a `| not` member, a type alias) is not in the bootstrap (§14.3: a function value SHALL NOT reach a cell or a struct field — S474 leaves a PURE one there INTERIM, unbuilt). Bind the function to a local, or pass it as an argument"), unresolved: true }
+    }
+
+    // A type written where a function value may stand: a function type is resolved (its parts
+    // likewise); any other type as resolveType resolves it.
+    fn resolveTypeFn(te: TypeEnv, at: AType, st0: AS) -> RType {
+        const k: ATypeK = at.k
+        const fp: ATypeK = k
+        const parts: FnATypeParts | not = match fp {
+            .TFn(params: ps, ret: r) :> { ps: ps, ret: r }
+            // no-default-arm: one question of a type — is it a function type
+            _ :> not
+        }
+        if (parts is not) return resolveType(te, at, st0)
+        let st: AS = st0
+        let bad = false
+        let tys: Type[] = []
+        for (const p of parts.ps) {
+            const rp: RType = resolveTypeFn(te, p, st)
+            st = rp.st
+            if (rp.unresolved) bad = true
+            tys = tys.concat([rp.t])
+        }
+        const ra: AType | not = parts.ret
+        if (ra is not) return { t: Type.Fn(tys, not), st: st, unresolved: bad }
+        const rr: RType = resolveTypeFn(te, ra, st)
+        return { t: Type.Fn(tys, rr.t), st: rr.st, unresolved: bad || rr.unresolved }
+    }
+
+    type FnATypeParts:struct = { ps: AType[], ret: AType | not }
+
+    fn aliasCyclesFn(te: TypeEnv, s: TypeStub, ps: AType[], ret: AType | not, seen: int[]) -> boolean {
+        for (const p of ps) {
+            if (aliasCycles(te, s, p, seen)) return true
+        }
+        if (ret is not) return false
+        return aliasCycles(te, s, ret, seen)
+    }
+
+    fn fnATypeText(ps: AType[], ret: AType | not) -> string {
+        let parts: string[] = []
+        for (const p of ps) { parts = parts.concat([typeText(p)]) }
+        let r: string = "void"
+        if (ret is given) r = typeText(ret)
+        return "(" + parts.join(", ") + ") => " + r
+    }
+
+    fn fnTypeName(ps: Type[], ret: Type | not) -> string {
+        let parts: string[] = []
+        for (const p of ps) { parts = parts.concat([typeName(p)]) }
+        let r: string = "void"
+        if (ret is given) r = typeName(ret)
+        return "(" + parts.join(", ") + ") => " + r
+    }
+
+    // The parts of a function type, else `not`.
+    fn fnTypeOf(t: Type | not) -> FnTypeParts | not {
+        if (t is not) return not
+        const u: Type = t
+        return match u {
+            .Fn(params: ps, ret: r) :> { ps: ps, ret: r }
+            // no-default-arm: one question of a type — is it a function type
+            _ :> not
+        }
+    }
+
+    type FnTypeParts:struct = { ps: Type[], ret: Type | not }
+
+    fn isFnType(t: Type | not) -> boolean { return fnTypeOf(t) is given }
 
     // s475 (s475-boot-lifecycle-type) — the presence lifecycle `(not to T)` is
     // Core `Type.Maybe(T)`: "No new runtime representation. At run time the cell
@@ -1813,6 +1898,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> ""
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -1829,6 +1915,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> presenceLife(f, x)
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -2130,6 +2217,24 @@ ${
 
     type RFieldDefs:struct = { fs: FieldDef[], st: AS }
 
+    // s478 (s478-boot-fn-type) — §14.3: "A field whose type is a **function type** (`onClick: ()
+    // -> void`, `cb: fn()`, `handler: (x: int) => string`) is **REJECTED** at declaration with the
+    // hard error `E-STRUCT-FUNCTION-FIELD`" (S474 leaves a PURE function value in a struct field
+    // INTERIM-refused with the same code). An enum payload field: §14.3 R2′ "SHALL NOT be written
+    // INTO a value … not as an enum payload (`Op.Apply(g)`)" — E-VALUE-FUNCTION-STORED is a
+    // VALUE's code, so the payload field's TYPE is refused by name.
+    fn fieldDeclTypeOf(te: TypeEnv, f: ATypeField, payload: boolean, st: AS) -> RType {
+        const k: ATypeK = f.ty.k
+        const isFn: boolean = match k {
+            .TFn(params: ps) :> true
+            // no-default-arm: one question of a type — is it a function type
+            _ :> false
+        }
+        if (!isFn) return resolveType(te, f.ty, st)
+        if (payload) return { t: Type.Int, st: addDiag(st, te.file, f.ty.span, "E-BOOTSTRAP-UNSUPPORTED", "the enum payload field `" + f.name + "` has the function type `" + typeText(f.ty) + "` — a function SHALL NOT be written into a value as an enum payload (§14.3, S469 R2′); keep the data in the payload and the behaviour in a function"), unresolved: true }
+        return { t: Type.Int, st: addDiag(st, te.file, f.ty.span, "E-STRUCT-FUNCTION-FIELD", "the struct field `" + f.name + "` has the function type `" + typeText(f.ty) + "` — a struct is a collection of data, and a function is not value data (no structural equality, no wire form): a function-typed field is rejected at declaration (§14.3). Keep the data in the struct and the behaviour in a function that takes it"), unresolved: true }
+    }
+
     // Payload fields (variants) are values: no grants. Struct fields take their
     // own `let` (O3) and their type's edit grants. `syms` = the member Syms minted
     // with the type (struct fields); payload fields are minted here.
@@ -2138,7 +2243,7 @@ ${
         let out: FieldDef[] = []
         let i = 0
         for (const f of fs) {
-            const rt: RType = resolveType(te, f.ty, st)
+            const rt: RType = fieldDeclTypeOf(te, f, payload, st)      // s478 (s478-boot-fn-type): a function-typed field is E-STRUCT-FUNCTION-FIELD (§14.3)
             const unresolved: boolean = rt.unresolved
             st = rt.st
             // s469-boot-tape-grants (g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469):
@@ -2209,6 +2314,7 @@ ${
             .Str :> false
             .Seq(elem: e) :> false
             .Maybe(inner: i) :> false
+            .Fn(params: ps) :> false
         }
     }
 
@@ -2277,6 +2383,7 @@ ${
             .Bool :> not
             .Seq(elem: e) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -2289,6 +2396,7 @@ ${
             .Str :> not
             .Bool :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -3206,6 +3314,7 @@ ${
             .TMaybe(inner: x) :> false
             .TLife(pre: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -3222,6 +3331,7 @@ ${
             .TMaybe(inner: x) :> false
             .TLife(pre: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -3753,6 +3863,7 @@ ${
             .Str :> t
             .Bool :> t
             .Named(sym: s) :> t
+            .Fn(params: ps) :> t
         }
     }
 
@@ -4228,6 +4339,7 @@ ${
             .Bool :> not
             .Seq(elem: e) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -4420,7 +4532,7 @@ ${
             let pt: Type | not = not
             const at: AType | not = p.ty
             if (at is given) {
-                const rt: RType = resolveType(cx.te, at, cx.st)
+                const rt: RType = resolveTypeFn(cx.te, at, cx.st)
                 if (!rt.unresolved) pt = rt.t
             }
             ps = ps.concat([{ name: p.name, ty: pt, param: true }])
@@ -4526,7 +4638,7 @@ ${
 
     fn localOf(cx: InferCx, n: string, mutable: boolean, aty: AType | not, init: AExpr, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
         if (aty is given) {
-            const rt: RType = resolveType(cx.te, aty, cx.st)
+            const rt: RType = resolveTypeFn(cx.te, aty, cx.st)
             if (rt.unresolved) return { b: { name: n, ty: not, param: false }, done: done }
             return { b: { name: n, ty: rt.t, param: false }, done: done }
         }
@@ -5899,7 +6011,7 @@ ${
                 const at: AType | not = af.ret
                 if (at is given) {
                     if (!isVoidType(at) && !hasErrIn(f.errs, at.span)) {
-                        const rt: RType = resolveType(fte, at, st)
+                        const rt: RType = resolveTypeFn(fte, at, st)
                         // guard (i), r7 A: a return type that did not resolve
                         // (E-TYPE-UNKNOWN answers with a placeholder type) is
                         // left unresolved — never checked against, never trusted
@@ -6321,6 +6433,7 @@ ${
             .Bool :> not
             .Named(sym: s) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -6429,6 +6542,7 @@ ${
             .Maybe(inner: i) :> hostSlotText(types, i) + " | not"
             .Seq(elem: e) :> hostSlotText(types, e) + "[]"
             .Named(sym: s) :> hostNamedText(types, s)
+            .Fn(params: ps) :> "(a function)"
         }
     }
 
@@ -6902,13 +7016,22 @@ ${
                 for (const p of fs.f.params) {
                     const at: AType | not = p.ty
                     if (at is given) {
-                        const rt: RType = resolveType(te, at, emptyAS())
+                        const rt: RType = resolveTypeFn(te, at, emptyAS())
                         if (!rt.unresolved && containsHost(g.types, rt.t, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
+                        // s478 (s478-boot-fn-type) — §12.5: "A parameter whose type is NOT JSON-serializable
+                        // — … (function, markup … ) — SHALL be a compile error (E-ROUTE-004: non-serializable
+                        // parameter type to server function)"; §14.3: "a closure cannot be serialized"
+                        if (!rt.unresolved && isFnType(rt.t)) out = out.concat([newDiag("E-ROUTE-004", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, a function — a server function's arguments cross the client→server boundary as JSON (§12.3), and a function value cannot be serialized (§12.5, §14.3). Pass the data the function would work on, and keep the behaviour on the side that runs it", fs.info.file, p.span)])
                     }
                 }
                 const r: Type | not = fs.info.ret
                 if (r is given) {
                     if (containsHost(g.types, r, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
+                    // s478 (s478-boot-fn-type) — §14.3 (PERMANENT): "a closure cannot be serialized — its
+                    // code and captured environment have no wire form"; the SPEC names no code for a server
+                    // function's function-typed RESULT (§12.5's E-ROUTE-004 names parameters), so it is
+                    // refused by name
+                    if (isFnType(r)) out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, a function — its result crosses the server→client boundary as JSON (§12.5), and a closure cannot be serialized (§14.3: \"its code and captured environment have no wire form\"). Return the data, and keep the behaviour on the client", fs.info.file, fs.info.span)])
                 }
             }
         }
@@ -7374,6 +7497,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -7552,6 +7676,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
         if (!isStamp) return st
         const own: AAttrValue = d.own
@@ -7706,6 +7831,7 @@ ${
             .TMaybe(inner: i) :> ""
             .TLife(pre: f, post: x) :> ""
             .TRefine(base: b, pred: p) :> ""
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -8268,9 +8394,9 @@ ${
     // position (withPre / withEvalPre), never read off `wholeWhat`'s wording — a counted head's
     // `step` / `init`, a value arm and a request body are assignments too, and their lowerings
     // emit no removalPre (resolveRemovalValue refuses there).
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not, pre: int }
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int, derr: Sym | not, pre: int, fnVal: int }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not, pre: -1 } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1, derr: not, pre: -1, fnVal: -1 } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -8279,7 +8405,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre, fnVal: f.fnVal })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -8290,13 +8416,13 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre, fnVal: f.fnVal })
     }
 
     // s477 FIX ROUND 1: `nid`'s lowering reads a removal's value before its statement (FailCtx.pre).
     fn withPre(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: nid })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: nid, fnVal: f.fnVal })
     }
 
     // s477 FIX ROUND 1: `e` is an expression STATEMENT whose lowering is lower.scrml's
@@ -8343,7 +8469,18 @@ ${
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre, fnVal: f.fnVal })
+    }
+
+    // s478 (s478-boot-fn-type) — `nid` stands where a function VALUE may: §14.3 (S469 R2′) "A
+    // function-holding value MAY be bound, passed, returned and called" — a `const` / `let`
+    // local's initializer, a whole-local assignment's value, an argument of a call of a scrml
+    // function (direct or through a value), a `return` operand. A function value anywhere else
+    // (an operand, a ternary arm, a literal's element, a cell, a template, a host argument …)
+    // is refused by name (fnValuePosition).
+    fn withFnVal(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre, fnVal: nid })
     }
 
     // s469 (#1471 round-2 MED-2): `nid` is a call evaluated as a STATEMENT (its result is
@@ -8351,12 +8488,12 @@ ${
     // E-ERROR-012) — resolveCall does not report it as a value use.
     fn withStmtCall(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr, pre: f.pre })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid, derr: f.derr, pre: f.pre, fnVal: f.fnVal })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall, derr: f.derr, pre: f.pre, fnVal: f.fnVal })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -8622,8 +8759,8 @@ ${
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` outside a tape value (a call argument, `f(...xs)`) is not in the bootstrap — rest parameters are not parsed (gap g-boot-call-spread-s477); pass the tape itself, or spread it into a tape value (`[...xs, e]`)", st)
             .Index(obj: o, idx: ix) :> resolveIndexRead(env, e, o, ix, st)   // s469 (§49.13)
-            .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
-            .BlockLambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a block-bodied function value (an arrow `(x) => { … }` or a function expression `function (x: T) { … }`, §7.2) is in the bootstrap only as the callback of a tape method (`.map` / `.filter` / `.some` / `.every` / `.sort`) or as an event handler that takes no event (`onclick=" + "$" + "{() => { … }}`) — function values elsewhere (bound by `const`, passed to a function, returned) are the function-values slice (g-bootstrap-function-values-slice-s451). Declare a named function (§7.3.1) and call it", st)
+            .Lambda(params: ps2) :> resolveValueLambda(env, e, expected, st)        // s478 (s478-boot-fn-type): an arrow as a function VALUE
+            .BlockLambda(params: ps2) :> resolveValueLambda(env, e, expected, st)   // s478 (s478-boot-fn-type)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
             .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
@@ -8695,7 +8832,82 @@ ${
         // any other function value is refused. (s477: so a nested function
         // never escapes the activation of the function that declares it.)
         if (f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-ERROR-002", "the failable function '" + f.name + "' is used as a value — whatever calls it later would discard its error. Call it here and handle the result (`" + f.name + "(…) !{ … }`, `match`, `?`) (§19.4.3)"))
-        return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later \"function values\" slice; call it directly: `" + name + "(…)`"))
+        // s478 (s478-boot-fn-type) — §14.3 (S469 R2′): "A function-holding value MAY be bound,
+        // passed, returned and called". The function itself is the value (Core FnRef), typed by
+        // its signature; what the bootstrap cannot prove about it is refused by name.
+        const why: string = fnValueWhy(env, f)
+        if (why != "") return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — " + why))
+        if (env.fx.fnVal != e.nid) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + name + "` (a function named without a call)")))
+        const ft: Type | not = fnValueType(env, f)
+        if (ft is not) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — the bootstrap types a function VALUE by its signature, and `" + f.name + "` does not write one it can read: every parameter's type, and the return type (`-> T`, or no `return <value>` at all) (INTERIM — an inferred return type is the typer's, after binding). Write `-> T` on `" + f.name + "`"))
+        const st3: AS = addPending(st2, PendRule.FnValue(f.sym.id, env.fx.fnSym, env.file, e.span, f.name))
+        return plain(ft, st3)
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-fn-type) — FUNCTION VALUES. §14.3 (S469 R2′): "A function-holding
+    // value MAY be bound, passed, returned and called." Built: a file-scope function named
+    // without a call, and an arrow / function expression, standing where a function value
+    // may stand (withFnVal — a local's initializer, a whole-local assignment, an argument of
+    // a scrml call, a `return` operand), and a call THROUGH a local of a function type.
+    // Refused by name, fail closed — each INTERIM unless said:
+    //   - a NESTED function (§7.3.1) as a value — it closes over its activation's locals,
+    //     which the bootstrap's write / narrowing passes do not follow out of it;
+    //   - a host-backed function (§21.3.1 wrapper) — its body is a host call;
+    //   - a function with a `lin` parameter — a function type carries no `lin`;
+    //   - a function whose signature the bootstrap cannot read (an untyped parameter, an
+    //     inferred return type);
+    //   - a function that WAITS (§13.2 async colour: a server function, or one that reaches
+    //     a server call) — §13.2 (S469, R3′): "Waiting-ness is part of a function's TYPE … It
+    //     is built after RP1 (effect subsumption) and the function-types slice … the bootstrap
+    //     refuses the same shapes with E-BOOTSTRAP-UNSUPPORTED until function types exist";
+    //     the bootstrap's function types carry no waiting colour, so a waiting one stays
+    //     refused (rulesPass, FnValue);
+    //   - a `!` function (§19.4.3 S469: failability travels with the value) — E-ERROR-002 as
+    //     before: the SPEC names no spelling for a failable function TYPE (owner question);
+    //   - recursion through a value (the function named reaches the body that names it) —
+    //     the effect summary would close over an edge the call graph does not have;
+    //   - a function value in a server-side body (a server function, or one server-placed
+    //     by inheritance) — §14.3 lets it be bound there, but the server artifact's reach
+    //     and the wire never carry one in the bootstrap.
+    // A call through a value is §6.7.4 rule 4's "call through a function-typed binding the
+    // compiler cannot resolve to a known set of scrml functions": the write summary records
+    // it as unresolved (scanCall), so a value position, an `<effect>` body and a narrowing
+    // after it fail closed with their own codes (E-VALUE-WRITE-UNPROVEN,
+    // E-EFFECT-WRITE-UNPROVEN, E-TYPE-046).
+    // =========================================================================
+    fn fnValueWhy(env: Env, f: FnInfo) -> string {
+        if (f.outer >= 0) return "a NESTED function (§7.3.1) used as a value is not in the bootstrap (INTERIM — it closes over its enclosing function's locals, which the write and narrowing passes do not follow out of that function). Declare it at file scope, or call it where it is declared"
+        if (f.host is given) return "a host-backed function (§21.3.1) used as a value is not in the bootstrap (INTERIM — its body is a host call the bootstrap emits only at a direct call). Call it directly, or wrap the call in a scrml function and name that"
+        const fs: FnSrc | not = fnSrcOf(env.g, f.sym.id)
+        if (fs is not) return "the bootstrap cannot read this function's declaration"
+        for (const p of fs.f.params) {
+            if (p.lin) return "a function with a `lin` parameter (§35.2.1) used as a value is not in the bootstrap (INTERIM — a function type carries no `lin`, so a call through the value could not count the consumption). Call it by its name"
+        }
+        return ""
+    }
+
+    // The value's type: `(P1, …) => R` from the declaration (`R` its written return type;
+    // `void` when it declares `-> void` or returns no value on any path). `not` when a
+    // parameter's or the return's type is not written / does not resolve.
+    fn fnValueType(env: Env, f: FnInfo) -> Type | not {
+        if (f.arity < 0) return not
+        let ps: Type[] = []
+        for (const pw of paramTypesOf(env, f)) {
+            const t: Type | not = pw.ty
+            if (t is not) return not
+            ps = ps.concat([t])
+        }
+        if (ps.length != f.arity) return not
+        const r: Type | not = f.ret
+        if (r is given) return Type.Fn(ps, r)
+        if (isVoidFn(env.g, f.sym.id)) return Type.Fn(ps, not)
+        return not
+    }
+
+    // Where a function value may stand (§14.3 R2′ "bound, passed, returned and called").
+    fn fnPosWhy(what: string) -> string {
+        return what + " stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml function, returned (`return …`) and called (`f(…)`) (§14.3, S469 R2′). Anywhere else — an operand, a ternary or `||` branch (a join of function values, §13.2 R3′), an array / object / map literal, a cell, a template, a host call's argument — is not in the bootstrap, and a function SHALL NOT reach a cell, a struct field, `==`, a map key or any serialization (§14.3, PERMANENT for `==` / keys / serialization). Bind it to a local first"
     }
 
     fn resolveNameOf(env: Env, e: AExpr, name: string, st: AS) -> RX {
@@ -8714,6 +8926,9 @@ ${
         if (l is given) {
             const st2: AS = addName(st, e.nid, NameFact.NLocal(l.s))
             if (isEventLocal(l)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", eventUseWhy(l, "`" + name + "` used as a value"), st2)   // s478 (s478-boot-fn-values)
+            // s478 (s478-boot-fn-type): a local holding a function value is read only where a
+            // function value may stand, or called (its callee position, fnRef)
+            if (isFnType(l.ty) && env.fx.fnVal != e.nid && env.fx.fnRef != e.nid) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + name + "` (a local holding a function value)"), st2)
             if (l.narrowed is given) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
@@ -8880,8 +9095,11 @@ ${
         // (core.scrml Type) hold no function type, so a typed local is never a function. One whose type
         // is unknown (a local bound to a lambda, `const v = () => 1`) may be the "named function
         // reference" §6.7.3 admits: refused by name, never E-LIFECYCLE-004
+        // s478 (s478-boot-fn-type): the types now hold function types — a local of a function type
+        // is the "named function reference" §6.7.3 admits ("fn": refused by name, unbuilt)
         const lb: LocalB | not = lookupLocal(env, n)
         if (lb is given) {
+            if (isFnType(lb.ty)) return "fn"
             if (lb.ty is given) return "value"
             return "unknown"
         }
@@ -9794,6 +10012,9 @@ ${
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st1)
+        // s478 (s478-boot-fn-type) — a call THROUGH a local of a function type
+        const cvt: FnTypeParts | not = fnTypeOf(rc.x.ty)
+        if (cvt is given && nameLocalSym(nameFactIn(rc.st, callee.nid)) is given) return resolveCallV(env, e, callee, args, cvt, rc.st)
         // s475 (g-boot-object-literal-struct-context-positions-s475): each argument is resolved
         // against its parameter's declared type — §18.5 reads an object in an argument "exactly as
         // `f({ … })`", and §14.10 names "a function parameter type" as a position's type
@@ -9810,6 +10031,12 @@ ${
             // (and an arm's value, whose E-ERROR-012 is reported by the arm rule), or the
             // operand of a `return` in a function that is itself void (it passes `void` on).
             if (isVoidFn(env.g, cf.sym.id) && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(sp, env.file, e.span, "E-TYPE-001", "`" + cf.name + "(…)` is `void` (no path of it returns a value) — it cannot be used as a value (§18.3); call it as a statement, or make it `return` a value on every path"))
+            // s478 (s478-boot-fn-type): a call whose value is a FUNCTION stands only where a
+            // function value may (withFnVal), and gives the local it initializes that type
+            if (isFnType(cf.ret)) {
+                if (env.fx.fnVal != e.nid) return plain(not, addDiag(sp, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + cf.name + "(…)` (a call whose value is a function)")))
+                return plain(cf.ret, sp)
+            }
             return plain(not, sp)
         }
         // s469 (templates review round 2 — found by the end-to-end fuzz): a call
@@ -9825,6 +10052,54 @@ ${
             return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only a declared scrml function is callable in the bootstrap — `" + exprName(callee) + "` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap"))
         }
         return plain(not, st)
+    }
+
+    fn nameLocalSym(f: NameFact | not) -> Sym | not {
+        return match f {
+            .NLocal(sym: s) :> s
+            // no-default-arm: one question of a name fact — is it a local
+            _ :> not
+        }
+    }
+
+    // s478 (s478-boot-fn-type) — a call THROUGH a local holding a function value. §7.3.4 checks
+    // a call "to a statically resolved scrml function" (arity E-CALL-ARITY, argument types
+    // E-TYPE-031) and leaves "a callee reached through a function-typed value" open; the
+    // bootstrap checks the same two against the VALUE's type, which every function value it
+    // builds carries exactly (fnFits admits only the same signature) — so the call is checked
+    // as a direct call would be (the typer, typeCallV). Its arguments are positions whose type
+    // is the signature's (an arrow there takes its parameter types from it, §7.5 S469 (3)).
+    // Refused by name:
+    //   - in a pure `fn` body — §48.6.2 "A `fn` body SHALL NOT call a `function`-declared
+    //     callable … unless the compiler can statically verify" its purity; a function type
+    //     carries no purity in the bootstrap (§48.6.3 "the returned `fn` carries its
+    //     constraints" names no spelling for it — owner question), so nothing is verified;
+    //   - when the local's NAME is also a function's in scope: the narrowing pass reads a
+    //     call's write set by the callee's NAME (fnWrites / callKeys), so it would read that
+    //     function's, not the value's (INTERIM — rename the local);
+    //   - a `void` value used as a value (E-TYPE-001, as a direct call's);
+    //   - a value that is itself a function, outside a function-value position.
+    // The write summary records the call as unresolved (§6.7.4 rule 4; scanCall).
+    fn resolveCallV(env: Env, e: AExpr, callee: AExpr, args: AExpr[], ft: FnTypeParts, st0: AS) -> RX {
+        const name: string = exprName(callee)
+        let ws: ParamWant[] = []
+        for (const p of ft.ps) { ws = ws.concat([{ ty: p }]) }
+        let st: AS = resolveArgs(env, args, ws, st0)
+        const h: HostCtx = env.host
+        const pure: boolean = match h {
+            .HostPure :> true
+            .HostOk :> false
+            .HostNo :> false
+        }
+        if (pure) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "(…)` calls through a function value inside a `fn` body — §48.6.2: a `fn` calls only what the compiler can verify is pure, and a function type in the bootstrap does not carry purity (INTERIM; §48.6.3 \"the returned `fn` carries its constraints\" names no spelling for a pure function type). Call a `fn` by its name, or make the caller a `function`"))
+        if (fnNamedIn(env, name) is given) return plain(not, addDiag(st, env.file, callee.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "(…)` calls through the local `" + name + "`, whose name is also a function's in scope here — the bootstrap's narrowing pass reads a call's writes by the callee's name, so it would read that function's instead of the value's (INTERIM). Rename the local"))
+        if (ft.ret is not && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-TYPE-001", "`" + name + "(…)` is `void` (its function type returns no value) — it cannot be used as a value (§18.3); call it as a statement"))
+        st = addPending(st, PendRule.FnValue(-2, env.fx.fnSym, env.file, e.span, name))
+        const r: Type | not = ft.ret
+        if (isFnType(r)) {
+            if (env.fx.fnVal != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + name + "(…)` (a call whose value is a function)")))
+        }
+        return plain(r, st)
     }
 
     // s475 (g-boot-object-literal-struct-context-positions-s475) — a declared
@@ -9843,7 +10118,7 @@ ${
             let ty: Type | not = not
             const at: AType | not = p.ty
             if (at is given && !hasErrIn(fileErrs(env.g.files, fs.info.file), at.span)) {
-                const rt: RType = resolveType(te, at, emptyAS())
+                const rt: RType = resolveTypeFn(te, at, emptyAS())
                 if (!rt.unresolved && rt.st.diags.length == 0) ty = rt.t
             }
             out = out.concat([{ ty: ty }])
@@ -9858,7 +10133,7 @@ ${
         for (const a of args) {
             let want: Type | not = not
             if (i < ps.length) want = ps[i].ty
-            st = resolveExpr(env, a, want, st).st
+            st = resolveExpr(withFnVal(env, a.nid), a, want, st).st
             i = i + 1
         }
         return st
@@ -10340,6 +10615,7 @@ ${
             .TRefine(base: b, pred: p) :> ""
             .TName(name: x) :> ""
             .TSeq(elem: e) :> ""
+            .TFn(params: ps) :> ""
         }
     }
 
@@ -10351,6 +10627,7 @@ ${
             .TMaybe(inner: i) :> typeText(i) + " | not"
             .TLife(pre: f, post: x) :> "(" + typeText(f) + " to " + typeText(x) + ")"
             .TRefine(base: b, pred: p) :> typeText(b) + "(" + p + ")"
+            .TFn(params: ps, ret: r) :> fnATypeText(ps, r)
         }
     }
 
@@ -11385,6 +11662,7 @@ ${
             .Bool :> not
             .Named(sym: x) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -11404,7 +11682,7 @@ ${
         }
         const blk: ABlock | not = lambdaBlock(lam)
         if (blk is given) return resolveBlockLambda(env, lam, blk, ty, want, st0)
-        st = addValue(st, lam.nid, ValueFact.VLambda(syms))
+        st = addValue(st, lam.nid, ValueFact.VLambda(syms, not))
         const b: AExpr | not = lambdaBody(lam)
         if (b is not) return plain(not, st)
         return resolveExpr(env2, b, want, st)
@@ -11446,7 +11724,7 @@ ${
                 st = addDiag(st, env.file, p.span, "E-PARAM-TYPE-REQUIRED", "the parameter `" + p.name + "` of this function expression has no type — every parameter of a `function` declaration or expression carries `: T` (§7.5, S469): write `" + p.name + ": Type`, or write the callback as an arrow `(" + p.name + ") => { … }`, whose parameters a tape method types (§7.5)")
             }
             if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
-                const rt: RType = resolveType(fte, at, st)
+                const rt: RType = resolveTypeFn(fte, at, st)
                 st = rt.st
                 if (!rt.unresolved) {
                     if (ty is given && !sameType(rt.t, ty)) {
@@ -11458,9 +11736,15 @@ ${
             if (pty is given) st = addAnnot(st, rs.s, pty)
             env2 = withLocal(env2, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" })
         }
-        st = addValue(st, lam.nid, ValueFact.VLambda(syms))
-        st = lamBodyCheck(env, body, [], st)
-        if (!exits(body)) st = addDiag(st, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "this callback's body can reach its end without a `return` — a tape method's callback gives a value on every path (falling off the end would give JavaScript's `undefined`, which is no scrml value). End every path with `return …;`")
+        st = addValue(st, lam.nid, ValueFact.VLambda(syms, not))
+        return lamBlockValue(env, env2, lam, body, want, "a tape method's callback", st)
+    }
+
+    // The body of a block lambda (a tape callback's, or a function value's — s478-boot-fn-type),
+    // resolved with its parameters in scope (`env2`); the value is its returns' joined type.
+    fn lamBlockValue(env: Env, env2: Env, lam: AExpr, body: ABlock, want: Type | not, what: string, st0: AS) -> RX {
+        let st: AS = lamBodyCheck(env, body, [], st0)
+        if (!exits(body)) st = addDiag(st, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "this callback's body can reach its end without a `return` — " + what + " gives a value on every path (falling off the end would give JavaScript's `undefined`, which is no scrml value). End every path with `return …;`")
         const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: want }), noFailCtx())
         const n0: int = st.rets.length
         st = resolveBlock(lenv, body, st)
@@ -11491,6 +11775,138 @@ ${
         }
         if (!same) rty = not
         return plain(rty, st)
+    }
+
+    // s478 (s478-boot-fn-type) — an arrow / function expression as a function VALUE (§14.3 S469
+    // R2′: "MAY be bound, passed, returned and called"). §7.5 (S469): its parameters are written
+    // `: T` — "A standalone lambda (`const f = (x) => …`) must annotate its parameters" — unless
+    // its position fixes them: "(3) an argument to a parameter whose declared type spells the
+    // function signature (`f: (x: int) => int` — the signature's parameter types)"; a bare one
+    // anywhere else is E-PARAM-TYPE-REQUIRED. §42.3.5 (S462 Q12): "a lambda / function
+    // expression created inside a narrowed scope does NOT inherit the narrowing of reactive
+    // cells — it re-tests" (the typer drops them, typeLambda; the resolver's handle narrowing
+    // is dropped here). Its body is a closure body: what it may hold is lamBodyCheck's
+    // (s478-boot-block-lambda) — no write to anything it did not declare, no handling form, no
+    // query — and it is no `!` function. Its type is `(P…) => R`, R its value's proven type (or
+    // the position's when the position writes one); a return type the bootstrap cannot prove
+    // is refused by name (INTERIM — write the binding's type).
+    fn resolveValueLambda(env: Env, lam: AExpr, expected: Type | not, st0: AS) -> RX {
+        const via: boolean = lambdaViaFunction(lam)
+        let what: string = "an arrow function"
+        if (via) what = "a function expression"
+        if (env.fx.fnVal != lam.nid) return diagX(env, lam, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy(what), st0)
+        const want: FnTypeParts | not = fnTypeOf(expected)
+        let st: AS = st0
+        let env2: Env = noNarrows(sealEvent(env))
+        let syms: Sym[] = []
+        let pts: Type[] = []
+        let typed = true
+        const fte: TypeEnv = teAt(env.g.te, env.file)
+        let ps: AParam[] = lambdaAParams(lam)
+        if (lambdaBlock(lam) is not) ps = lambdaTypedParams(lam)
+        const names: string[] = lambdaParams(lam)
+        let i = 0
+        while (i < names.length) {
+            const pn: string = names[i]
+            let at: AType | not = not
+            let pspan: ASpan = lam.span
+            if (i < ps.length) {
+                at = ps[i].ty
+                pspan = ps[i].span
+                if (ps[i].lin) st = addDiag(st, env.file, pspan, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter on a function value is not in the bootstrap (INTERIM) — §35.2.1 allows it; the bootstrap does not count a closure's own `lin` parameters, and a function type carries no `lin`. Drop `lin`")
+            }
+            let pty: Type | not = not
+            if (want is given && i < want.ps.length) pty = want.ps[i]
+            if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
+                const rt: RType = resolveTypeFn(fte, at, st)
+                st = rt.st
+                if (rt.unresolved) {
+                    pty = not
+                } else {
+                    pty = rt.t
+                }
+            } else if (at is given) {
+                pty = not
+            } else if (pty is not) {
+                st = addDiag(st, env.file, pspan, "E-PARAM-TYPE-REQUIRED", "the parameter `" + pn + "` of " + what + " has no type — a lambda's parameters are inferred only where its position fixes their types (a tape method's callback, an event handler, an argument to a parameter whose type spells the function signature); everywhere else every parameter carries `: T` (§7.5, S469): write `(" + pn + ": Type) => …`")
+            }
+            const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn)
+            st = rs.st
+            syms = syms.concat([rs.s])
+            if (pty is given) {
+                st = addAnnot(st, rs.s, pty)
+                pts = pts.concat([pty])
+            } else {
+                typed = false
+            }
+            env2 = withLocal(env2, { name: pn, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
+            i = i + 1
+        }
+        let wantRet: Type | not = not
+        let wantVoid = false
+        if (want is given) {
+            wantRet = want.ret
+            wantVoid = want.ret is not
+        }
+        let rty: Type | not = not
+        const blk: ABlock | not = lambdaBlock(lam)
+        if (blk is given) {
+            const rb: RX = lamBlockValue(env, env2, lam, blk, wantRet, "a function value", st)
+            st = rb.st
+            rty = rb.x.ty
+        } else {
+            const b: AExpr | not = lambdaBody(lam)
+            if (b is given) {
+                st = lamExprCheck(env, b, [], st)
+                const rb: RX = resolveExpr(withFx(env2, noFailCtx()), b, wantRet, st)
+                st = rb.st
+                rty = rb.x.ty
+                if (rty is not) rty = callRetOf(env, rb.st, b)      // a call of a function that declares `-> T`
+            }
+        }
+        if (want is given) {
+            // the position writes the signature: the value's type is that signature (the typer
+            // checks the body's value against its return type, typeLambda)
+            if (wantVoid) rty = not
+            if (!wantVoid) rty = wantRet
+        } else if (rty is not && typed) {
+            st = addDiag(st, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the bootstrap cannot prove the type of the value " + what + " returns, so it cannot type the function value (INTERIM). Write the binding's type, `const f: (x: int) => int = …`, so the position spells the signature")
+        }
+        if (!typed) return plain(not, addValue(st, lam.nid, ValueFact.VLambda(syms, not)))
+        if (want is not && rty is not) return plain(not, addValue(st, lam.nid, ValueFact.VLambda(syms, not)))
+        const ft: Type = Type.Fn(pts, rty)
+        st = addValue(st, lam.nid, ValueFact.VLambda(syms, ft))
+        st = addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""))
+        return plain(ft, st)
+    }
+
+    // The declared return type of a call of a named, non-failable scrml function (`f(…)` whose
+    // callee declares `-> T`), else `not` — an arrow's body's value type when the binder's
+    // expression types do not carry it (resolveCall types no call).
+    fn callRetOf(env: Env, st: AS, b: AExpr) -> Type | not {
+        const c: AExpr | not = calleeOf(b.k)
+        if (c is not) return not
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return not
+        if (f.failable || f.serverOwn) return not
+        return f.ret
+    }
+
+    // An expression lambda's WRITTEN parameters (`(x: int) => …`), else none.
+    fn lambdaTypedParams(e: AExpr) -> AParam[] {
+        const k: AExprK = e.k
+        return match k {
+            .Lambda(params: ps, body: b, typed: tps) :> tps
+            // no-default-arm: one question of an expression — is it an arrow with written parameter types
+            _ :> []
+        }
+    }
+
+    // §42.3.5 / §66.7.5: the handle narrowings (`given c = @h`, a presence test) of the scope a
+    // function value is created in are not its own — it may run after they end.
+    fn noNarrows(env: Env) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: [], present: [], host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx, lift: env.lift, nest: env.nest }
     }
 
     fn lambdaAParams(e: AExpr) -> AParam[] {
@@ -13055,6 +13471,7 @@ ${
             .Bool :> t
             .Named(sym: s) :> t
             .Seq(elem: el) :> t
+            .Fn(params: ps) :> t
         }
     }
 
@@ -13067,6 +13484,7 @@ ${
             .Str :> not
             .Bool :> not
             .Named(sym: s) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -13081,6 +13499,7 @@ ${
             .Num :> true
             .Str :> true
             .Bool :> true
+            .Fn(params: ps) :> false
         }
     }
 
@@ -13646,7 +14065,12 @@ ${
             // g-boot-spread-value-s475): the capable form is a spread in every tape value.
             const lshape: int = seqEditShapeKey(l.name, value)
             if (lshape == 1 || lshape == 2) return resolveLocalGrowShape(env, value, l, st)
-            return resolveExpr(env, value, l.ty, st).st
+            const lrx: RX = resolveExpr(withFnVal(env, value.nid), value, l.ty, st)
+            // s478 (s478-boot-fn-type): a local whose type is not a function type is never given a
+            // function value — its type was fixed without one, and the passes that track function
+            // values read the local's type
+            if (isFnType(lrx.x.ty) && !isFnType(l.ty)) return addDiag(lrx.st, env.file, value.span, "E-BOOTSTRAP-UNSUPPORTED", "the local `" + l.name + "` is not declared with a function type, and this assigns it a function value — a local holds a function value only when its declaration says so (its initializer is a function value, or its annotation a function type, `let " + l.name + ": (x: T) => R = …`) (INTERIM)")
+            return lrx.st
         }
         const p: WPlace | not = rp.place
         if (p is not) return resolveExpr(env, value, not, st).st
@@ -14369,6 +14793,7 @@ ${
             .Bool :> not
             .Named(sym: s) :> not
             .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -14581,6 +15006,7 @@ ${
             .Bool :> typeName(t)
             .Named(sym: s) :> typeName(t)
             .Maybe(inner: x) :> typeName(t)
+            .Fn(params: ps) :> typeName(t)
         }
     }
 
@@ -15033,6 +15459,7 @@ ${
             .Str :> not
             .Bool :> not
             .Named(sym: s) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -15087,6 +15514,7 @@ ${
             .TMaybe(inner: i) :> []
             .TLife(pre: f, post: x) :> []
             .TRefine(base: b, pred: p) :> []
+            .TFn(params: ps) :> []
         }
     }
 
@@ -15109,6 +15537,7 @@ ${
             .TMaybe(inner: i) :> lifeTapeGranted(i)
             .TLife(pre: f, post: x) :> lifeTapeGranted(x)
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -15121,6 +15550,7 @@ ${
             .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
             .TLife(pre: f, post: x) :> seqReplace(x)
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -15134,6 +15564,7 @@ ${
             .Bool :> []
             .Named(sym: s) :> []
             .Maybe(inner: i) :> []
+            .Fn(params: ps) :> []
         }
     }
 
@@ -15226,6 +15657,7 @@ ${
             .Bool :> false
             .Named(sym: x) :> false
             .Maybe(inner: i) :> false
+            .Fn(params: ps) :> false
         }
     }
 
@@ -17038,7 +17470,7 @@ ${
 
     fn eventHandler(env: Env, b: ABlock, ev: string, st0: AS) -> AS {
         const rs: RSym = mint(reservedName(st0, env.file, b.span, ev), ev)
-        const st: AS = addValue(rs.st, b.nid, ValueFact.VLambda([rs.s]))
+        const st: AS = addValue(rs.st, b.nid, ValueFact.VLambda([rs.s], not))
         const env2: Env = withLocal(withLift(env, LiftCtx.NoLift), { name: ev, s: rs.s, ty: not, mutable: false, narrowed: not, nDecl: not, fresh: false, via: eventVia(), foreign: false })
         return loopChecks(env.file, b, resolveBlock(env2, b, st))
     }
@@ -18820,6 +19252,7 @@ ${
             .TMaybe(inner: i) :> false
             .TLife(pre: f, post: x) :> false
             .TRefine(base: b, pred: p) :> false
+            .TFn(params: ps) :> false
         }
     }
 
@@ -20175,6 +20608,7 @@ ${
             .Bool :> false
             .Named(sym: x) :> false
             .Seq(elem: x) :> false
+            .Fn(params: ps) :> false
         }
     }
 
@@ -20388,7 +20822,7 @@ ${
         if (e is not) return st
         // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
         // anywhere else a `return` operand is a value position
-        let renv: Env = withPre(withWholeAt(env, e.nid, "a `return` operand"), e.nid)
+        let renv: Env = withFnVal(withPre(withWholeAt(env, e.nid, "a `return` operand"), e.nid), e.nid)
         // s478: in a block lambda's body a `return` is the LAMBDA's value (its type recorded
         // for resolveLambda) — never the enclosing function's
         if (env.nest.lam >= 0) {
@@ -20400,7 +20834,12 @@ ${
         // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
         // type is the enclosing function's declared return type — §18.5 reads an object
         // there "exactly as `return { … }`", and §14.10 names "a function return type"
-        return resolveExpr(renv, e, enclosingRet(env), st).st
+        const rrx: RX = resolveExpr(renv, e, enclosingRet(env), st)
+        // s478 (s478-boot-fn-type): a function that returns a function value DECLARES it (`-> (x: T)
+        // => R`) — its callers' locals then carry the function type (an inferred return type is
+        // the typer's, after binding, and the binder's function-value checks read declared types)
+        if (isFnType(rrx.x.ty) && !isFnType(enclosingRet(env))) return addDiag(rrx.st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "this `return` gives a function value from a function that does not declare a function return type — write it, `-> (x: T) => R` (INTERIM: the bootstrap types a function value only by a declared signature)")
+        return rrx.st
     }
 
     fn enclosingRet(env: Env) -> Type | not {
@@ -20451,7 +20890,7 @@ ${
         let annot: Type | not = not
         if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = teAt(env.g.te, env.file)
-            const rt: RType = resolveType(te, aty, st)
+            const rt: RType = resolveTypeFn(te, aty, st)
             // r8: an annotation that did not resolve is not the local's type
             if (!rt.unresolved) annot = rt.t
             st = rt.st
@@ -20464,7 +20903,7 @@ ${
         if (fi is given) {
             ri = resolveForeignAt(env, init, fi, false, st)      // s473: `const x = _={ … }=` (§23.2.4)
         } else {
-            ri = resolveExpr(withPre(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init.nid), init, annot, st)
+            ri = resolveExpr(withFnVal(withPre(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init.nid), init.nid), init, annot, st)
         }
         const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
@@ -20482,6 +20921,14 @@ ${
         // the join of what it is given (§42.3.1).
         const srt: Type | not = sqlInitRow(env, init)
         if (annot is not && mutable && srt is given && ri.x.ty is given) st = addAnnot(st, rs.s, srt)
+        // s478 (s478-boot-fn-type): a local initialized with a function value takes that value's
+        // type as its DECLARED type — every rebinding is checked against it (typeAssign), so a
+        // `let` never joins two signatures (§13.2 R3′: "a join of functions with different
+        // effects … is refused"; the bootstrap refuses any join of function values)
+        if (annot is not && isFnType(ri.x.ty)) {
+            const fty: Type | not = ri.x.ty
+            if (fty is given) st = addAnnot(st, rs.s, fty)
+        }
         const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not, fresh: !mutable && sinkFreshInit(init), via: "", foreign: fi is given && annot is not }
         return { env: withLocal(env, l), st: st }
     }
@@ -26797,7 +27244,7 @@ ${
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1 }
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1, fnVal: -1 }
             const env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx, lift: LiftCtx.NoLift, nest: noNest() }
             st = resolveFnBody(env, fs, st)
         }
@@ -26823,7 +27270,7 @@ ${
                 // a type that failed to parse is not resolved (its parse
                 // error is the diagnostic; the typer treats it as unproven)
                 if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
-                    const rt: RType = resolveType(fte, at, st)
+                    const rt: RType = resolveTypeFn(fte, at, st)
                     pty = rt.t
                     const unresolved: boolean = rt.unresolved
                     st = rt.st
@@ -26946,7 +27393,7 @@ ${
         let host: HostCtx = HostCtx.HostOk
         if (f.pure || env.host == HostCtx.HostPure) host = HostCtx.HostPure     // §48.3: "anywhere inside a `fn` body, including inside nested closures"
         const fx: FailCtx = { inFn: true, fnName: f.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                              fnSym: fs.info.sym.id, serverOwn: env.fx.serverOwn || fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1 }
+                              fnSym: fs.info.sym.id, serverOwn: env.fx.serverOwn || fs.info.serverOwn, stmtCall: -1, derr: fs.info.derr, pre: -1, fnVal: -1 }
         let caps: int[] = env.nest.caps
         for (const l of env.locals) { caps = caps.concat([l.s.id]) }
         let pureCaps: int[] = env.nest.pureCaps
@@ -30139,6 +30586,7 @@ ${
             .Bool :> not
             .Named(sym: s) :> not
             .Seq(elem: e) :> not
+            .Fn(params: ps) :> not
         }
     }
 
@@ -30158,6 +30606,7 @@ ${
             .Named(sym: s) :> s.hint
             .Seq(elem: e) :> elemName(e) + "[]"
             .Maybe(inner: i) :> typeName(i) + " | not"
+            .Fn(params: ps, ret: r) :> fnTypeName(ps, r)
         }
     }
 
@@ -30173,6 +30622,7 @@ ${
             .Named(sym: s) :> aliasName(al, file, s)
             .Seq(elem: e) :> elemNameIn(al, file, e) + "[]"
             .Maybe(inner: i) :> typeNameIn(al, file, i) + " | not"
+            .Fn(params: ps, ret: r) :> fnTypeName(ps, r)
         }
     }
 
@@ -30197,6 +30647,7 @@ ${
             .Named(sym: s) :> s
             .Seq(elem: e) :> innerNamed(e)
             .Maybe(inner: i) :> innerNamed(i)
+            .Fn(params: ps) :> not
         }
     }
 
@@ -30242,6 +30693,7 @@ ${
             .Named(sym: s) :> 4
             .Seq(elem: e) :> 5
             .Maybe(inner: i) :> 6
+            .Fn(params: ps) :> 7
         }
     }
 
@@ -30291,7 +30743,31 @@ ${
             if (ve is given && te is given) return fitsType(ve, te)
             return Verdict.Fails
         }
+        if (tk == 7 || vk == 7) return fnFits(v, target)      // s478 (s478-boot-fn-type)
         if (vk == tk) return Verdict.Fits
+        return Verdict.Fails
+    }
+
+    // s478 (s478-boot-fn-type) — a function value into a function-typed position fits when the
+    // signatures are the SAME: one parameter count, each parameter type the same, and the same
+    // return (both `void`, or the same type). §7.5.1 names no variance for function types (the
+    // SPEC states no subtyping rule between signatures), so none is assumed — fail closed:
+    // `(x: int) => int` does not fit `(x: number) => int`, nor `() => int` fit `() => void`.
+    fn fnFits(v: Type, target: Type) -> Verdict {
+        const a: FnTypeParts | not = fnTypeOf(v)
+        const b: FnTypeParts | not = fnTypeOf(target)
+        if (a is not || b is not) return Verdict.Fails
+        if (a.ps.length != b.ps.length) return Verdict.Fails
+        let i = 0
+        while (i < a.ps.length) {
+            if (!sameType(a.ps[i], b.ps[i])) return Verdict.Fails
+            i = i + 1
+        }
+        const ra: Type | not = a.ret
+        const rb: Type | not = b.ret
+        if (ra is not && rb is not) return Verdict.Fits
+        if (ra is not || rb is not) return Verdict.Fails
+        if (sameType(ra, rb)) return Verdict.Fits
         return Verdict.Fails
     }
 
@@ -30514,7 +30990,7 @@ ${
             .NField(decl: d, inst: i, idx: x) :> fieldTypeOf(env.t, d, x)
             .NInst(decl: d, inst: i) :> known(instType(env.t, d, i))
             .NStruct(owner: o, idx: x) :> structFieldType(env.t, o, x)
-            .NFn(sym: s) :> VType.Unknown
+            .NFn(sym: s) :> fnValueVType(env, s)      // s478 (s478-boot-fn-type): a function named as a value
             .NLength :> known(Type.Int)
             .NSurface(of: x, prop: pr) :> surfaceType(pr)
             .NReq(id: rq0, sig: rs0) :> reqSigType(env.t, rq0, rs0)
@@ -31187,7 +31663,7 @@ ${
         const vf: ValueFact | not = valueFact(env.t.values, e.nid)
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> rvt(narrowRead(env, e, nameType(env, nf)), ts)
+            .Name(name: n) :> rvt(fnValueQuiet(env, e, narrowRead(env, e, nameType(env, nf))), ts)
             .At(name: n) :> lifeRead(env, e, nf, ts)     // s475: the lifecycle read rule (E-TYPE-001)
             .AtItem :> rvt(nameType(env, nf), ts)
             .Num(raw: r) :> rvt(valueType(vf), ts)
@@ -31225,30 +31701,81 @@ ${
 
     // s444 — a lambda: its body typed with its parameters bound (their types
     // are the binder's annotations — the sequence's element type).
+    // s478 (s478-boot-fn-type) — a function VALUE (VLambda.fnTy given): its body does not
+    // inherit the narrowing of reactive cells (§42.3.5, S462 Q12: "a lambda / function
+    // expression created inside a narrowed scope does NOT inherit the narrowing of reactive
+    // cells — it re-tests"), its value is checked against the signature's return type (§7.5.1
+    // position 4, as a `return` is), and its type is the signature.
     fn typeLambda(env: TEnv, e: AExpr, body: AExpr, ts: TypeState) -> RVT {
+        const vf: ValueFact | not = valueFact(env.t.values, e.nid)
+        const ft: Type | not = lambdaFnTy(vf)
         let env2: TEnv = env
-        for (const s of lambdaSyms(valueFact(env.t.values, e.nid))) {
+        if (ft is given) env2 = tFnValueEnv(env)
+        for (const s of lambdaSyms(vf)) {
             const a: Type | not = annotOf(env.t, s)
             let vt: VType = VType.Unknown
             if (a is given) vt = known(a)
             env2 = tWithLocal(env2, s, vt)
         }
-        return rvt(VType.Unknown, typeExpr(env2, body, ts).ts)
+        const r: RVT = typeExpr(env2, body, ts)
+        if (ft is not) return rvt(VType.Unknown, r.ts)
+        const parts: FnTypeParts | not = fnTypeOf(ft)
+        let ts2: TypeState = r.ts
+        if (parts is given) {
+            const rt: Type | not = parts.ret
+            if (rt is given) ts2 = checkValue(env2, r.vt, rt, body.span, "the value this function returns (its type's `=> " + typeName(rt) + "`)", ts2)
+        }
+        return rvt(known(ft), ts2)
     }
 
     // s478 (s478-boot-block-lambda) — a block lambda's body, typed as a function body of its
     // own: its parameters are locals (their types as resolveBlockLambda recorded them), and its
     // `return`s are checked against nothing here (fret `not`) — what they must be is its
     // position's (predicateCheck / comparatorCheck; a map's element type is their one type).
+    // s478 (s478-boot-fn-type) — a function VALUE: no inherited cell narrowing (§42.3.5), and its
+    // `return`s checked against the signature's return type; its type is the signature.
     fn typeBlockLambda(env: TEnv, e: AExpr, body: ABlock, ts: TypeState) -> RVT {
+        const vf: ValueFact | not = valueFact(env.t.values, e.nid)
+        const ft: Type | not = lambdaFnTy(vf)
         let env2: TEnv = withRet(env, not)
-        for (const s of lambdaSyms(valueFact(env.t.values, e.nid))) {
+        if (ft is given) {
+            const parts: FnTypeParts | not = fnTypeOf(ft)
+            let rt: Type | not = not
+            if (parts is given) rt = parts.ret
+            env2 = withRet(tFnValueEnv(env), rt)
+        }
+        for (const s of lambdaSyms(vf)) {
             const a: Type | not = annotOf(env.t, s)
             let vt: VType = VType.Unknown
             if (a is given) vt = known(a)
             env2 = tWithLocal(env2, s, vt)
         }
-        return rvt(VType.Unknown, typeBlock(env2, body, ts))
+        const ts2: TypeState = typeBlock(env2, body, ts)
+        if (ft is given) return rvt(known(ft), ts2)
+        return rvt(VType.Unknown, ts2)
+    }
+
+    // s478 (s478-boot-fn-type, #1929 review H1) — the narrowing a function VALUE's body
+    // inherits. §42.3.5: "A lambda / function expression created inside a narrowed scope does
+    // NOT inherit the narrowing of reactive cells — it re-tests … Captured LOCALS keep their
+    // narrowing unless written (by the closure or after)." A function value runs AFTER later
+    // statements of its creator (`x = not; f()`, or returned out of it), so "written after" is
+    // any write of the local at all — a deferred body's rule (tDeferEnv): only a local that is
+    // never rebound (a parameter, a `const`, a `let` with no assignment anywhere) keeps its
+    // narrowing; a rebound local's, a place under a local, and every cell's are dropped. A
+    // synchronous tape callback (`.map` / `.filter`, no fnTy — the §42.3.5 exempt list) is not
+    // a function value and keeps tDropCellNarrowing's rule. Fail closed: a dropped narrowing
+    // makes a read in the body unproven, never silently `T`.
+    fn tFnValueEnv(env: TEnv) -> TEnv {
+        return tDeferEnv(env)
+    }
+
+    fn lambdaFnTy(f: ValueFact | not) -> Type | not {
+        return match f {
+            .VLambda(params: ps, fnTy: t) :> t
+            // no-default-arm: one question of a value fact — is it a function value's lambda
+            _ :> not
+        }
     }
 
     fn lambdaSyms(f: ValueFact | not) -> Sym[] {
@@ -33037,6 +33564,12 @@ ${
         // s478-boot-print-builtins — a `print` / `println` built-in call: every argument is a text sink (§20.7.2)
         if (isPrintFact(cf)) return rvt(VType.Unknown, printArgCheck(env, args, ts))
         ts = typePlace(env, callee, VType.Unknown, ts)
+        // s478 (s478-boot-fn-type) — a call through a local holding a function value
+        const cvs: Sym | not = nameLocalSym(nameFact(env.t.names, callee.nid))
+        if (cvs is given) {
+            const cvt: FnTypeParts | not = fnTypeOf(knownOf(tLocal(env, cvs)))
+            if (cvt is given) return typeCallV(env, e, exprName(callee), cvt, args, ts)
+        }
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         // merge (s469 strings × loops): three independent argument checks, each keyed on its OWN
         // value fact (VToEnum / VAt / VMethod or a SortBy comparator) and the identity otherwise
@@ -33269,6 +33802,62 @@ ${
             if (f.sym.id == s.id) return f
         }
         return not
+    }
+
+    // s478 (s478-boot-fn-type) — a function value the binder REFUSED where it stands (a position
+    // or a function it does not build) is not typed again: no second report (§42.4 statement 6's
+    // "no second report", as the typer's Blame does elsewhere).
+    fn fnValueQuiet(env: TEnv, e: AExpr, v: VType) -> VType {
+        if (!isFnType(knownOf(v))) return v
+        if (hasErrIn(env.blame.spans, e.span)) return VType.Unknown
+        return v
+    }
+
+    // s478 (s478-boot-fn-type) — the type of function `s` named as a VALUE: `(P…) => R`, each
+    // parameter's bound type (BParam) and its declared return (`void` when none is written —
+    // the binder refused a named value whose return is inferred, fnValueType). Unknown when a
+    // parameter's type is unknown.
+    fn fnValueVType(env: TEnv, s: Sym) -> VType {
+        const fi: FnInfo | not = fnInfoOf(env.t, s)
+        if (fi is not) return VType.Unknown
+        if (fi.failable || fi.outer >= 0 || fi.host is given) return VType.Unknown    // refused by the binder (fnNameRef)
+        let ps: Type[] = []
+        let found = false
+        for (const w of env.fnw) {
+            if (w.nid == fi.nid) {
+                found = true
+                for (const pn of w.params) {
+                    const pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pn)))
+                    if (pt is not) return VType.Unknown
+                    ps = ps.concat([pt])
+                }
+            }
+        }
+        if (!found) return VType.Unknown
+        return known(Type.Fn(ps, fi.ret))
+    }
+
+    // s478 (s478-boot-fn-type) — a call through a function value: its arity and each argument
+    // against the VALUE's type (§7.3.4's two checks — E-CALL-ARITY and E-TYPE-031 at §7.5.1
+    // position 3 — made against the signature the value carries); its value, the return type.
+    fn typeCallV(env: TEnv, e: AExpr, name: string, ft: FnTypeParts, args: AExpr[], ts0: TypeState) -> RVT {
+        let ts: TypeState = ts0
+        const n: int = ft.ps.length
+        if (n != args.length) ts = report(ts, env, e.span, "E-CALL-ARITY", "the function value `" + name + "` is `" + fnTypeName(ft.ps, ft.ret) + "`, which takes " + n + " argument(s), and is called with " + args.length + " (§7.3, E-CALL-ARITY: a call is checked against the signature it calls)")
+        if (n == args.length) {
+            let i = 0
+            while (i < args.length) {
+                const what: string = "argument " + (i + 1) + " of the function value `" + name + "`"
+                ts = checkValue(env, exprType0(ts, args[i].nid), ft.ps[i], args[i].span, what, ts)
+                ts = checkNotElems(env, args[i], ft.ps[i], ts)
+                ts = boundValue(env, args[i], ft.ps[i], what, ts)
+                ts = checkLitFields(env, args[i], ts)
+                i = i + 1
+            }
+        }
+        const r: Type | not = ft.ret
+        if (r is given) return rvt(known(r), ts)
+        return rvt(VType.Unknown, ts)
     }
 
     // ---- statements ------------------------------------------------------------
@@ -40451,6 +41040,7 @@ ${
             .Num :> ""
             .Str :> ""
             .Bool :> ""
+            .Fn(params: ps) :> ""
         }
     }
 
@@ -41190,6 +41780,7 @@ ${
             .Named(sym: s) :> true
             .Seq(elem: e) :> false          // a tape's grants are the reader's (s469 F2) — its type is written, or refused
             .Maybe(inner: i) :> spellable(i)
+            .Fn(params: ps) :> false
         }
     }
 
@@ -42568,6 +43159,7 @@ ${
             .TMaybe(inner: i) :> maybeAType(copyAType(i, next), t.span)
             .TLife(pre: f, post: x) :> lifeAType(copyAType(f, next), x, t.span)
             .TRefine(base: b, pred: p) :> refineAType(copyAType(b, next), p, t.span)
+            .TFn(params: ps) :> { ty: { nid: next, span: t.span, k: ATypeK.TName("") }, next: next + 1 }
         }
     }
 
@@ -42596,6 +43188,7 @@ ${
             .Named(sym: s) :> { ty: { nid: next, span: sp, k: ATypeK.TName(s.hint) }, next: next + 1 }
             .Seq(elem: e) :> seqAType(typeAType(e, sp, next), sp, [])
             .Maybe(inner: i) :> maybeAType(typeAType(i, sp, next), sp)
+            .Fn(params: ps) :> { ty: { nid: next, span: sp, k: ATypeK.TName("") }, next: next + 1 }
         }
     }
 
@@ -42738,7 +43331,7 @@ ${
             .ObjectLit(props: ps) :> AExprK.ObjectLit(mProps(ps, m))
             .Spread(e: x) :> AExprK.Spread(mExpr(x, m))
             .Index(obj: o, idx: i) :> AExprK.Index(mExpr(o, m), mExpr(i, m))
-            .Lambda(params: ps, body: b) :> AExprK.Lambda(ps, mExpr(b, m))
+            .Lambda(params: ps, body: b, typed: tps) :> AExprK.Lambda(ps, mExpr(b, m), tps)
             .BlockLambda(params: ps, body: b, viaFunction: vf) :> AExprK.BlockLambda(ps, mBlock(b, m), vf)   // s478: its statements, as an arm block's
             .Sql(q: q) :> AExprK.Sql({ chunks: q.chunks, params: mExprs(q.params, m), mode: q.mode, nobatch: q.nobatch, handled: q.handled })
             .Handled(h: h) :> AExprK.Handled({ subject: mExpr(h.subject, m), how: mHow(h.how, m) })
@@ -44048,6 +44641,11 @@ ${
         RemoteOr(caller: int, remote: Diag[], local: Diag[]),
         IfClock(fnSym: int, diag: Diag),
         PureCall(fnSym: int, bare: Diag, clocked: Diag),
+        // s478 (s478-boot-fn-type) — a function value (`target` the function named, -1 an
+        // arrow / function expression, -2 a call through a value) in the body of `caller`
+        // (-1: no function — a handler, markup, an initializer): refused where the summary
+        // shows what the bootstrap's function types cannot carry (fnValueDiags).
+        FnValue(target: int, caller: int, file: string, span: ASpan, name: string),
     }
     type Pending:struct = { at: int, rule: PendRule }
 
@@ -44073,7 +44671,67 @@ ${
             .RemoteOr(caller: c, remote: r, local: l) :> remoteOr(s, c, r, l)
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d)
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a)
+            .FnValue(target: t, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, t, c, f, sp, n)
         }
+    }
+
+    // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
+    // decided on the summary (see the FUNCTION VALUES banner): a target that WAITS (§13.2:
+    // "Waiting-ness is part of a function's TYPE" — S469 R3′, built after RP1; the bootstrap's
+    // function type carries no colour, so "no function of unknown effect reaches an indirect
+    // call" holds only if no waiting function becomes a value); a target the server places
+    // (it runs where the value is not); RECURSION through a value (the target reaches the body
+    // that names it); and any function value in a SERVER-side body.
+    fn fnValueDiags(s: Summary, target: int, caller: int, file: string, sp: ASpan, name: string) -> Diag[] {
+        if (caller >= 0) {
+            const cp: PlaceK = placeOf(s.places, caller)
+            if (cp == PlaceK.Server || cp == PlaceK.Split || s.inherited.indexOf(caller) >= 0) {
+                return [newDiag("E-BOOTSTRAP-UNSUPPORTED", fnValueSiteText(target, name) + " stands in a function that runs on the server — a function value there is not in the bootstrap (INTERIM: §14.3 lets it be bound, but the bootstrap builds function values in client code only). Call the function by its name", file, sp)]
+            }
+        }
+        if (target < 0) return []
+        const i: int = nodeIdx(s.nodes, target)
+        if (i < 0) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function the effect summary does not hold — not a function value the bootstrap can type", file, sp)]
+        const tp: PlaceK = placeOf(s.places, target)
+        if (tp == PlaceK.Server || tp == PlaceK.Split || s.inherited.indexOf(target) >= 0) {
+            return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a SERVER function without calling it — it would hand the client a function that runs on the server. §13.2: a waiting function used as a value is refused until function types carry the waiting colour (S469 R3′, INTERIM); a server function's value never crosses to the client. Call it by its name (the client awaits the call)", file, sp)]
+        }
+        const w: FxAtom | not = witnessOf(s.waits[i])
+        if (w is given) {
+            return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function that waits for the server (§13.2 async colour: `" + fxChain(s, s.waits, i, w).join(" → ") + "`) without calling it — a waiting function used as a value is refused until function types carry the waiting colour (§13.2, S469 R3′: \"built after RP1 … and the function-types slice\"; INTERIM). Call it by its name", file, sp)]
+        }
+        if (caller >= 0 && (target == caller || reachesFn(s, target, caller))) {
+            return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` is named as a value inside a function it reaches — recursion through a function value is not in the bootstrap (INTERIM: the effect summary closes over the call graph, and an edge through a value is not in it). Call the function by its name", file, sp)]
+        }
+        return []
+    }
+
+    fn fnValueSiteText(target: int, name: string) -> string {
+        if (target == -1) return "this function expression (an arrow used as a value)"
+        if (target == -2) return "this call through the function value `" + name + "`"
+        return "`" + name + "` (a function named without a call)"
+    }
+
+    // Does callable `from` reach function `to` through the references its body makes (calls
+    // and function values), transitively?
+    fn reachesFn(s: Summary, from: int, to: int) -> boolean {
+        let seen: int[] = []
+        let todo: int[] = [from]
+        while (todo.length > 0) {
+            const id: int = todo[0]
+            todo = todo.slice(1)
+            if (seen.indexOf(id) < 0) {
+                seen = seen.concat([id])
+                const i: int = nodeIdx(s.nodes, id)
+                if (i >= 0) {
+                    for (const r of s.nodes[i].f.scan.refs) {
+                        if (r.sym == to) return true
+                        todo = todo.concat([r.sym])
+                    }
+                }
+            }
+        }
+        return false
     }
 
     fn onlyIf(yes: boolean, d: Diag) -> Diag[] {
@@ -45301,6 +45959,7 @@ ${
             .Named(sym: s) :> "a `" + s.hint + "`"
             .Seq(elem: e) :> "a sequence"
             .Maybe(inner: i) :> "a `T | not`"
+            .Fn(params: ps) :> "a function"
         }
     }
 

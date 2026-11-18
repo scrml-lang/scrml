@@ -210,9 +210,13 @@ describe("never silently allowed", () => {
     expect(codes(prog(`        const ys: int[] = @xs.filter(x => { if (x > 1) { return true; } return 0; });
         @out = ys.length;`))).toContain("E-TYPE-031");
   });
-  test("a block lambda bound by `const` (a function value) is refused by name", () => {
+  // s478-boot-fn-type: a block lambda bound by `const` is a function VALUE now (§14.3 S469 R2′,
+  // slice-m4/fn-type-s478.test.js) — but a standalone lambda's bare parameter is
+  // E-PARAM-TYPE-REQUIRED (§7.5 S469: "A standalone lambda (`const f = (x) => …`) must annotate
+  // its parameters"), never silently typed
+  test("a block lambda bound by `const` with a bare parameter is E-PARAM-TYPE-REQUIRED", () => {
     expect(codes(prog(`        const f = (x) => { return x; };
-        @out = 1;`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+        @out = 1;`))).toContain("E-PARAM-TYPE-REQUIRED");
   });
 });
 

@@ -477,11 +477,17 @@ describe("S239 review fix round (114e6ef80)", () => {
   });
 
   // HIGH-2: a function named without a call was lowered as `null`
-  test("HIGH-2 — a function value (alias, return, argument) is refused, never lowered as `null`", () => {
+  // s478-boot-fn-type: function values are built (Core FnRef — never `null`; fn-type-s478.test.js):
+  // an alias is a value, and the misuses are reported by what they are
+  test("HIGH-2 — a function value (alias, return, argument) is never lowered as `null`", () => {
     const ok = `    function ok() -> int {\n        return 3;\n    }`;
-    expect(codes(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    const r = run(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`));
+    expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
+    expect(mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js).toContain("const g = ok;");
+    // returned from a function declared `-> int`: refused by name (a returned function value needs a declared function type)
     expect(codes(P(`${ok}\n    function go() -> int {\n        return ok;\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x; }\n    function go() {\n        @n = id(ok);\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // passed to an `int` parameter: not assignable (§7.5.1 position 3)
+    expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x; }\n    function go() {\n        @n = id(ok);\n    }`))).toEqual(["E-TYPE-031"]);
   });
 
   test("HIGH-2 — a `!` function used as a value is E-ERROR-002 (its error would be dropped by whoever calls it)", () => {
