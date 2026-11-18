@@ -219,3 +219,73 @@ describe("throttled engine — leading commit in the handler, trailing commit in
     });
   }, { timeout: 60000 });
 });
+
+// r1 (F1, PR #1972 review): a commit whose downstream EFFECT throws still committed — the value
+// landed, so it is an emit and (on a throttle) opens the window. §6.13.3: "a `throttled=` cell
+// emits at most once per window"; the window is opened by the emit, not undone by an effect that
+// throws during it. Only a REFUSED edge (an engine's commit-time `rule=` check) opens no window.
+// The effect error itself surfaces as on base: thrown into the handler for a leading commit, out
+// of the timer for a trailing one — never swallowed into the commit gate's refusal report.
+// Red on c773540cb (head before r1): the throttle cases commit every write.
+describe("a throwing effect does not disable timing (r1 F1) — engine and non-engine cells", () => {
+  const TABLE = { Idle: ["Loading"], Loading: ["Done"], Done: ["Idle"] };
+  let rtmod;
+  beforeAll(async () => { rtmod = await import("../slice-m1/runtime/runtime.js"); });
+
+  async function withRt(kind, engine, body) {
+    const clock = new FakeClock();
+    clock.install();
+    const hadReport = Object.prototype.hasOwnProperty.call(globalThis, "reportError");
+    const prevReport = globalThis.reportError;
+    const rep = [];
+    globalThis.reportError = (e) => { rep.push(e); };
+    const s = new rtmod.Scope(null);
+    try {
+      const c = rtmod.timed(s, rtmod.cell(engine ? "Idle" : 0), kind, 1000, engine ? TABLE : null);
+      rtmod.effect(s, () => { const v = c.get(); if (v !== 0 && v !== "Idle") throw new Error("effect boom " + v); });
+      const write = (v) => (engine ? rtmod.transition(c, TABLE, v) : c.set(v));
+      await body({ clock, c, write });
+      expect(rep).toEqual([]);                      // an effect error is never re-routed to the refusal report
+    } finally {
+      s.dispose?.();
+      clock.restore();
+      if (hadReport) globalThis.reportError = prevReport;
+      else delete globalThis.reportError;
+    }
+  }
+
+  for (const engine of [false, true]) {
+    const label = engine ? "engine" : "non-engine";
+    // engine: Idle → Loading (leading) → Done (trailing) → Idle (held, its effect does not throw)
+    const [a, b, c3, d] = engine ? ["Loading", "Done", "Done", "Idle"] : [1, 2, 3, 4];
+    test(`throttle (${label}): the leading commit's effect throws — the value landed and the window is open`, async () => {
+      await withRt("throttle", engine, async ({ clock, c, write }) => {
+        expect(() => write(a)).toThrow("effect boom"); // leading: committed; the effect trap reaches the handler
+        expect(c.peek()).toBe(a);
+        write(b);                                      // inside the window: HELD, not committed
+        write(c3);
+        expect(c.peek()).toBe(a);
+        await expect(clock.advance(1000)).rejects.toThrow("effect boom"); // trailing commit; its effect throws out of the timer
+        expect(c.peek()).toBe(c3);
+        write(d);                                      // the trailing commit opened the next window: held
+        expect(c.peek()).toBe(c3);
+        if (engine) await clock.advance(1000);
+        else await expect(clock.advance(1000)).rejects.toThrow("effect boom");
+        expect(c.peek()).toBe(d);
+      });
+    }, { timeout: 60000 });
+
+    test(`debounce (${label}): the commit's effect throws out of the timer; the cell keeps debouncing`, async () => {
+      await withRt("debounce", engine, async ({ clock, c, write }) => {
+        write(a);
+        expect(c.peek()).toBe(engine ? "Idle" : 0);   // held
+        await expect(clock.advance(1000)).rejects.toThrow("effect boom");
+        expect(c.peek()).toBe(a);
+        write(b);
+        expect(c.peek()).toBe(a);                      // still held — the timing rule survived the throw
+        await expect(clock.advance(1000)).rejects.toThrow("effect boom");
+        expect(c.peek()).toBe(b);
+      });
+    }, { timeout: 60000 });
+  }
+});

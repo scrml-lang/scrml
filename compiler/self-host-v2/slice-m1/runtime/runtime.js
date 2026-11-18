@@ -295,19 +295,22 @@ function timedEdgeJudged(c) {
 }
 
 /**
- * A held value commits: on an engine cell, the `rule=` edge from the variant the cell holds
- * NOW is judged first (§6.13.5) — a violation leaves the cell at its prior value and throws
- * (E-ENGINE-INVALID-TRANSITION). Returns once the value has landed.
+ * The commit gate (§6.13.5): on an engine cell, the `rule=` edge from the variant the cell
+ * holds NOW is judged before a held value commits — a violation leaves the cell at its prior
+ * value and throws (E-ENGINE-INVALID-TRANSITION). A non-engine cell always passes.
  */
-function commitTimed(c, t, v) {
+function admitTimed(c, t, v) {
   if (t.table !== null) checkEdge(c, t.table, v);
-  c.write(v);
 }
 
-/** A trailing commit runs in a timer: a refused edge is reported, never thrown into the timer frame (§19.17). */
-function commitFromTimer(c, t, v) {
+/**
+ * A trailing commit's gate runs in a timer: a refused edge is reported, never thrown into the
+ * timer frame (§19.17), and returns false. Only the REFUSAL is caught here — once the edge is
+ * admitted, the write itself (and any effect it runs) is the caller's, exactly as before.
+ */
+function admitFromTimer(c, t, v) {
   try {
-    commitTimed(c, t, v);
+    admitTimed(c, t, v);
     return true;
   } catch (err) {
     reportLater(err);
@@ -325,14 +328,15 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      if (!t.disposed) commitFromTimer(c, t, h);
+      if (!t.disposed && admitFromTimer(c, t, h)) c.write(h);
     }, t.ms);
     return;
   }
   const now = Date.now();
   if (t.timer === null && now - t.last >= t.ms) {
-    commitTimed(c, t, v);                           // leading emit (a refused edge throws into the handler)
-    t.last = now;                                   // only a committed emit opens the window
+    admitTimed(c, t, v);                            // a refused edge throws into the handler, opening no window
+    t.last = now;                                   // leading emit: the window opens BEFORE the write, so an
+    c.write(v);                                     // effect that throws during it cannot keep the window shut
     return;
   }
   t.held = v;                                       // suppressed: the latest is held
@@ -341,8 +345,12 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      // the trailing emit opens the next window — if it commits
-      if (!t.disposed && commitFromTimer(c, t, h)) t.last = Date.now();
+      // the trailing emit opens the next window — if its edge is admitted (before the write,
+      // so an effect that throws during the write still leaves the window open)
+      if (!t.disposed && admitFromTimer(c, t, h)) {
+        t.last = Date.now();
+        c.write(h);
+      }
     }, Math.max(0, t.ms - (now - t.last)));
   }
 }
