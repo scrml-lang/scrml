@@ -1450,7 +1450,7 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
       }
       // s478 #1928 fix r1 (MED-1): the prefix is intercepted only in a program that HAS channels
       // (a program without one answers `/_scrml_ws/…` as any other path, unchanged from before
-      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (endpointPathRefusal),
+      // channels); the compiler refuses an `<endpoint>` under `/_scrml_ws` (E-ENDPOINT-ROUTE-DUPLICATE, endpointReservedWhy),
       // so no endpoint is ever shadowed here. Refusal order (LOW-1): 403 (Origin, §40.2 — first,
       // before anything about the request is answered), then 404 (no such channel), 405
       // (non-GET), 426 (no `Upgrade: websocket`); only then the upgrade.
@@ -1650,9 +1650,11 @@ function channelSockets(host) {
 //   the JSON response body — HTTP 200, `Content-Type: application/json`"; "A
 //   self-closing `<Variant/>` arm SHALL return default-success with no body — HTTP
 //   204 No Content".
-// Fail closed where the SPEC is silent (owner questions, g-boot-endpoint-s478): a
-// key that is neither `tag` nor a payload field of the named variant is
-// InvalidPayload; a JSON array is Malformed (§41.13: MissingDiscriminator is "an
+// S478 open-Qs ruling (user-voice), items 33 / 35 / 39 — §61.3: "The request body's
+// keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key
+// that is neither is a decode failure — `::InvalidPayload`"; §61.5: a non-JSON
+// media type is 415 `UnsupportedMediaType`; §61.7: another method at the path is
+// 405 + `Allow`. A JSON array is Malformed (§41.13: MissingDiscriminator is "an
 // OBJECT that lacks a `tag` field").
 // ---------------------------------------------------------------------------
 export function endpoint(desc, arms) {
