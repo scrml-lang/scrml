@@ -21404,6 +21404,11 @@ ${
         // compile error (E-SYNTAX-002) … unless the loop is bound" — a bare `function` body
         // has no lift target. (A `fn` body's `~`, §48.5, is not in the bootstrap.)
         if (tgt is not && inBareFunction(env)) return addDiag(st, env.file, s.span, "E-SYNTAX-002", "`lift` is not valid inside a bare `function` body (§10.4) — a `function` returns its value. Bind the loop as a value and return it (`const xs = for (…) { … lift e; … }; return xs;`, §49.6), or `return` the value and lift it at the call site")
+        // S478 open-Qs ruling item 1 (b) — §17.3 (amended S478): "A `${ … }` at a
+        // `<program>` / `<page>` / `<channel>` body top … renders nothing: a `lift` of
+        // markup there, and a single-element `if` / `given` branch there, is
+        // E-MARKUP-STATEMENT-NOT-RENDERED (§17.6.10.1)" — reported at the element.
+        if (tgt is not && !env.fx.inFn && liftsBodyTopRow(w)) return addDiag(st, env.file, liftRowSpan(w, s.span), "E-MARKUP-STATEMENT-NOT-RENDERED", "this markup is lifted in a body-top `" + "$" + "{ … }`, which is evaluated, not rendered (§17.3), so it is not rendered (§17.6.10.1) — write the element in the body itself (under `if=`, §17.1, when it is conditional)")
         if (tgt is not) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`lift` appends to a loop BOUND AS A VALUE (`const xs = for (…) { … lift e; … };`, §49.6) or to a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — this one stands in neither (lifting into a render target or a `fn` body's `~`, §10 / §48.5, is not in the bootstrap)")
         if (!tier0 && liftsMarkup(w)) return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "lifted MARKUP is a row of a Tier-0 `" + "$" + "{ for … }` in markup (§17.4) — the nearest bound loop here is `" + tgt.hint + "`, which builds a tape of values")
         st = addBind(st, s.nid, BindFact.BJump(tgt))
@@ -21481,6 +21486,37 @@ ${
             }
         }
         return st
+    }
+
+    // S478 — an element lifted in a body-top `${ … }`: parse's stand-in carries
+    // the body-top row tag as its text (parseLift, bodyTopRowTag).
+    fn liftsBodyTopRow(w: ALift) -> boolean {
+        return match w {
+            .LiftNode(n: x) :> x.nid < 0 && standText(x) == "body-top-row"
+            .LiftExpr(e: x) :> false
+        }
+    }
+
+    fn standText(n: ANode) -> string {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: s) :> s
+            .Elem(e: x) :> ""
+            .Interp(e: x) :> ""
+            .DeclNode(d: x) :> ""
+            .Css(c: x) :> ""
+            .Effect(w: x) :> ""
+            .Request(r: x) :> ""
+            .Gather(f: x) :> ""
+            .Run(b: x) :> ""
+        }
+    }
+
+    fn liftRowSpan(w: ALift, dflt: ASpan) -> ASpan {
+        return match w {
+            .LiftNode(n: x) :> x.span
+            .LiftExpr(e: x) :> dflt
+        }
     }
 
     fn liftsMarkup(w: ALift) -> boolean {
@@ -24274,21 +24310,15 @@ ${
     // matchView), so the page holds it where a `<div>` is held (SPEC §24.5): judged
     // as a `<div>` in its context, and each arm's body as a template of its own
     // inserted into that `<div>` (as an `if=` arm's is).
+    // S478 open-Qs ruling item 13 — §18.0.1 (amended S478): a `<match>` has no
+    // wrapper element ("The dispatched arm's content renders in place of the
+    // `<match>`"), so each arm's content is judged where the `<match>` stands, as
+    // the template of a branch there (an `if=` arm's, an `<each>` row's).
     fn mkMatch(g: Globals, sa: AS, file: string, e: AElem, c: MkCx) -> MkFault[] {
         let out: MkFault[] = []
-        if (isForeignNs(c.ns) && isForeignBreakout("div", false)) {
-            out = [{ nid: e.nid, file: file, span: e.span, code: "E-HTML-FOREIGN-BREAKOUT", msg: "`<match>` mounts its arms in a `<div>`; " + breakoutMsg("div", c) }]
-        } else if (isHtmlInNs(c.ns, "div")) {
-            out = mkRepair(file, e, "div", c)
-        }
-        let pc: MkCx = c
-        if (out.length > 0) pc = mkRoot(htmlNs(), c.depth)
-        let kns: string = c.ns
-        if (out.length > 0) kns = htmlNs()
-        const kc: MkCx = mkKid(kns, "div", "", pc)
         for (const k of e.kids) {
             const arm: AElem | not = elemOfANode(k)
-            if (arm is given) out = out.concat(mkNodes(g, sa, file, arm.kids, mkRootAt(kc.ns, kc.depth, mkPlaceOf(kc))))
+            if (arm is given) out = out.concat(mkNodes(g, sa, file, arm.kids, mkRootAt(c.ns, c.depth, mkPlaceOf(c))))
         }
         return out
     }
@@ -26747,7 +26777,18 @@ ${
         }
         let es: Sym | not = not
         if (forA is not) {
-            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<match>` without `for=` — §18.0.1: \"`for=Type` — REQUIRED. The enum type the match is over.\" The SPEC names no code for its absence, and the bootstrap does not infer the type from `on=`: write `<match for=Type on=expr>`")
+            // S478 open-Qs ruling item 12 (a) — §18.0.1 (amended S478): "`for=` MAY be
+            // omitted when `on=` is provably of one enum type; the match is then over
+            // that type." Proven here: `on=@cell`, a cell of this program whose type
+            // (phase A) is an enum. Any other `on=` is not proven by the bootstrap —
+            // refused by name (INTERIM, fail closed); `on=@cell` of a non-enum type is
+            // the `for=` path's own refusal for that type.
+            const ie: RMatchEnum = matchEnumFromOn(env, onA)
+            if (ie.es is given) {
+                es = ie.es
+            } else {
+                st = addDiag(st, env.file, e.span, ie.code, ie.why)
+            }
         } else {
             const tn: string = bareName(forA.value)
             const ts0: Sym | not = typeNamedHere(env, tn)
@@ -26821,6 +26862,36 @@ ${
         const onF: AExpr | not = onX
         if (onF is given) st = addElem(st, e.nid, ElemFact.MMatch({ es: esk, on: onF, arms: arms }))
         return st
+    }
+
+    // S478 (open-Qs ruling item 12) — the enum a `<match>` with no `for=` is over,
+    // read from its `on=` (resolveMatchBlock): `es` when proven, else the code and
+    // message of the refusal.
+    type RMatchEnum:struct = { es: Sym | not, code: string, why: string }
+
+    fn matchEnumFromOn(env: Env, onA: AAttr | not) -> RMatchEnum {
+        const unproven: string = "`<match>` without `for=` — §18.0.1 (amended S478) lets `for=` be omitted when `on=` is provably of one enum type; the bootstrap proves it only for `on=@cell`, a cell of this program declared with an enum type — write `<match for=Type on=…>`"
+        if (onA is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        const ox: AExpr | not = valueExpr(onA.value)
+        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        const n: string = atName(ox)
+        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        // an `as=` handle of that name in scope is not the cell
+        for (const h of env.handles) {
+            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
+        }
+        for (const d of env.g.decls) {
+            if (d.isProgram && d.file == env.file) {
+                for (const fi of d.info.fields) {
+                    if (fi.sym.hint == n) {
+                        const es: Sym | not = isEnumType(env.g.types, fi.ty)
+                        if (es is given) return { es: es, code: "", why: "" }
+                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)" }
+                    }
+                }
+            }
+        }
+        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven }
     }
 
     // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a

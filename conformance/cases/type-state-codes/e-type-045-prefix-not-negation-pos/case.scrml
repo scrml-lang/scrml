@@ -2,5 +2,5 @@ ${
     <ready> = false
 }
 <program>
-    ${ if (not @ready) { <p id="p">waiting</> } }
+    <p id="p" if=(not @ready)>waiting</>
 </>

@@ -1245,6 +1245,15 @@ ${
                 } else if (c.cls == TC.Punct && tk(c, "-") && tk(g, ">") && touching(c, g)) {
                     legacy = true
                     t = adv(adv(t))
+                } else if (c.cls == TC.Punct && tk(c, "|") && !patStartAt(adv(t))) {
+                    // S478 open-Qs ruling item 15 — §18.10 (amended S478): "The compiler SHALL
+                    // also emit E-SYNTAX-011 when a `|` after an arm pattern is followed by
+                    // something that is not a pattern (`.Admin | p.active :> …`): that is the
+                    // same guard, spelled with a pipe."
+                    t = diagAt(t, "E-SYNTAX-011", "a match arm has no guard clause in v1 (§18.10): `| " + cur(adv(t)).text + "…` after the arm's pattern is a guard, not a second pattern — match the variant, then branch inside the arm body", c)
+                    while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t) }
+                    if (sepAt(t, 0)) t = adv(t)
+                    if (isP(t, ">")) t = adv(t)
                 } else if (c.cls == TC.Punct && tk(c, "|")) {
                     // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
                     t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
@@ -1546,6 +1555,23 @@ ${
     }
 
     // An arm's pattern.
+    // S478 (open-Qs ruling item 15, §18.10 amended) — does a PATTERN start at
+    // the cursor (the token after an arm's `|`)? The pattern starts of §18.2 /
+    // §18.16.1, as impl#1 reads them (type-system.ts altRhsIsVariantPattern):
+    // `.V` / `::V` / a bare variant token, `_`, `else`, `not`, a literal. Anything
+    // else after the `|` is a guard (`.Admin | p.active :>`), E-SYNTAX-011.
+    fn patStartAt(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        if (a.cls == TC.Variant) return true
+        if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return true
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b)) return true
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && (a.v == "_" || a.v == "else" || a.v == "not")) return true
+        if (a.cls == TC.Str || a.cls == TC.Num) return true
+        if ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false")) return true
+        return a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b)
+    }
+
     fn parsePattern(tp: TP, guard: boolean) -> RPat {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
@@ -4609,8 +4635,12 @@ ${
         // analyze judges where the `lift` is (resolveLift: E-SYNTAX-002 in a bare
         // `function` body, §10.4; refused by name where no Tier-0 loop takes it)
         if (isLocusRow(nx)) return misplacedRowStmt(adv(t), kw.start)
+        // S478 open-Qs ruling item 1 (b): the stand-in of an element lifted in a
+        // body-top `${ … }` carries bodyTopRowTag() as its text, so analyze
+        // (resolveLift) can judge a `lift` with no loop to take it there as
+        // E-MARKUP-STATEMENT-NOT-RENDERED (§17.3 amended S478)
         if (nx.cls == TC.Other && nx.v == logicRowMark(false)) {
-            const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text("") }
+            const stand: ANode = { nid: -1, span: mkSpan(nx.start, nx.end), k: ANodeK.Text(nx.bad) }
             return mkS(adv(adv(t)), kw.start, AStmtK.Lift(ALift.LiftNode(stand)))
         }
         if (isLogicRowTok(nx)) return logicRowStmt(adv(t), kw.start, "lifting MARKUP is in the bootstrap only in a Tier-0 `" + interpOpen() + " for (…) { … lift <li>…</li>; … } }` in markup (§17.4) — a `lift` of markup in a `" + interpOpen() + " … }` logic block (§10, §17.4) is not")
@@ -4723,7 +4753,13 @@ ${
         return false
     }
 
-    fn logicBlockTP(mp: MP) -> RLogicRegion {
+    // S478 (open-Qs ruling item 1) — `bodyTop`: the block stands at a `<program>` /
+    // `<page>` body top (parseMarkupItem), not in markup (parseNestedLogic). Its
+    // element rows carry bodyTopRowTag() in `bad` so the statement reader can
+    // tell a body-top block — which renders nothing (§17.3) — from a markup one.
+    fn bodyTopRowTag() -> string { return "body-top-row" }
+
+    fn logicBlockTP(mp: MP, bodyTop: boolean) -> RLogicRegion {
         let pos: int = mp.pos + 1
         let depth: int = 0
         let toks: PTok[] = []
@@ -4752,7 +4788,9 @@ ${
                 const lifted: boolean = toks.length > 0 && isLiftWord(toks[toks.length - 1])
                 if (!refused && !lifted && rowIsElem(rn.n) && !rowIsMarkup(rn.n, mp.src, m.pos, toks)) mark = logicRowOther()
                 if (!refused && locusMarkOf(rn.n) != "") mark = locusMarkOf(rn.n)
-                const rt: PTok = { cls: TC.Other, v: mark, text: text, start: p.end, end: m.pos, line: p.line, bad: "" }
+                let rowTag: string = ""
+                if (bodyTop) rowTag = bodyTopRowTag()
+                const rt: PTok = { cls: TC.Other, v: mark, text: text, start: p.end, end: m.pos, line: p.line, bad: rowTag }
                 toks = toks.concat([rt])
                 pos = m.pos
                 depth = p.depth
@@ -4927,16 +4965,18 @@ ${
     // branch; an element after a statement in a branch or block …; a `for` /
     // `while` body without `lift`; … and markup in statement position in a
     // `function` body". A body-top `${ … }` is "a statement list, evaluated, not
-    // rendered" (§17.3, S449), so it holds no value-form. One shape is held back
-    // (refused by name, INTERIM — owner question, see the lane's progress note):
-    // an element that is the ONLY statement of a nested block at a body top
-    // (`${ if (c) { <p/> } }` there) — the conformance corpus reads it as
-    // rendered, §17.3 + §17.6.10.1 read it as not rendered.
+    // rendered" (§17.3, S449), so it holds no value-form: an element that is the
+    // ONLY statement of a nested block there (`${ if (c) { <p/> } }`) is
+    // E-MARKUP-STATEMENT-NOT-RENDERED too — S478 open-Qs ruling item 1 (b), §17.3
+    // amended S478: "a single-element `if` / `given` branch or a `lift` there
+    // renders nothing, and is E-MARKUP-STATEMENT-NOT-RENDERED". The same shape in
+    // a `${ … }` logic block inside MARKUP (parseNestedLogic) stays refused by
+    // name: a markup parent makes it a render position (§10.1), not built there.
     fn logicBareStmt(tp: TP, start: int, why: string) -> RStmt {
         const row: PTok = cur(tp)
         if (isLocusRow(row)) return misplacedRowStmt(tp, start)
         if (row.v != logicRowMark(false)) return logicRowStmt(tp, start, why)
-        if (tp.inFn == 0 && soleInNestedBlock(tp)) return logicRowStmt(tp, start, why)
+        if (tp.inFn == 0 && row.bad != bodyTopRowTag() && soleInNestedBlock(tp)) return logicRowStmt(tp, start, why)
         return unrenderedRowStmt(tp, start, true)
     }
 
@@ -5019,7 +5059,7 @@ ${
 
     fn parseNestedLogic(mp: MP) -> RNodeOne {
         const start: int = mp.pos
-        const lr: RLogicRegion = logicBlockTP(mp)
+        const lr: RLogicRegion = logicBlockTP(mp, false)
         const inner: RItems = parseLogicItems(expectP(lr.tp, "{"), "}", false)
         let t: TP = expectRegionEnd(expectP(inner.tp, "}"))
         let hoisted: AItem[] = []
@@ -13616,7 +13656,7 @@ ${
         if (chAt(mp, 0) == "!" && chAt(mp, 1) == "{") return { items: [], mp: skipSigil(mp) }
         if (atInterp(mp)) {
             // s478 — markup in the block is read as markup (logicBlockTP)
-            const lr: RLogicRegion = logicBlockTP(mp)
+            const lr: RLogicRegion = logicBlockTP(mp, true)
             const inner: RItems = parseLogicItems(expectP(lr.tp, "{"), "}", false)
             const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
             return { items: inner.items, mp: backToMarkup(lr.mp, t2) }

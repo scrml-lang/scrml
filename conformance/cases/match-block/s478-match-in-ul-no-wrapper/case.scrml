@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Open, Closed }
+    <phase>: Phase = .Open
+}
+<button id="close" onclick=${@phase = Phase.Closed}>Close</>
+<ul id="list">
+    <match on=@phase>
+        <Open>
+            <li id="open">open</li>
+        </>
+        <Closed>
+            <li id="closed">closed</li>
+        </>
+    </match>
+</ul>

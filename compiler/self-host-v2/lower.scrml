@@ -2369,8 +2369,11 @@ ${
     // `[field k]` while the subject holds the arm's variant, else `[]` — so a binder
     // is a row cell: a new payload value of the same variant updates it in place,
     // and a body never reads a binder of a variant the subject has left (the row
-    // is gone before it could). The arms mount inside a
-    // `<div data-scrml-match-mount>` (the mount the conformance cases observe).
+    // is gone before it could). S478 open-Qs ruling item 13 — §18.0.1 (amended
+    // S478): "The dispatched arm's content renders in place of the `<match>`, with
+    // no wrapper element" — the View.Cond stands where the `<match>` does
+    // (anchor-only, as an `if=` chain's does), so a `<match>` in a `<ul>` /
+    // `<select>` / `<p>` keeps that parent's content model.
     fn matchView(c: LC, m: MatchBlock) -> View {
         const read: Expr = lowerExpr(c, m.on)
         let arms: CondArm[] = []
@@ -2379,7 +2382,7 @@ ${
             if (a.variant >= 0) test = variantIs(c, read, m.es, a.variant)
             arms = arms.concat([{ test: test, body: matchArmViews(c, read, m.es, a) }])
         }
-        return View.El("div", [Attr.Static("data-scrml-match-mount", "")], [View.Cond(arms)])
+        return View.Cond(arms)
     }
 
     // The arm body inside one `<each>` per named binder, the first binder outermost.
