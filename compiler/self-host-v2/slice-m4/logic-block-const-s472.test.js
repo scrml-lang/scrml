@@ -298,10 +298,10 @@ describe("initializers: the compile-time-constant class only — everything else
     });
   }
 
-  // S478 open-Qs ruling (user-voice) item 59 (a): a query is E-FILE-SCOPE-SERVER-REACH (§7.6), no longer by name.
-  test("a query: E-FILE-SCOPE-SERVER-REACH, and nothing else", () => {
+  // S478 open-Qs ruling (user-voice) item 59 (a): a query is E-FILE-SCOPE-SERVER-ONLY-REACH (§7.6), no longer by name.
+  test("a query: E-FILE-SCOPE-SERVER-ONLY-REACH, and nothing else", () => {
     const r = one(P(`    const A = ${SQ}\`SELECT 1\`}.get();`));
-    expect(codes(r)).toEqual(["E-FILE-SCOPE-SERVER-REACH"]);
+    expect(codes(r)).toEqual(["E-FILE-SCOPE-SERVER-ONLY-REACH"]);
     expect(r.core).toBeFalsy();
   });
 

@@ -414,7 +414,9 @@ ${
     // An attribute value, by its spelling (§66.2.4 cares which one was written).
     export type AAttrValue:enum = {
         NoValue,
-        Quoted(v: string),       // "…"
+        // s478 r1 (#1947 review F6) — `sq`: written with single quotes (`'…'`), so a message
+        // can echo the source's own spelling (a flag, not a string: §4 keeps strings to literals)
+        Quoted(v: string, sq: boolean),       // "…"
         Bare(e: AExpr),          // an unquoted value: a literal, a name, @ref, a call, a member path
         Paren(e: AExpr),         // ( expr )
         // { stmts }. s478 (s478-boot-fn-values) — `ev`: the event parameter of the §5.2.1

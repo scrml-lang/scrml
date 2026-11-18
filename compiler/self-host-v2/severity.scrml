@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 407 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 408 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 36 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -188,6 +188,7 @@ ${
             "E-ENDPOINT-PATH-MISSING" :> Severity.Error
             "E-ENDPOINT-ROUTE-DUPLICATE" :> Severity.Error
             "E-ENGINE-MOUNT-NOT-ENGINE" :> Severity.Error
+            "E-ENGINE-RULE-LEGACY-SYNTAX" :> Severity.Error
             "E-ENGINE-RULE-QUOTED" :> Severity.Error
             "E-ENGINE-STATE-CHILD-MISSING" :> Severity.Error
             "E-ENUM-VARIANT-CASE" :> Severity.Error
@@ -211,7 +212,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-EVENT-CONTROL-AFTER-AWAIT" :> Severity.Error
             "E-EXPORT-001" :> Severity.Error
-            "E-FILE-SCOPE-SERVER-REACH" :> Severity.Error
+            "E-FILE-SCOPE-SERVER-ONLY-REACH" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
             "E-FN-005" :> Severity.Error

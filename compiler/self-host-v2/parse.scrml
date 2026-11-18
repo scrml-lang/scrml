@@ -9521,9 +9521,9 @@ ${
         }
         if (mEof(m)) {
             const d: MP = mDiag(m, "E-PARSE-ATTR", "unterminated attribute string", mp.pos, m.pos)
-            return { v: AAttrValue.Quoted(text), mp: d }
+            return { v: AAttrValue.Quoted(text, q == "'"), mp: d }
         }
-        return { v: AAttrValue.Quoted(text), mp: mAdv(m, 1) }
+        return { v: AAttrValue.Quoted(text, q == "'"), mp: mAdv(m, 1) }
     }
 
     // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------
