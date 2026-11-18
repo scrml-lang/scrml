@@ -11,7 +11,7 @@
 //           containing only the selected columns … `.get()` produces `Row | not`, `.all()` (or a
 //           bare `?{}`) produces `Row[]` (§8.3)"; "`SELECT *` over a single table expands to that
 //           table's generated type".
-//   §14.8.3 INTEGER / REAL → `number`, TEXT → `string`; "A `ColumnDef` with `nullable: true` SHALL
+//   §14.8.3 INTEGER → `int` (S478 open-Qs ruling item 20; was `number`), REAL → `number`, TEXT → `string`; "A `ColumnDef` with `nullable: true` SHALL
 //           produce a field type of `T | not`" (a column without `not null`, §38.5.2; an
 //           `integer primary key` is the rowid, §38.5.1).
 //   §14.8.1 "The generated types are **nominal**".
@@ -24,7 +24,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SQL } from "bun";
 import { mods, compile, serve, post, pathOf } from "./server-artifact-harness.js";
@@ -75,8 +75,8 @@ describe("§14.8.3 field types", () => {
   test("a `text not null` column is `string`; used as `int` it is E-TYPE-031", () => {
     expect(codesOf(P(fn("f() -> int", [getRow("id, body"), "if (r is not) return 0;", "const n: int = r.body;", "return n;"])))).toEqual(["E-TYPE-031"]);
   });
-  test("an `integer` column is `number`, not `int` (INTEGER → number)", () => {
-    expect(codesOf(P(fn("f() -> int", [getRow("id"), "if (r is not) return 0;", "const n: int = r.id;", "return n;"])))).toEqual(["E-TYPE-031"]);
+  test("an `integer` column is `int` (S478 ruling 20: INTEGER → int); an `int` still fits a `number`", () => {
+    expect(codesOf(P(fn("f() -> int", [getRow("id"), "if (r is not) return 0;", "const n: int = r.id;", "return n;"])))).toEqual([]);
     expect(codesOf(P(fn("f() -> number", [getRow("id"), "if (r is not) return 0;", "const n: number = r.id;", "return n;"])))).toEqual([]);
   });
   test("a column without `not null` is `T | not`", () => {
@@ -323,6 +323,49 @@ describe("runtime (SQLite): the rows the compiler typed are the rows the server 
   });
 });
 
+// S478 open-Qs ruling item 20, option (b), INTERIM — §14.8.3 "A typed row is checked as it is read":
+// "the server SHALL check each row value against its declared field type as the row is read … A row
+// value that fails the check SHALL fail the query as `SqlError::QueryFailed` … the program never sees
+// the value." A non-STRICT SQLite table stores any storage class in any column (measured before this:
+// TEXT holding x'41' answered 200 "65!", INTEGER holding 'abc' made `r.x * 2` NaN).
+describe("runtime (SQLite): a typed row value that does not fit its column type fails the query (§14.8.3, S478)", () => {
+  let dir, sql, srv, routes;
+  const logs = [];
+  const call = (f, args = []) => post(srv, pathOf(routes, f), args);
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s478-row-check-"));
+    sql = new SQL("sqlite://" + join(dir, "app.db"));
+    // the table is NOT STRICT: SQLite stores what it is given
+    await sql.unsafe("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL, note TEXT, score REAL NOT NULL)");
+    await sql.unsafe("INSERT INTO notes (id, body, note, score) VALUES (1, x'41', 'n1', 'zz')");
+    await sql.unsafe("CREATE TABLE t2 (current_timestamp INTEGER NOT NULL)");
+    await sql.unsafe("INSERT INTO t2 VALUES (1.5)");
+    const r = compile(RT);
+    ({ srv, routes } = await serve(r.core, sql, logs));
+  }, 300000);
+  afterAll(async () => {
+    await sql.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a blob in a `text` column: the query fails (its arm runs) — never a Uint8Array through a string", async () => {
+    expect((await call("armLeave")).json).toBe("err");
+    expect((await call("firstBody")).json).toBe("none");
+    expect(logs.some((l) => /does not fit its declared type/.test(l) && /expected a string/.test(l))).toBe(true);
+  });
+  test("a string in a `real not null` column: the `.all()` query fails ([] arm)", async () => {
+    expect((await call("scoreSum")).json).toBe(0);
+  });
+  test("a non-integral REAL in an `integer` column (`int` since S478): the query fails", async () => {
+    expect((await call("kwQual")).json).toBe(0);
+    expect(logs.some((l) => /expected an int, got 1\.5/.test(l))).toBe(true);
+  });
+  test("a fitting row still reads (the check passes a NULL in a nullable column)", async () => {
+    await sql.unsafe("INSERT INTO notes (id, body, note, score) VALUES (2, 'b', NULL, 2)");
+    expect((await call("nullNote", [2])).json).toBe("null");
+  });
+});
+
 // fix r1 (#1915 review): the review's runtime repros — each returned a wrongly-typed value through a
 // typed slot on the server (rt.test.js: armInt / rebindInt / rebindNarrow "undefined!", lit2 "10",
 // cntStr 7, cntNot 500, kw2 NaN). Each is now refused at compile time.
@@ -346,5 +389,29 @@ describe("runtime repros of the #1915 review are refused at compile time", () =>
   });
   test("kw2 (L1)", () => {
     expect(one("kw2() -> string", [`const r = ${SQ}\`SELECT current_timestamp FROM t2\`}.get() !{ _ :> not };`, `if (r is not) return "none";`, "const k: number = r.current_timestamp * 2;", `return k > 5 ? "gt5" : "NOT-gt5";`])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// S478 open-Qs ruling item 20 — "Expect tutorial 02b to compile clean": `value: integer not null` is now
+// `int`, so `return row is given ? row.value : 0` fits the `(not to int)` cell. On base it was
+// E-TYPE-031 (`@count` expects `int | not`, and this value is `number | not`).
+describe("docs/tutorial-snippets/02b-counter-persisted.scrml (S478 ruling 20)", () => {
+  const SRC = readFileSync(join(import.meta.dir, "../../../docs/tutorial-snippets/02b-counter-persisted.scrml"), "utf8");
+  test("compiles clean on the bootstrap", () => {
+    expect(errs(SRC).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  });
+  test("its server functions run against SQLite (the row check passes a fitting row)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s478-02b-"));
+    const sql = new SQL("sqlite://" + join(dir, "counter.db"));
+    try {
+      await sql.unsafe("CREATE TABLE counters (id INTEGER PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)");
+      const { srv, routes } = await serve(compile(SRC).core, sql, []);
+      expect((await post(srv, pathOf(routes, "loadCount"), [])).json).toBe(0);
+      expect((await post(srv, pathOf(routes, "persistCount"), [5])).json).toBe(5);
+      expect((await post(srv, pathOf(routes, "loadCount"), [])).json).toBe(5);
+    } finally {
+      await sql.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

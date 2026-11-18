@@ -46,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite } from "./analyze.scrml"
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -1209,8 +1209,8 @@ ${
     }
 
     // s478 (s478-boot-syntax-batch) — a Core If's `tx`: a `transaction { … }` block runs on its
-    // function's envelope database (analyze.scrml txPlacePass, §19.10.3); an `if` and a bare block
-    // on none. A block analyze placed no database for was refused there (E-BOOTSTRAP-UNSUPPORTED or
+    // function's envelope database (analyze.scrml txPlacePass, §19.10.3); an `if`, a bare block and
+    // (S478 ruling item 21 (a)) a transaction block in a `!` function that reaches no query on none. A block analyze placed no database for was refused there (E-BOOTSTRAP-UNSUPPORTED or
     // E-ERROR-001, so no Core is built); if one reaches here anyway its `tx` names no database —
     // check.scrml C-TX4 refuses the Core, so it can never print as a plain block (fail closed).
     fn txOfIf(c: LC, s: AStmt, fm: IfForm) -> Sym | not {
@@ -1220,6 +1220,9 @@ ${
             .Bare :> false
         }
         if (!isTx) return not
+        // S478 open-Qs ruling item 21 (a) — §19.10.4: in a `!` function that reaches no query the
+        // block "SHALL compile as a plain block" (analyze.scrml txPlacePass, TxAt.db = not)
+        if (txPlainAt(c.t, s.nid)) return not
         const db: Sym | not = txAtOf(c.t, s.nid)
         if (db is given) return db
         return { id: -1, hint: "a transaction block analyze placed on no database" }
@@ -3883,7 +3886,7 @@ ${
         }
         return { db: db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
                  kind: kind, reads: reads, writes: writes, columns: columns,
-                 nobatch: q.nobatch, handled: handled, site: { n: e.nid } }
+                 nobatch: q.nobatch, handled: handled, site: { n: e.nid }, row: rowOfSite(c.t.rows, e.nid) }
     }
 
     fn exprIndex(es: Expr[], x: Expr) -> int {

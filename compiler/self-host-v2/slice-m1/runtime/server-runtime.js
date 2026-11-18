@@ -807,12 +807,12 @@ export async function txEnd(h, ok) {
 // A SQLite error that ended the whole transaction (ON CONFLICT ROLLBACK, SQLITE_FULL, …) is found by
 // runQuery's probe, which throws: the savepoint went with the transaction, and the envelope rolls
 // back and answers a server error. A ROLLBACK TO / RELEASE that fails throws the same way.
-async function statement(tx, mode, text, params, slots) {
+async function statement(tx, mode, text, params, slots, row = null) {
   tx.seq = tx.seq + 1;
   const name = "scrml_sp_" + tx.seq;
   await control(tx, "SAVEPOINT " + name);
   tx.stack.push(name);
-  const result = await runQuery(tx.conn, mode, text, params, slots, tx);
+  const result = await runQuery(tx.conn, mode, text, params, slots, tx, row);
   if (failed(result)) {
     await undoSavepoint(tx, name);
     return result;
@@ -924,23 +924,25 @@ function logLine(host, line) {
 // handled where it is written (a `!{}` on it, a `match` on its result). Inside a transaction this
 // scope owns it runs under a statement savepoint of its own (`statement`); outside one it runs as
 // any other query (one statement undoes only itself).
-export async function query(conn, mode, text, params, slots, handled = false) {
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM): `row` — the §57 wire table of the
+// query's result type when its rows are typed from a `<schema>` table (print.scrml queryJs), else null.
+export async function query(conn, mode, text, params, slots, handled = false, row = null) {
   const tx = ownTx(conn);
   if (tx !== null) {
     if (tx.broken) throw brokenError(conn);
-    if (handled === true) return statement(tx, mode, text, params, slots);
-    return runQuery(conn, mode, text, params, slots, tx);
+    if (handled === true) return statement(tx, mode, text, params, slots, row);
+    return runQuery(conn, mode, text, params, slots, tx, row);
   }
-  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null);
+  if (!gated(conn)) return runQuery(conn, mode, text, params, slots, null, row);
   await conn.gate.acquire();
   try {
-    return await runQuery(conn, mode, text, params, slots, null);
+    return await runQuery(conn, mode, text, params, slots, null, row);
   } finally {
     conn.gate.release();
   }
 }
 
-async function runQuery(conn, mode, text, params, slots, tx) {
+async function runQuery(conn, mode, text, params, slots, tx, row = null) {
   let rows;
   try {
     const values = slots.map((i) => params[i]);
@@ -960,8 +962,31 @@ async function runQuery(conn, mode, text, params, slots, tx) {
   if (mode === "run") return null;
   const list = [];
   for (const r of rows ?? []) list.push(plainRow(r));
-  if (mode === "get") return list.length > 0 ? list[0] : null;
-  return list;
+  const value = mode === "get" ? (list.length > 0 ? list[0] : null) : list;
+  if (row === null) return value;
+  return checkRows(conn, row, value);
+}
+
+// S478 (§14.8.3 "A typed row is checked as it is read", INTERIM — ruling:user-voice-scrml.md S478
+// open-Qs item 20, option (b): "validate each typed row value at the query boundary, server-side, as
+// the row is read"). A non-STRICT SQLite table stores any storage class in any column (an INTEGER
+// column holding 'abc' or 1.5, a TEXT column holding a blob), so a row typed off the `<schema>`
+// declaration is checked against its §57 descriptor — the decoder's own check (an `int` an integer,
+// a `number` finite, a `string` a string, `T | not` null or a T; a key the type does not declare
+// refused) — before the program sees it. A value that fails it fails the QUERY as
+// SqlError::QueryFailed, as a driver error does (handled where the query is, propagated where it
+// propagates), with a server log line; the program never sees the value. The decoded value (the
+// codec's runtime layout) is what the query returns. Redundant, and dropped, once `<schema>`
+// generates STRICT DDL (the ruling's option (a)).
+function checkRows(conn, row, value) {
+  const r = decode(row, value);
+  if (r.ok) return r.value;
+  // the log names the stored value; the SqlError message does not (it may cross the wire in a
+  // route's failure answer — and is withheld there as driver text, noteDriverText, as well)
+  conn.log(`scrml server: a query on ${conn.desc.driver}:${conn.desc.file} read a row value that does not fit its declared type — ${r.error.path}: ${r.error.reason} (§14.8.3: a typed row is checked as it is read; a table that is not STRICT stores any value in any column)`);
+  const err = { variant: "QueryFailed", data: [`a row value does not fit its declared type at ${r.error.path} (§14.8.3)`] };
+  noteDriverText({ message: err.data[0] }, err);
+  return failure(err);
 }
 
 // A row as a value: a fresh plain object of the row's own columns.
