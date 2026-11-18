@@ -598,7 +598,7 @@ ${
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
-        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false))
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e, false, false))
     }
 
     // s469 (§49.2.5): `a..b` / `a..=b` is legal ONLY as the whole iterable of a
@@ -657,10 +657,17 @@ ${
     fn parsePostfixFrom(first: RExpr, start: int) -> RExpr {
         let r: RExpr = first
         let going = true
+        // s478 (s478-boot-syntax-batch, landed s478-boot-optional-chain) — optional chaining (§42.3.6): the receivers of this
+        // chain's `?.` hops, in order (see optHop / closeOpt)
+        let opts: AExpr[] = []
         while (going) {
             const t: PTok = cur(r.tp)
             const prev: PTok = peekAt(r.tp, -1)
-            if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Ident) {
+            if (t.cls == TC.Punct && tk(t, "?.")) {
+                const oh: ROpt = optHop(r, start)
+                r = oh.r
+                if (oh.ok) opts = opts.concat([oh.recv])
+            } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Ident) {
                 const name: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, name))
             } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Keyword) {
@@ -677,6 +684,11 @@ ${
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else if (opts.length > 0) {
+                // the chain ends here: what follows (`!{`, `?`, `is given`, an operator) applies
+                // to the WHOLE optional chain (§42.3.6 "Short-circuit is chain-wide")
+                r = closeOpt(r, opts)
+                opts = []
             } else if (t.cls == TC.TChunk && t.line == endLine(prev)) {
                 // s469 — `tag`…`` (a tagged template: the tag CALLED with the
                 // template's pieces) is not a text template; refused by name, the
@@ -714,7 +726,308 @@ ${
                 going = false
             }
         }
+        if (opts.length > 0) r = closeOpt(r, opts)
         return r
+    }
+
+    // =========================================================================
+    // s478 (s478-boot-syntax-batch; landed by s478-boot-optional-chain on #1917's member access
+    // through a narrowed `T | not`) — OPTIONAL CHAINING, `?.` (SPEC §42.3.6):
+    //   optional-access ::= expr '?.' identifier | expr '?.' '[' expr ']' | expr '?.' arguments
+    // "When the receiver `expr` is `not`, the access short-circuits: the whole optional-chain
+    // expression evaluates to `not`, and the remainder of the chain is NOT evaluated (no field
+    // read, no index, no call, no argument evaluation, no side effects past the `?.`)." "Short-
+    // circuit is chain-wide from the `?.` point, but each hop is guarded only against its own
+    // receiver." "Result type. `recv?.field` has type `F | not` where `F` is the declared type of
+    // `field` … a further BARE dereference on it fires E-TYPE-046 (§42.3.5)."
+    //
+    // The bootstrap reads a chain holding `?.` hops as the presence tests of their receivers
+    // around the chain read plainly — `a?.b.c` is `a is given ? a.b.c : not`, `a?.b?.c` is
+    // `a is given ? (a.b is given ? a.b.c : not) : not` — a value-position conditional (§42.4
+    // statement 8: "`x is given` narrows it to `T` where the test is true", a member path
+    // included). That IS each SPEC sentence: the rest of the chain runs only where every tested
+    // receiver is present; a hop after a `?.` is guarded against that receiver only (the next
+    // hop's own receiver is not narrowed, so a bare `.c` on an optional `b` is still E-TYPE-046);
+    // and the conditional's type joins the chain's type with `not` — `F | not`. A `?.` ends at
+    // the chain's end: `(a?.b).c` dereferences the conditional's `F | not`, E-TYPE-046.
+    //
+    // The receiver is evaluated twice (its test, then the chain), so it is built only for a
+    // receiver whose evaluation does nothing but read: a name, `@cell`, a `<#id>`
+    // reference, a member path of those, an index by a literal or such a path (an `<each>` row
+    // read `@.` is refused by name — INTERIM g-boot-optional-chain-atitem-s478). Any other receiver
+    // (a call, a conditional …; parentheses alone are grouping) is refused by name — INTERIM,
+    // g-boot-optional-chain-receiver-s478 (the capable form binds it once: `const u = f(); u?.x`).
+    // (§42.3.6 "Codegen" — "SHALL lower to the corresponding JavaScript optional-chaining form" —
+    // is about the emitted JavaScript; the bootstrap prints its presence test and the plain
+    // access, which short-circuit identically on `not` — owner question g-boot-optional-chain-js-form-s478.)
+    // Every read in the chain is a PLAIN member read typed by analyze.scrml typeMember, so the
+    // receiver-type check (memberRecvMismatch, #1917 H1) and E-TYPE-046 apply to it unchanged.
+    // =========================================================================
+    type ROpt:struct = { r: RExpr, recv: AExpr, ok: boolean }
+
+    // One `?.` hop: `?.name`, `?.[i]` or `?.(args)` read as the plain hop on the receiver, which is
+    // returned (`recv`) so closeOpt can test it. `ok` false: refused (the hop is read past).
+    fn optHop(r0: RExpr, start: int) -> ROpt {
+        const recv: AExpr = r0.e
+        const q: PTok = cur(r0.tp)
+        let t: TP = r0.tp
+        // s478 (s478-boot-optional-chain): an OPTIONAL CALL `f?.(args)` is refused by name —
+        // INTERIM, g-boot-optional-call-s478. Its receiver is a function value that may be `not`
+        // (§42.3.6 "recv?.method(args)"); the bootstrap types no `fn | not` value, and a function
+        // DECLARATION (never `not`) read through `?.(` would test a function for presence and put a
+        // server call in a conditional arm (the s474 H1 shape, foreign-content-s474.test.js: `match check?.(p) { … }`) — so the
+        // whole hop is refused, fail closed. The capable form: call it plainly, or narrow the
+        // function value first.
+        const isCall: boolean = peekAt(t, 1).cls == TC.Punct && tk(peekAt(t, 1), "(")
+        if (isCall) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?.(…) optional call` (§42.3.6) is not in the bootstrap yet — the bootstrap builds `?.` member and index reads, not a call through a function value that may be `not`; it is refused here by name rather than misread (INTERIM, g-boot-optional-call-s478). Call it plainly (`f(args)`), or narrow the value first (`if (f is given) { f(args) }`)", q)
+        } else if (optAtItemRooted(recv)) {
+            // s478 fix round 1 (#1927 review LOW-3): an `<each>` row read `@.` / `@.addr` is no
+            // place the typer narrows (analyze.scrml nKey: `@.` has no key), so the presence
+            // test would not reach the hop and the user would get E-TYPE-046 at a hop they did
+            // not write — refused by name, INTERIM g-boot-optional-chain-atitem-s478; the named
+            // row binding (`<each in=@xs as u>` … `u.addr?.city`) is built.
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on an `@.` row read` (§42.3.6) is not in the bootstrap yet — it cannot narrow an `<each>` row read `@.` (or a member path of it) by the presence test `?.` makes; it is refused here by name rather than misreported (INTERIM, g-boot-optional-chain-atitem-s478). Name the row: `<each in=@xs as u>` … `u.addr?.city`", q)
+        } else if (!optRecvOk(recv)) {
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "`?. on a computed receiver` (§42.3.6) is not in the bootstrap yet — it builds `?.` on a name, `@cell`, a `<#id>` reference, or a member path / literal index of those, whose presence it can test before reading it; it is refused here by name rather than misread (INTERIM, g-boot-optional-chain-receiver-s478). Bind the receiver first: `const r = …; r?.x`", q)
+        }
+        const n: PTok = peekAt(t, 1)
+        let out: RExpr = { e: recv, tp: t }
+        if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+            out = mkE(adv(adv(t)), start, AExprK.Member(recv, n.v))
+        } else if (n.cls == TC.Punct && tk(n, "[")) {
+            const ix: RExpr = parseAssign(adv(adv(t)))
+            out = mkE(expectP(ix.tp, "]"), start, AExprK.Index(recv, ix.e))
+        } else if (n.cls == TC.Punct && tk(n, "(")) {
+            const args: RExprs = parseList(adv(adv(t)), ")")
+            out = mkE(args.tp, start, AExprK.Call(recv, args.es))
+        } else {
+            const dt: TP = diagAt(t, "E-PARSE-EXPECTED", "expected a field name, `[` or `(` after `?.` (§42.3.6: `recv?.field`, `recv?.[key]`, `recv?.method(args)`)", n)
+            return { r: mkE(adv(dt), start, AExprK.Recovered), recv: recv, ok: false }
+        }
+        if (isCall || optAtItemRooted(recv) || !optRecvOk(recv)) return { r: mkE(out.tp, start, AExprK.Recovered), recv: recv, ok: false }
+        return { r: out, recv: recv, ok: true }
+    }
+
+    // A receiver whose evaluation only reads (so testing it, then reading it again, is one read).
+    fn optRecvOk(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> true
+            .At(name: n) :> true
+            .AtItem :> true
+            .HashRef(id: h) :> true
+            .Member(obj: o) :> optRecvOk(o)
+            .Index(obj: o, idx: i) :> optRecvOk(o) && optIndexOk(i)
+            .Num(raw: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+            .Foreign(f: x) :> false
+        }
+    }
+
+    // Is the receiver an `<each>` row read `@.`, or a member path / index of one?
+    fn optAtItemRooted(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const ob: AExpr | not = recvObj(e)
+        if (ob is given) return optAtItemRooted(ob)
+        return match k {
+            .AtItem :> true
+            // no-default-arm: one question of the receiver's root — is it `@.`
+            _ :> false
+        }
+    }
+
+    fn optIndexOk(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const lit: boolean = match k {
+            .Num(raw: x) :> true
+            .Str(v: x) :> true
+            .Name(name: x) :> false
+            .At(name: x) :> false
+            .AtItem :> false
+            .HashRef(id: x) :> false
+            .Member(obj: x) :> false
+            .Index(obj: x) :> false
+            .Bool(v: x) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: x) :> false
+            .BlockLambda(params: x) :> false
+            .Sql(q: x) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: x) :> false
+            .Foreign(f: x) :> false
+        }
+        return lit || optRecvOk(e)
+    }
+
+    // The chain `r.e` with its `?.` receivers `opts` (shortest first): each receiver's presence
+    // test around the rest, the first receiver's outermost — `opts[0] is given ? (… ? r.e : not) : not`.
+    // Each test reads a COPY of its receiver with fresh node ids (a node is typed once; the test
+    // and the chain read the receiver at two places). The conditional is marked `optChain`: the
+    // analyzer counts the test and the chain's read of the receiver as ONE use of a `lin` binding
+    // (linOptWalk, #1927 review MED-1), and the test narrows the receiver only where the chain's
+    // SPINE reads it, never inside a hop's argument or index (optSpineKeys — §42.3.6 "each hop is
+    // guarded only against its own receiver", #1927 review LOW-2).
+    fn closeOpt(r: RExpr, opts: AExpr[]) -> RExpr {
+        let t: TP = r.tp
+        let inner: AExpr = r.e
+        let i: int = opts.length - 1
+        while (i >= 0) {
+            const rc: RExpr = cloneRecv(t, opts[i])
+            t = rc.tp
+            const test: AExpr = { nid: t.nid, span: opts[i].span, k: AExprK.Unary(UnOp.IsGiven, rc.e) }
+            t = bumpId(t)
+            const none: AExpr = { nid: t.nid, span: r.e.span, k: AExprK.NotLit }
+            t = bumpId(t)
+            inner = { nid: t.nid, span: r.e.span, k: AExprK.Ternary(test, inner, none, false, true) }
+            t = bumpId(t)
+            i = i - 1
+        }
+        return { e: inner, tp: t }
+    }
+
+    // A copy of a receiver optRecvOk admits, every node with a fresh id.
+    fn cloneRecv(tp: TP, e: AExpr) -> RExpr {
+        let t: TP = tp
+        let k2: AExprK = e.k
+        const ob: AExpr | not = recvObj(e)
+        if (ob is given) {
+            const co: RExpr = cloneRecv(t, ob)
+            t = co.tp
+            const ix: AExpr | not = recvIdx(e)
+            if (ix is given) {
+                const ci: RExpr = cloneRecv(t, ix)
+                t = ci.tp
+                k2 = AExprK.Index(co.e, ci.e)
+            } else {
+                k2 = AExprK.Member(co.e, recvName(e))
+            }
+        }
+        const out: AExpr = { nid: t.nid, span: e.span, k: k2 }
+        return { e: out, tp: bumpId(t) }
+    }
+
+    fn recvObj(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> o
+            .Index(obj: o) :> o
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .HashRef(id: x) :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    fn recvIdx(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Index(obj: o, idx: i) :> i
+            .Member(obj: x) :> not
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .HashRef(id: x) :> not
+            .Num(raw: x) :> not
+            .Str(v: x) :> not
+            .Bool(v: x) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Call(callee: x) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: x) :> not
+            .ObjectLit(props: x) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: x) :> not
+            .BlockLambda(params: x) :> not
+            .Sql(q: x) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: x) :> not
+            .Foreign(f: x) :> not
+        }
+    }
+
+    fn recvName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o, name: n) :> n
+            .Index(obj: x) :> ""
+            .Name(name: x) :> ""
+            .At(name: x) :> ""
+            .AtItem :> ""
+            .HashRef(id: x) :> ""
+            .Num(raw: x) :> ""
+            .Str(v: x) :> ""
+            .Bool(v: x) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: x) :> ""
+            .Call(callee: x) :> ""
+            .Unary(op: x) :> ""
+            .Binary(op: x) :> ""
+            .Ternary(test: x) :> ""
+            .Assign(target: x) :> ""
+            .ArrayLit(elems: x) :> ""
+            .ObjectLit(props: x) :> ""
+            .Spread(e: x) :> ""
+            .Lambda(params: x) :> ""
+            .BlockLambda(params: x) :> ""
+            .Sql(q: x) :> ""
+            .Handled(h: x) :> ""
+            .Template(quasis: x) :> ""
+            .Foreign(f: x) :> ""
+        }
     }
 
     // =========================================================================
@@ -6038,7 +6351,7 @@ ${
                 t = eb.tp
             }
         }
-        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true))
+        return mkE(t, start, AExprK.Ternary(cond, yes.e, no, true, false))
     }
 
     // s475 (#1762 review item 2) — at the token after `if`: is the head a BARE
