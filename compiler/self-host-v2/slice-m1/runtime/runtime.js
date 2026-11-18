@@ -5574,6 +5574,13 @@ export function channelPacer(limits, io) {
       return n;
     },
     // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
+    // S479 (s479-channel-follow), §38.4.3: the relay refused a frame of this connection unread, over a
+    // rate bound — "the client SHALL then slow down": its bucket is emptied, so the next frame waits
+    // for a token's refill. Frames still queued keep their order.
+    starve() {
+      tokens = 0;
+      at = io.now();
+    },
     push(key, op, text, ref) {
       if (!open) return false;
       if (op === "replace") {
@@ -5657,6 +5664,19 @@ export function channelJudge(c, cur, op, val) {
   return null;
 }
 
+// S479 (s479-channel-follow) — ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off
+// §3.B", item 5: "`reconnect=` is the initial delay, doubling with ±20% jitter to a 30 s cap; reset on
+// open; `0` disables. A fixed delay reconnects every client in lockstep after a server restart." §38.7:
+// the wait before reconnect attempt `n` (0 for the first after an open) is `min(cap, initial × 2^n)`,
+// scaled by a factor drawn uniformly from [0.8, 1.2]; the cap is 30 s, or the initial delay itself when
+// that is larger (an author's own delay is never shortened). `random` returns a number in [0, 1).
+export const CHANNEL_RECONNECT_CAP_MS = 30000;
+export function channelBackoff(initial, n, random) {
+  const cap = Math.max(CHANNEL_RECONNECT_CAP_MS, initial);
+  const base = Math.min(cap, initial * 2 ** Math.min(n, 30));
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+
 // The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.
 const RELAY_CLOSES = new Map([
   [1003, "it sent a binary frame"],
@@ -5685,6 +5705,7 @@ export function channel(scope, desc) {
   let stopped = false;      // a truncated frame log: the channel is out of sync for good
   let ws = null;
   let timer = null;
+  let retries = 0;          // reconnect attempts since the last open (§38.7 backoff)
   let disposed = false;
   let applying = false;
   let windowFrom = 0;
@@ -5875,8 +5896,22 @@ export function channel(scope, desc) {
     // pending and is not shown (as its own copy refused at the confirmed value would be), and it is
     // reported. It must name that oldest pending edit, or the stream is broken.
     if (v !== null && typeof v === "object" && !Array.isArray(v) && v.__type === "__refused") {
+      // S479 (s479-channel-follow), §38.4.3 "Over a rate bound": `{ __type: "__refused", __why }` — the
+      // relay refused this connection's next frame UNREAD (over its connection's or its address's frame
+      // bucket): relayed to no one, numbered never. The relay reads frames in the order they were sent,
+      // so it is this client's oldest pending edit, which must have been SENT (a queued one has not
+      // reached the relay). It stops being pending and is not shown, it is reported, and the client
+      // slows down (its pacer's bucket is emptied, `starve`).
+      if (Object.keys(v).length === 2 && typeof v.__why === "string") {
+        const p = pending[0];
+        if (p === undefined || p.sent !== true) return "a rate __refused with no sent pending edit";
+        unit(() => { pending.shift(); });
+        pacer.starve();
+        refused(`this client's own edit, unread by the relay (over a rate bound, §38.4.3): ${v.__why.slice(0, 300)}`);
+        return "";
+      }
       if (Object.keys(v).length !== 5 || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val") || typeof v.__why !== "string") {
-        return "a __refused that is not exactly {__type, __key, __op, __val, __why}";
+        return "a __refused that is not exactly {__type, __key, __op, __val, __why} or {__type, __why}";
       }
       const p = pending[0];
       if (p === undefined || p.c.key !== v.__key || p.op !== v.__op || JSON.stringify(p.wire) !== JSON.stringify(v.__val)) {
@@ -5967,8 +6002,12 @@ export function channel(scope, desc) {
   //   frame would be over it is not sent; the client reports it" — it is not pending either, so the
   //   next received unit's rebase drops it from the shown value (it never reaches a peer). Returns
   //   whether the edit was queued.
+  //   S479 (s479-channel-follow), §38.4.2 "The frame": `__seen` is the last sequence number this client
+  //   had applied when it made the edit — `seq` now: an edit is sent (queued) in the step that makes it,
+  //   and a held edit in the unit that re-applies it on the replay's value — so the relay can tell
+  //   whether any frame it relayed after that could explain a refusal (§38.4.2 "The relay's fold").
   function send(p) {
-    const text = JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire });
+    const text = JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire, __seen: seq });
     if (utf8Over(text, maxFrame)) { warn(`@${p.c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return false; }
     if (!pacer.isOpen()) pacer.open();
     p.sent = false;
@@ -6002,6 +6041,7 @@ export function channel(scope, desc) {
     // frame is pushed to it before the replay is applied (the edits until then are HELD, §38.4.2).
     s.onopen = () => {
       if (ws !== s) return;
+      retries = 0;                                      // §38.7: the backoff is reset on open
       pacer.open();
     };
     // #1941 fix r1 (MED-1), §38.10.2: "the handler SHALL run when the connection's replay message
@@ -6041,7 +6081,9 @@ export function channel(scope, desc) {
       }
       if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed)`);
       hook(desc.close);
-      if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
+      // §38.7 (S479 ruled §3.B item 5): `reconnect=` is the INITIAL delay; each attempt with no open
+      // between doubles it, ±20% jitter, up to the 30 s cap (`channelBackoff`); `0` disables
+      if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, channelBackoff(desc.reconnect, retries++, () => g.Math.random()));
     };
   }
   for (const c of desc.cells) c.cell.sync = sink(c);

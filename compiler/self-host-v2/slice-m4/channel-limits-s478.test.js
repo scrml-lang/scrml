@@ -23,6 +23,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { withSeen } from "./channel-seen-harness.js";
 
 let pageEnv = false;
 beforeAll(async () => {
@@ -104,7 +105,7 @@ async function served(s, host = {}) {
 
 function connect(base, path) {
   return new Promise((resolveP, reject) => {
-    const ws = new WebSocket(`ws://${base}${path}`);
+    const ws = withSeen(new WebSocket(`ws://${base}${path}`));
     const got = [];
     let closed = null;
     // #1941 × #1942 integration: the relay's first message is the §38.4.2 `__replay`, and every
@@ -124,7 +125,10 @@ const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 const sync = (key, val, op = "replace") => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
 
 describe("B — §38.4.3 bounds, served", () => {
-  test("the token bucket: a burst past `frame-burst=` closes the sender 1008, and nothing past the bucket is relayed", async () => {
+  // S479 (s479-channel-follow), §38.4.3 "Over a rate bound": a frame past the bucket is REFUSED UNREAD
+  // (`{"__type":"__refused","__why"}`) and spends a token anyway (debt); only a further full burst past it
+  // (the bucket at minus `burst`) closes the sender 1008.
+  test("the token bucket: a burst past `frame-burst=` is refused unread (`__refused`), nothing past the bucket is relayed; a further burst closes the sender 1008", async () => {
     const { bun, base, logs } = await served(src(" frame-rate=1 frame-burst=3"));
     try {
       const a = await connect(base, "/_scrml_ws/chat");
@@ -133,8 +137,16 @@ describe("B — §38.4.3 bounds, served", () => {
       for (let i = 1; i <= 6; i++) a.ws.send(sync("count", i));
       await tick(200);
       expect(b.got.map((f) => f.__val)).toEqual([1, 2, 3]);
+      expect(a.closed()).toBe(null);
+      const unread = a.got.filter((f) => f.__type === "__refused");
+      expect(unread.length).toBe(3);
+      expect(Object.keys(unread[0]).sort()).toEqual(["__type", "__why"]);
+      expect(unread[0].__why).toContain("rate limit");
+      for (let i = 7; i <= 9; i++) a.ws.send(sync("count", i));
+      await tick(200);
+      expect(b.got.map((f) => f.__val)).toEqual([1, 2, 3]);
       expect(a.closed()?.code).toBe(1008);
-      expect(logs.join("\n")).toContain("rate limit");
+      expect(logs.join("\n")).toContain("a further burst");
       expect(b.closed()).toBe(null);           // the limit is per connection: b is untouched
       b.ws.close();
     } finally { bun.stop(true); }
@@ -161,7 +173,9 @@ describe("B — §38.4.3 bounds, served", () => {
       a.ws.send(sync("count", 1));
       a.ws.send("{nope");
       await tick(150);
-      expect(a.closed()?.code).toBe(1008);    // the rate limit, not 1007: the second frame found no token
+      // the rate limit, not 1007: the second frame found no token, so it was refused UNREAD (S479)
+      expect(a.closed()).toBe(null);
+      expect(a.got.filter((f) => f.__type === "__refused").length).toBe(1);
     } finally { bun.stop(true); }
   });
 

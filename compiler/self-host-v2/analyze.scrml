@@ -3149,6 +3149,13 @@ ${
                 // bounds, read by channelPass; "a value that is not a bare positive integer
                 // literal within the bound's range SHALL be a compile error, `E-CHANNEL-LIMIT-INVALID`"
                 if (chLimit(a.value, a.name) < 0) st = addDiag(st, file, a.span, "E-CHANNEL-LIMIT-INVALID", chLimitMsg("<program " + a.name + "=…>", a.name))
+            } else if (a.name == "trusted-proxies") {
+                // S479 (s479-channel-follow) — ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of
+                // S478 hand-off §3.B", item 6: "`<program trusted-proxies=N>` (N = the number of proxies
+                // in front of the server …; 0 ignores the headers)", default 0. §40.2: a bare integer
+                // literal from 0 to 32; any other value is E-MW-009 (a forwarded-header trust the
+                // compiler cannot read must never become a guess)
+                if (trustedProxiesValue(a.value) < 0) st = addDiag(st, file, a.span, "E-MW-009", "`trusted-proxies=` is " + attrValueText(a.value) + " — it is the number of proxies in front of the server, a bare integer from 0 to 32 (e.g. `trusted-proxies=1`; 0, the default, trusts no `X-Forwarded-*` header — §40.2)")
             } else if (a.name == "mcp") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program mcp>` is not in the bootstrap — it asks for the MCP dev-telemetry server (a stdio MCP server, booted beside the program's server, that exposes the running program's state over read-only tools), and the bootstrap builds no MCP server; remove `mcp` to compile here (the SPEC registers the attribute, §4.12.2, but no section says what it emits)")
             } else if (isProgramAttrName(a.name)) {
@@ -49525,7 +49532,7 @@ ${
                 }
                 if (!hasErrorDiag(diags.slice(d0)) && ch.ctx == "program" && f.path == g.entry && name != "") {
                     out = out.concat([{ name: name, topic: topic, reconnect: reconnect, cells: cells, ops: ops, open: open, close: close, error: error, file: f.path, watches: watches,
-                                      maxFrame: maxFrame, rate: rate, burst: burst, maxSubs: maxSubs }])
+                                      maxFrame: maxFrame, rate: rate, burst: burst, maxSubs: maxSubs, trustedProxies: trustedProxiesOf(g) }])
                 }
             }
         }
@@ -49747,6 +49754,57 @@ ${
         }
         if (n < min || n > max) return -1
         return n
+    }
+
+    // S479 (s479-channel-follow), §40.2: `trusted-proxies=N` — a bare integer literal of digits only,
+    // 0 to 32, else -1 (E-MW-009 in topProgramAttrDiags).
+    fn trustedProxiesValue(v: AAttrValue) -> int {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x
+            .Quoted(v: s) :> not
+            .Dur(text: s) :> not
+            .NoValue :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+        if (e is not) return -1
+        const raw: string = match e.k {
+            .Num(raw: r) :> r
+            // no-default-arm: one question of an expression — is it a number literal
+            _ :> ""
+        }
+        if (raw == "" || raw.length > 2) return -1
+        let n: int = 0
+        let i = 0
+        while (i < raw.length) {
+            const c: int = raw.charCodeAt(i)
+            if (c < 48 || c > 57) return -1
+            n = n * 10 + (c - 48)
+            i = i + 1
+        }
+        if (n > 32) return -1
+        return n
+    }
+
+    // §40.2: the entry file's top-level `<program trusted-proxies=N>`, else 0 (the default — and an
+    // illegal value is E-MW-009, so 0 stands here: fail closed, no forwarded header is trusted).
+    fn trustedProxiesOf(g: Globals) -> int {
+        for (const f of g.files) {
+            if (f.path == g.entry) {
+                for (const it of f.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const a of p.attrs) {
+                            if (a.name == "trusted-proxies") {
+                                const v: int = trustedProxiesValue(a.value)
+                                if (v > 0) return v
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return 0
     }
 
     // The entry file's top-level `<program>`'s value for the bound `name`, else `dflt` (an

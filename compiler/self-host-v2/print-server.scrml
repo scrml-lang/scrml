@@ -571,6 +571,8 @@ ${
                     { key: "burst", value: jnum(ch.burst) },
                     { key: "maxSubscribers", value: jnum(ch.maxSubs) },
                 ]) },
+                // §40.2 (S479 ruled §3.B item 6): `<program trusted-proxies=N>`, else 0
+                { key: "trustedProxies", value: jnum(ch.trustedProxies) },
             ]))])
             i = i + 1
         }
