@@ -7885,6 +7885,32 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 
 **Both `debounced=` AND `throttled=` on the same cell.** Forbidden — `E-REACTIVITY-ATTR-CONFLICT`. The two attributes describe competing timing rules; pick one.
 
+**With an engine (a cell whose value has `rule=` state-children — §51.0, §66.13.2).** A `debounced=` /
+`throttled=` engine cell **transitions at commit**. A write to it is held by the timing rule like any other
+local write, and the transition happens when the held value commits: `rule=` (§51.0.F) is judged at the
+commit, against the variant the cell holds then, and `<onTransition>` handlers (§51.0.H) run then. A held write
+that a later write in the same window supersedes never commits, so it is never judged. A committed write that
+violates `rule=` is the runtime `E-ENGINE-INVALID-TRANSITION`: the cell keeps its prior value, no
+`<onTransition>` handler runs, and the violation is a trap (§19.17) of the unit the commit runs in — the event
+handler for a commit that lands at once (a throttle's leading write), the timer for a trailing commit, where
+it is reported to the logging surface. A self-write at commit is a no-op (§51.0.F.1). A refused commit is not
+an emit, so on a `throttled=` engine it opens no throttle window (§6.13.2 "within `DURATION` of the last emit"):
+the next write is a leading write; a commit that lands opens the window even if an effect it runs throws. *(PA
+reading S479, pending owner ratification — **Provenance:** rationale:a write `rule=` refuses never lands, so it is
+not an emit and starts no window; the ruling (S479 §3.B item 8) is silent on the window · gap:
+`g-boot-timed-engine-refused-commit-window-unratified-s479` · **Direction of change:** none beyond the S479
+build — it records what the bootstrap does.)* Static check of LITERAL
+held writes: a write `@var = .Variant` to a timed engine cell, where no variant reachable from the cell's
+initial variant along its `rule=` edges is `.Variant` or has `.Variant` in its `rule=`, could never commit
+and SHALL be `E-ENGINE-INVALID-TRANSITION` (§34) at the write site. *(S479. **Provenance:**
+ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8 — *"a
+`debounced=`/`throttled=` engine cell transitions at commit — `rule=` judged and `<onTransition>` run at commit;
+violation = runtime E-ENGINE-INVALID-TRANSITION. Mitigate with a static check of literal held writes."* ·
+supersedes: nothing (the composition was unspecified; the bootstrap refused it by name) · **Direction of
+change:** newly-accepting (a timed engine compiles), plus the literal-held-write static check (newly-rejecting
+only for a write that could never commit). The bootstrap builds both (`compiler/self-host-v2/analyze.scrml`
+`heldWriteCheck`, runtime `timed`); impl#1 does not (S471 policy, carried divergence).)*
+
 #### 6.13.6 Normative Statements
 
 - A state-cell declaration MAY carry at most one of `debounced=DURATION` and `throttled=DURATION`.
@@ -7894,6 +7920,7 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 - `debounced=` AND `throttled=` on the same state-decl SHALL fire `E-REACTIVITY-ATTR-CONFLICT` (§34).
 - `debounced=` / `throttled=` on a `<x server>` server-authoritative cell SHALL fire `E-DEBOUNCED-WITH-SERVER` (§34).
 - `reset(@cell)` on a cell with `debounced=` / `throttled=` SHALL cancel any pending timer for `cell` before applying the reset value (§6.8).
+- On an engine cell (§51.0, §66.13.2) with `debounced=` / `throttled=`, `rule=` SHALL be judged and `<onTransition>` SHALL run when a held write commits, not when it is requested; a committed write that violates `rule=` SHALL leave the cell at its prior value and SHALL be the runtime `E-ENGINE-INVALID-TRANSITION`, a trap (§19.17). A LITERAL held write whose target no variant reachable from the initial variant admits SHALL be `E-ENGINE-INVALID-TRANSITION` at compile time (§6.13.5; S479, ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8).
 - Validity recomputation (§6.11, §55) SHALL fire on each debounced/throttled write — the timing rule is a wrapper around the same write path that triggers ordinary subscribers.
 - A write to a `debounced=` / `throttled=` cell whose right-hand side reads the SAME cell (`@x = @x + 1`, `@x += 1`, `@log = @log + line`) SHALL produce the lint **`W-TIMED-READ-MODIFY-WRITE`** (Warning) at the write. Reads see the timed value (§6.13.4), so a write still pending in the window is invisible to the next read and the increments made inside one window are lost (three `@x = @x + 1` in one window commit `+1`). The message points the author at the capable form: keep a plain source cell for the read-modify-write and time a copy of it (`<count> = 0` written by the handler; `<shown debounced=300ms>` written from `@count`). It is a lint — the program means what it says. (S478 open-Qs ruling (user-voice) item 32; the code name is confirmed by ruling:user-voice-scrml.md S479 "⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted" item 2.)
 
@@ -31065,8 +31092,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
 | W-MATCH-VALUE-UNUSED | §48.11, §48.13 | The last statement of a function with NO return-type annotation is a value-producing `match` whose value is NOT returned (no `return`) and is therefore discarded — ~~the function falls through to `undefined` (a plain `function` has NO implicit return per §48.11 / §7.3)~~ the function returns no value (no form has an implicit tail return, §48 "The return rule"). ~~This is spec-correct fall-through, but~~ The silently-discarded value is almost always a mistake. Resolution: add `return` before the `match` ~~, or change the declaration to `fn` / a return-typed `function` (which carry tail-expression implicit return)~~. Does NOT fire for `return match`, ~~`fn`/return-typed functions~~ a function with a declared return type (its unreturned tail is E-TYPE-043), a side-effect-only (block-arm) match, or a match that is not the last statement. **Amended S469** (ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"*): the struck text described the retired tail return; the warning's reach to an un-annotated `fn` is **Nominal on impl#1** (impl#1 fires it on a plain `function` only). (Catalog addition S144 Cluster D — Bug AA; emitted by CG at `compiler/src/codegen/emit-functions.ts`.) | Warning |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
-| E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
-| W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
+| E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **S479 (§6.13.5):** on a `debounced=` / `throttled=` engine cell the runtime check runs when the held write COMMITS (a violating commit leaves the cell at its prior value — a §19.17 trap, reported when the commit runs in a timer), and a LITERAL held write whose target no variant reachable from the initial variant admits is rejected statically at the write site (ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8; both emitted by the bootstrap — the static check at `compiler/self-host-v2/analyze.scrml`, the commit check in the runtime `compiler/self-host-v2/slice-m1/runtime/runtime.js` `timed`; Nominal on impl#1). **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
+| W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` ~~either~~ matches the enclosing state-child tag (STRICT — inside-state-child fire)~~ OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire)~~. A write outside any state-child body never fires it (S479, ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 7 — *"drop the conservative firing outside a state-child (§51.0.F.1); keep the strict inside-state-child half"*; direction of change: newly-accepting in practice, an Info lint removed). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside` — the latter is the struck outside firing, impl#1's carried divergence (§34.0, S471 policy). The inside-state-child firing is emitted at `compiler/self-host-v2/analyze.scrml` `literalStateWrite`.) | Info |
 | W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | (**Carried impl#1 divergence — NOT the language rule.** The language SUPPORTS a block `<match>` in a state-child, §51.0.B / §18.0.1, S439 ruling #5; bryan approved this row as that divergence's code. **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" · supersedes: "Known-limitation warning, pending a ruling" and the ⚑ OPEN-fork sentence below, kept for the record.) A block `<match>` (§18.0.1) appears inside an engine state-child body — directly, inside lowercase elements, or via a component whose body is the match, in the outer engine or a nested one. Measured behaviour: the match renders when its state-child is on screen at page load, but the engine writes the state-child with innerHTML, so every LATER entry (leaving and re-entering the state-child, or first entering a state-child that is not `initial=`) creates a fresh, empty match mount that stays BLANK until the match's `on=` value changes. Identical for `</>` and named `</X>` arm closers. Not fired for a `<match>` inside an `<each>` body in the state-child (the `<each>` re-mounts on entry and renders correctly), nor for a `<match>` outside any state-child. ⚑ *(superseded S439 — ruled (B) support)* ~~Whether a block `<match>` is permitted in a dispatched arm / engine state-child at all is the OPEN (A) refuse / (B) support fork in `g-nested-block-match-in-dispatched-arm-silently-drops`; this row does not decide it — (A) promotes this code to an error, (B) retires it with the re-entry fix.~~ Workaround: move the `<match>` outside the `<engine>` into an element gated on the engine variable, e.g. `<div if=(@phase == .On)> <match …>…</match> </div>`; wrapping the match in a component does not help. Direction-of-change: **newly-warning only** — no predicate, emitted artifact or exit code moves. (Catalog addition S432; emitted at `compiler/src/validators/post-ce-invariant.ts` `warnMatchInStateChild` on the post-CE AST, so both parse pipelines.) | Warning |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
 | E-ENGINE-EFFECT-ON-DERIVED | §51.0.H, §51.0.J | `effect=` used on the opener of a `derived=` engine (the boot init effect, §51.0.H Form 3). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing to do. Resolution: use a mount-time `${}` effect at the enclosing scope, or a non-derived engine. (Catalog addition S148 — Insight 33 Fork C1 edge-case ruling iii. NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J — fires on derived state changes.) | Error |
@@ -41522,6 +41549,13 @@ conditionals), the rule= is enforced at runtime — invalid transitions throw wi
 
 The `rule=` attribute is therefore a **CONTRACT on writes**, not just metadata.
 
+**A timed engine judges `rule=` at commit.** On an engine cell carrying `debounced=` or `throttled=` (§6.13),
+a write is held and the transition happens when the held value commits: `rule=` is judged, and
+`<onTransition>` (§51.0.H) runs, at the commit, and a committed write that violates `rule=` is the runtime
+`E-ENGINE-INVALID-TRANSITION` (the cell keeps its prior value). §6.13.5 states the full rule, including the
+compile-time check of literal held writes. *(S479, ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478
+hand-off §3.B, PA recs adopted" item 8.)*
+
 ##### 51.0.F.1 Idempotent self-write semantics (v0.3 Option-d synthesis, 2026-05-12)
 
 **A self-write to the current variant is a runtime NO-OP, NOT a `rule=` violation.**
@@ -41567,7 +41601,7 @@ engine's outer write helpers share that intuition uniformly. Three reinforcing a
 
 2. **Diagnostic preservation.** The compile-time info lint
    `W-ENGINE-SELF-WRITE-DETECTED` (§34) surfaces self-writes when statically detectable
-   (literal `.Variant` form), preserving the "every transition is intentional" signal
+   (literal `.Variant` form inside the state-child of that variant), preserving the "every transition is intentional" signal
    at the diagnostic layer without making the runtime hostile.
 
 3. **Synthesis-pattern precedent.** This is the same shape as Insight 30 / §40.8.1 OQ
@@ -41581,11 +41615,22 @@ engine's outer write helpers share that intuition uniformly. Three reinforcing a
   tag): fires when `@var = .CurrentVariant` OR `@var.advance(.CurrentVariant)` and
   `.CurrentVariant` matches the enclosing state-child tag. STRICT — high-confidence.
 
-- **Outside any state-child body** (function bodies, top-level logic, event handlers
+- ~~**Outside any state-child body** (function bodies, top-level logic, event handlers
   not attached to engine state-children): fires CONSERVATIVELY when `@var = .Variant`
-  OR `@var.advance(.Variant)` and `.Variant` is one of the engine's declared variants.
-  Less strict because the runtime current variant is dynamic — the lint surfaces
-  "this MAY be a no-op when you weren't expecting it; verify intent."
+  OR `@var.advance(.Variant)` and `.Variant` is one of the engine's declared variants.~~
+  **Outside any state-child body** (function bodies, top-level logic, event handlers
+  not attached to engine state-children) the lint does NOT fire. There the current variant
+  is not known at the write site, and a function-body engine write is the canonical §66
+  idiom (`function load() { @phase = .Loading; }`, §66.19.6), so a lint on every literal
+  write there would only add noise. *(S479. **Provenance:** ruling:user-voice-scrml.md S479
+  "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 7 — *"drop the
+  conservative firing outside a state-child (§51.0.F.1); keep the strict inside-state-child
+  half. Under §66 a function-body engine write is the canonical idiom."* · supersedes: the
+  CONSERVATIVE outside-state-child firing (struck above) · **Direction of change:**
+  newly-accepting in practice (an Info lint removed; no program's acceptance changes). The
+  bootstrap never emitted the outside firing; impl#1 still emits it
+  (`compiler/src/symbol-table.ts` `walkEngineSelfWriteOutside`), a carried divergence (§34.0,
+  S471 policy).)*
 
 **Suppression.** Info-level — no hard suppress mechanism. To silence the lint at a
 specific site, either:

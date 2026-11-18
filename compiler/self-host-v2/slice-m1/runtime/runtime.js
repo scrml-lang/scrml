@@ -260,14 +260,26 @@ export class Cell {
 //     trailing write emits with the held value." `last` starts at 0, so the
 //     first write ever is a leading emit.
 // The compiler refuses every composition whose rule this does not build
-// (analyze timingPass: a server-origin writer, `persist=`, a reset) — so no
-// write here is server-origin, and no reset reaches a pending timer.
-// Reads see the committed value (§6.13.4). The timer is owned by `scope`.
+// (analyze timingPass: a server-origin writer, `persist=`, a reset, an engine's
+// `<onIdle>`) — so no write here is server-origin, and no reset reaches a
+// pending timer. Reads see the committed value (§6.13.4). The timer is owned by
+// `scope`.
+// S479 — an ENGINE cell (a `rule=` graph field) passes its edge table (`table`).
+// §6.13.5: "A `debounced=` / `throttled=` engine cell transitions at commit … `rule=`
+// (§51.0.F) is judged at the commit, against the variant the cell holds then … A held
+// write that a later write in the same window supersedes never commits, so it is never
+// judged. A committed write that violates `rule=` is the runtime
+// `E-ENGINE-INVALID-TRANSITION`: the cell keeps its prior value … the violation is a
+// trap (§19.17) of the unit the commit runs in — the event handler for a commit that
+// lands at once (a throttle's leading write), the timer for a trailing commit, where it
+// is reported to the logging surface." So `transition` skips its write-time check on
+// such a cell (timedEdgeJudged) and `commit` runs `checkEdge` first: a leading commit
+// throws into the handler, a trailing one is reported (never thrown into a timer frame).
 // ---------------------------------------------------------------------------
-export function timed(scope, c, kind, ms) {
+export function timed(scope, c, kind, ms, table = null) {
   requireScope(scope, "a timed cell");
   if (kind !== "debounce" && kind !== "throttle") throw new Error(`timed: unknown timing rule ${JSON.stringify(kind)} (§6.13)`);
-  const t = { kind, ms, timer: null, held: undefined, last: 0, disposed: false };
+  const t = { kind, ms, table, timer: null, held: undefined, last: 0, disposed: false };
   c.timing = t;
   scope.own(() => {
     t.disposed = true;
@@ -275,6 +287,35 @@ export function timed(scope, c, kind, ms) {
     t.timer = null;
   });
   return c;
+}
+
+/** Is `c` a timed engine cell, whose `rule=` edge is judged at commit (§6.13.5)? */
+function timedEdgeJudged(c) {
+  return c.timing !== null && c.timing.table !== null;
+}
+
+/**
+ * The commit gate (§6.13.5): on an engine cell, the `rule=` edge from the variant the cell
+ * holds NOW is judged before a held value commits — a violation leaves the cell at its prior
+ * value and throws (E-ENGINE-INVALID-TRANSITION). A non-engine cell always passes.
+ */
+function admitTimed(c, t, v) {
+  if (t.table !== null) checkEdge(c, t.table, v);
+}
+
+/**
+ * A trailing commit's gate runs in a timer: a refused edge is reported, never thrown into the
+ * timer frame (§19.17), and returns false. Only the REFUSAL is caught here — once the edge is
+ * admitted, the write itself (and any effect it runs) is the caller's, exactly as before.
+ */
+function admitFromTimer(c, t, v) {
+  try {
+    admitTimed(c, t, v);
+    return true;
+  } catch (err) {
+    reportLater(err);
+    return false;
+  }
 }
 
 function timedWrite(c, v) {
@@ -287,14 +328,15 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      if (!t.disposed) c.write(h);
+      if (!t.disposed && admitFromTimer(c, t, h)) c.write(h);
     }, t.ms);
     return;
   }
   const now = Date.now();
   if (t.timer === null && now - t.last >= t.ms) {
-    t.last = now;                                   // leading emit
-    c.write(v);
+    admitTimed(c, t, v);                            // a refused edge throws into the handler, opening no window
+    t.last = now;                                   // leading emit: the window opens BEFORE the write, so an
+    c.write(v);                                     // effect that throws during it cannot keep the window shut
     return;
   }
   t.held = v;                                       // suppressed: the latest is held
@@ -303,8 +345,12 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      t.last = Date.now();                          // the trailing emit opens the next window
-      if (!t.disposed) c.write(h);
+      // the trailing emit opens the next window — if its edge is admitted (before the write,
+      // so an effect that throws during the write still leaves the window open)
+      if (!t.disposed && admitFromTimer(c, t, h)) {
+        t.last = Date.now();
+        c.write(h);
+      }
     }, Math.max(0, t.ms - (now - t.last)));
   }
 }
@@ -1625,9 +1671,12 @@ function variantTag(v) {
   return v !== null && typeof v === "object" && typeof v.variant === "string" ? v.variant : v;
 }
 
-/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
+/**
+ * A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1).
+ * On a timed engine cell the check runs when the held write commits, not here (§6.13.5).
+ */
 export function transition(target, table, to) {
-  checkEdge(target, table, to);
+  if (!timedEdgeJudged(target)) checkEdge(target, table, to);
   asOp(target, "transition", to, () => target.set(to));
 }
 

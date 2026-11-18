@@ -4119,7 +4119,7 @@ ${
                 body = body.concat([JsStmt.SAssign(slot, init)])
                 init = slot
             }
-            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, f, init))])
+            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, d, f, i, init))])
             body = body.concat(idleWatchJs(fctx, d, f, i))
             i = i + 1
         }
@@ -4207,13 +4207,18 @@ ${
     // s478 — a `debounced=` / `throttled=` field (§6.13):
     // `rt.timed(inst$.scope, <cell>, "debounce" | "throttle", <ms>)` — the cell,
     // whose LOCAL writes now pass through the timing rule (runtime `timed`).
-    fn fieldCtor(ctx: Ctx, f: Field, init: JsExpr) -> JsExpr {
+    // S479 (§6.13.5) — on a graph field (an engine) the field's edge table is passed
+    // too: `rt.timed(…, <ms>, <edges>)`, and the runtime judges `rule=` when a held
+    // write COMMITS ("A `debounced=` / `throttled=` engine cell transitions at commit").
+    fn fieldCtor(ctx: Ctx, d: Decl, f: Field, i: int, init: JsExpr) -> JsExpr {
         const c: JsExpr = fieldCell0(ctx, f, init)
         const tm: Timing | not = f.timing
         if (tm is given && f.wcap is given) {
             let kind: string = "debounce"
             if (tm.throttle) kind = "throttle"
-            return rtCall(ctx, "timed", [jmember(jid("inst$"), "scope"), c, jstr(kind), jnum(tm.ms)])
+            let args: JsExpr[] = [jmember(jid("inst$"), "scope"), c, jstr(kind), jnum(tm.ms)]
+            if (f.graph is given) args = args.concat([jid(nameOf(ctx.names, NameKey.Edges(d.sym.id, i)))])
+            return rtCall(ctx, "timed", args)
         }
         return c
     }
