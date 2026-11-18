@@ -575,7 +575,9 @@ ${
     // subsequent `${}` blocks and markup interpolations in the same file"),
     // optionally `export`ed (§21.2). `nid` is the declaration's own node id (its
     // BindFact names the constant's Sym).
-    export type AConst:struct = { nid: int, span: ASpan, exported: boolean, name: string, ty: AType | not, init: AExpr }
+    // s479 (s479-file-scope-init): `mutable` — a file-scope `let` (§7.6: per-artifact
+    // state, S478 open-Qs ruling item 59 (c)); `false` — a `const`.
+    export type AConst:struct = { nid: int, span: ASpan, exported: boolean, name: string, ty: AType | not, init: AExpr, mutable: boolean }
 
     // `path` is the file's path as the driver names it (an identifier of the
     // file, used to resolve import sources).

@@ -137,16 +137,32 @@ describe("B — the S478 open-Qs rulings (user-voice items 33–40), and refusal
       expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
     }
     // a prefix that only LOOKS like one is an ordinary path
-    for (const p of ["/_scrmlx", "/_scrml_wsx/a", "/x/_scrml/y", "/_SCRML/a"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
+    for (const p of ["/_scrmlx", "/_scrml_wsx/a", "/x/_scrml/y", "/_SCRML/a", "/_scrml_localx", "/_scrml_local_/a", "/x/_scrml_local/y", "/_SCRML_LOCAL/a"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
   });
 
-  // item 37 — §61.7 path grammar; the refusal's code is not yet named (owner question), so it stays
-  // the bootstrap's not-built code (fail closed)
-  test("a path= outside the §61.7 grammar is refused (fail closed — its code is not yet named)", () => {
-    for (const p of ["fsp", "/a?b=1", "/a#x", "/a/../b", "/a/./b", "/a//b", "/users/:id", "/a%20b", "/ünï", "/a b"]) {
-      expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // S479 ruling (user-voice) §3.A item 5 — §61.7: the compiler "serves the client helpers it copies
+  // into the build output under `/_scrml_local/` (§21.3). A `path=` that is … `/_scrml_local`, or
+  // begins with … `/_scrml_local/`, is `E-ENDPOINT-ROUTE-DUPLICATE`"
+  test("S479: a path= under the reserved /_scrml_local/ prefix is E-ENDPOINT-ROUTE-DUPLICATE (once — not also E-ENDPOINT-PATH-INVALID)", () => {
+    for (const p of ["/_scrml_local", "/_scrml_local/", "/_scrml_local/helper.js", "/_scrml_local/lib/a.mjs"]) {
+      const ds = errs(ep(`path="${p}" method="POST" accepts=FspMethod`));
+      expect(ds.map((d) => d.code)).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
+      expect(ds[0].message).toContain("/_scrml_local/");
     }
-    for (const p of ["/", "/fsp/", "/api/v1/fleet-status", "/a.b_c~d", "/A-Z/0-9"]) expect(codes(ep(`path="${p}" method="POST" accepts=FspMethod`))).toEqual([]);
+    // a reserved path that is ALSO outside the grammar is reported once, as the reservation
+    expect(codes(ep(`path="/_scrml_local/a?b" method="POST" accepts=FspMethod`))).toEqual(["E-ENDPOINT-ROUTE-DUPLICATE"]);
+  });
+
+  // item 37 — §61.7 path grammar; S479 ruling (user-voice) §3.A item 5 names its code: "A `path=`
+  // outside this grammar is `E-ENDPOINT-PATH-INVALID` (§61.9), reported at the `<endpoint>` opener."
+  test("S479: a path= outside the §61.7 grammar is E-ENDPOINT-PATH-INVALID (one report, never E-BOOTSTRAP-UNSUPPORTED)", () => {
+    for (const p of ["fsp", " /fsp", "/a?b=1", "/a?", "/a#x", "/a/../b", "/a/./b", "/..", "/.", "/a/..", "/a//b", "//", "//a", "/users/:id", "/a%20b", "/a%2Fb", "/ünï", "/a b", "/a\\\\b" /* two backslashes in the scrml source: the attribute literal unescapes them to one */, "/a;b", "/a@b", "/a+b", "/a*b", "/a!b", "/a$b", "/a'b", "/a(b)", "/a,b", "/a=b", "/a[b]"]) {
+      const ds = errs(ep(`path="${p}" method="POST" accepts=FspMethod`));
+      expect([p, ds.map((d) => d.code)]).toEqual([p, ["E-ENDPOINT-PATH-INVALID"]]);
+      expect(ds[0].severity).toBe("Error");
+    }
+    // inside the grammar: a trailing `/` (an empty LAST segment), a segment of dots other than `.` / `..`
+    for (const p of ["/", "/fsp/", "/api/v1/fleet-status", "/a.b_c~d", "/A-Z/0-9", "/...", "/.well-known/x", "/a/b/", "/a./.b", "/~"]) expect([p, codes(ep(`path="${p}" method="POST" accepts=FspMethod`))]).toEqual([p, []]);
   });
 
   // item 36 — §61.2: "An `<endpoint>` declaration SHALL be a direct child of the top-level
@@ -306,6 +322,70 @@ describe("C — the route, served (§61.3 / §61.5 / §61.7)", () => {
     expect(await kind('{"tag":"FleetStatus","__proto__":{"x":1}}')).toBe("InvalidPayload");
   });
 
+  // S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one JSON
+  // object — the body itself or any object nested in it — names the same key twice is a decode
+  // failure — `::Malformed` … Keys are compared after JSON string unescaping". review #1940 (4):
+  // `{"tag":"Unit","tag":"I","n":3}` ran `I` (last wins) while a first-wins proxy sees `Unit`.
+  test("S479 §61.3: a body with a repeated key — any spelling, any depth — is 400 Malformed and no arm runs", async () => {
+    const { send } = await served(prog(`function record(p: string) -> string { return p; }\n<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { ran: record(prompt) }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`));
+    const malformed = async (raw) => {
+      const r = await send("/fsp", "POST", raw);
+      expect([raw, r.status, r.json && r.json.error && r.json.error.kind]).toEqual([raw, 400, "Malformed"]);
+      return r.json.error.message;
+    };
+    // the review's smuggle: two `tag`s naming two variants
+    expect(await malformed('{"tag":"FleetStatus","tag":"DeltaSince","seq":3}')).toContain("'tag'");
+    await malformed('{"tag":"DeltaSince","tag":"FleetStatus","seq":3}');
+    // the same variant twice, and a repeated payload field (same and different values)
+    await malformed('{"tag":"FleetStatus","tag":"FleetStatus"}');
+    await malformed('{"tag":"DeltaSince","seq":1,"seq":1}');
+    await malformed('{"tag":"DeltaSince","seq":1,"seq":2}');
+    await malformed('{"tag":"Dispatch","prompt":"a","project":"b","prompt":"rm -rf"}');
+    // keys that differ only by escape are the same key after unescaping
+    await malformed('{"tag":"FleetStatus","t\\u0061g":"DeltaSince","seq":3}');
+    await malformed('{"t\\u0061g":"FleetStatus","tag":"DeltaSince","seq":3}');
+    await malformed('{"\\u0074\\u0061\\u0067":"FleetStatus","tag":"FleetStatus"}');
+    await malformed('{"tag":"DeltaSince","seq":1,"s\\u0065q":2}');
+    await malformed('{"tag":"DeltaSince","seq":1,"\\u0073eq":2}');
+    await malformed('{"tag":"DeltaSince","seq":1,"\\u0073\\u0065\\u0071":2}');
+    await malformed('{"tag":"Dispatch","prompt":"a","project":"b","pro\\u006dpt":"c"}');
+    // an escaped solidus and an escaped non-BMP character (a surrogate pair) compare by value
+    await malformed('{"tag":"FleetStatus","a/b":1,"a\\/b":2}');
+    await malformed('{"tag":"FleetStatus","\\ud83d\\ude00":1,"\u{1F600}":2}');
+    // whitespace between tokens does not hide a repeat
+    await malformed('{ "tag" : "FleetStatus" ,\n\t"tag" : "FleetStatus" }');
+    // a repeat inside a nested object or an object inside an array — the body is still refused
+    await malformed('{"tag":"FleetStatus","x":{"a":1,"a":2}}');
+    await malformed('{"tag":"FleetStatus","x":[{"a":1},{"b":1,"b":2}]}');
+    await malformed('{"tag":"FleetStatus","x":{"y":{"z":{"k":1,"k\\u0000":0,"k":2}}}}');
+    await malformed('{"tag":"DeltaSince","seq":1,"__proto__":{},"__proto__":{}}');
+  });
+
+  test("S479 §61.3: no false repeat — the same key in sibling or nested objects, escaped look-alikes that differ, and key text inside string values", async () => {
+    const { send } = await served(prog(`<endpoint path="/fsp" method="POST" accepts=FspMethod>\n  <FleetStatus : { active: 3 }>\n  <Dispatch(prompt, project) : { prompt: prompt, project: project }>\n  <DeltaSince(seq) : { since: seq }>\n</endpoint>`));
+    // a value that LOOKS like a repeated key, escaped quotes in values, a backslash before the closing quote
+    let r = await send("/fsp", "POST", '{"tag":"Dispatch","prompt":"\\",\\"prompt\\":\\"x","project":"p\\\\"}');
+    expect([r.status, r.json]).toEqual([200, { prompt: '","prompt":"x', project: "p\\" }]);
+    r = await send("/fsp", "POST", '{"tag":"Dispatch","prompt":"{\\"tag\\":1,\\"tag\\":2}","project":"[{,:}]"}');
+    expect([r.status, r.json]).toEqual([200, { prompt: '{"tag":1,"tag":2}', project: "[{,:}]" }]);
+    // keys that differ in case, or by an escape of a different character, are different keys:
+    // the body is refused for its extra key (strict keys, InvalidPayload) — not as a repeat
+    for (const raw of ['{"tag":"DeltaSince","seq":1,"Seq":2}', '{"tag":"DeltaSince","seq":1,"seq\\u0000":2}', '{"tag":"DeltaSince","seq":1,"s\\u0065q2":2}']) {
+      r = await send("/fsp", "POST", raw);
+      expect([raw, r.status, r.json.error.kind]).toEqual([raw, 400, "InvalidPayload"]);
+    }
+    // the same key in two sibling objects, or at two depths, is no repeat (judged per object):
+    // these bodies fail only for their extra key `x`
+    for (const raw of ['{"tag":"FleetStatus","x":[{"a":1},{"a":2}]}', '{"tag":"FleetStatus","x":{"tag":{"tag":1}}}', '{"tag":"FleetStatus","x":[[{"a":1}],{"a":[{"a":2}]}]}']) {
+      r = await send("/fsp", "POST", raw);
+      expect([raw, r.status, r.json.error.kind]).toEqual([raw, 400, "InvalidPayload"]);
+      expect(r.json.error.message).toContain("'x'");
+    }
+    // and an ordinary body still dispatches
+    r = await send("/fsp", "POST", '{ "seq" : 4 , "tag" : "DeltaSince" }');
+    expect([r.status, r.json]).toEqual([200, { since: 4 }]);
+  });
+
   // S478 open-Qs ruling item 35 — §61.3: "A foreign contract whose requests carry envelope keys
   // (JSON-RPC's `jsonrpc`, `id`) declares them as payload fields of the variant"
   test("§61.3 strict keys: JSON-RPC envelope keys are refused unless the variant declares them, and served when it does", async () => {
@@ -410,6 +490,124 @@ let <reply:string=""/>
     expect((await send("/echo", "POST", body({ tag: "Echo", text: "hi" }))).json).toEqual({ said: "hi!" });
     // the compiler-internal route still demands its CSRF pair (§12) — the endpoint did not open it
     expect((await send(server.routes[0].path, "POST", "[]")).status).toBe(403);
+  });
+});
+
+// S479 ruling (user-voice) §3.A item 5 — the repeated-key scan (server-runtime.js
+// `jsonRepeatedKey`) against an independent reference: a recursive-descent JSON reader that
+// decodes every key with its own escape table and reports the first key a single object names
+// twice. Random documents are drawn from a tiny key alphabet (so repeats are common) and each key
+// is spelled with random escapes (`\uXXXX` upper/lower hex, `\/`), random whitespace, nesting
+// through arrays and objects, and string VALUES that contain quotes, backslashes and key-like text.
+describe("E — §61.3 repeated-key scan vs a reference reader (seeded fuzz)", () => {
+  function refRepeated(text) {
+    let i = 0;
+    let found;
+    const ws = () => { while (" \t\n\r".includes(text[i])) i++; };
+    const str = () => {
+      i++; // the opening quote
+      let out = "";
+      for (;;) {
+        const c = text[i++];
+        if (c === '"') return out;
+        if (c !== "\\") { out += c; continue; }
+        const e = text[i++];
+        if (e === "u") { out += String.fromCharCode(parseInt(text.slice(i, i + 4), 16)); i += 4; }
+        else out += { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" }[e];
+      }
+    };
+    const val = () => {
+      ws();
+      const c = text[i];
+      if (c === "{") {
+        i++;
+        const keys = new Set();
+        ws();
+        if (text[i] === "}") { i++; return; }
+        for (;;) {
+          ws();
+          const k = str();
+          if (keys.has(k) && found === undefined) found = k;
+          keys.add(k);
+          ws(); i++; // ':'
+          val();
+          ws();
+          if (text[i++] === "}") return;
+        }
+      }
+      if (c === "[") {
+        i++;
+        ws();
+        if (text[i] === "]") { i++; return; }
+        for (;;) { val(); ws(); if (text[i++] === "]") return; }
+      }
+      if (c === '"') { str(); return; }
+      while (i < text.length && !",]} \t\n\r".includes(text[i])) i++;
+    };
+    val();
+    return found;
+  }
+
+  // a small deterministic PRNG (mulberry32)
+  const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+
+  function spell(r, s) {
+    let out = "";
+    for (let j = 0; j < s.length; j++) {
+      const ch = s[j]; // a UTF-16 code unit: a non-BMP character is escaped as its surrogate pair
+      const x = r();
+      const code = ch.charCodeAt(0);
+      if (ch === '"' || ch === "\\") out += "\\" + ch;
+      else if (ch === "/" && x < 0.5) out += "\\/";
+      else if (x < 0.3 || code < 0x20 || (code >= 0xd800 && code <= 0xdfff && x < 0.9)) { const h = code.toString(16).padStart(4, "0"); out += "\\u" + (r() < 0.5 ? h : h.toUpperCase()); }
+      else out += ch;
+    }
+    return '"' + out + '"';
+  }
+  const sp = (r) => [" ", "", "\n", "\t", "  ", "\r\n"][Math.floor(r() * 6)];
+  const KEYS = ["tag", "t", "a", "a/b", "\"", "\\", "k\u0000", "Tag", "é", "\u{1F600}"];
+  const VALS = ["\"tag\"", "\",\\\"tag\\\":\"", "\"\\\\\"", "\"{\\\"a\\\":1,\\\"a\\\":2}\""];
+  function gen(r, depth) {
+    const x = r();
+    if (depth > 4 || x < 0.3) {
+      const y = r();
+      if (y < 0.4) return VALS[Math.floor(r() * VALS.length)];
+      if (y < 0.7) return String(Math.floor(r() * 100));
+      return ["true", "false", "null", "-1.5e3"][Math.floor(r() * 4)];
+    }
+    const n = Math.floor(r() * 4);
+    const parts = [];
+    if (x < 0.55) {
+      for (let k = 0; k < n; k++) parts.push(sp(r) + gen(r, depth + 1) + sp(r));
+      return "[" + parts.join(",") + "]";
+    }
+    for (let k = 0; k < n; k++) parts.push(sp(r) + spell(r, KEYS[Math.floor(r() * KEYS.length)]) + sp(r) + ":" + sp(r) + gen(r, depth + 1) + sp(r));
+    return "{" + parts.join(",") + "}";
+  }
+
+  test("agrees with the reference on 20,000 random documents (repeats and non-repeats both hit)", async () => {
+    const { jsonRepeatedKey } = await import("../slice-m1/runtime/server-runtime.js");
+    const r = rng(479);
+    let repeats = 0;
+    let clean = 0;
+    for (let n = 0; n < 20000; n++) {
+      const doc = gen(r, 0);
+      JSON.parse(doc); // the generator writes valid JSON only
+      const want = refRepeated(doc);
+      const got = jsonRepeatedKey(doc);
+      if (got !== want) expect({ doc, got, want }).toEqual({ doc, got: want, want });
+      if (want === undefined) clean++; else repeats++;
+    }
+    expect(repeats).toBeGreaterThan(2000);
+    expect(clean).toBeGreaterThan(2000);
+  });
+
+  test("a deeply nested body is scanned without exhausting the stack", async () => {
+    const { jsonRepeatedKey } = await import("../slice-m1/runtime/server-runtime.js");
+    const deep = (n, inner) => '{"a":'.repeat(n) + inner + "}".repeat(n);
+    expect(jsonRepeatedKey(deep(100000, '{"k":1,"k":2}'))).toBe("k");
+    expect(jsonRepeatedKey(deep(100000, '{"k":1,"j":2}'))).toBe(undefined);
+    expect(jsonRepeatedKey("[".repeat(100000) + '{"x":0,"x":0}' + "]".repeat(100000))).toBe("x");
   });
 });
 

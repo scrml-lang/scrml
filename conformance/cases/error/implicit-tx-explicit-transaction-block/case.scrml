@@ -15,7 +15,7 @@
         transaction {
             ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run();
         }
-        return { a, b }
+        return 1;
     }
     <p>x</p>
 </program>
