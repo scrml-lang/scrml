@@ -253,15 +253,15 @@ describe("item 59 — where a file-scope initializer runs (§7.6)", () => {
     expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-SERVER-ONLY-REACH");
     expect(d.map((x) => x.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
-  test("a non-constant, non-server initializer stays refused by name, citing the ruling (INTERIM)", () => {
+  // s479 (s479-file-scope-init): rule (b) and the file-scope `let` are built — the two by-name
+  // refusals these tests pinned are gone (file-scope-init-s479.test.js covers (b) and (c))
+  test("s479: a non-constant, non-server initializer is admitted (§7.6 rule (b))", () => {
     const d = run(P("    fn f() -> int { return 1; }\n    const A = f();")).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d.length).toBe(1);
-    expect(d[0].message).toContain("g-boot-file-scope-init-eval-s478");
+    expect(d.length).toBe(0);
   });
-  test("a file-scope `let` stays refused by name, naming E-FILE-SCOPE-LET-SERVER-WRITE's rule", () => {
+  test("s479: a file-scope `let` is admitted (§7.6 rule (c) — per-artifact state)", () => {
     const d = run(P("    let counter = 0;")).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d.length).toBe(1);
-    expect(d[0].message).toContain("E-FILE-SCOPE-LET-SERVER-WRITE");
+    expect(d.length).toBe(0);
   });
 });
 
