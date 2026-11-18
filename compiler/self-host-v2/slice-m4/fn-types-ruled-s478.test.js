@@ -216,3 +216,44 @@ describe("item 8 — a server function's function-typed result (§12.5.3)", () =
     expect(codes(P(`    server function badP(cb: () => void) -> string { return "ok"; }\n    function go() { @out = 1; }`))).toEqual(["E-ROUTE-004"]);
   });
 });
+
+// s478-ruled-fn-types r1 — the S239 review of #1943 (MED-1, MED-2, LOW-1, LOW-3).
+describe("r1 — review fixes", () => {
+  // MED-1: refusals.scrml — a pure function type `fn (x: T) => R` is token-for-token the
+  // anonymous-`fn` arrow (§48.2.1 E-FN-ARROW-BODY); in a type position it is a pass-through
+  // row, so the line's real error is reported (refusals.scrml header: "a matching construct with
+  // no error on its line is simply not this construct").
+  test("a pure function type on a parameter, on a line with a real error: that error alone", () => {
+    expect(codes(P(`    fn ap(f: fn (x: int) => int, n: int) -> int { return f(n) + nope; }\n    function go() { @out = 1; }`))).toEqual(["E-SCOPE-001"]);
+  });
+  test("a pure function type on a local, on a line with a real error: that error alone", () => {
+    expect(codes(P(`    fn tw(x: int) -> int { return x; }\n    function go() { const f: fn (x: int) => int = tw; @out = nope; }`))).toEqual(["E-SCOPE-001"]);
+  });
+  test("a pure failable function type on a parameter, on a line with a real error: that error alone", () => {
+    expect(codes(P(`${E}\n    fn ap(f: fn (x: int)! E => int, n: int) -> int { return nope; }\n    function go() { @out = 1; }`))).toEqual(["E-SCOPE-001"]);
+  });
+  test("an anonymous `fn` arrow as a VALUE keeps its E-FN-ARROW-BODY", () => {
+    expect(codes(P(`    function go() { const d = [1, 2].map(fn(n) => n * 2); @out = 1; }`))).toEqual(["E-FN-ARROW-BODY"]);
+  });
+
+  // LOW-1: §7.5 — the retired `->` after the failable modifier is one E-PARSE-TYPE naming the fix
+  test("`(x: int)! E -> int` in a type is one E-PARSE-TYPE naming `=>`", () => {
+    const src = P(`${E}\n    function ap(f: (x: int)! E -> int, n: int) -> int { return n; }\n    function go() { @out = 1; }`);
+    expect(codes(src)).toEqual(["E-PARSE-TYPE"]);
+    expect(msgs(src)[0]).toContain("`=>`");
+  });
+
+  // MED-2: §7.5 — `fn()` on a §66 declaration attribute is E-PARSE-TYPE naming the fix
+  test("`act:fn()` on a declaration attribute is one E-PARSE-TYPE naming `() => void`", () => {
+    const src = `<program>\n    <btn label:string act:fn()/>\n    <p>x</p>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-PARSE-TYPE"]);
+    expect(msgs(src)[0]).toContain("() => void");
+  });
+
+  // LOW-3: §19.4.1 — a `!` function has no `-> T` slot, so the refusal does not tell the author to write one
+  test("a recursive `!` function used as a value: refused without the `-> T` fix", () => {
+    const m = msgs(P(`${E}\n    function rec(x: int)! E { if (x < 0) { fail E.Bad; } if (x == 0) { return 0; } const g = rec; return g(x - 1)? + 1; }\n    function go() { @out = rec(3) !{ .Bad :> 0 }; }`));
+    expect(m.some((x) => x.startsWith("E-BOOTSTRAP-UNSUPPORTED") && x.includes("no `-> T` slot"))).toBe(true);
+    expect(m.some((x) => x.includes("Write `-> T`"))).toBe(false);
+  });
+});

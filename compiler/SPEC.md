@@ -9002,7 +9002,7 @@ reverse. Purity is the one widening: a pure value (`fn (x: T) => R`) satisfies t
 signature (`(x: T) => R`), since it keeps a contract the position does not ask for; an impure value never satisfies
 a pure type. Not satisfying is E-TYPE-031 at every position this section checks — a function value's type is always
 proven (it is its signature). **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 6 — *"keep
-invariance for v1 and write it into §7.5.1."* *(PA reading, flagged for veto: the purity widening and exact
+invariance for v1 and write it into §7.5.1."* *(PA reading pending the owner's confirmation, flagged for veto: the purity widening and exact
 failability are not named by the ruling. Without the widening every `fn` passed to a callback parameter would be
 E-TYPE-031, against §48.6.3 "`fn` declarations MAY be … Passed as function arguments"; failability is exact
 because §19.4.3 says it "travels with the value".)* **Direction of change:** inert — the bootstrap's rule since
@@ -11438,7 +11438,7 @@ The compiler inserts `await` automatically per §13.
 - **A function-typed result is E-ROUTE-003 (S478).** A server function whose return type is a function type
   (§7.5 "Function types") — `server function f() -> () => void` — is E-ROUTE-003 under the bullet above (*"a
   **function** (not value data … no JSON form)"*): its result would cross the server→client boundary, and a function
-  value has no wire form (§14.3). ⚑ **PA reading, flagged for veto.** The S478 ruling (ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 8: *"widen E-ROUTE-004 to "a parameter or return type""*) answered an owner question
+  value has no wire form (§14.3). ⚑ **PA reading pending the owner's confirmation, flagged for veto.** The S478 ruling (ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 8: *"widen E-ROUTE-004 to "a parameter or return type""*) answered an owner question
   whose premise was that *"a function-typed return has no code"*; it has one — E-ROUTE-003, above, which impl#1
   emits for this exact shape (measured: `server function badRet() -> () => void` → E-ROUTE-003). Widening
   E-ROUTE-004 to results too would give one shape two codes and split the implementations, so E-ROUTE-004 stays the
@@ -30388,7 +30388,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-MAP-ITERATION-ORDER | §59.8 | (Phase-c, info) A non-`@ordered` map is iterated without `.sorted()` in a position where order may matter; names `.sorted()` / `@ordered`. Partitions into `result.warnings` (non-fatal) per the info-level diagnostic-stream convention. (S168 — Value-Native Maps, §59.8) | Info |
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
-| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. **S474 (§14.3, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a field whose function parts are all pure `fn` is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474); an impure function-typed field is INTERIM too, until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474; ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). (Emitted at `compiler/src/type-system.ts` (`checkFunctionTypedStructFields`).) | Error |
+| E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: () => void }`) is declared with a FUNCTION type (`() => void`, `(x: int) => string`; S478: the retired spellings ~~`() -> void`~~ and ~~`fn()`~~ are E-PARSE-TYPE, §7.5 "Function types"). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. **S474 (§14.3, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a field whose function parts are all pure `fn` is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474); an impure function-typed field is INTERIM too, until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474; ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). (Emitted at `compiler/src/type-system.ts` (`checkFunctionTypedStructFields`).) | Error |
 | E-VALUE-FUNCTION-STORED | §14.3, §15.11.5.1, §59.3 | A VALUE stores a function: an object, array or map literal holds a function in a field, element or entry (directly, through a spread, a method / getter, or a ternary / `??` / logical-or choosing one); a state cell is initialised or assigned one (`<f> = g`, `@f = g`); a field / element write puts one into a value (`o.f = g`, `@o["k"] = g`, `@fs[0] = g`); an enum payload holds one (`Op.Apply(g)`); a method puts one into a scrml value (on a known scrml value every method except the closed calling set `map` / `filter` / `forEach` / `then` / … / `update` / `sortedBy`; on a receiver of unknown provenance the storing methods `push` / `concat` / `with` / `insert` / `add` / …); a host call whose argument literal held one has its RESULT kept as a scrml value (`const o = Object.freeze({ f: g })`, `Array.of(g)`, `new Set().add(g)`); a host call writes one into a scrml value (`Object.assign(o, { f: g })`, `Object.defineProperty`, `Reflect.set`); a value is BUILT FROM a callback that returns functions (`xs.map(() => g)`, `Array.from(xs, f)`, `m.update(k, f)` — S464 "(a) Close it", the closure-array entry); the dot-shorthand enum payload (`.Apply(g)`); or a known host callable is stored (`{ f: Math.max }`). A `match` arm value, a value-form `if` lift and a `for` lift count as the value. Function facts cross imports, re-exports (`export … from`, `export *`) and local export lists, and are read for `scrml:` stdlib modules from their source; an unknown cross-module value name fails closed. Function-ness is read from the tree and solved to a fixpoint over the file, failing closed: an arrow / `fn` / `function` expression (block bodies included), or a name that may hold one — an alias, a reassigned binding, a destructuring / parameter default, a function-typed parameter, a parameter a call site hands a function — or a call of a file function that may return one. NOT fired for a function PASSED as an argument or callback, wired as a prop / event handler, CALLED, or bound to a local name; nor for a literal handed to a host-JS call in statement position (the host boundary), nor for a write or method whose target is rooted in a host binding. The sibling of `E-STRUCT-FUNCTION-FIELD` (which stays the type-annotation code). Fix: pass the function instead (hand it to the call that uses it), wire it as a prop / handler, or store an enum tag and `match` on it. Partitions into `result.errors`. (Ruling S462 "a" + S464; emitted at `compiler/src/value-function-stored.ts` via `compiler/src/type-system.ts` `checkValueFunctionStored`.) **S474 (§14.3; S469 R2′, ruling:user-voice-scrml.md S474 "⭐ RULED — permanent-restrictions re-review: the four one-way doors" item 4):** a pure `fn` value in a cell or struct field is an INTERIM refusal (g-pure-fn-values-in-cells-unbuilt-s474), and so is a local binding holding any function value (R2′); an impure function value in a cell or field is INTERIM until effect-typed function values are built (g-impure-fn-values-in-cells-effect-typed-s474); any function-holding value at `==` / ordering, a map key or a serialization sink stays refused, PERMANENT (semantic impossibility: function `==` is undecidable; a closure cannot be serialized — ruling:user-voice-scrml.md S474 "⭐ RULED — FORK RULE row C amended: semantic impossibility may be PERMANENT"). | Error |
 | E-TIMER-STRUCT-MISUSE | §41.21 | A `scrml:time` `Debouncer` / `Throttler` (a name or state cell initialised by `debounce(…)` / `throttle(…)` imported from `scrml:time`) is CALLED (`d(q)`, `@d(q)`) or has a method called on it (`d.cancel()`, `d.flush()`, `d.run()`). The struct is data, not a function: the message names the free function to use — `run(d, …)`, `cancel(d)`, `flush(d)`. Retires the pre-S464 callable-with-methods shape at compile time (it threw at run time). Partitions into `result.errors`. (Ruling S464 "(a) Struct + free fns" / "(a) Fix + land + type rule"; emitted at `compiler/src/value-function-stored.ts` via `checkTimerMisuse`.) | Error |
 | E-STRUCT-DUPLICATE-KEY | §14.3, §66.11.3 | A struct literal names the same key twice — a plain literal (`{ x: 5, x: 6 }`), a nested one, or the spread-override shape (`{ ...@g, phase: .Gone, phase: .Live }`). Not a map literal (that is `W-MAP-DUPLICATE-LITERAL-KEY`, §59.3). **Provenance:** ruling:user-voice-scrml.md S440 — "duplicate keys are an error in ANY struct literal" + the six-open-questions "all recs" (S440, second entry), item 2. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). | Error |
@@ -38312,13 +38312,19 @@ fn buildItem(name: string) {
 `fn` declarations MAY be:
 - Assigned to `let`/`const`/`lin` variables.
 - Passed as function arguments.
-- Stored as fields of `<state>` objects (using a function type annotation).
+- ~~Stored as fields of `<state>` objects (using a function type annotation).~~ *(superseded by §14.3: a function
+  is "never STORED as value data (a struct field or a state cell)" — E-STRUCT-FUNCTION-FIELD /
+  E-VALUE-FUNCTION-STORED.)*
 - Returned from other `fn` bodies (the returned `fn` carries its constraints).
 
-When a `fn` is stored in a `<state>` field, the field's type annotation carries the `fn` constraint. Calling the stored function is subject to the same constraints as calling any `fn` directly.
+~~When a `fn` is stored in a `<state>` field, the field's type annotation carries the `fn` constraint. Calling the stored function is subject to the same constraints as calling any `fn` directly.~~
+*(S478: superseded by §14.3 — a function is not stored in a `<state>` field or any other value data. The `fn`
+constraint is carried by the pure function type below, in the positions §14.3 R2′ admits: bound, passed,
+returned and called.)*
 
 **The pure function type (S478).** The type that carries the `fn` constraint is spelled `fn (x: T) => R` (§7.5
-"Function types"). A `fn` declaration named as a value has it; an impure value never satisfies it (§7.5.1,
+"Function types"). It stands in the positions §14.3 R2′ admits a function value (a local's, a parameter's or a
+return type), never a stored field. A `fn` declaration named as a value has it; an impure value never satisfies it (§7.5.1,
 "Function types — invariance"). Two rules follow:
 
 1. **A `fn` body calls through a pure value only.** Inside a `fn` body, a call through a function value SHALL have
@@ -38326,14 +38332,16 @@ When a `fn` is stored in a `<state>` field, the field's type annotation carries 
    rule for a call of a `function`, since the value may run any of the five prohibited constructs.
 2. **A `fn` returns only a pure value.** A `fn` SHALL return only a value of a pure function type: a `fn` whose
    declared return type is an impure function type is **E-FN-003**, as is a pure function type whose result is an
-   impure function type. *(⚑ Code — PA reading, flagged for veto: the ruling names no code. E-FN-003 is the code of
+   impure function type. *(⚑ Code — PA reading pending the owner's confirmation, flagged for veto: the ruling names no code. E-FN-003 is the code of
    the purity contract this protects — a later call of the returned value would run an impure body on the `fn`'s
    behalf.)*
 
 **Provenance:** ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 4 — *"`fn (x: T) => R` as the pure function type; a `fn` body may call
 through a value of that type only."*; and (the #1929 review L3 sub-question) *"once the pure function type exists,
-a `fn` may return only a value of it."* · **supersedes:** nothing struck — this section said *"the returned `fn`
-carries its constraints"* and *"the field's type annotation carries the `fn` constraint"* with no spelling.
+a `fn` may return only a value of it."* · **supersedes:** nothing struck by this paragraph — this section said *"the returned `fn`
+carries its constraints"* with no spelling. (Its *"the field's type annotation carries the `fn` constraint"*
+and the `<state>`-field bullet are struck above as superseded by §14.3, which forbids storing a function as value
+data; they are no home of the pure type.)
 **Direction of change:** newly-accepting for rule 1 (a call through a value in a `fn` body was refused by name in
 the bootstrap); newly-rejecting for rule 2 (a `fn` returning an impure function value compiled). Nominal on impl#1.
 
@@ -54047,7 +54055,7 @@ s474-slot-exclusive-branches; impl#1 does not implement §66.)*
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
 
-> ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. `onOpen:fn()`) is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
+> ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. ~~`onOpen:fn()`~~ `onOpen:() => void` — S478: `fn()` is no longer a type spelling, E-PARSE-TYPE, §7.5 "Function types") is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O8: function-typed attributes vs the passed-vs-stored rule.** "Callback props =
 > function-typed attributes" is ruled. But an attribute is declaration DATA — part of the declaration's type
@@ -54059,7 +54067,7 @@ s474-slot-exclusive-branches; impl#1 does not implement §66.)*
 > the value; a function stored on a declaration instance and invoked through it (`@x.onpick(…)`) is the shape
 > that stance rejects. (The components text bryan answered asserted the opposite reading — *"This isn't a method,
 > just a value passed in, so it's consistent with your S430 stance"* — which ratifies function-typed attributes
-> (`<card title:string onOpen:fn()>`) but not how they meet §15.11.5.1 / `E-EQ-003`.)
+> (`<card title:string onOpen:fn()>` — the record's spelling; S478 writes it `onOpen:() => void`, §7.5) but not how they meet §15.11.5.1 / `E-EQ-003`.)
 
 #### 66.15.3 Explicit attribute forwarding — the ratified destination (Nominal, not built)
 
@@ -54083,13 +54091,15 @@ A declaration MAY opt in to forwarding by declaring an **element-typed rest** an
 element** in its `renders`:
 
 ```scrml
-<btn label:string act:fn() ...attrs:button/>
+<btn label:string act:() => void ...attrs:button/>
 renders <button class="btn" type="button" onclick=act() ...attrs>${label}</button>
 
 <btn label="Delete" act=confirmDelete() aria-describedby="del-help" data-testid="del" class="btn--danger"/>
 <btn label="Save" act=save() type="submit"/>      // E-DECL-USE-ATTR — `type` is written by <btn>'s renders
 <btn label="Save" act=save() hreff="/x"/>         // E-DECL-USE-ATTR — not an attribute of <button>
 ```
+
+*(S478: the example read ~~`act:fn()`~~; `fn()` is no longer a type spelling — `() => void`, §7.5 "Function types". The bootstrap does not yet read a function type in a declaration opener: `act:() => void` there is a parse error, INTERIM, gap `g-boot-opener-fn-type-s478`.)*
 
 1. **Declared as `...name:element`.** The rest is declared in the opener as `...attrs:button` — an element NAME,
    with no angle brackets (`<button>` would close the opener, §66.2.4). Its type is that element's attribute set,

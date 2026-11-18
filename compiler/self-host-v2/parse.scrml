@@ -7708,8 +7708,22 @@ ${
         if (!isP(tp, "(")) return false
         const close: int = parenClose(tp)
         if (close < 0) return false
-        const a: PTok = peekAt(tp, close + 1)
-        return tk(a, "-") && tk(peekAt(tp, close + 2), ">") && touching(a, peekAt(tp, close + 2))
+        return thinArrowAt(tp, close + 1) > 0
+    }
+
+    // s478-ruled-fn-types r1 (review LOW-1) — after a function type's `)`, at offset `k`: the
+    // retired glued `->`, past an optional failable modifier `!` / `! E` (`(x: int)! E -> int`
+    // is the retired spelling of `(x: int)! E => int`, §7.5). The offset of the `-`, else 0.
+    fn thinArrowAt(tp: TP, k: int) -> int {
+        let j: int = k
+        if (tk(peekAt(tp, j), "!")) {
+            j = j + 1
+            const e: PTok = peekAt(tp, j)
+            if ((e.cls == TC.Ident || e.cls == TC.Keyword) && tk(peekAt(tp, j + 1), "-")) j = j + 1
+        }
+        const a: PTok = peekAt(tp, j)
+        if (tk(a, "-") && tk(peekAt(tp, j + 1), ">") && touching(a, peekAt(tp, j + 1))) return j
+        return 0
     }
 
     fn thinArrowFix() -> string {
@@ -7722,8 +7736,7 @@ ${
     fn parseRetiredFnKw(tp: TP, start: int) -> RType {
         const t0: TP = diagAt(tp, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value; `fn (x: T) => R` (with `=>`) is the PURE function type (§48.6.3)", cur(tp))
         const close: int = parenClose(adv(t0))
-        const a: PTok = peekAt(adv(t0), close + 1)
-        if (close > 0 && tk(a, "-") && tk(peekAt(adv(t0), close + 2), ">") && touching(a, peekAt(adv(t0), close + 2))) return parseFnTypeAt(adv(t0), start, false, true, false)
+        if (close > 0 && thinArrowAt(adv(t0), close + 1) > 0) return parseFnTypeAt(adv(t0), start, false, true, false)
         return parseFnTypeAt(adv(t0), start, false, false, true)
     }
 
@@ -7759,7 +7772,7 @@ ${
         if (!thin) return parseFnTypeAt(tp, start, pure, false, false)
         // the retired `(…) -> R`: reported at its `->`, then read as `(…) => R`
         const close: int = parenClose(tp)
-        const t1: TP = diagAt(tp, "E-PARSE-TYPE", thinArrowFix(), peekAt(tp, close + 1))
+        const t1: TP = diagAt(tp, "E-PARSE-TYPE", thinArrowFix(), peekAt(tp, thinArrowAt(tp, close + 1)))
         return parseFnTypeAt(t1, start, pure, true, false)
     }
 
@@ -7795,7 +7808,7 @@ ${
             isFail = true
             t = adv(t)
             const et: PTok = cur(t)
-            if ((et.cls == TC.Ident || et.cls == TC.Keyword) && tk(peekAt(t, 1), "=>")) {
+            if ((et.cls == TC.Ident || et.cls == TC.Keyword) && (tk(peekAt(t, 1), "=>") || (thin && tk(peekAt(t, 1), "-")))) {
                 err = { nid: t.nid, span: mkSpan(et.start, et.end), k: ATypeK.TName(et.v) }
                 t = bumpId(adv(t))
             }
@@ -9920,6 +9933,24 @@ ${
         let m: MP = nm.mp
         if (nm.w == "") {
             m = mDiag(m, "E-PARSE-TYPE", "expected a type after " + after, start, start + 1)
+        }
+        // s478-ruled-fn-types r1 (review MED-2) — the RETIRED `fn(…)` spelling on a declaration
+        // attribute (`<btn act:fn()/>`, §66): E-PARSE-TYPE naming the fix (§7.5 "Function types":
+        // "the `fn(…)` spelling with no `=>` (`cb: fn()`) SHALL be a parse error, E-PARSE-TYPE, whose
+        // message names the fix"). The `(…)` — and a glued `-> R` after it — is read past, so nothing
+        // cascades; the type is blank (already reported).
+        if (nm.w == "fn" && chAt(m, 0) == "(") {
+            const fclose: int = lifeCloseCh(mp.src, m.pos)
+            if (fclose >= 0) {
+                m = mAt(m, fclose + 1)
+                if (chAt(m, 0) == "-" && chAt(m, 1) == ">") {
+                    const rr: RMType = openerTypeMember(mAdv(m, 2), "`->`")
+                    m = rr.mp
+                }
+                m = mDiag(m, "E-PARSE-TYPE", "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value. (The bootstrap does not yet read a function type on a declaration attribute — INTERIM, g-boot-opener-fn-type-s478.)", start, m.pos)
+                const bt: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName("") }
+                return { t: bt, mp: mBump(m) }
+            }
         }
         let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
         m = mBump(m)

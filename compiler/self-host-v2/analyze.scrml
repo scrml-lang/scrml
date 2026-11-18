@@ -8891,6 +8891,9 @@ ${
         if (why != "") return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — " + why))
         if (env.fx.fnVal != e.nid) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", fnPosWhy("`" + name + "` (a function named without a call)")))
         const ft: Type | not = fnValueType(env, f)
+        // s478-ruled-fn-types r1 (review LOW-3): a `!` function has no `-> T` slot (§19.4.1; E-PARSE-FN
+        // if written) — its success type is the one its returns prove, so the fix is not `-> T`
+        if (ft is not && f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — the bootstrap types a function VALUE by its signature, and the `!` function `" + f.name + "` has no success type it can read yet: every parameter's type must be written, and a `!` function has no `-> T` slot (§19.4.1) — its success type is the one its `return <value>`s prove, which is not proven here (a return through a value of the function itself, recursion through a value, INTERIM). Write every parameter's type on `" + f.name + "`, or call it by its name rather than through a value"))
         if (ft is not) return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it — the bootstrap types a function VALUE by its signature, and `" + f.name + "` does not write one it can read: every parameter's type, and the return type (`-> T`, or no `return <value>` at all) (INTERIM — an inferred return type is the typer's, after binding). Write `-> T` on `" + f.name + "`"))
         const st3: AS = addPending(st2, PendRule.FnValue(f.sym.id, env.fx.fnSym, env.file, e.span, f.name))
         return plain(ft, st3)

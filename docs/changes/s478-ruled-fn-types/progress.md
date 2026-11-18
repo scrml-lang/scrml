@@ -34,3 +34,18 @@ Branch `s478-ruled-fn-types`, base b04fdc27a. Scratch: `~/.cache/scrml/review/s4
   rejecting (now E-PARSE-TYPE pre-migration).
 - Gates: severity --check, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim,
   lint-no-default-arm, lint-duplicate-fn, spec-coverage-check — green.
+
+## Fix round 1 (S239 review of #1943, ~/.cache/scrml/review/s478-1943/review.md)
+- Merged origin/main (ba50527f9); known-gaps.md: kept the resolved marker + main's RULED paragraph.
+- MED-1: refusals.scrml — `PASS` pass-through rows for a pure function type in a type position
+  (`: fn (…) =>|!`, `-> fn (…) =>|!`, `type X = fn (…) =>|!`); the line keeps its real error.
+- MED-2: SPEC §66 O8 + §66.15.3 example → `() => void` (struck), §34 E-STRUCT-FUNCTION-FIELD row;
+  parse.scrml openerTypeMember: `name:fn(` in an opener is E-PARSE-TYPE naming the fix. Gap filed:
+  g-boot-opener-fn-type-s478 (`act:() => void` in an opener does not parse — pre-existing).
+- LOW-1: parse.scrml thinArrowAt — `(x: int)! E -> int` is one E-PARSE-TYPE.
+- LOW-2: SPEC §48.6.3 — the `<state>`-field bullet and sentence struck as superseded by §14.3.
+- LOW-3: analyze.scrml fnNameRef — a `!` function's refusal no longer says "Write `-> T`".
+- ⚑ notes (§7.5.1, §12.5.3, §48.6.3): "PA reading pending the owner's confirmation".
+- Tests: fn-types-ruled-s478 +7 (36 pass); named-refusals-s473 allows code PASS.
+- Conformance vs origin/main: PASS 614 → 615, PASS→FAIL 0 (r1 itself changes no verdict).
+- Corpus 3211 files vs origin/main bootstrap: 3209 identical, newly-rejecting 0.

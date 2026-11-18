@@ -131,11 +131,11 @@ describe("D28 — re-label only: the table never refuses a program the front end
 
 describe("D28 — the table is data in one place", () => {
   const SPEC = readFileSync(join(import.meta.dir, "..", "..", "SPEC.md"), "utf8");
-  test("every row's code is the bootstrap's E-BOOTSTRAP-UNSUPPORTED or a §34 code, and every row's section is a SPEC heading", () => {
+  test("every row's code is the bootstrap's E-BOOTSTRAP-UNSUPPORTED, a §34 code, or PASS (a pass-through), and every row's section is a SPEC heading", () => {
     const rows = mods.refusals.refusalTable();
     expect(rows.length).toBeGreaterThanOrEqual(40);
     for (const r of rows) {
-      if (r.code !== UNS) expect(SPEC).toContain(`| ${r.code} |`);
+      if (r.code !== UNS && r.code !== "PASS") expect(SPEC).toContain(`| ${r.code} |`);
       const sec = r.section.replace(/^§/, "");
       if (r.section.startsWith("App. ")) expect(SPEC).toContain(`## Appendix ${r.section.slice(5)}:`);
       else expect(SPEC).toMatch(new RegExp(`^#+ ${sec.replace(/\./g, "\\.")}[ .]`, "m"));

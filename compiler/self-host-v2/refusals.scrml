@@ -49,6 +49,8 @@
 //   `a|b`         any one of the alternatives (each may be a class above)
 //   `!a|b`        any token that is none of them
 //   `...`         zero or more tokens on the same line, none of them `{` / `;`
+// A row whose code is `PASS` is a pass-through: where it matches, its tokens are
+// consumed and nothing fires (a legal construct that shares a refused one's tokens).
 // `glue`: "tight" — every matched token touches the next (`^{`, `[:]`, `::`);
 // "spaced" — the first two do NOT touch (`< name`); "lead" — the first token
 // begins its line (a statement-head word that is also an English word: `use`,
@@ -166,6 +168,16 @@ ${
             // relabel it. (A pure `fn (…) => R` there has no error on its line, so nothing fires.)
             rowOn("fn(…) as a type", "§7.5", "E-PARSE-TYPE", [":", "fn", "("], ["E-PARSE-TYPE"], false, "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value; `fn (x: T) => R` (with `=>`) is the PURE function type (§48.6.3)"),
             rowOn("fn(…) as a type", "§7.5", "E-PARSE-TYPE", ["-", ">", "fn", "("], ["E-PARSE-TYPE"], false, "`fn(…)` is not a function type spelling (§7.5 \"Function types\", S478: `=>` is the one spelling). Write `(x: T) => R` — `() => void` for a function of no parameters that gives no value; `fn (x: T) => R` (with `=>`) is the PURE function type (§48.6.3)"),
+            // s478-ruled-fn-types r1 (review MED-1): a PURE function type `fn (x: T) => R` /
+            // `fn (x: T)! E => R` (§7.5, S478) is token-for-token the anonymous-`fn` arrow below, so
+            // a legal pure type on a line holding any OTHER error was relabelled E-FN-ARROW-BODY and
+            // the real error dropped. In a TYPE position — after a `:` annotation, a `->` return
+            // arrow, or `type X =` — the row is a PASS-THROUGH (code `PASS`): it consumes the type
+            // and relabels nothing, so the line keeps its own diagnostics. (A `fn (` there without
+            // `=>` / `!` after its `)` is the retired `fn(…)` spelling, owned by the two rows above.)
+            rowOn("fn (…) => R as a type", "§7.5", "PASS", [":", "fn", "(", "...", ")", "=>|!"], [], false, ""),
+            rowOn("fn (…) => R as a type", "§7.5", "PASS", ["-", ">", "fn", "(", "...", ")", "=>|!"], [], false, ""),
+            rowOn("fn (…) => R as a type", "§7.5", "PASS", ["type", "$w", "=", "fn", "(", "...", ")", "=>|!"], [], false, ""),
             rowOn("fn(…) => expr", "§48.2.1", "E-FN-ARROW-BODY", ["fn", "(", "...", ")", "=>"], [], false, "an anonymous `fn` takes a block body, `fn(x: T) { return …; }`; for an inline body write a plain lambda `(x: T) => …` (§48.2.1)"),
             rowOn("anonymous fn expression", "§48.2.1", U, ["fn", "("], [], false, "declare a named `fn` and pass its name, or write an arrow `(x: T) => …` where a callback is taken"),
             // s478-boot-block-lambda: a function EXPRESSION `function (…) { … }` is BUILT
@@ -327,7 +339,11 @@ ${
             for (const r of table) {
                 if (!done) {
                     const end: int = refMatchFrom(ts, i, r.pattern, 0, ts[i].line)
-                    if (end > i && glueHolds(ts, i, end, r.glue)) {
+                    if (end > i && glueHolds(ts, i, end, r.glue) && r.code == "PASS") {
+                        // a pass-through row: the tokens are not this table's construct — skip them
+                        next = end
+                        done = true
+                    } else if (end > i && glueHolds(ts, i, end, r.glue)) {
                         const first: int = ts[i].line
                         const last: int = ts[end - 1].line
                         const s: int = ts[i].start
