@@ -1,0 +1,5 @@
+// s478 fixture (PR 1948 review MED-1): a barrel re-exporting a barrel, every name compiling.
+${
+    export { good } from './good.scrml';
+    export { good2 } from './good2.scrml';
+}
