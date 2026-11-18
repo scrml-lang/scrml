@@ -1,9 +1,9 @@
 {
   "id": "reactive-dg-001-cyclic-neg",
-  "description": "§31 E-DG-001 NEGATIVE — the ACYCLIC equivalent of dg-001-cyclic-pos. Byte-identical source except `loadPet` does NOT call back to `loadOwner`, so the two db-escalated (§12.2 T1) server functions form a straight-line `awaits` chain `loadOwner -> loadPet` with a valid sequencing order. E-DG-001 stays silent. This is the cyclic-vs-acyclic contrast: server→server COMPOSITION is explicitly legal (§13.4) — only a CYCLE is rejected, so the whole E-DG- family must stay quiet here. Incidental W-PROGRAM-SPA-INFERRED / W-SQL-ROW-UNTYPED ignored by superset.",
+  "description": "§31.2 NEGATIVE — two db-touching (§12.2 T1, server-escalated) functions in a straight-line call chain `loadOwner -> loadPet` compile clean: server→server composition is legal (§13.4). The E-DG- family stays quiet — E-DG-001 is retired (S479). A call cycle is not rejected either: a cycle of calls is recursion, not a dependency cycle (§31.2), pinned by reactive/server-fn-mutual-recursion-clean. Incidental W-PROGRAM-SPA-INFERRED / W-SQL-ROW-UNTYPED ignored by superset.",
   "language-version": "1.0",
   "spec": "§13.4, §31.2",
-  "rationale": "§13.4: 'A server-escalated function MAY call another server-escalated function. Both execute in the same server handler context.' — a server→server awaits edge is legal by construction. §13.2 requires the compiler to 'Sequence dependent operations using `await`'; an acyclic awaits subgraph has a valid topological order, so the E-DG-001 rejection condition (§34: 'circular dependency in reactive graph') is not met and the compiler SHALL NOT reject the program.",
+  "rationale": "§13.4: 'A server-escalated function MAY call another server-escalated function. Both execute in the same server handler context.' §31.2 (S479): 'A cycle of calls between functions — direct recursion, or mutual recursion such as two server functions that call each other (§13.4) — is recursion, not a dependency cycle. The compiler SHALL NOT reject it.' An acyclic call chain is a fortiori not rejected; the reactive-graph cycles that are errors each have their own code (§31.2), and E-DG-001 is retired (§34).",
   "expect": {
     "codes": [],
     "notCodes": ["E-DG-001"],
