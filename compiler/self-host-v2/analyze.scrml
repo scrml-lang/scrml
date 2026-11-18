@@ -15692,6 +15692,8 @@ ${
             .Num :> ""
             .Str :> ""
             .Bool :> ""
+            // #1929: no cell holds a function value (analyze refuses it); fail closed regardless
+            .Fn :> "holds a function value (no wire form, §14.3)"
         }
     }
 
