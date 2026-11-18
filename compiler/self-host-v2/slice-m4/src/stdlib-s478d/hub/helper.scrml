@@ -1,0 +1,6 @@
+// s478 fixture — a file the bootstrap does NOT compile, imported by its module's entry.
+${
+    export function helper(s) {
+        return s;
+    }
+}

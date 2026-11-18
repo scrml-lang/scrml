@@ -10,20 +10,20 @@ ${
     // ---------------------------------------------------------------------------
 
     export { Rule, validate, isValid, firstError,
-             emailField, passwordField, passwordConfirmField } from './validate.scrml'
+             emailField, passwordField, passwordConfirmField } from './validate.scrml';
 
     export { pick, omit, mapKeys, mapValues, groupBy, indexBy, sortBy, unique,
              union, intersection, difference, member,
              flatten, flattenDeep, chunk, toSnakeCase, toCamelCase, camelizeKeys,
-             snakifyKeys, deepMerge, clamp, paginate } from './transform.scrml'
+             snakifyKeys, deepMerge, clamp, paginate } from './transform.scrml';
 
-    export { parseVariant, ParseError } from './parse.scrml'
+    export { parseVariant, ParseError } from './parse.scrml';
 
-    export { registerMessages, messageFor } from './messages.scrml'
+    export { registerMessages, messageFor } from './messages.scrml';
 
-    export { formFor, registerLabels } from './form-for.scrml'
+    export { formFor, registerLabels } from './form-for.scrml';
 
-    export { schemaFor } from './schema-for.scrml'
+    export { schemaFor } from './schema-for.scrml';
 
-    export { tableFor, TableSort } from './table-for.scrml'
+    export { tableFor, TableSort } from './table-for.scrml';
 }

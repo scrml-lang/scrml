@@ -760,6 +760,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
             .FCallV(f: x) :> not
         }
     }

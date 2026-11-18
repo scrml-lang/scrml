@@ -1,0 +1,7 @@
+// s478 (ruled-stdlib-data) fixture stdlib — a BARREL module (`scrml:bar`): its names are
+// re-exported from sibling files, supplied one target at a time (S478 open-Qs ruling item 55).
+${
+    export { good, Tone } from './good.scrml';
+    export { bad, alsoBad } from './bad.scrml';
+    export { unused } from './unused.scrml';
+}

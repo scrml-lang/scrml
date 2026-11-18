@@ -1072,6 +1072,7 @@ ${
         // failure set is checked with the Suspend, checkSuspendCall; C-SQL1 there too)
         const f: Sym | not = failableFn(call)
         let want: Sym | not = not
+        out = out.concat(checkParse(p, call, err))
         // s478-ruled-fn-types — C-FV3 for a failable call through a value: its callee is a Local
         // (the error enum is analyze's, from the value's function type — Core locals carry no type)
         const fv: Expr | not = failableValue(call)
@@ -1117,6 +1118,90 @@ ${
             if (!branchOk(needs, a.body, a.value)) out = out.concat([valueProblem(needs, "a failure arm")])
         }
         return out
+    }
+
+    // s478 (s478-ruled-stdlib-data) — C-PV1: an FParse (the §41.13 `parseVariant` intrinsic)
+    // decodes into an enum of the program whose payload fields are each `int`, `number`,
+    // `string` or `bool` (the decode the runtime builds — analyze refuses any other field,
+    // INTERIM), and fails with the enum its Attempt handles.
+    fn checkParse(p: CoreProgram, call: Failable, err: Sym) -> string[] {
+        return match call {
+            .FParse(json: j, en: en, err: er) :> parseProblems(p, en, er, err)
+            .FCall(fn: x) :> []
+            .FSettled(outcome: x) :> []
+            .FCallV(f: x) :> []
+        }
+    }
+
+    fn parseProblems(p: CoreProgram, en: Sym, er: Sym, err: Sym) -> string[] {
+        let out: string[] = []
+        if (er.id != err.id) out = out.concat(["C-PV1: a parseVariant Attempt handles `" + err.hint + "` but the decode fails with `" + er.hint + "`"])
+        // s478 #1948 review LOW-6: the failure enum IS the stdlib ParseError — the runtime decode
+        // (rt.parseVariant) builds its four variants by name, so an enum of another shape would fail
+        // at run time (CodecDefect), not here. Core carries no declaring file, so ParseError is
+        // recognised by its declaration (scrml:data/parse.scrml): exactly these variants, in order.
+        out = out.concat(parseErrorProblems(p, er))
+        const t: TypeDef | not = findTypeDef(p, en)
+        if (t is not) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not a type of the program"])
+        if (!isEnumDef(t)) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not an enum (§41.13)"])
+        for (const v of enumVariantDefs(t)) {
+            for (const fd of v.fields) {
+                if (!primField(fd.ty)) out = out.concat(["C-PV1: parseVariant decodes `" + en.hint + "." + v.sym.hint + "." + fd.sym.hint + "`, a field that is not `int` / `number` / `string` / `bool`"])
+            }
+        }
+        return out
+    }
+
+    // `er` is the stdlib `ParseError`: `MissingDiscriminator`, `UnknownVariant(tag: string)`,
+    // `InvalidPayload(field: string, reason: string)`, `Malformed(reason: string)`.
+    fn parseErrorProblems(p: CoreProgram, er: Sym) -> string[] {
+        const bad: string[] = ["C-PV1: a parseVariant decode fails with `" + er.hint + "`, which is not the stdlib `ParseError` (MissingDiscriminator / UnknownVariant(tag) / InvalidPayload(field, reason) / Malformed(reason), §41.13)"]
+        const t: TypeDef | not = findTypeDef(p, er)
+        if (t is not) return bad
+        if (!isEnumDef(t)) return bad
+        const vs: VariantDef[] = enumVariantDefs(t)
+        if (vs.length != 4) return bad
+        if (!strVariant(vs[0], "MissingDiscriminator", "", "")) return bad
+        if (!strVariant(vs[1], "UnknownVariant", "tag", "")) return bad
+        if (!strVariant(vs[2], "InvalidPayload", "field", "reason")) return bad
+        if (!strVariant(vs[3], "Malformed", "reason", "")) return bad
+        return []
+    }
+
+    // Is `v` the variant `name` with the `string` fields `f1`, `f2` (each "" for none)?
+    fn strVariant(v: VariantDef, name: string, f1: string, f2: string) -> boolean {
+        if (v.sym.hint != name) return false
+        let want: string[] = []
+        if (f1 != "") want = want.concat([f1])
+        if (f2 != "") want = want.concat([f2])
+        if (v.fields.length != want.length) return false
+        let i: int = 0
+        while (i < want.length) {
+            if (v.fields[i].sym.hint != want[i] || !isStrType(v.fields[i].ty)) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn isStrType(t: Type) -> boolean {
+        return match t {
+            .Str :> true
+            // no-default-arm: one question of a type — is it `string`
+            _ :> false
+        }
+    }
+
+    fn primField(t: Type) -> boolean {
+        return match t {
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+            .Named(sym: x) :> false
+            .Seq(elem: x) :> false
+            .Maybe(inner: x) :> false
+            .Fn(params: x) :> false
+        }
     }
 
     fn valueProblem(needs: boolean, what: string) -> string {
@@ -1576,6 +1661,7 @@ ${
             .FCallV(f: f) :> f
             .FCall(fn: x) :> not
             .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
         }
     }
 
@@ -1583,6 +1669,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
             .FCallV(f: x) :> not
         }
     }
@@ -3801,6 +3888,7 @@ ${
         return match c {
             .FSettled(outcome: o) :> o
             .FCall(fn: x) :> not
+            .FParse(json: x) :> not
             .FCallV(f: x) :> not
         }
     }

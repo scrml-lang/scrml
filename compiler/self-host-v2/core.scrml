@@ -435,9 +435,18 @@ ${
     // `!`. Only as the call of the Attempt that is the first statement of the
     // Suspend's `then`, and the outcome is read nowhere else (check.scrml C-S7):
     // a raw outcome (a value or a Failure) reaches no other expression.
+    // s478 (s478-ruled-stdlib-data) — FParse: the §41.13 `parseVariant(json, EnumType)`
+    // intrinsic (S478 open-Qs ruling (user-voice) item 56: "build the intrinsic (§41.13 is
+    // normative; 8 cases)"). §41.13: "the emitted code is a synchronous monomorphized parser per
+    // call site": `json` (the text) decodes against the enum `en` — its §57 wire descriptor
+    // (codec.scrml), strictly — into a value of `en`, or fails with the `err` enum (the
+    // `ParseError` scrml:data declares: MissingDiscriminator / UnknownVariant(tag) /
+    // InvalidPayload(field, reason) / Malformed(reason)). It names no function; it stands only
+    // as an Attempt's call, `err` that Attempt's (check.scrml C-PV1).
     export type Failable:enum = {
         FCall(fn: Sym, args: Expr[]),
         FSettled(outcome: Sym),
+        FParse(json: Expr, en: Sym, err: Sym),
         // s478-ruled-fn-types — a call THROUGH a local holding a failable function value
         // (§19.4.3 "The failable function type (S478)"): `f` is that Local (check.scrml C-FV3).
         FCallV(f: Expr, args: Expr[]),

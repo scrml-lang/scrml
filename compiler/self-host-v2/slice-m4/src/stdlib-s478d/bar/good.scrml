@@ -1,0 +1,8 @@
+// s478 fixture — a re-export target that compiles on the bootstrap.
+${
+    export type Tone:enum = { Warm, Cool };
+
+    export fn good(n: int) -> int {
+        return n + 1;
+    }
+}
