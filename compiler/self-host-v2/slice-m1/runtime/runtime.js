@@ -4837,6 +4837,74 @@ export function decodeText(table, text, opts) {
   return decode(table, wire, opts);
 }
 
+// -----------------------------------------------------------------------------
+// s478 (s478-ruled-stdlib-data) — the §41.13 `parseVariant(json, EnumType)` intrinsic
+// (S478 open-Qs ruling (user-voice) item 56: "build the intrinsic (§41.13 is normative; 8
+// cases)"). The compiler lowers each call to Core Failable.FParse, printed as
+// `rt.parseVariant(<EnumType's §57 table>, <ParseError's table>, json)`. Returns the decoded
+// enum value (the runtime shape: a unit variant is its name, a payload variant `{ variant,
+// data: [v0, …] }` positional in declared field order), or `failure(e)` with `e` a ParseError
+// value built against `errTable` (field names → positions, so the stdlib's declaration order is
+// read, never assumed). SPEC §41.13:
+//   - "the JSON string failed `JSON.parse`, OR the input is `null`/non-object/non-string (not a
+//     decodable object shape at all)" → Malformed(reason) — an array is not an object (§61.3 reads
+//     it so too);
+//   - "the input is an OBJECT that lacks a `tag` field" → MissingDiscriminator (a `tag` that is
+//     not a string names no variant either, as impl#1 and the endpoint decode read it);
+//   - "the JSON discriminator value does not match any variant name" → UnknownVariant(tag) —
+//     names are compared, never looked up (a `"__proto__"` / `"toString"` tag names nothing);
+//   - "a variant's payload field has the wrong type" → InvalidPayload(field, reason). STRICT
+//     KEYS: an object key other than `tag` and the payload fields of the variant `tag` names is
+//     InvalidPayload too — §61.3, whose body "decodes … via parseVariant": "The request body's
+//     keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is
+//     neither is a decode failure — `::InvalidPayload`"; §57 refuses an extra key everywhere
+//     ("A key the type does not declare is refused, not dropped (no coercion)"). A missing field
+//     is InvalidPayload. Each field decodes through the §57 codec (`decode`, canonical-only), no
+//     coercion: `"lots"` is not an `int`.
+// The `reason` texts are implementation freedom (the conformance cases assert the variant and
+// `field`, never `reason`).
+// -----------------------------------------------------------------------------
+const pvOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const pvClip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
+
+// A ParseError value: variant `name` of `errTable`'s root enum, its payload from `byField`.
+function pvError(errTable, name, byField) {
+  const d = defOf(errTable, errTable.root);
+  const v = d.k === "enum" ? variantOf(d, name) : undefined;
+  if (v === undefined) throw new CodecDefect(`parseVariant: the error enum ${JSON.stringify(d.name)} has no variant ${JSON.stringify(name)} (§41.13 ParseError)`);
+  if (v.fields.length === 0) return failure(v.name);
+  const data = v.fields.map((f) => {
+    if (!pvOwn(byField, f.name)) throw new CodecDefect(`parseVariant: ${d.name}.${v.name} has a field ${JSON.stringify(f.name)} the decode does not fill (§41.13 ParseError)`);
+    return byField[f.name];
+  });
+  return failure({ variant: v.name, data });
+}
+
+export function parseVariant(table, errTable, json) {
+  const d = defOf(table, table.root);
+  if (d.k !== "enum") throw new CodecDefect(`parseVariant: ${JSON.stringify(d.name)} is not an enum descriptor (§41.13)`);
+  let v = json;
+  if (typeof json === "string") {
+    try { v = JSON.parse(json); } catch (e) { return pvError(errTable, "Malformed", { reason: `not JSON: ${message(e)}` }); }
+  }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return pvError(errTable, "Malformed", { reason: "expected a JSON object (or the JSON text of one) at the parseVariant boundary" });
+  if (!pvOwn(v, "tag") || typeof v.tag !== "string") return pvError(errTable, "MissingDiscriminator", {});
+  const variant = variantOf(d, v.tag);
+  if (variant === undefined) return pvError(errTable, "UnknownVariant", { tag: v.tag });
+  for (const k of Object.keys(v)) {
+    if (k !== "tag" && !variant.fields.some((f) => f.name === k)) return pvError(errTable, "InvalidPayload", { field: k, reason: `'${pvClip(k)}' is not a payload field of variant '${variant.name}'` });
+  }
+  if (variant.fields.length === 0) return variant.name;
+  const data = [];
+  for (const f of variant.fields) {
+    if (!pvOwn(v, f.name)) return pvError(errTable, "InvalidPayload", { field: f.name, reason: `payload field '${f.name}' of variant '${variant.name}' is missing` });
+    const r = decode({ defs: table.defs, root: f.ty }, v[f.name], { canonicalOnly: true });
+    if (!r.ok) return pvError(errTable, "InvalidPayload", { field: f.name, reason: `payload field '${f.name}' of variant '${variant.name}': ${r.error && r.error.reason ? r.error.reason : "it does not decode"}` });
+    data.push(r.value);
+  }
+  return { variant: variant.name, data };
+}
+
 // Reading the input may throw: a recursive type admits unboundedly deep input
 // (or, on encode, a cyclic value) that exhausts the stack, and a getter or a
 // Proxy trap may throw. Each is a failure of the operation's `kind`, not a

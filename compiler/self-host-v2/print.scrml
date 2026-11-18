@@ -1844,6 +1844,7 @@ ${
         return match c {
             .FSettled(outcome: o) :> [o.id]
             .FCall(fn: f) :> []          // its arguments are Nodes (walk.kids); `fn` names a function, not a local
+            .FParse(json: j) :> []       // s478: its input is a Node (walk.kids); `en` / `err` name types
         }
     }
 
@@ -2381,6 +2382,10 @@ ${
         return match c {
             .FCall(fn: f, args: args) :> jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
             .FSettled(outcome: o) :> localRead(ctx, o)   // s454 (U1b): the Suspend's settled outcome
+            // s478 (s478-ruled-stdlib-data) — the §41.13 `parseVariant` intrinsic: `rt.parseVariant(<the
+            // enum's §57 table>, <the ParseError table>, json)` — the decoded value, or `rt.failure(e)`
+            // with `e` a value of the error enum (slice-m1/runtime/runtime.js parseVariant).
+            .FParse(json: j, en: en, err: er) :> rtCall(ctx, "parseVariant", [wireOrNull(ctx.p, Type.Named(en)), wireOrNull(ctx.p, Type.Named(er)), exprJs(ctx, j)])
         }
     }
 
@@ -5166,6 +5171,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
         }
     }
 }

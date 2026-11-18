@@ -1,0 +1,6 @@
+// s478 fixture — a re-export target nothing imports: never supplied, so its error is never seen.
+${
+    export function unused(s) {
+        return s;
+    }
+}

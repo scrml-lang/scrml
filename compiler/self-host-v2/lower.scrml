@@ -378,6 +378,7 @@ ${
         return match f {
             .VTemplate(text: tx) :> tx
             .VPrint(text: tx2, newline: nl2) :> allText(n)
+            .VParseVariant(en: pv2) :> allText(n)
             .VLit(lit: l) :> allText(n)
             .VVariant(enumSym: x) :> allText(n)
             .VOp(op: x) :> allText(n)
@@ -590,6 +591,7 @@ ${
             .VAt :> atExpr(c, cal, args)
             .VTemplate(text: tx) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VPrint(text: tx2, newline: nl2) :> printExpr(c, args, tx2, nl2)
+            .VParseVariant(en: pv2) :> missing()      // s478: the §41.13 intrinsic lowers only as an Attempt's call (failableOf / parseFailable)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             .VMethod(op: o) :> methodExpr(c, o, cal, args)
             not :> removalOrCall(c, e, cal, args)
@@ -654,6 +656,7 @@ ${
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
             .VPrint(text: tx2, newline: nl2) :> missing()
+            .VParseVariant(en: pv2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
@@ -679,6 +682,7 @@ ${
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
             .VPrint(text: tx2, newline: nl2) :> missing()
+            .VParseVariant(en: pv2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
@@ -743,6 +747,7 @@ ${
             .VAt :> missing()
             .VTemplate(text: tx) :> missing()
             .VPrint(text: tx2, newline: nl2) :> missing()
+            .VParseVariant(en: pv2) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             not :> missing()
@@ -763,6 +768,7 @@ ${
             .VAt :> PrimOp.Not
             .VTemplate(text: tx) :> PrimOp.Not
             .VPrint(text: tx2, newline: nl2) :> PrimOp.Not
+            .VParseVariant(en: pv2) :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
             .VMethod(op: x) :> PrimOp.Not
             not :> PrimOp.Not
@@ -785,6 +791,7 @@ ${
             .VAt :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VTemplate(text: tx) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VPrint(text: tx2, newline: nl2) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VParseVariant(en: pv2) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VMethod(op: m) :> Expr.Prim(m, [lowerExpr(c, o)])        // s469: a string's `.length` (StrLength)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -1161,6 +1168,7 @@ ${
             .VAt :> ""
             .VTemplate(text: tx) :> ""
             .VPrint(text: tx2, newline: nl2) :> ""
+            .VParseVariant(en: pv2) :> ""
             .VLit(lit: x) :> ""
             .VVariant(enumSym: x) :> ""
             .VStructOf(ty: x) :> ""
@@ -3236,6 +3244,7 @@ ${
             .VAt :> not
             .VTemplate(text: tx) :> not
             .VPrint(text: tx2, newline: nl2) :> not
+            .VParseVariant(en: pv2) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not
@@ -3422,6 +3431,9 @@ ${
         // client call's, or — the call turned out server→server — the callee's own
         const err: Sym = effErr(c, h)
         let call: Failable = failableOf(c, hd.subject)
+        // s478 (s478-ruled-stdlib-data): a call of the §41.13 `parseVariant` intrinsic decodes in place
+        const pv: Failable | not = parseFailable(c, hd.subject, err)
+        if (pv is given) call = pv
         const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
         if (sa is given) call = Failable.FSettled(sa.bind)
         const how: AHow = hd.how
@@ -3496,6 +3508,27 @@ ${
     }
 
     fn noCall() -> Failable { return Failable.FCall(mkSym(-1, "unhandled"), []) }
+
+    // s478 (s478-ruled-stdlib-data) — a call of the §41.13 `parseVariant(json, EnumType)` intrinsic
+    // (analyze resolveParseVariant: VParseVariant with its enum): the decode of its first argument
+    // into that enum, failing with `err` (the Attempt's — the ParseError the intrinsic's declaration
+    // names). §41.13: "the emitted code is a synchronous monomorphized parser per call site". The
+    // type argument is not a value and is never lowered. `not` for any other subject.
+    fn parseFailable(c: LC, e: AExpr, err: Sym) -> Failable | not {
+        const en: Sym | not = parseEnumOf(valueFact(c.t.values, e.nid))
+        if (en is not) return not
+        const a: AExpr[] = callArgsOf(e)
+        if (a.length != 2) return not
+        return Failable.FParse(lowerExpr(c, a[0]), en, err)
+    }
+
+    fn parseEnumOf(f: ValueFact | not) -> Sym | not {
+        return match f {
+            .VParseVariant(en: x) :> x
+            // no-default-arm: one question of the fact — the enum a parseVariant call decodes into
+            _ :> not
+        }
+    }
 
     // (A subject analyze did not resolve to a `!` function never reaches here —
     // it is E-ERROR-004 / refused, and the gate stops lowering; check.scrml's

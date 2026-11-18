@@ -1,0 +1,9 @@
+// s478 fixture — a module whose ENTRY imports (not re-exports) a failing file: the import
+// cannot be withheld by name, so the module is withdrawn whole, its cause reported first.
+${
+    import { helper } from './helper.scrml';
+
+    export fn hub(n: int) -> int {
+        return n;
+    }
+}

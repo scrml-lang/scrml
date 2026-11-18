@@ -92,6 +92,8 @@ export { hostResult };
 export { lengthCheck, tapeInsert } from "./runtime.js";
 // s478 (s478-boot-refinement-runtime) — a boundary-zone refinement's runtime check (§53.4.5, §53.9.4): the SAME function
 export { refineCheck } from "./runtime.js";
+// s478 (s478-ruled-stdlib-data): the §41.13 `parseVariant` intrinsic — "callable in both server-side and client-side contexts"
+export { parseVariant } from "./runtime.js";
 import { refineCheck as refineCheckRt, ScrmlTrap as ScrmlTrapRt } from "./runtime.js";
 
 // Review #1911 MED-1 — a ROUTED server function's parameter refinements, judged in its

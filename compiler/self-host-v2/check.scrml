@@ -1052,6 +1052,7 @@ ${
         // failure set is checked with the Suspend, checkSuspendCall; C-SQL1 there too)
         const f: Sym | not = failableFn(call)
         let want: Sym | not = not
+        out = out.concat(checkParse(p, call, err))
         if (f is given) {
             want = fnErr(p, f)
             if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
@@ -1093,6 +1094,45 @@ ${
             if (!branchOk(needs, a.body, a.value)) out = out.concat([valueProblem(needs, "a failure arm")])
         }
         return out
+    }
+
+    // s478 (s478-ruled-stdlib-data) — C-PV1: an FParse (the §41.13 `parseVariant` intrinsic)
+    // decodes into an enum of the program whose payload fields are each `int`, `number`,
+    // `string` or `bool` (the decode the runtime builds — analyze refuses any other field,
+    // INTERIM), and fails with the enum its Attempt handles.
+    fn checkParse(p: CoreProgram, call: Failable, err: Sym) -> string[] {
+        return match call {
+            .FParse(json: j, en: en, err: er) :> parseProblems(p, en, er, err)
+            .FCall(fn: x) :> []
+            .FSettled(outcome: x) :> []
+        }
+    }
+
+    fn parseProblems(p: CoreProgram, en: Sym, er: Sym, err: Sym) -> string[] {
+        let out: string[] = []
+        if (er.id != err.id) out = out.concat(["C-PV1: a parseVariant Attempt handles `" + err.hint + "` but the decode fails with `" + er.hint + "`"])
+        const t: TypeDef | not = findTypeDef(p, en)
+        if (t is not) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not a type of the program"])
+        if (!isEnumDef(t)) return out.concat(["C-PV1: parseVariant decodes into `" + en.hint + "`, which is not an enum (§41.13)"])
+        for (const v of enumVariantDefs(t)) {
+            for (const fd of v.fields) {
+                if (!primField(fd.ty)) out = out.concat(["C-PV1: parseVariant decodes `" + en.hint + "." + v.sym.hint + "." + fd.sym.hint + "`, a field that is not `int` / `number` / `string` / `bool`"])
+            }
+        }
+        return out
+    }
+
+    fn primField(t: Type) -> boolean {
+        return match t {
+            .Int :> true
+            .Num :> true
+            .Str :> true
+            .Bool :> true
+            .Named(sym: x) :> false
+            .Seq(elem: x) :> false
+            .Maybe(inner: x) :> false
+            .Fn(params: x) :> false
+        }
     }
 
     fn valueProblem(needs: boolean, what: string) -> string {
@@ -1551,6 +1591,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSettled(outcome: x) :> not
+            .FParse(json: x) :> not
         }
     }
 
@@ -3768,6 +3809,7 @@ ${
         return match c {
             .FSettled(outcome: o) :> o
             .FCall(fn: x) :> not
+            .FParse(json: x) :> not
         }
     }
 

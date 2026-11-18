@@ -1,0 +1,10 @@
+// s478 fixture — a re-export target the bootstrap does NOT compile (an untyped parameter).
+${
+    export function bad(s) {
+        return s;
+    }
+
+    export fn alsoBad(n: int) -> int {
+        return n;
+    }
+}
