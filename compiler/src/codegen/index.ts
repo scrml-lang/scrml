@@ -224,6 +224,13 @@ export interface CgInput {
    * When absent, runCG computes it from `files` with the same function.
    */
   compilationHasDatabase?: boolean;
+  /**
+   * §40.8 — the application's entry file paths (endpoint-program-rules.ts
+   * `endpointEntryFiles`, computed by api.js over the parsed build with the given
+   * build root). The endpoint preflight's `Access-Control-Max-Age` comes from the
+   * entry `<program>` (S480). When absent, every file is read.
+   */
+  appEntryFilePaths?: string[] | null;
   sourceMap?: boolean;
   embedRuntime?: boolean;
   mode?: "browser" | "library";
@@ -1355,6 +1362,7 @@ export function runCG(input: CgInput): CgOutput {
     protectAnalysis,
     compilationTenant: compilationTenantInput,
     compilationHasDatabase: compilationHasDatabaseInput,
+    appEntryFilePaths = null,
     embedRuntime = false,
     sourceMap = false,
     mode = "browser",
@@ -2563,7 +2571,7 @@ export function runCG(input: CgInput): CgOutput {
   // a §64 `kind="tool"` program serves its own endpoints from its own harness.
   {
     const webFiles = (files ?? []).filter((f) => f && typeof f === "object" && !isToolProgram(f));
-    const appEpCors = appEndpointCors(webFiles);
+    const appEpCors = appEndpointCors(webFiles, appEntryFilePaths);
     // Written on every file (null when the app mounts no endpoint, and on a tool
     // program), so a file AST reused by a later compilation never carries an
     // earlier app's table.

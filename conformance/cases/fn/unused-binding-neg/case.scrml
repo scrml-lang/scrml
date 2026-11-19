@@ -1,0 +1,18 @@
+<program>
+    let <count:int=0/>
+    function step(unusedParam: int) {
+        const base = 1;
+        let total = base;
+        total = total + @count;
+        const _skipped = 2;
+        for (const _item of [1, 2, 3]) {
+            @count = @count + 1;
+        }
+        for (const x of [4, 5]) {
+            @count = @count + x;
+        }
+        @count = total;
+    }
+    <p id="s">${@count}</p>
+    <button id="b" onclick=step(1)>step</button>
+</program>

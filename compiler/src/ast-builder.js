@@ -399,6 +399,12 @@ export const STRUCTURAL_ELEMENT_PLACEMENT = {
   onTimeout:    "an `<onTimeout>` element belongs inside an engine state-child (§51.0.M)",
   onIdle:       "an `<onIdle>` element belongs at engine root, sibling of state-children (§51.0.R)",
   onchange:     "an `<onchange>` element belongs inside a `<channel watches=<table>>` body (§38.13.3)",
+  // §61.2 (ruling:user-voice-scrml.md-S478-open-Qs-item-36; built in impl#1 by
+  // ruling:user-voice-scrml.md-S480-four-recs item 1): "An `<endpoint>` declaration
+  // SHALL be a direct child of the top-level `<program>` (the entry file's
+  // `<program>`, §40.8)." The markup loci are judged by the post-build walk in
+  // buildAST, the non-entry file by compiler/src/endpoint-program-rules.ts.
+  endpoint:     "an `<endpoint>` declaration belongs as a direct child of the top-level `<program>` (§61.2): a route belongs to the served program, not to a page, a channel, a nested program, an element or a logic block",
   // §65.9 — the scrml-native CSS structural elements. Both are PROGRAM-SCOPE:
   // an immediate child of `<program>` (a sibling of `<page>` / `<channel>`) for
   // v1; page-scope override is deferred to v1.next. Use outside that locus (file
@@ -22758,10 +22764,306 @@ export function attachHandlerStatementListsInTree(nodes, filePath, options = {})
 }
 
 // §61.7 / §39.2.1 — one serialized origin, the non-`*` value of an `<endpoint>`'s
-// `cors=`: `scheme://host[:port]` (RFC 6454 §6.1 / RFC 3986 scheme), where host is a
-// DNS-style name or a bracketed IPv6 literal. No path, query, userinfo or whitespace.
-const ENDPOINT_CORS_ORIGIN_RE =
-  /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
+// `cors=`: `scheme://host[:port]`, written the way a browser sends it in `Origin`
+// (the Fetch "serialization of an origin", WHATWG HTML §7.1.1 / RFC 6454 §6.2),
+// because the value is compared with that header byte for byte.
+//
+// An `http` / `https` value is judged by the URL parser itself: it SHALL be its own
+// origin serialization (`new URL(v).origin === v`) — so a lowercase scheme and host,
+// the host as the URL host serializer writes it (an IPv4 address in dotted-decimal, an
+// IPv6 literal compressed and bracketed, a domain lowercased and in punycode), no
+// default port, and no userinfo, path, query, fragment or whitespace (the parser drops a
+// tab or newline, so such a value is not its own serialization). A host the serializer
+// keeps as written is accepted though a DNS name could not hold it — `a_b.example`,
+// `-a.example`, the fully-qualified `a.example.` — because a page served there sends
+// exactly that `Origin` (the URL host parser runs UTS #46 with CheckHyphens and
+// UseSTD3ASCIIRules off, and a trailing dot names a distinct origin).
+//
+// The other special schemes name no origin a browser sends in `Origin`: a `file:` URL's
+// origin is opaque (sent as `null`), and no document has a `ws:` / `wss:` / `ftp:`
+// origin (a WebSocket's `Origin` is its page's). They are refused. A non-special scheme
+// (an extension's `chrome-extension://<id>`, `moz-extension://<uuid>`, …) has no URL
+// origin serializer; it keeps the shape check — lowercase, the host a domain or a
+// bracketed IPv6 literal the URL parser accepts — and a port, if written, is 1–65535 with
+// no leading zero. Port 0 is refused on every scheme (no page is served from it).
+const ENDPOINT_CORS_HTTP_ORIGIN_RE = /^https?:\/\/[^/?#@\s\\]+$/;
+const ENDPOINT_CORS_OPAQUE_ORIGIN_RE =
+  /^([a-z][a-z0-9+.-]*):\/\/(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::([1-9][0-9]{0,4}))?$/;
+const ENDPOINT_CORS_NOT_ORIGIN_SCHEMES = {
+  file: "a `file:` page's origin is opaque — a browser sends `Origin: null` from it",
+  ws: "no page has a `ws:` origin — a WebSocket request carries its page's `Origin`",
+  wss: "no page has a `wss:` origin — a WebSocket request carries its page's `Origin`",
+  ftp: "no page has an `ftp:` origin a browser sends in `Origin`",
+};
+
+/**
+ * §61.7 — why `value` is not one origin as a browser sends it, or null when it is.
+ * The reason completes "…, which is neither `"*"` nor one origin as a browser sends it".
+ */
+function endpointCorsOriginFault(value) {
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(value);
+  const lower = scheme ? scheme[1].toLowerCase() : "";
+  if (Object.prototype.hasOwnProperty.call(ENDPOINT_CORS_NOT_ORIGIN_SCHEMES, lower)) {
+    return ENDPOINT_CORS_NOT_ORIGIN_SCHEMES[lower];
+  }
+  if (lower === "http" || lower === "https") {
+    if (!ENDPOINT_CORS_HTTP_ORIGIN_RE.test(value)) return "it is not `scheme://host[:port]`";
+    let url;
+    try {
+      url = new URL(value);
+    } catch (_e) {
+      return "the URL parser refuses it";
+    }
+    if (url.port === "0") return "port 0 serves no page";
+    if (url.origin !== value) return `a browser sends it as \`${url.origin}\``;
+    // The URL parser keeps an empty label (`a..b`, `.a.example`), but DNS cannot name a
+    // host with one, so no page is served there; only the last label may be empty (the
+    // trailing dot of a fully-qualified name, which resolves).
+    if (!url.hostname.startsWith("[")) {
+      // The URL host parser keeps `* , ; { } ! $ & ( ) + = ~` and a backtick in a domain
+      // (forbidden host code points are only the delimiters), so `https://*.example`,
+      // `https://a.example,b.example` and `https://a;b.example` are their own
+      // serialization — but no page is served from such a host (no DNS name holds one;
+      // #1998 review r2 N2). A host is lowercase letters, digits, `-`, `_` and `.` (an
+      // IPv4 address and a punycode `xn--` label among them).
+      if (!/^[a-z0-9_.-]+$/.test(url.hostname)) {
+        const bad = [...url.hostname].find((c) => !/[a-z0-9_.-]/.test(c));
+        return `its host holds \`${bad}\`, which no host a page is served from has`;
+      }
+      const labels = url.hostname.split(".");
+      if (labels.slice(0, -1).some((l) => l === "") || labels.every((l) => l === "")) {
+        return "its host has an empty label, which no DNS name has";
+      }
+    }
+    return null;
+  }
+  const m = ENDPOINT_CORS_OPAQUE_ORIGIN_RE.exec(value);
+  if (!m) return "it is not `scheme://host[:port]` in lowercase";
+  if (m[3] !== undefined && Number(m[3]) > 65535) return "its port is above 65535";
+  // A bracketed IPv6 literal: the URL host parser must read it, as written.
+  if (m[2].startsWith("[")) {
+    let host = null;
+    try {
+      host = new URL(`http://${m[2]}`).hostname;
+    } catch (_e) {
+      host = null;
+    }
+    if (host !== m[2]) return host === null ? "its IPv6 literal is not one" : `its IPv6 literal is written \`${host}\``;
+  }
+  return null;
+}
+
+/**
+ * §61.2 — the attributes of an `<endpoint>` opener, read by the markup attribute
+ * tokenizer (`tokenizeAttributes(…, "markup")`), the reader every markup opener and
+ * the `<match>` / `<each>` / `<engine>` openers use (readStructuralOpenerAttrs). An
+ * attribute is a NAME token followed by `=` and a value token, so text inside another
+ * attribute's string (`note="see cors='*'"`) is that string's value, never an
+ * attribute, and `data-path=` is not `path=` (a regex over the header read both —
+ * #1998 review r1 F1). `header` is the opener after the tag name, up to (not
+ * including) the `>` / `/>` that tokenizer closes it at (readEndpointOpener).
+ *
+ * §61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` is a closed
+ * grammar, so the opener is read WHOLE or refused (#1998 review r2 N1): the tokenizer
+ * DROPS what it cannot read — a `'` or a backtick (an attribute string is `"`-only,
+ * §4.18.3), a `{…}` / `${…}` block or a `<!-- … -->` comment with no attribute name, a
+ * value it cannot start (`x=-1`) — and the text around it was then read on: inside
+ * `note='x cors="*" y'` or ``note=`cors="*"` `` the `cors="*"` became the endpoint's own
+ * `cors=` and opened it to every origin; `note='path="/evil"' path="/a"` mounted it at
+ * `/evil`. Every character of the header SHALL be part of a token, else E-ATTR-001 (§5.2
+ * round 4/5: a value the reader drops, a token no attribute owns, is refused on every
+ * opener); a stray `=` / value with no name is E-ATTR-001, and a value the unquoted
+ * reader refuses (ATTR_OP_REJECT) keeps the markup reader's own diagnostic
+ * (unquotedRejectDiagnostic). `refusals` are in source order; `at` is the offset in
+ * `header`.
+ *
+ * @returns {{
+ *   attrs: Map<string, Array<{ kind: string, value: string|null, at: number }>>,
+ *   refusals: Array<{ code: string, message: string, at: number }>,
+ * }}  `attrs`: every written attribute by name, in source order — `kind` is the value
+ *   token's kind (`ATTR_STRING`, `ATTR_IDENT`, `ATTR_EXPR`, …), `"absent"` (a bare name,
+ *   or `name=` with nothing after it), `"unread"` (`name=` then characters the reader
+ *   dropped — refused above) or `"refused"` (a value the unquoted reader refused);
+ *   `value` its text, or null.
+ */
+function readEndpointOpenerAttrs(header) {
+  const attrs = new Map();
+  const refusals = [];
+  const text = typeof header === "string" ? header : "";
+  const synthetic = `<x ${text}>`;
+  const BEFORE = 3; // `<x `
+  let toks = [];
+  try {
+    toks = tokenizeAttributes(synthetic, 0, 1, 1, "markup");
+  } catch (_e) {
+    refusals.push({
+      code: "E-ATTR-001",
+      message: "E-ATTR-001: the `<endpoint>` opener could not be read by the attribute reader. It is refused " +
+        "rather than read in part; an `<endpoint>` opener carries `path=\"…\"`, `method=…`, `accepts=Enum` and " +
+        "an optional `cors=\"…\"` only (§61.2).",
+      at: 0,
+    });
+    return { attrs, refusals };
+  }
+  const at = (t) => (t && t.span && typeof t.span.start === "number" ? Math.max(0, t.span.start - BEFORE) : 0);
+
+  // Coverage: every non-space character of the header belongs to a token.
+  const covered = new Uint8Array(synthetic.length);
+  for (const t of toks) {
+    if (!t || !t.span || t.kind === "TAG_OPEN") continue;
+    for (let i = Math.max(0, t.span.start); i < Math.min(synthetic.length, t.span.end); i++) covered[i] = 1;
+  }
+  const end = BEFORE + text.length;
+  for (let i = BEFORE; i < end; i++) {
+    if (covered[i] || /\s/.test(synthetic[i])) continue;
+    let j = i;
+    while (j < end && !covered[j]) j++;
+    const run = synthetic.slice(i, j).replace(/\s+$/, "");
+    const c = synthetic[i];
+    const shown = run.length > 40 ? run.slice(0, 40) + "…" : run;
+    // The token the run follows: after `name=` the run is that attribute's value.
+    let prevIdx = -1;
+    for (let q = 0; q < toks.length; q++) {
+      const tq = toks[q];
+      if (tq && tq.span && tq.kind !== "TAG_OPEN" && tq.span.end <= i) prevIdx = q;
+    }
+    const valueOf = prevIdx > 0 && toks[prevIdx].kind === "ATTR_EQ" && toks[prevIdx - 1].kind === "ATTR_NAME"
+      ? toks[prevIdx - 1].text
+      : null;
+    const why = c === "'" || c === "`"
+      ? `${c === "'" ? "`'`" : "a backtick"} is not an attribute quote — an attribute string is written in \`"…"\` only (§4.18.3) — so the ` +
+        `attribute reader drops it and reads the text it encloses as attributes of their own (a \`cors=\` or ` +
+        `\`path=\` there would configure the route). Write the value as \`"…"\``
+      : valueOf !== null
+        ? `the value of \`${valueOf}=\` (\`${shown}\`) cannot be read — the attribute reader drops it, so the ` +
+          `opener would be read on without it. Write the value as \`"…"\` (a string literal), or as a bare name`
+      : `\`${shown}\` is not part of any attribute — the attribute reader drops it (a \`{…}\` / \`\${…}\` block or a ` +
+        `comment with no attribute name, or a value it cannot read) and would read the opener on without it`;
+    refusals.push({
+      code: "E-ATTR-001",
+      message: `E-ATTR-001: in the \`<endpoint>\` opener, ${why}. The opener is refused rather than read in part; ` +
+        `an \`<endpoint>\` opener carries \`path="…"\`, \`method=…\`, \`accepts=Enum\` and an optional \`cors="…"\` ` +
+        `only (§61.2).`,
+      at: i - BEFORE,
+    });
+    i = j - 1;
+  }
+
+  const VALUE_KINDS = new Set(["ATTR_STRING", "ATTR_IDENT", "ATTR_EXPR", "ATTR_CALL", "ATTR_BLOCK"]);
+  const isEnd = (t) => !t || t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE" || t.kind === "EOF";
+  let k = 0;
+  while (k < toks.length) {
+    const t = toks[k];
+    if (!t || t.kind === "TAG_OPEN" || isEnd(t)) { k++; continue; }
+    if (t.kind !== "ATTR_NAME") {
+      // §5.2 round 5 — an `=` or a value no attribute name owns is never skipped.
+      refusals.push({
+        code: "E-ATTR-001",
+        message: `E-ATTR-001: \`${t.kind === "ATTR_EQ" ? "=" : String(t.text ?? "").slice(0, 40)}\` in the ` +
+          `\`<endpoint>\` opener is not part of any attribute (a stray \`=\`, or a value with no name before it). ` +
+          `It is refused rather than dropped; an \`<endpoint>\` opener carries \`path="…"\`, \`method=…\`, ` +
+          `\`accepts=Enum\` and an optional \`cors="…"\` only (§61.2).`,
+        at: at(t),
+      });
+      k++;
+      continue;
+    }
+    const name = t.text;
+    let entry = { kind: "absent", value: null, at: at(t) };
+    k++;
+    if (toks[k] && toks[k].kind === "ATTR_EQ") {
+      k++;
+      const v = toks[k];
+      if (v && VALUE_KINDS.has(v.kind)) {
+        entry = { kind: v.kind, value: typeof v.text === "string" ? v.text : null, at: at(t) };
+        k++;
+      } else if (v && v.kind === "ATTR_OP_REJECT") {
+        const d = unquotedRejectDiagnostic(name, v.text);
+        refusals.push({ code: d.code, message: d.message, at: at(v) });
+        entry = { kind: "refused", value: null, at: at(t) };
+        k++;
+      }
+      else {
+        // `name=` with no value the tokenizer reads: "unread" when the reader dropped what
+        // follows the `=` (`cors=*`, `method='POST'` — refused above), else "absent".
+        const eq = toks[k - 1];
+        let p = eq && eq.span ? eq.span.end : -1;
+        while (p >= 0 && p < end && /\s/.test(synthetic[p])) p++;
+        if (p >= 0 && p < end && !covered[p]) entry = { kind: "unread", value: null, at: at(t) };
+      }
+    }
+    if (!attrs.has(name)) attrs.set(name, []);
+    attrs.get(name).push(entry);
+  }
+  refusals.sort((a, b) => a.at - b.at);
+  return { attrs, refusals };
+}
+
+/**
+ * §61.2 — where the `<endpoint>` opener in `raw` (the block's raw text, from its `<`)
+ * ends, found by the SAME tokenizer that reads its attributes (#1998 review r2 L2: a
+ * hand scanner took `'` for a quote the tokenizer does not, so `note='>' cors="*"`
+ * ended the opener in one place and was read in another). Returns the index of the
+ * opener's `>` (or -1 when the tokenizer finds none), and the header between the tag
+ * name and its `>` / `/>`.
+ */
+function readEndpointOpenerExtent(raw) {
+  const m = /^<\s*endpoint/.exec(raw);
+  const nameEnd = m ? m[0].length : 0;
+  let toks = [];
+  try {
+    toks = tokenizeAttributes("<x" + raw.slice(nameEnd), 0, 1, 1, "markup");
+  } catch (_e) {
+    toks = [];
+  }
+  const shift = nameEnd - 2; // raw index = synthetic index + shift
+  const close = toks.find((t) => t && (t.kind === "TAG_CLOSE_GT" || t.kind === "TAG_SELF_CLOSE") && t.span);
+  if (!close) {
+    const nl = raw.indexOf("\n", nameEnd);
+    return { openerEnd: -1, headerStart: nameEnd, header: raw.slice(nameEnd, nl < 0 ? raw.length : nl) };
+  }
+  return {
+    openerEnd: close.span.end - 1 + shift,
+    headerStart: nameEnd,
+    header: raw.slice(nameEnd, close.span.start + shift),
+  };
+}
+
+// §61.7 — the compiler's own route prefixes, and why each is reserved (the messages are
+// the bootstrap's: compiler/self-host-v2/analyze.scrml `endpointReservedWhy`).
+const ENDPOINT_RESERVED_PREFIXES = [
+  ["/_scrml", "`/_scrml/` is where the compiler mounts its own routes (§12.3)"],
+  ["/_scrml_ws", "`/_scrml_ws/` is where the compiler mounts its channels' WebSocket upgrade routes (§38.1)"],
+  ["/_scrml_local", "`/_scrml_local/` is where the compiler serves the client helpers it copies into the build output (§21.3)"],
+];
+
+/** §61.7 — why `path` is under a reserved prefix, or "" (bootstrap `endpointReservedWhy`). */
+function endpointReservedWhy(path) {
+  for (const [prefix, why] of ENDPOINT_RESERVED_PREFIXES) {
+    if (path === prefix || path.startsWith(prefix + "/")) return why;
+  }
+  return "";
+}
+
+/** §61.7 — why `path` is outside the `path=` grammar, or "" (bootstrap `endpointPathRefusal`). */
+function endpointPathRefusal(path) {
+  if (path.slice(0, 1) !== "/") return "it does not begin with `/`";
+  // One UTF-16 unit at a time, as the bootstrap does (`p.substring(i, i + 1)`), so the
+  // two implementations name the same character in the message.
+  for (let i = 0; i < path.length; i++) {
+    const ch = path.slice(i, i + 1);
+    if (!/^[A-Za-z0-9\-._~/]$/.test(ch)) {
+      return "`" + ch + "` is not a path character (only unreserved characters and `/` — no query, fragment, percent-escape or path parameter)";
+    }
+  }
+  const segs = path.slice(1).split("/");
+  for (let k = 0; k < segs.length; k++) {
+    const sg = segs[k];
+    if (sg === "." || sg === "..") return "a `" + sg + "` segment is removed when the request URL is normalized, so the path would never match";
+    if (sg === "" && k !== segs.length - 1) return "an empty segment (`//`) is not part of the grammar — no segment but the last may be empty";
+  }
+  return "";
+}
 
 function buildBlock(block, filePath, parentContextKind, counter, errors, parentStateName = null) {
   // Uniform-opener normalization: rewrite block.type when the BS classification
@@ -23513,102 +23815,142 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // `<endpoint>` production when the `<api>`/`<endpoint>` family is mirrored.
       if (block.name === "endpoint") {
         const endpointRaw = (block.raw || "").trim();
+        // `endpointRaw[i]` is block.raw[lead + i] (only leading whitespace is trimmed).
+        const endpointLead = (block.raw || "").length - (block.raw || "").trimStart().length;
 
-        // Brace+paren+bracket-aware opener-end finder (mirrors <api> / <match>).
-        // The opener attrs are `path="..."` (string), `method=...` (string or
-        // bareword), `accepts=Enum` (bareword type-ref); track `(){}[]` +
-        // string state so a `>` inside a quoted URL does not truncate the header.
-        function _findEndpointOpenerEnd(s) {
-          let depth = 0;
-          let parenDepth = 0;
-          let bracketDepth = 0;
-          let inDQ = false;
-          let inSQ = false;
-          for (let i = 0; i < s.length; i++) {
-            const c = s[i];
-            if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") i++; continue; }
-            if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
-            if (c === '"') { inDQ = true; continue; }
-            if (c === "'") { inSQ = true; continue; }
-            if (c === "{") { depth++; continue; }
-            if (c === "}") { if (depth > 0) depth--; continue; }
-            if (c === "(") { parenDepth++; continue; }
-            if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
-            if (c === "[") { bracketDepth++; continue; }
-            if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
-            if (c === ">" && depth === 0 && parenDepth === 0 && bracketDepth === 0) return i;
-          }
-          return -1;
-        }
-
-        const openerEnd = _findEndpointOpenerEnd(endpointRaw);
-        const headerLine = openerEnd >= 0
-          ? endpointRaw.slice(0, openerEnd)
-          : endpointRaw.split("\n")[0];
-        // Strip the `<endpoint` prefix (also handles `< endpoint` w/ leading
-        // space). The tag name is the FIRST `endpoint` token in the opener, so
-        // an `accepts=` / `path=` value containing "endpoint" is unaffected.
-        let header = headerLine;
-        const epIdx = header.indexOf("endpoint");
-        if (epIdx >= 0) header = header.slice(epIdx + "endpoint".length).trim();
-        // Strip any trailing `/` (self-closing — invalid for endpoint, defensive)
-        // or `>` fragments from the header.
-        header = header.replace(/[/>]+\s*$/, "").trim();
+        // §61.2 — the opener ends where the attribute tokenizer that reads it closes it
+        // (readEndpointOpenerExtent; #1998 review r2 L2 — a hand scanner treated `'` as a
+        // quote, which the tokenizer does not, so the two disagreed on `note='>' cors="*"`).
+        const { openerEnd, headerStart, header } = readEndpointOpenerExtent(endpointRaw);
 
         // §61.2 opener attrs:
         //   path=   string-literal URL (required; the contract — §61.7)
         //   method= recognized HTTP method literal (quoted OR bareword)
         //   accepts= enum type-ref (bareword; captured RAW — W3 resolves)
-        const STR = /(?:"([^"]*)"|'([^']*)')/;
-        const E_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
+        //   cors=   string literal (optional; §61.7)
+        //
+        // Every attribute is read by ONE reader, the markup attribute tokenizer
+        // (readEndpointOpenerAttrs): a name followed by `=` and a value token. Text inside
+        // another attribute's quoted value is never an attribute — `note="see cors='*'"`
+        // used to open CORS, and a `cors=` counted on a quote-blanked header but read from
+        // the raw one emitted a value nothing had validated (#1998 review r1 F1) — and an
+        // attribute name is matched whole, so `data-path=` is not `path=`. The attribute
+        // string is `"`-only (§4.18.3 / the S111 quoted-text model), as on every element.
+        // §61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` — the
+        // opener is read whole or refused: a character the reader drops (`'`, a backtick,
+        // a `{…}` block, a comment), a stray `=` / value and a refused unquoted value are
+        // reported at their position (#1998 review r2 N1: inside `note='x cors="*" y'` the
+        // `cors="*"` was read as the endpoint's own), and each of `path=` / `method=` /
+        // `accepts=` / `cors=` is written at most once.
+        const E_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+        const { attrs: epAttrs, refusals: epRefusals } = readEndpointOpenerAttrs(header);
+        // The file position of `header[at]` (the diagnostic is reported where the reader stopped).
+        const headerSpanAt = (at) => {
+          const rawIdx = headerStart + at;
+          const before = endpointRaw.slice(0, rawIdx);
+          const nl = (before.match(/\n/g) || []).length;
+          const lastNl = before.lastIndexOf("\n");
+          const startCol = span.col ?? 1;
+          return {
+            file: filePath,
+            start: (span.start ?? 0) + endpointLead + rawIdx,
+            end: (span.start ?? 0) + endpointLead + rawIdx + 1,
+            line: (span.line ?? 1) + nl,
+            col: nl > 0 ? rawIdx - lastNl : startCol + rawIdx,
+          };
+        };
+        for (const r of epRefusals) errors.push(new TABError(r.code, r.message, headerSpanAt(r.at)));
+        // A refused opener reports what the reader could not read FIRST and alone: an
+        // attribute it lost (`method='POST'` reads `method=` with no value) is not then
+        // also reported as missing (#1998 review r2 L3 — "(none)", PATH-MISSING,
+        // ACCEPTS-MISSING named the wrong problem). The compile fails on the refusal.
+        // An attribute the opener WRITES with a value the reader could not read (`cors=*`,
+        // `method='POST'`) is still reported under its own code, after the refusal.
+        const openerRefused = epRefusals.length > 0;
+        const attrList = (name) => epAttrs.get(name) ?? [];
+        const firstAttr = (name) => {
+          const list = attrList(name);
+          return list.length > 0 ? list[0] : null;
+        };
+        // §61.2 — `path-attr method-attr accepts-attr`, each once (#1998 review r2: a
+        // repeated attribute was read first-wins, silently). Each is refused under its own
+        // attribute's code, as a repeated `cors=` is (E-ENDPOINT-CORS-INVALID, below).
+        const REPEAT_CODES = [
+          ["path", "E-ENDPOINT-PATH-INVALID"],
+          ["method", "E-ENDPOINT-METHOD-INVALID"],
+          ["accepts", "E-ENDPOINT-ACCEPTS-MISSING"],
+        ];
+        for (const [name, code] of REPEAT_CODES) {
+          const n = attrList(name).length;
+          if (n > 1) {
+            errors.push(new TABError(
+              code,
+              `${code}: \`${name}=\` on \`<endpoint>\` is written ${n} times — an \`<endpoint>\` carries one ` +
+              `\`${name}=\` (§61.2 \`endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?\`); it is ` +
+              `refused rather than read first-wins. Keep one.`,
+              span,
+            ));
+          }
+        }
 
-        const pathMatch = header.match(new RegExp(`\\bpath\\s*=\\s*${STR.source}`));
-        const path = pathMatch ? (pathMatch[1] !== undefined ? pathMatch[1] : pathMatch[2]) : null;
+        const pathAttr = firstAttr("path");
+        const path = pathAttr && pathAttr.kind === "ATTR_STRING" ? pathAttr.value : null;
 
         // method= accepts a quoted string OR a bareword (§61.7 — the §60.2 set).
-        const methodMatch = header.match(
-          new RegExp(`\\bmethod\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(${E_IDENT.source}))`),
-        );
-        const method = methodMatch
-          ? (methodMatch[1] !== undefined ? methodMatch[1]
-            : (methodMatch[2] !== undefined ? methodMatch[2] : methodMatch[3]))
+        const methodAttr = firstAttr("method");
+        const method = methodAttr && (methodAttr.kind === "ATTR_STRING" || methodAttr.kind === "ATTR_IDENT")
+          ? methodAttr.value
           : null;
 
         // accepts= bareword enum type-ref — captured RAW (W3 resolves against
         // §14/§53 + checks exhaustiveness / non-enum).
-        const acceptsMatch = header.match(new RegExp(`\\baccepts\\s*=\\s*(${E_IDENT.source})\\b`));
-        const acceptsRaw = acceptsMatch ? acceptsMatch[1] : null;
+        const acceptsAttr = firstAttr("accepts");
+        const acceptsRaw = acceptsAttr && acceptsAttr.kind === "ATTR_IDENT" && E_IDENT_RE.test(acceptsAttr.value ?? "")
+          ? acceptsAttr.value
+          : null;
 
         // §61.7 per-endpoint `cors=` (ruling:user-voice-scrml.md-S479 "program
         // `cors=` does not cover `<endpoint>` routes; per-endpoint `cors=`"): a
-        // string literal, the same values as the §39.2.1 program attribute. The
-        // name must start the attribute (`(?:^|\s)`), so `x-cors=` or
-        // `cors-max-age=` never reads as it. Absent → null: the endpoint takes
-        // no cross-origin browser callers and its preflight is answered 405.
-        const corsMatch = header.match(new RegExp(`(?:^|\\s)cors\\s*=\\s*${STR.source}`));
-        let cors = corsMatch ? (corsMatch[1] !== undefined ? corsMatch[1] : corsMatch[2]) : null;
+        // string literal, the same values as the §39.2.1 program attribute. Absent →
+        // null: the endpoint takes no cross-origin browser callers and its preflight
+        // is answered 405.
+        const corsList = attrList("cors");
+        const corsCount = corsList.length;
+        let cors = corsCount > 0 && corsList[0].kind === "ATTR_STRING" ? corsList[0].value : null;
         // §61.7: "An `<endpoint>` MAY carry `cors=`, a string literal with the
         // values of the §39.2.1 program attribute (`"*"`, or one origin such as
         // `"https://example.com"`)." — and §61.2 `cors-attr ::= 'cors='
         // string-literal`. Anything else is E-ENDPOINT-CORS-INVALID: an unquoted
-        // `cors=*` (the string-literal read above misses it, so it used to be
-        // dropped silently), `cors=""`, or a value that is not `*` and not one
-        // serialized origin — `scheme://host[:port]`, no path, no whitespace (a
-        // newline in it made every response of the endpoint fail in
-        // `Headers.set`). The endpoint is then compiled with no CORS (fail closed).
-        if (/(?:^|\s)cors\s*=/.test(header)) {
-          const corsWhy = cors === null
-            ? "is not a string literal"
-            : (cors === "*" || ENDPOINT_CORS_ORIGIN_RE.test(cors))
-              ? null
-              : (cors === "" ? "is empty" : `is ${JSON.stringify(cors)}, which is neither \`"*"\` nor one origin`);
+        // `cors=*` (it used to be dropped silently), `cors=""`, or a value that is
+        // not `*` and not one serialized origin (endpointCorsOriginFault — a newline
+        // in it made every response of the endpoint fail in `Headers.set`). The
+        // endpoint is then compiled with no CORS (fail closed). On a refused opener the
+        // endpoint takes no `cors=` either.
+        if (openerRefused) cors = null;
+        if (corsCount > 0 && !(corsCount === 1 && corsList[0].kind === "refused")) {
+          // §61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` —
+          // at most one `cors=`. A second one was read first-wins, silently (#1981
+          // review r1 NIT); it is refused, and the endpoint takes no `cors=`
+          // (ruling:user-voice-scrml.md-S480-1998-recs item 2).
+          const corsVal = corsCount > 0 && corsList[0].kind === "ATTR_STRING" ? corsList[0].value : null;
+          const originFault = corsVal === null || corsVal === "" || corsVal === "*" ? null : endpointCorsOriginFault(corsVal);
+          const corsWhy = corsCount > 1
+            ? `is written ${corsCount} times (an \`<endpoint>\` carries at most one \`cors=\`, §61.2)`
+            : corsVal === null
+              ? (corsList[0].kind === "absent" ? "has no value" : "is not a string literal")
+              : corsVal === ""
+                ? "is empty"
+                : originFault === null
+                  ? null
+                  : `is ${JSON.stringify(corsVal)}, which is neither \`"*"\` nor one origin as a browser sends it (${originFault})`;
           if (corsWhy !== null) {
             errors.push(new TABError(
               "E-ENDPOINT-CORS-INVALID",
               `E-ENDPOINT-CORS-INVALID: \`cors=\` on \`<endpoint>\` ${corsWhy}. Per SPEC §61.7 an ` +
               `\`<endpoint>\`'s \`cors=\` is a string literal with the values of the §39.2.1 program ` +
               `attribute: \`"*"\`, or one origin — \`scheme://host\` with an optional \`:port\` and no ` +
-              `path, e.g. \`cors="https://example.com"\`.`,
+              `path, written as a browser sends it in \`Origin\` (lowercase, no default port), ` +
+              `e.g. \`cors="https://example.com"\`.`,
               span,
             ));
             cors = null;
@@ -23616,27 +23958,63 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
 
         // §61.9 — E-ENDPOINT-PATH-MISSING: an `<endpoint>` with no `path=`.
-        if (path === null) {
+        // (Not when a refused opener does not write it — the reader may have lost it, and
+        // the refusal is the report.)
+        if (path === null && !(openerRefused && (!pathAttr || pathAttr.kind === "refused"))) {
           errors.push(new TABError(
             "E-ENDPOINT-PATH-MISSING",
-            `E-ENDPOINT-PATH-MISSING: \`<endpoint>\` declaration has no \`path=\` URL. ` +
+            `E-ENDPOINT-PATH-MISSING: \`<endpoint>\` declaration has no \`path=\` URL` +
+            (pathAttr ? ` (its \`path\` has no string-literal value — §61.2 \`path-attr ::= 'path=' string-literal\`)` : ``) +
+            `. ` +
             `Per SPEC §61.7 an \`<endpoint>\` SHALL declare a \`path=\` — the author-stable ` +
             `URL a foreign client connects to (the contract), e.g. ` +
             `\`<endpoint path="/fsp" method="POST" accepts=FspMethod>\`.`,
             span,
           ));
+        } else if (path !== null) {
+          // §61.7 (ruling:user-voice-scrml.md-S480-1998-recs item 1, building
+          // g-impl1-endpoint-path-rules-s479): "A `path=` that is `/_scrml`, `/_scrml_ws`
+          // or `/_scrml_local`, or begins with `/_scrml/`, `/_scrml_ws/` or
+          // `/_scrml_local/`, is `E-ENDPOINT-ROUTE-DUPLICATE` (§61.9)" — the endpoint
+          // would shadow the compiler's own routes; and "A `path=` outside this grammar
+          // is `E-ENDPOINT-PATH-INVALID` (§61.9), reported at the `<endpoint>` opener."
+          // A reserved-prefix path is reported once, by its own code (the bootstrap's
+          // order: compiler/self-host-v2/analyze.scrml `endpointPass`; the path is still
+          // counted for a duplicate route there, and here).
+          const reservedWhy = endpointReservedWhy(path);
+          const pathWhy = reservedWhy === "" ? endpointPathRefusal(path) : "";
+          if (reservedWhy !== "") {
+            errors.push(new TABError(
+              "E-ENDPOINT-ROUTE-DUPLICATE",
+              `E-ENDPOINT-ROUTE-DUPLICATE: \`path="${path}"\` on \`<endpoint>\` — ${reservedWhy}; an ` +
+              `\`<endpoint>\` may not mount there (§61.7). Choose another path`,
+              span,
+            ));
+          } else if (pathWhy !== "") {
+            errors.push(new TABError(
+              "E-ENDPOINT-PATH-INVALID",
+              `E-ENDPOINT-PATH-INVALID: \`path="${path}"\` on \`<endpoint>\` — ${pathWhy} ` +
+              `(§61.7: a \`path=\` is an absolute path of RFC 3986 unreserved characters and \`/\`, with no ` +
+              `\`.\`, \`..\` or empty segment; a trailing \`/\` is allowed)`,
+              span,
+            ));
+          }
         }
 
         // §61.9 — E-ENDPOINT-METHOD-INVALID: a `method=` that is not a
         // recognized HTTP method literal (the §60.2 set, reused). A missing
         // `method=` is also reported here (no recognized method literal).
         const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
-        if (method === null || !HTTP_METHODS.has(method)) {
-          const shown = method === null ? "(none)" : method;
+        if ((method === null && !(openerRefused && (!methodAttr || methodAttr.kind === "refused"))) ||
+            (method !== null && !HTTP_METHODS.has(method))) {
+          const what = method !== null || !methodAttr
+            ? `\`<endpoint>\` declares HTTP method \`${method !== null ? method : "(none)"}\`, which is not a recognized method`
+            : methodAttr.kind === "absent"
+              ? `\`method=\` on \`<endpoint>\` has no value`
+              : `\`method=\` on \`<endpoint>\` has a value that is neither a string literal nor a bareword`;
           errors.push(new TABError(
             "E-ENDPOINT-METHOD-INVALID",
-            `E-ENDPOINT-METHOD-INVALID: \`<endpoint>\` declares HTTP method \`${shown}\`, ` +
-            `which is not a recognized method. Per SPEC §61.7 the \`method=\` SHALL be ` +
+            `E-ENDPOINT-METHOD-INVALID: ${what}. Per SPEC §61.7 the \`method=\` SHALL be ` +
             `one of GET, POST, PUT, PATCH, DELETE (the §60.2 method set).`,
             span,
           ));
@@ -23645,11 +24023,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // §61.9 — E-ENDPOINT-ACCEPTS-MISSING: an `<endpoint>` with no
         // `accepts=` (the typed inbound surface is required — without it there
         // is nothing to decode or dispatch, §61.3).
-        if (acceptsRaw === null) {
+        if (acceptsRaw === null && !(openerRefused && (!acceptsAttr || acceptsAttr.kind === "refused"))) {
           errors.push(new TABError(
             "E-ENDPOINT-ACCEPTS-MISSING",
             `E-ENDPOINT-ACCEPTS-MISSING: \`<endpoint>\` declaration has no \`accepts=\` ` +
-            `enum type. Per SPEC §61.3 an \`<endpoint>\` SHALL declare an \`accepts=\` ` +
+            `enum type` +
+            (acceptsAttr ? ` (its \`accepts\` is not a bare type name — §61.2 \`accepts-attr ::= 'accepts=' enum-type-ref\`)` : ``) +
+            `. Per SPEC §61.3 an \`<endpoint>\` SHALL declare an \`accepts=\` ` +
             `\`:enum\` type — the request body decodes into it via parseVariant (§41.13), ` +
             `e.g. \`<endpoint path="/fsp" method="POST" accepts=FspMethod>\`.`,
             span,
@@ -27555,6 +27935,76 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
       }
     }
     for (const topNode of nodes) checkThemePlacement(topNode);
+  }
+
+  // ---------------------------------------------------------------------------
+  // §61.2 — `<endpoint>` placement, the markup loci (ruling:user-voice-scrml.md-
+  // S478-open-Qs-item-36; built in impl#1 by ruling:user-voice-scrml.md-S480-four-
+  // recs item 1). "An `<endpoint>` declaration SHALL be a direct child of the
+  // top-level `<program>` (the entry file's `<program>`, §40.8). An `<endpoint>`
+  // anywhere else — inside a `<page>`, a `<channel>`, a nested `<program>`, an
+  // element, a `${ … }` logic block, outside any `<program>`, or in a file that is
+  // not the program's entry — is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)."
+  //
+  // This walk judges what one file shows: the endpoint's parent node. A program is
+  // top-level when it has no `<program>` / `<page>` ancestor, whatever markup wraps
+  // it (§4.12, program-role.ts). The `${ … }` locus is refused by parseLogicBody
+  // (STRUCTURAL_ELEMENT_PLACEMENT.endpoint); the two BUILD facts — a file that is
+  // not the entry, and a route file whose program is nested under the application
+  // program — are judged by compiler/src/endpoint-program-rules.ts. Messages
+  // mirror the bootstrap (compiler/self-host-v2/parse.scrml `endpointItem`,
+  // analyze.scrml markup walk). Every property is walked (an `<endpoint>` the
+  // codegen walk can still reach must not escape the rule by its container).
+  {
+    const ENDPOINT_MOVE =
+      "an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15)";
+    const seenEp = new WeakSet();
+    const nestedProgram = new WeakSet(); // programs with a `<program>` / `<page>` ancestor
+    const isTag = (n, tag) => !!n && n.kind === "markup" && n.tag === tag;
+    function walkEndpointPlacement(node, parent, underProgramOrPage) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const c of node) walkEndpointPlacement(c, parent, underProgramOrPage);
+        return;
+      }
+      if (seenEp.has(node)) return;
+      seenEp.add(node);
+      const isNode = typeof node.kind === "string";
+      if (node.kind === "endpoint-decl") {
+        let why = null;
+        if (parent === null) {
+          why = "outside a `<program>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to an imported module; move it into the entry file's `<program>` body";
+        } else if (isTag(parent, "program")) {
+          if (nestedProgram.has(parent)) {
+            why = "inside a nested `<program>` — " + ENDPOINT_MOVE + ": a nested program is an execution context (a worker, sidecar or scoped-db program, §4.12), not the served program; move it into the top-level `<program>` body";
+          }
+        } else if (isTag(parent, "page")) {
+          why = "inside a `<page>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to a page; move it into the `<program>` body";
+        } else if (isTag(parent, "channel")) {
+          why = "inside a `<channel>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to a channel; move it into the `<program>` body";
+        } else {
+          const shown = parent.kind === "markup" && typeof parent.tag === "string" ? `\`<${parent.tag}>\`` : "markup";
+          why = `inside ${shown} — ` + ENDPOINT_MOVE + "; move it out of the enclosing element, into the `<program>` body";
+        }
+        if (why !== null) {
+          errors.push(new TABError(
+            "E-STRUCTURAL-ELEMENT-MISPLACED",
+            `E-STRUCTURAL-ELEMENT-MISPLACED: \`<endpoint>\` ${why}.`,
+            node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+        return; // an endpoint's arms hold no endpoint
+      }
+      if (isTag(node, "program") && underProgramOrPage) nestedProgram.add(node);
+      const nextParent = isNode ? node : parent;
+      const nextUnder = underProgramOrPage || isTag(node, "program") || isTag(node, "page");
+      for (const k of Object.keys(node)) {
+        if (k === "span") continue;
+        const v = node[k];
+        if (v && typeof v === "object") walkEndpointPlacement(v, nextParent, nextUnder);
+      }
+    }
+    for (const topNode of nodes) walkEndpointPlacement(topNode, null, false);
   }
 
   // ---------------------------------------------------------------------------

@@ -91,6 +91,7 @@ import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runTransactionChecks } from "./validators/lint-transaction.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
+import { checkEndpointProgramRules, endpointEntryFiles, importedFilePaths } from "./endpoint-program-rules.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
 import { shipText, shipStripFallbackWarning } from "./codegen/ship-strip.ts";
@@ -2008,12 +2009,15 @@ function _compileScrmlImpl(options = {}) {
   // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
   // program role (program-role.ts). The route-file classifier is route
   // inference's own build-root rule (`programRoleBuildFacts`) — swap it there, not here.
+  // §40.8 — the application's entry file paths (S480; the endpoint preflight's
+  // Access-Control-Max-Age comes from the entry `<program>`), handed to codegen.
+  let _appEntryFilePaths = null;
+  const _endpointGivenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+    ? resolve(options.buildRoot)
+    : undefined;
   {
     const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
-    const _givenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
-      ? resolve(options.buildRoot)
-      : undefined;
-    stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _givenRoot));
+    stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _endpointGivenRoot));
   }
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
@@ -2226,6 +2230,21 @@ function _compileScrmlImpl(options = {}) {
   const _resolveModules = seams.pick("MOD", resolveModules);
   const moduleResult = stage("MOD", () => _resolveModules(tabResults));
   collectErrors("MOD", moduleResult.errors);
+
+  // §61.2 / §61.7 (ruling:user-voice-scrml.md-S480-four-recs item 1) — the two
+  // `<endpoint>` rules that need the whole build: an endpoint in a file that is not
+  // the application's entry (E-STRUCTURAL-ELEMENT-MISPLACED), and two endpoints at
+  // one path and method in any files of the app (E-ENDPOINT-ROUTE-DUPLICATE). The
+  // entry is route inference's build-root rule (the implied ancestor's, above) less
+  // every file another file of the build imports — read from the import graph just
+  // built (#1998 review r1 F3: §61.2 "a route belongs to the served program, not to an
+  // imported module").
+  {
+    const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
+    const _imported = importedFilePaths(moduleResult.importGraph);
+    collectErrors("ENDPOINT-RULES", stage("ENDPOINT-RULES", () => checkEndpointProgramRules(_asts, _endpointGivenRoot, _imported)));
+    _appEntryFilePaths = [...endpointEntryFiles(_asts, _endpointGivenRoot, _imported)].map((f) => f.filePath);
+  }
   if (verbose) {
     const importCount = [...moduleResult.importGraph.values()].reduce((n, e) => n + e.imports.length, 0);
     const exportCount = [...moduleResult.exportRegistry.values()].reduce((n, e) => n + e.size, 0);
@@ -3518,6 +3537,8 @@ function _compileScrmlImpl(options = {}) {
     // §14.8.10 item (1) (S457) — the SAME database scope the stage above used: codegen holds
     // every `?{}` it lowers to the program-body statement allow-list.
     compilationHasDatabase: compilationHasDb,
+    // §40.8 / §39.2.1 (S480) — the entry `<program>` the endpoint Max-Age is read from.
+    appEntryFilePaths: _appEntryFilePaths,
     batchPlan: bpResult.batchPlan,
     batchPlannerErrors: bpResult.errors,
     embedRuntime,

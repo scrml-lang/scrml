@@ -15,7 +15,8 @@
 // Graded on the RUNTIME effect (happy-dom) and on exact codes.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadM2, frontEnd } from "./harness.js";
+import { loadM2 } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
