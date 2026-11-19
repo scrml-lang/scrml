@@ -1,23 +1,34 @@
 {
   "id": "linear-must-use-unread-pos",
-  "description": "A keywordless declaration (`unusedThing = 42`, §50.8.5 — a `const`) that falls out of scope never read is NOT E-MU-001 and not an error: an unread binding is the S422 unused-binding LINT, the same for every binding form (`let`, `const`, keywordless). E-MU-001 is \"Must-use: return value of `!` function not captured\" (§34). The case keeps its S412-era directory name; what it pins is the S479 ruling.",
+  "description": "A keywordless declaration (`unusedThing = 42`, §50.8.5 — a `const`) that falls out of scope never read is NOT E-MU-001 and not an error: an unread binding is the S422 unused-binding LINT, W-UNUSED-BINDING (§7.3.5, a Warning), the same for every binding form (`let`, `const`, keywordless). E-MU-001 is \"Must-use: return value of `!` function not captured\" (§34). The case keeps its S412-era directory name; what it pins is the S479 rulings.",
   "language-version": "1.0",
-  "spec": "§50.8.5",
-  "provenance": "ruling:user-voice-scrml.md-S479-3B (\"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\", §3.B: \"S422 stands; an unread keywordless binding is the same lint as every other binding form; the E-MU-001 reading is rejected\") · ruling:user-voice-scrml.md S422 \"CALL 3 — unused-binding is a LINT across all binding forms, hard error later if it proves out\"",
-  "rationale": "S422 Call 3: \"Population: ALL binding forms (`let` · `const` · bare)\" — \"you cannot split on 'was the keyword written'\"; \"Severity: LINT now\". A lint never rejects, so the program compiles. The lint itself has no §34 code yet (g-spec-unused-binding-lint-code-s479); when it lands this case gains its warning code in `codes`.",
+  "spec": "§50.8.5, §7.3.5",
+  "provenance": "ruling:user-voice-scrml.md-S479-3B (\"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\", §3.B: \"S422 stands; an unread keywordless binding is the same lint as every other binding form; the E-MU-001 reading is rejected\") · ruling:user-voice-scrml.md S422 \"CALL 3 — unused-binding is a LINT across all binding forms, hard error later if it proves out\" · ruling:user-voice-scrml.md \"⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)\"",
+  "rationale": "S422 Call 3: \"Population: ALL binding forms (`let` · `const` · bare)\" — \"you cannot split on 'was the keyword written'\"; \"Severity: LINT now\". S479: \"any local binding (`let`, `const`, keywordless; `lin` excluded because §35 governs it) not read before its scope ends gets the warning\" — W-UNUSED-BINDING. A lint never rejects, so the program compiles with the warning.",
   "expect": {
-    "codes": [],
+    "codes": [
+      "W-UNUSED-BINDING"
+    ],
     "notCodes": [
       "E-MU-001"
-    ]
+    ],
+    "severity": {
+      "W-UNUSED-BINDING": "warning"
+    },
+    "codeCounts": {
+      "W-UNUSED-BINDING": 1
+    }
   },
   "xfail": {
     "impl1-ts": {
       "gap": "g-impl1-e-mu-001-unread-binding-s479",
       "fails": {
         "codes": [
+          "codeCounts:code 'W-UNUSED-BINDING' fired 0 time(s), expected exactly 1",
           "emitted:E-MU-001=1",
-          "forbidden:E-MU-001"
+          "forbidden:E-MU-001",
+          "missing:W-UNUSED-BINDING",
+          "severity:code 'W-UNUSED-BINDING' did not fire (expected severity warning)"
         ]
       }
     }

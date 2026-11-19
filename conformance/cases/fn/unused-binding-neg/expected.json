@@ -1,0 +1,14 @@
+{
+  "id": "fn-unused-binding-neg",
+  "description": "§7.3.5 clean neg — no W-UNUSED-BINDING: every local is read (`base` only by a later initializer, `total` by its own reassignment and after it, `x` in the loop body), the unread `_skipped` and `_item` are exempt by their `_` prefix, and an unread parameter is not a binding the lint covers.",
+  "language-version": "1.0",
+  "spec": "§7.3.5",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)\" (\"a `_` prefix exempts it\")",
+  "rationale": "§7.3.5: \"a name beginning with `_` is exempt\"; \"A reference counts wherever it stands in the scope: … in the initializer of a later binding\"; parameters are listed as not covered.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "W-UNUSED-BINDING"
+    ]
+  }
+}

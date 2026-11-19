@@ -744,10 +744,12 @@ ${
     // callers instead (§19.9.5: "Its client call fails with … the function's declared error variants … plus
     // `Transport(t: ServerCallError)`"), so analyzeRun drops these reports for it (dropTransportDiags).
     type TportAt:struct = { fnSym: int, d: Diag }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[], reqs: ReqFact[], rets: LamRet[] }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[], lifts: LiftSeen[], nsAt: NsAt[], tport: TportAt[], reqs: ReqFact[], rets: LamRet[], locs: LocDecl[] }
     // s478 (s478-boot-block-lambda) — one `return` value of a block lambda (`lam`: its nid): its
     // resolved type, read by resolveLambda for the lambda's value type (a map's element type).
     type LamRet:struct = { lam: int, ty: Type | not }
+    // s480 — a local binding (addLoc): its statement / binder node, Sym id, name and span.
+    type LocDecl:struct = { file: string, nid: int, sym: int, name: string, span: ASpan }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -789,11 +791,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -844,38 +846,66 @@ ${
     }
 
     fn withDiag(st: AS, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
     // diagnostic list where the binder used to make it.
     fn addPending(st: AS, r: PendRule) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
-                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]), lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn addLift(st: AS, into: Sym, ty: Type | not) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts.concat([{ into: into.id, ty: ty }]), nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
+    }
+
+    // s480 (W-UNUSED-BINDING, §7.3.5): record a LOCAL binding the binder minted — a `let` /
+    // `const` / keywordless declaration (a destructured name included), an iterate-head binder,
+    // a counted head's `let`, a loop bound as a value. unusedBindings judges them once the
+    // program is bound. File-scope bindings, parameters and pattern binders are never recorded.
+    fn addLoc(st: AS, file: string, nid: int, s: Sym, name: string, span: ASpan) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
+                 locs: st.locs.concat([{ file: file, nid: nid, sym: s.id, name: name, span: span }]) }
+    }
+
+    fn localIsLin(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(lin: l) :> l
+            .Eval(e: x) :> false
+            .Return(e: x) :> false
+            .If(cond: x) :> false
+            .Given(name: x) :> false
+            .For(f: x) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
+            .Lift(what: x) :> false
+            .LocalFn(f: x) :> false
+            .EffectStmt(w: x) :> false
+            .Defer(body: x) :> false
+            .Fail(f: x) :> false
+        }
     }
 
     // =========================================================================
@@ -9389,7 +9419,7 @@ ${
         // analyzeSources re-reads the file with `m.x` one name there and analyzes again, so this report
         // stands only for `m` used as a value.
         if (env.fx.fnRef != e.nid && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
             return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a namespace import — it is no value; name one of its exports: `" + name + ".name` (§21.3)", sr)
         }
         // s472: a file-scope constant (§7.6) — after the locals, which shadow it
@@ -9839,7 +9869,7 @@ ${
             if (nm.code != "") return diagX(env, e, nm.code, nm.why, st)
         }
         if (isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: e.span.start + 1, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
             return diagX(env, e, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; read one of its exported cells: `@" + name + ".name` (§21.3)", sr)
         }
         // s473 D29 — the read side of §6.1.1 is E-STATE-UNDECLARED (the more specific code; §34 row
@@ -13979,7 +14009,7 @@ ${
         // s475 (g-boot-namespace-cell-read-s475) — `@m` with `m` a namespace import (no nearer binding):
         // recorded as resolveAtOf records a read, so `@m.x = …` is re-read with `m.x` one name.
         if (!namesInstance(env, name) && isNsBinding(env.g.te.link, env.file, name)) {
-            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets }
+            const sr: AS = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt.concat([{ file: env.file, at: t.span.start + 1, kw: false }]), tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
             return noPlace(addDiag(sr, env.file, t.span, "E-SCOPE-001", "`@" + name + "` — `" + name + "` is a namespace import, not a cell; write one of its exported cells' fields: `@" + name + ".name.field = …` (§21.3)"))
         }
         // s475 (g-boot-namespace-cell-read-s475) — a whole-value write of an own value declared in ANOTHER
@@ -18637,7 +18667,7 @@ ${
         const rl: RB = resolveLocal(env, s, kn, false, not, v, sd)
         const r2: AS = rl.st
         const at: NsAt = { file: env.file, at: s.span.start, kw: true }
-        const sr: AS = { facts: r2.facts, diags: r2.diags, nextSym: r2.nextSym, annots: r2.annots, bad: r2.bad, effects: r2.effects, pend: r2.pend, lifts: r2.lifts, nsAt: r2.nsAt.concat([at]), tport: r2.tport, reqs: r2.reqs, rets: r2.rets }
+        const sr: AS = { facts: r2.facts, diags: r2.diags, nextSym: r2.nextSym, annots: r2.annots, bad: r2.bad, effects: r2.effects, pend: r2.pend, lifts: r2.lifts, nsAt: r2.nsAt.concat([at]), tport: r2.tport, reqs: r2.reqs, rets: r2.rets, locs: r2.locs }
         return { env: rl.env, st: sr }
     }
 
@@ -20521,7 +20551,7 @@ ${
     }
 
     fn emptyAS() -> AS {
-        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [] }
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [], locs: [] }
     }
 
     // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
@@ -20615,7 +20645,7 @@ ${
     }
 
     fn withTport(st: AS, fnSym: int, d: Diag) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]), reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport.concat([{ fnSym: fnSym, d: d }]), reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // `!{}` / `match` on the call: the arms resolve against the CLIENT set (the
@@ -21892,7 +21922,7 @@ ${
     }
 
     fn addReq(st: AS, r: ReqFact) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs.concat([r]), rets: st.rets }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs.concat([r]), rets: st.rets, locs: st.locs }
     }
 
     // The body's shape (§6.7.7 grammar `lin-declaration* assignment-expression`).
@@ -22459,7 +22489,7 @@ ${
                 ds = ds.concat([d])
             }
         }
-        st = { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        st = { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
         let deps: NameFact[] = []
         for (const at of atNodesIn(rhs)) {
             const rd: RDep = inferredDep(env, at, tname, st)
@@ -22735,7 +22765,7 @@ ${
         if (env.nest.lam >= 0) {
             const lr: RX = resolveExpr(renv, e, env.nest.lamWant, st)
             const s1: AS = lr.st
-            return { facts: s1.facts, diags: s1.diags, nextSym: s1.nextSym, annots: s1.annots, bad: s1.bad, effects: s1.effects, pend: s1.pend, lifts: s1.lifts, nsAt: s1.nsAt, tport: s1.tport, reqs: s1.reqs, rets: s1.rets.concat([{ lam: env.nest.lam, ty: lr.x.ty }]) }
+            return { facts: s1.facts, diags: s1.diags, nextSym: s1.nextSym, annots: s1.annots, bad: s1.bad, effects: s1.effects, pend: s1.pend, lifts: s1.lifts, nsAt: s1.nsAt, tport: s1.tport, reqs: s1.reqs, rets: s1.rets.concat([{ lam: env.nest.lam, ty: lr.x.ty }]), locs: s1.locs }
         }
         if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
         // s475 (g-boot-object-literal-struct-context-positions-s475): the operand's position
@@ -22814,6 +22844,7 @@ ${
         }
         const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
+        if (!localIsLin(s)) st = addLoc(st, env.file, s.nid, rs.s, name, s.span)   // s480 (W-UNUSED-BINDING): `lin` is §35's
         let lty: Type | not = ri.x.ty
         if (annot is given) {
             lty = annot
@@ -22956,6 +22987,7 @@ ${
         }
         const rs: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rs.st, b.nid, BindFact.BBind(rs.s))
+        st = addLoc(st, env.file, b.nid, rs.s, b.name, b.span)   // s480: a loop bound as a value (§7.3.5)
         if (annot is given) st = addAnnot(st, rs.s, annot)
         const n0: int = st.lifts.length
         st = resolveFor(withLift(env, LiftCtx.LiftTo(rs.s, false)), s, f, st)
@@ -23488,6 +23520,7 @@ ${
         const ri: RX = resolveExpr(env, init, annot, st)
         const rs: RSym = mint(reservedName(ri.st, env.file, s.span, name), name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
+        st = addLoc(st, env.file, s.nid, rs.s, name, s.span)   // s480: a counted head's `let` (§7.3.5)
         let lty: Type | not = ri.x.ty
         if (annot is given) {
             lty = annot
@@ -23549,6 +23582,7 @@ ${
         st = localCellClash(env, b.span, b.name, st)     // #1690 review F12: a for-of binder is a function-body const/let (§7.6, D14)
         const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
         st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+        st = addLoc(st, env.file, b.nid, rb.s, b.name, b.span)   // s480: an iterate-head binder (§7.3.5, §49.3.5)
         let via: string = ""
         const ix: AExpr | not = iterOfExpr(src)
         if (rx.x.ty is not && ix is given) via = srcWhy(env, ix, st)
@@ -30743,6 +30777,89 @@ ${
             }
         }
         return out
+    }
+
+    // =========================================================================
+    // s480 — W-UNUSED-BINDING (SPEC §7.3.5; §34 Severity: Warning). Ruling
+    // (user-voice "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479)"):
+    // "any local binding (`let`, `const`, keywordless; `lin` excluded because §35
+    // governs it) not read before its scope ends gets the warning, and a `_` prefix
+    // exempts it". The population is what the binder recorded with addLoc (a local
+    // declaration — a destructured name included —, an iterate-head binder, a counted
+    // head's `let`, a loop bound as a value); parameters, pattern binders, `given`
+    // names and file-scope bindings are never recorded. A binding is READ when any
+    // name the binder resolved denotes its Sym (NameFact NLocal) — a whole-assignment
+    // target `x = v` records no name (placeName), so a write-only binding is unread;
+    // the root of a part write `p.f = v` records one (resolveLocalPartWrite), so it
+    // counts as a read (§7.3.5 lane reading: never fire on a binding a program uses).
+    // Sym-exact, so shadowing is exact. Not judged: a `_`-prefixed name, a name with
+    // `#` (a compiler-minted temp, parse.scrml destructTemp), and a binding whose
+    // statement the binder resolved more than once unless EVERY resolution is unread.
+    // Run only over a compile with no Error (analyzeRun, as E-DG-002): a read inside
+    // a refused construct is never resolved, so "never read" is not known there.
+    // =========================================================================
+    fn unusedBindings(st: AS) -> Diag[] {
+        if (st.locs.length == 0) return []
+        let read: int[] = minusOnes(st.nextSym)
+        for (const f of st.facts.names.facts) {
+            const k: int = nlocalSymId(f)
+            if (k >= 0 && k < read.length) read[k] = 1
+        }
+        let wrote: int[] = minusOnes(st.nextSym)
+        for (const e of st.facts.effects.facts) {
+            const w: int = wholeLocalWrite(e)
+            if (w >= 0 && w < wrote.length) wrote[w] = 1
+        }
+        // a statement resolved more than once: read if any of its resolutions is
+        // (by node id, one mark per node: 1 read, 2 reported — linear in the locals)
+        let top: int = -1
+        for (const l0 of st.locs) {
+            if (l0.nid > top) top = l0.nid
+        }
+        let mark: int[] = minusOnes(top + 1)
+        for (const l1 of st.locs) {
+            if (l1.nid >= 0 && l1.sym < read.length && read[l1.sym] == 1) mark[l1.nid] = 1
+        }
+        let out: Diag[] = []
+        for (const l of st.locs) {
+            const skip: boolean = l.name.substring(0, 1) == "_" || l.name.indexOf("#") >= 0 || l.sym >= read.length || l.nid < 0
+            if (!skip && read[l.sym] != 1 && mark[l.nid] == -1) {
+                mark[l.nid] = 2
+                const what: string = wrote[l.sym] == 1 ? "is assigned, but nothing reads it before its scope ends — every value written to it is lost" : "is declared, but nothing reads it before its scope ends"
+                out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` " + what + " (§7.3.5). Read it, remove it, or name it `_" + l.name + "` if it is deliberately unread")])
+            }
+        }
+        return out
+    }
+
+    // s480 — the Sym id a resolved name denotes as a local (-1: not a local).
+    fn nlocalSymId(f: NameFact) -> int {
+        return match f {
+            .NLocal(sym: s) :> s.id
+            .NField(decl: d) :> -1
+            .NInst(decl: d) :> -1
+            .NStruct(owner: o) :> -1
+            .NFn(sym: s) :> -1
+            .NLength :> -1
+            .NSurface(of: o) :> -1
+            .NConst(sym: s) :> -1
+            .NReq(id: rq0) :> -1
+        }
+    }
+
+    // s480 — the Sym id a whole rebinding of a local writes (-1: none).
+    fn wholeLocalWrite(e: EffectFact) -> int {
+        return match e {
+            .EAssignLocal(sym: s, path: pa) :> (pa.length == 0 ? s.id : -1)
+            .ELocalEdit(sym: s) :> -1
+            .EWrite(w: w) :> -1
+            .ESpread(ws: ws) :> -1
+            .EReset(w: w) :> -1
+            .EEdits(w: w) :> -1
+            .ERemove(w: w) :> -1
+            .EElemAt(cap: c) :> -1
+            .EPosition(cap: c) :> -1
+        }
     }
 
     // s478 — the program field a resolved name reads (-1: none).
@@ -43533,7 +43650,7 @@ ${
             if (!dup) ds = ds.concat([d])
             i = i + 1
         }
-        return { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // s473 D29 — `at` lies inside the text of a `?{}` that writes (not a SELECT / WITH … SELECT,
@@ -44537,7 +44654,7 @@ ${
             }
             if (!drop) out = out.concat([d])
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // Why callable i's server calls need composing ("" — they do not): two or more
@@ -46524,7 +46641,7 @@ ${
             }
         }
         if (!dropped) return st
-        return { facts: st.facts, diags: keep, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: keep, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // §13.7 "the fix: a value position cannot wait for the server; load the value with a
@@ -47271,7 +47388,7 @@ ${
             if (i < st.diags.length) out = out.concat([st.diags[i]])
             i = i + 1
         }
-        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     fn decide(s: Summary, r: PendRule) -> Diag[] {
@@ -50645,7 +50762,7 @@ ${
     // s475-boot-literal-carriers (g-boot-transport-carriers-rerun-every-carrier-s475): `retype` — some carrier's
     // `err` would differ from its declared enum (remoteEnums: failable, an enum, no `Transport` variant), so its
     // callers must be judged again; a carrier whose enum already declares `Transport` changes nothing.
-    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[], retype: boolean }
+    export type ARun:struct = { tp: TypedProgram, plans: ComposePlan[], nsAt: NsAt[], carriers: int[], pend: int[], retype: boolean, unused: Diag[] }
 
     // =========================================================================
     // s478 (s478-boot-endpoint) — THE §61 `<endpoint>` PASS. The parser recorded
@@ -51864,7 +51981,7 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers)
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(r1.tp, epNotes)
+        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withNotes(r1.tp, epNotes), r1.unused)
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers)
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -51872,7 +51989,10 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes) }
         let ds: Diag[] = []
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]) }
-        return withNotes({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, epNotes)
+        // s480: the lint of the files as written (r1), only when the composed program has no Error
+        let un: Diag[] = []
+        if (!hasErrorDiag(ds)) un = r1.unused
+        return withNotes(withNotes({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, epNotes), un)
     }
 
     fn withNotes(tp: TypedProgram, notes: Diag[]) -> TypedProgram {
@@ -52148,7 +52268,7 @@ ${
     }
 
     fn analyzeRun(files: FileAst[], entry: string, keyBase: string, routeBase: string, allow: boolean, carriers: int[]) -> ARun {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [], lifts: [], nsAt: [], tport: [], reqs: [], rets: [], locs: [] }
         const ra0: RGlobals = phaseA(files, entry, routeBase, carriers, st0)
         // s472: the file-scope constants' initializers, in order (before any body reads one)
         const ra: RGlobals = constPass(ra0.g, ra0.st)
@@ -52163,7 +52283,7 @@ ${
         st = rr.st
         // s477: a `reset-on=` on a pending cell re-runs its load (§13.9.2) — the entries join its deps
         const prr: RPendResets = pendResetDeps(st.reqs, rr.infos)
-        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs }
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: prr.reqs, locs: st.locs }
         const rp: RPersists = persistPass(ra.g, files, st)
         // s478: `debounced=` / `throttled=` on program cells (§6.13)
         const rt: RTimings = timingPass(ra.g, files, prr.infos, prr.reqs, rp.st)
@@ -52179,7 +52299,7 @@ ${
         // values; the final Tables carries the typer's own table.
         const fs: NodeFacts = indexed(st.facts)
         // s477: a pending cell's load depends on the cells its called functions read too (§13.9.2)
-        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: pendCallDeps(ra.g, fs.names, st.reqs) }
+        st = { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: pendCallDeps(ra.g, fs.names, st.reqs), locs: st.locs }
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [], refines: [] },
@@ -52251,9 +52371,16 @@ ${
         // a refused or broken construct is never resolved, so "never read" is not known there
         // (no cascade: the error accounts for it)
         let unread: Diag[] = []
-        if (!hasErrorDiag(judged) && !parseFailed(files)) unread = unreadCells(t)
+        // s480: W-UNUSED-BINDING (§7.3.5) — judged as E-DG-002 is, over a compile with no Error; kept
+        // apart from `tp` (analyzeSources adds it once, from the last run over the files as written —
+        // never from the composed run, whose synthesized batches are not the author's bindings)
+        let unused: Diag[] = []
+        if (!hasErrorDiag(judged) && !parseFailed(files)) {
+            unread = unreadCells(t)
+            unused = unusedBindings(pl.st)
+        }
         return { tp: { files: files, tables: t, diags: judged.concat(unread),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: cps.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: cps.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype, unused: unused }
     }
 
     // s478 — did any file draw an Error-severity parse diagnostic (FileAst.errs)?

@@ -13,7 +13,8 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadM2, terminated } from "./harness.js";
-import { frontEnd, readSlice, compileProgram, PROGRAMS } from "./lowered.js";
+import { readSlice, compileProgram, PROGRAMS } from "./lowered.js";
+import { frontEndNoUnusedLint as frontEnd } from "./no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });

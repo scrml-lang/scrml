@@ -84,6 +84,7 @@ ${
             "W-TIMED-READ-MODIFY-WRITE" :> Severity.Warning
             "W-TX-ARM-UNREACHABLE" :> Severity.Warning
             "W-TX-EXIT-ROLLS-BACK" :> Severity.Warning
+            "W-UNUSED-BINDING" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
