@@ -212,13 +212,18 @@ describe("(D) route registration at the verbatim path=/method= + node --check (�
     const sjs = serverJs(r);
     // The route record SHAPE the WinterCG aggregate auto-collects.
     expect(sjs).toMatch(/export const __ri_route_endpoint_\d+ = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
-    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_\d+\];/);
+    // S479 (§61.7): plus one OPTIONS record at the endpoint's path — its preflight
+    // answer (405 without the endpoint's own `cors=`; endpoint-cors-served.test.js).
+    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_\d+, __ri_route_endpoint_preflight_0\];/);
     // The imported aggregate confirms the live record (not just the text).
     expect(Array.isArray(SRV.routes)).toBe(true);
-    expect(SRV.routes.length).toBe(1);
+    expect(SRV.routes.length).toBe(2);
+    expect(SRV.routes.filter((r) => r.method === "POST").length).toBe(1);
     expect(SRV.routes[0].path).toBe("/fsp");
     expect(SRV.routes[0].method).toBe("POST");
     expect(typeof SRV.routes[0].handler).toBe("function");
+    expect(SRV.routes[1].path).toBe("/fsp");
+    expect(SRV.routes[1].method).toBe("OPTIONS");
   });
 
   test("the fetch aggregate only matches the verbatim path+method (a wrong path returns no record)", async () => {

@@ -111,6 +111,17 @@ describe("A — §61 compile-time diagnostics", () => {
     expect(refusals(ep(`path="/fsp" method="POST" accepts=FspMethod csrf="off"`)).join()).toContain("SHALL NOT carry a `csrf=`");
     expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod auth="x"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
+
+  // S479 ruling (user-voice) "program `cors=` does not cover `<endpoint>` routes; per-endpoint
+  // `cors=`" — §61.7: "An `<endpoint>` MAY carry `cors=`". The bootstrap builds no CORS, so the
+  // attribute is refused BY NAME (INTERIM, g-boot-endpoint-cors-unbuilt-s479), never ignored.
+  test("§61.7: a per-endpoint cors= is refused by name (INTERIM) — not the generic 'path/method/accepts only' refusal", () => {
+    const r = refusals(ep(`path="/fsp" method="POST" accepts=FspMethod cors="https://a.example"`));
+    expect(r.length).toBe(1);
+    expect(r[0]).toContain("`cors=` on `<endpoint>` (§61.7");
+    expect(r[0]).toContain("g-boot-endpoint-cors-unbuilt-s479");
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod cors="*"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
 });
 
 describe("B — the S478 open-Qs rulings (user-voice items 33–40), and refusals by name where the SPEC is silent", () => {

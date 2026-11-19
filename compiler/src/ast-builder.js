@@ -23573,6 +23573,15 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const acceptsMatch = header.match(new RegExp(`\\baccepts\\s*=\\s*(${E_IDENT.source})\\b`));
         const acceptsRaw = acceptsMatch ? acceptsMatch[1] : null;
 
+        // §61.7 per-endpoint `cors=` (ruling:user-voice-scrml.md-S479 "program
+        // `cors=` does not cover `<endpoint>` routes; per-endpoint `cors=`"): a
+        // string literal, the same values as the §39.2.1 program attribute. The
+        // name must start the attribute (`(?:^|\s)`), so `x-cors=` or
+        // `cors-max-age=` never reads as it. Absent → null: the endpoint takes
+        // no cross-origin browser callers and its preflight is answered 405.
+        const corsMatch = header.match(new RegExp(`(?:^|\\s)cors\\s*=\\s*${STR.source}`));
+        const cors = corsMatch ? (corsMatch[1] !== undefined ? corsMatch[1] : corsMatch[2]) : null;
+
         // §61.9 — E-ENDPOINT-PATH-MISSING: an `<endpoint>` with no `path=`.
         if (path === null) {
           errors.push(new TABError(
@@ -23651,6 +23660,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           path,          // required string URL (null → E-ENDPOINT-PATH-MISSING above)
           method,        // recognized HTTP method (invalid/missing → E-ENDPOINT-METHOD-INVALID)
           acceptsRaw,    // raw enum type-ref text (W3 resolves against §14/§53)
+          cors,          // §61.7 per-endpoint cors= origin string, or null (no CORS)
           arms,          // MatchArmEntry[] from parseMatchArms (§18.0.1 reuse)
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,

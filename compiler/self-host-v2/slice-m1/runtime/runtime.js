@@ -4875,6 +4875,60 @@ export function decodeText(table, text, opts) {
 // The `reason` texts are implementation freedom (the conformance cases assert the variant and
 // `field`, never `reason`).
 // -----------------------------------------------------------------------------
+// S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one
+// JSON object — the body itself or any object nested in it — names the same key twice is a
+// decode failure — `::Malformed` … Keys are compared after JSON string unescaping, so `"tag"`
+// and `"tag"` are the same key." `JSON.parse` keeps the last of a repeated name silently
+// (review #1940 (4): `{"tag":"Unit","tag":"I","n":3}` ran `I`, while a first-wins proxy saw
+// `Unit`), so the text is scanned once more after it parses. S479 (#1962 ruling item 5): moved
+// here from server-runtime.js (which re-exports it for the endpoint decode) so the standalone
+// §41.13 `parseVariant` below refuses a repeated key in a string input as well.
+//
+// `text` is JSON that `JSON.parse` accepted, so the scan only tracks structure: string literals
+// (skipped by their escapes; a `\` escapes exactly the next character, so `\"` never ends a
+// string and `\\"` does), `{ [ } ] , :`. Each open object holds the set of its keys; a string
+// read where an object expects a key (after `{` or after a `,` inside that object) is a key. A
+// key with no `\` is its own text; one with escapes is decoded by `JSON.parse` of the literal,
+// so every spelling of a name (`a`, `\/`, a surrogate pair) compares by its value. The
+// stack is explicit, so a deeply nested body cannot overflow the call stack here. Returns the
+// first repeated key, or `undefined`.
+export function jsonRepeatedKey(text) {
+  const stack = []; // per open container: a Set of keys (an object) or null (an array)
+  let expectKey = false;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22) {
+      const start = i;
+      let escaped = false;
+      i++;
+      while (i < n) {
+        const d = text.charCodeAt(i);
+        if (d === 0x5c) { escaped = true; i += 2; continue; }
+        if (d === 0x22) break;
+        i++;
+      }
+      i++; // past the closing quote
+      if (expectKey) {
+        const keys = stack[stack.length - 1];
+        const key = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
+        if (keys.has(key)) return key;
+        keys.add(key);
+        expectKey = false;
+      }
+      continue;
+    }
+    if (c === 0x7b) { stack.push(new Set()); expectKey = true; }
+    else if (c === 0x5b) { stack.push(null); expectKey = false; }
+    else if (c === 0x7d || c === 0x5d) { stack.pop(); expectKey = false; }
+    else if (c === 0x2c) expectKey = stack.length > 0 && stack[stack.length - 1] !== null;
+    else if (c === 0x3a) expectKey = false;
+    i++;
+  }
+  return undefined;
+}
+
 const pvOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const pvClip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
 
@@ -4897,6 +4951,11 @@ export function parseVariant(table, errTable, json) {
   let v = json;
   if (typeof json === "string") {
     try { v = JSON.parse(json); } catch (e) { return pvError(errTable, "Malformed", { reason: `not JSON: ${message(e)}` }); }
+    // §41.13 "A repeated key" (S479, #1962 ruling item 5): "When the input is a string, a JSON
+    // text in which one object … names the same key twice is a decode failure — `::Malformed`"
+    // — the §61.3 endpoint rule, by the same detector.
+    const rep = jsonRepeatedKey(json);
+    if (rep !== undefined) return pvError(errTable, "Malformed", { reason: `the JSON text repeats the key '${pvClip(rep)}' in one object` });
   }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return pvError(errTable, "Malformed", { reason: "expected a JSON object (or the JSON text of one) at the parseVariant boundary" });
   if (!pvOwn(v, "tag") || typeof v.tag !== "string") return pvError(errTable, "MissingDiscriminator", {});
