@@ -5607,19 +5607,19 @@ ${
     // counts as a `replace` of every tape its elements hold, RECURSIVELY"). "" when each
     // does, else why. `d` only seeds structTapeKept (path [] — nothing is "kept" there).
     fn innerTapeKept(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string) -> string {
-        return innerKeptWalk(p, ob, tape, d, label, []).msg
+        return innerKeptWalk(p, ob, tape, d, label, { msg: "", done: [], memo: [] }).msg
     }
 
-    fn innerKeptWalk(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, done: int[]) -> KeptWalk {
+    fn innerKeptWalk(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, w: KeptWalk) -> KeptWalk {
         const et: Type | not = seqElemOf(unMaybeC(tape))
-        if (et is not) return { msg: "", done: done }
+        if (et is not) return w
         const at: string = label + "[…]"
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
-            if (!ig) return { msg: "the write replaces the tape `" + at + "` held by an element of a replaced tape, whose type grants no `replace` — an outer `replace` does not override an inner tape's grants (§66.12.6 rule 1, RULED S472)", done: done }
-            return innerKeptWalk(p, ob, et, d, at, done)
+            if (!ig) return { msg: "the write replaces the tape `" + at + "` held by an element of a replaced tape, whose type grants no `replace` — an outer `replace` does not override an inner tape's grants (§66.12.6 rule 1, RULED S472)", done: w.done, memo: w.memo }
+            return innerKeptWalk(p, ob, et, d, at, w)
         }
-        return keptWalk(p, ob, et, not, d, InstRef.Lexical(0), [], at, done)
+        return keptWalk(p, ob, et, not, d, InstRef.Lexical(0), [], at, w)
     }
 
     // s472-boot-map-grants — a FieldAt whose target is a tape writes that tape WHOLE: it is
@@ -5866,34 +5866,62 @@ ${
     // s480 r1 (review:#1994 HIGH-1): no path `seen` cut — against a StructOf-bearing ancestor
     // it hid a replaced tape (see analyze.scrml TapeWalk). A no-value struct is in `done` before
     // its fields are walked; a StructOf one descends into its own field values (finite).
-    type KeptWalk:struct = { msg: string, done: int[] }
+    // s480 r2 (review:#1994 HIGH-2): `memo` — the LITERAL states (the value a once-bound Local
+    // whose init is a StructOf) already walked clean. A let used twice (`l1 = { a: l0, b: l0 }`)
+    // was walked once per path to it: 2^depth over a let DAG, with or without a tape anywhere.
+    // A literal state's walk reads only: the Local (its value is a function of the Local: a
+    // once-bound init, `boundValue`), the named struct `s`, and the path — the path ONLY through
+    // the keep tests, `keepKey(field value) == placeKeyOf(d, inst, path ++ q)`. `keptPathClass`
+    // is that path when some field value of some StructOf in the program reads a place under it
+    // (ob.keepReads), else "*": no keep test under the path can then succeed, so every path in
+    // "*" walks the same fields the same way. Only a CLEAN walk is recorded (a problem ends the
+    // whole walk), and a clean state walked again is clean again and adds nothing to `done`
+    // (every no-value state it expanded is in `done` already), so the memo changes no verdict
+    // and no message — it only drops repeats.
+    type KeptWalk:struct = { msg: string, done: int[], memo: string[] }
 
     fn structTapeKept(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string) -> string {
-        return keptWalk(p, ob, ty, v0, d, inst, path, label, []).msg
+        return keptWalk(p, ob, ty, v0, d, inst, path, label, { msg: "", done: [], memo: [] }).msg
     }
 
-    fn keptWalk(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, done0: int[]) -> KeptWalk {
+    fn keptPathClass(ob: OnceBinds, d: Sym, inst: InstRef, path: FieldRef[]) -> string {
+        const pk: string = placeKeyOf(d, inst, path)
+        const below: string = pk + "."
+        for (const r of ob.keepReads) {
+            if (r == pk || r.startsWith(below)) return pk
+        }
+        return "*"
+    }
+
+    fn keptWalk(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, w0: KeptWalk) -> KeptWalk {
         let v: Expr | not = not
         if (v0 is given) v = boundValue(p, ob, v0, 0)
         // s469 F4: the value IS the written place — nothing in it is replaced
         if (v is given && path.length > 0) {
-            if (keepKey(p, ob, v) == placeKeyOf(d, inst, path)) return { msg: "", done: done0 }
+            if (keepKey(p, ob, v) == placeKeyOf(d, inst, path)) return w0
         }
         // s472-boot-map-grants (RULED S472 item 1): a tape written whole replaces every tape
         // its elements hold, at any depth
-        if (isTapeType(ty)) return innerKeptWalk(p, ob, ty, d, label, done0)
+        if (isTapeType(ty)) return innerKeptWalk(p, ob, ty, d, label, w0)
         const s: Sym | not = namedSym(unMaybeC(ty))
-        if (s is not) return { msg: "", done: done0 }
+        if (s is not) return w0
         const td: TypeDef | not = findTypeDef(p, s)
-        if (td is not) return { msg: "", done: done0 }
+        if (td is not) return w0
         const fs: FieldDef[] | not = structFields(td)
-        if (fs is not) return { msg: "", done: done0 }          // an enum: a payload is a value, not a tape position (RULED S469)
+        if (fs is not) return w0          // an enum: a payload is a value, not a tape position (RULED S469)
         let vals: Expr[] | not = not
         if (v is given) vals = structOfFields(v)
-        let done: int[] = done0
+        let w: KeptWalk = w0
+        let memoKey: string = ""
         if (vals is not) {
-            if (done.indexOf(s.id) >= 0) return { msg: "", done: done }
-            done = done.concat([s.id])
+            if (w.done.indexOf(s.id) >= 0) return w
+            w = { msg: "", done: w.done.concat([s.id]), memo: w.memo }
+        } else if (v0 is given) {
+            const ls: Sym | not = localSymOf(v0)
+            if (ls is given) {
+                memoKey = ls.id + "/" + s.id + "/" + keptPathClass(ob, d, inst, path)
+                if (w.memo.indexOf(memoKey) >= 0) return w
+            }
         }
         let i = 0
         for (const fd of fs) {
@@ -5908,19 +5936,17 @@ ${
             }
             if (!kept) {
                 if (isTapeType(fd.ty)) {
-                    if (!fd.grants.replace) return { msg: "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)", done: done }
-                    const ir: KeptWalk = innerKeptWalk(p, ob, fd.ty, d, label + "." + fd.sym.hint, done)
-                    if (ir.msg != "") return ir
-                    done = ir.done
+                    if (!fd.grants.replace) return { msg: "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)", done: w.done, memo: w.memo }
+                    w = innerKeptWalk(p, ob, fd.ty, d, label + "." + fd.sym.hint, w)
                 } else {
-                    const r: KeptWalk = keptWalk(p, ob, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, done)
-                    if (r.msg != "") return r
-                    done = r.done
+                    w = keptWalk(p, ob, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, w)
                 }
+                if (w.msg != "") return w
             }
             i = i + 1
         }
-        return { msg: "", done: done }
+        if (memoKey != "") return { msg: "", done: w.done, memo: w.memo.concat([memoKey]) }
+        return w
     }
 
     fn isTapeType(t: Type) -> boolean {
@@ -6035,12 +6061,16 @@ ${
     // walk by checkCore — onceBoundInit walked the whole program per query (per
     // tape-replace write), O(writes × program). `lets[k]` is bound by a Let to
     // `inits[k]` (program preorder); `assigned` every local some Assign rebinds.
-    type OnceBinds:struct = { lets: int[], inits: Expr[], assigned: int[] }
+    // s480 r2: `keepReads` — every place key a field value of a StructOf in the program reads
+    // (keepKey of its boundValue: a cell read, or a read through a snapshot Local), the only
+    // keys a keep test of keptWalk can ever match (keptPathClass).
+    type OnceBinds:struct = { lets: int[], inits: Expr[], assigned: int[], keepReads: string[] }
 
     fn onceBinds(p: CoreProgram) -> OnceBinds {
         let lets: int[] = []
         let inits: Expr[] = []
         let assigned: int[] = []
+        let cand: Expr[] = []
         for (const n of allNodes(Node.NProgram(p))) {
             const b: LetBind | not = nodeLetBind(n)
             if (b is given) {
@@ -6051,8 +6081,42 @@ ${
                     assigned = assigned.concat([b.sym.id])
                 }
             }
+            for (const fv of nodeStructOfFields(n)) {
+                if (localSymOf(fv) is given || cellReadOf(fv) is given) cand = cand.concat([fv])
+            }
         }
-        return { lets: lets, inits: inits, assigned: assigned }
+        const ob0: OnceBinds = { lets: lets, inits: inits, assigned: assigned, keepReads: [] }
+        let reads: string[] = []
+        for (const fv of cand) {
+            const k: string = keepKey(p, ob0, boundValue(p, ob0, fv, 0))
+            if (k.startsWith("<") && reads.indexOf(k) < 0) reads = reads.concat([k])
+        }
+        return { lets: lets, inits: inits, assigned: assigned, keepReads: reads }
+    }
+
+    fn nodeStructOfFields(n: Node) -> Expr[] {
+        return match n {
+            .NExpr(e: e) :> structOfFieldsOr(e)
+            .NStmt(s: x) :> []
+            .NProgram(p: x) :> []
+            .NDecl(d: x) :> []
+            .NField(f: x) :> []
+            .NFn(f: x) :> []
+            .NServerFn(f: x) :> []
+            .NBlock(b: x) :> []
+            .NPlace(pl: x) :> []
+            .NInst(i: x) :> []
+            .NPattern(pat: x) :> []
+            .NEdit(k: x) :> []
+            .NView(v: x) :> []
+            .NAttr(a: x) :> []
+        }
+    }
+
+    fn structOfFieldsOr(e: Expr) -> Expr[] {
+        const fs: Expr[] | not = structOfFields(e)
+        if (fs is not) return []
+        return fs
     }
 
     type LetBind:struct = { sym: Sym, init: Expr, isLet: boolean }

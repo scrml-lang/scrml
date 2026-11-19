@@ -81,29 +81,37 @@ describe("F1 — a whole-struct write over a shared struct graph (§66.12.6 rule
   });
 
   // s480 r1 (review:#1994 HIGH-1): there is no path `seen` cut any more; `done` stops the cycle. The
-  // walk now also reaches the tape the ELEMENTS of `@t.kids` hold — `@t.kids[…].kids`, a separate
-  // position (§66.12.6 rule 1, RULED S472 item 1: "a `replace` of every tape its elements hold,
-  // RECURSIVELY"). It is the element-held diagnostic, once, as for any struct a field and a tape's
-  // elements share (the test below); base cut it because `T` was on the path. Granting `replace`
-  // makes both go.
-  test("a recursive struct: the tape field, once, and the tape its elements hold, once (`done` stops the cycle)", () => {
+  // walk also reaches `@t.kids[…].kids`, the tape the ELEMENTS of `@t.kids` hold (§66.12.6 rule 1,
+  // RULED S472 item 1). s480 r2 (LOW-a): that is the same field DECLARATION `T.kids`, with the same
+  // grants — one fix — so it is reported once, at the first path. Granting `replace` makes it go.
+  test("a recursive struct: the tape field declaration, once (`done` stops the cycle, `fields` the repeat)", () => {
     const r = run(P("    type T:struct = { kids: T[free, append], n: int }", "let <t:T | not=(not)/>", "function go(v: T) {\n        @t = v;\n    }"));
-    expect(tapeFields(r)).toEqual(["@t.kids", "@t.kids[…].kids"]);
-    expect(errs(r)[1].message).toContain("replaces the tapes inside `@t`");
+    expect(tapeFields(r)).toEqual(["@t.kids"]);
+    expect(errs(r)[0].message).toContain("§66.12.6 rule 4");
     const g = run(P("    type T:struct = { kids: T[free, append, replace], n: int }", "let <t:T | not=(not)/>", "function go(v: T) {\n        @t = v;\n    }"));
     expect(tapeFields(g)).toEqual([]);
   });
 
-  test("a struct shared by a field and by a tape's elements: reported once as a field, once as an element-held tape", () => {
+  // s480 r2 (LOW-a): `B.xs` is one declaration — reported once, at the first path; the element-held
+  // wording stays for a declaration reached ONLY through elements.
+  test("a struct shared by a field and by a tape's elements: its tape field reported once, at the first path", () => {
     const r = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, list: B[free, replace], again: B }",
       "let <r:R | not=(not)/>", "function go(v: R) {\n        @r = v;\n    }"));
-    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.list[…].xs"]);
+    expect(tapeFields(r)).toEqual(["@r.a.xs"]);
+    const e = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { list: B[free, replace], n: int }",
+      "let <r:R | not=(not)/>", "function go(v: R) {\n        @r = v;\n    }"));
+    expect(tapeFields(e)).toEqual(["@r.list[…].xs"]);
+    expect(errs(e)[0].message).toContain("replaces the tapes inside `@r`");
   });
 
   test("an object literal is still judged field by field (a literal is never skipped as `done`)", () => {
     const r = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, b: B, c: B }",
       "let <r:R | not=(not)/>", "function go(v: B) {\n        @r = { a: v, b: { xs: [] }, c: @r.c };\n    }"));
-    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.b.xs"]);
+    // s480 r2 (LOW-a): `@r.a.xs` and `@r.b.xs` are one declaration `B.xs` — once, at the first path
+    expect(tapeFields(r)).toEqual(["@r.a.xs"]);
+    const k = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, b: B, c: B }",
+      "let <r:R | not=(not)/>", "function go(v: B) {\n        @r = { a: @r.a, b: { xs: [] }, c: @r.c };\n    }"));
+    expect(tapeFields(k)).toEqual(["@r.b.xs"]);
   });
 
   test("`reset(@b)` over a shared graph: refused naming the first path, fast (resetTapeProblem)", () => {
@@ -167,11 +175,115 @@ describe("r1 — a cycle back to an object-literal-bearing struct (§66.12.6 rul
   // optional struct field: `@a = { b: not }` refuses `@a.b.xs`).
   test("literals at several depths through the cycle: each replaced tape refused once; granted: clean; terminates", () => {
     const lit = (inner, g = "free, append") => `<program>\n\${\n${Y(g)}\n    type R:struct = { y: Y }\n}\n    let <r:R | not=(not)/>\n    function go() {\n        if (@r is given) {\n            @r = { y: { t: @r.y.t, s: { y: ${inner} } } };\n        }\n    }\n<p>x</p>\n</program>\n`;
-    // depth 2: `t: @r.y.t` is not the place @r.y.s.y.t; depth 3: `y: not` replaces @r.y.s.y.s.y.t
-    expect(tapeFields(run(lit("{ t: @r.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.t", "@r.y.s.y.s.y.t"]);
+    // depth 2: `t: @r.y.t` is not the place @r.y.s.y.t; depth 3: `y: not` replaces @r.y.s.y.s.y.t —
+    // the same declaration `Y.t` (s480 r2 LOW-a: once, at the first path); granting `replace` on it clears both
+    expect(tapeFields(run(lit("{ t: @r.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.t"]);
+    expect(tapeFields(run(lit("{ t: @r.y.s.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.s.y.t"]);
     const k = run(lit("{ t: @r.y.t, s: { y: not } }", "free, append, replace"));
     expect(errs(k)).toEqual([]);
     expect(mods().check.checkCore(k.core)).toEqual([]);
+  });
+});
+
+// s480 r2 (review:#1994 HIGH-2): check.scrml keptWalk followed a once-bound let into its literal on EVERY
+// path to it — a let used twice made the walk a tree walk, 2^depth over a let DAG. With r1's cut gone a
+// recursive type no longer bounded it; on a non-recursive chain base was exponential too. A clean literal
+// state is now memoized by (the Local, the struct, the path class — the path only when some literal field
+// in the program reads a place under it). 1597b0515: plain24 / reclet24 > 90 s, tri13 6.6 s, let24 47 s
+// (checkCore alone).
+describe("r2 — a let-bound literal shared along many paths (§66.12.6 rule 4, Core C3)", () => {
+  const prog = (types, cell, body, params = "") => `<program>\n\${\n${types}\n}\n    ${cell}\n    function go(${params}) {\n        if (@${cell.match(/<(\w+)/)[1]} is given) {\n${body}\n        }\n    }\n<p>x</p>\n</program>\n`;
+  const chain = (n, w, last, lit) => {
+    const L = [`            const l0: ${lit(0)};`];
+    for (let k = 1; k <= n; k++) L.push(`            const l${k}: ${last(k, Array.from({ length: w }, () => "l" + (k - 1)))};`);
+    return L.join("\n");
+  };
+  const coreTimed = (src) => {
+    const r = run(src);
+    expect(errs(r)).toEqual([]);
+    return timed(() => mods().check.checkCore(r.core));
+  };
+  test("plain24: a recursive struct with no tape, a 2-wide let DAG 24 deep — Core clean, fast", () => {
+    const L = chain(24, 2, (k, xs) => `T = { a: ${xs[0]}, b: ${xs[1]}, n: ${k} }`, () => "T = { a: not, b: not, n: 0 }");
+    const [c, ms] = coreTimed(prog("    type T:struct = { a: T | not, b: T | not, n: int }", "let <t:T | not=(not)/>", L + "\n            @t = l24;"));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(2_000);
+  }, 120_000);
+  test("reclet24: the same with a granted tape field — Core clean, fast", () => {
+    const L = chain(24, 2, (k, xs) => `T = { a: ${xs[0]}, b: ${xs[1]}, xs: [] }`, () => "T = { a: v, b: v, xs: [] }");
+    const [c, ms] = coreTimed(prog("    type T:struct = { a: T | not, b: T | not, xs: int[free, append, replace] }", "let <t:T | not=(not)/>", L + "\n            @t = l24;", "v: T"));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(2_000);
+  }, 120_000);
+  test("tri13: 3-wide sharing 13 deep — Core clean, fast", () => {
+    const L = chain(13, 3, (k, xs) => `T = { a: ${xs[0]}, b: ${xs[1]}, c: ${xs[2]}, n: ${k} }`, () => "T = { a: not, b: not, c: not, n: 0 }");
+    const [c, ms] = coreTimed(prog("    type T:struct = { a: T | not, b: T | not, c: T | not, n: int }", "let <t:T | not=(not)/>", L + "\n            @t = l13;"));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(2_000);
+  }, 120_000);
+  test("let24: a NON-recursive chain S_k { a: S_k-1, b: S_k-1 } over a let DAG (exponential on base too) — Core clean, fast", () => {
+    const T = ["    type S0:struct = { t: int[free, append, replace] }"];
+    for (let k = 1; k <= 24; k++) T.push(`    type S${k}:struct = { a: S${k - 1}, b: S${k - 1} }`);
+    const L = chain(24, 2, (k, xs) => `S${k} = { a: ${xs[0]}, b: ${xs[1]} }`, () => "S0 = { t: [] }");
+    const [c, ms] = coreTimed(prog(T.join("\n"), "let <r:S24 | not=(not)/>", L + "\n            @r = l24;"));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(2_000);
+  }, 120_000);
+
+  // Behaviour: a let-bound literal that KEEPS a tape field at one path and replaces it at another. Compiled
+  // with `replace` granted (analyze treats a let as an opaque value), then the grant flipped off in Core.
+  const B = "    type B:struct = { xs: int[free, append, replace] }\n    type R:struct = { a: B, b: B }";
+  const flip = (body) => {
+    const r = run(prog(B, "let <r:R | not=(not)/>", body));
+    expect(errs(r)).toEqual([]);
+    expect(mods().check.checkCore(r.core)).toEqual([]);
+    const core = structuredClone(r.core);
+    const td = core.types.find((t) => JSON.stringify(t).includes('"hint":"xs"'));
+    let n = 0;
+    const walk = (o) => { if (o && typeof o === "object") { if (o.sym && o.sym.hint === "xs" && o.grants) { o.grants.replace = false; n++; } for (const v of Object.values(o)) walk(v); } };
+    walk(td);
+    expect(n).toBeGreaterThan(0);
+    return mods().check.checkCore(core).filter((m) => m.startsWith("C3:"));
+  };
+  test("a let kept at its own path, the other field kept by place: Core clean", () => {
+    expect(flip("            const k: B = { xs: @r.a.xs };\n            @r = { a: k, b: @r.b };")).toEqual([]);
+  });
+  test("the same let at its own path AND another: the other path replaces — refused naming it (the memo must not carry the first path's keep)", () => {
+    const c = flip("            const k: B = { xs: @r.a.xs };\n            @r = { a: k, b: k };");
+    expect(c.length).toBe(1);
+    expect(c[0]).toContain("tape field `r.b.xs`");
+  });
+  test("reverse order: the let keeps `@r.b.xs`, first reached at `a` — refused naming `r.a.xs`", () => {
+    const c = flip("            const k: B = { xs: @r.b.xs };\n            @r = { a: k, b: k };");
+    expect(c.length).toBe(1);
+    expect(c[0]).toContain("tape field `r.a.xs`");
+  });
+  test("a let reached twice where neither path keeps: refused; where both keep (two lets): clean", () => {
+    const c = flip("            const k: B = { xs: [] };\n            @r = { a: k, b: k };");
+    expect(c.length).toBe(1);
+    expect(c[0]).toContain("tape field `r.a.xs`");
+    expect(flip("            const k: B = { xs: @r.a.xs };\n            const m: B = { xs: @r.b.xs };\n            @r = { a: k, b: m };")).toEqual([]);
+  });
+  test("a shared let two levels down keeps only along its own path: the second path is refused", () => {
+    const T = "    type B:struct = { xs: int[free, append, replace] }\n    type M:struct = { p: B, q: B }\n    type R:struct = { a: M, b: M }";
+    const r = run(prog(T, "let <r:R | not=(not)/>", "            const k: B = { xs: @r.a.p.xs };\n            const m: M = { p: k, q: @r.a.q };\n            @r = { a: m, b: { p: @r.b.p, q: @r.b.q } };\n            @r = { a: { p: @r.a.p, q: @r.a.q }, b: m };"));
+    expect(errs(r)).toEqual([]);
+    const core = structuredClone(r.core);
+    const walk = (o) => { if (o && typeof o === "object") { if (o.sym && o.sym.hint === "xs" && o.grants) o.grants.replace = false; for (const v of Object.values(o)) walk(v); } };
+    walk(core.types);
+    const c = mods().check.checkCore(core).filter((m) => m.startsWith("C3:"));
+    expect(c.length).toBe(1);
+    expect(c[0]).toContain("tape field `r.b.p.xs`");
+  });
+
+  // LOW-b: under a value the write replaces whole, `name: <path>` is not writable — the hint rebuilds down to it
+  test("the keep hint for a field under a replaced parameter value names the nested rebuild", () => {
+    const r = run(prog("    type C:struct = { xs: int[free, append] }\n    type B:struct = { c: C }\n    type R:struct = { b: B }", "let <r:R | not=(not)/>", "            @r = { b: v };", "v: B"));
+    const e = errs(r).filter((d) => d.code === "E-WRITE-NOT-GRANTED");
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("`{ ...@r, b: { ...@r.b, c: { ...@r.b.c, xs: @r.b.c.xs } } }`");
+    const d = run(prog("    type B:struct = { xs: int[free, append] }\n    type R:struct = { b: B }", "let <r:R | not=(not)/>", "            @r = { b: { xs: [] } };"));
+    expect(errs(d)[0].message).toContain("Keep the field as it was (`xs: @r.b.xs`)");
   });
 });
 

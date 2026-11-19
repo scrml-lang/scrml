@@ -16148,8 +16148,9 @@ ${
     // message), its type, and its OWN grants (the FieldDef's — never the
     // owning struct's `replace`). `inner`: the tape is held by an ELEMENT of a
     // replaced tape (`@g[…]`, `@b.rows[…].kids` — RULED S472, rule 1 recursion),
-    // not a field of the written struct itself.
-    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, inner: boolean }
+    // not a field of the written struct itself. `lit`: the field's owner is an object
+    // literal of the written value (so `name: <path>` can be written in it).
+    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, inner: boolean, lit: boolean }
 
     // §66.12.6 rule 4: the tape fields a whole value `v` of type `ty`, written
     // at the place spelled `key` ("" when it has no spelling), REPLACES. Every
@@ -16187,10 +16188,17 @@ ${
     // Termination without it: a no-value state is in `done` before its fields are walked,
     // so a cycle of them stops at the first repeat; a literal state descends into a
     // sub-expression of the literal, so a run of them is bounded by the literal's depth.
-    type TapeWalk:struct = { hits: TapeHit[], done: int[] }
+    //
+    // s480 r2 (review:#1994 LOW-a): `fields` — the tape field DECLARATIONS (`owner:idx`) already
+    // hit. A declaration reached again (a recursive `T { kids: T[…] }` reaches `kids` as a field
+    // and again as a tape its elements hold; a struct shared by a field and by a tape's elements)
+    // is the same tape type with the same grants: it is not hit again, so each offending field
+    // declaration is reported once, at the first path that reaches it. Its element walk is not
+    // repeated either: tapeWalkInner of the same tape type reaches nothing the first one did not.
+    type TapeWalk:struct = { hits: TapeHit[], done: int[], fields: string[] }
 
     fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeHit[] {
-        return tapeWalkStruct(types, ty, v, key, label, false, { hits: [], done: [] }).hits
+        return tapeWalkStruct(types, ty, v, key, label, false, { hits: [], done: [], fields: [] }).hits
     }
 
     fn tapeWalkStruct(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, inner: boolean, w0: TapeWalk) -> TapeWalk {
@@ -16211,7 +16219,7 @@ ${
             let state: int = s.id * 2
             if (inner) state = state + 1
             if (w.done.indexOf(state) >= 0) return w0
-            w = { hits: w.hits, done: w.done.concat([state]) }
+            w = { hits: w.hits, done: w.done.concat([state]), fields: w.fields }
         }
         // a spread of the place itself keeps the fields no LATER property names —
         // only when it is the last spread (`{ ...@b, ...other }`: `other` may override)
@@ -16219,6 +16227,7 @@ ${
         for (const pr of props) {
             if (pr.spread) selfSpread = key != "" && placeKey(pr.value) == key
         }
+        let fi = 0
         for (const fd of fs) {
             const name: string = fd.sym.hint
             const sub: string = memberKey(key, name)
@@ -16234,12 +16243,16 @@ ${
             }
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
-                    w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner }]), done: w.done }
-                    w = tapeWalkInner(types, fd.ty, at, w)
+                    const fk: string = s.id + ":" + fi
+                    if (w.fields.indexOf(fk) < 0) {
+                        w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner, lit: props.length > 0 }]), done: w.done, fields: w.fields.concat([fk]) }
+                        w = tapeWalkInner(types, fd.ty, at, w)
+                    }
                 } else {
                     w = tapeWalkStruct(types, fd.ty, fv, sub, at, inner, w)
                 }
             }
+            fi = fi + 1
         }
         return w
     }
@@ -16254,7 +16267,7 @@ ${
     // s480: the element walk shares structTapeWrites' `done` set (tapeWalkInner), which
     // also stops a recursive struct (s480 r1: no path `seen`).
     fn innerTapeHits(types: TypeInfo[], tape: Type, label: string) -> TapeHit[] {
-        return tapeWalkInner(types, tape, label, { hits: [], done: [] }).hits
+        return tapeWalkInner(types, tape, label, { hits: [], done: [], fields: [] }).hits
     }
 
     fn tapeWalkInner(types: TypeInfo[], tape: Type, label: string, w0: TapeWalk) -> TapeWalk {
@@ -16263,7 +16276,7 @@ ${
         const at: string = label + "[…]"
         const tg: GrantSet | not = tapeGrants(el)
         if (tg is given) {
-            const w: TapeWalk = { hits: w0.hits.concat([{ path: at, ty: el, grants: tg, inner: true }]), done: w0.done }
+            const w: TapeWalk = { hits: w0.hits.concat([{ path: at, ty: el, grants: tg, inner: true, lit: false }]), done: w0.done, fields: w0.fields }
             return tapeWalkInner(types, el, at, w)
         }
         return tapeWalkStruct(types, el, not, "", at, true, w0)
@@ -16333,7 +16346,7 @@ ${
             if (!grantsAdmit(h.grants, EditKind.Replace) && h.inner) {
                 out = out.concat([innerTapeDiag("`" + label + " = …` replaces the tapes inside `" + label + "`", h)])
             } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
-                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)" }])
+                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). " + keepFieldHint(label, h) }])
             }
         }
         return out
@@ -16403,6 +16416,32 @@ ${
     fn writtenLabel(key: string, hint: string) -> string {
         if (key != "") return key
         return "@" + hint
+    }
+
+    // s480 r2 (review:#1994 LOW-b): `name: <path>` is a fix only where an object literal of the
+    // write owns the field, or the field is a direct field of the written place (`{ ...v, xs: @b.xs }`).
+    // Deeper, under a value the write replaces whole (a parameter, a local), the field is kept by
+    // rebuilding down to it: nested literals over spreads of the place.
+    fn keepFieldHint(label: string, h: TapeHit) -> string {
+        const keep: string = "Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)"
+        if (h.lit || !h.path.startsWith(label + ".")) return keep
+        const segs: string[] = h.path.substring(label.length + 1).split(".")
+        if (segs.length < 2) return keep
+        let inner: string = segs[segs.length - 1] + ": " + h.path
+        if (segs.length > 4) inner = "… " + inner
+        let i: int = segs.length - 2
+        if (segs.length > 4) i = 1
+        while (i >= 0) {
+            let at: string = label
+            let j = 0
+            while (j <= i) {
+                at = at + "." + segs[j]
+                j = j + 1
+            }
+            inner = segs[i] + ": { ..." + at + ", " + inner + " }"
+            i = i - 1
+        }
+        return "Keep the field as it was: it sits inside `" + label + "." + segs[0] + "`, which this write replaces whole, so rebuild down to it from the place, keeping it (`{ ..." + label + ", " + inner + " }`), or write the parts that change in place"
     }
 
     fn lastSegment(path: string) -> string {

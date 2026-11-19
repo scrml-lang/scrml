@@ -27,3 +27,12 @@ Branch from origin/main c61700fee (#1991 merged). Review findings of #1991: F1, 
   `@t.kids` and `@t.kids[…].kids` (the element-held tape, rule 1 / RULED S472 item 1).
 - Differential (~/.cache/scrml/review/s480-1994-r1/tdiff3.mjs, with an oracle): 12 000 programs, 6 801 valid; fixed
   head = oracle everywhere (analyze + Core flip); base fail-opens 411, pre-fix head 433.
+
+## r2 (review:#1994 HIGH-2, LOW-a, LOW-b)
+- HIGH-2: check.scrml keptWalk memoizes clean literal states by (Local sym, struct, keptPathClass): the path
+  when some StructOf field value in the program reads a place under it (OnceBinds.keepReads), else "*".
+  plain24/reclet24 (>90 s), tri13 (6.6 s), let24 (47 s, base too) → ~6 ms checkCore.
+  Gap filed + resolved: g-boot-tape-walk-let-dag-exponential-s480.
+- LOW-a: analyze.scrml TapeWalk.fields — each tape field DECLARATION hit once (first path).
+- LOW-b: keepFieldHint — a field under a value replaced whole gets the nested-rebuild hint.
+- Tests: describe "r2" + updated F1 expectations (36 pass).
