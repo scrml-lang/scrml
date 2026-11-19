@@ -1,0 +1,49 @@
+{
+  "id": "engine-timed-throttle-trailing-judged-at-commit-rt",
+  "description": "§6.13.5 (S479): a `throttled=1s` engine cell. Click #load: the leading write commits at once (Idle -> Loading). Click #finish inside the window: held. Advance the window: the trailing commit is judged against the variant the cell holds THEN (Loading, which admits .Done), so the engine reaches Done. XFAIL on impl#1: it parses neither the §66 `single` engine opener nor a timed engine (S471 policy: impl#1 is frozen; carried gap g-impl1-timed-engine-commit-s479).",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.5: \"`rule=` (§51.0.F) is judged at the commit, against the variant the cell holds then\"; §6.13.2: \"The first write in any window emits immediately; subsequent writes within `DURATION` of the last emit are suppressed but the most recent suppressed value is held. At the end of the window a single trailing write emits with the held value.\" ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 8.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-INVALID-TRANSITION",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "click": "#finish"
+      },
+      {
+        "advance-time": 1000
+      }
+    ],
+    "state": {
+      "phase": "Done"
+    },
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "Done"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-timed-engine-commit-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=4",
+          "emitted:E-COMPONENT-035=3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-VARIANT-AMBIGUOUS=2"
+        ],
+        "runtime": "sha256:bd0ef391fe1f9df9"
+      }
+    }
+  }
+}

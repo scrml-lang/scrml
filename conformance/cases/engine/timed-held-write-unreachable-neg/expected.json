@@ -1,0 +1,11 @@
+{
+  "id": "engine-timed-held-write-unreachable-neg",
+  "description": "§6.13.5 (S479) negative twin of engine-timed-held-write-unreachable-pos: `@doc = .Published` on a `debounced=` engine names a variant reachable from `.Draft` (Draft -> Review -> Published), so the static check does not fire; whether the commit is legal is judged at commit, against the variant held then.",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.5: the static check fires only when \"no variant reachable from the cell's initial variant along its `rule=` edges is `.Variant` or has `.Variant` in its `rule=`\"; `.Review` (reachable) has `.Published` in its `rule=`. ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 8.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ENGINE-INVALID-TRANSITION", "E-BOOTSTRAP-UNSUPPORTED"]
+  }
+}

@@ -2877,9 +2877,9 @@ ${
     // program's items). Two checks:
     //   - its attributes, against §40.8's closed per-route set (pageAttrDiags);
     //   - a SECOND `<page>` in the file. §40.8 (amended S478, open-Qs ruling
-    //     item 60): "Two `<page>`s in one `<program>` are an error: a route has
-    //     one page". The ruling names no code — refused by name until one is
-    //     chosen (owner question; recommendation E-PAGE-DUPLICATE).
+    //     item 60; code ruled S479 hand-off §3.A item 4): "Two `<page>`s in one
+    //     `<program>` are an error … SHALL be `E-PAGE-DUPLICATE`, reported at the
+    //     second `<page>`'s opener" (and at each later one).
     fn pageDiags(f: FileAst, st0: AS) -> AS {
         let st: AS = st0
         let seen = 0
@@ -2887,7 +2887,7 @@ ${
             seen = seen + 1
             st = pageAttrDiags(f.path, pg, st)
             if (seen > 1) {
-                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file — two `<page>`s in one `<program>` are an error (§40.8, amended S478): a route has one page, and a second page is a second route file. Merge them into one `<page>`. (The SPEC names no code for it yet — an owner question; refused by name meanwhile)")
+                st = addDiag(st, f.path, pg.span, "E-PAGE-DUPLICATE", "a second `<page>` in one `<program>` — a route has one page (its URL is its file's location), so a second page is a second route file (§40.8). Merge the two into one `<page>`, or move this one into its own file under `pages/`")
             }
         }
         return st
@@ -13810,15 +13810,12 @@ ${
     //   §51.0.F.1: "A self-write to the current variant is a runtime NO-OP, NOT a `rule=`
     //   violation. This holds REGARDLESS of whether the from-state's `rule=` lists the
     //   current variant" — and the Info lint W-ENGINE-SELF-WRITE-DETECTED "Inside a
-    //   state-child body … fires when `@var = .CurrentVariant` … STRICT"; "Outside any
-    //   state-child body … fires CONSERVATIVELY when `@var = .Variant` … and `.Variant` is
-    //   one of the engine's declared variants". The site is "inside" when the write's span
-    //   lies in the body of one of THIS field's state-children (same file).
+    //   state-child body … fires when `@var = .CurrentVariant` … STRICT". The site is "inside"
+    //   when the write's span lies in the body of one of THIS field's state-children (same file).
+    //   S479 (ruling §3.B item 7; §51.0.F.1): "Outside any state-child body (function bodies,
+    //   top-level logic, …) the lint does NOT fire" — the CONSERVATIVE outside firing is struck.
     // `not` — the write is not a literal declared variant, or stands outside every state-child
-    // body of the field: transitionCheck decides alone. INTERIM (gap
-    // g-boot-engine-self-write-outside-lint-s478): the CONSERVATIVE outside-body Info lint is
-    // not emitted yet — it would fire on every literal engine write in a function body
-    // (§66.19.6's own `load()` / `finish()`); Info-level, so no program the SPEC rejects is accepted.
+    // body of the field: transitionCheck decides alone, and no lint fires.
     fn literalStateWrite(env: Env, p: WPlace, f: FieldInfo, g: TransitionGraph, value: AExpr, key: string, st: AS) -> RCheck | not {
         const lit: string = variantLitName(value.k)
         if (lit == "") return not
@@ -13832,7 +13829,16 @@ ${
         const from: int = variantIndex(env.g.types, g.enumSym, sc.name)
         if (from < 0) return not
         if (to == from) {
-            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1). Informational: remove the write, or check its target if a state change was expected")
+            // r1 (#1972 N2): on a `debounced=` / `throttled=` engine the write is not a no-op AT
+            // the write — §6.13.5: "A write to it is held by the timing rule like any other local
+            // write, and the transition happens when the held value commits … A self-write at
+            // commit is a no-op (§51.0.F.1)." It replaces a write already held in the window
+            // (§6.13.1 debounce: "Each new write within the window restarts the timer"; §6.13.2 throttle: "the most recent suppressed value is held"), so the message says so.
+            let what: string = "a self-write is a runtime no-op, not a `rule=` violation: no transition, no `<onTransition>`, no subscriber fire (§51.0.F.1)"
+            if (p.decl.sym.id == env.g.program.id && isTimedProgramCell(env.g, f)) {
+                what = "`@" + f.sym.hint + "` is `debounced=` / `throttled=`, so the write is HELD, not dropped: it replaces any write already held in the window, and only when it commits is it judged — a no-op then if `@" + f.sym.hint + "` still holds `." + lit + "`, not a `rule=` violation (§6.13.5, §51.0.F.1)"
+            }
+            const st2: AS = addDiag(st, env.file, value.span, "W-ENGINE-SELF-WRITE-DETECTED", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` writes the variant `@" + f.sym.hint + "` already holds — " + what + ". Informational: remove the write, or check its target if a state change was expected")
             return { check: Check.RuntimeEdge, st: st2 }
         }
         let targets: int[] = []
@@ -13847,6 +13853,61 @@ ${
         }
         const st3: AS = addDiag(st, env.file, value.span, "E-ENGINE-INVALID-TRANSITION", "`@" + f.sym.hint + " = ." + lit + "` inside the state-child `<" + sc.name + ">` is not a legal transition: from `." + sc.name + "` the contract is " + allowed + " (§51.0.F — inside a state-child body the from-state is known, so the write is checked here). Change the target, or add `." + lit + "` to `<" + sc.name + ">`'s `rule=`")
         return { check: Check.RuntimeEdge, st: st3 }
+    }
+
+    // S479 (ruling §3.B item 8) — the static check of a LITERAL held write. §6.13.5: "a write
+    // `@var = .Variant` to a timed engine cell, where no variant reachable from the cell's
+    // initial variant along its `rule=` edges is `.Variant` or has `.Variant` in its `rule=`,
+    // could never commit and SHALL be `E-ENGINE-INVALID-TRANSITION` (§34) at the write site."
+    // A timed cell is a PROGRAM cell (timing on a user declaration's field is refused,
+    // timingPass), so the write's place is the program's. The variants the cell can hold are
+    // those reachable from the initial one (every commit is an edge-checked transition; no
+    // writer bypasses the wrapper — server-origin, persist=, reset and <onIdle> compositions
+    // are refused). `.Variant` reachable ⇒ some reachable state is it or has an edge to it.
+    // `not` — not a timed cell, not a literal declared variant, the initial state unknown, or
+    // the target reachable: the ordinary checks (literalStateWrite / transitionCheck) decide.
+    fn heldWriteCheck(env: Env, p: WPlace, f: FieldInfo, g: TransitionGraph, value: AExpr, st: AS) -> AS | not {
+        if (p.decl.sym.id != env.g.program.id) return not
+        if (!isTimedProgramCell(env.g, f)) return not
+        const lit: string = variantLitName(value.k)
+        if (lit == "") return not
+        const to: int = variantIndex(env.g.types, g.enumSym, lit)
+        if (to < 0) return not
+        const initial: int = initialVariant(env, g, f.init)
+        if (initial < 0) return not
+        const reach: int[] = reachableVariants(g, initial)
+        if (reach.indexOf(to) >= 0) return not
+        let names: string = ""
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, g.enumSym)
+        if (ti is given) {
+            const vs: VariantDef[] = enumVariants(ti.def)
+            for (const r of reach) {
+                if (r >= 0 && r < vs.length) {
+                    if (names != "") names = names + ", "
+                    names = names + "." + vs[r].sym.hint
+                }
+            }
+        }
+        return addDiag(st, env.file, value.span, "E-ENGINE-INVALID-TRANSITION", "`@" + f.sym.hint + " = ." + lit + "` is a held write (`@" + f.sym.hint + "` is `debounced=` / `throttled=`): it transitions when it commits, and no state `@" + f.sym.hint + "` can hold then (" + names + ", reachable from the initial state along `rule=`) is `." + lit + "` or has `." + lit + "` in its `rule=` — every commit of it would be refused (§6.13.5, §51.0.F). Change the target, or add an edge to `." + lit + "` from a reachable state")
+    }
+
+    // The variants reachable from `initial` along the graph's edges (the initial included), in
+    // discovery order.
+    fn reachableVariants(g: TransitionGraph, initial: int) -> int[] {
+        let seen: int[] = [initial]
+        let i = 0
+        while (i < seen.length) {
+            const at: int = seen[i]
+            for (const e of g.edges) {
+                if (e.origin == at) {
+                    for (const t of e.targets) {
+                        if (seen.indexOf(t) < 0) seen = seen.concat([t])
+                    }
+                }
+            }
+            i = i + 1
+        }
+        return seen
     }
 
     // The state-child of field `f` (of the declaration `p` writes) whose source span holds `at`.
@@ -15050,6 +15111,8 @@ ${
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
+            const hw: AS | not = heldWriteCheck(env, p, f, g, value, st)
+            if (hw is given) return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: Check.RuntimeEdge }, st: hw }
             const lw: RCheck | not = literalStateWrite(env, p, f, g, value, key, st)
             if (lw is given) return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: lw.check }, st: lw.st }
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
@@ -27878,8 +27941,11 @@ ${
     // variant, its positional binders and their arity E-TYPE-021), with the same
     // duplicate (E-TYPE-023), arm-after-wildcard (E-SYNTAX-010) and unreachable-
     // wildcard (W-MATCH-001) rules; the codes §18.0.1 names for the block form:
-    //   - "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names
-    //     no code for a missing one: refused by name (fail closed).
+    //   - "`for=Type` — REQUIRED. The enum type the match is over." Amended S478:
+    //     `for=` MAY be omitted when `on=` is proven one enum type (phase A). Where
+    //     it stays required and is omitted, §18.0.1 "Amended S479 — the codes for a
+    //     `for=` that is still required": a known non-enum `on=` is E-TYPE-024, any
+    //     other unproven `on=` is E-MATCH-FOR-REQUIRED (matchEnumFromOn).
     //   - "`on=expr` — REQUIRED when the matched-on value is not auto-implied" —
     //     implied ONLY by an `<engine for=Type>` in scope, which the bootstrap does
     //     not build (`<engine>` is refused, §66.13.3), so a missing `on=` is
@@ -27916,21 +27982,25 @@ ${
             }
         }
         let es: Sym | not = not
+        let noFor: RMatchEnum | not = not
         if (forA is not) {
             // S478 open-Qs ruling item 12 (a) — §18.0.1 (amended S478): "`for=` MAY be
             // omitted when `on=` is provably of one enum type; the match is then over
             // that type." Proven here: `on=@cell`, a cell of this program whose type
-            // (phase A) is an enum. Any other `on=` is not proven by the bootstrap —
-            // refused by name (INTERIM, fail closed); `on=@cell` of a non-enum type is
-            // the `for=` path's own refusal for that type.
+            // (phase A) is an enum. S479 (hand-off §3.A item 4), §18.0.1: where `for=`
+            // stays required and is omitted, a known non-enum `on=` is E-TYPE-024 and an
+            // `on=` the compiler cannot prove to be of one enum type is
+            // E-MATCH-FOR-REQUIRED (matchEnumFromOn).
             const ie: RMatchEnum = matchEnumFromOn(env, onA)
             if (ie.es is given) {
                 es = ie.es
             } else if (ie.code != "" && !(ie.typeless && fileHasCode(st, env.file, "E-TYPE-UNKNOWN"))) {
                 // fix round 1 of #1945 (review LOW-8): no second report on a `<match>` with no
                 // `on=` (E-MATCH-ON-REQUIRED is its report), nor a "not an enum" on a cell whose
-                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type)
-                st = addDiag(st, env.file, e.span, ie.code, ie.why)
+                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type).
+                // S479: reported once `on=` is resolved — not when `on=` itself is an error
+                // (an undeclared `@name`: §42.4 statement 6, "no second report").
+                noFor = ie
             }
         } else {
             const tn: string = bareName(forA.value)
@@ -27962,7 +28032,10 @@ ${
             if (ox is not) {
                 st = addDiag(st, env.file, onA.span, "E-BOOTSTRAP-UNSUPPORTED", "`on=` on `<match>` takes the matched-on expression — `on=@cell` or `on=(expr)` (§18.0.1); a quoted, valueless or braced `on=` names no value")
             } else {
+                const before: int = errorCount(st)
                 st = resolveExpr(withWhole(env, -1), ox, not, st).st
+                const nf: RMatchEnum | not = noFor
+                if (nf is given && errorCount(st) == before) st = addDiag(st, env.file, e.span, nf.code, nf.why)
             }
         }
         const esk: Sym | not = es
@@ -28009,8 +28082,22 @@ ${
 
     // S478 (open-Qs ruling item 12) — the enum a `<match>` with no `for=` is over,
     // read from its `on=` (resolveMatchBlock): `es` when proven, else the code and
-    // message of the refusal.
+    // message of the refusal. S479 (hand-off §3.A item 4): a known non-enum `on=` (a
+    // program cell of a non-enum type, or a literal that is never an enum value) is
+    // E-TYPE-024; an `on=` this compiler cannot prove to be of one enum type is
+    // E-MATCH-FOR-REQUIRED. INTERIM: the proof is read here, before typing, so only
+    // `on=@cell` is proven (g-boot-match-for-inference-residue-s478 — capable form:
+    // decide the arms' enum in the typer; widening it is newly-accepting). A
+    // `T | not` cell stays refused by name, as with `for=` (typeMatchBlock: §18.0.1
+    // defines no absence arm). A valueless / quoted / braced `on=` is reported by
+    // resolveMatchBlock's own `on=` check — no second report here.
     type RMatchEnum:struct = { es: Sym | not, code: string, why: string, typeless: boolean }
+
+    fn errorCount(st: AS) -> int {
+        let n = 0
+        for (const d of st.diags) { if (d.severity == Severity.Error) n = n + 1 }
+        return n
+    }
 
     fn fileHasCode(st: AS, file: string, code: string) -> boolean {
         for (const d of st.diags) { if (d.file == file && d.code == code) return true }
@@ -28018,15 +28105,17 @@ ${
     }
 
     fn matchEnumFromOn(env: Env, onA: AAttr | not) -> RMatchEnum {
-        const unproven: string = "`<match>` without `for=` — §18.0.1 (amended S478) lets `for=` be omitted when `on=` is provably of one enum type; the bootstrap proves it only for `on=@cell`, a cell of this program declared with an enum type — write `<match for=Type on=…>`"
+        const unproven: string = "`<match>` without `for=` — `for=` may be omitted only when `on=` is provably of one enum type (§18.0.1), and this compiler proves it only for `on=@cell`, a cell of this program declared with an enum type; here `for=` stays required — write `<match for=Type on=…>`"
         if (onA is not) return { es: not, code: "", why: "", typeless: false }
         const ox: AExpr | not = valueExpr(onA.value)
-        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        if (ox is not) return { es: not, code: "", why: "", typeless: false }
+        const lit: string = nonEnumLiteral(ox)
+        if (lit != "") return { es: not, code: "E-TYPE-024", why: "`<match on=…>` without `for=` — `on=` is " + lit + ", never an enum value: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: false }
         const n: string = atName(ox)
-        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        if (n == "") return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
         // an `as=` handle of that name in scope is not the cell
         for (const h of env.handles) {
-            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+            if (h.name == n) return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
         }
         for (const d of env.g.decls) {
             if (d.isProgram && d.file == env.file) {
@@ -28034,12 +28123,48 @@ ${
                     if (fi.sym.hint == n) {
                         const es: Sym | not = isEnumType(env.g.types, fi.ty)
                         if (es is given) return { es: es, code: "", why: "", typeless: false }
-                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)", typeless: fi.ty is Type.Str }
+                        if (maybeInner(fi.ty) is given) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` over a `T | not` value (`" + typeName(fi.ty) + "`) — §18.0.1 defines no absence arm for the block form; discriminate the value first (`<div if=@" + n + ">…</div>`, §14.12.3) or match a value that is always present", typeless: false }
+                        return { es: not, code: "E-TYPE-024", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: fi.ty is Type.Str }
                     }
                 }
             }
         }
-        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
+    }
+
+    // S479 — an `on=` literal that is never an enum value (matchEnumFromOn): its kind
+    // as the message names it, or "" (anything else, a variant literal included —
+    // `.V` names no enum by itself).
+    fn nonEnumLiteral(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> "a number"
+            .Str(v: s) :> "a string"
+            .Template(quasis: qs) :> "a string"
+            .Bool(v: b) :> "a boolean"
+            .NotLit :> "`not`"
+            .ArrayLit(elems: es) :> "a tape literal"
+            .ObjectLit(props: ps) :> "an object literal"
+            .Lambda(params: lp) :> "a function"
+            .BlockLambda(params: lp) :> "a function"
+            .At(name: n) :> ""
+            .Name(name: n) :> ""
+            .AtItem :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .HashRef(id: hr0) :> ""
+            .Foreign(f: fb0) :> ""
+        }
     }
 
     // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a
@@ -40872,10 +40997,16 @@ ${
     // Why the bootstrap refuses to time `f` ("" — it does not): each a composition
     // the SPEC rules and the runtime does not build (INTERIM).
     fn timingCellProblem(g: Globals, prog: DeclSrc, d: ADecl, f: FieldInfo, idx: int, resets: ResetOnInfo[], reqs: ReqFact[]) -> string {
-        // r1 F5 — §6.13 times a plain state cell's writes; an engine's writes are its
-        // transitions (§51.0.F rule= contract, <onIdle> / <onTimeout> timers) and the SPEC
-        // rules no timing wrapper over them.
-        if (f.graph is given) return "an engine (a value with state-children): its writes are transitions, checked against `rule=` and seen by `<onIdle>` / `<onTimeout>` (§51.0) — §6.13 rules no timing wrapper over them; not built. Time a plain cell and `.advance()` from it"
+        // S479 (ruling §3.B item 8) — §6.13.5: "A `debounced=` / `throttled=` engine cell
+        // transitions at commit … `rule=` (§51.0.F) is judged at the commit, against the
+        // variant the cell holds then" — built (runtime `timed` carries the edge table;
+        // `heldWriteCheck` is the static half). INTERIM: an engine with an `<onIdle>`
+        // watchdog stays refused — no SPEC sentence says whether the watchdog's own fire is
+        // a local write the wrapper holds, or commits at once (and cancels a held write).
+        const gr: TransitionGraph | not = f.graph
+        if (gr is given) {
+            if (gr.idle is given) return "an engine with an `<onIdle>` watchdog: §6.13.5 makes a timed engine transition at commit, but no SPEC sentence says whether the watchdog's own fire is held by the timing rule or commits at once (cancelling a held write) — not built; drop one of the two"
+        }
         if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
         if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
         if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
@@ -42476,7 +42607,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
             }
         }
         return st
@@ -45750,6 +45881,20 @@ ${
         }
         for (const p of valuePositions(g, t, [])) {
             for (const r of scanValue({ t: t, file: p.file }, p.v, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: p.what, file: r.file, span: r.span }]) }
+        }
+        // s479 (g-boot-mixed-recursion-escalation-s479) — a `<request>` body, the author's or
+        // the compiler-written half of a pending cell (§13.9.2), is CLIENT code: §19.9.10 scope
+        // item 2 "The call is evaluated on the client: … in a lifecycle body … or a `<request>`
+        // body". A function its load calls therefore has a client-classified caller and "SHALL
+        // remain ambient (client-classified)" (§12.2 Trigger 5). Before s479 a request body was
+        // no referrer at all, so a helper the load called that a server function ALSO called
+        // (`step` ↔ `down`) was placed by inheritance — then its server calls were judged
+        // server→server (a false E-ERROR-013) and the load called it as a server function
+        // that is not one (C-R2 / C-S3: E-BOOTSTRAP-CORE-ILL-FORMED).
+        for (const rq of t.requests) {
+            let what: string = "the `<request>` body that loads `@" + rq.targetName + "`"
+            if (rq.pend >= 0) what = "the initializer of `@" + rq.targetName + "`"
+            for (const r of scanBlock({ t: t, file: rq.file }, rq.req.body, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: what, file: r.file, span: r.span }]) }
         }
         return out
     }

@@ -140,6 +140,7 @@ import { RULED_FORM_CODE, ruledFormMessage, forEachRuledCallForm, collectRuledSt
 import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
 import { codeOnlyView } from "./codegen/code-segments.ts";
+import { markSharedTypes, isSharedTypeObject } from "./shared-type-objects.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -1521,7 +1522,19 @@ function tError(name: string, fields: Map<string, ResolvedType>): ErrorType {
 // with these before any file is processed.
 // ---------------------------------------------------------------------------
 
-const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
+// ---------------------------------------------------------------------------
+// Process-lifetime (shared) type objects
+// ---------------------------------------------------------------------------
+// The type objects below (BUILTIN_TYPES, PARSE_ERROR_ENUM, the compiler-provided binder
+// sets) are created ONCE per process and handed out by identity to every compile — a
+// `resolveTypeExpr("string")` in any file returns the same object. They can therefore
+// end up reachable from a compile's AST (e.g. an endpoint arm's `payloadBindingTypes`),
+// and an AST walk that annotates what it reaches would write one compile's facts onto
+// every later compile (g-impl1-dbvar-tag-mutates-shared-type-s479: codegen's `_dbVar`
+// tagging left `_dbVar: "_scrml_sql"` on the shared `string` type). Every such object
+// is passed through `markSharedTypes` (shared-type-objects.ts) so an annotating walk can
+// stop at it. Any new module-level type object MUST be passed through it too.
+const BUILTIN_TYPES: Map<string, ResolvedType> = markSharedTypes(new Map([
   ["number",    tPrimitive("number")],
   ["string",    tPrimitive("string")],
   ["boolean",   tPrimitive("boolean")],
@@ -1563,7 +1576,7 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
   // export (`import { ParseError } from 'scrml:data'`); see PARSE_ERROR_ENUM.
   ["NotFoundError",   tError("NotFoundError",   new Map())],
   ["ConflictError",   tError("ConflictError",   new Map())],
-]);
+]));
 
 /**
  * §41.13 — the failure type of a `parseVariant` call, as the COMPILER knows it.
@@ -1578,12 +1591,12 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
  * must stay identical to the stdlib declaration — pinned by
  * compiler/tests/unit/stdlib-shim-export-parity.test.js §5.
  */
-const PARSE_ERROR_ENUM: EnumType = tEnum("ParseError", [
+const PARSE_ERROR_ENUM: EnumType = markSharedTypes(tEnum("ParseError", [
   { name: "MissingDiscriminator", payload: null, renders: null },
   { name: "UnknownVariant",       payload: new Map([["tag",    tPrimitive("string")]]), renders: null },
   { name: "InvalidPayload",       payload: new Map([["field",  tPrimitive("string")], ["reason", tPrimitive("string")]]), renders: null },
   { name: "Malformed",            payload: new Map([["reason", tPrimitive("string")]]), renders: null },
-]);
+]));
 
 /** The `fnErrorTypes` key for a parseVariant call's failure type — not an identifier, so no program can name it. */
 const PARSE_VARIANT_FAILURE = "scrml:data/ParseError";
@@ -1622,14 +1635,14 @@ const COMPILER_ERROR_TYPE_NAMES: ReadonlySet<string> = new Set(["Error", "SqlErr
  * failed call to such a function throws past the `!{}` (the stub raises `HTTP <status>`), so the
  * arm is not entered there; the typing is the SPEC's, for the code the arm holds.
  */
-const CLIENT_SERVER_CALL_FAILURE_SET: EnumType = Object.freeze({
+const CLIENT_SERVER_CALL_FAILURE_SET: EnumType = markSharedTypes(Object.freeze({
   kind: "enum" as const,
   name: "Transport(t: ServerCallError)",
   variants: Object.freeze([
     Object.freeze({ name: "Transport", payload: new Map<string, ResolvedType>([["t", tAsIs()]]), renders: null }),
   ]) as unknown as VariantDef[],
   transitionRules: null,
-}) as EnumType;
+}) as EnumType);
 
 /**
  * S474 — §18.6.1 "The binder's type is the type of the failure being handled — … a call to a
@@ -1659,12 +1672,12 @@ function sqlErrorVariantDefs(): VariantDef[] {
 // must not see them before their module has run.
 let _sqlErrorBinderEnum: EnumType | null = null;
 function sqlErrorBinderEnum(): EnumType {
-  return _sqlErrorBinderEnum ??= Object.freeze({
+  return _sqlErrorBinderEnum ??= markSharedTypes(Object.freeze({
     kind: "enum" as const,
     name: "SqlError",
     variants: Object.freeze(sqlErrorVariantDefs()) as unknown as VariantDef[],
     transitionRules: null,
-  }) as EnumType;
+  }) as EnumType);
 }
 
 /**
@@ -1675,12 +1688,12 @@ function sqlErrorBinderEnum(): EnumType {
  */
 let _sqlErrorClientCallFailureSet: EnumType | null = null;
 function sqlErrorClientCallFailureSet(): EnumType {
-  return _sqlErrorClientCallFailureSet ??= Object.freeze({
+  return _sqlErrorClientCallFailureSet ??= markSharedTypes(Object.freeze({
     kind: "enum" as const,
     name: "SqlError | Transport(t: ServerCallError)",
     variants: Object.freeze([...sqlErrorBinderEnum().variants, ...CLIENT_SERVER_CALL_FAILURE_SET.variants]) as unknown as VariantDef[],
     transitionRules: null,
-  }) as EnumType;
+  }) as EnumType);
 }
 
 /**
@@ -6066,7 +6079,7 @@ class ScopeChain {
  * Receiver-kind normalizes `"integer"` -> `"number"` (§53 integer is a number
  * refinement) before lookup, so a field typed `int` resolves its host methods.
  */
-const HOST_METHOD_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = new Map([
+const HOST_METHOD_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = markSharedTypes(new Map([
   ["string", new Map<string, ResolvedType>([
     // string -> string
     ["charAt", tPrimitive("string")],
@@ -6118,16 +6131,16 @@ const HOST_METHOD_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>
     ["toExponential", tPrimitive("string")],
     ["toString", tPrimitive("string")],
   ])],
-]);
+]));
 
 /**
  * Property (non-call) member accesses whose type is invariant per receiver-kind.
  * `s.length` / `arr.length` -> number. Keyed identically to HOST_METHOD_RETURNS.
  */
-const HOST_PROPERTY_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = new Map([
+const HOST_PROPERTY_RETURNS: ReadonlyMap<string, ReadonlyMap<string, ResolvedType>> = markSharedTypes(new Map([
   ["string", new Map<string, ResolvedType>([["length", tPrimitive("number")]])],
   ["array", new Map<string, ResolvedType>([["length", tPrimitive("number")]])],
-]);
+]));
 
 /** Normalize a resolved receiver type to its host-method table key, or null. */
 function hostReceiverKind(t: ResolvedType | null | undefined): string | null {
@@ -20886,7 +20899,7 @@ function enumReadEntry(e: ScopeEntry | null | undefined): { kind: string; t: Res
  * cycle) is not a chain: it names no type, and is unknown as before.
  */
 const ENUM_READ_DEPTH_LIMIT = 256;
-const ENUM_READ_LIMIT = { kind: "enum-read-limit" } as unknown as ResolvedType;
+const ENUM_READ_LIMIT = markSharedTypes({ kind: "enum-read-limit" } as unknown as ResolvedType);
 
 /**
  * S470 fix round 3 — a declared type TEXT read where it was declared: `registry` is the declaring file's
@@ -21205,7 +21218,7 @@ function enumReadUnify(ts0: Array<ResolvedType | null>): ResolvedType | null {
 }
 
 /** A function result still being inferred (see enumReadUnify). Never a type a value is checked against. */
-const ENUM_READ_PENDING = { kind: "pending" } as unknown as ResolvedType;
+const ENUM_READ_PENDING = markSharedTypes({ kind: "pending" } as unknown as ResolvedType);
 
 /** A function value's type whose result is known: the `function` type carrying `returnType`. */
 function enumReadFnType(ret: ResolvedType | null): ResolvedType | null {
@@ -37684,6 +37697,8 @@ function checkOptionalMemberAccess(
 // ---------------------------------------------------------------------------
 
 export {
+  // g-impl1-dbvar-tag-mutates-shared-type-s479 — process-lifetime type objects.
+  isSharedTypeObject,
   ScopeChain,
   Scope,
   initCap,
