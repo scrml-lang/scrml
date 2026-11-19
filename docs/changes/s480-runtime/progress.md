@@ -15,4 +15,8 @@ Lane: three RULED bootstrap items (user-voice-scrml.md S479 "⭐ RULED — the r
 - analyze armLift: statement arm passes LiftTo through (bound loop); Tier-0 stays LiftInArm (INTERIM: row pass doesn't read arm elements); message reworded.
 - analyze liftReachable / typer liftOperands see statement-arm lifts (binder typed; E-TYPE-031 checked); check C20 liftsInto counts Attempt arms.
 - Tests: slice-m4/stmt-arm-lift-s480.test.js (7 red on base); value-form-s469 arm test now runtime.
-## Item 24 — g-placement-only-helper-always-async-peer-s466 — TODO
+
+## Item 24 — g-placement-only-helper-always-async-peer-s466 — ALREADY HOLDS ON BOOTSTRAP (commit 3: SPEC + pin)
+- Probe on base: `twice` (called only by server fn `top`) printed as plain `function twice`, `return twice(n_1) + u.id` (no await), no route in manifest.
+- Added §13.2 sentence (ruling item 24); pin test slice-m4/placement-not-waiting-s480.test.js (green on base by design).
+- Gap stays open for impl#1 (frozen); not `carried` — no bootstrap-passable xfail shape until the bootstrap has parameter defaults.

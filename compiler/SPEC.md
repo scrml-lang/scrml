@@ -11614,6 +11614,17 @@ The compiler SHALL:
 
 > **Provenance:** ruling:user-voice-scrml.md S471 "go, and yes to all the recs" (hand-off-470 §3 item 3) — the
 > `safeCallAsync` exception above.
+- *(S479.)* **Placement does not make a function waiting.** "A server function" above is one a call reaches across
+  the client→server boundary. A function placed on the server only by its callers (§12.2 Trigger 5) and whose body
+  has no suspension point — no `?{}`, no call of an async-colored function — is not async-colored: it SHALL be
+  emitted synchronously, a server caller calls it in place without `await` (§13.4), it gets no route, and it is
+  legal in a parameter default (§7.3.2, §13.9.6 — E-PARAM-DEFAULT-AWAIT does not apply to it).
+  > **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 24 —
+  > *"placement does not make a function waiting; a helper with no suspension point is emitted synchronously and is
+  > legal in a parameter default (§13.9.6)."* · **Direction of change: newly-accepting** (impl#1 emitted such a
+  > helper as an async peer with a route and refused it in a parameter default; carried impl#1 divergence,
+  > `g-placement-only-helper-always-async-peer-s466`). The bootstrap already emits it synchronously (it has no
+  > parameter defaults yet, `g-boot-param-default-and-rest-s473`).
 
 > **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
 
