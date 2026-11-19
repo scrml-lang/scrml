@@ -7,26 +7,26 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1921 of 1921 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1926 of 1926 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 726 | 37.8% |
+| PASS | 732 | 38.0% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 638 | 33.2% |
-| UNSUPPORTED | 557 | 29.0% |
+| NOT-TWINNED | 638 | 33.1% |
+| UNSUPPORTED | 556 | 28.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 726; of those, 726 hold (100.0%). Runtime half executed on the bootstrap for 232 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 732; of those, 732 hold (100.0%). Runtime half executed on the bootstrap for 238 case(s).
 
-- **Vacuous** passes: 17 of 726 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **709**.
+- **Vacuous** passes: 17 of 732 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **715**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 557.
+UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
 | endpoint | 25 | 24 | · | · | · | · | 1 | · | · |
-| engine | 99 | 29 | · | · | · | 50 | 20 | · | · |
+| engine | 101 | 31 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
 | error | 80 | 56 | · | · | · | 5 | 19 | · | · |
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 132 | 78 | · | · | · | 44 | 10 | · | · |
+| reactive | 135 | 82 | · | · | · | 44 | 9 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 13 | 8 | · | · | · | · | 5 | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (726)
+### PASS / CODES-ONLY (732)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -423,6 +423,8 @@ none
 - `engine/timed-debounce-held-until-commit-rt` — PASS
 - `engine/timed-held-write-unreachable-neg` — PASS
 - `engine/timed-held-write-unreachable-pos` — PASS
+- `engine/timed-onidle-debounce-fire-cancels-held-rt` — PASS
+- `engine/timed-onidle-throttle-fire-in-window-rt` — PASS
 - `engine/timed-throttle-leading-violation-rt` — PASS
 - `engine/timed-throttle-trailing-judged-at-commit-rt` — PASS
 - `enum/variant-name-lowercase-reject` — PASS · TWIN
@@ -755,6 +757,7 @@ none
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
 - `reactive/mixed-recursion-3cycle-rt` — PASS
+- `reactive/mixed-recursion-client-caller-rt` — PASS
 - `reactive/mixed-recursion-inherited-rt` — PASS
 - `reactive/multi-cell-interp` — PASS · TWIN
 - `reactive/name-collides-state-neg` — PASS · TWIN
@@ -798,6 +801,9 @@ none
 - `reactive/reset-init-after-assignment-rt` — PASS · TWIN
 - `reactive/reset-reserved-identifier` — PASS · TWIN
 - `reactive/s437-r5-template-cell-read-value-attr` — PASS · TWIN
+- `reactive/server-copy-bang-handler-rt` — PASS
+- `reactive/server-copy-chain-rt` — PASS
+- `reactive/server-copy-markup-and-server-rt` — PASS
 - `reactive/server-fn-mutual-recursion-clean` — PASS
 - `reactive/server-fn-rawvar-read-error` — PASS · TWIN
 - `reactive/tape-bound-append-rt` — PASS
@@ -908,7 +914,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (557)
+### UNSUPPORTED (556)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1308,7 +1314,6 @@ none
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
-- `reactive/mixed-recursion-client-caller-rt` — bootstrap-unsupported: `down()` runs on the server and calls `step()`, a client function that waits for the server (`step() → down()`) — on the server that call would be made in place, which needs a second, server-side copy
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it

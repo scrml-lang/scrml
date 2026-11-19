@@ -580,14 +580,6 @@ ${
         return s
     }
 
-    // s479 — the server copy of `sym`, if it has one.
-    export fn copyOf(t: Tables, sym: int) -> SrvCopy | not {
-        for (const c of t.server.copies) {
-            if (c.orig.id == sym) return c
-        }
-        return not
-    }
-
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
     // inheritance (§19.9.10 "placement is whole-program")?
@@ -16270,6 +16262,16 @@ ${
     // is the same tape type with the same grants: it is not hit again, so each offending field
     // declaration is reported once, at the first path that reaches it. Its element walk is not
     // repeated either: tapeWalkInner of the same tape type reaches nothing the first one did not.
+    // s480 r3 (review:#1994 r2 LOW-a): that dedupe is for positions reached with NO value (a
+    // no-value state, an element path) — where every path to the declaration takes the same fix
+    // (grant `replace`). A position an object LITERAL owns is hit at its own path, every time:
+    // `@r = { a: { t: [], n: 1 }, b: p, c: { t: @r.a.t, n: 1 } }` replaces `@r.a.t`, `@r.b.t` and
+    // `@r.c.t`, three positions with three different fixes (keep `t`, rebuild `b`, keep the
+    // right `t`), and reporting only the first hid the next one until it was fixed. A literal
+    // hit records its declaration only while ITS elements are walked (a recursive `T { kids:
+    // T[…] }` written `{ kids: [] }` still reports `kids` once), then forgets it, so a later
+    // no-value position of the same declaration is still reported. The literal walk is bounded
+    // by the literal, so this adds at most one hit per literal position.
     type TapeWalk:struct = { hits: TapeHit[], done: int[], fields: string[] }
 
     fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeHit[] {
@@ -16319,8 +16321,15 @@ ${
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
                     const fk: string = s.id + ":" + fi
-                    if (w.fields.indexOf(fk) < 0) {
-                        w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner, lit: props.length > 0 }]), done: w.done, fields: w.fields.concat([fk]) }
+                    if (props.length > 0) {
+                        // a literal-owned position: hit at its own path, whatever was hit before
+                        // (r3) — the declaration is recorded only for the walk of ITS elements
+                        const had: boolean = w.fields.indexOf(fk) >= 0
+                        w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner, lit: true }]), done: w.done, fields: w.fields.concat([fk]) }
+                        w = tapeWalkInner(types, fd.ty, at, w)
+                        if (!had) w = { hits: w.hits, done: w.done, fields: withoutKey(w.fields, fk) }
+                    } else if (w.fields.indexOf(fk) < 0) {
+                        w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner, lit: false }]), done: w.done, fields: w.fields.concat([fk]) }
                         w = tapeWalkInner(types, fd.ty, at, w)
                     }
                 } else {
@@ -16330,6 +16339,14 @@ ${
             fi = fi + 1
         }
         return w
+    }
+
+    fn withoutKey(xs: string[], k: string) -> string[] {
+        let out: string[] = []
+        for (const x of xs) {
+            if (x != k) out = out.concat([x])
+        }
+        return out
     }
 
     // s472-boot-map-grants (RULED S472 "five PA recs" item 1): every tape the
@@ -16421,7 +16438,7 @@ ${
             if (!grantsAdmit(h.grants, EditKind.Replace) && h.inner) {
                 out = out.concat([innerTapeDiag("`" + label + " = …` replaces the tapes inside `" + label + "`", h)])
             } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
-                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). " + keepFieldHint(label, h) }])
+                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). " + keepFieldHint(types, ty, v, label, h) }])
             }
         }
         return out
@@ -16494,35 +16511,137 @@ ${
     }
 
     // s480 r2 (review:#1994 LOW-b): `name: <path>` is a fix only where an object literal of the
-    // write owns the field, or the field is a direct field of the written place (`{ ...v, xs: @b.xs }`).
-    // Deeper, under a value the write replaces whole (a parameter, a local), the field is kept by
-    // rebuilding down to it: nested literals over spreads of the place.
-    fn keepFieldHint(label: string, h: TapeHit) -> string {
-        const keep: string = "Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)"
-        if (h.lit || !h.path.startsWith(label + ".")) return keep
+    // write owns the field. Deeper, under a value the write replaces whole (a parameter, a local),
+    // the field is kept by rebuilding that value down to it.
+    // s480 r3 (review:#1994 r2 LOW-b): the r2 rebuild spread the place at every level
+    // (`{ ...@r, a: { ...@r.a, t: @r.a.t } }`), which the bootstrap refuses (a spread is only
+    // `@x = { ...@x, f: v }`, and a literal must name every field: E-TYPE-STRUCT-FIELD). Every form
+    // suggested here compiles: the rebuild is spread-free, names every field of each struct it
+    // writes, `<value>` marking the fields the author supplies (`a: { t: @r.a.t, n: <value> }`);
+    // the spread is offered only as the whole statement `@x = { ...@x, f: v }`, and only for a
+    // field of the written cell itself, a cell not typed `T | not` (a spread write needs a
+    // struct-typed target, E-TYPE-STRUCT-CONTEXT, narrowed or not). The kept read (`@r.a.t`)
+    // through a `T | not` (the cell, or a field on the way) compiles only narrowed (E-TYPE-046):
+    // the hint names the narrowing (`if (@r is given && @r.a is given)`, keepNarrowing). A path
+    // the bootstrap cannot spell as code (an element, `[…]`) or a rebuild past 4 levels / 16
+    // fields gets the advice in words.
+    fn keepFieldHint(types: TypeInfo[], ty: Type, v: AExpr | not, label: string, h: TapeHit) -> string {
+        const keepWords: string = "Keep the field as it was (write its current value back), or write the parts that change in place"
+        if (!h.path.startsWith(label + ".") || label.indexOf("[") >= 0) return keepWords
         const segs: string[] = h.path.substring(label.length + 1).split(".")
-        if (segs.length < 2) return keep
-        let inner: string = segs[segs.length - 1] + ": " + h.path
-        if (segs.length > 4) inner = "… " + inner
-        let i: int = segs.length - 2
-        if (segs.length > 4) i = 1
-        while (i >= 0) {
-            let at: string = label
-            let j = 0
-            while (j <= i) {
-                at = at + "." + segs[j]
-                j = j + 1
+        const n: int = segs.length
+        // the run of object literals the write spells from the place down: `k` levels
+        let k = 0
+        let cur: AExpr | not = v
+        let walking = true
+        while (walking && k < n) {
+            walking = false
+            if (cur is given) {
+                const ps: AProp[] = propsOf(cur)
+                if (ps.length > 0) {
+                    const pr: AProp | not = namedProp(ps, segs[k])
+                    cur = not
+                    if (pr is given) cur = pr.value
+                    k = k + 1
+                    walking = true
+                }
             }
-            inner = segs[i] + ": { ..." + at + ", " + inner + " }"
-            i = i - 1
         }
-        return "Keep the field as it was: it sits inside `" + label + "." + segs[0] + "`, which this write replaces whole, so rebuild down to it from the place, keeping it (`{ ..." + label + ", " + inner + " }`), or write the parts that change in place"
+        const last: string = segs[n - 1]
+        if (h.lit || k >= n) {
+            const keep: string = "Keep the field as it was (`" + last + ": " + h.path + "`" + keepNarrowing(types, ty, label, segs) + ")"
+            if (n == 1 && label.startsWith("@") && maybeInner(ty) is not) return keep + ", or spread the struct (`" + label + " = { ..." + label + ", f: v }`)"
+            return keep
+        }
+        // the value written at `at` (the place itself when k == 0) is replaced whole: rebuild it
+        let at: string = label
+        let t: Type = unMaybe(ty)
+        let i = 0
+        while (i < k) {
+            at = at + "." + segs[i]
+            const ft: Type | not = fieldTypeIn(types, t, segs[i])
+            if (ft is not) return keepWords
+            t = unMaybe(ft)
+            i = i + 1
+        }
+        const words: string = "Keep the field as it was: it sits inside `" + at + "`, which this write replaces whole — rebuild `" + at + "` as an object literal that keeps `" + last + "`, or write the parts that change in place"
+        if (n - k > 4) return words
+        const rb: KeepRebuild = keepRebuild(types, t, segs, k, h.path, 0)
+        if (rb.text == "" || rb.fields > 16) return words
+        let lead: string = at + " = "
+        if (k > 0) lead = segs[k - 1] + ": "
+        return "Keep the field as it was: it sits inside `" + at + "`, which this write replaces whole, so write that value as an object literal that keeps it, supplying the other fields (`" + lead + rb.text + "`" + keepNarrowing(types, ty, label, segs) + "), or write the parts that change in place"
     }
 
-    fn lastSegment(path: string) -> string {
-        const i: int = path.lastIndexOf(".")
-        if (i < 0) return path
-        return path.substring(i + 1)
+    // The narrowing the kept read `label.segs` needs: the cell, and each field on the way to the
+    // tape's owner, typed `T | not` — "", else `, read where … narrowed: `if (A is given && …)``.
+    fn keepNarrowing(types: TypeInfo[], ty: Type, label: string, segs: string[]) -> string {
+        let conds: string[] = []
+        if (maybeInner(ty) is given) conds = conds.concat([label])
+        let t: Type = unMaybe(ty)
+        let at: string = label
+        let i = 0
+        while (i < segs.length - 1) {
+            const ft: Type | not = fieldTypeIn(types, t, segs[i])
+            if (ft is not) return ""
+            at = at + "." + segs[i]
+            if (maybeInner(ft) is given) conds = conds.concat([at])
+            t = unMaybe(ft)
+            i = i + 1
+        }
+        if (conds.length == 0) return ""
+        let test: string = ""
+        for (const c of conds) {
+            if (test != "") test = test + " && "
+            test = test + c + " is given"
+        }
+        let which: string = "`" + conds.join("`, `") + "` is"
+        if (conds.length > 1) which = "`" + conds.join("`, `") + "` are"
+        return ", read where " + which + " narrowed: `if (" + test + ")`"
+    }
+
+    type KeepRebuild:struct = { text: string, fields: int }
+
+    // `{ f: <value>, …, segs[i]: <the rebuild below> }` for struct type `t` (every field, in order);
+    // at the last segment, `segs[i]: <path>` (a `T | not` level is rebuilt as a `T`). "" where a
+    // level is not a struct.
+    fn keepRebuild(types: TypeInfo[], t: Type, segs: string[], i: int, path: string, n0: int) -> KeepRebuild {
+        const s: Sym | not = namedOf(unMaybe(t))
+        if (s is not) return { text: "", fields: n0 }
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return { text: "", fields: n0 }
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return { text: "", fields: n0 }
+        let parts: string[] = []
+        let count: int = n0 + fs.length
+        for (const fd of fs) {
+            const name: string = fd.sym.hint
+            if (name != segs[i]) {
+                parts = parts.concat([name + ": <value>"])
+            } else if (i == segs.length - 1) {
+                parts = parts.concat([name + ": " + path])
+            } else {
+                const sub: KeepRebuild = keepRebuild(types, fd.ty, segs, i + 1, path, count)
+                if (sub.text == "") return sub
+                count = sub.fields
+                parts = parts.concat([name + ": " + sub.text])
+            }
+        }
+        return { text: "{ " + parts.join(", ") + " }", fields: count }
+    }
+
+    // The type of field `name` of struct type `t`.
+    fn fieldTypeIn(types: TypeInfo[], t: Type, name: string) -> Type | not {
+        const s: Sym | not = namedOf(unMaybe(t))
+        if (s is not) return not
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return not
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return not
+        for (const fd of fs) {
+            if (fd.sym.hint == name) return fd.ty
+        }
+        return not
     }
 
     // A whole-value write to a struct with a tape field it cannot judge

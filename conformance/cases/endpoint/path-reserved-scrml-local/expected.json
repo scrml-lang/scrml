@@ -19,17 +19,5 @@
     "codeCounts": {
       "E-ENDPOINT-ROUTE-DUPLICATE": 1
     }
-  },
-  "xfail": {
-    "impl1-ts": {
-      "gap": "g-impl1-endpoint-path-rules-s479",
-      "fails": {
-        "codes": [
-          "codeCounts:code 'E-ENDPOINT-ROUTE-DUPLICATE' fired 0 time(s), expected exactly 1",
-          "missing:E-ENDPOINT-ROUTE-DUPLICATE",
-          "severity:code 'E-ENDPOINT-ROUTE-DUPLICATE' did not fire (expected severity error)"
-        ]
-      }
-    }
   }
 }
