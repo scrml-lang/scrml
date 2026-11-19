@@ -26,4 +26,9 @@ fire, tool initializers, trailing-dot origins), PA recs adopted" (`ruling:user-v
 
 ## Status
 - [x] implementation + tests (touched tests green)
-- [ ] commit / final gates / PR
+- [x] commit 71e5fe688 (hook green); coverage row §51.0.R updated
+- [x] final gates: pretest; bootstrap conformance PASS 732→733 (new case), CRASH 0, no PASS→FAIL;
+  s34-census, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim, severity --check green
+- [x] byte-compare: impl#1, all 1927 cases identical except the new case; bootstrap tool/endpoint cases
+  identical except foreign/foreign-slice-no-free-capture-neg (unread `banner` const now printed — item 2, intended)
+- [ ] PR
