@@ -107,8 +107,10 @@ describe("F1 — a whole-struct write over a shared struct graph (§66.12.6 rule
   test("an object literal is still judged field by field (a literal is never skipped as `done`)", () => {
     const r = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, b: B, c: B }",
       "let <r:R | not=(not)/>", "function go(v: B) {\n        @r = { a: v, b: { xs: [] }, c: @r.c };\n    }"));
-    // s480 r2 (LOW-a): `@r.a.xs` and `@r.b.xs` are one declaration `B.xs` — once, at the first path
-    expect(tapeFields(r)).toEqual(["@r.a.xs"]);
+    // s480 r3 (review:#1994 r2 LOW-a): `@r.b.xs` is a position the LITERAL owns, so it is reported at its
+    // own path although `@r.a.xs` (the same declaration `B.xs`) was hit first — they take different fixes
+    // (rebuild `a`; keep `xs: @r.b.xs`). r2 reported only `@r.a.xs`; main before #1994 reported both.
+    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.b.xs"]);
     const k = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, b: B, c: B }",
       "let <r:R | not=(not)/>", "function go(v: B) {\n        @r = { a: @r.a, b: { xs: [] }, c: @r.c };\n    }"));
     expect(tapeFields(k)).toEqual(["@r.b.xs"]);
@@ -176,8 +178,10 @@ describe("r1 — a cycle back to an object-literal-bearing struct (§66.12.6 rul
   test("literals at several depths through the cycle: each replaced tape refused once; granted: clean; terminates", () => {
     const lit = (inner, g = "free, append") => `<program>\n\${\n${Y(g)}\n    type R:struct = { y: Y }\n}\n    let <r:R | not=(not)/>\n    function go() {\n        if (@r is given) {\n            @r = { y: { t: @r.y.t, s: { y: ${inner} } } };\n        }\n    }\n<p>x</p>\n</program>\n`;
     // depth 2: `t: @r.y.t` is not the place @r.y.s.y.t; depth 3: `y: not` replaces @r.y.s.y.s.y.t —
-    // the same declaration `Y.t` (s480 r2 LOW-a: once, at the first path); granting `replace` on it clears both
-    expect(tapeFields(run(lit("{ t: @r.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.t"]);
+    // the same declaration `Y.t`, but the first is a literal-owned position (fix: keep `t: @r.y.s.y.t`) and
+    // the second is not (fix: do not write `not` over it) — s480 r3 (review:#1994 r2 LOW-a) reports both
+    // (r2: the first only); granting `replace` on it clears both
+    expect(tapeFields(run(lit("{ t: @r.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.t", "@r.y.s.y.s.y.t"]);
     expect(tapeFields(run(lit("{ t: @r.y.s.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.s.y.t"]);
     const k = run(lit("{ t: @r.y.t, s: { y: not } }", "free, append, replace"));
     expect(errs(k)).toEqual([]);
@@ -276,15 +280,144 @@ describe("r2 — a let-bound literal shared along many paths (§66.12.6 rule 4, 
     expect(c[0]).toContain("tape field `r.b.p.xs`");
   });
 
-  // LOW-b: under a value the write replaces whole, `name: <path>` is not writable — the hint rebuilds down to it
+  // LOW-b: under a value the write replaces whole, `name: <path>` is not writable — the hint rebuilds down to it.
+  // s480 r3 (review:#1994 r2 LOW-b): r2's rebuild spread the place at every level (`{ ...@r, b: { ...@r.b, … } }`),
+  // which the bootstrap refuses (E-BOOTSTRAP-UNSUPPORTED + E-TYPE-STRUCT-FIELD); it is now spread-free, and
+  // every hint form is compiled in the "r3 — every distinct fix, hints that compile" block below.
   test("the keep hint for a field under a replaced parameter value names the nested rebuild", () => {
     const r = run(prog("    type C:struct = { xs: int[free, append] }\n    type B:struct = { c: C }\n    type R:struct = { b: B }", "let <r:R | not=(not)/>", "            @r = { b: v };", "v: B"));
     const e = errs(r).filter((d) => d.code === "E-WRITE-NOT-GRANTED");
     expect(e.length).toBe(1);
-    expect(e[0].message).toContain("`{ ...@r, b: { ...@r.b, c: { ...@r.b.c, xs: @r.b.c.xs } } }`");
+    expect(e[0].message).toContain("(`b: { c: { xs: @r.b.c.xs } }`, read where `@r` is narrowed: `if (@r is given)`)");
+    expect(e[0].message).not.toContain("{ ...");
     const d = run(prog("    type B:struct = { xs: int[free, append] }\n    type R:struct = { b: B }", "let <r:R | not=(not)/>", "            @r = { b: { xs: [] } };"));
-    expect(errs(d)[0].message).toContain("Keep the field as it was (`xs: @r.b.xs`)");
+    // s480 r3: `@r` is `R | not` — the kept read compiles narrowed, and the hint names it
+    expect(errs(d)[0].message).toContain("Keep the field as it was (`xs: @r.b.xs`, read where `@r` is narrowed: `if (@r is given)`)");
   });
+});
+
+// s480 r3 (review:#1994 r2 LOW-a, LOW-b, INFO). LOW-a: r2 reported each tape field DECLARATION once, at the first
+// path — across object-literal positions too, which hid positions taking DIFFERENT fixes (fix `@r.a.t`, and
+// `@r.b.t` appears). The dedupe now applies only to positions reached with no value (a no-value state, an element
+// path: every path takes the same fix, grant `replace`); a literal-owned position is reported at its own path.
+// LOW-b: every hint form is code the bootstrap accepts — compiled here. INFO: check.scrml keptPathClass was a
+// linear scan of the keep reads per literal visit.
+describe("r3 — every distinct fix reported, hints that compile (§66.12.6 rule 4)", () => {
+  const S = "    type S0:struct = { t: int[free, append], n: int }\n    type S1:struct = { a: S0, b: S0, c: S0 }";
+  const cell = "let <r:S1=({ a: { t: [], n: 0 }, b: { t: [], n: 0 }, c: { t: [], n: 0 } })/>";
+  const fn = (body, params = "p: S0") => `function go(${params}) {\n        ${body}\n    }`;
+  const P3 = (types, c, f) => `<program>\n\${\n${types}\n}\n    ${c}\n    ${f}\n<p>x</p>\n</program>\n`;
+  // the code forms a refusal suggests: each `…` span after the rule-4 sentence that is code (`f: …`, `x = …`,
+  // `if (…)`), not a bare place name
+  const hints = (m) => m.slice(m.indexOf("rule 4). ")).split("`").filter((x, i) => i % 2 === 1 && /[:=(]/.test(x));
+  const byPath = (r) => Object.fromEntries(errs(r).filter((d) => d.code === "E-WRITE-NOT-GRANTED").map((d) => [(d.message.match(/the tape (?:field )?`([^`]+)`/) ?? [])[1], hints(d.message)]));
+  const clean = (src) => {
+    const r = run(src);
+    expect(errs(r).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+    expect(mods().check.checkCore(r.core)).toEqual([]);
+  };
+
+  test("lowa: a literal-owned `a.t`, a parameter `b`, a literal `c.t` keeping the WRONG place — all three (r2: `@r.a.t` only)", () => {
+    const r = run(P3(S, cell, fn("@r = { a: { t: [], n: 1 }, b: p, c: { t: @r.a.t, n: 1 } };")));
+    expect(tapeFields(r)).toEqual(["@r.a.t", "@r.b.t", "@r.c.t"]);
+    const h = byPath(r);
+    expect(h["@r.a.t"]).toEqual(["t: @r.a.t"]);
+    expect(h["@r.b.t"]).toEqual(["b: { t: @r.b.t, n: <value> }"]);
+    expect(h["@r.c.t"]).toEqual(["t: @r.c.t"]);
+    // the three fixes, as suggested (`<value>` supplied): accepted, and clean in Core
+    clean(P3(S, cell, fn("@r = { a: { t: @r.a.t, n: 1 }, b: { t: @r.b.t, n: p.n }, c: { t: @r.c.t, n: 1 } };")));
+  });
+
+  test("lowa2: `a` kept, `b` a parameter, `c` keeping `@r.a.t` — `@r.b.t` and `@r.c.t` (r2: `@r.b.t` only)", () => {
+    expect(tapeFields(run(P3(S, cell, fn("@r = { a: { t: @r.a.t, n: 1 }, b: p, c: { t: @r.a.t, n: 1 } };"))))).toEqual(["@r.b.t", "@r.c.t"]);
+  });
+
+  test("two parameters (no value at either): the declaration once — `done` / the no-value dedupe, as r2", () => {
+    expect(tapeFields(run(P3(S, cell, fn("@r = { a: p, b: q, c: @r.c };", "p: S0, q: S0"))))).toEqual(["@r.a.t"]);
+  });
+
+  test("a recursive struct written with a literal: `kids` once (its own elements' `kids` is the same fix)", () => {
+    const T = "    type T:struct = { kids: T[free, append], n: int }";
+    const r = run(P3(T, "let <t:T | not=(not)/>", fn("@t = { kids: [], n: 1 };", "")));
+    expect(tapeFields(r)).toEqual(["@t.kids"]);
+    // no spread offered: `@t` is `T | not`, and a spread write needs a struct-typed target (E-TYPE-STRUCT-CONTEXT);
+    // the kept read `@t.kids` needs `@t` narrowed (E-TYPE-046), and the hint says so
+    expect(byPath(r)["@t.kids"]).toEqual(["kids: @t.kids", "if (@t is given)"]);
+    clean(P3(T, "let <t:T | not=(not)/>", fn("if (@t is given) {\n            @t = { kids: @t.kids, n: 1 };\n        }", "")));
+  });
+
+  test("a struct shared by a literal field and a tape's elements: the literal position, then the element path", () => {
+    const T = "    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, list: B[free, replace], again: B }";
+    const r = run(P3(T, "let <r:R | not=(not)/>", fn("@r = { a: { xs: [] }, list: [], again: v };", "v: B")));
+    // `again: v` is a no-value position of `B.xs`, already reached with no value through `list`'s elements:
+    // deduped with it (the reviewer's rule: no-value and element positions dedupe, literal ones do not)
+    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.list[…].xs"]);
+  });
+
+  test("hint1: the spread-free rebuild of a replaced parameter value compiles (r2's `{ ...@r, a: { ...@r.a, … } }` did not)", () => {
+    const T = "    type S0:struct = { t: int[free, append], n: int }\n    type S1:struct = { a: S0, b: S0 }";
+    const c2 = "let <r:S1=({ a: { t: [], n: 0 }, b: { t: [], n: 0 } })/>";
+    const r = run(P3(T, c2, fn("@r = { a: p, b: { t: @r.b.t, n: 1 } };")));
+    expect(byPath(r)).toEqual({ "@r.a.t": ["a: { t: @r.a.t, n: <value> }"] });
+    clean(P3(T, c2, fn("@r = { a: { t: @r.a.t, n: p.n }, b: { t: @r.b.t, n: 1 } };")));
+    // hint2 — r2's suggestion, refused by the bootstrap (why it is no longer suggested)
+    const h2 = errs(run(P3(T, c2, fn("@r = { ...@r, a: { ...@r.a, t: @r.a.t } };")))).map((d) => d.code);
+    expect(h2).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+
+  test("the whole cell replaced by a value: a rebuild from the cell, every level, `<value>` per field; it compiles", () => {
+    const T = "    type C:struct = { xs: int[free, append], m: int }\n    type B:struct = { c: C, k: int }\n    type R:struct = { b: B }";
+    const r = run(P3(T, "let <r:R | not=(not)/>", fn("if (@r is given) {\n            @r = v;\n        }", "v: R")));
+    expect(byPath(r)).toEqual({ "@r.b.c.xs": ["@r = { b: { c: { xs: @r.b.c.xs, m: <value> }, k: <value> } }", "if (@r is given)"] });
+    clean(P3(T, "let <r:R | not=(not)/>", fn("if (@r is given) {\n            @r = { b: { c: { xs: @r.b.c.xs, m: v.b.c.m }, k: v.b.k } };\n        }", "v: R")));
+    const D = "    type D:struct = { xs: int[free, append], n: int }";
+    const d = run(P3(D, "let <d:D=({ xs: [], n: 0 })/>", fn("@d = w;", "w: D")));
+    expect(byPath(d)).toEqual({ "@d.xs": ["@d = { xs: @d.xs, n: <value> }"] });
+    clean(P3(D, "let <d:D=({ xs: [], n: 0 })/>", fn("@d = { xs: @d.xs, n: w.n };", "w: D")));
+    // a field of the cell itself in a literal, the cell not `T | not`: keep it, or the spread statement
+    const l = run(P3(D, "let <d:D=({ xs: [], n: 0 })/>", fn("@d = { xs: [], n: 1 };", "")));
+    expect(byPath(l)).toEqual({ "@d.xs": ["xs: @d.xs", "@d = { ...@d, f: v }"] });
+    clean(P3(D, "let <d:D=({ xs: [], n: 0 })/>", fn("@d = { xs: @d.xs, n: 1 };\n        @d = { ...@d, n: 2 };", "")));
+  });
+
+  test("a kept read through `T | not` fields: the hint names the narrowing, and the code compiles under it", () => {
+    const T = "    type C:struct = { xs: int[free, append], m: int }\n    type B:struct = { c: C | not }\n    type R:struct = { b: B }";
+    const r = run(P3(T, "let <r:R | not=(not)/>", fn("@r = { b: v };", "v: B")));
+    expect(byPath(r)).toEqual({ "@r.b.c.xs": ["b: { c: { xs: @r.b.c.xs, m: <value> } }", "if (@r is given && @r.b.c is given)"] });
+    clean(P3(T, "let <r:R | not=(not)/>", fn("if (@r is given && @r.b.c is given) {\n            @r = { b: { c: { xs: @r.b.c.xs, m: 1 } } };\n        }", "v: B")));
+    // a literal-owned position through the r1 cycle (`Y.s: S | not`, `S.y: Y | not`)
+    const Y = "    type Y:struct = { t: int[free, append], s: S | not }\n    type S:struct = { y: Y | not }\n    type R:struct = { y: Y }";
+    const w = (inner) => fn(`if (@r is given${inner ? " && @r.y.s is given && @r.y.s.y is given" : ""}) {\n            @r = { y: { t: @r.y.t, s: { y: { t: ${inner ? "@r.y.s.y.t, s: @r.y.s.y.s" : "[], s: @r.y.s"} } } } };\n        }`, "");
+    const y = run(P3(Y, "let <r:R | not=(not)/>", w(false)));
+    expect(byPath(y)["@r.y.s.y.t"]).toEqual(["t: @r.y.s.y.t", "if (@r is given && @r.y.s is given && @r.y.s.y is given)"]);
+    clean(P3(Y, "let <r:R | not=(not)/>", w(true)));
+    // past 4 levels: the advice in words, no code
+    const D = ["    type D5:struct = { xs: int[free, append] }"];
+    for (let i = 0; i < 5; i++) D.push(`    type D${i}:struct = { d: D${i + 1} }`);
+    const deep = run(P3(D.join("\n"), "let <r:D0 | not=(not)/>", fn("@r = v;", "v: D0")));
+    const m = errs(deep).find((d) => d.code === "E-WRITE-NOT-GRANTED").message;
+    expect(hints(m)).toEqual([]);
+    expect(m).toContain("rebuild `@r` as an object literal that keeps `xs`");
+  });
+
+  // INFO: keptPathClass scanned every keep read per literal visit, and the memo recorded a key per path with keep
+  // reads under it (each lookup linear in them) — quadratic in the keep reads. A let DAG 24 deep plus 800 literals each reading two places: base checkCore 2.2 s (1600: 8.3 s); r3 0.16 s (a sorted prefix set, "*"-only memo).
+  test("kr24 + 800 keep-reading literals: Core C3 clean, fast (check.scrml keptPathClass)", () => {
+    const n = 24, M = 800;
+    let s = 12345;
+    const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+    const path = () => Array.from({ length: n }, () => (rnd() < 0.5 ? "a" : "b")).join(".");
+    const T = ["    type S0:struct = { t: int[free, append, replace], u: int[free, append, replace] }"];
+    for (let k = 1; k <= n; k++) T.push(`    type S${k}:struct = { a: S${k - 1}, b: S${k - 1} }`);
+    const L = [`const l0: S0 = { t: @r.${"a.".repeat(n)}t, u: @r.${path()}.u };`];
+    for (let k = 1; k <= n; k++) L.push(`const l${k}: S${k} = { a: l${k - 1}, b: l${k - 1} };`);
+    for (let i = 0; i < M; i++) L.push(`const z${i}: S0 = { t: @r.${path()}.t, u: @r.${path()}.u };`);
+    const r = run(P3(T.join("\n"), `let <r:S${n} | not=(not)/>`, fn(`if (@r is given) {\n            ${L.join("\n            ")}\n            @r = l${n};\n        }`, "")));
+    expect(errs(r)).toEqual([]);
+    const [c, ms] = timed(() => mods().check.checkCore(r.core));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(1_000);
+  }, 120_000);
 });
 
 describe("F3 — rule 15 over many mutually reachable structs (hostTypeDataDiags)", () => {
