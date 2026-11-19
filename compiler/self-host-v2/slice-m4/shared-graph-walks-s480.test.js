@@ -80,9 +80,18 @@ describe("F1 — a whole-struct write over a shared struct graph (§66.12.6 rule
     expect(errs(r)[2].message).toContain("replaces the tapes inside `@a`");
   });
 
-  test("a recursive struct: the tape field itself, once (the path `seen` still stops the cycle)", () => {
+  // s480 r1 (review:#1994 HIGH-1): there is no path `seen` cut any more; `done` stops the cycle. The
+  // walk now also reaches the tape the ELEMENTS of `@t.kids` hold — `@t.kids[…].kids`, a separate
+  // position (§66.12.6 rule 1, RULED S472 item 1: "a `replace` of every tape its elements hold,
+  // RECURSIVELY"). It is the element-held diagnostic, once, as for any struct a field and a tape's
+  // elements share (the test below); base cut it because `T` was on the path. Granting `replace`
+  // makes both go.
+  test("a recursive struct: the tape field, once, and the tape its elements hold, once (`done` stops the cycle)", () => {
     const r = run(P("    type T:struct = { kids: T[free, append], n: int }", "let <t:T | not=(not)/>", "function go(v: T) {\n        @t = v;\n    }"));
-    expect(tapeFields(r)).toEqual(["@t.kids"]);
+    expect(tapeFields(r)).toEqual(["@t.kids", "@t.kids[…].kids"]);
+    expect(errs(r)[1].message).toContain("replaces the tapes inside `@t`");
+    const g = run(P("    type T:struct = { kids: T[free, append, replace], n: int }", "let <t:T | not=(not)/>", "function go(v: T) {\n        @t = v;\n    }"));
+    expect(tapeFields(g)).toEqual([]);
   });
 
   test("a struct shared by a field and by a tape's elements: reported once as a field, once as an element-held tape", () => {
@@ -107,6 +116,63 @@ describe("F1 — a whole-struct write over a shared struct graph (§66.12.6 rule
     expect(e.map((d) => d.message).join("\n")).toContain("@b" + ".f0".repeat(30) + ".kids");
     expect(ms).toBeLessThan(5_000);
   }, 60_000);
+});
+
+// s480 r1 (review:#1994 HIGH-1, g-boot-tape-walk-literal-cycle-cut-s480) — §66.12.6 rule 4 ("A whole-struct
+// write that changes a tape field is a `replace` of that field … checked against the FIELD's grants"). The
+// path `seen` cut stopped the edge back to a struct on the stack. Against a struct written with an OBJECT
+// LITERAL that is unsound: the literal keeps `y.t`, but `s: x` replaces `@r.y.s` whole — `@r.y.s.y.t`
+// with it — and the cut edge `S.y -> Y` was never walked. preexist1 compiled on base and on e8e943792;
+// failopen1 compiled on e8e943792 (the `done` set then hid the second path `s2: z`), refused on base.
+// Both are red on e8e943792, analyze AND Core check (structTapeKept, the defence in depth).
+describe("r1 — a cycle back to an object-literal-bearing struct (§66.12.6 rule 4)", () => {
+  const Y = (g) => `    type Y:struct = { t: int[${g}], s: S | not }\n    type S:struct = { y: Y | not }`;
+  const fo = (g) => `<program>\n\${\n${Y(g)}\n    type R:struct = { y: Y, s2: S }\n}\n    let <r:R | not=(not)/>\n    function go(x: S, z: S) {\n        if (@r is given) {\n            @r = { y: { t: @r.y.t, s: x }, s2: z };\n        }\n    }\n<p>x</p>\n</program>\n`;
+  const pe = (g) => `<program>\n\${\n${Y(g)}\n    type R:struct = { y: Y }\n}\n    let <r:R | not=(not)/>\n    function go(x: S) {\n        if (@r is given) {\n            @r = { y: { t: @r.y.t, s: x } };\n        }\n    }\n<p>x</p>\n</program>\n`;
+  const find = (n, pred, out = []) => {
+    if (n && typeof n === "object") {
+      if (pred(n)) out.push(n);
+      for (const v of Object.values(n)) find(v, pred, out);
+    }
+    return out;
+  };
+  // compiled with `replace` granted (clean), then the grant flipped off in Core: C3 must refuse
+  const flipped = (src) => {
+    const r = run(src);
+    expect(errs(r)).toEqual([]);
+    expect(mods().check.checkCore(r.core)).toEqual([]);
+    const core = structuredClone(r.core);
+    const fds = find(core.types, (n) => n.sym && n.sym.hint === "t" && n.grants);
+    expect(fds.length).toBeGreaterThan(0);
+    for (const f of fds) f.grants.replace = false;
+    return mods().check.checkCore(core);
+  };
+
+  test("failopen1: `s: x` and `s2: z` both replace `Y.t` — refused (e8e943792: compiled clean; base: refused)", () => {
+    expect(tapeFields(run(fo("free, append")))).toEqual(["@r.y.s.y.t"]);
+  });
+  test("failopen1, Core: C3 refuses (e8e943792: [])", () => {
+    const c = flipped(fo("free, append, replace"));
+    expect(c.some((m) => m.startsWith("C3:") && m.includes("tape field `r.y.s.y.t`"))).toBe(true);
+  });
+  test("preexist1: `s: x` replaces `@r.y.s.y.t` under a literal that keeps `@r.y.t` — refused (base AND e8e943792: compiled)", () => {
+    expect(tapeFields(run(pe("free, append")))).toEqual(["@r.y.s.y.t"]);
+  });
+  test("preexist1, Core: C3 refuses (base AND e8e943792: [])", () => {
+    const c = flipped(pe("free, append, replace"));
+    expect(c.some((m) => m.startsWith("C3:") && m.includes("tape field `r.y.s.y.t`"))).toBe(true);
+  });
+  // literals three deep through the cycle R -> Y -> S -> Y -> S: every state is a literal until `y: not` /
+  // `s: @r.y.s.y.s`. Writing `not` over a `Y | not` that may hold a tape replaces it (as base does for any
+  // optional struct field: `@a = { b: not }` refuses `@a.b.xs`).
+  test("literals at several depths through the cycle: each replaced tape refused once; granted: clean; terminates", () => {
+    const lit = (inner, g = "free, append") => `<program>\n\${\n${Y(g)}\n    type R:struct = { y: Y }\n}\n    let <r:R | not=(not)/>\n    function go() {\n        if (@r is given) {\n            @r = { y: { t: @r.y.t, s: { y: ${inner} } } };\n        }\n    }\n<p>x</p>\n</program>\n`;
+    // depth 2: `t: @r.y.t` is not the place @r.y.s.y.t; depth 3: `y: not` replaces @r.y.s.y.s.y.t
+    expect(tapeFields(run(lit("{ t: @r.y.t, s: { y: not } }")))).toEqual(["@r.y.s.y.t", "@r.y.s.y.s.y.t"]);
+    const k = run(lit("{ t: @r.y.t, s: { y: not } }", "free, append, replace"));
+    expect(errs(k)).toEqual([]);
+    expect(mods().check.checkCore(k.core)).toEqual([]);
+  });
 });
 
 describe("F3 — rule 15 over many mutually reachable structs (hostTypeDataDiags)", () => {

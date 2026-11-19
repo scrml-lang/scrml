@@ -16158,11 +16158,10 @@ ${
     // (innerTapeHits); the replaced tape's OWN grant is judged where it is
     // written (the caller). An ENUM is not walked: a variant payload is a value,
     // not a tape position — grants do not apply inside it (RULED S469, "Not a
-    // tape position"), so a whole enum write replaces no tape. `seen` stops a
-    // recursive struct.
+    // tape position"), so a whole enum write replaces no tape.
     //
-    // s480 (g-boot-tape-grant-walk-exponential-s480, review:#1991): the walk keeps a
-    // second set beside the PATH `seen` — `done`, the walk states (named type, inside
+    // s480 (g-boot-tape-grant-walk-exponential-s480, review:#1991): the walk keeps
+    // `done` — the walk states (named type, inside
     // an element or not) already expanded with NO value to compare (`v` is not an
     // object literal: every field is replaced, so what is reached is a function of
     // the type alone). A state met again is not re-expanded: on a struct graph with
@@ -16171,20 +16170,29 @@ ${
     // the type graph. Each offending tape FIELD is reported once, at the first path
     // that reaches it (the order of first reach is the plain walk's); a graph without
     // sharing never meets a state twice, so its hits are unchanged.
+    //
+    // s480 r1 (review:#1994 HIGH-1, g-boot-tape-walk-literal-cycle-cut-s480): there is NO
+    // path `seen` cut. It cut the edge back to a struct on the stack, which is sound only
+    // when that struct was expanded with no value (its own expansion covers the edge);
+    // against an object-literal-bearing ancestor the literal keeps fields the cut edge
+    // replaces (`@r = { y: { t: @r.y.t, s: x } }`, `S { y: Y }`: `x` replaces
+    // `@r.y.s.y.t`), and a state the cut path marked `done` then hid a second path.
+    // Termination without it: a no-value state is in `done` before its fields are walked,
+    // so a cycle of them stops at the first repeat; a literal state descends into a
+    // sub-expression of the literal, so a run of them is bounded by the literal's depth.
     type TapeWalk:struct = { hits: TapeHit[], done: int[] }
 
-    fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
-        return tapeWalkStruct(types, ty, v, key, label, seen, false, { hits: [], done: [] }).hits
+    fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeHit[] {
+        return tapeWalkStruct(types, ty, v, key, label, false, { hits: [], done: [] }).hits
     }
 
-    fn tapeWalkStruct(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[], inner: boolean, w0: TapeWalk) -> TapeWalk {
+    fn tapeWalkStruct(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, inner: boolean, w0: TapeWalk) -> TapeWalk {
         if (v is given) {
             if (key != "" && placeKey(v) == key) return w0
         }
-        if (tapeGrants(ty) is given) return tapeWalkInner(types, ty, label, seen, w0)
+        if (tapeGrants(ty) is given) return tapeWalkInner(types, ty, label, w0)
         const s: Sym | not = namedOf(unMaybe(ty))
         if (s is not) return w0
-        if (seen.indexOf(s.id) >= 0) return w0
         const ti: TypeInfo | not = typeInfoOf(types, s)
         if (ti is not) return w0
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
@@ -16220,9 +16228,9 @@ ${
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
                     w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner }]), done: w.done }
-                    w = tapeWalkInner(types, fd.ty, at, seen.concat([s.id]), w)
+                    w = tapeWalkInner(types, fd.ty, at, w)
                 } else {
-                    w = tapeWalkStruct(types, fd.ty, fv, sub, at, seen.concat([s.id]), inner, w)
+                    w = tapeWalkStruct(types, fd.ty, fv, sub, at, inner, w)
                 }
             }
         }
@@ -16234,23 +16242,24 @@ ${
     // tape (and what ITS elements hold), and each tape field reached through an
     // element struct (and what its elements hold). A whole write of `tape` that
     // does not keep its elements replaces each of them, so each needs its own
-    // `replace` (§66.12.6 rule 1, "in each position that can hold one"). `seen`
-    // stops a recursive struct; an enum element is not walked (RULED S469).
-    // s480: the element walk shares structTapeWrites' `done` set (tapeWalkInner).
-    fn innerTapeHits(types: TypeInfo[], tape: Type, label: string, seen: int[]) -> TapeHit[] {
-        return tapeWalkInner(types, tape, label, seen, { hits: [], done: [] }).hits
+    // `replace` (§66.12.6 rule 1, "in each position that can hold one"). An enum
+    // element is not walked (RULED S469).
+    // s480: the element walk shares structTapeWrites' `done` set (tapeWalkInner), which
+    // also stops a recursive struct (s480 r1: no path `seen`).
+    fn innerTapeHits(types: TypeInfo[], tape: Type, label: string) -> TapeHit[] {
+        return tapeWalkInner(types, tape, label, { hits: [], done: [] }).hits
     }
 
-    fn tapeWalkInner(types: TypeInfo[], tape: Type, label: string, seen: int[], w0: TapeWalk) -> TapeWalk {
+    fn tapeWalkInner(types: TypeInfo[], tape: Type, label: string, w0: TapeWalk) -> TapeWalk {
         const el: Type | not = seqElem(unMaybe(tape))
         if (el is not) return w0
         const at: string = label + "[…]"
         const tg: GrantSet | not = tapeGrants(el)
         if (tg is given) {
             const w: TapeWalk = { hits: w0.hits.concat([{ path: at, ty: el, grants: tg, inner: true }]), done: w0.done }
-            return tapeWalkInner(types, el, at, seen, w)
+            return tapeWalkInner(types, el, at, w)
         }
-        return tapeWalkStruct(types, el, not, "", at, seen, true, w0)
+        return tapeWalkStruct(types, el, not, "", at, true, w0)
     }
 
     // s472-boot-map-grants — a write of a whole TAPE (`label = value`, the place
@@ -16278,7 +16287,7 @@ ${
 
     // The first tape the elements of `tape` hold whose type does not grant `replace`.
     fn innerTapeProblems(types: TypeInfo[], tape: Type, label: string, what: string) -> TapeDiag[] {
-        for (const h of innerTapeHits(types, tape, label, [])) {
+        for (const h of innerTapeHits(types, tape, label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace)) return [innerTapeDiag(what, h)]
         }
         return []
@@ -16313,7 +16322,7 @@ ${
     // its own grants (`grantsAdmit(…, Replace)`): E-WRITE-NOT-GRANTED.
     fn structTapeProblems(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeDiag[] {
         let out: TapeDiag[] = []
-        for (const h of structTapeWrites(types, ty, v, key, label, [])) {
+        for (const h of structTapeWrites(types, ty, v, key, label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace) && h.inner) {
                 out = out.concat([innerTapeDiag("`" + label + " = …` replaces the tapes inside `" + label + "`", h)])
             } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
@@ -16399,7 +16408,7 @@ ${
     // statically (`reset`, `reset-on=`: whether the reset changes a tape field
     // depends on its value at run time) — the first such field, or "".
     fn resetTapeProblem(types: TypeInfo[], ty: Type, label: string) -> string {
-        for (const h of structTapeWrites(types, ty, not, "", label, [])) {
+        for (const h of structTapeWrites(types, ty, not, "", label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace)) return h.path
         }
         return ""

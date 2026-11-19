@@ -2782,7 +2782,7 @@ ${
         // s469-boot-tape-grants (review r2 H1): that whole-value write replaces a struct's tape
         // fields too (§66.12.6 rule 4) — a struct must not carry an append-only tape past the line above
         if (local) {
-            const tp: string = structTapeKept(p, ob, f.ty, not, d.sym, InstRef.Lexical(0), [], f.sym.hint, [])
+            const tp: string = structTapeKept(p, ob, f.ty, not, d.sym, InstRef.Lexical(0), [], f.sym.hint)
             if (tp != "") out = out.concat([at + " in localStorage, but a cross-tab value is a whole-value write and " + tp])
         }
         const wb: WireBuild = wireBuild(p, f.ty)
@@ -5597,7 +5597,7 @@ ${
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
             if (!ig) return what + " replaces an element of `" + f.sym.hint + "` that is itself a tape, whose grants give no `replace` (§66.12.6 rule 1)"
-            return innerTapeKept(p, ob, et, f.sym, f.sym.hint + "[…]", [])
+            return innerTapeKept(p, ob, et, f.sym, f.sym.hint + "[…]")
         }
         return elemAtTapeKept(p, ob, f, value, [])
     }
@@ -5606,20 +5606,20 @@ ${
     // `replace` when the tape is replaced whole ("A `replace` (or any whole write) of a tape
     // counts as a `replace` of every tape its elements hold, RECURSIVELY"). "" when each
     // does, else why. `d` only seeds structTapeKept (path [] — nothing is "kept" there).
-    fn innerTapeKept(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, seen: int[]) -> string {
-        return innerKeptWalk(p, ob, tape, d, label, seen, []).msg
+    fn innerTapeKept(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string) -> string {
+        return innerKeptWalk(p, ob, tape, d, label, []).msg
     }
 
-    fn innerKeptWalk(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, seen: int[], done: int[]) -> KeptWalk {
+    fn innerKeptWalk(p: CoreProgram, ob: OnceBinds, tape: Type, d: Sym, label: string, done: int[]) -> KeptWalk {
         const et: Type | not = seqElemOf(unMaybeC(tape))
         if (et is not) return { msg: "", done: done }
         const at: string = label + "[…]"
         const ig: boolean | not = seqReplaceOf(unMaybeC(et))
         if (ig is given) {
             if (!ig) return { msg: "the write replaces the tape `" + at + "` held by an element of a replaced tape, whose type grants no `replace` — an outer `replace` does not override an inner tape's grants (§66.12.6 rule 1, RULED S472)", done: done }
-            return innerKeptWalk(p, ob, et, d, at, seen, done)
+            return innerKeptWalk(p, ob, et, d, at, done)
         }
-        return keptWalk(p, ob, et, not, d, InstRef.Lexical(0), [], at, seen, done)
+        return keptWalk(p, ob, et, not, d, InstRef.Lexical(0), [], at, done)
     }
 
     // s472-boot-map-grants — a FieldAt whose target is a tape writes that tape WHOLE: it is
@@ -5800,7 +5800,7 @@ ${
     fn tapeReplaceProblem(p: CoreProgram, ob: OnceBinds, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
         const base: FieldRef[] = [{ owner: d, idx: idx }]
         return match edit {
-            .Replace :> structTapeKept(p, ob, f.ty, value, d, inst, base, f.sym.hint, [])
+            .Replace :> structTapeKept(p, ob, f.ty, value, d, inst, base, f.sym.hint)
             .FieldAt(path: path) :> fieldAtTapeKept(p, ob, f.ty, value, d, inst, base, path, f.sym.hint)
             .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, ob, f, value, path)
             // s472: the element is replaced whole — each tape field of it the value changes is a `replace` of that field (rule 4)
@@ -5827,7 +5827,7 @@ ${
             at = at + "." + fd.sym.hint
         }
         if (isTapeType(ty) && fieldAtPermutation(p, ob, d, inst, base.concat(path), value)) return ""
-        return structTapeKept(p, ob, ty, value, d, inst, base.concat(path), at, [])
+        return structTapeKept(p, ob, ty, value, d, inst, base.concat(path), at)
     }
 
     fn elemAtTapeKept(p: CoreProgram, ob: OnceBinds, f: Field, value: Expr, path: FieldRef[]) -> string {
@@ -5842,7 +5842,7 @@ ${
             at = at + "." + fd.sym.hint
         }
         // an element has no place spelling here: no tape field of it is "kept"
-        return structTapeKept(p, ob, ty, value, f.sym, InstRef.Lexical(0), [], at, [])
+        return structTapeKept(p, ob, ty, value, f.sym, InstRef.Lexical(0), [], at)
     }
 
     fn structStep(p: CoreProgram, ty: Type, step: FieldRef) -> FieldDef | not {
@@ -5863,13 +5863,16 @@ ${
     // field replaced, so the verdict is a function of the type) and found clean is not expanded
     // again (a problem ends the walk). A struct graph with sharing was walked once per PATH
     // (4x per two levels); it is now linear in the graph, and the first problem is the same one.
+    // s480 r1 (review:#1994 HIGH-1): no path `seen` cut — against a StructOf-bearing ancestor
+    // it hid a replaced tape (see analyze.scrml TapeWalk). A no-value struct is in `done` before
+    // its fields are walked; a StructOf one descends into its own field values (finite).
     type KeptWalk:struct = { msg: string, done: int[] }
 
-    fn structTapeKept(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
-        return keptWalk(p, ob, ty, v0, d, inst, path, label, seen, []).msg
+    fn structTapeKept(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string) -> string {
+        return keptWalk(p, ob, ty, v0, d, inst, path, label, []).msg
     }
 
-    fn keptWalk(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[], done0: int[]) -> KeptWalk {
+    fn keptWalk(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, done0: int[]) -> KeptWalk {
         let v: Expr | not = not
         if (v0 is given) v = boundValue(p, ob, v0, 0)
         // s469 F4: the value IS the written place — nothing in it is replaced
@@ -5878,10 +5881,9 @@ ${
         }
         // s472-boot-map-grants (RULED S472 item 1): a tape written whole replaces every tape
         // its elements hold, at any depth
-        if (isTapeType(ty)) return innerKeptWalk(p, ob, ty, d, label, seen, done0)
+        if (isTapeType(ty)) return innerKeptWalk(p, ob, ty, d, label, done0)
         const s: Sym | not = namedSym(unMaybeC(ty))
         if (s is not) return { msg: "", done: done0 }
-        if (seen.indexOf(s.id) >= 0) return { msg: "", done: done0 }
         const td: TypeDef | not = findTypeDef(p, s)
         if (td is not) return { msg: "", done: done0 }
         const fs: FieldDef[] | not = structFields(td)
@@ -5907,11 +5909,11 @@ ${
             if (!kept) {
                 if (isTapeType(fd.ty)) {
                     if (!fd.grants.replace) return { msg: "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)", done: done }
-                    const ir: KeptWalk = innerKeptWalk(p, ob, fd.ty, d, label + "." + fd.sym.hint, seen.concat([s.id]), done)
+                    const ir: KeptWalk = innerKeptWalk(p, ob, fd.ty, d, label + "." + fd.sym.hint, done)
                     if (ir.msg != "") return ir
                     done = ir.done
                 } else {
-                    const r: KeptWalk = keptWalk(p, ob, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, seen.concat([s.id]), done)
+                    const r: KeptWalk = keptWalk(p, ob, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, done)
                     if (r.msg != "") return r
                     done = r.done
                 }

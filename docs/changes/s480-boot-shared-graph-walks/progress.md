@@ -17,3 +17,13 @@ Branch from origin/main c61700fee (#1991 merged). Review findings of #1991: F1, 
   client/server/host outputs. 0 programs changed. (`files` differs only by the absolute tree path.)
 - CI checks: s34-census --check-new PASS; types-gate OK (unchanged); snippet-gate 0 fail; claim-gate 0 fail;
   corpus-compile-floor PASS; gen-md-shim current.
+
+## r1 (review:#1994 HIGH-1)
+- analyze.scrml tapeWalkStruct/tapeWalkInner and check.scrml keptWalk/innerKeptWalk: the path `seen` cut is gone
+  (and the `seen` parameter with it); `done` alone terminates (no-value states enter `done` before their fields are
+  walked; literal states descend into the literal). Fixes failopen1 (head-only regression) and preexist1 (a base fail-open).
+- Gap filed + resolved: g-boot-tape-walk-literal-cycle-cut-s480 (HIGH, security-class fail-open).
+- Tests: describe "r1" in shared-graph-walks-s480.test.js (6 red on e8e943792); the recursive-tape test now expects
+  `@t.kids` and `@t.kids[…].kids` (the element-held tape, rule 1 / RULED S472 item 1).
+- Differential (~/.cache/scrml/review/s480-1994-r1/tdiff3.mjs, with an oracle): 12 000 programs, 6 801 valid; fixed
+  head = oracle everywhere (analyze + Core flip); base fail-opens 411, pre-fix head 433.
