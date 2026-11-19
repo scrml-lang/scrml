@@ -1,0 +1,18 @@
+// §6.13.5 (S479) — negative twin: `.Published` is reachable (Draft → Review → Published), so the
+// literal held write is left to the commit-time check — no compile error, even though `.Draft`
+// itself does not admit `.Published`.
+<program>
+    type Doc:enum = { Draft, Review, Published, Purged, Archived }
+    <doc:Doc=.Draft single debounced=500ms>
+        <Draft rule=.Review/>
+        <Review rule=(.Draft | .Published)/>
+        <Published rule=.Draft/>
+        <Purged rule=.Archived/>
+        <Archived rule=.Draft/>
+    </>
+    function publish() { @doc = .Published; }
+    <main>
+        <p>${@doc}</p>
+        <button onclick=publish()>Publish</button>
+    </main>
+</program>

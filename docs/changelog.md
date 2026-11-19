@@ -2,6 +2,24 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S479 — 2026-11-18 (bryan · theRog) — every S478 owner question ruled and built in reviewed lanes; three narrow impl#1 carve-outs; channel relay fold; file-scope `let`; endpoint path grammar and duplicate-key refusal; host OOM capped the session
+
+Rulings: user-voice §S479 (PA recs adopted on every batch; three impl#1 carve-outs). Every code PR took an S239 adversarial review on a frozen tree; every fix round got a fresh re-review.
+
+**Landed (13 PRs + bot regens):** #1957 (impl#1 endpoint 415 + strict keys) · #1958 (review markers) · #1960 (six SPEC-contradicting cases) · #1961 (keywordless binding = const; duplicate arm binder E-SCOPE-REDECLARE) · #1962 (file-scope `let`, per-artifact initializers, E-FILE-SCOPE-LET-SERVER-WRITE) · #1965 (E-ENDPOINT-PATH-INVALID, `/_scrml_local/`, duplicate JSON keys → Malformed, parseVariant alias) · #1966 (`:error` and E-DG-001 retired) · #1967 (channel relay fold + per-address bounds) · #1969 (E-PAGE-DUPLICATE, E-MATCH-FOR-REQUIRED) · #1970 (impl#1 `_dbVar` shared-type leak) · #1972 (timed engine cells judge `rule=` at commit) · #1974 (records; `url(#ident)`; `<db>` failure view) · #1978 (a `<request>` body is a client position).
+
+**Queued / open at wrap:** #1975, #1977 (merge queue); #1963, #1971 (reviewed, need main merged in); #1981 (unreviewed). Unpushed lanes and the owed list: `hand-off.md` §4.
+
+**Not run at wrap:** the full suite (systemd-oomd killed the whole session four times under parallel hooks); CI `gate` is the authority.
+
+## S478 (second wrap) — 2026-11-17 → 11-18 (bryan · theRog) — op-based channel sync; 62 open owner questions ruled wholesale and built in 7 reviewed lanes; conformance PASS 599 → 638 (≈645 with #1947)
+
+- **Channels (§38):** op-based sync — each write syncs as its granted edit, checked by every receiver (#1937); relay-sequenced convergent order, a frame log replayed to late joiners and reconnects, derived writes kept local (#1941); relay bounds (64 KiB frames, 50/s burst-100 bucket, 1000-subscriber cap), client pacing so honest bursts lose nothing, dev-server Host allowlist, typed `onchange` arms (#1942). The tutorial chat compiles and converges.
+- **Ruled language work:** `<endpoint>` (405/Allow, duplicate route + reserved paths, strict keys, 415, placement, arm-with-no-value, `tag` field) (#1940); failable and pure function types, `=>` only, invariance (#1943); schema comma, duplicate codes, `schema` reserved, INTEGER→`int` with a row-read check, transaction blocks without an envelope, tx-exit warning (#1944); body-top lift renders nothing, Appendix H.6 event typing, suspending-loop rule, `for=` optional, wrapper-less `<match>`, `|` guard, one `<page>` per file (#1945); stdlib per-name barrel supply + `parseVariant` intrinsic (#1948). In the merge queue: misc rulings — print/`asIs`, library entry, foreign comments, durations, `?.` wording, quoted `rule=`, read-modify-write lint, file-scope server reach, contradictory validators (#1947); compile-scaling test best-of-3 (#1953).
+- **Records:** 36 gaps marked RULED (#1938); every lane's review follow-ups filed as gaps.
+- **Rulings (user-voice §S478):** op-based channel sync (86dc707); the open owner questions, PA recs adopted wholesale, items 1–62 (ccb6b40).
+- **Lessons:** the §34.0 row-provenance gate is CI-only — now in the composition script; two lanes adding a variant to one enum leave non-conflicting matches missing an arm; verify every push against the remote head.
+
 ## S478 — 2026-11-14 → 11-17 (bryan · theRog) — 49 PRs (+#1928 queued): the bootstrap reads `<schema>` / typed `?{}` / raw DDL, `<endpoint>`, `<match for=>`, `?.`, event listeners, markup in `${ if }`, bare + `transaction` blocks, destructuring, block lambdas, refinement runtime checks, print; conformance PASS 336 → 599
 
 - **Bootstrap language:** re-exports + import cycles (#1863); attribute-value forms (#1865); durations, debounced=/throttled=, `<onIdle>` (#1875); body-top statements + display literals (#1876, #1886); `${}` hoisting (#1880); markup in value positions (#1885); keywordless declarations, §20 built-ins (#1887); refinement types + runtime checks (#1888, #1911); print/println (#1900); object destructuring (#1901); block lambdas + function expressions (#1905); `<schema>` §39 (#1908), typed SELECT (#1915), raw CREATE TABLE (#1925); `<match for= on=>` (#1909); `<endpoint>` §61 (#1916); `T | not` member access E-TYPE-046 (#1917) and `?.` (#1927); `${(e) => …}` listeners + E-EVENT-CONTROL-AFTER-AWAIT (#1918); markup in `${ if … }` (#1919); bare blocks + `transaction { }` (#1920). Function types and values (#1929). Queued: `<channel>` §38 (#1928).

@@ -1,4 +1,4 @@
 ${
-    type MyError : error = { reason : string , code : int }
+    type MyError:enum = { Failed(message: string, code: int), Rejected(type: string, reason: string) }
 }
 <p>x</>

@@ -9,12 +9,12 @@ The last-8 session-wrap anchors: SHA, push state, tag cut. Per-session narrative
 [`docs/changelog.md`](../changelog.md). Context: [`master-list.md`](../../master-list.md) §0.6.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `546d98051` — wrap(s478): #1929 merged at wrap — hand-off, changelog, delta-log — **pushed**
+- `5cf1accdf` — wrap(s479): hand-off, changelog, review markers #1954–#1980, delta-log, lane queue — **pushed**
+- `fb11d492c` — wrap(s478): review markers #1932–#1953 — **pushed**
 - `e3fc0edcd` — wrap(s477): S476 + S477 wrap — hand-off, changelog, review markers, delta-log, perf gap resolved — **pushed**
 - `01634f258` — wrap(s475): 40 PRs landed; pending cells, literal transport carriers, local tape edits; hand-off rotated — **pushed**
 - `ec038b549` — Merge pull request #1742 from scrml-lang/wrap/s474-tail — **pushed**
 - `34ebef81d` — Merge pull request #1693 from scrml-lang/wrap/s473 — **pushed**
 - `a62629d68` — Merge pull request #1624 from scrml-lang/wrap/s472 — **pushed**
 - `b28c85cea` — Merge pull request #1600 from scrml-lang/wrap/s471 — **pushed**
-- `a8bac7248` — Merge pull request #1583 from scrml-lang/wrap/s470 — **pushed**
 <!-- @generated:recent-sessions END -->

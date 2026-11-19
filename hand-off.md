@@ -1,140 +1,73 @@
-# scrml — Session 478 (bryan · theRog) — WRAPPED
+# scrml — Session 479 (bryan · theRog) — WRAPPED
 
-> S478 ran from 2026-11-14 to 11-17: Profile A, many compactions, and 6–8 parallel lanes the whole time. The S476+S477 hand-off is at `handOffs/hand-off-477.md`. **Rotate this file to `handOffs/hand-off-478.md` at the next wrap.**
-> - Board: `scrml-support/handOffs/active-sessions/S478-bryan.md`.
-> - Rulings, verbatim: `scrml-support/user-voice-scrml.md` §S478.
-> - PA ledger: `~/.claude/pa-ledger/scrml.md` S478-A … S478-DH.
-> - Delta-log: [4029]–[4033].
+> S479 ran 2026-11-18. Profile A (partial read — see §5). Rotate this file to `handOffs/hand-off-479.md` at the next wrap. The S478 hand-off is `handOffs/hand-off-478.md`.
+>
+> - Board: `scrml-support/handOffs/active-sessions/S479-bryan.md`.
+> - Rulings, verbatim: `scrml-support/user-voice-scrml.md` §S479 (2f86684 … 31da360).
+> - Lane queue / owner-Q batch / lane rules (copied from `~/.cache/scrml/review/s479-lanes/`): `handOffs/s479-lane-queue.md`, `handOffs/s479-owner-qs-batch.md`, `handOffs/s479-lane-rules.md`.
+> - Delta-log: [4039]–[4045].
 
 ## 0. Where things stand
-- **bryan's subscription is ending.** This file and `handOffs/delta-log.md` must be enough to pick up cold.
-- **Policy holds:** bootstrap only (`compiler/self-host-v2/`). impl#1 (`compiler/src/`) is frozen except for the bootstrap-build carve-out (S471).
-- **Main at wrap:** 314895410 (#1929 merged), plus this wrap PR.
-- **#1929 function types and values MERGED at wrap.** Still in the merge queue: #1928, composition-tested on main + #1919, S239-reviewed, fixed in round 1, and PA-verified with the reviewers' probes.
-  1. **#1928 `<channel>` (§38)**, head 14a8dbfad. Merged tree: 606 PASS / 0 CRASH.
-  - **If it is ejected:**
-    1. Read the merge-group run's failed job.
-    2. `compile-scaling-s477` fails on load: a 3.09 ratio against the 3.0 bound ejected #1927 once. Re-enqueue it.
-    3. Otherwise merge origin/main into the branch. Severity conflict: `git checkout --theirs compiler/self-host-v2/severity.scrml && bun scripts/gen-bootstrap-severity.ts && … --check`.
-    4. Run `~/.cache/scrml/review/comp.sh <tree>` and push.
-    5. Enqueue with `gh pr merge N --auto -R scrml-lang/scrml`, run on its own.
-- **Older open PRs:** #1448 (`s468-rulings-spec`) and #580 (draft). Both are untouched.
-- **Conformance (bootstrap, main f11506f4c):** PASS 599 / FAIL 18 / CRASH 0. At the S477 wrap it was PASS 336 / FAIL 260. Expect about 610 PASS once #1928 lands.
-- **Gap rollup (generated):** impl#1-owed HIGH 271 · MED 779 · LOW 797; bootstrap-carried HIGH 6 · MED 13 · LOW 7. The wrap's follow-up gaps add LOW/MED rows.
+- **Policy holds:** bootstrap only, with three narrow impl#1 carve-outs ruled this session (§2): endpoint 415 / strict keys (+ the `cors=` exclusion), CSS-url / stylesheet-href guard, and gate health (`_dbVar` leak).
+- **The host OOM-kills everything at >2 parallel hook runs.** systemd-oomd killed the terminal scope (Claude + every agent) four times today (16:36, 17:07, 18:26, 19:44 — `journalctl --user | grep oomd`). Memory `feedback_oomd_lane_cap`. **Next session: one write lane at a time** (or two light ones), hooks with `SCRML_HOOK_SHARDS=2 SCRML_HOOK_SHARD_TIMEOUT_S=2400`. A structural fix (run hook test processes under `systemd-run --user --scope` so oomd kills only the test run) was offered and NOT authorized — it changes bryan's hook setup.
+- **Main at wrap:** 37f7843cc (#1961) plus whatever the queue lands.
+- **Merge queue at wrap (auto-merge on, reviewed):** #1975 (file-scope follow-ups), #1977 (import-shadow build lint). If either is ejected: merge origin/main, regen `severity.scrml` (`bun scripts/gen-bootstrap-severity.ts`), push, verify remote == local, `gh pr merge N --auto -R scrml-lang/scrml` on its own.
+- **Reviewed but CONFLICTING with main (need a merge-main round, then they auto-merge):** #1963 (parser fixes, r2 head 73e5e0bd7) and #1971 (schema rulings, d11fe707b). The landing worktree `.claude/worktrees/agent-a467bb9a19d03853b` is mid-merge on `land-1963` (152 changed files) — finish it or abort and redo.
+- **Opened, NOT reviewed, CONFLICTING:** #1981 (endpoint `cors=` + standalone `parseVariant` duplicate keys; worktree agent-ac98e90f4aba62aba, head d60825e44, 84 uncommitted).
+- **Unfinished lanes (local worktrees only, nothing pushed — §4):** channel follow-ups, recursive-enum perf, waiting-helper server copy, timed engine + `<onIdle>`.
+- Conformance (bootstrap) last measured on lane branches: ~705 PASS / 4 FAIL / 0 CRASH; the bot regenerates the generated tables after merges.
 
-## 1. What landed (49 PRs, plus #1928 in the queue)
-Every code PR had an S239 adversarial review on a frozen tree, except a few small ones the PA checked directly (marked in `docs/pr-reviews.md`). Fix rounds were fresh agents, and the PA re-ran the reviewers' HIGH probes on each fix head before enqueuing.
-- **Rulings built:**
-  - #1846: negative `insert` literal;
-  - #1850, #1857: bounded branch literals, option A;
-  - #1852, #1860, #1864: pending `[replace]`, reset/reload order, rule 4;
-  - #1886: body-top run locals are file-scope.
-- **impl#1 build tool:** #1853 and #1869 make the text rewrites skip string literals. #1862 and #1872 then removed the bootstrap's workarounds for them.
-- **Language on the bootstrap:**
-  - #1863 re-exports and import cycles (§21.4);
-  - #1865 attribute-value forms;
-  - #1867 engine codes;
-  - #1873 is-tests;
-  - #1875 durations, debounced=/throttled=, `<onIdle>`;
-  - #1876 body-top statements, display literals, logic `<script>`;
-  - #1877 parser smalls;
-  - #1880 `${}` hoisting;
-  - #1885 markup in value positions, foreign `in:{}`;
-  - #1887 keywordless declarations, §20 built-ins;
-  - #1888 refinement types; #1911 refinement runtime checks (§53.4.5);
-  - #1894 engine rule= in state children;
-  - #1900 print/println (§20.7);
-  - #1901 object destructuring;
-  - #1905 block lambdas and function expressions;
-  - #1908 `<schema>` (§39); #1915 typed `?{}` SELECT from the schema; #1925 raw CREATE TABLE DDL;
-  - #1909 `<match for= on=>` element;
-  - #1916 `<endpoint>` (§61);
-  - #1917 `T | not` member access (E-TYPE-046); #1927 `?.` (§42.3.6);
-  - #1918 the `${(e) => …}` event listener, E-EVENT-CONTROL-AFTER-AWAIT;
-  - #1919 markup in `${ if … }`;
-  - #1920 bare blocks and `transaction { }`;
-  - #1929 function types and values (bound, passed, returned, called through).
-- **Conformance and stale cases:** #1866 #1871 #1879 #1895 #1897 (the `;` migration, honest fixtures, false-positive FAILs).
-- **Review follow-up rounds:** #1870 #1891 #1902 #1907.
-- **Tooling:** #1855 fixes hook shard pollution, the memory ceiling (`SCRML_HOOK_SHARD_MEM_MB`), and the pre-push exit code.
+## 1. Landed this session
+Every code PR had an S239 adversarial review on a frozen tree; fix rounds were fresh agents and invalidated the review (re-reviewed). Markers in `docs/pr-reviews.md` (this wrap PR).
+- **#1957** impl#1 `<endpoint>` 415 + strict keys (carve-out). Clean.
+- **#1958** review markers #1928/#1929.
+- **#1960** six conformance cases that contradicted the SPEC.
+- **#1961** keywordless unread binding = same as `const` (no refusal); duplicate arm binder = E-SCOPE-REDECLARE (PA chose the code: E-SCOPE-010 is file-scope only). r0 MED: keywordless file-scope write inside a function silently shadowed → fixed (E-ASSIGN-004).
+- **#1962** file-scope `let`; initializers evaluated once per artifact; E-FILE-SCOPE-LET-SERVER-WRITE.
+- **#1965** E-ENDPOINT-PATH-INVALID, `/_scrml_local/` reserved, duplicate JSON keys → 400 Malformed (`jsonRepeatedKey`, fuzzed 155k docs), parseVariant enum alias, E-TYPE-080.
+- **#1966** `:error` kind retired (error types are enums), E-ERROR-008 retired, E-DG-001 retired (§31.2: a call cycle is recursion).
+- **#1967** channel relay fold (relay judges frames with the clients' `channelJudge`, applies the decoded OUTBOUND text — the r0 HIGH was a `-0` split) + per-address INTERIM bounds; in-place ring-buffer fold.
+- **#1969** E-PAGE-DUPLICATE, E-MATCH-FOR-REQUIRED / E-TYPE-024 for omitted `for=`; S478 provisional codes confirmed.
+- **#1970** impl#1 `_dbVar` no longer mutates shared type singletons (gate-health carve-out) + class regression test.
+- **#1972** engine outside-state-child lint dropped; timed engine cells judge `rule=` at commit (r0 MED: throttle switched off when an effect threw → fixed).
+- **#1974** records: §3.B items 12/14/18/19/22/23/26, `url(#ident)` admitted (Chromium-verified 0 fetches), `<db>` failure view, stale-gap cleanup.
+- **#1978** a `<request>` body is a client position for §12.2 T5 (mixed recursion placement).
 
-## 2. Rulings (verbatim in user-voice §S478; brief from there, never from this list)
-1. S477 Q1: a whole-cell write on a pending tape without `[replace]` is REFUSED. S477 Q2: the later write beats a reset's reload.
-2. Bounded branches, option A: any branch with a provably violating literal is a compile error. §13.9.4 rule 4: the reload starts at the write. `reset-on=` timing is kept.
-3. Body-top (#1876):
-   - the display-literal line test stays INTERIM;
-   - body-top `lin`/locals are file-scope;
-   - SPEC-contradicting cases are fixed, not the compiler;
-   - `Counter;` reports E-STMT-NO-EFFECT plus E-SCOPE-001.
-4. Raw DDL (#1925): a non-primary column type is E-SCHEMA-004. WITHOUT ROWID and STRICT are admitted (WITHOUT ROWID PK columns are NOT NULL; STRICT stores only the declared type).
+## 2. Rulings this session (verbatim in user-voice §S479 — brief from there)
+- §3.A items 1–7 (S478 hand-off) and §3.B kw-unread: PA recs.
+- impl#1 carve-out 1: endpoint 415 / strict keys.
+- The rest of §3.B (batch items 3–26, item 6 amended to `trusted-proxies` default 0); items 1–2 (`:error`, E-DG-001).
+- `cors=` does not cover `<endpoint>`; per-endpoint `cors=` (impl#1 under carve-out 1).
+- W-UNUSED-BINDING (bryan's spelling).
+- #1963 follow-ups ("both yes"): INTERIM same-line `not` operand; §8 wording.
+- #1962 questions 1–4 + standalone parseVariant duplicate keys.
+- impl#1 carve-out 3: gate health (`_dbVar`).
+- The three last questions ("your recs", 31da360): tool initializers refuse only suspending reach; timed engine + `<onIdle>` (watchdog commits immediately, cancels the held write); a refused throttled write opens no window.
 
-## 3. Owner questions open (each has a PA rec; record rulings verbatim in user-voice)
-1. **#1928 §38.4: sync channel ops, not whole values. PA rec: YES.** This is the biggest one.
-   - Today the bootstrap refuses any non-`replace` channel cell (append, pop, engine). That is INTERIM, and it blocks the tutorial's chat example.
-   - The capable alternative: send "append X" and have the receiver check the grant. That also fixes the lost-update race when two clients append at once.
-   - It is a wire-protocol change in §38.4. #1928 Qs 1–7 are in its PR body.
-2. **#1929 function types**, Qs 1–6 in the PR body:
-   - failable spelling `(x:T)! E => R`;
-   - a pure `fn` type;
-   - `=>` only;
-   - invariance;
-   - callback colour;
-   - a server fn returning a fn stays refused.
-   - PA recs are in the PR body.
-3. **#1916 `<endpoint>`**, Qs 1–8. PA rec, adopt all of these:
-   - 405 + Allow;
-   - E-ENDPOINT-ROUTE-DUPLICATE, and reserve `/_scrml/` (and `/_scrml_ws/`);
-   - strict 400 on extra keys;
-   - direct child of the entry `<program>`;
-   - path grammar unreserved + `/`;
-   - E-ENDPOINT-ARM-NO-VALUE;
-   - 415 with impl#1 parity;
-   - a `tag` field.
-   - Separate: the GET query-string design.
-4. **SQL:**
-   - §14.8.3 maps INTEGER→`number`, but S440 enforces `int`. **PA rec:** amend it to `int`.
-   - Non-STRICT row trust. **PA rec:** (b) a §57 decode check at the boundary, INTERIM.
-5. **stdlib data** (lane stopped, no PR):
-   - Q1, per-name barrel import: **PA rec YES, INTERIM**;
-   - Q2, the parseVariant intrinsic: **PA rec: build it**;
-   - Q3, a typed data API: **PA rec: defer until the F3 `<host>` bridge**.
-6. **#1917:** loop narrowing.
-7. **#1918:** event attribute → interface table, and the loop-suspension rule. **PA rec:** rewrite the 18 event-after-await cases with `!{}`.
-8. **#1919:** a body-top `lift` renders nothing.
-9. **#1920:** a tx block with no envelope. **PA rec:** a plain block when there is no query, and a permanent refusal on the client.
-10. **#1927:** §42.3.6 says literal `?.`. **PA rec:** amend it to "short-circuit as".
-11. **#1909:** duplicate binders in `<Loaded(n, n)>`. **PA rec:** refuse them in both match forms. Also, the `<match>` mount wrapper inside `<ul>`/`<select>`. **PA rec:** lower it without a wrapper.
-12. **Carried from S477 §3:** the #1793 veto-window readings; `.join` on `int[]`; O9 slot spelling; the S473 veto markers; `<m.card>`.
+## 3. Owner questions open (with PA rec)
+1. **`serve=` narrowing of the tool exemption** (#1975): the ruling exempted tools from §7.6 rule (c); the lane narrowed it to tools WITHOUT `serve=` (a served tool takes requests). *Rec: confirm* (fail-closed, costs nothing today).
 
-## 4. Owed next (pick from here)
-1. Land #1928 (§0).
-2. Once the owner rules on §3.1, build op-based channel sync. That unblocks the tutorial chat.
-3. **Review follow-ups:** the gaps filed at this wrap (`prov=review:#18xx/#19xx`, `docs/known-gaps.md`). Best value first:
-   - #1920 MED: a `transaction` in a handler should be E-ERROR-001 (it currently fails closed as CORE-ILL-FORMED);
-   - #1886 LOW-6: a latent lin fail-open on nested Run;
-   - #1895 LOW-1: an import-cycle recompute that is ~cubic;
-   - #1901 M1: E-OBJECT-SHORTHAND-CELL.
-4. impl#1 silently overrides a duplicate top-level fn (agents hit this twice). It is in scope under the build-tool carve-out.
-5. Make `compile-scaling-s477` robust (median of 3, or a wider bound).
-6. Next conformance blockers for `server-db/*-rt`: nullable text vs string slots, untyped params, `.push` on `[]`, `Object.values`, `count(*) AS n` / JOIN.
-7. A maps refresh: last at f92d1a8fb, and S478 rewrote parse/analyze heavily.
+## 4. Owed next (one lane at a time)
+Order is the PA's recommendation; details and loci in `handOffs/s479-lane-queue.md`.
+1. **Land #1963 + #1971** (merge main into each; the land-1963 worktree is mid-merge).
+2. **#1981** (`cors=` + parseVariant dup keys): merge main, then S239 review.
+3. **Channel follow-ups** (worktree agent-acae1e68b2bf5fda5, branch `s479-channel-follow`, 1 commit + 150 uncommitted, mid-merge): **SECURITY first** — a forged `replace` of a fixed-length tape with a different length is accepted by the relay and every client (pre-existing since #1937; fix in `channelJudge`). Then `__seen`, over-budget → `__refused`, reconnect backoff (ruled item 5), `trusted-proxies` (item 6; also fixes `ratelimit=` first-entry spoofing), timing on channel cells (#1972 N-A: verify, refuse INTERIM if reachable).
+4. **Recursive-enum compile time** (worktree agent-ae2da898da114d549): exponential in recursive variants (k=4 > 60 s); a DoS for authors. **Probes must run with memory caps** — this repro is the likely trigger of the last OOM.
+5. **Waiting-helper server copy** (worktree agent-adb6fe36f617a12d2, barely started): a server copy of a waiting client helper so a server caller runs it in place (gap g-boot-waiting-helper-server-copy-s479).
+6. **Timed engine + `<onIdle>` and the refused-commit marker** (worktree agent-a5ecc98dc81d9c90d, barely started; ruled 31da360 items 2–3). Item 1 (tool initializers) after #1975 lands.
+7. **W-UNUSED-BINDING** (ruled) — now unblocked (#1961 merged).
+8. **Queued, not started** (`s479-lane-queue.md` top): typer (items 11/13/25), runtime (17/20/24), build mode (10/16), impl#1 CSS carve-out (21), endpoint GET input (9), records batch 2 (many LOW review follow-ups listed there), the #1963 parser LOWs, `g-lint-dup-fn-latent-s479` (#1977 latent M1/M2/L1).
+9. Maps refresh (last at f92d1a8fb) — not done this session.
 
-## 5. Lessons (S478)
-- **`bun run pretest` exits 0 when the bootstrap bundle fails to build.**
-  - Symptom: whole test files fail as one `(fail) (unnamed)` after 30–90 s. It looks like load, but it isn't.
-  - Run one file and read the `bootstrap bundle failed to compile under impl#1:` error.
-  - After merging two lanes, grep every match AND every construction of a variant or struct that gained a field or variant. The bundle broke this way four times: ElemFact.MSchema, `If.form`, `Braced.ev`, `Ternary.optChain`.
-- **The composition test is mandatory before every push of a merged branch:** `~/.cache/scrml/review/comp.sh <tree>`. CRASH must be 0, and every gate must be green. `types-gate` needs `node_modules` symlinked into the worktree; otherwise it prints "tool is missing".
-- **Keep the main checkout on current main.** Hooks run from it via an absolute hooksPath. At wrap it was 14 commits behind, so every worktree's hook was running stale gates.
-- **Merge queue:**
-  - A push clears auto-merge.
-  - The next PR usually goes DIRTY only on `severity.scrml` (regenerate it).
-  - A queued PR can be ejected by a flaky timing test; read the merge-group run before touching code.
-- **Agents tried `--no-verify` twice** (the #1918 lane and the #1919 r1 agent). The classifier blocked both, and nothing ran. Briefs (`~/.cache/scrml/review/s478-lanes/COMMON.md`) now forbid it explicitly. Keep that line.
-- **Never `pkill -f` with a pattern your own shell matches.** It killed the PA's shell.
-- **At 6–8 lanes, load reaches 11–18.** Hook load-timeouts are noise: rerun once before investigating.
+## 5. Lessons
+- **OOM is the binding constraint on theRog**, not CPU: four whole-session kills, each re-paid every agent's context. Cap lanes; give exponential-blowup probes `ulimit -v`.
+- **Boot read-set was partial** (pa-base §6+, overlay, primer, SPEC-INDEX, master-list §0 skipped for context). It cost nothing visible this session; the next PA should read them.
+- **`--plan` drifts** because `~/.cache/scrml/test-timings.json` is shared; pin `SCRML_TEST_TIMINGS` per lane.
+- **Bootstrap-build import shadowing** (`opensTag`) silently miscompiled the bootstrap (648 → 515 PASS) — impl#1 builds the bundle; #1977 puts the lint in the build path.
+- **One `git commit --dry-run --no-verify`** by a lane (nothing committed; self-reported). Lane rules now forbid `--no-verify` even with `--dry-run`.
+- **Reviewers keep finding real bugs in fix rounds** (#1963 r1 introduced MED-A; #1970 r0 missed the memo leak) — the re-review on every fix head is earning its cost.
 
 ## 6. Wrap state
-- **Worktrees:** 70 merged review and agent trees were removed at wrap. Kept: #1928 (`agent-a956129cc31d703a5`), #1929 (`agent-a5a565bae8b5cecb0`), #1448 (`agent-a036efcbcbcb1c8b0`), `rev-1927*`/`rev-1928*`/`rev-1929*` and their bases under `~/.cache/scrml/review/s478-192{7,8,9}/base`, and the wrap trees. Some trees stay locked while this Claude process runs. Once it exits, bryan runs: `! cd ~/scrmlMaster/scrml && git worktree list | awk '{print $1}' | grep -E '/worktrees/(agent|rev|wrap)-' | grep -v a036efcbcbcb1c8b0 | xargs -r -n1 git worktree remove -f -f && git worktree prune`. Wait until #1928 has merged.
-- **Review probes:** `~/.cache/scrml/review/s478-*`. Runner: `bun ~/.cache/scrml/review/s478-1886/probes/run.mjs <absTree> <probe.mjs> [filter]`. A `.probe.test.js` runs as `TREE=<tree> bun test ./<file>`.
-- **Lane rules for briefs:** `~/.cache/scrml/review/s478-lanes/COMMON.md`.
+- **Not run at wrap:** the full test suite (OOM risk); CI `gate` on each PR is the authority. Maps refresh not run.
+- **Worktrees retained** (unfinished, §4): agent-ac98e90f4aba62aba (cors), agent-acae1e68b2bf5fda5 (channel), agent-ae2da898da114d549 (enum perf), agent-adb6fe36f617a12d2 (server copy), agent-a5ecc98dc81d9c90d (onIdle), agent-a467bb9a19d03853b (land-1963), agent-a036efcbcbcb1c8b0 (#1448). Merged lanes' worktrees removed at wrap.
+- Review trees: `~/.cache/scrml/review/s479-*` (≈25 GB with older S47x trees; prune once the open PRs land).

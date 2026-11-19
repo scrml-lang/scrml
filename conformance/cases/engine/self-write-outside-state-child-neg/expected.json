@@ -1,0 +1,20 @@
+{
+  "id": "engine-self-write-outside-state-child-neg",
+  "description": "§51.0.F.1 (S479): a literal engine write OUTSIDE any state-child body — `function load() { @phase = .Loading; }`, the canonical §66 function-body idiom — does NOT fire W-ENGINE-SELF-WRITE-DETECTED. The CONSERVATIVE outside-state-child firing is struck; only the STRICT inside-state-child half remains (engine-self-write-pos). Two clicks drive the engine Idle -> Loading -> Done through the function bodies. XFAIL on impl#1: it still emits the struck outside firing (compiler/src/symbol-table.ts walkEngineSelfWriteOutside) — a carried divergence (S471 policy).",
+  "language-version": "1.0",
+  "spec": "§51.0.F.1",
+  "rationale": "§51.0.F.1 (S479): \"Outside any state-child body (function bodies, top-level logic, event handlers not attached to engine state-children) the lint does NOT fire.\" ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 7 — \"drop the conservative firing outside a state-child (§51.0.F.1); keep the strict inside-state-child half. Under §66 a function-body engine write is the canonical idiom.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-ENGINE-SELF-WRITE-DETECTED", "E-ENGINE-INVALID-TRANSITION"],
+    "input": [{ "click": "#load" }, { "click": "#finish" }],
+    "state": { "phase": "Done" },
+    "domAnchored": [{ "selector": "#s", "text": "Done" }]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-engine-self-write-outside-lint-s479",
+      "fails": { "codes": ["forbidden:W-ENGINE-SELF-WRITE-DETECTED"] }
+    }
+  }
+}

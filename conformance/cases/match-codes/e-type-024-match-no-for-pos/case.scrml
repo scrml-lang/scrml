@@ -1,0 +1,9 @@
+<program>
+let <count:int=0/>
+<button id="inc" onclick=${@count = @count + 1}>"+"</>
+<match on=@count>
+    <_>
+        <p>"n"</p>
+    </>
+</match>
+</program>

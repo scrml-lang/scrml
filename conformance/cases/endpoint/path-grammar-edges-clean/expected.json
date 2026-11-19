@@ -1,0 +1,17 @@
+{
+  "id": "endpoint-path-grammar-edges-clean",
+  "description": "§61.7 — paths at the edge of the grammar compile clean: a trailing `/` (an empty LAST segment), a segment that begins with `.` but is not `.` / `..`, every unreserved punctuation character, and `/_scrml_localx` (which only looks like the reserved `/_scrml_local/` prefix).",
+  "language-version": "1.0",
+  "spec": "§61.7",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 5 (`E-ENDPOINT-PATH-INVALID`; reserve `/_scrml_local/`)",
+  "rationale": "§61.7: \"A `path=` SHALL be an absolute path: it begins with `/`, and every other character is an RFC 3986 unreserved character (`A`–`Z`, `a`–`z`, `0`–`9`, `-`, `.`, `_`, `~`) or `/`. No segment is empty (`//`), `.` or `..` … A `path=` outside this grammar is `E-ENDPOINT-PATH-INVALID` (§61.9), reported at the `<endpoint>` opener.\" \"a trailing `/` (an empty LAST segment) is allowed\"; the reserved prefixes are `/_scrml_local` and paths beginning with `/_scrml_local/` only.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-ENDPOINT-"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  }
+}

@@ -39,6 +39,8 @@
 [esm] conformance/cases/defer/yield-in-defer-neg/case.scrml  # emit-client-esm: The keyword 'yield' is reserved
 [esm] conformance/cases/element-refusal/handler-arrow-markup-script-pos/case.scrml  # emit-client-esm: Unexpected token (an expect-reject case: E-SCRIPT-001, markup held in a handler arrow, §4.17, S462)
 [esm] conformance/cases/error/await-not-in-scrml/case.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] conformance/cases/error/e-tx-client-placed-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/error/w-tx-exit-rolls-back-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/fn/arrow-body-reject/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/fn/nested-redeclare-local-neg/case.scrml  # emit-client-esm: Identifier 'step' has already been declared (an expect-reject case impl#1 miscompiles — impl1 xfail, S477 #1831)
 [esm] conformance/cases/fn/scope-redeclare-neg/case.scrml  # emit-client-esm: Identifier 'x' has already been declared
@@ -69,7 +71,11 @@
 [esm] conformance/cases/markup-handler/s437-r4-dangling-else-match-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/markup-handler/s437-r4-dangling-else-top-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-codes/e-match-arm-markup-in-value-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-codes/e-match-for-required-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/match-codes/e-scope-redeclare-arm-binder-element-pos/case.scrml  # emit-client-esm: Argument name clash (an expect-reject case: E-SCOPE-REDECLARE §7.3.3, the repeated arm binder, S479)
+[esm] conformance/cases/match-codes/e-scope-redeclare-arm-binder-value-pos/case.scrml  # emit-client-esm: Identifier 'n' has already been declared (an expect-reject case: E-SCOPE-REDECLARE §7.3.3, the repeated arm binder, S479)
 [esm] conformance/cases/match-codes/e-syntax-010-else-not-last-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-codes/e-type-024-match-no-for-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/match-leave/argument-match-arm-labelled-break-outer-neg/case.scrml  # emit-client-esm: Unsyntactic break
 [esm] conformance/cases/match-leave/bare-break-continue-arm-no-loop-neg/case.scrml  # emit-client-esm: Unsyntactic break
 [esm] conformance/cases/match-leave/dpa068-engine-msg-arm-bare-return-neg/case.scrml  # emit-client-esm: Unexpected token
@@ -110,6 +116,7 @@
 [esm] conformance/cases/reactive/tape-bound-append-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
 [esm] conformance/cases/reactive/tape-bound-append-trap-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
 [esm] conformance/cases/reactive/tape-insert-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
+[esm] conformance/cases/reactive/w-timed-read-modify-write-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/server-db/sql-delete-reflects-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
 [esm] conformance/cases/server-db/sql-get-single-row-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
 [esm] samples/compilation-tests/error-004-in-logic.scrml  # emit-client-esm: The keyword 'let' is reserved

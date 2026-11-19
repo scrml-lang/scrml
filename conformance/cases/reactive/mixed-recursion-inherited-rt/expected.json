@@ -1,0 +1,55 @@
+{
+  "id": "reactive-mixed-recursion-inherited-rt",
+  "description": "§31.2 + §12.2 Trigger 5: a db-touching `down` (server-placed, Trigger 1) and a plain `step` call each other; `step` has no caller but `down`, so it is server-placed by inheritance and both calls run in place on the server. The pending cell loads `down(4)` with one server call: down(4) → step(3) → 1 + down(2) → 1 + step(1) → 2 + down(0) → 2 + u.id = 3. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§31.2, §12.2, §13.4, §19.9.10",
+  "provenance": "lane:s479-mixed-recursion (g-boot-mixed-recursion-escalation-s479, filed by review #1966).",
+  "rationale": "§31.2 (S479): 'A cycle of calls between functions — direct recursion, or mutual recursion … — is recursion, not a dependency cycle. The compiler SHALL NOT reject it.' §12.2 Trigger 5: 'A function with no direct triggers (1-4) and no capture-taint, called only from server-classified callers and never from a client-classified function, SHALL escalate to server by inheritance.' §19.9.10: 'A call whose caller is itself server-placed runs in the same server handler: the callee is inlined (§13.4), no request is made'.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "v": 3
+    },
+    "domAnchored": [
+      {
+        "selector": "#v",
+        "text": "3"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:f1c3f3c7ba5f1bd7"
+      }
+    }
+  }
+}

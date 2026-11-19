@@ -46,7 +46,7 @@
 // binding (positional binding over an imported enum is silently dropped).
 // =============================================================================
 ${
-    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
+    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, CoreConst, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
              CoreEndpoint, CoreEpArm, TypeDef, VariantDef, FieldDef, Type, typeDefSym,
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -132,7 +132,17 @@ ${
         let roots: Node[] = []
         for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
         for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
-        body = body.concat(constStmts(ctx, constsReadIn(p, roots)))
+        const sconsts: CoreConst[] = constsReadIn(p, roots)
+        body = body.concat(constStmts(ctx, sconsts))
+        // s479: the functions those bindings' initializers call run at MODULE initialization
+        // (§7.6 S478 rule (b)), before any createServer — so they are printed at module level,
+        // not inside createServer. (analyze fileScopePass: none of them reaches a server-placed
+        // function or client-only state, so none needs a connection.)
+        const initFns: int[] = initFnClosure(p, sconsts)
+        if (initFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("the functions a file-scope initializer calls (§7.6) — module level: they run at module initialization")])
+        for (const f3 of p.fns) {
+            if (initFns.indexOf(f3.sym.id) >= 0) body = body.concat([serverFnOf(ctx, p, f3)])
+        }
 
         // the SQL text of every query site the server reaches, frozen once at load (§8.1:
         // a query's text is the literal runs only; every value is a bound parameter)
@@ -157,7 +167,7 @@ ${
             if (reach.indexOf(sf.sym.id) >= 0) inner = inner.concat([bodyFnJs(ctx, p, sf.sym, sf.params, sf.body, sf.waits)])
         }
         for (const f of p.fns) {
-            if (reach.indexOf(f.sym.id) >= 0) inner = inner.concat([serverFnOf(ctx, p, f)])
+            if (reach.indexOf(f.sym.id) >= 0 && initFns.indexOf(f.sym.id) < 0) inner = inner.concat([serverFnOf(ctx, p, f)])
         }
         let routeExprs: JsExpr[] = []
         for (const sf of routed) { routeExprs = routeExprs.concat([routeEntry(ctx, sf)]) }
@@ -674,6 +684,9 @@ ${
     // ---- reach: the functions the server artifact holds ------------------------
     // The routed server functions and everything they call, transitively (Fns and
     // ServerFns by Sym — a Call's callee, an Attempt's FCall).
+    // s479: and the functions the initializers of the file-scope bindings that reached code
+    // reads call — each such initializer runs in this artifact at module initialization
+    // (§7.6 S478 rule (b)), so its callees are server-artifact code too.
     fn serverReach(p: CoreProgram, routed: ServerFn[]) -> int[] {
         let out: int[] = []
         let todo: int[] = []
@@ -681,6 +694,60 @@ ${
             out = out.concat([sf.sym.id])
             todo = todo.concat([sf.sym.id])
         }
+        let more = true
+        while (more) {
+            out = reachClose(p, out, todo)
+            todo = []
+            let roots: Node[] = []
+            for (const sf2 of p.server) { if (out.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
+            for (const f2 of p.fns) { if (out.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
+            for (const k of constsReadIn(p, roots)) {
+                for (const n of allNodes(Node.NExpr(k.init))) {
+                    const c: Sym | not = nodeCallee(n)
+                    if (c is given) {
+                        if (findFn(p, c) is given && out.indexOf(c.id) < 0 && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
+                    }
+                }
+            }
+            for (const id of todo) { out = out.concat([id]) }
+            more = todo.length > 0
+        }
+        return out
+    }
+
+    // s479 — the Fns the initializers of `ks` call, closed over the Fns they call.
+    fn initFnClosure(p: CoreProgram, ks: CoreConst[]) -> int[] {
+        let todo: int[] = []
+        for (const k of ks) {
+            for (const n of allNodes(Node.NExpr(k.init))) {
+                const c: Sym | not = nodeCallee(n)
+                if (c is given) {
+                    if (findFn(p, c) is given && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
+                }
+            }
+        }
+        let out: int[] = []
+        while (todo.length > 0) {
+            const id: int = todo[0]
+            todo = todo.slice(1)
+            if (out.indexOf(id) < 0) {
+                out = out.concat([id])
+                for (const c2 of calleesOf(p, id)) {
+                    if (out.indexOf(c2) < 0 && isFnId(p, c2)) todo = todo.concat([c2])
+                }
+            }
+        }
+        return out
+    }
+
+    fn isFnId(p: CoreProgram, id: int) -> boolean {
+        for (const f of p.fns) { if (f.sym.id == id) return true }
+        return false
+    }
+
+    fn reachClose(p: CoreProgram, out0: int[], todo0: int[]) -> int[] {
+        let out: int[] = out0
+        let todo: int[] = todo0
         while (todo.length > 0) {
             const id: int = todo[0]
             todo = todo.slice(1)

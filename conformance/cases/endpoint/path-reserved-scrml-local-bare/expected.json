@@ -1,0 +1,35 @@
+{
+  "id": "endpoint-path-reserved-scrml-local-bare",
+  "description": "§61.7 — `path=\"/_scrml_local\"` is under the reserved `/_scrml_local/` prefix (where the compiler serves the client helpers it copies into the build output, §21.3): E-ENDPOINT-ROUTE-DUPLICATE, reported once.",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9, §21.3",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 5 (`E-ENDPOINT-PATH-INVALID`; reserve `/_scrml_local/`)",
+  "rationale": "§61.7 Reserved prefixes: \"A `path=` that is `/_scrml`, `/_scrml_ws` or `/_scrml_local`, or begins with `/_scrml/`, `/_scrml_ws/` or `/_scrml_local/`, is `E-ENDPOINT-ROUTE-DUPLICATE` (§61.9).\"",
+  "expect": {
+    "codes": [
+      "E-ENDPOINT-ROUTE-DUPLICATE"
+    ],
+    "notCodes": [
+      "E-ENDPOINT-PATH-INVALID",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "severity": {
+      "E-ENDPOINT-ROUTE-DUPLICATE": "error"
+    },
+    "codeCounts": {
+      "E-ENDPOINT-ROUTE-DUPLICATE": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-endpoint-path-rules-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-ENDPOINT-ROUTE-DUPLICATE' fired 0 time(s), expected exactly 1",
+          "missing:E-ENDPOINT-ROUTE-DUPLICATE",
+          "severity:code 'E-ENDPOINT-ROUTE-DUPLICATE' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

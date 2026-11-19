@@ -1,0 +1,49 @@
+{
+  "id": "engine-timed-debounce-held-until-commit-rt",
+  "description": "§6.13.5 (S479): a `debounced=1s` engine cell. Click #load (Idle -> Loading is held), advance the 1s window: the held write commits and the engine transitions to Loading. Then click #finish (Loading -> Done) with NO time advanced: that write is still held, so the cell stays Loading — the transition happens at commit, not at the write. XFAIL on impl#1: it parses neither the §66 `single` engine opener nor a timed engine (S471 policy: impl#1 is frozen; carried gap g-impl1-timed-engine-commit-s479).",
+  "language-version": "1.0",
+  "spec": "§6.13.5",
+  "rationale": "§6.13.5: \"A `debounced=` / `throttled=` engine cell **transitions at commit**. A write to it is held by the timing rule like any other local write, and the transition happens when the held value commits: `rule=` (§51.0.F) is judged at the commit, against the variant the cell holds then\". ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 8.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-INVALID-TRANSITION",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "advance-time": 1000
+      },
+      {
+        "click": "#finish"
+      }
+    ],
+    "state": {
+      "phase": "Loading"
+    },
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "Loading"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-timed-engine-commit-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=4",
+          "emitted:E-COMPONENT-035=3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-VARIANT-AMBIGUOUS=2"
+        ],
+        "runtime": "sha256:b74f7ca7bfb8f42c"
+      }
+    }
+  }
+}

@@ -1,10 +1,12 @@
 {
   "id": "error-008-neg",
-  "description": "Error type with only non-reserved fields (reason/code) does NOT fire E-ERROR-008.",
+  "description": "An error type is an enum (§19.1, §14.2 — there is no `:error` kind), and its variants carry data as payload fields. A payload field named `message` or `type` is legal: no normative text reserves them, and E-ERROR-008 is retired. The declaration compiles clean.",
   "language-version": "1.0",
-  "source-test": "compiler/tests/conformance/conf-ERROR-008.test.js",
+  "spec": "§19.1, §14.2, §14.4, §34",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — S479 batch items 1 and 2, PA recs adopted\" item 1 — rewritten from `type MyError : error = { reason : string , code : int }` (error/error-008-message-pos retired with E-ERROR-008).",
+  "rationale": "§19.1: 'Error types are enum types (§14.4). Error variants are enum variants.' The ruling's capable alternative to the struck `:error` kind: 'payload fields on variants (`Failed(message: string)`); authors lose nothing.'",
   "expect": {
     "codes": [],
-    "notCodes": ["E-ERROR-008"]
+    "notCodes": ["E-ERROR-008", "E-PARSE-TYPE"]
   }
 }

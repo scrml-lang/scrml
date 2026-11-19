@@ -1234,10 +1234,14 @@ ${
 
     export type DbLoad:struct = { cell: Sym, fn: Sym, val: Sym }
 
-    // s472 — a file-scope constant: its value is fixed at compile time (analyze
-    // constPass admits only literals, variants, other constants, member reads and
-    // operators), so evaluating it once at module load is the whole of its meaning.
-    export type CoreConst:struct = { sym: Sym, init: Expr }
+    // s472 — a file-scope binding (§7.6): `init` is evaluated ONCE, at module
+    // initialization, in each artifact whose code reads (or writes) it — each
+    // artifact its own copy (s479, §7.6 S478 rule (b); analyze constPass /
+    // fileScopePass admit an initializer that needs nothing the module cannot do
+    // synchronously there). `mutable`: a file-scope `let` (s479, rule (c): per-
+    // artifact state, never written by server code) — printed `let`, and rebound by
+    // a `Stmt.Assign` of its Sym; else a `const`.
+    export type CoreConst:struct = { sym: Sym, init: Expr, mutable: boolean }
 
     // s469 — §25.7: a `@name` of a program cell in a `#{}` value is
     // `var(--scrml-<name>)`; at run time the cell's value is written to that

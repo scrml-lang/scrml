@@ -68,7 +68,21 @@ const HOSTILE_CSS = [
   ["url() exfiltration", "url(https://evil.example/leak.svg#p)"],
   ["URL() — any case", "URL(https://evil.example/leak.svg#p)"],
   ["a relative url()", "url(/leak.svg#p)"],
-  ["a local-fragment url() (no url() is admitted from data)", "url(#grad)"],
+  // s479 (RULED S479 §3.B item 22): exactly `url(#ident)` is admitted (BENIGN_CSS, below); every
+  // other spelling of a fragment reference stays refused
+  ["a local fragment with a fallback paint (not exactly `url(#ident)`)", "url(#grad) red"],
+  ["a quoted local fragment", "url('#grad')"],
+  ["a double-quoted local fragment", "url(\"#grad\")"],
+  ["an upper-case URL( local fragment", "URL(#grad)"],
+  ["a space inside the parentheses", "url( #grad)"],
+  ["a fragment with a path character", "url(#a/b)"],
+  ["a fragment with a dot", "url(#a.b)"],
+  ["a fragment starting with a digit", "url(#1grad)"],
+  ["an empty fragment", "url(#)"],
+  ["an unclosed local fragment", "url(#grad"],
+  ["text after the local fragment", "url(#grad)x"],
+  ["two local fragments", "url(#a) url(#b)"],
+  ["an escape in the fragment", "url(#g\\72 ad)"],
   ["url() with a fallback colour", "url(https://evil.example/x.svg#p) red"],
   ["a cursor url list", "url(https://evil.example/c.png), auto"],
   ["whitespace before the paren (`url (`)", "url (https://evil.example/x)"],
@@ -93,6 +107,11 @@ const BENIGN_CSS = [
   ["clip-path", "circle(50%)"], ["clip-path", "inset(10px)"],
   ["clip-path", "polygon(0 0, 100% 0, 50% 100%)"], ["clip-path", "ellipse(10px 20px at 50% 50%)"],
   ["mask", "none"], ["marker-start", "none"], ["cursor", "pointer"],
+  // s479 (RULED S479 §3.B item 22, INTERIM): a same-document fragment reference
+  ["fill", "url(#grad)"], ["stroke", "url(#Grad_2-b)"], ["filter", "url(#blur1)"],
+  ["mask", "url(#m)"], ["clip-path", "url(#c)"], ["marker-end", "url(#arrow)"],
+  ["marker", "url(#k)"], ["cursor", "url(#cur)"], ["color-profile", "url(#p)"],
+  ["fill", "  url(#grad)\n"],
 ];
 
 describe("runtime — a bound CSS-url presentation attribute is judged by cssValueOf (refused → removed, reported without the value)", () => {
@@ -247,6 +266,31 @@ describe("runtime — SMIL values animating a CSS-url attribute (`to` / `from` /
     const { warns } = captured(() => rt.attr(scope, el, "to", () => "10;url(x)"));
     expect(el.getAttribute("to")).toBe("10;url(x)");
     expect(warns).toEqual([]);
+    scope.dispose?.();
+  });
+  test("s479: `values` of local fragments is written; one non-fragment url() entry still refuses the list", () => {
+    const el = anim(`<animate id="a" attributeName="fill" dur="1s"></animate>`);
+    const scope = new rt.Scope(rt.root);
+    const c = rt.cell("url(#a); url(#b);red");
+    const { warns } = captured(() => {
+      rt.attr(scope, el, "values", () => c.get());
+      expect(el.getAttribute("values")).toBe("url(#a); url(#b);red");
+      c.set("url(#a);url(x.svg#b)");
+      expect(el.hasAttribute("values")).toBe(false);
+    });
+    expect(warns.length).toBe(1);
+    scope.dispose?.();
+  });
+  test("s479: a computed `attributeName` — `url(#g)` passes both guards", () => {
+    const el = anim(`<set id="a"></set>`);
+    const scope = new rt.Scope(rt.root);
+    const { warns, errors } = captured(() => {
+      rt.attr(scope, el, "attributeName", () => "fill");
+      rt.attr(scope, el, "to", () => "url(#g)");
+    });
+    expect(el.getAttribute("to")).toBe("url(#g)");
+    expect(warns).toEqual([]);
+    expect(errors).toEqual([]);
     scope.dispose?.();
   });
   test("benign: `<set attributeName=\"fill\" to=\"red\">` is written", () => {

@@ -33,9 +33,18 @@
  * (`resolveSlotRenamed`, `ghostFn`) would otherwise make a bogus "via `ghostFn`" row pass (S474
  * review F2). A test file CITED BY PATH is still read — the row named it.
  *
+ * A NAME ONLY IN A LITERAL vouches only when it is CODE-SHAPED there (S479, gap
+ * g-s34-census-string-occurrence-vouches-s474; ruling:user-voice-scrml.md "⭐ RULED — the rest of
+ * S478 hand-off §3.B, PA recs adopted (S479, 2026-11-18)" item 19 — *"a string-only occurrence
+ * vouches only when code-shaped"*): `function X` / `function* X` / `fn X` / `class X`, `X(`,
+ * `X =` (not `==`), or `.X`. So an emitted helper on a quoted line (`"function _scrml_x(p) {"`)
+ * still resolves, and a name a message string merely mentions (`"(emitIfExprDecl lowers to
+ * null)"`) does not.
+ *
  * KNOWN LENIENCIES (stated, not hidden; each only ever ADMITS a name, never rejects a correct row):
- *   - a name surviving only in a string / display-text literal / free markup text of the cited
- *     file (or, tree-wide, any non-test file) counts;
+ *   - a name in free markup text of a cited .scrml file (outside quotes) counts — the scrml
+ *     stripper does not split markup from logic (below);
+ *   - a code-shaped name inside a literal counts even when the literal is prose ("call foo(x)");
  *   - other citation spellings (`→`, `’s`, `a/b`, `(line 3, …)`) are not parsed — gap
  *     g-s34-census-unparsed-citation-spellings-s474.
  */
@@ -104,7 +113,36 @@ function regexEnd(src: string, i: number): number {
  * Offsets and line count are preserved.
  */
 export function stripJsForIdents(src: string): string {
+  return scanJsForIdents(src).out;
+}
+
+/**
+ * The stripper's three views of one source, all the length of `src` with its line structure:
+ * `out` — comments blanked (what stripJsForIdents returns); `code` — `out` with literal CONTENTS
+ * blanked too; `lit` — only the literal contents, everything else blanked.
+ */
+export type IdentViews = { out: string; code: string; lit: string };
+const blanks = (t: string) => t.replace(/[^\n]/g, " ");
+/** `out` split by the literal mask into its code view and its literal view (runs, not chars). */
+function splitViews(out: string, isLit: Uint8Array): IdentViews {
+  let code = "", lit = "";
+  let a = 0;
+  while (a < out.length) {
+    const l = isLit[a];
+    let b = a + 1;
+    while (b < out.length && isLit[b] === l) b++;
+    const run = out.slice(a, b);
+    if (l) { code += blanks(run); lit += run; } else { code += run; lit += blanks(run); }
+    a = b;
+  }
+  return { out, code, lit };
+}
+
+function scanJsForIdents(src: string): IdentViews {
   let out = "";
+  const isLit = new Uint8Array(src.length + 1);
+  const c_ = (t: string) => { out += t; };
+  const l_ = (t: string) => { isLit.fill(1, out.length, out.length + t.length); out += t; };
   let i = 0;
   const n = src.length;
   // Template-literal interpolation brace depths: a `}` at depth 0 returns to the template.
@@ -113,39 +151,39 @@ export function stripJsForIdents(src: string): string {
   while (i < n) {
     const c = src[i], c2 = src[i + 1];
     if (mode === "code") {
-      if (c === "/" && c2 === "/") { mode = "line"; out += "  "; i += 2; continue; }
-      if (c === "/" && c2 === "*") { mode = "block"; out += "  "; i += 2; continue; }
+      if (c === "/" && c2 === "/") { mode = "line"; c_("  "); i += 2; continue; }
+      if (c === "/" && c2 === "*") { mode = "block"; c_("  "); i += 2; continue; }
       if (c === "/" && regexStartsAt(out)) {
         const e = regexEnd(src, i);
-        if (e > 0) { out += src.slice(i, e); i = e; continue; }
+        if (e > 0) { c_(src.slice(i, e)); i = e; continue; }
       }
-      if (c === "'") { mode = "s"; out += c; i++; continue; }
-      if (c === '"') { mode = "d"; out += c; i++; continue; }
-      if (c === "`") { mode = "t"; out += c; i++; continue; }
+      if (c === "'") { mode = "s"; c_(c); i++; continue; }
+      if (c === '"') { mode = "d"; c_(c); i++; continue; }
+      if (c === "`") { mode = "t"; c_(c); i++; continue; }
       if (tmpl.length) {
         if (c === "{") tmpl[tmpl.length - 1]++;
         else if (c === "}") {
-          if (tmpl[tmpl.length - 1] === 0) { tmpl.pop(); mode = "t"; out += c; i++; continue; }
+          if (tmpl[tmpl.length - 1] === 0) { tmpl.pop(); mode = "t"; c_(c); i++; continue; }
           tmpl[tmpl.length - 1]--;
         }
       }
-      out += c; i++; continue;
+      c_(c); i++; continue;
     }
-    if (mode === "line") { if (c === "\n") { mode = "code"; out += c; } else out += " "; i++; continue; }
+    if (mode === "line") { if (c === "\n") { mode = "code"; c_(c); } else c_(" "); i++; continue; }
     if (mode === "block") {
-      if (c === "*" && c2 === "/") { mode = "code"; out += "  "; i += 2; continue; }
-      out += blank(c); i++; continue;
+      if (c === "*" && c2 === "/") { mode = "code"; c_("  "); i += 2; continue; }
+      c_(blank(c)); i++; continue;
     }
     // inside a literal — copy verbatim, honoring escapes
-    if (c === "\\") { out += c + (c2 ?? ""); i += 2; continue; }
-    if (mode === "t" && c === "$" && c2 === "{") { tmpl.push(0); mode = "code"; out += "${"; i += 2; continue; }
-    if ((mode === "s" && c === "'") || (mode === "d" && c === '"') || (mode === "t" && c === "`")) mode = "code";
+    if (c === "\\") { l_(c + (c2 ?? "")); i += 2; continue; }
+    if (mode === "t" && c === "$" && c2 === "{") { tmpl.push(0); mode = "code"; l_("$"); c_("{"); i += 2; continue; }
+    if ((mode === "s" && c === "'") || (mode === "d" && c === '"') || (mode === "t" && c === "`")) { mode = "code"; c_(c); i++; continue; }
     // an unterminated '…' / "…" ends at the line (JS strings cannot span lines), so a stray quote
     // cannot hide every later comment from the stripper
-    else if ((mode === "s" || mode === "d") && c === "\n") mode = "code";
-    out += c; i++; continue;
+    else if ((mode === "s" || mode === "d") && c === "\n") { mode = "code"; c_(c); i++; continue; }
+    l_(c); i++; continue;
   }
-  return out;
+  return splitViews(out, isLit);
 }
 
 /**
@@ -161,49 +199,79 @@ export function stripJsForIdents(src: string): string {
  * newlines). Parity edge cases vs the real scrml tokenizer: gap g-s34-census-scrml-stripper-parity-s474.
  */
 export function stripScrmlForIdents(src: string): string {
+  return scanScrmlForIdents(src).out;
+}
+
+function scanScrmlForIdents(src: string): IdentViews {
   let out = "";
+  const isLit = new Uint8Array(src.length + 1);
+  const c_ = (t: string) => { out += t; };
+  const l_ = (t: string) => { isLit.fill(1, out.length, out.length + t.length); out += t; };
   let i = 0;
   const n = src.length;
   let mode: "code" | "line" | "block" | "html" | "s" | "d" | "t" = "code";
   while (i < n) {
     const c = src[i], c2 = src[i + 1];
-    if (mode === "line") { if (c === "\n") { mode = "code"; out += c; } else out += " "; i++; continue; }
+    if (mode === "line") { if (c === "\n") { mode = "code"; c_(c); } else c_(" "); i++; continue; }
     if (mode === "block") {
-      if (c === "*" && c2 === "/") { mode = "code"; out += "  "; i += 2; continue; }
-      out += blank(c); i++; continue;
+      if (c === "*" && c2 === "/") { mode = "code"; c_("  "); i += 2; continue; }
+      c_(blank(c)); i++; continue;
     }
     if (mode === "html") {
-      if (c === "-" && c2 === "-" && src[i + 2] === ">") { mode = "code"; out += "   "; i += 3; continue; }
-      out += blank(c); i++; continue;
+      if (c === "-" && c2 === "-" && src[i + 2] === ">") { mode = "code"; c_("   "); i += 3; continue; }
+      c_(blank(c)); i++; continue;
     }
     if (mode === "s" || mode === "d" || mode === "t") {
-      if (c === "\\") { out += c + (c2 ?? ""); i += 2; continue; }
-      if ((mode === "s" && c === "'") || (mode === "d" && c === '"') || (mode === "t" && c === "`")) mode = "code";
-      else if (mode === "s" && c === "\n") mode = "code";
-      out += c; i++; continue;
+      if (c === "\\") { l_(c + (c2 ?? "")); i += 2; continue; }
+      if ((mode === "s" && c === "'") || (mode === "d" && c === '"') || (mode === "t" && c === "`")) { mode = "code"; c_(c); i++; continue; }
+      else if (mode === "s" && c === "\n") { mode = "code"; c_(c); i++; continue; }
+      l_(c); i++; continue;
     }
-    if (c === "/" && c2 === "/") { mode = "line"; out += "  "; i += 2; continue; }
-    if (c === "/" && c2 === "*") { mode = "block"; out += "  "; i += 2; continue; }
-    if (c === "<" && c2 === "!" && src[i + 2] === "-" && src[i + 3] === "-") { mode = "html"; out += "    "; i += 4; continue; }
+    if (c === "/" && c2 === "/") { mode = "line"; c_("  "); i += 2; continue; }
+    if (c === "/" && c2 === "*") { mode = "block"; c_("  "); i += 2; continue; }
+    if (c === "<" && c2 === "!" && src[i + 2] === "-" && src[i + 3] === "-") { mode = "html"; c_("    "); i += 4; continue; }
     if (c === "/" && regexStartsAt(out)) {
       const e = regexEnd(src, i);
-      if (e > 0) { out += src.slice(i, e); i = e; continue; }
+      if (e > 0) { c_(src.slice(i, e)); i = e; continue; }
     }
-    if (c === "'") { mode = "s"; out += c; i++; continue; }
-    if (c === '"') { mode = "d"; out += c; i++; continue; }
-    if (c === "`") { mode = "t"; out += c; i++; continue; }
-    out += c; i++; continue;
+    if (c === "'") { mode = "s"; c_(c); i++; continue; }
+    if (c === '"') { mode = "d"; c_(c); i++; continue; }
+    if (c === "`") { mode = "t"; c_(c); i++; continue; }
+    c_(c); i++; continue;
   }
+  return splitViews(out, isLit);
+}
+
+/**
+ * The CODE-SHAPED names in literal text (S479, item 19): a definition head (`function X`,
+ * `function* X`, `fn X`, `class X`), a call `X(`, an assignment `X =` (not `==`), a member `.X`.
+ * Each name is matched whole (not preceded by an identifier character).
+ */
+const CODE_SHAPED: RegExp[] = [
+  /(?<![A-Za-z0-9_$])(?:function(?:\s*\*)?\s*|fn\s+|class\s+)([A-Za-z_$][A-Za-z0-9_$]*)/g,
+  /(?<![A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)(?=\s*\()/g,
+  /(?<![A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)(?=\s*=(?!=))/g,
+  /\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g,
+];
+export function codeShapedNames(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const re of CODE_SHAPED) for (const m of text.matchAll(re)) out.add(m[1]);
   return out;
 }
 
-/** The identifiers of a source file's comment-stripped text, by extension; null for a non-source file. */
+/**
+ * The identifiers of a source file, by extension; null for a non-source file. A name in CODE
+ * (comments blanked, literal contents blanked) counts; a name only inside a string or template
+ * literal counts only when it is code-shaped there (codeShapedNames).
+ */
 export function identsOfSource(src: string, path: string): Set<string> | null {
-  const code = path.endsWith(".scrml") ? stripScrmlForIdents(src)
-    : JS_EXT.test(path) ? stripJsForIdents(src)
+  const v = path.endsWith(".scrml") ? scanScrmlForIdents(src)
+    : JS_EXT.test(path) ? scanJsForIdents(src)
     : null;
-  if (code === null) return null;
-  return new Set(code.match(IDENT) ?? []);
+  if (v === null) return null;
+  const ids = new Set(v.code.match(IDENT) ?? []);
+  for (const id of codeShapedNames(v.lit)) ids.add(id);
+  return ids;
 }
 
 // -- citation extraction -------------------------------------------------------------------------

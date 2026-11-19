@@ -1,0 +1,32 @@
+${
+    type Pair:enum = { Loaded(a: int, b: int), Twice(a: int, b: int), Empty }
+    <pair>: Pair = .Empty
+
+    function first(p: Pair) -> int {
+        return match p {
+            .Loaded(n, m) :> n + m,
+            .Twice(n, _) :> n,
+            .Empty :> 0
+        };
+    }
+
+    function none(p: Pair) -> int {
+        return match p {
+            .Loaded(_, _) :> 1,
+            .Twice(_, _) :> 2,
+            .Empty :> 0
+        };
+    }
+}
+<p>${first(@pair) + none(@pair)}</p>
+<match for=Pair on=@pair>
+    <Loaded(n, m)>
+        <p>${n + m}</p>
+    </>
+    <Twice(n, _)>
+        <p>${n}</p>
+    </>
+    <Empty>
+        <p>"empty"</p>
+    </>
+</match>
