@@ -50362,6 +50362,8 @@ ${
             _ :> ""
         }
         if (raw == "" || raw.length > 2) return -1
+        // a bare integer literal: `0`, or a decimal with no leading zero (`07` / `00` are refused, as `032` is)
+        if (raw.length == 2 && raw.charCodeAt(0) == 48) return -1
         let n: int = 0
         let i = 0
         while (i < raw.length) {

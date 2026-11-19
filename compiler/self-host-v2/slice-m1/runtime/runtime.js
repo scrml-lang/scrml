@@ -5720,7 +5720,9 @@ export function channelPacer(limits, io) {
     // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
     // S479 (s479-channel-follow), §38.4.3: the relay refused a frame of this connection unread, over a
     // rate bound — "the client SHALL then slow down": its bucket is emptied, so the next frame waits
-    // for a token's refill. Frames still queued keep their order.
+    // for a token's refill. Frames still queued keep their order. S480 r1 (#1987 review MED-1): a refused
+    // frame spends no relay token, so the relay's bucket is at 0 or more when it refuses; an emptied
+    // client bucket refilling at 95% of `rate` stays behind the relay's, which refills at `rate`.
     starve() {
       tokens = 0;
       at = io.now();

@@ -362,6 +362,109 @@ describe("C — over a rate bound: refused unread, the client slows down (§38.4
   }, 30000);
 });
 
+// S480 #1987 review fix r1 (MED-1), §38.4.3 "Over a rate bound": a refused frame spends no token (no
+// debt), and the close is a separate close bucket of `burst` + 30 × `rate` that every frame spends. A
+// shared fake clock (`host.now`) drives the relay, so time is the test's. RED on b024ff914: the relay
+// put a refused frame's token into debt, so after a network-bunched burst a pacing client's frames were
+// refused in a streak (the last edit too, at a 600 ms stall) and a 2.4 s stall closed it `1008`; and a
+// frame sent a second after three refusals at `frame-rate=1` was refused (the debt), not relayed.
+describe("C2 — over a rate bound after a network stall: an honest pacer is not refused past the bunch, nor closed (§38.4.3)", () => {
+  // The real client pacer (`channelPacer`, defaults: rate 50, burst 100) and the real relay on one fake
+  // clock. At T = 3000 the client sends a full burst and then edits every 16 ms (faster than the pace,
+  // so its queue is never empty); every frame it sends during [3000, holdTo) is held by the "network"
+  // and delivered at holdTo. Each delivered frame is answered (its own echo, or `__refused`) before
+  // the clock moves on. Returns the refused frames' delivery times, how many were delivered, and the close.
+  async function stall(holdTo, editEnd, simEnd) {
+    let T = 0;
+    const w = await world(app(), { now: () => T });
+    try {
+      const R = await w.raw();
+      const timers = [], outbox = [];
+      const pacer = rt.channelPacer({ rate: 50, burst: 100 }, {
+        now: () => T,
+        later: (f, ms) => { const h = { due: T + ms, f }; timers.push(h); return h; },
+        cancel: (h) => { const i = timers.indexOf(h); if (i >= 0) timers.splice(i, 1); },
+        send: (text) => { outbox.push({ text, at: T >= 3000 && T < holdTo ? holdTo : T }); },
+      });
+      pacer.open();
+      let delivered = 0, answered = 0;
+      const refusedAt = [];
+      const deliveredAt = [];
+      R.ws.addEventListener("message", (ev) => {
+        const v = JSON.parse(String(ev.data));
+        if (v.__type === "__refused") { pacer.starve(); refusedAt.push(deliveredAt[answered]); answered++; } else if (v.__own === true) answered++;
+      });
+      T = 3000;
+      for (let i = 0; i < 100; i++) pacer.push("k" + i, "replace", frame("n", "replace", i), null);
+      for (; T < simEnd && R.closed() === null; T += 4) {
+        if (T % 16 === 0 && T < editEnd) pacer.push("n", "replace", frame("n", "replace", T), null);
+        for (const h of timers.filter((x) => x.due <= T)) { timers.splice(timers.indexOf(h), 1); h.f(); }
+        const due = outbox.filter((o) => o.at <= T);
+        for (const o of due) { outbox.splice(outbox.indexOf(o), 1); R.ws.send(o.text); delivered++; deliveredAt.push(T); }
+        if (due.length) await until(() => answered === delivered || R.closed() !== null, 3000);
+      }
+      await tick(50);
+      return { refusedAt, delivered, answered, lastAt: deliveredAt[delivered - 1], closed: R.closed() };
+    } finally { w.done(); }
+  }
+
+  for (const [label, holdTo, editEnd, simEnd] of [["150 ms", 3150, 5000, 6000], ["600 ms", 3600, 5000, 6000], ["2.4 s, editing on after it", 5400, 6500, 7000]]) {
+    test(`a ${label} stall: only frames of the bunch are refused, the last edit is relayed, never closed`, async () => {
+      const r = await stall(holdTo, editEnd, simEnd);
+      expect(r.closed).toBe(null);
+      expect(r.answered).toBe(r.delivered);
+      expect(r.refusedAt.length).toBeGreaterThan(0);              // the bunch is over the relay's bucket
+      // all at the one step that delivers the bunch (the clock moves in 4 ms steps): nothing after it
+      expect(r.refusedAt.every((t) => t >= holdTo && t < holdTo + 4)).toBe(true);
+      expect(r.lastAt).toBeGreaterThan(holdTo);                    // so the user's last edit, after it, is relayed
+    }, 60000);
+  }
+
+  test("a refused frame spends no token: a frame one token-refill after three refusals is relayed", async () => {
+    let T = 1000;
+    const w = await world(app(" frame-rate=1 frame-burst=3"), { now: () => T });
+    try {
+      const A = await w.raw();
+      const B = await w.raw();
+      for (let i = 1; i <= 6; i++) A.ws.send(frame("n", "replace", i));
+      expect(await until(() => A.refusals.length === 3 && B.got.length === 3)).toBe(true);
+      T += 1000;                                                   // one token at frame-rate=1
+      A.ws.send(frame("n", "replace", 7));
+      expect(await until(() => B.got.length === 4)).toBe(true);
+      expect(B.got.map((f) => f.__val)).toEqual([1, 2, 3, 7]);
+      expect(A.refusals.length).toBe(3);
+      expect(A.closed()).toBe(null);
+    } finally { w.done(); }
+  });
+
+  test("a sender that keeps sending past the rate while it reads its refusals is refused, then closed 1008 at its close bucket", async () => {
+    let T = 1000;
+    // frame-rate=5 frame-burst=3: the close bucket holds 3 + 5 × 30 = 153 tokens
+    const w = await world(app(" frame-rate=5 frame-burst=3"), { now: () => T });
+    try {
+      const A = await w.raw();
+      const B = await w.raw();
+      let sent = 0;
+      // 20 frames each 100 ms of the fake clock (200/s, forty times the rate), waiting each round until
+      // the relay has answered (relayed or refused) every frame — so the sender has read its refusals
+      while (A.closed() === null && sent < 1000) {
+        for (let i = 0; i < 20; i++) A.ws.send(frame("n", "replace", ++sent));
+        await until(() => A.closed() !== null || B.got.length + A.refusals.length === sent);
+        T += 100;
+      }
+      expect(A.closed()?.code).toBe(1008);
+      expect(A.closed()?.reason).toContain("close bound");
+      expect(A.refusals.length).toBeGreaterThan(100);
+      // relayed: the burst and the rate, never more; closed after the close bucket (153 + 5/s refill)
+      const secs = (T - 1000) / 1000;
+      expect(B.got.length).toBeLessThanOrEqual(3 + Math.ceil(5 * secs) + 1);
+      expect(sent).toBeLessThanOrEqual(153 + Math.ceil(5 * secs) + 20);
+      expect(B.closed()).toBe(null);
+      expect(w.logs.join("\n")).toContain("past its close bound");
+    } finally { w.done(); }
+  }, 30000);
+});
+
 describe("D — reconnect backoff (§38.7, ruled §3.B item 5)", () => {
   test("channelBackoff: doubling from `reconnect=`, ±20% jitter, a 30 s cap (never below the author's own delay)", () => {
     const mid = () => 0.5;
@@ -425,7 +528,8 @@ describe("D — reconnect backoff (§38.7, ruled §3.B item 5)", () => {
 describe("E — `<program trusted-proxies=N>` (§40.2, ruled §3.B item 6, default 0)", () => {
   const codes = (src) => frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml").diags.map((d) => d.code);
   test("a value that is not a bare integer 0..=32 is E-MW-009; 0..=32 compile and are printed on the server desc", () => {
-    for (const bad of [`"1"`, "33", "-1", "1.5", "(1)", ""]) {
+    // S480 #1987 fix r1 (NIT-2): "a bare integer literal" — `0` or a decimal with no leading zero
+    for (const bad of [`"1"`, "33", "-1", "1.5", "(1)", "", "00", "07", "032"]) {
       const v = bad === "" ? "" : `=${bad}`;
       expect(codes(app("", ` trusted-proxies${v}`))).toContain("E-MW-009");
     }
@@ -442,6 +546,8 @@ describe("E — `<program trusted-proxies=N>` (§40.2, ruled §3.B item 6, defau
     expect(srt.forwardedEntry(req("1.1.1.1, 2.2.2.2, 3.3.3.3"), "X-Forwarded-For", 2)).toBe("2.2.2.2");
     expect(srt.forwardedEntry(req("2.2.2.2"), "X-Forwarded-For", 2)).toBe("");
     expect(srt.forwardedEntry(req(undefined), "X-Forwarded-For", 1)).toBe("");
+    // S480 #1987 fix r1 (NIT-1): a count that is not a safe integer trusts nothing (fail closed)
+    for (const n of [1.5, NaN, Infinity, 2 ** 53]) expect(srt.forwardedEntry(req("1.1.1.1, 2.2.2.2"), "X-Forwarded-For", n)).toBe("");
   });
 
   // max-subscribers=10: one address holds ONE place (⌊10 / 10⌋), so a second socket from the same

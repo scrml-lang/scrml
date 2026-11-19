@@ -126,9 +126,9 @@ const sync = (key, val, op = "replace") => JSON.stringify({ __type: "__sync", __
 
 describe("B — §38.4.3 bounds, served", () => {
   // S479 (s479-channel-follow), §38.4.3 "Over a rate bound": a frame past the bucket is REFUSED UNREAD
-  // (`{"__type":"__refused","__why"}`) and spends a token anyway (debt); only a further full burst past it
-  // (the bucket at minus `burst`) closes the sender 1008.
-  test("the token bucket: a burst past `frame-burst=` is refused unread (`__refused`), nothing past the bucket is relayed; a further burst closes the sender 1008", async () => {
+  // (`{"__type":"__refused","__why"}`) and spends no token; S480 #1987 fix r1: only a sender that empties
+  // its connection's close bucket (`burst` + 30 × `rate` = 3 + 30 = 33 here, spent by every frame) is closed 1008.
+  test("the token bucket: a burst past `frame-burst=` is refused unread (`__refused`), nothing past the bucket is relayed; emptying the close bucket closes the sender 1008", async () => {
     const { bun, base, logs } = await served(src(" frame-rate=1 frame-burst=3"));
     try {
       const a = await connect(base, "/_scrml_ws/chat");
@@ -142,11 +142,11 @@ describe("B — §38.4.3 bounds, served", () => {
       expect(unread.length).toBe(3);
       expect(Object.keys(unread[0]).sort()).toEqual(["__type", "__why"]);
       expect(unread[0].__why).toContain("rate limit");
-      for (let i = 7; i <= 9; i++) a.ws.send(sync("count", i));
+      for (let i = 7; i <= 40; i++) a.ws.send(sync("count", i));
       await tick(200);
       expect(b.got.map((f) => f.__val)).toEqual([1, 2, 3]);
       expect(a.closed()?.code).toBe(1008);
-      expect(logs.join("\n")).toContain("a further burst");
+      expect(logs.join("\n")).toContain("past its close bound");
       expect(b.closed()).toBe(null);           // the limit is per connection: b is untouched
       b.ws.close();
     } finally { bun.stop(true); }
