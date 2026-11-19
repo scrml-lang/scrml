@@ -65,6 +65,7 @@
 [esm] conformance/cases/lifecycle/pending-tape-granted-append-rt/case.scrml  # emit-client-esm: Unexpected token (a §66-dialect case impl#1 does not compile — impl1 xfail, S478 s478-boot-pending-tape-grants)
 [esm] conformance/cases/lifecycle/pending-tape-granted-replace-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S478 s478-boot-pending-tape-grants)
 [esm] conformance/cases/lifecycle/pending-tape-whole-write-not-granted-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S478 #1852)
+[esm] conformance/cases/linear/bare-arrow-binding-called-pos/case.scrml  # emit-client-esm: Unexpected token (impl#1 reports the false E-MU-001 on the `fmt = (n) => …` keywordless arrow binding, then emits on the errored source — impl1 xfail g-bare-arrow-binding-false-e-mu-001, S480 #2006)
 [esm] conformance/cases/loop/loop-001-break-outside/case.scrml  # emit-client-esm: Unsyntactic break
 [esm] conformance/cases/loop/loop-002-continue-outside/case.scrml  # emit-client-esm: Unsyntactic continue
 [esm] conformance/cases/loop/loop-005-break-pos/case.scrml  # emit-client-esm: Unexpected token

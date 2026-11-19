@@ -1,0 +1,28 @@
+{
+  "id": "acceptance-tapes-join-primitives",
+  "description": "join on int / number / bool / unit-enum tapes gives each element's one honest text.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 3 · §20.7.2 · ruling:user-voice-scrml.md-S479-3B-rest-item-13",
+  "rationale": "An int as its decimal digits, a number as Number::toString (`1e21` → `1e+21`, `-0` → `0`), a bool as true / false, a unit variant as its declared name.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#ns",
+        "text": "-9,0,10"
+      },
+      {
+        "selector": "#fs",
+        "text": "0.5 1e+21 0"
+      },
+      {
+        "selector": "#bs",
+        "text": "true/false"
+      },
+      {
+        "selector": "#cs",
+        "text": "Red+Green"
+      }
+    ]
+  }
+}
