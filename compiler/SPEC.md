@@ -7895,11 +7895,14 @@ violates `rule=` is the runtime `E-ENGINE-INVALID-TRANSITION`: the cell keeps it
 handler for a commit that lands at once (a throttle's leading write), the timer for a trailing commit, where
 it is reported to the logging surface. A self-write at commit is a no-op (§51.0.F.1). A refused commit is not
 an emit, so on a `throttled=` engine it opens no throttle window (§6.13.2 "within `DURATION` of the last emit"):
-the next write is a leading write; a commit that lands opens the window even if an effect it runs throws. *(PA
-reading S479, pending owner ratification — **Provenance:** rationale:a write `rule=` refuses never lands, so it is
-not an emit and starts no window; the ruling (S479 §3.B item 8) is silent on the window · gap:
+the next write is a leading write; a commit that lands opens the window even if an effect it runs throws. *(S479,
+ratified. **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — three open S479 questions, PA recs adopted"
+item 3 — *"keep it, because a refused write never actually happened, so it shouldn't start a window."* — RULED yes
+(the "PA reading, pending owner ratification" marker comes off) · resolves gap:
 `g-boot-timed-engine-refused-commit-window-unratified-s479` · **Direction of change:** none beyond the S479
-build — it records what the bootstrap does.)* Static check of LITERAL
+build — it records what the bootstrap does.)* **With an `<onIdle>` watchdog (§51.0.R).** The watchdog's fire on a
+`debounced=` / `throttled=` engine is not held by the timing rule: it applies immediately, and it cancels any held
+write (see §51.0.R "Composition with `debounced=` / `throttled=`"). Static check of LITERAL
 held writes: a write `@var = .Variant` to a timed engine cell, where no variant reachable from the cell's
 initial variant along its `rule=` edges is `.Variant` or has `.Variant` in its `rule=`, could never commit
 and SHALL be `E-ENGINE-INVALID-TRANSITION` (§34) at the write site. *(S479. **Provenance:**
@@ -7921,6 +7924,7 @@ only for a write that could never commit). The bootstrap builds both (`compiler/
 - `debounced=` / `throttled=` on a `<x server>` server-authoritative cell SHALL fire `E-DEBOUNCED-WITH-SERVER` (§34).
 - `reset(@cell)` on a cell with `debounced=` / `throttled=` SHALL cancel any pending timer for `cell` before applying the reset value (§6.8).
 - On an engine cell (§51.0, §66.13.2) with `debounced=` / `throttled=`, `rule=` SHALL be judged and `<onTransition>` SHALL run when a held write commits, not when it is requested; a committed write that violates `rule=` SHALL leave the cell at its prior value and SHALL be the runtime `E-ENGINE-INVALID-TRANSITION`, a trap (§19.17). A LITERAL held write whose target no variant reachable from the initial variant admits SHALL be `E-ENGINE-INVALID-TRANSITION` at compile time (§6.13.5; S479, ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8).
+- On an engine cell with `debounced=` / `throttled=` and an `<onIdle>` watchdog (§51.0.R), the watchdog's fire SHALL NOT be held by the timing rule; a fire that lands SHALL cancel any held write. *(S479 ruling "three open S479 questions" item 2.)*
 - Validity recomputation (§6.11, §55) SHALL fire on each debounced/throttled write — the timing rule is a wrapper around the same write path that triggers ordinary subscribers.
 - A write to a `debounced=` / `throttled=` cell whose right-hand side reads the SAME cell (`@x = @x + 1`, `@x += 1`, `@log = @log + line`) SHALL produce the lint **`W-TIMED-READ-MODIFY-WRITE`** (Warning) at the write. Reads see the timed value (§6.13.4), so a write still pending in the window is invisible to the next read and the increments made inside one window are lost (three `@x = @x + 1` in one window commit `+1`). The message points the author at the capable form: keep a plain source cell for the read-modify-write and time a copy of it (`<count> = 0` written by the handler; `<shown debounced=300ms>` written from `@count`). It is a lint — the program means what it says. (S478 open-Qs ruling (user-voice) item 32; the code name is confirmed by ruling:user-voice-scrml.md S479 "⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted" item 2.)
 
@@ -42848,6 +42852,21 @@ as activity, send a handled engine message (§51.0.S; see "Handled-message reset
 - Each timer occupies a distinct slot in the runtime's `_scrml_machine_timers` map
   (composite-key encoding: `<varName>::<stateName>::<index>` for per-state; `<varName>::__idle`
   for the engine-wide watchdog).
+
+**Composition with `debounced=` / `throttled=` (§6.13.5).** On a timed engine cell the
+watchdog's fire **applies immediately**: it is not held by the timing rule, so it lands exactly
+`after=` after the last committed transition — never `after=` plus the timing window. Its `rule=`
+judgement is the ordinary one (rule 3), made at the fire against the variant the cell holds then.
+A fire that lands **cancels any write still held** by the timing rule (a debounce's pending write,
+a throttle's held trailing write), which is then never committed and never judged. The fire is not
+an emit of the timing rule, so a `throttled=` engine's open window (§6.13.2) is neither opened nor
+restarted by it. Re-arm is unchanged: the watchdog resets on every committed transition (rule 2) —
+the fire's own, and a held write's when it commits. A fire `rule=` refuses (rule 3) never happened,
+so it cancels nothing; a fire whose `to=` is the variant the cell already holds is a self-write
+no-op (§51.0.F.1), not a transition, so it cancels nothing either — no state changed under the held
+write.
+
+> **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — three open S479 questions, PA recs adopted" item 2 (PERMANENT) — *"The watchdog firing applies immediately. It's already a timed transition, and delaying it again would stack the window on top of `after=`. It cancels any write still waiting, since that write was requested against a state that just changed. The watchdog's "re-arm on every committed transition" rule stays as is."* · the refused-fire and no-op-fire limbs read "a state that just changed" (a fire that changes no state cancels nothing; gap `g-boot-onidle-noop-fire-cancel-reading-s480`) · supersedes: nothing (the composition was unspecified; the bootstrap refused it by name, gap `g-boot-timed-engine-residue-s479` part 1) · **Direction of change:** newly-accepting (a timed engine with `<onIdle>` compiles). Built by the bootstrap (`compiler/self-host-v2/analyze.scrml` `timingCellProblem`, runtime `idleWatch` → `idleFire`); impl#1 does not (S471 policy, carried divergence).
 
 **Interaction with `<onTransition>` (§51.0.H).** A watchdog-induced transition IS a legal
 transition event and triggers matching `<onTransition>` handlers — same write-path semantics

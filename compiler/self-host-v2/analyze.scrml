@@ -41489,13 +41489,10 @@ ${
         // S479 (ruling §3.B item 8) — §6.13.5: "A `debounced=` / `throttled=` engine cell
         // transitions at commit … `rule=` (§51.0.F) is judged at the commit, against the
         // variant the cell holds then" — built (runtime `timed` carries the edge table;
-        // `heldWriteCheck` is the static half). INTERIM: an engine with an `<onIdle>`
-        // watchdog stays refused — no SPEC sentence says whether the watchdog's own fire is
-        // a local write the wrapper holds, or commits at once (and cancels a held write).
-        const gr: TransitionGraph | not = f.graph
-        if (gr is given) {
-            if (gr.idle is given) return "an engine with an `<onIdle>` watchdog: §6.13.5 makes a timed engine transition at commit, but no SPEC sentence says whether the watchdog's own fire is held by the timing rule or commits at once (cancelling a held write) — not built; drop one of the two"
-        }
+        // `heldWriteCheck` is the static half). An engine with an `<onIdle>` watchdog is
+        // accepted too (S479, ruling "three open S479 questions" item 2; §51.0.R): "The
+        // watchdog firing applies immediately … It cancels any write still waiting" — the
+        // runtime `idleWatch` fire bypasses the wrapper (`idleFire`).
         if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
         if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
         if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"

@@ -1,0 +1,56 @@
+{
+  "id": "engine-timed-onidle-throttle-fire-in-window-rt",
+  "description": "§51.0.R / §6.13.5 (S480): a `throttled=10s` engine with `<onIdle after=5s to=.Idle/>`. At 1 s click #busy (a leading write: Busy at once, window to 11 s, watchdog re-armed for 6 s); at 2 s click #active (held as the trailing write for 11 s); advance to 12 s: the watchdog fires at 6 s inside the open window and applies at once (Idle), and the held Active — which Idle's rule= would admit — is dropped, so the cell stays Idle. XFAIL on impl#1: it parses neither the §66 `single` engine opener nor a timed engine (S471 policy; carried gap g-impl1-timed-engine-commit-s479).",
+  "language-version": "1.0",
+  "spec": "§51.0.R",
+  "rationale": "§51.0.R \"Composition with `debounced=` / `throttled=`\": \"On a timed engine cell the watchdog's fire **applies immediately** … A fire that lands **cancels any write still held** by the timing rule\". ruling:user-voice-scrml.md S479 \"⭐ RULED — three open S479 questions, PA recs adopted\" item 2 — \"The watchdog firing applies immediately. It's already a timed transition, and delaying it again would stack the window on top of `after=`. It cancels any write still waiting, since that write was requested against a state that just changed.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-INVALID-TRANSITION",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "advance-time": 1000
+      },
+      {
+        "click": "#busy"
+      },
+      {
+        "advance-time": 1000
+      },
+      {
+        "click": "#active"
+      },
+      {
+        "advance-time": 10000
+      }
+    ],
+    "state": {
+      "phase": "Idle"
+    },
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "Idle"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-timed-engine-commit-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=1",
+          "emitted:E-COMPONENT-035=3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-STRUCTURAL-ELEMENT-MISPLACED=1",
+          "emitted:E-VARIANT-AMBIGUOUS=2"
+        ],
+        "runtime": "sha256:63425ce860d06860"
+      }
+    }
+  }
+}
