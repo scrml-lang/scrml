@@ -15,3 +15,10 @@ Rulings (scrml-support/user-voice-scrml.md):
 
 ## Next
 - pretest, bootstrap tests, conformance before/after, gates, commit, PR.
+
+## r1 fix round (S480, #1981 review FINDINGS) — branch s480-1981-r1 → pushed to s479-endpoint-cors
+- STEP 0: fresh `git merge origin/main` (clean, no conflicts; severity.scrml --check current) — 078f96d34.
+- HIGH-1: endpoint CORS knowledge is now APP-scope. codegen/index.ts computes `appEndpointCors(webFiles)` once per compilation (every non-tool file) and stashes it on each file AST (`APP_ENDPOINT_CORS_KEY`, null when the app has no endpoint — the `COMPILATION_TENANT_KEY` carrier). emit-server.ts: the program CORS stage (onion preflight, `/*` route, response stamping) gates on the APP table; a `cors=` module with no endpoint of its own carries the app table (`endpointCorsHelperLines`). Probes (~/.cache/scrml/review/s480-1981-r1): multi build+dev → preflight 405, POST no ACAO; multi-a → a.example, never `*`.
+- MED-1: preflight records are named by PATH (`endpointPreflightRouteName`, `/op` → `__ri_route_endpoint_preflight__2fop`) and answer from the app table; twofile → PUT preflight 204 a.example, POST preflight 405 `Allow: POST, PUT` (build + dev).
+- LOW-1: the emitted helpers use `== null` / `: null` (no literal `undefined`).
+- Byte identity: noep1 (single cors+log+headers+handle) and noep2 (two files, cors, no endpoint) — origin/main vs head `scrml build` outputs identical.

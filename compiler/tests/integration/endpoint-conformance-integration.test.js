@@ -214,7 +214,7 @@ describe("(D) route registration at the verbatim path=/method= + node --check (�
     expect(sjs).toMatch(/export const __ri_route_endpoint_\d+ = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
     // S479 (§61.7): plus one OPTIONS record at the endpoint's path — its preflight
     // answer (405 without the endpoint's own `cors=`; endpoint-cors-served.test.js).
-    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_\d+, __ri_route_endpoint_preflight_0\];/);
+    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_\d+, __ri_route_endpoint_preflight__2ffsp\];/);
     // The imported aggregate confirms the live record (not just the text).
     expect(Array.isArray(SRV.routes)).toBe(true);
     expect(SRV.routes.length).toBe(2);

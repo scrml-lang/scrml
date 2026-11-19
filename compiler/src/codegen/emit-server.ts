@@ -2338,6 +2338,170 @@ function collectEndpointDecls(nodes: any[]): any[] {
   return out;
 }
 
+/** One mounted `<endpoint>`'s CORS fact: its route and its own `cors=` origin (or null). */
+export interface EndpointCorsRow { path: string; method: string; cors: string | null }
+
+/**
+ * §39.2.1 / §61.7 — the endpoint CORS facts of the WHOLE application.
+ *
+ * The program-level `cors=` stops at every `<endpoint>` route, and the `<endpoint>`
+ * may sit in a different file from the `<program>` that declares `cors=`. Both
+ * hosts (`scrml build`'s `_server.js`, `scrml dev`) mount ONE request onion for the
+ * app, taken from the module that declares it, and register every module's
+ * routes side by side — so the onion's preflight stage and its response stamping
+ * must know every endpoint the app mounts, and a preflight at a path served from
+ * two files must be answered from both files' endpoints. A per-module table (the
+ * file's own endpoints) let `<program cors="*">` in one file answer a preflight to
+ * an endpoint in another (#1981 review HIGH-1).
+ *
+ * codegen/index.ts computes this once per compilation over every web-app file and
+ * stashes it on each file AST under `APP_ENDPOINT_CORS_KEY` (the same carrier as
+ * `COMPILATION_TENANT_KEY`: the emitters have no `files` handle). A file without
+ * it (a §64 tool program, a direct emitter call in a unit test) uses its own
+ * endpoints.
+ */
+export const APP_ENDPOINT_CORS_KEY = "_scrmlAppEndpointCors";
+export interface AppEndpointCors {
+  rows: EndpointCorsRow[];
+  /** The app's `<program cors-max-age=>` raw value (the §39.2.1 Max-Age), or null. */
+  corsMaxAge: string | null;
+}
+
+/**
+ * The endpoints a module MOUNTS — the same skip rules as the endpoint handler
+ * loop (a resolved `accepts=` enum, a path and a method) — each with its own
+ * `cors=` origin or null.
+ */
+export function servedEndpointCorsRows(fileAST: any): EndpointCorsRow[] {
+  const rows: EndpointCorsRow[] = [];
+  for (const d of collectEndpointDecls(getNodes(fileAST))) {
+    const en = (d as { acceptsEnum?: { kind?: string } }).acceptsEnum;
+    if (!en || en.kind !== "enum") continue;
+    if (typeof d.path !== "string" || !d.path || typeof d.method !== "string" || !d.method) continue;
+    rows.push({ path: d.path, method: d.method, cors: typeof d.cors === "string" ? d.cors : null });
+  }
+  return rows;
+}
+
+/**
+ * Merge the endpoint CORS rows of every web-app file in a compilation (file order,
+ * then declaration order). One row per path and method: two endpoints at one path
+ * and method (§61.7 makes that E-ENDPOINT-ROUTE-DUPLICATE; impl#1 does not report
+ * it) whose `cors=` values differ keep NO origin — the host serves one of the two
+ * handlers, and a preflight must never grant an origin the served one did not
+ * declare (fail closed: 405). Returns null when the app mounts no endpoint, so a
+ * program without `<endpoint>` emits exactly what it did before.
+ */
+export function appEndpointCors(files: any[]): AppEndpointCors | null {
+  const byKey = new Map<string, EndpointCorsRow>();
+  let corsMaxAge: string | null = null;
+  for (const f of files) {
+    if (!f || typeof f !== "object") continue;
+    for (const r of servedEndpointCorsRows(f)) {
+      const key = r.method + " " + r.path;
+      const prev = byKey.get(key);
+      if (prev === undefined) byKey.set(key, { ...r });
+      else if (prev.cors !== r.cors) prev.cors = null;
+    }
+    const mc = (f as any).middlewareConfig ?? (f as any).ast?.middlewareConfig ?? null;
+    const raw = mc ? ((mc as { corsMaxAge?: string | null }).corsMaxAge ?? null) : null;
+    if (corsMaxAge === null && parseCorsMaxAge(raw) !== null) corsMaxAge = raw;
+  }
+  if (byKey.size === 0) return null;
+  return { rows: Array.from(byKey.values()), corsMaxAge };
+}
+
+/**
+ * The export name of the OPTIONS route for an endpoint path. Derived from the
+ * PATH (not a per-module counter), so two modules serving one path export the
+ * same name for the same route, and two different paths never share a name — a
+ * host that de-duplicates imports by name (build.js F-BUILD-002) keeps one per
+ * path. Letters and digits stay; every other character becomes `_` + its two
+ * hex digits (`/op` → `_2fop`; a character past U+00FF becomes `_u` + six hex
+ * digits), so the name is injective over every path string.
+ */
+function endpointPreflightRouteName(path: string): string {
+  let s = "";
+  for (const ch of path) {
+    if (/[A-Za-z0-9]/.test(ch)) s += ch;
+    else {
+      const cp = ch.codePointAt(0)!;
+      s += cp < 0x100 ? "_" + cp.toString(16).padStart(2, "0") : "_u" + cp.toString(16).padStart(6, "0");
+    }
+  }
+  return `__ri_route_endpoint_preflight_${s}`;
+}
+
+/**
+ * §61.7 per-endpoint `cors=` + §39.2.1 scoping — the emitted endpoint CORS
+ * table and its helpers, over the APP's endpoints (`appEndpointCors`):
+ *   - `_scrml_endpoint_cors_table`: path → (method → the endpoint's `cors=`
+ *     origin, or null);
+ *   - `_scrml_endpoint_cors_headers(origin, method)`: the Access-Control-* set;
+ *   - `_scrml_endpoint_preflight(req)`: the answer to an OPTIONS at an endpoint
+ *     path (204 + the endpoint's headers when the endpoint the
+ *     `Access-Control-Request-Method` names has `cors=`, else 405 + `Allow` —
+ *     every method served at the path — with no Access-Control-* header), or
+ *     null at any other path;
+ *   - `_scrml_is_endpoint_route(req)`: an endpoint is mounted at the request's
+ *     path AND method (a page at the same path keeps the program's headers).
+ * Emitted by every module that mounts an endpoint, and by the module whose
+ * program-level CORS stage must leave endpoint routes alone.
+ */
+function endpointCorsHelperLines(rows: EndpointCorsRow[], corsMaxAgeRaw: string | null): string[] {
+  const lines: string[] = [];
+  const _corsMaxAgeSec = parseCorsMaxAge(corsMaxAgeRaw);
+  const _corsMaxAgeValue = _corsMaxAgeSec !== null ? String(_corsMaxAgeSec) : "86400";
+  const _byPath = new Map<string, Map<string, string | null>>();
+  for (const _se of rows) {
+    if (!_byPath.has(_se.path)) _byPath.set(_se.path, new Map());
+    _byPath.get(_se.path)!.set(_se.method, _se.cors);
+  }
+  const _tableRows = Array.from(_byPath.entries()).map(([_p, _ms]) => {
+    const _inner = Array.from(_ms.entries())
+      .map(([_m, _o]) => `[${JSON.stringify(_m)}, ${_o === null ? "null" : JSON.stringify(_o)}]`)
+      .join(", ");
+    return `  [${JSON.stringify(_p)}, new _scrml_g.Map([${_inner}])],`;
+  });
+  lines.push(`// --- §61.7/§39.2.1: <endpoint> CORS — path → (method → the endpoint's cors= origin, or null) ---`);
+  lines.push(`// Every endpoint the app mounts. Program cors= does not cover these routes;`);
+  lines.push(`// each endpoint opts in with its own cors=.`);
+  lines.push(`const _scrml_endpoint_cors_table = new _scrml_g.Map([`);
+  for (const _r of _tableRows) lines.push(_r);
+  lines.push(`]);`);
+  lines.push(`function _scrml_endpoint_cors_headers(_scrml_origin, _scrml_method) {`);
+  lines.push(`  return {`);
+  lines.push(`    "Access-Control-Allow-Origin": _scrml_origin,`);
+  lines.push(`    "Access-Control-Allow-Methods": _scrml_method,`);
+  lines.push(`    "Access-Control-Allow-Headers": "Content-Type, Authorization",`);
+  lines.push(`    "Access-Control-Max-Age": "${_corsMaxAgeValue}",`);
+  lines.push(`  };`);
+  lines.push(`}`);
+  lines.push(`// The answer to a preflight at an <endpoint> path, or null for any other path.`);
+  lines.push(`function _scrml_endpoint_preflight(_scrml_req) {`);
+  lines.push(`  const _scrml_url = new _scrml_g.URL(_scrml_req.url, "http://localhost");`);
+  lines.push(`  const _scrml_methods = _scrml_endpoint_cors_table.get(_scrml_url.pathname);`);
+  lines.push(`  if (_scrml_methods == null) return null;`);
+  lines.push(`  const _scrml_want = _scrml_req.headers.get("Access-Control-Request-Method");`);
+  lines.push(`  const _scrml_origin = typeof _scrml_want === "string" ? _scrml_methods.get(_scrml_want) : null;`);
+  lines.push(`  if (typeof _scrml_origin === "string") {`);
+  lines.push(`    return new _scrml_g.Response(null, { status: 204, headers: _scrml_endpoint_cors_headers(_scrml_origin, _scrml_want) });`);
+  lines.push(`  }`);
+  lines.push(`  // §61.7 — no endpoint here takes cross-origin browser callers for that method: 405.`);
+  lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: "Method Not Allowed" }), {`);
+  lines.push(`    status: 405,`);
+  lines.push(`    headers: { "Content-Type": "application/json", "Allow": _scrml_g.Array.from(_scrml_methods.keys()).join(", ") },`);
+  lines.push(`  });`);
+  lines.push(`}`);
+  lines.push(`// True when an <endpoint> is mounted at the request's path and method.`);
+  lines.push(`function _scrml_is_endpoint_route(_scrml_req) {`);
+  lines.push(`  const _scrml_methods = _scrml_endpoint_cors_table.get(new _scrml_g.URL(_scrml_req.url, "http://localhost").pathname);`);
+  lines.push(`  return _scrml_methods != null && _scrml_methods.has(_scrml_req.method);`);
+  lines.push(`}`);
+  lines.push("");
+  return lines;
+}
+
 /**
  * MOD `exportRegistry` shape (per-module by-name export metadata) as threaded
  * into the server emitters. Named once so both entry points
@@ -3790,17 +3954,20 @@ function generateServerJsImpl(
   // §39.2.1 / §61.7 (ruling:user-voice-scrml.md-S479 "program `cors=` does not
   // cover `<endpoint>` routes; per-endpoint `cors=`") — the endpoints this module
   // MOUNTS (the same skip rules as the handler loop below: a resolved `accepts=`
-  // enum, a path and a method), each with its own `cors=` origin or null. The
-  // program-level CORS stage reads this to leave endpoint routes alone; the
-  // endpoint block emits the `_scrml_endpoint_cors_table` it consults.
-  const _servedEndpoints: { path: string; method: string; cors: string | null }[] = [];
-  for (const _d of _endpointDecls) {
-    const _en = (_d as { acceptsEnum?: { kind?: string } }).acceptsEnum;
-    if (!_en || _en.kind !== "enum") continue;
-    if (typeof _d.path !== "string" || !_d.path || typeof _d.method !== "string" || !_d.method) continue;
-    _servedEndpoints.push({ path: _d.path, method: _d.method, cors: typeof _d.cors === "string" ? _d.cors : null });
-  }
+  // enum, a path and a method), each with its own `cors=` origin or null.
+  const _servedEndpoints = servedEndpointCorsRows(fileAST);
   const _hasServedEndpoints = _servedEndpoints.length > 0;
+  // ... and the endpoints the whole APP mounts (`appEndpointCors`, stashed by
+  // codegen/index.ts): the program-level CORS stage reads these to leave every
+  // endpoint route alone — including one declared in another file — and an
+  // endpoint path's preflight answers for every endpoint at that path. A file
+  // with no app table (a §64 tool program, a direct emitter call) uses its own.
+  const _appEpCors = (fileAST as Record<string, unknown>)[APP_ENDPOINT_CORS_KEY] as AppEndpointCors | null | undefined;
+  const _epCorsRows: EndpointCorsRow[] = _appEpCors ? _appEpCors.rows : _servedEndpoints;
+  const _hasEpCorsRows = _epCorsRows.length > 0;
+  const _epCorsMaxAgeRaw: string | null = _appEpCors
+    ? _appEpCors.corsMaxAge
+    : (middlewareConfig ? ((middlewareConfig as { corsMaxAge?: string | null }).corsMaxAge ?? null) : null);
 
   if (
     serverFns.length === 0 &&
@@ -4620,7 +4787,7 @@ function generateServerJsImpl(
       lines.push("  path: '/*',");
       lines.push("  method: 'OPTIONS',");
       lines.push("  handler: function(_scrml_req) {");
-      if (_hasServedEndpoints) {
+      if (_hasEpCorsRows) {
         // §39.2.1: program `cors=` does not cover `<endpoint>` routes — a preflight
         // to an endpoint's path is the endpoint's to answer (§61.7).
         lines.push("    const _scrml_ep_pre = _scrml_endpoint_preflight(_scrml_req);");
@@ -4630,6 +4797,12 @@ function generateServerJsImpl(
       lines.push("  },");
       lines.push("};");
       lines.push("");
+      if (_hasEpCorsRows && !_hasServedEndpoints) {
+        // §39.2.1 — the app mounts `<endpoint>`s, but in OTHER files: this module's
+        // CORS stage still has to leave them alone, so it carries the app's
+        // endpoint table (a module that mounts one emits it in its endpoint block).
+        for (const _l of endpointCorsHelperLines(_epCorsRows, _epCorsMaxAgeRaw)) lines.push(_l);
+      }
     }
 
     if (_scrml_hasRatelimit) {
@@ -4779,7 +4952,7 @@ function generateServerJsImpl(
       lines.push("    // limiter and ahead of handle() PRE, so an author handle() never sees a");
       lines.push("    // browser preflight (it carries no credentials to satisfy an auth check).");
       lines.push("    if (_scrml_mw_req.method === 'OPTIONS') {");
-      if (_hasServedEndpoints) {
+      if (_hasEpCorsRows) {
         // §39.2.1 (S479 ruling): program `cors=` covers every route EXCEPT an
         // `<endpoint>` route. A preflight to an endpoint's path is answered by
         // that endpoint's own `cors=` — or 405 without one (§61.7) — so the
@@ -4872,7 +5045,7 @@ function generateServerJsImpl(
     }
 
     if (_scrml_hasCors) {
-      if (_hasServedEndpoints) {
+      if (_hasEpCorsRows) {
         // §39.2.1 (S479 ruling) — an `<endpoint>` route's responses carry only the
         // endpoint's own `cors=` headers (set by its handler), never the program's.
         lines.push("    // §39.2.1 — program CORS headers on every response except an <endpoint> route's.");
@@ -6841,56 +7014,7 @@ function generateServerJsImpl(
     // `Access-Control-Request-Method` names has `cors=`, else 405 + `Allow` (§61.7)
     // with no Access-Control-* header, so a browser refuses the cross-origin call.
     if (_hasServedEndpoints) {
-      const _corsMaxAgeSec = parseCorsMaxAge(
-        middlewareConfig ? ((middlewareConfig as { corsMaxAge?: string | null }).corsMaxAge ?? null) : null,
-      );
-      const _corsMaxAgeValue = _corsMaxAgeSec !== null ? String(_corsMaxAgeSec) : "86400";
-      const _byPath = new Map<string, Map<string, string | null>>();
-      for (const _se of _servedEndpoints) {
-        if (!_byPath.has(_se.path)) _byPath.set(_se.path, new Map());
-        _byPath.get(_se.path)!.set(_se.method, _se.cors);
-      }
-      const _tableRows = Array.from(_byPath.entries()).map(([_p, _ms]) => {
-        const _inner = Array.from(_ms.entries())
-          .map(([_m, _o]) => `[${JSON.stringify(_m)}, ${_o === null ? "null" : JSON.stringify(_o)}]`)
-          .join(", ");
-        return `  [${JSON.stringify(_p)}, new _scrml_g.Map([${_inner}])],`;
-      });
-      lines.push(`// --- §61.7/§39.2.1: <endpoint> CORS — path → (method → the endpoint's cors= origin, or null) ---`);
-      lines.push(`// Program cors= does not cover these routes; each endpoint opts in with its own cors=.`);
-      lines.push(`const _scrml_endpoint_cors_table = new _scrml_g.Map([`);
-      for (const _r of _tableRows) lines.push(_r);
-      lines.push(`]);`);
-      lines.push(`function _scrml_endpoint_cors_headers(_scrml_origin, _scrml_method) {`);
-      lines.push(`  return {`);
-      lines.push(`    "Access-Control-Allow-Origin": _scrml_origin,`);
-      lines.push(`    "Access-Control-Allow-Methods": _scrml_method,`);
-      lines.push(`    "Access-Control-Allow-Headers": "Content-Type, Authorization",`);
-      lines.push(`    "Access-Control-Max-Age": "${_corsMaxAgeValue}",`);
-      lines.push(`  };`);
-      lines.push(`}`);
-      lines.push(`// The answer to a preflight at an <endpoint> path, or null for any other path.`);
-      lines.push(`function _scrml_endpoint_preflight(_scrml_req) {`);
-      lines.push(`  const _scrml_url = new _scrml_g.URL(_scrml_req.url, "http://localhost");`);
-      lines.push(`  const _scrml_methods = _scrml_endpoint_cors_table.get(_scrml_url.pathname);`);
-      lines.push(`  if (_scrml_methods === undefined) return null;`);
-      lines.push(`  const _scrml_want = _scrml_req.headers.get("Access-Control-Request-Method");`);
-      lines.push(`  const _scrml_origin = typeof _scrml_want === "string" ? _scrml_methods.get(_scrml_want) : undefined;`);
-      lines.push(`  if (typeof _scrml_origin === "string") {`);
-      lines.push(`    return new _scrml_g.Response(null, { status: 204, headers: _scrml_endpoint_cors_headers(_scrml_origin, _scrml_want) });`);
-      lines.push(`  }`);
-      lines.push(`  // §61.7 — no endpoint here takes cross-origin browser callers for that method: 405.`);
-      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: "Method Not Allowed" }), {`);
-      lines.push(`    status: 405,`);
-      lines.push(`    headers: { "Content-Type": "application/json", "Allow": _scrml_g.Array.from(_scrml_methods.keys()).join(", ") },`);
-      lines.push(`  });`);
-      lines.push(`}`);
-      lines.push(`// True when an <endpoint> is mounted at the request's path and method.`);
-      lines.push(`function _scrml_is_endpoint_route(_scrml_req) {`);
-      lines.push(`  const _scrml_methods = _scrml_endpoint_cors_table.get(new _scrml_g.URL(_scrml_req.url, "http://localhost").pathname);`);
-      lines.push(`  return _scrml_methods !== undefined && _scrml_methods.has(_scrml_req.method);`);
-      lines.push(`}`);
-      lines.push("");
+      for (const _l of endpointCorsHelperLines(_epCorsRows, _epCorsMaxAgeRaw)) lines.push(_l);
     }
 
     for (const _epDecl of _endpointDecls) {
@@ -7041,11 +7165,14 @@ function generateServerJsImpl(
     // literally (`_server.js`, `scrml dev`, the WinterCG `fetch`) answers the
     // preflight even when the program has no `cors=` (405 without the endpoint's
     // own `cors=`). Emitted AFTER the endpoint records so `routes` lists each
-    // endpoint first.
+    // endpoint first. The record is named for its PATH and answers from the app
+    // table, so when two files serve one path the host keeps one identical
+    // record (by name) whose answer covers both files' endpoints (§61.7: `Allow`
+    // lists every method at the path; the requested method's own `cors=` decides).
     if (_hasServedEndpoints) {
       const _prePaths = Array.from(new Set(_servedEndpoints.map((_se) => _se.path)));
       for (let _pi = 0; _pi < _prePaths.length; _pi++) {
-        lines.push(`export const __ri_route_endpoint_preflight_${_pi} = {`);
+        lines.push(`export const ${endpointPreflightRouteName(_prePaths[_pi])} = {`);
         lines.push(`  path: ${JSON.stringify(_prePaths[_pi])},`);
         lines.push(`  method: "OPTIONS",`);
         lines.push(`  handler: _scrml_endpoint_preflight,`);

@@ -68,7 +68,7 @@ import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
-import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
+import { generateServerJs, astUsesSessionWrite, appEndpointCors, APP_ENDPOINT_CORS_KEY } from "./emit-server.ts";
 import { compilationTenantSet, COMPILATION_TENANT_KEY, type CompilationTenantSet } from "./tenant-egress.ts";
 import { buildProtectContext } from "./protect-egress.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
@@ -2554,6 +2554,22 @@ export function runCG(input: CgInput): CgOutput {
     compilationTenantInput ?? compilationTenantSet(files, buildProtectContext(protectAnalysis));
   for (const fileAST of files) {
     if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
+  }
+  // §39.2.1 / §61.7 (S479 ruling; #1981 review HIGH-1) — the endpoint CORS facts of
+  // the whole APP, not of one file: the host mounts ONE request onion (from the file
+  // that declares it) in front of every file's routes, so a program-level `cors=`
+  // must leave alone an `<endpoint>` declared in any file, and an endpoint path's
+  // preflight answers for every file's endpoints at that path. Web-app files only:
+  // a §64 `kind="tool"` program serves its own endpoints from its own harness.
+  {
+    const webFiles = (files ?? []).filter((f) => f && typeof f === "object" && !isToolProgram(f));
+    const appEpCors = appEndpointCors(webFiles);
+    // Written on every file (null when the app mounts no endpoint, and on a tool
+    // program), so a file AST reused by a later compilation never carries an
+    // earlier app's table.
+    for (const f of files ?? []) {
+      if (f && typeof f === "object") (f as any)[APP_ENDPOINT_CORS_KEY] = isToolProgram(f) ? null : appEpCors;
+    }
   }
   // S470 s470-host-fetch-followups (R3) — a binding of the host global object (`const w = window`)
   // is that object for every reader of the host `fetch` spellings (host-promise-names.ts): marked on
