@@ -1,0 +1,7 @@
+// §7.6 (S479) — a write of another file's file-scope `let` through a namespace import is E-FILE-SCOPE-LET-FOREIGN-WRITE.
+import * as L from "./lib.scrml";
+<program>
+    <main>
+        <button onclick={ L.shared = 3; }>b</button>
+    </main>
+</program>

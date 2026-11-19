@@ -9840,7 +9840,9 @@ ${
                             if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(s, i)))
                             i = i + 1
                         }
-                        return diagX(env, e, "E-SCOPE-001", shownStruct(env, s) + " has no field `" + name + "`", st)
+                        // S480: an unknown field of a struct is E-TYPE-004 (§34, §14.3, §14.8.8 T2a) —
+                        // a member name is not a scope identifier (E-SCOPE-001); impl#1 agrees
+                        return diagX(env, e, "E-TYPE-004", shownStruct(env, s) + " has no field `" + name + "`", st)
                     }
                 }
             }
@@ -9870,7 +9872,7 @@ ${
                                 if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(ms, mx)))
                                 mx = mx + 1
                             }
-                            return diagX(env, e, "E-SCOPE-001", shownStruct(env, ms) + " has no field `" + name + "`", st)
+                            return diagX(env, e, "E-TYPE-004", shownStruct(env, ms) + " has no field `" + name + "`", st)
                         }
                     }
                 }
@@ -10676,13 +10678,15 @@ ${
     //       g-boot-file-scope-init-residue-s479) — a function reached at initialization that
     //       accesses client-only state (a cell, a DOM global: module initialization runs
     //       before the program instance exists, and the server artifact has neither), that
-    //       makes a call the analysis cannot resolve, that runs a declaration's
-    //       construction, or that reads / writes a file-scope binding initialized AFTER this
-    //       one (that binding is not initialized yet — JS's temporal dead zone).
+    //       makes a call the analysis cannot resolve, or that runs a declaration's
+    //       construction. One that reads / writes a file-scope binding initialized AFTER this
+    //       one (or this one itself), through any chain of calls, is E-SCOPE-001 — s479
+    //       (s479-file-scope-follow; ruling #1962 item 2), §7.6: "the same error as reading the
+    //       later binding directly" (that binding is not initialized yet when this runs).
     //   (c) "A server function SHALL NOT write a file-scope `let`,
     //       `E-FILE-SCOPE-LET-SERVER-WRITE`": a `let` written — `=`, a compound assignment,
     //       `++` / `--`, a tape edit (`append` …) — by a server-placed function's body or by
-    //       any function it reaches (it runs in place on the server, §13.4).
+    //       any function it reaches (the call runs on the server, in the server artifact — the static call graph §12.4 judges a server function by). Exempt: a `kind="tool"` program without `serve=` (§64; ruling #1962 item 1; a §64.9 `serve=` tool answers requests and is not exempt — #1975 review F1).
     // And §48.3.3 (E-FN-003): "A `fn` body SHALL NOT write to any variable declared outside
     // the `fn`'s own scope boundary. This includes: Assignment (`x = value`) where `x` is
     // declared in an enclosing `${}` logic context or file scope."
@@ -10705,11 +10709,20 @@ ${
         let ownB: FxAtom[][] = []
         let ownS: FxAtom[][] = []
         let fnE: int[][] = []
+        // s479 r1 (#1975 review F2) — the DIRECT dimension: the bindings a body uses, and the
+        // functions it calls, OUTSIDE its function values (an arrow function, a block lambda) and
+        // its nested function declarations (deferredSpansIn) — code that runs when the body runs.
+        // A use reached only through a function value may never run at module initialization
+        // (`const g = () => Z;` stored, not called): E-SCOPE-001 is not proven for it.
+        let ownBD: FxAtom[][] = []
+        let fnED: int[][] = []
         let i: int = 0
         for (const c of sum.nodes) {
             fnE = fnE.concat([refTargets(sum.nodes, c.f.scan.refs, false)])
             let ws: LetW[] = []
             let bs: FxAtom[] = []
+            let bd: FxAtom[] = []
+            let defer: ASpan[] = []
             const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym)
             if (c.kind == CallableK.KFn && fsrc is given) {
                 ws = letWritesIn(t, fsrc.f.body, lets, fsrc.info.file)
@@ -10718,7 +10731,15 @@ ${
                     bs = bs.concat([ownAtom("b:" + id, i, k)])
                     k = k + 1
                 }
+                defer = deferredSpansIn(fsrc.f.body)
+                let kd: int = 0
+                for (const id of bindingUsesDirect(t, fsrc.f.body, binds, defer)) {
+                    bd = bd.concat([ownAtom("b:" + id, i, kd)])
+                    kd = kd + 1
+                }
             }
+            ownBD = ownBD.concat([bd])
+            fnED = fnED.concat([directCallTargets(sum.nodes, c.f.scan.refs, defer)])
             let wa: FxAtom[] = []
             let k2: int = 0
             for (const w of ws) {
@@ -10736,6 +10757,7 @@ ${
         }
         const writes: FxAtom[][] = closeDim(ownW, fnE)
         const uses: FxAtom[][] = closeDim(ownB, fnE)
+        const usesD: FxAtom[][] = closeDim(ownBD, fnED)
         const servers: FxAtom[][] = closeDim(ownS, fnE)
         // §48.3.3 — a `fn` body's own write of a file-scope `let`
         for (const fs of g.fns) {
@@ -10745,20 +10767,31 @@ ${
                 }
             }
         }
-        // (c) — a server-placed function's body, or a function it reaches, writes a file-scope `let`
+        // (c) — a server-placed function's body, or a function it reaches, writes a file-scope `let`.
+        // s479 (s479-file-scope-follow; ruling #1962 item 1) — §7.6 rule (c): "A `kind="tool"`
+        // program (§64) with no `serve=` attribute has no client boundary (§64.5.1), no requests
+        // and no other users: a file-scope `let` its functions write is the one process's own
+        // state, not state shared across requests, so rule (c) does not apply to it. A
+        // `kind="tool"` program WITH `serve=` (§64.9, in any form …) is NOT exempt": a tool's every `function`
+        // is server-placed (FnFacts.tool), and none of them is refused here.
+        // s479 r1 (#1975 review F1) — only a tool WITHOUT `serve=`: the ruling's reason ("a tool
+        // has no requests and no other users") does not hold for a §64.9 `serve=` tool, which
+        // mounts routes and answers requests — a `serve=` in any form (well-formed or not) keeps
+        // rule (c) (fail closed; g-boot-tool-serve-unbuilt-s477).
+        const exempt: boolean = fileIsServelessTool(g, g.entry)
         let seen: string[] = []
         let j: int = 0
         for (const c of sum.nodes) {
             const pk: PlaceK = placeOf(sum.places, c.f.sym)
-            if (c.kind == CallableK.KFn && (pk == PlaceK.Server || pk == PlaceK.Split)) {
+            if (!exempt && c.kind == CallableK.KFn && (pk == PlaceK.Server || pk == PlaceK.Split)) {
                 for (const a of writes[j]) {
                     const w: LetW = sites[a.root][a.pos]
                     const key: string = w.file + ":" + w.span.start
                     if (seen.indexOf(key) < 0) {
                         seen = seen.concat([key])
                         let via: string = ""
-                        if (a.root != j) via = " (through `" + sum.nodes[a.root].label + "`, which it calls in place on the server — §13.4)"
-                        out = out.concat([newDiag("E-FILE-SCOPE-LET-SERVER-WRITE", "`" + c.label + "` is placed on the server, and it writes `" + w.name + "`, a file-scope `let`" + via + " — a file-scope `let` is per-artifact state, and the server artifact's copy would be per-process mutable state shared by every request, a cross-user leak (§7.6 rule (c)). Keep per-user server state in a session (§20.5) or the database; client state in a cell", w.file, w.span)])
+                        if (a.root != j) via = " (through " + callableShown(g, sum.nodes[a.root]) + ", which it calls — the call runs on the server, in the server artifact, §12.4)"
+                        out = out.concat([newDiag("E-FILE-SCOPE-LET-SERVER-WRITE", capitalized(callableShown(g, c)) + " is placed on the server, and it writes `" + w.name + "`, a file-scope `let`" + via + " — a file-scope `let` is per-artifact state, and the server artifact's copy would be per-process mutable state shared by every request, a cross-user leak (§7.6 rule (c)). Keep per-user server state in a session (§20.5) or the database; client state in a cell", w.file, w.span)])
                     }
                 }
             }
@@ -10767,10 +10800,32 @@ ${
         // (a) / (b) — what each initializer reaches through the functions it names
         let ci: int = 0
         for (const kc of g.consts) {
-            if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, binds, kc, ci))
+            if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, usesD, binds, kc, ci))
             ci = ci + 1
         }
         return out
+    }
+
+    // s479 (s479-file-scope-follow; #1962 review LOW-1) — a callable as its source names it: a
+    // function "`f()`"; a synthesized `<endpoint>` arm function (parse.scrml endpointDesugar,
+    // `endpoint#<k>#<V>`) "the `<V>` arm of `<endpoint path="/p">`"; a synthesized `<onchange>`
+    // arm (`onchange#<k>#<V>`) "the `<V>` arm of an `<onchange>`" — never the internal name.
+    fn callableShown(g: Globals, c: Callable) -> string {
+        const n: string = c.f.name
+        if (c.kind == CallableK.KFn && isEndpointFnName(n)) {
+            for (const fa of g.files) {
+                if (fa.path == c.f.file) {
+                    for (const ep of fa.eps) {
+                        for (const a of ep.arms) {
+                            if (a.fn == n) return "the `<" + a.variant + ">` arm of `<endpoint path=\"" + ep.path + "\">`"
+                        }
+                    }
+                }
+            }
+            return "an `<endpoint>` arm"
+        }
+        if (c.kind == CallableK.KFn && n.indexOf("onchange#") == 0) return "the `<" + n.substring(n.lastIndexOf("#") + 1) + ">` arm of an `<onchange>`"
+        return "`" + c.label + "`"
     }
 
     fn fnSrcOfSym(g: Globals, sym: int) -> FnSrc | not {
@@ -10797,9 +10852,13 @@ ${
     }
 
     // The initializer of the constant at index `ci` of g.consts: (a), then the (b) refusals.
-    fn initReachDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][], servers: FxAtom[][], uses: FxAtom[][], binds: int[], kc: ConstInfo, ci: int) -> Diag[] {
+    fn initReachDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][], servers: FxAtom[][], uses: FxAtom[][], usesD: FxAtom[][], binds: int[], kc: ConstInfo, ci: int) -> Diag[] {
         const scan: BodyScan = scanExpr({ t: t, file: kc.file }, kc.init, emptyScan())
         const what: string = bindingWhat(kc)
+        const initDefer: ASpan[] = deferredSpansInExpr(kc.init)
+        // s479 r1 (#1975 review F2): a later binding reached only through a function value —
+        // the first such, refused by name after every ref is judged (a proven reach wins)
+        let lamLate: Diag | not = not
         if (scan.unproven.length > 0) {
             const u: USite = scan.unproven[0]
             return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " makes a call the analysis cannot resolve (" + u.what + ") — it runs at module initialization (§7.6 rule (b)), and the bootstrap evaluates only a call whose callee it knows there (INTERIM, g-boot-file-scope-init-residue-s479)", u.file, u.span)]
@@ -10820,21 +10879,108 @@ ${
                     return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which reaches client-only state (`" + sum.nodes[ca.root].label + "` " + clientWhatAt(sum.nodes[ca.root].f, ca.pos) + ") — the initializer runs at module initialization in every artifact that reads the binding (§7.6 rule (b)): before the program instance exists, and on the server, which has no cells or DOM. The bootstrap does not evaluate it there (INTERIM, g-boot-file-scope-init-residue-s479); read the cell where the value is needed", r.file, r.span)]
                 }
                 if (sum.routeOpen[j].length > 0) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which makes a call the analysis cannot resolve — the bootstrap evaluates at module initialization (§7.6 rule (b)) only code whose callees it knows (INTERIM, g-boot-file-scope-init-residue-s479)", r.file, r.span)]
-                for (const ua of uses[j]) {
+                // s479 r1 (#1975 review F2) — E-SCOPE-001 only for a use reached through DIRECT
+                // calls (usesD: no function value, no nested declaration on the way; the call
+                // itself not inside a function value of the initializer, nor a function named
+                // without a call). A use reached only through a function value is not proven to
+                // run at module initialization — refused by name below, INTERIM.
+                let direct: FxAtom[] = []
+                if (!r.asValue && !spanInAny(r.span, initDefer)) direct = usesD[j]
+                for (const ua of direct) {
                     const used: int = atomBinding(ua.key)
                     const ui: int = constIndexOf(g, used)
                     if (ui >= ci) {
                         const uk: ConstInfo | not = constOfSym(g, used)
                         let un: string = "a file-scope binding"
                         if (uk is given) un = "`" + uk.name + "`"
-                        let self: string = " is initialized after it"
+                        // s479 (s479-file-scope-follow; ruling #1962 item 2) — §7.6: "An initializer that
+                        // reaches a file-scope binding declared after it — directly, or through a
+                        // function it calls, at any depth — SHALL be `E-SCOPE-001`, the same error as
+                        // reading the later binding directly" (resolveName's report for the direct read)
+                        let via: string = ","
+                        if (ua.root != j) via = ", which reaches `" + sum.nodes[ua.root].label + "`,"
+                        let self: string = " is declared after `" + kc.name + "`"
                         if (ui == ci) self = " is the binding being initialized"
-                        return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which uses " + un + " — and " + un + self + ", so it is not initialized when this initializer runs at module initialization (§7.6 rule (b)). Declare it before `" + kc.name + "` (no cycle, no read of an uninitialized binding)", r.file, r.span)]
+                        let fix: string = "Declare " + un + " before `" + kc.name + "`"
+                        if (ui == ci) fix = "An initializer cannot use the binding it initializes"
+                        return [newDiag("E-SCOPE-001", un + " is used before it is initialized — the initializer of " + what + " calls `" + c.label + "`" + via + " which uses " + un + ", and " + un + self + ", so it is not initialized when this initializer runs at module initialization (§7.6: an initializer reads only the file-scope bindings initialized before it, directly or through the functions it calls). " + fix, r.file, r.span)]
+                    }
+                }
+                if (lamLate is not) {
+                    for (const ua of uses[j]) {
+                        const used: int = atomBinding(ua.key)
+                        const ui: int = constIndexOf(g, used)
+                        if (ui >= ci && lamLate is not) {
+                            const uk: ConstInfo | not = constOfSym(g, used)
+                            let un: string = "a file-scope binding"
+                            if (uk is given) un = "`" + uk.name + "`"
+                            let self: string = " is declared after `" + kc.name + "`"
+                            if (ui == ci) self = " is the binding being initialized"
+                            lamLate = newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which uses " + un + " only inside a function value (an arrow function, a block lambda) or a nested function — and " + un + self + ", so it is not initialized when this initializer runs at module initialization. Whether that code runs then (a function value may be stored and called later, or handed to a method that calls it now) is not decided by the bootstrap, so it refuses this by name (INTERIM, g-boot-file-scope-init-residue-s479; §7.6 rule (b)). Declare " + un + " before `" + kc.name + "`", r.file, r.span)
+                        }
                     }
                 }
             }
         }
+        if (lamLate is given) return [lamLate]
         return []
+    }
+
+    // s479 r1 (#1975 review F2) — the spans of a body whose code does NOT run when the body
+    // runs: a function value (an arrow function, a block lambda — it runs when it is called, if
+    // ever) and a nested function declaration (its own callable: a call of it is an edge).
+    fn deferredSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s)
+            if (lf is given) {
+                out = out.concat([lf.span])
+            } else {
+                for (const e of stmtExprs(s)) { out = out.concat(deferredSpansInExpr(e)) }
+                for (const nb of nestedBlocks(s)) { out = out.concat(deferredSpansIn(nb)) }
+            }
+        }
+        return out
+    }
+
+    fn deferredSpansInExpr(e: AExpr) -> ASpan[] {
+        if (isLambda(e)) return [e.span]
+        let out: ASpan[] = []
+        for (const x of exprKids(e)) { out = out.concat(deferredSpansInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(deferredSpansIn(b)) }
+        return out
+    }
+
+    fn spanInAny(s: ASpan, spans: ASpan[]) -> boolean {
+        for (const d of spans) {
+            if (d.start <= s.start && s.end <= d.end) return true
+        }
+        return false
+    }
+
+    // bindingUsesIn, outside the spans `defer` (deferredSpansIn).
+    fn bindingUsesDirect(t: Tables, b: ABlock, binds: int[], defer: ASpan[]) -> int[] {
+        let out: int[] = []
+        for (const e of nameExprsIn(b)) {
+            const f: NameFact | not = nameFact(t.names, e.nid)
+            const id: int = constSymOfFact(f)
+            if (id >= 0 && binds.indexOf(id) >= 0 && out.indexOf(id) < 0 && !spanInAny(e.span, defer)) out = out.concat([id])
+        }
+        for (const w of letWritesIn(t, b, binds, "")) {
+            if (out.indexOf(w.sym) < 0 && !spanInAny(w.span, defer)) out = out.concat([w.sym])
+        }
+        return out
+    }
+
+    // The callables a body CALLS outside the spans `defer` (a function named without a call
+    // is no edge: it is a value, not a run).
+    fn directCallTargets(nodes: Callable[], refs: FnRef[], defer: ASpan[]) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (j >= 0 && !r.asValue && !spanInAny(r.span, defer)) out = out.concat([j])
+        }
+        return out
     }
 
     fn atomBinding(key: string) -> int { return Number(key.substring(2)) }
@@ -13405,6 +13551,27 @@ ${
         return false
     }
 
+    // s479 r1 (#1975 review F1) — is `file`'s top-level `<program>` a `kind="tool"` program
+    // with NO `serve=` attribute, in any form (§64.9)? Such a tool has no requests (§7.6 rule
+    // (c)'s tool exemption); a `serve=` tool answers requests, so it is not exempt.
+    fn fileIsServelessTool(g: Globals, file: string) -> boolean {
+        if (!fileIsTool(g, file)) return false
+        for (const fa of g.files) {
+            if (fa.path == file) {
+                for (const it of fa.items) {
+                    const p: AProgram | not = programOfItem(it)
+                    if (p is given) {
+                        for (const a of p.attrs) {
+                            if (a.name == "serve") return false
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     fn foreignElemOf(it: AItem) -> AElem | not {
         const k: AItemK = it.k
         return match k {
@@ -14922,6 +15089,10 @@ ${
         // (client logic only — a server function has no DOM, §5.2)
         const sinkW: string = assignSinkWhy(env, target, value)
         if (sinkW != "") return addDiag(st0, env.file, e.span, "E-LOGIC-EXECUTABLE-SINK", sinkMessage(sinkW))
+        // s479 (s479-file-scope-follow) — a write of another file's file-scope `let` (§7.6,
+        // E-FILE-SCOPE-LET-FOREIGN-WRITE), whatever its shape: a rebinding, a part, a position
+        const fw: AS | not = foreignLetWrite(env, target, target.span, [value], st0)
+        if (fw is given) return fw
         // s442: the recognized sequence reassignment shapes (§66.11.2) and an
         // element-field write (dpa-052 Q3).
         // r1 F1: only a CELL / field place — a local (or a place rooted in one)
@@ -15499,6 +15670,12 @@ ${
     // state authoritatively, bypassing sub-field contracts).
     fn resolveReset(env: Env, e: AExpr, args: AExpr[], st0: AS) -> AS {
         if (args.length != 1) return addDiag(st0, env.file, e.span, "E-RESET-ARG", "`reset` takes one cell: `reset(@x)`")
+        // s479 (s479-file-scope-follow; #1962 review LOW-3 — `reset(x)` on a plain `let` compiled
+        // to nothing) — §6.8.2: "The target argument MUST be one of the three canonical shapes
+        // above. Any other expression shape — literal, function-call result, binary / ternary /
+        // unary expression, bare identifier without `@`, member chain rooted at a non-`@`
+        // identifier, or computed-index access — is **E-RESET-INVALID-TARGET**".
+        if (!resetShapeOk(args[0])) return addDiag(resolveExpr(env, args[0], not, st0).st, env.file, args[0].span, "E-RESET-INVALID-TARGET", "this `reset` — `reset` takes a cell: `reset(@cell)`, `reset(@compound)` or `reset(@compound.field)` (§6.8.2); " + resetShapeFix(args[0]))
         const rp: RPlace = resolvePlace(env, args[0], st0)
         let st: AS = rp.st
         const p: WPlace | not = rp.place
@@ -15606,6 +15783,13 @@ ${
         // grants (the typer, localEditProblems) and lowered to a rebinding of the local
         const lm: MethodCall | not = memberCall(callee)
         if (lm is given) {
+            // s479 (s479-file-scope-follow): an edit of another file's file-scope `let` tape —
+            // through a namespace import too, whose root is no local (resolveLocalEdit)
+            const em: string = lm.method
+            if (em == "append" || em == "prepend" || em == "pop" || em == "shift" || em == "remove" || em == "insert") {
+                const fw: AS | not = foreignLetWrite(env, lm.obj, lm.obj.span, args, st)
+                if (fw is given) return fw
+            }
             if (rootIsLocal(env, lm.obj)) {
                 const le: AS | not = resolveLocalEdit(env, e, lm, args, false, st)
                 if (le is given) return le
@@ -17123,6 +17307,10 @@ ${
         const meth: string = m.method
         const editName: boolean = meth == "append" || meth == "prepend" || meth == "pop" || meth == "shift"
         if (!editName && meth != "remove" && meth != "insert") return not
+        // s479 (s479-file-scope-follow) — an edit of another file's file-scope `let` tape (§7.6,
+        // E-FILE-SCOPE-LET-FOREIGN-WRITE), of the binding or of a part of it
+        const fw: AS | not = foreignLetWrite(env, m.obj, m.obj.span, args, st0)
+        if (fw is given) return fw
         const n: string = exprName(m.obj)
         let l: LocalB | not = lookupLocal(env, n)
         // s479: an edit of a file-scope `let` tape (§7.6) — a write of it, as a rebinding is
@@ -28422,7 +28610,7 @@ ${
     // NAME (E-BOOTSTRAP-UNSUPPORTED, INTERIM g-boot-file-scope-init-residue-s479):
     // initBlocker's forms (a cell read, a function value, a `match` / handling
     // form, an assignment) and fileScopePass's (a callee that reaches client-only
-    // state, an unresolvable call, a construction, a binding initialized later).
+    // state, an unresolvable call, a construction). A binding initialized later, reached through a call, is E-SCOPE-001 (s479-file-scope-follow, ruling #1962 item 2).
     // An initializer reads only the bindings initialized BEFORE it (earlier in its
     // file, or in a file it imports — link order) — directly (resolveName) or
     // through the functions it calls (fileScopePass) — so there is no cycle and
@@ -28536,6 +28724,14 @@ ${
             // or a constant whose type is unknown already, whose own report owns it)
             let kw: string = "const"
             if (c.mutable) kw = "let"
+            // s479 (#1962 review LOW-2): a server-placed callee is rule (a)'s, whatever the type
+            const sc: AExpr | not = serverOwnCallIn(g, c.init, ri.st)
+            if (sc is given) {
+                let callee: string = "a function"
+                const sf: FnSrc | not = calleeFnOf(g, sc, ri.st)
+                if (sf is given) callee = "`" + sf.info.name + "()`"
+                return { c: constAs(c, not, true, false), st: addDiag(st, c.file, sc.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " calls " + callee + ", placed on the server — a file-scope initializer runs at module initialization, which is synchronous and cannot wait on the server (§7.6 rule (a), as §6.6.19 refuses a derived cell). Compute the value in a server function and call it where it is needed") }
+            }
             if (!recoveredInit(c.init) && ri.st.diags.length == st0.diags.length && !cycleUntypedRead(g, c.file, c.init)) st = addDiag(st, c.file, c.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of " + what + " is not known from its initializer — write it: `" + kw + " " + c.name + ": T = …;`")
             return { c: constAs(c, not, true, false), st: st }
         }
@@ -28549,6 +28745,32 @@ ${
     // s479 — the declared result type of the function `e` calls by name (not a failable or a
     // server-own one, whose call is not a plain value), else `not`.
     fn calledRet(g: Globals, e: AExpr, st: AS) -> Type | not {
+        const fs: FnSrc | not = calleeFnOf(g, e, st)
+        if (fs is not) return not
+        if (fs.info.failable || fs.info.serverOwn) return not
+        return fs.info.ret
+    }
+
+    // s479 (s479-file-scope-follow; #1962 review LOW-2) — the first call in a file-scope
+    // initializer, at any depth, of a function whose OWN body places it on the server
+    // (FnInfo.serverOwn: a `?{}`, a print §20.7.3, the `server` modifier), else `not`. When the
+    // initializer's type is not known, this is still §7.6 rule (a)'s "a call of a server-placed
+    // function" — E-FILE-SCOPE-SERVER-ONLY-REACH, not a request to write the type. (Where the
+    // type IS known, fileScopePass reports it over placement, transitive calls included.)
+    fn serverOwnCallIn(g: Globals, e: AExpr, st: AS) -> AExpr | not {
+        const fs: FnSrc | not = calleeFnOf(g, e, st)
+        if (fs is given) {
+            if (fs.info.serverOwn) return e
+        }
+        for (const x of exprKids(e)) {
+            const hit: AExpr | not = serverOwnCallIn(g, x, st)
+            if (hit is given) return hit
+        }
+        return not
+    }
+
+    // The function `e` calls by name (a file-scope function the binder resolved), else `not`.
+    fn calleeFnOf(g: Globals, e: AExpr, st: AS) -> FnSrc | not {
         const k: AExprK = e.k
         const cnid: int = match k {
             .Call(callee: c) :> c.nid
@@ -28584,10 +28806,7 @@ ${
         const fsym: Sym | not = fnSymOfFact(nf)
         if (fsym is not) return not
         for (const fs of g.fns) {
-            if (fs.info.sym.id == fsym.id) {
-                if (fs.info.failable || fs.info.serverOwn) return not
-                return fs.info.ret
-            }
+            if (fs.info.sym.id == fsym.id) return fs
         }
         return not
     }
@@ -29083,9 +29302,8 @@ ${
     // s479 (s479-file-scope-init) — the file-scope `let` (§7.6) `name` denotes here, as the
     // local a write rebinds (no nearer local of the name: lookupLocal is asked first). Its
     // type is its declaration's (constValue fixed it; annotOf carries it to the typer). A
-    // `let` declared in ANOTHER file is not written from here: whether an import makes a
-    // file-scope `let` writable is not ruled (cf. §66.14 ⚑ O2 / O39 for an own value) —
-    // fileLetWriteGuard refuses it by name.
+    // `let` declared in ANOTHER file is not written from here: E-FILE-SCOPE-LET-FOREIGN-WRITE
+    // (foreignLetOf, fileLetWriteGuard; s479-file-scope-follow, ruling #1962 item 3).
     fn fileLetLocal(env: Env, name: string) -> LocalB | not {
         if (lookupLocal(env, name) is given) return not
         const kc: ConstInfo | not = constNamed(env.g, env.file, name)
@@ -29100,11 +29318,150 @@ ${
     //     own scope boundary. This includes: Assignment (`x = value`) where `x` is declared
     //     in an enclosing `${}` logic context or file scope." — E-FN-003 (fnWritePass judges
     //     the body that writes; this site is recorded by its EAssignLocal / ELocalEdit);
-    //   - a `let` of another file: not ruled writable through an import — refused by name.
+    //   - a `let` of another file: E-FILE-SCOPE-LET-FOREIGN-WRITE (foreignLetDiag).
     fn fileLetWriteGuard(env: Env, l: LocalB, span: ASpan, st: AS) -> AS {
         const kc: ConstInfo | not = constNamed(env.g, env.file, l.name)
-        if (kc is given && kc.file != env.file) return addDiag(st, env.file, span, "E-BOOTSTRAP-UNSUPPORTED", "this writes `" + l.name + "`, a file-scope `let` declared in `" + kc.file + "` — whether an import makes a file-scope `let` writable from another file is not ruled (cf. §66.14 ⚑ O2 / O39), so the bootstrap refuses it (INTERIM, g-boot-file-scope-init-residue-s479); write it through a function `" + kc.file + "` exports")
+        if (kc is given && kc.file != env.file) return addDiag(st, env.file, span, "E-FILE-SCOPE-LET-FOREIGN-WRITE", foreignLetWhy(l.name, kc))
         return st
+    }
+
+    // s479 (s479-file-scope-follow) — S479 ruling (user-voice, "#1962 file-scope questions 1–4"
+    // item 3): "Writing another file's file-scope `let`: refuse it, PERMANENT. The alternative is
+    // to write through a function the other file exports (the §66.19 pattern), so nothing is
+    // lost." §7.6: "A file-scope `let` SHALL be written only in the file that declares it. A
+    // write of it from another file — through a named import, an `as` alias or a namespace
+    // import — SHALL be a compile error, `E-FILE-SCOPE-LET-FOREIGN-WRITE`."
+    // The file-scope `let` of ANOTHER file that a write target `t` denotes or is rooted in:
+    // `x`, `x.f`, `x[i]` (`x` imported by name or `as` an alias), `ns.x`, `ns.x.f`, `ns.x[i]`
+    // (`ns` a namespace import, §21.3). `not`: none (a nearer local of the name shadows it).
+    fn foreignLetOf(env: Env, t: AExpr) -> ConstInfo | not {
+        const n: string = exprName(t)
+        if (n != "") return foreignLetNamed(env, n)
+        const o: AExpr | not = chainObj(t)
+        if (o is not) return not
+        const on: string = exprName(o)
+        const mn: string = memberName(t.k)
+        if (on != "" && mn != "" && isNsBinding(env.g.te.link, env.file, on)) {
+            const viaNs: ConstInfo | not = foreignLetNamed(env, on + "." + mn)
+            if (viaNs is given) return viaNs
+        }
+        return foreignLetOf(env, o)
+    }
+
+    // `name` (`x`, or `ns.x` through a namespace import) as a file-scope `let` of another file.
+    fn foreignLetNamed(env: Env, name: string) -> ConstInfo | not {
+        const dot: int = name.indexOf(".")
+        if (dot > 0) {
+            if (nsShadowed(env, name.substring(0, dot))) return not
+        } else if (lookupLocal(env, name) is given) {
+            return not
+        }
+        const kc: ConstInfo | not = constNamed(env.g, env.file, name)
+        if (kc is not) return not
+        if (!kc.mutable || kc.file == env.file) return not
+        return kc
+    }
+
+    // The object of a member / index step, else `not`.
+    fn chainObj(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> o
+            .Index(obj: o) :> o
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Lambda(params: lp) :> not
+            .BlockLambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
+            .HashRef(id: hr0) :> not
+            .Foreign(f: fb0) :> not
+        }
+    }
+
+    fn foreignLetWhy(shown: string, kc: ConstInfo) -> string {
+        let there: string = ""
+        if (shown != kc.name) there = " (`" + kc.name + "` there)"
+        return "this writes `" + shown + "`" + there + ", a file-scope `let` declared in `" + kc.file + "` — a file-scope `let` is written only in the file that declares it (§7.6); an import makes it readable here, never writable. Write it through a function `" + kc.file + "` exports (§66.19), e.g. `export function set" + capitalized(kc.name) + "(v: T) { " + kc.name + " = v; }`, and call that"
+    }
+
+    // A write whose target is rooted in another file's file-scope `let`: the refusal, with the
+    // value (and an edit's arguments) still bound for their own reports. `not`: not such a write.
+    fn foreignLetWrite(env: Env, target: AExpr, span: ASpan, rest: AExpr[], st0: AS) -> AS | not {
+        const kc: ConstInfo | not = foreignLetOf(env, target)
+        if (kc is not) return not
+        let st: AS = st0
+        for (const x of rest) { st = resolveExpr(env, x, not, st).st }
+        return addDiag(st, env.file, span, "E-FILE-SCOPE-LET-FOREIGN-WRITE", foreignLetWhy(writeShown(target), kc))
+    }
+
+    // A write target as written: `x`, `ns.x.f`, `xs[…]`, `ns.xs[…].f`.
+    fn writeShown(t: AExpr) -> string {
+        const pk: string = placeKey(t)
+        if (pk != "") return pk
+        const o: AExpr | not = chainObj(t)
+        if (o is not) return "this value"
+        const mn: string = memberName(t.k)
+        if (mn != "") return writeShown(o) + "." + mn
+        return writeShown(o) + "[…]"
+    }
+
+    // s479 — §6.8.2's three canonical `reset` target shapes, `@cell`, `@compound`,
+    // `@compound.field` (and a deeper compound path, "legal when each segment resolves through
+    // the compound-scope chain"): a member chain rooted at `@`. A parse-error placeholder and a
+    // row value `@.` are resolvePlace's to report.
+    fn resetShapeOk(t: AExpr) -> boolean {
+        const k: AExprK = t.k
+        return match k {
+            .At(name: n) :> true
+            .AtItem :> true
+            .Recovered :> true
+            .Member(obj: o) :> resetShapeOk(o)
+            .Name(name: n) :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Call(callee: c) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: lp) :> false
+            .BlockLambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
+            .HashRef(id: hr0) :> false
+            .Foreign(f: fb0) :> false
+        }
+    }
+
+    fn resetShapeFix(t: AExpr) -> string {
+        const rn: AExpr | not = partRootName(t)
+        if (rn is given) return "`" + exprName(rn) + "` is not a cell (a cell is written `@" + exprName(rn) + "`). A plain `let` has no declared initial state to restore — assign the value: `" + exprName(rn) + " = …;`"
+        return "this argument is not a cell (§6.8.2 refuses a literal, a call result, an operator expression and a computed-index access)"
     }
 
     // s477 — is `id` a nested function's Sym?

@@ -1,0 +1,12 @@
+// §7.6 rule (b) (S479) — the same chain with `Z` declared before `A` is clean, and `A` is 12.
+${
+    const Z = 5;
+    function late() -> int { return Z + 1; }
+    function mid() -> int { return late() * 2; }
+    const A: int = mid();
+}
+<program>
+    <main>
+        <p id="v">${A}</p>
+    </main>
+</program>

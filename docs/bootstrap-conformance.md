@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1905 of 1905 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1909 of 1909 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 710 | 37.3% |
+| PASS | 714 | 37.4% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 1 | 0.1% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1905 of 1905 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 711; of those, 710 hold (99.9%). Runtime half executed on the bootstrap for 231 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 715; of those, 714 hold (99.9%). Runtime half executed on the bootstrap for 231 case(s).
 
-- **Vacuous** passes: 18 of 710 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **692**.
+- **Vacuous** passes: 18 of 714 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **696**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 1 | · | · | · | 3 | · | · | · |
-| components | 68 | 1 | · | · | · | 65 | 2 | · | · |
+| components | 69 | 2 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
 | control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
 | defer | 51 | 26 | · | · | · | 4 | 21 | · | · |
@@ -155,7 +155,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | reactive | 132 | 78 | · | · | · | 44 | 10 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
-| schema | 10 | 5 | · | · | · | · | 5 | · | · |
+| schema | 13 | 8 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
@@ -181,7 +181,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (710)
+### PASS / CODES-ONLY (714)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -252,6 +252,7 @@ none
 - `channel/watches-no-pk` — PASS (also emitted, unasserted: W-SCHEMA-001)
 - `channel/watches-unknown-table` — PASS
 - `codegen/cg-export-enum-library-rep` — PASS · TWIN
+- `components/name-collides-reserved-db-neg` — PASS
 - `components/post-ce-residual-component-reject` — PASS
 - `condition/bang-on-optional-neg` — PASS
 - `condition/bool-condition-pos` — PASS
@@ -834,6 +835,9 @@ none
 - `schema/schema-001-neg` — PASS
 - `schema/schema-002-neg` — PASS
 - `schema/schema-003-neg` — PASS
+- `schema/schema-018-composite-key-pos` — PASS
+- `schema/schema-018-second-pk-neg` — PASS
+- `schema/schema-type-case-pos` — PASS
 - `schema/w-schema-001-warn` — PASS
 - `server-db/event-after-await-e02-dynkey-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/event-after-await-e25-before-ok-pos` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)

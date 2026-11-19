@@ -135,8 +135,8 @@ describe("S460 statement 6 — no second report: an unresolved type an error alr
     expect(codes(M + "    function f(a: Nope) { if (a) { @_m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
     expect(codes(M + "    function g() -> Nope { }\n    function f() { if (g()) { @_m = 1; } }")).toEqual(["E-TYPE-UNKNOWN"]);
   });
-  test("a field that does not exist (E-SCOPE-001 only)", () => {
-    expect(codes(O, "<p if=@o.qq>a</p>")).toEqual(["E-SCOPE-001"]);
+  test("a field that does not exist (E-TYPE-004 only)", () => {
+    expect(codes(O, "<p if=@o.qq>a</p>")).toEqual(["E-TYPE-004"]);
   });
   test("a condition inside a construct already refused (`if=` on a `<db>`: E-BOOTSTRAP-UNSUPPORTED only)", () => {
     expect(codes("    let <n:int=0/>\n    <db src=\"./a.db\" if=@n><p>a</p></db>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

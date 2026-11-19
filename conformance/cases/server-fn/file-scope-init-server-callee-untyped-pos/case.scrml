@@ -1,0 +1,10 @@
+// §7.6 rule (a) — an unannotated file-scope initializer calling a server-placed function (it prints, §20.7.3) is E-FILE-SCOPE-SERVER-ONLY-REACH.
+<program>
+    ${
+        function lg() -> int { println("hi"); return 1; }
+        const A = lg() + 1;
+    }
+    <main>
+        <p>${A}</p>
+    </main>
+</program>

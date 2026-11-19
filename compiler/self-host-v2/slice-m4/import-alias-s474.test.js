@@ -134,13 +134,13 @@ describe("aliasing a function, a type, an enum and a constant", () => {
     expect($("#o").textContent).toBe("boxed");
     expect($("#h").textContent).toBe("b");
   });
-  // r1 (#1715 review: the weak pin) — exactly E-SCOPE-001 "has no field `nope`", and (F7) the
+  // r1 (#1715 review: the weak pin) — exactly E-TYPE-004 (S480; was E-SCOPE-001) "has no field `nope`", and (F7) the
   // message names the type by its alias here, with what it is
-  test("a type alias resolves to the declaring file's type: a field it lacks is E-SCOPE-001", () => {
+  test("a type alias resolves to the declaring file's type: a field it lacks is E-TYPE-004", () => {
     const T = { path: "t.scrml", src: `\${\n    export type Box:struct = { v: string }\n}\n` };
     const M = useFns(`import { Box as Crate } from "./t.scrml";\n    fn open(c: Crate) -> string {\n        return c.nope;\n    }`, `<p>x</p>`);
     const r = prog([T, M]);
-    expect(at(r)).toEqual([["E-SCOPE-001", ENTRY]]);
+    expect(at(r)).toEqual([["E-TYPE-004", ENTRY]]);
     expect(errs(r)[0].message).toContain("has no field `nope`");
     expect(errs(r)[0].message).toContain("`Crate` (`Box`, declared in `t.scrml`)");
   });

@@ -125,10 +125,10 @@ describe("§42.3.6 typing — the `F | not` result and the per-hop rule (red on 
     expect(codes(prog(`let <t:string=""/>\nfunction go() { @t = @user?.name; }`, `<p>\${@t}</p>`))).toEqual(["E-TYPE-031"]);
   });
 
-  test("`?.` on an unknown member is E-SCOPE-001", () => {
+  test("`?.` on an unknown member of a struct is E-TYPE-004 (§34, §14.3)", () => {
     const m = msgs(prog(`function go() { const x: string | not = @user?.nope; if (x is given) { @out = x; } }`));
     expect(m.length).toBe(1);
-    expect(m[0]).toContain("E-SCOPE-001");
+    expect(m[0]).toContain("E-TYPE-004");
     expect(m[0]).toContain("`nope`");
   });
 

@@ -63,7 +63,7 @@ describe("a `.get()` row is `Row | not` of the projected columns", () => {
   });
   test("a column not projected is not a field (the row is the projection, not the table)", () => {
     const es = errs(P(fn("f() -> string", [getRow("id, body"), `if (r is not) return "none";`, "return r.note;"])));
-    expect(es.map((d) => d.code)).toEqual(["E-SCOPE-001"]);
+    expect(es.map((d) => d.code)).toEqual(["E-TYPE-004"]);   // §14.8.8 T2a: `r.<unknown>` is E-TYPE-004
     expect(es[0].message).toContain("has no field `note`");
   });
   test("`SELECT *` is the whole table: every column is a field", () => {
