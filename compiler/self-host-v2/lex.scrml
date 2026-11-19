@@ -1798,6 +1798,13 @@ ${
         const c0: int = peekCode(c, 0)
         const c1: int = peekCode(c, 1)
         if (c0 == 36) return c1 == 123
+        return markupOpensAt(c0, c1)
+    }
+
+    // s479 r2 — the tag-open rule as a character test, shared with the parser (a
+    // `type` alias's skipped text stops at a `<` that opens a tag, parse.scrml
+    // aliasStopAt): `<` followed by `/`, `!` or an ASCII letter.
+    export fn markupOpensAt(c0: int, c1: int) -> boolean {
         if (c0 != 60) return false
         return c1 == 47 || c1 == 33 || (c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)
     }
