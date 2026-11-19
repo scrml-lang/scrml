@@ -667,7 +667,7 @@ ${
             if (!hostCrossesIn(p, prm.ty)) out = out.concat(["C-HB4: a parameter of the binding " + who + " does not cross into the host as itself"])
         }
         if (ret is given) {
-            if (!hostDecodes(p, ret, 0)) out = out.concat(["C-HB4: the binding " + who + " returns a type the decode does not check"])
+            if (!hostDecodes(p, ret)) out = out.concat(["C-HB4: the binding " + who + " returns a type the decode does not check"])
         }
         return out
     }
@@ -754,29 +754,76 @@ ${
         return hostScalar(t) || hostIsHandle(p, t)
     }
 
-    fn hostDecodes(p: CoreProgram, t: Type, depth: int) -> boolean {
-        if (depth > 12) return false
-        if (hostScalar(t) || hostIsHandle(p, t)) return true
+    // Every type reachable from `t0` is a scalar, a handle, or a struct, none more than
+    // 12 steps down. A worklist of (type, depth) pairs that expands a struct once PER
+    // DEPTH (`seen` holds `id * 16 + depth`): a struct graph with sharing costs at most
+    // 13 expansions per struct, not (fields)^depth. s479 (survey of
+    // g-boot-recursive-enum-exponential-s479): the same verdict as the plain recursion
+    // it replaces — the conjunction over the same (type, depth) states.
+    fn hostDecodes(p: CoreProgram, t0: Type) -> boolean {
+        let work: Type[] = [t0]
+        let depths: int[] = [0]
+        let seen: int[] = []
+        while (work.length > 0) {
+            const n: int = work.length - 1
+            const t: Type = work[n]
+            const depth: int = depths[n]
+            work = work.slice(0, n)
+            depths = depths.slice(0, n)
+            if (depth > 12) return false
+            if (!hostScalar(t) && !hostIsHandle(p, t)) {
+                const mi: Type | not = hostMaybeInner(t)
+                const el: Type | not = hostSeqElem(t)
+                const s: Sym | not = hostNamedSym(t)
+                if (mi is given) {
+                    work = work.concat([mi])
+                    depths = depths.concat([depth + 1])
+                } else if (el is given) {
+                    work = work.concat([el])
+                    depths = depths.concat([depth + 1])
+                } else {
+                    if (s is not) return false
+                    const key: int = s.id * 16 + depth
+                    if (seen.indexOf(key) < 0) {
+                        seen = seen.concat([key])
+                        const td: TypeDef | not = findTypeDef(p, s)
+                        if (td is not) return false
+                        if (!hostIsStructDef(td)) return false
+                        for (const fd of hostStructFields(td)) {
+                            work = work.concat([fd.ty])
+                            depths = depths.concat([depth + 1])
+                        }
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    fn hostSeqElem(t: Type) -> Type | not {
         return match t {
-            .Maybe(inner: i) :> hostDecodes(p, i, depth + 1)
-            .Seq(elem: e) :> hostDecodes(p, e, depth + 1)
-            .Named(sym: s) :> hostStructDecodes(p, s, depth)
-            .Int :> true
-            .Num :> true
-            .Str :> true
-            .Bool :> true
-            .Fn(params: ps) :> false
+            .Seq(elem: e) :> e
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> not
+            .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
     }
 
-    fn hostStructDecodes(p: CoreProgram, s: Sym, depth: int) -> boolean {
-        const td: TypeDef | not = findTypeDef(p, s)
-        if (td is not) return false
-        if (!hostIsStructDef(td)) return false
-        for (const fd of hostStructFields(td)) {
-            if (!hostDecodes(p, fd.ty, depth + 1)) return false
+    fn hostNamedSym(t: Type) -> Sym | not {
+        return match t {
+            .Named(sym: s) :> s
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Seq(elem: e) :> not
+            .Maybe(inner: i) :> not
+            .Fn(params: ps) :> not
         }
-        return true
     }
 
     fn hostStructFields(td: TypeDef) -> FieldDef[] {

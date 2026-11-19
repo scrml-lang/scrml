@@ -6587,27 +6587,40 @@ ${
     }
 
     // Does `t` contain a declared `:host` type at any depth (a `T | not`, a
-    // tape element, a struct field, an enum payload)? `depth` bounds a cyclic type.
-    fn containsHost(ts: TypeInfo[], t: Type, depth: int) -> boolean {
-        if (depth > 12) return false
-        if (isHostType(ts, t)) return true
-        const mi: Type | not = maybeInner(t)
-        if (mi is given) return containsHost(ts, mi, depth + 1)
-        const el: Type | not = seqElemOf(t)
-        if (el is given) return containsHost(ts, el, depth + 1)
-        const s: Sym | not = namedOf(t)
-        if (s is not) return false
-        const ti: TypeInfo | not = typeInfoOf(ts, s)
-        if (ti is not) return false
-        const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is given) {
-            for (const f of fs) {
-                if (containsHost(ts, f.ty, depth + 1)) return true
-            }
-        }
-        for (const v of enumVariants(ti.def)) {
-            for (const f of v.fields) {
-                if (containsHost(ts, f.ty, depth + 1)) return true
+    // tape element, a struct field, an enum payload)? §21.3.3 rule 15: "A value
+    // whose type contains one at any depth". A worklist over the type graph: each
+    // named type's fields are expanded ONCE (`seen` holds the named types already
+    // expanded), so a cyclic type ends at its name and a type graph with sharing
+    // (a recursive enum whose variants each hold `E` and `E[]`) is walked in time
+    // linear in its size. s479 (g-boot-recursive-enum-exponential-s479): this was
+    // a depth-bounded recursion (depth 12) that re-expanded `E` inside `E` — on
+    // k such variants about (2k)^12 steps, so an AST-shaped enum never compiled.
+    fn containsHost(ts: TypeInfo[], t: Type) -> boolean {
+        let work: Type[] = [t]
+        let seen: int[] = []
+        while (work.length > 0) {
+            const cur: Type = work[work.length - 1]
+            work = work.slice(0, work.length - 1)
+            if (isHostType(ts, cur)) return true
+            const mi: Type | not = maybeInner(cur)
+            const el: Type | not = seqElemOf(cur)
+            const s: Sym | not = namedOf(cur)
+            if (mi is given) {
+                work = work.concat([mi])
+            } else if (el is given) {
+                work = work.concat([el])
+            } else if (s is given && seen.indexOf(s.id) < 0) {
+                seen = seen.concat([s.id])
+                const ti: TypeInfo | not = typeInfoOf(ts, s)
+                if (ti is given) {
+                    const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                    if (fs is given) {
+                        for (const f of fs) { work = work.concat([f.ty]) }
+                    }
+                    for (const v of enumVariants(ti.def)) {
+                        for (const f of v.fields) { work = work.concat([f.ty]) }
+                    }
+                }
             }
         }
         return false
@@ -7046,7 +7059,7 @@ ${
         }
         const r: Type | not = fs.info.ret
         if (r is given) {
-            if (!hostResultOk(types, r, 0)) return "returns `" + typeName(r) + "` — the bootstrap decodes a host result of `int`, `number`, `string`, `bool`, a declared `:host` handle, a struct of those, a tape of those, or the `T | not` of one (§21.3.3 rule 13); an enum's decode (the §41.13 `parseVariant` shape) and DOM element types (rule 16) are not built"
+            if (!hostResultOk(types, r)) return "returns `" + typeName(r) + "` — the bootstrap decodes a host result of `int`, `number`, `string`, `bool`, a declared `:host` handle, a struct of those, a tape of those, or the `T | not` of one (§21.3.3 rule 13); an enum's decode (the §41.13 `parseVariant` shape) and DOM element types (rule 16) are not built"
         }
         return ""
     }
@@ -7057,21 +7070,53 @@ ${
         return scalarType(t) || isHostType(types, t)
     }
 
-    fn hostResultOk(types: TypeInfo[], t: Type, depth: int) -> boolean {
-        if (depth > 12) return false
-        if (scalarType(t) || isHostType(types, t)) return true
-        const mi: Type | not = maybeInner(t)
-        if (mi is given) return hostResultOk(types, mi, depth + 1)
-        const el: Type | not = seqElemOf(t)
-        if (el is given) return hostResultOk(types, el, depth + 1)
-        const s: Sym | not = namedOf(t)
-        if (s is not) return false
-        const ti: TypeInfo | not = typeInfoOf(types, s)
-        if (ti is not) return false
-        const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return false
-        for (const f of fs) {
-            if (!hostResultOk(types, f.ty, depth + 1)) return false
+    // Every type reachable from `t0` (through `T | not`, a tape element, a struct
+    // field) is a scalar, a declared `:host` handle, or a struct, and none lies more
+    // than 12 steps down (a cyclic struct never ends, so it is refused). A worklist of
+    // (type, depth) pairs: a named type is expanded once PER DEPTH (`seen` holds
+    // `id * 16 + depth`, depth <= 12), so a struct graph with sharing — `D0 { a: D1,
+    // b: D1, c: D1, d: D1 }`, `D1 { … D2 … }`, … — costs at most 13 expansions per type,
+    // not 4^depth. s479 (g-boot-recursive-enum-exponential-s479 survey): this was a plain
+    // recursion re-walking every shared struct on every path. The verdict is the
+    // conjunction over the same (type, depth) states the recursion reached, so it is
+    // unchanged.
+    fn hostResultOk(types: TypeInfo[], t0: Type) -> boolean {
+        let work: Type[] = [t0]
+        let depths: int[] = [0]
+        let seen: int[] = []
+        while (work.length > 0) {
+            const n: int = work.length - 1
+            const t: Type = work[n]
+            const depth: int = depths[n]
+            work = work.slice(0, n)
+            depths = depths.slice(0, n)
+            if (depth > 12) return false
+            if (!scalarType(t) && !isHostType(types, t)) {
+                const mi: Type | not = maybeInner(t)
+                const el: Type | not = seqElemOf(t)
+                const s: Sym | not = namedOf(t)
+                if (mi is given) {
+                    work = work.concat([mi])
+                    depths = depths.concat([depth + 1])
+                } else if (el is given) {
+                    work = work.concat([el])
+                    depths = depths.concat([depth + 1])
+                } else {
+                    if (s is not) return false
+                    const key: int = s.id * 16 + depth
+                    if (seen.indexOf(key) < 0) {
+                        seen = seen.concat([key])
+                        const ti: TypeInfo | not = typeInfoOf(types, s)
+                        if (ti is not) return false
+                        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                        if (fs is not) return false
+                        for (const f of fs) {
+                            work = work.concat([f.ty])
+                            depths = depths.concat([depth + 1])
+                        }
+                    }
+                }
+            }
         }
         return true
     }
@@ -7182,12 +7227,12 @@ ${
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
             if (fs is given) {
                 for (const f of fs) {
-                    if (containsHost(types, f.ty, 0)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
+                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
                 }
             }
             for (const v of enumVariants(ti.def)) {
                 for (const f of v.fields) {
-                    if (containsHost(types, f.ty, 0)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
+                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
                 }
             }
         }
@@ -7206,7 +7251,7 @@ ${
                     const at: AType | not = p.ty
                     if (at is given) {
                         const rt: RType = resolveTypeFn(te, at, emptyAS())
-                        if (!rt.unresolved && containsHost(g.types, rt.t, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
+                        if (!rt.unresolved && containsHost(g.types, rt.t)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
                         // s478 (s478-boot-fn-type) — §12.5: "A parameter whose type is NOT JSON-serializable
                         // — … (function, markup … ) — SHALL be a compile error (E-ROUTE-004: non-serializable
                         // parameter type to server function)"; §14.3: "a closure cannot be serialized"
@@ -7215,7 +7260,7 @@ ${
                 }
                 const r: Type | not = fs.info.ret
                 if (r is given) {
-                    if (containsHost(g.types, r, 0)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
+                    if (containsHost(g.types, r)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
                     // s478-ruled-fn-types — §12.5.3 "A function-typed result is E-ROUTE-003 (S478)": "Return
                     // types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003 …). The
                     // non-serializable kinds are: a **function** …" (impl#1 reports E-ROUTE-003 for this
@@ -7237,7 +7282,7 @@ ${
         let st: AS = st0
         for (const ds of g.decls) {
             for (const f of ds.info.fields) {
-                if (containsHost(g.types, f.ty, 0)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
+                if (containsHost(g.types, f.ty)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
             }
         }
         return st
@@ -34680,8 +34725,8 @@ ${
         // s473 (§21.3.3 rule 15): "It is not comparable: `==` or `!=` on a type that
         // contains a declared `:host` type SHALL be `E-EQ-003`, as for a function (§45.2)"
         let hosty: boolean = false
-        if (x0 is given) hosty = containsHost(env.t.types, x0, 0)
-        if (y0 is given && !hosty) hosty = containsHost(env.t.types, y0, 0)
+        if (x0 is given) hosty = containsHost(env.t.types, x0)
+        if (y0 is given && !hosty) hosty = containsHost(env.t.types, y0)
         if (hosty) return report(ts, env, e.span, "E-EQ-003", "equality on a value of a declared `:host` handle type — a host handle is not comparable (§21.3.3 rule 15, §45.2: there is no identity comparison in scrml, §45.6); test it with `is given` / `is not`, or declare a binding that compares on the host side")
         if (x0 is not || y0 is not) return eqMembers(env, e, a, b, ts)
         const x: Type = unMaybe(x0)
