@@ -21,3 +21,4 @@ Base conformance: PASS 645 / FAIL 12 / CRASH 0 (~/.cache/scrml/review/s479-chann
 - Item 5: trusted-proxies (analyze E-MW-009, CoreChannel.trustedProxies, print-server desc, server-runtime forwardedEntry/originOk/addressOf); SPEC §40.2 + §39.2.4.
 - Tests: slice-m4/channel-follow-s479.test.js (18), harness channel-seen-harness.js; existing channel tests updated for __seen / rate refusal / Origin at N=0.
 - e2e differential (~/.cache/scrml/review/s479-channel-follow/diff-e2e.mjs, + bx bounded replace): seeds 11, 12 × 6000 ops — 0 findings.
+- (S480) merged origin/main 25c06747e (58b45b26f; only conflict generated severity.scrml, regenerated); merged-base conformance PASS 708 / FAIL 4 / CRASH 0 (same 4 FAILs as main's docs/bootstrap-conformance.md). Ruled S480: §38.4.2 + §66.11.2 amended (replace not bound by a FIXED length); gap g-boot-fixed-tape-replace-length-unruled-s479 resolved; test comments updated.

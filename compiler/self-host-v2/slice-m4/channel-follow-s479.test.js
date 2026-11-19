@@ -5,9 +5,10 @@
 //      (§66.12.2 "every value of the type has a length in the bound") is refused by the relay (1007,
 //      relayed to no one) and by a receiver; a `T[replace]` tape with no length grant takes a value of
 //      ANY length — exactly as the local write `@fx = [2, 5]` does (the bootstrap compiles it with no
-//      check, and §6's `let <results:Item[replace]=[]/>` example relies on it). Whether a FIXED length
-//      binds a `replace` is an owner question (g-boot-fixed-tape-replace-length-unruled-s479); these
-//      tests pin that relay, client and local write agree today.
+//      check, and §6's `let <results:Item[replace]=[]/>` example relies on it). A FIXED length does not
+//      bind a `replace` — ruled S480 (user-voice-scrml.md "replace is not bound by a FIXED length";
+//      §38.4.2, §66.11.2; g-boot-fixed-tape-replace-length-unruled-s479 resolved); these tests pin that
+//      relay, client and local write agree.
 //   B. `__seen` (§38.4.2 "The frame", "The relay's fold"): every client frame names the last sequence
 //      number its sender had applied; the relay closes (1008) the sender of a refused frame that no
 //      frame relayed after its `__seen` can explain — on a busy channel too — and never an honest
@@ -173,7 +174,7 @@ describe("A — a `replace` and the tape's length: relay, receivers and the loca
     const fx = desc.cells.find((c) => c.key === "fx");
     expect(rt.decode(bx.table, [7], { canonicalOnly: true }).ok).toBe(false);
     expect(rt.channelJudge(bx, [1, 2], "replace", [5, 6])).toBe(null);
-    // the reading pinned (owner question g-boot-fixed-tape-replace-length-unruled-s479): no length grant
+    // ruled S480 (§38.4.2, g-boot-fixed-tape-replace-length-unruled-s479 resolved): no length grant
     // binds `replace` — the relay's fold and every receiver accept what the local `@fx = [2, 5]` writes
     expect(rt.channelJudge(fx, [1, 2, 3], "replace", [2, 5])).toBe(null);
     expect(srt.CHANNEL_FOLD_TEST.judge(fx, new srt.CHANNEL_FOLD_TEST.FoldTape([1, 2, 3]), "replace", [2, 5])).toBe(null);

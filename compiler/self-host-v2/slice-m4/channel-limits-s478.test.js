@@ -158,7 +158,15 @@ describe("B — §38.4.3 bounds, served", () => {
       const a = await connect(base, "/_scrml_ws/chat");
       const b = await connect(base, "/_scrml_ws/chat");
       await tick();
-      for (let i = 1; i <= 4; i++) { a.ws.send(sync("count", i)); await tick(120); }
+      // Each frame is sent only after the previous one was RELAYED (seen by `b`) plus 120 ms, so the
+      // relay handles consecutive frames at least 120 ms apart (2.4 tokens at 20/s) however late the
+      // socket delivers them — a fixed sleep between SENDS let a loaded CI host coalesce two arrivals
+      // inside one token's 50 ms. A bucket that does not refill still refuses frame 2 (burst 1).
+      for (let i = 1; i <= 4; i++) {
+        a.ws.send(sync("count", i));
+        for (let w = 0; w < 100 && b.got.length < i && a.got.every((f) => f.__type !== "__refused"); w++) await tick(20);
+        await tick(120);
+      }
       expect(b.got.map((f) => f.__val)).toEqual([1, 2, 3, 4]);
       expect(a.closed()).toBe(null);
       a.ws.close(); b.ws.close();
