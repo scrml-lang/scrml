@@ -12,8 +12,9 @@
 
 import { compileScrml } from "../../src/api.js";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { lintFiles } from "../../../scripts/lint-duplicate-fn.js";
 
 export const SELF_HOST_V2 = join(import.meta.dir, "..");
 
@@ -147,9 +148,18 @@ export function bundleInputFiles(bundle, modules) {
 export function buildBundleChunks(bundle, modules) {
   // s471-slice-tmp-leak: the out dir is read back into memory and removed. Callers outside
   // `bun test` (scripts/scrml-boot.ts, bootstrap-conformance) never get the S448 tmp root.
+  // s479-import-shadow: impl#1 builds a bootstrap source with a file-scope name collision (an
+  // import and a local of one name, two top-level `fn`s of one name, …) with NO error and resolves
+  // it silently — the bundle builds and miscompiles. SPEC §7.6 makes every such collision
+  // E-SCOPE-010 and impl#1 is frozen, so the build runs the check itself and refuses first.
+  const inputFiles = bundleInputFiles(bundle, modules);
+  const collisions = lintFiles(inputFiles).violations;
+  if (collisions.length > 0) {
+    throw new Error("bootstrap bundle refused — a file-scope name collision in its sources, which impl#1 would build silently (SPEC §7.6, E-SCOPE-010):\n"
+      + collisions.map((v) => `${relative(SELF_HOST_V2, v.file)}:${v.line}:${v.col}: ${v.message}`).join("\n"));
+  }
   const outDir = mkdtempSync(join(tmpdir(), "self-host-v2-bundle-"));
   try {
-    const inputFiles = bundleInputFiles(bundle, modules);
     const result = compileScrml({ inputFiles, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
     const errs = (result.errors ?? []).filter((e) => e && e.code !== undefined);
     if (errs.length > 0) {
