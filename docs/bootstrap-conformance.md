@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1903 of 1903 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1905 of 1905 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 709 | 37.3% |
+| PASS | 710 | 37.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 1 | 0.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.5% |
-| UNSUPPORTED | 556 | 29.2% |
+| NOT-TWINNED | 637 | 33.4% |
+| UNSUPPORTED | 557 | 29.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 709 hold (99.9%). Runtime half executed on the bootstrap for 230 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 711; of those, 710 hold (99.9%). Runtime half executed on the bootstrap for 231 case(s).
 
-- **Vacuous** passes: 18 of 709 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **691**.
+- **Vacuous** passes: 18 of 710 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **692**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556.
+UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 467 · FAIL 1 · UNSUPPORTED 414. Twin holds 467 (non-vacuous 452). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **883** — PASS 468 · FAIL 1 · UNSUPPORTED 414. Twin holds 468 (non-vacuous 453). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
-| endpoint | 24 | 24 | · | · | · | · | · | · | · |
+| endpoint | 25 | 24 | · | · | · | · | 1 | · | · |
 | engine | 99 | 29 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
@@ -147,7 +147,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
 | page | 3 | 2 | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | 2 | · | · | · | 2 | · | · | · |
-| parse-variant | 12 | 12 | · | · | · | · | · | · | · |
+| parse-variant | 13 | 13 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
@@ -181,7 +181,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (709)
+### PASS / CODES-ONLY (710)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -713,6 +713,7 @@ none
 - `parse-variant/error-invalid-payload` — PASS · TWIN
 - `parse-variant/error-malformed-json` — PASS · TWIN
 - `parse-variant/error-missing-discriminator` — PASS · TWIN
+- `parse-variant/error-repeated-key` — PASS · TWIN
 - `parse-variant/error-unknown-variant` — PASS · TWIN
 - `parse-variant/happy-payload-variant` — PASS · TWIN
 - `parse-variant/happy-unit-variant` — PASS · TWIN
@@ -893,7 +894,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (556)
+### UNSUPPORTED (557)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1013,6 +1014,7 @@ none
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
+- `endpoint/cors-attr-clean` — bootstrap-unsupported: `cors=` on `<endpoint>` (§61.7 — cross-origin browser callers) is not in the bootstrap yet: it builds no CORS answer (nor the `<program cors=…>` one), so it is refused by name rather than ignored (INT
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level
