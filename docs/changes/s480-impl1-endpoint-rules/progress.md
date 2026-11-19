@@ -41,3 +41,14 @@ ruling:user-voice-scrml.md-S480-four-recs item 1 (§61.2 placement + §61.7 dupl
   pre-write) + F3 (import graph: an imported file is not an entry; rules run after MOD) +
   Max-Age (a silent mounting entry counts as the default). g-impl1-endpoint-entry-ambiguous-app-s480
   narrowed. Tests: endpoint-route-names-entry-served.test.js.
+- C4 landed (route-export-conflict.js exempts `_scrml_route___ssr`, INTERIM — open gap
+  g-compose-route-export-name-collision-mounts-one-page: every page module exports it for its
+  own path; refusing it failed every multi-page build).
+- Final gates on head: pretest 0; bootstrap conformance CRASH 0 / FAIL 0 (726 PASS); byte-identity
+  66/73 programs identical full `scrml build` output (7 refused identically on both: copied-out
+  db paths / pre-existing errors); conformance impl#1 output 1900/1921 identical — 20 endpoint
+  cases (route names only) + 1 nondeterministic error case; s34-census / types-gate / snippet /
+  claim / corpus-floor / gen-md-shim PASS. Newly-rejecting corpus: the 6 endpoint/path-* negative
+  conformance cases only.
+- C5: LOW note (DELETE at an endpoint path → 404 + program CORS headers) under
+  g-boot-endpoint-residue-s478; progress.
