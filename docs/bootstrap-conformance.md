@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1890 of 1890 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1900 of 1900 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 693 | 36.7% |
+| PASS | 702 | 36.9% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 4 | 0.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.7% |
-| UNSUPPORTED | 556 | 29.4% |
+| NOT-TWINNED | 637 | 33.5% |
+| UNSUPPORTED | 557 | 29.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 697; of those, 693 hold (99.4%). Runtime half executed on the bootstrap for 223 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 706; of those, 702 hold (99.4%). Runtime half executed on the bootstrap for 230 case(s).
 
-- **Vacuous** passes: 18 of 693 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **675**.
+- **Vacuous** passes: 18 of 702 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **684**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556.
+UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **878** — PASS 459 · FAIL 4 · UNSUPPORTED 415. Twin holds 459 (non-vacuous 444). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **879** — PASS 460 · FAIL 4 · UNSUPPORTED 415. Twin holds 460 (non-vacuous 445). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
 | endpoint | 24 | 24 | · | · | · | · | · | · | · |
-| engine | 93 | 23 | · | · | · | 50 | 20 | · | · |
+| engine | 99 | 29 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
 | error | 80 | 56 | · | · | · | 5 | 19 | · | · |
@@ -152,7 +152,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 128 | 75 | · | · | · | 44 | 9 | · | · |
+| reactive | 132 | 78 | · | · | · | 44 | 10 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
@@ -195,7 +195,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (693)
+### PASS / CODES-ONLY (702)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -428,11 +428,17 @@ none
 - `engine/rule-violation-neg` — PASS · TWIN
 - `engine/rule-violation-pos` — PASS · TWIN
 - `engine/self-write-neg` — PASS · TWIN
+- `engine/self-write-outside-state-child-neg` — PASS · TWIN
 - `engine/self-write-pos` — PASS · TWIN
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-invalid-variant-pos` — PASS · TWIN
 - `engine/state-child-missing-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-missing-pos` — PASS · TWIN
+- `engine/timed-debounce-held-until-commit-rt` — PASS
+- `engine/timed-held-write-unreachable-neg` — PASS
+- `engine/timed-held-write-unreachable-pos` — PASS
+- `engine/timed-throttle-leading-violation-rt` — PASS
+- `engine/timed-throttle-trailing-judged-at-commit-rt` — PASS
 - `enum/variant-name-lowercase-reject` — PASS · TWIN
 - `equality/cross-type-primitive-reject` — PASS · TWIN
 - `equality/eq-not-reject` — PASS · TWIN
@@ -736,6 +742,7 @@ none
 - `raw-content/match-arm-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/nested-code-with-attribute-is-text` — PASS
 - `raw-content/pre-code-wrapper-stays-element` — PASS
+- `reactive/client-recursion-calling-server-rt` — PASS
 - `reactive/counter-increment` — PASS · TWIN
 - `reactive/debounce-trailing-commit` — PASS · TWIN
 - `reactive/debounce-valid-neg` — PASS · TWIN
@@ -748,6 +755,8 @@ none
 - `reactive/if-top-level-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
+- `reactive/mixed-recursion-3cycle-rt` — PASS
+- `reactive/mixed-recursion-inherited-rt` — PASS
 - `reactive/multi-cell-interp` — PASS · TWIN
 - `reactive/name-collides-state-neg` — PASS · TWIN
 - `reactive/name-collides-state-pos` — PASS · TWIN
@@ -891,7 +900,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (556)
+### UNSUPPORTED (557)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1291,6 +1300,7 @@ none
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `reactive/mixed-recursion-client-caller-rt` — bootstrap-unsupported: `down()` runs on the server and calls `step()`, a client function that waits for the server (`step() → down()`) — on the server that call would be made in place, which needs a second, server-side copy
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it
