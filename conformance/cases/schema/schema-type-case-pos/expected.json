@@ -1,0 +1,13 @@
+{
+  "id": "schema-type-case-pos",
+  "description": "§39.2 / §39.4 (S479) — `<schema>` column type names and constraint words are case-insensitive, lowercase canonical: `id: INTEGER PRIMARY KEY`, `email: Text Not Null Unique`, `REAL DEFAULT(0)`, `INTEGER NOT NULL REFERENCES users(id)` declare exactly what their lowercase spellings declare. The whole E-SCHEMA-* family stays silent, and the uppercase `PRIMARY KEY` is the table's key (no W-SCHEMA-001).",
+  "language-version": "1.0",
+  "spec": "§39.2, §39.4",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 3 (gap g-boot-schema-type-case-s478)",
+  "rationale": "§39.2: \"The `column-type` names (§39.4) and the words of a `column-constraint` — `primary`, `key`, `not`, `null`, `unique`, `default`, `references`, `rename`, `from` — SHALL be matched case-insensitively; the lowercase spelling is canonical.\" §39.4: \"The type names are matched case-insensitively, lowercase canonical\". Newly-accepting on the bootstrap (it reported `id: INTEGER` as E-SCHEMA-004 and refused `PRIMARY KEY` by name); impl#1 already lowercases.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-SCHEMA-001", "E-BOOTSTRAP-UNSUPPORTED"],
+    "notCodePrefixes": ["E-SCHEMA-"]
+  }
+}

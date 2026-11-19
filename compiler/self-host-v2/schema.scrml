@@ -33,6 +33,7 @@
 //   E-SCHEMA-014  a raw `CREATE TABLE` that is not a plain declaration (§39.2);
 //   E-SCHEMA-016  a table declared twice (§39.7, S478 open-Qs ruling item 18);
 //   E-SCHEMA-017  a column declared twice in one table (§39.7, S478 ruling item 18);
+//   E-SCHEMA-018  a table with more than one `primary key` (§38.5.1, S479 ruling item 4);
 //   W-SCHEMA-001  a table with no `primary key` column (§38.5.1);
 //   W-SCHEMA-NO-TABLES-DECLARED  content that declares no table (§34).
 //
@@ -50,8 +51,7 @@
 //     the §39.5.7 shared-core vocabulary, `immutable`, `rename from` (§38.5.6 —
 //     decided against the live database), a `references` target not declared
 //     here (§39.5.5 allows "the existing database schema", which the bootstrap
-//     does not read), a second `primary key` in one table (its code is still an
-//     OPEN owner question — S478 ruling item 18 left it hedged);
+//     does not read);
 //   - anything else the grammar does not produce (a `,` before `}` or a
 //     doubled `,` among them — S478 ruling item 17 admits ONE `,` between two
 //     column declarations: `column-declaration (','? column-declaration)*`).
@@ -512,9 +512,13 @@ ${
         if (te == j) {
             return colGiveUp(errs, refuse("column `" + name + "` has no type — §39.2: `" + name + ": type` with type one of text, integer, real, blob, boolean, timestamp", i, ne), j)
         }
-        const ty: string = s.substring(j, te)
+        // S479 ruling item 3 — §39.2: "The `column-type` names (§39.4) and the words of a
+        // `column-constraint` … SHALL be matched case-insensitively; the lowercase spelling is
+        // canonical." The column keeps the canonical (lowercase) type.
+        const tyWritten: string = s.substring(j, te)
+        const ty: string = tyWritten.toLowerCase()
         if (!isColumnType(ty)) {
-            errs = errs.concat([err("E-SCHEMA-004", "column `" + table + "." + name + "` has the type `" + ty + "`, which is not a `<schema>` column type — the types are text, integer, real, blob, boolean, timestamp (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\")", j, te)])
+            errs = errs.concat([err("E-SCHEMA-004", "column `" + table + "." + name + "` has the type `" + tyWritten + "`, which is not a `<schema>` column type — the types are text, integer, real, blob, boolean, timestamp (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\")", j, te)])
         } else if (ty == "boolean") {
             errs = errs.concat([refuse("column `" + table + "." + name + "` is `boolean` — §39.4: it is stored as INTEGER and \"The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`)\" at every query, which the bootstrap does not build (INTERIM), so a read would hand the program `1` / `0`. Declare it `integer` and compare with 1 / 0", j, te)])
         }
@@ -552,21 +556,24 @@ ${
                 } else {
                     const we: int = wordEnd(s, k, to)
                     const w: string = s.substring(k, we)
+                    // the §39.2 constraint words compare case-insensitively (S479 ruling item 3)
+                    const lw: string = w.toLowerCase()
                     const after: int = skip(s, we, to)
+                    const lnext: string = wordAt(s, after, to).toLowerCase()
                     if (ch(s, after) == ":") {
                         // the next column declaration
                         going = false
-                    } else if (w == "primary" && wordAt(s, after, to) == "key") {
+                    } else if (lw == "primary" && lnext == "key") {
                         pk = true
                         pks = pks + 1
-                        if (pks > 1) errs = errs.concat([refuse("column `" + table + "." + name + "` says `primary key` twice", k, wordEnd(s, after, to))])
+                        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `primary key` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", k, wordEnd(s, after, to))])
                         k = skip(s, wordEnd(s, after, to), to)
-                    } else if (w == "not" && wordAt(s, after, to) == "null") {
+                    } else if (lw == "not" && lnext == "null") {
                         nn = true
                         k = skip(s, wordEnd(s, after, to), to)
-                    } else if (w == "unique") {
+                    } else if (lw == "unique") {
                         k = after
-                    } else if (w == "default") {
+                    } else if (lw == "default") {
                         if (ch(s, after) != "(") {
                             return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
                         }
@@ -585,7 +592,7 @@ ${
                             if (kw != "") errs = errs.concat([refuse(kw, k, pe + 1)])
                         }
                         k = skip(s, pe + 1, to)
-                    } else if (w == "references") {
+                    } else if (lw == "references") {
                         // §39.5.5: "This is the ONLY foreign-key production" — `references <table>(<column>)`
                         const tb: int = skip(s, we, to)
                         const tbe: int = wordEnd(s, tb, to)
@@ -603,7 +610,7 @@ ${
                         }
                         refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }])
                         k = skip(s, tail, to)
-                    } else if (w == "rename") {
+                    } else if (lw == "rename") {
                         return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
                     } else if (isSharedCore(w)) {
                         return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
@@ -673,7 +680,9 @@ ${
         // reader did not see every column, and a `primary key` it skipped would
         // make the warning a false cascade
         if (pks == 0 && !gaveUp) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
-        if (pks > 1) errs = errs.concat([refuse("`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\"", start, end)])
+        // S479 ruling item 4 — §38.5.1: "A table with more than one `primary key` SHALL be a compile
+        // error (E-SCHEMA-018)"; a key over several columns is a table-level `PRIMARY KEY (a, b)` in raw DDL
+        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\" (SQLite refuses the table: \"has more than one primary key\"). A key over several columns is one key: declare the table with raw `CREATE TABLE " + name + " (…, PRIMARY KEY (a, b))` in this `<schema>`", start, end)])
         return { t: { name: name, cols: cols, start: start, end: end, strict: false }, refs: refs, errs: errs, next: i }
     }
 
@@ -995,7 +1004,7 @@ ${
                 return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("`" + shownToks(it, p) + "` after column `" + table + "." + name + " " + t.text + "` is not a column constraint the bootstrap reads (INTERIM) — it reads PRIMARY KEY [AUTOINCREMENT], NOT NULL, NULL, UNIQUE, DEFAULT <literal>, REFERENCES <table>(<column>), CHECK (…), COLLATE <name> and CONSTRAINT <name>", start, end), 0)
             }
         }
-        if (pkN > 1) errs = errs.concat([refuse("column `" + table + "." + name + "` says `PRIMARY KEY` twice", start, end)])
+        if (pkN > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `PRIMARY KEY` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", start, end)])
         // `next` carries the column-level PRIMARY KEY count (readDdl counts them per table)
         return { col: { name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs: refs, errs: errs, next: pkN, stop: false }
     }
@@ -1195,7 +1204,8 @@ ${
                     if (rcol.stop) {
                         stopped = true
                     } else {
-                        pks = pks + rcol.next
+                        // one column is one key, however often it says `PRIMARY KEY` (readDdlCol reports that)
+                        if (rcol.next > 0) pks = pks + 1
                         if (c is given) {
                             if (rcol.next > 0) pkCols = pkCols.concat([c.name])
                             const tw: string = tk(it, 1).w
@@ -1209,7 +1219,10 @@ ${
             k = k + 1
         }
         if (stopped) return { t: not, refs: [], errs: errs, stop: true }
-        if (pks > 1) errs = errs.concat([refuse("`CREATE TABLE " + name + "` declares " + pks + " primary keys — a table has one (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\")", start, end)])
+        // S479 ruling item 4 — E-SCHEMA-018 (§38.5.1): two column-level keys, a column-level key beside a
+        // table-level `PRIMARY KEY (…)`, or two table-level ones (SQLite refuses each at CREATE). One
+        // table-level `PRIMARY KEY (a, b)` is ONE key (the composite form) — legal.
+        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`CREATE TABLE " + name + "` declares " + pks + " primary keys — a table has one (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). A key over several columns is one table-level `PRIMARY KEY (a, b)`", start, end)])
         // S478 ruling (user-voice): "`WITHOUT ROWID` and `STRICT` are ADMITTED, with their
         // nullability and storage written into §14.8.3: a `WITHOUT ROWID` table's PRIMARY KEY
         // columns are NOT NULL; a `STRICT` table stores only its declared type". SQLite reads

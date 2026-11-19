@@ -2542,7 +2542,7 @@ ${
     fn userDeclStub(d: ADecl, file: string, st0: AS) -> RDeclStubs {
         let st: AS = st0
         if (reservedElementName(d.name)) {
-            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, `schema`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
+            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, `schema`, `db`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
         }
         const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
@@ -2556,6 +2556,10 @@ ${
     // S478 open-Qs ruling item 19 reserves `schema`: every `<schema>` is read as the §39
     // schema block at parse time (its body is §39.2's declaration language), so a user
     // declaration of that name could never be used.
+    // S479 ruling item 15 reserves `db` ("add `db` to §4.15's reserved names
+    // (E-NAME-COLLIDES-RESERVED), following S478's `schema`"): a `<db>` is the §4 built-in
+    // state block, whose body mode the parser picks at the opener (parse.scrml isDbOpener),
+    // before any declaration is bound — a use `<db>` always names the state block.
     // Compared lowercase: §24.4 extends it to the capitalised spellings
     // (`const Engine = <div>`, `OnMount`, `Page`, `Theme`, …).
     fn reservedElementName(name: string) -> boolean {
@@ -2577,6 +2581,7 @@ ${
             "defaults"     :> true
             "md"           :> true
             "schema"       :> true
+            "db"           :> true
             _              :> false
         }
     }
@@ -24974,6 +24979,9 @@ ${
         if (e.tag == "schema") {
             return resolveSchema(env, e, st)
         }
+        // S479 ruling item 15 — `db` is reserved too (§4.15): a user declaration of it is
+        // E-NAME-COLLIDES-RESERVED, and a use `<db …>` is always the §4 state block.
+        if (e.tag == "db") return resolveDb(env, e, st)
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, env.file, e.tag)
@@ -25000,8 +25008,6 @@ ${
         if (singleProgramField(env, e.tag)) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
-        // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
-        if (e.tag == "db") return resolveDb(env, e, st)
         // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
         // implement is never an HTML element (§4.15, §24.4 "These element names
         // SHALL NOT be treated as HTML elements") — refused, not rendered as
@@ -42105,12 +42111,11 @@ ${
         return false
     }
 
-    // A `<db>` state block (§4 — "`db` is a built-in state type"), unless a
-    // user declaration takes the name (the binder's rule: a declaration in
-    // scope wins over every built-in reading of a tag).
+    // A `<db>` state block (§4 — "`db` is a built-in state type"). Since S479
+    // (ruling item 15) `db` is a reserved name (§4.15): a user declaration of it is
+    // E-NAME-COLLIDES-RESERVED and never takes the tag over.
     fn isDbElem(g: Globals, file: string, e: AElem) -> boolean {
-        if (e.star || e.tag != "db") return false
-        return declNamed(g, file, e.tag) is not
+        return !e.star && e.tag == "db"
     }
 
     fn dbsInNode(g: Globals, file: string, n: ANode, scope: int, acc: RDbs) -> RDbs {
@@ -42154,18 +42159,12 @@ ${
         // s472 (S472 ruling Q3) — the functions declared in this `<db>` body:
         // their nearest database scope is this block (§8.1.1). A `<db>` with no
         // `src=` registers no scope (resolveDb refuses it), so their queries
-        // resolve to nothing — never to an outer database. A `<db>` a user
-        // declaration takes over is that declaration's use, not a database
-        // scope: a function in its body has no SPEC reading — refused.
-        if (!e.star && e.tag == "db") {
-            const isDb: boolean = isDbElem(g, file, e)
+        // resolve to nothing — never to an outer database. (Since S479 `db` is
+        // reserved, §4.15: no user declaration takes a `<db>` over.)
+        if (isDbElem(g, file, e)) {
             for (const o of acc.owned) {
                 if (o.db == e.nid) {
-                    if (isDb) {
-                        acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: o.fn, scope: e.nid }]), sites: acc.sites, st: acc.st, owned: acc.owned }
-                    } else {
-                        acc = { scopes: acc.scopes, fns: acc.fns, sites: acc.sites, st: addDiag(acc.st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a function in the body of `<db>` — here a use of the declaration `db`, not the `<db>` state block (§4, §8.1.1) — is not in the bootstrap"), owned: acc.owned }
-                    }
+                    acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: o.fn, scope: e.nid }]), sites: acc.sites, st: acc.st, owned: acc.owned }
                 }
             }
         }

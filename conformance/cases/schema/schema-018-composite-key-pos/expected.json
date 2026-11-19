@@ -1,0 +1,12 @@
+{
+  "id": "schema-018-composite-key-pos",
+  "description": "§38.5.1 (S479) — the capable alternative to a second `primary key`: a key over several columns is ONE key, written as a table-level `PRIMARY KEY (user_id, team_id)` in a raw `CREATE TABLE` inside the `<schema>` block. It compiles clean: no E-SCHEMA-018, no W-SCHEMA-001. Negative twin: schema/schema-018-second-pk-neg.",
+  "language-version": "1.0",
+  "spec": "§38.5.1, §39.2",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 4: \"Capable alternative: table-level `PRIMARY KEY (a, b)` in raw DDL.\"",
+  "rationale": "§38.5.1: \"A key over several columns is ONE key: it is written as a table-level `PRIMARY KEY (a, b)` in a raw `CREATE TABLE` in the same `<schema>` block\". §39.2: \"A `<schema>` body MAY also declare a table with raw SQL `CREATE TABLE <name> ( … )` DDL\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCHEMA-018", "W-SCHEMA-001", "E-BOOTSTRAP-UNSUPPORTED"]
+  }
+}

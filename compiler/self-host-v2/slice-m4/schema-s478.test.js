@@ -103,7 +103,8 @@ describe("§39.3 placement, database and count", () => {
 describe("§39.4 / §39.5 / §39.7 declaration checks", () => {
   test("E-SCHEMA-004: an unrecognized column type (no other names are valid)", () => {
     expect(errsOf(P("        users {\n            id: integer primary key\n            name: string\n        }"))).toEqual(["E-SCHEMA-004"]);
-    expect(errsOf(P("        users {\n            id: INTEGER primary key\n        }"))).toEqual(["E-SCHEMA-004"]);
+    // S479 ruling item 3: type names are case-insensitive — `id: INTEGER` is accepted (schema-s479.test.js)
+    expect(errsOf(P("        users {\n            id: INTEGER primary key\n        }"))).toEqual([]);
   });
 
   test("W-SCHEMA-001: a table with no primary key is a WARNING (compiles)", () => {
@@ -137,8 +138,8 @@ describe("§39.4 / §39.5 / §39.7 declaration checks", () => {
     expect(errsOf(P("        CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, A TEXT)"))).toEqual(["E-SCHEMA-017"]);
   });
 
-  test("S478 ruling 18 — a second `primary key` in one table stays refused by name (its code is still OPEN)", () => {
-    expect(errsOf(P("        t {\n            id: integer primary key\n            k: integer primary key\n        }"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("S479 ruling item 4 — a second `primary key` in one table is E-SCHEMA-018 (was refused by name while S478 left it OPEN)", () => {
+    expect(errsOf(P("        t {\n            id: integer primary key\n            k: integer primary key\n        }"))).toEqual(["E-SCHEMA-018"]);
   });
 
   test("S478 ruling 17 — one `,` between column declarations (§39.2 `column-declaration (','? column-declaration)*`)", () => {
@@ -289,8 +290,11 @@ describe("fix-1: a refusal does not cascade into W-SCHEMA-001 / E-SCHEMA-006 (F5
   test("a trailing `, ` after a `primary key` column keeps the key (no W-SCHEMA-001 cascade)", () => {
     expect(run(P("        t { id: integer primary key, }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("an unread `PRIMARY KEY` does not also warn W-SCHEMA-001", () => {
-    expect(run(P("        users {\n            id: integer PRIMARY KEY\n        }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // S479 ruling item 3: `PRIMARY KEY` is now read (constraint words are case-insensitive) — the
+  // pin moved to a key the reader never reaches (an unread word before it)
+  test("an unread `primary key` (after a refused word) does not also warn W-SCHEMA-001", () => {
+    expect(run(P("        users {\n            id: integer indexed primary key\n        }")).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(run(P("        users {\n            id: integer PRIMARY KEY\n        }")).diags.map((d) => d.code)).toEqual([]);
   });
   test("a column kept after its give-up is still a `references` target", () => {
     const src = P("        users {\n            id: integer primary key indexed\n        }\n        posts {\n            id: integer primary key\n            uid: integer references users(id)\n        }");
