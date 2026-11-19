@@ -4430,9 +4430,90 @@ ${
         if (b.shape == 2) thunk = JsExpr.JArrowE([], base)
         if (b.shape == 3) thunk = JsExpr.JArrow([], [JsStmt.SAssign(base, args[0])])
         let desc: JsExpr = hostKind("void")
-        if (ret is given) desc = hostDescJs(ctx, ret, 0)
+        let body: JsStmt[] = []
+        if (ret is given) {
+            const hoist: Sym[] = hostDescHoist(ctx, ret)
+            let k: int = 0
+            while (k < hoist.length) {
+                body = body.concat([JsStmt.SConst(hostDescName(k), hostNamedDesc(ctx, hoist[k], 0, hoist, k))])
+                k = k + 1
+            }
+            desc = hostDescJs(ctx, ret, 0, hoist)
+        }
         const at: string = f.sym.hint + "() — the `<host>` binding"
-        return JsStmt.SFunc(symName(ctx, f.sym), params, [JsStmt.SReturn(rtCall(ctx, "hostCall", [thunk, desc, jstr(at)]))])
+        return JsStmt.SFunc(symName(ctx, f.sym), params, body.concat([JsStmt.SReturn(rtCall(ctx, "hostCall", [thunk, desc, jstr(at)]))]))
+    }
+
+    // s480 (g-boot-host-desc-exponential-s480, review:#1991 F2) — the decode descriptor is a DAG,
+    // printed as one. A struct type the descriptor names from TWO or more places (two fields, a
+    // field and the result, …) is printed once, as a `const hostty$K` at the top of the binding's
+    // function, and named from each place; every other type is printed where it stands, as before.
+    // The tree printing repeated a shared struct at every path: 16 fields per struct, depth 4 was a
+    // 6.3 MB client.js, depth 5 101 MB, depth 6 out of memory — for a clean 6-declaration program.
+    // The runtime decode (runtime.js hostDecode) only READS the descriptor, so a shared object is
+    // decoded exactly as its copies were. The order is post-order (a hoisted struct after every
+    // struct it names), and a descriptor has no cycle: rule 13's decode check refuses a result type
+    // more than 12 steps deep (analyze.scrml hostResultOk, check.scrml hostDecodes C-HB4), and a
+    // cyclic struct is unboundedly deep.
+    type HostDescPlan:struct = { ids: int[], counts: int[], syms: Sym[], order: int[] }
+
+    fn hostDescName(k: int) -> string { return "hostty$" + k }
+
+    // The structs to hoist, in post-order: those named from two or more places.
+    fn hostDescHoist(ctx: Ctx, t: Type) -> Sym[] {
+        const pl: HostDescPlan = hostPlanType(ctx, t, { ids: [], counts: [], syms: [], order: [] })
+        let out: Sym[] = []
+        for (const id of pl.order) {
+            const k: int = pl.ids.indexOf(id)
+            if (pl.counts[k] >= 2) out = out.concat([pl.syms[k]])
+        }
+        return out
+    }
+
+    fn hostPlanType(ctx: Ctx, t: Type, pl: HostDescPlan) -> HostDescPlan {
+        return match t {
+            .Maybe(inner: i) :> hostPlanType(ctx, i, pl)
+            .Seq(elem: e) :> hostPlanType(ctx, e, pl)
+            .Named(sym: s) :> hostPlanNamed(ctx, s, pl)
+            .Int :> pl
+            .Num :> pl
+            .Str :> pl
+            .Bool :> pl
+            .Fn(params: ps) :> pl
+        }
+    }
+
+    fn hostPlanNamed(ctx: Ctx, s: Sym, pl: HostDescPlan) -> HostDescPlan {
+        const k: int = pl.ids.indexOf(s.id)
+        if (k >= 0) {
+            const counts: int[] = pl.counts.slice(0, k).concat([pl.counts[k] + 1]).concat(pl.counts.slice(k + 1))
+            return { ids: pl.ids, counts: counts, syms: pl.syms, order: pl.order }
+        }
+        const td: TypeDef | not = findTypeDef(ctx.p, s)
+        if (td is not) return pl
+        const fs: FieldDef[] | not = hostStructFieldsOf(td)
+        if (fs is not) return pl
+        let q: HostDescPlan = { ids: pl.ids.concat([s.id]), counts: pl.counts.concat([1]), syms: pl.syms.concat([s]), order: pl.order }
+        for (const fd of fs) { q = hostPlanType(ctx, fd.ty, q) }
+        return { ids: q.ids, counts: q.counts, syms: q.syms, order: q.order.concat([s.id]) }
+    }
+
+    fn hostStructFieldsOf(td: TypeDef) -> FieldDef[] | not {
+        return match td {
+            .StructDef(fields: fs) :> fs
+            .HostDef(sym: x) :> not
+            .EnumDef(sym: x) :> not
+        }
+    }
+
+    // The index of `s` among the hoisted structs, or -1.
+    fn hostHoistIndex(hoist: Sym[], s: Sym) -> int {
+        let k: int = 0
+        while (k < hoist.length) {
+            if (hoist[k].id == s.id) return k
+            k = k + 1
+        }
+        return -1
     }
 
     fn hostArgJs(a: HostArg, params: string[]) -> JsExpr {
@@ -4452,24 +4533,28 @@ ${
     }
 
     // The decode descriptor of a binding's declared result (rule 13) — check.scrml C-HB4.
-    fn hostDescJs(ctx: Ctx, t: Type, depth: int) -> JsExpr {
+    // `hoist`: the structs printed once as `hostty$K` (hostDescHoist) — a reference to one is its name.
+    fn hostDescJs(ctx: Ctx, t: Type, depth: int, hoist: Sym[]) -> JsExpr {
         return match t {
             .Int :> hostKind("int")
             .Num :> hostKind("number")
             .Str :> hostKind("string")
             .Bool :> hostKind("bool")
-            .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostDescJs(ctx, i, depth + 1) }])
-            .Seq(elem: e) :> JsExpr.JObject([{ key: "k", value: jstr("tape") }, { key: "elem", value: hostDescJs(ctx, e, depth + 1) }])
-            .Named(sym: s) :> hostNamedDesc(ctx, s, depth)
+            .Maybe(inner: i) :> JsExpr.JObject([{ key: "k", value: jstr("maybe") }, { key: "inner", value: hostDescJs(ctx, i, depth + 1, hoist) }])
+            .Seq(elem: e) :> JsExpr.JObject([{ key: "k", value: jstr("tape") }, { key: "elem", value: hostDescJs(ctx, e, depth + 1, hoist) }])
+            .Named(sym: s) :> hostNamedDesc(ctx, s, depth, hoist, -1)
             .Fn(params: ps) :> hostKind("unchecked")   // unreachable: analyze refuses a function type in a host binding (resolveType)
         }
     }
 
-    fn hostNamedDesc(ctx: Ctx, s: Sym, depth: int) -> JsExpr {
+    // `selfK`: the index of the hoisted struct whose `const` this is (printed in full, not named), else -1.
+    fn hostNamedDesc(ctx: Ctx, s: Sym, depth: int, hoist: Sym[], selfK: int) -> JsExpr {
+        const hk: int = hostHoistIndex(hoist, s)
+        if (hk >= 0 && hk != selfK) return jid(hostDescName(hk))
         const td: TypeDef | not = findTypeDef(ctx.p, s)
         if (td is not) return hostKind("unchecked")
         if (depth > 12) return hostKind("unchecked")
-        return hostDefDesc(ctx, s, td, depth)
+        return hostDefDesc(ctx, s, td, depth, hoist)
     }
 
     // s473-host-allowlist-b (DRAFT §21.3.3 rules 8.4, 8.7): an Appendix H interface result is decoded
@@ -4480,18 +4565,18 @@ ${
         return "handle"
     }
 
-    fn hostDefDesc(ctx: Ctx, s: Sym, td: TypeDef, depth: int) -> JsExpr {
+    fn hostDefDesc(ctx: Ctx, s: Sym, td: TypeDef, depth: int, hoist: Sym[]) -> JsExpr {
         return match td {
             .HostDef(sym: x) :> JsExpr.JObject([{ key: "k", value: jstr(hostHandleKind(s.hint)) }, { key: "name", value: jstr(s.hint) }])
-            .StructDef(fields: fs) :> hostStructDesc(ctx, s, fs, depth)
+            .StructDef(fields: fs) :> hostStructDesc(ctx, s, fs, depth, hoist)
             .EnumDef(sym: x) :> hostKind("unchecked")
         }
     }
 
-    fn hostStructDesc(ctx: Ctx, s: Sym, fs: FieldDef[], depth: int) -> JsExpr {
+    fn hostStructDesc(ctx: Ctx, s: Sym, fs: FieldDef[], depth: int, hoist: Sym[]) -> JsExpr {
         let fields: JsExpr[] = []
         for (const fd of fs) {
-            fields = fields.concat([JsExpr.JObject([{ key: "name", value: jstr(fd.sym.hint) }, { key: "ty", value: hostDescJs(ctx, fd.ty, depth + 1) }])])
+            fields = fields.concat([JsExpr.JObject([{ key: "name", value: jstr(fd.sym.hint) }, { key: "ty", value: hostDescJs(ctx, fd.ty, depth + 1, hoist) }])])
         }
         return JsExpr.JObject([{ key: "k", value: jstr("struct") }, { key: "name", value: jstr(s.hint) }, { key: "fields", value: JsExpr.JArray(fields) }])
     }

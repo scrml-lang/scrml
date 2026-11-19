@@ -45,7 +45,7 @@ ${
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, MatchBlock, MatchBlockArm, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact, ReqSig, reqSigIndex,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
-             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
+             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, ServerFacts, SrvCopy, sideCallee,
              sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite } from "./analyze.scrml"
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml"
 
@@ -855,7 +855,7 @@ ${
     // A call of a named function (the callee's fact names it).
     fn callExpr(c: LC, f: NameFact | not, args: AExpr[]) -> Expr {
         return match f {
-            .NFn(sym: s) :> Expr.Call(s, lowerExprs(c, args))
+            .NFn(sym: s) :> Expr.Call(sideCallee(c.t, s), lowerExprs(c, args))     // s479: a server-side call of a helper with a server copy calls the copy
             .NLocal(sym: s) :> Expr.CallV(Expr.Local(s), lowerExprs(c, args))   // s478 (s478-boot-fn-type): a call through a function value
             .NField(decl: d) :> missing()
             .NInst(decl: d) :> missing()
@@ -3417,6 +3417,10 @@ ${
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
         if (h is not) return []
         if (suspendAtOf(c.t.server.plan, e.nid) is given) return []    // s454: hoisted with its Suspend (hoistExpr)
+        if (inPlaceUnfailing(c, h)) {
+            const hd: AHandled | not = handledOfK(e.k)
+            if (hd is given) return unfailingStmts(c, e, h, lowerExpr(c, hd.subject))
+        }
         return [attemptOf(c, e, h)]
     }
 
@@ -3469,6 +3473,53 @@ ${
         const rf: RemoteFact | not = h.remote
         if (rf is not) return false
         return remoteCaller(c.t, rf.caller)
+    }
+
+    // s479 (s479-waiting-helper-server-copy) — a handling form written in a client-placed helper,
+    // lowered in the helper's SERVER COPY (analyze copyPass): there its call of a server function
+    // is server→server — §19.9.10 "Not affected": "the callee is inlined (§13.4), no request is
+    // made, and nothing on the wire can fail. Its failure set is the callee's own — none for a
+    // function not declared `!`." So on a callee not declared `!` no arm can run there: the form
+    // is the bare call (inPlaceUnfailing / unfailingStmts); on a `!` callee only the trailing
+    // `.Transport` arm is dead, and is dropped (deadTransportArm). (In a function server-placed
+    // by inheritance either form is reported — E-ERROR-013 / dead handling, §19.9.10 — so only a
+    // copy's body reaches here with one.)
+    fn inPlaceUnfailing(c: LC, h: HandledFact) -> boolean {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return false
+        if (remoteCaller(c.t, rf.caller)) return false
+        return rf.local is not
+    }
+
+    // The bare call `v` in the form's place: its value is the form's result (`?` / `!{}` — the
+    // success value itself), or (a `match`) the success arm's, its binder bound to `v`.
+    fn unfailingStmts(c: LC, e: AExpr, h: HandledFact, v: Expr) -> Stmt[] {
+        const hd: AHandled | not = handledOfK(e.k)
+        if (hd is not) return []
+        const how: AHow = hd.how
+        const ok: OkArm = match how {
+            .Propagate :> plainOk(h)
+            .Guard(arms: arms) :> plainOk(h)
+            .MatchOn(arms: arms) :> matchOk(c, h, arms)
+        }
+        let out: Stmt[] = [Stmt.Let(ok.bind, v)].concat(ok.body.stmts)
+        const ov: Expr | not = ok.value
+        if (!h.stmt && ov is given) out = out.concat([Stmt.Let(h.result, ov)])
+        return out
+    }
+
+    // A `.Transport` arm on a call that turned out server→server (the client set's trailing variant,
+    // at the index one past the callee's own variants): it handles nothing there.
+    fn deadTransportArm(c: LC, h: HandledFact, idx: int) -> boolean {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return false
+        if (remoteCaller(c.t, rf.caller)) return false
+        const l: Sym | not = rf.local
+        if (l is not) return false
+        for (const ti of c.t.types) {
+            if (typeDefSym(ti.def).id == l.id) return idx >= enumVariantsOfDef(ti.def).length
+        }
+        return false
     }
 
     // The success branch of `?` / `!{}`: the value itself.
@@ -3541,7 +3592,7 @@ ${
     // C-E2 names any FCall of a Sym that is no function.)
     fn failableCall(c: LC, f: NameFact | not, args: AExpr[]) -> Failable {
         return match f {
-            .NFn(sym: s) :> Failable.FCall(s, lowerExprs(c, args))
+            .NFn(sym: s) :> Failable.FCall(sideCallee(c.t, s), lowerExprs(c, args))
             // s478-ruled-fn-types — a call through a local of a failable function type (analyze
             // reached here only for one: a handled subject that does not fail is E-ERROR-013 /
             // E-ERROR-004, and the gate stops lowering)
@@ -3618,7 +3669,7 @@ ${
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             } else if (idx == -4) {
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
-            } else if (idx >= 0) {
+            } else if (idx >= 0 && !deadTransportArm(c, h, idx)) {
                 out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             }
         }
@@ -4139,13 +4190,16 @@ ${
         const on: Expr = match kd {
             .SRemote(callee: f) :> Expr.ServerCall(f, args)
             .SWaits(callee: f) :> Expr.Call(f, args)
-            .SLocal(callee: f) :> Expr.Call(f, args)       // s468 (U1c): an in-place server→server call that waits
+            .SLocal(callee: f) :> Expr.Call(sideCallee(c.t, f), args)       // s468 (U1c): an in-place server→server call that waits (s479: through a server copy)
             .SQuery :> queryAt(c, e)                       // s468 (U1c): a `?{}` — a wait on the server
             .SForeign :> foreignAt(c, e, args)              // s477: a §23.2.4a foreign slice — a wait at the host boundary
         }
         const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
-        if (h is given && (handledOfK(e.k) is given || sqlOfExpr(e.k) is given)) return [sus, attemptOf(c, e, h)]
+        if (h is given && (handledOfK(e.k) is given || sqlOfExpr(e.k) is given)) {
+            if (inPlaceUnfailing(c, h)) return [sus].concat(unfailingStmts(c, e, h, Expr.Local(sa.bind)))
+            return [sus, attemptOf(c, e, h)]
+        }
         return [sus]
     }
 
@@ -4625,6 +4679,15 @@ ${
         return { title: title, metas: metas }
     }
 
+    // s479 (s479-waiting-helper-server-copy) — the tables as a SERVER-SIDE body is lowered against
+    // them: `onServer` (calls retarget to server copies, analyze sideCallee), and the plan and the
+    // inherited set that body is read with (a server copy's own plan; its helper counted server-side).
+    fn serverView(t: Tables, plan: SuspendPlan, inherited: int[]) -> Tables {
+        const f: ServerFacts = t.server
+        const sf: ServerFacts = { servers: f.servers, sqls: f.sqls, dbs: f.dbs, places: f.places, inherited: inherited, plan: plan, loads: f.loads, envelopes: f.envelopes, txs: f.txs, reqReads: f.reqReads, tool: f.tool, endpoints: f.endpoints, channels: f.channels, copies: f.copies, onServer: true }
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: t.waits, rows: t.rows }
+    }
+
     export fn lower(tp: TypedProgram) -> Lowered {
         if (hasError(tp)) return { core: not, diags: tp.diags }   // s451: the diagnostics gate
         const t: Tables = tp.tables
@@ -4656,14 +4719,32 @@ ${
         const fsx: FnSyntax[] = fnSyntaxes(tp.files)
         let fns: Fn[] = []
         let server: ServerFn[] = []
+        // s479 (s479-waiting-helper-server-copy): a server-side body — a server-placed function, one
+        // server-placed by inheritance (§12.2 Trigger 5) — is lowered against the server view, where a
+        // call of a helper with a server copy names the copy (sideCallee)
+        const ts: Tables = serverView(t, t.server.plan, t.server.inherited)
         for (const info of t.fns) {
             if (info.outer >= 0) continue      // s477: a nested function is lowered in place (lowerLocalFn)
             if (isServerPlaced(t, info.sym)) {
-                const sf: ServerFn | not = lowerServerFn(t, fsx, info)
+                const sf: ServerFn | not = lowerServerFn(ts, fsx, info)
                 if (sf is given) server = server.concat([sf])
+            } else if (t.server.inherited.indexOf(info.sym.id) >= 0) {
+                const fi: Fn | not = lowerFn(ts, fsx, info)
+                if (fi is given) fns = fns.concat([fi])
             } else {
                 const f: Fn | not = lowerFn(t, fsx, info)
                 if (f is given) fns = fns.concat([f])
+            }
+        }
+        // s479: each server copy — the helper's own body, lowered again under the copy's SERVER plan
+        // with the helper counted server-side (its server calls in place, §19.9.10 "Not affected",
+        // §13.4), as a server-only Fn under the copy's Sym (no client call names it: no route)
+        for (const cp of t.server.copies) {
+            for (const info2 of t.fns) {
+                if (info2.sym.id == cp.orig.id) {
+                    const fc: Fn | not = lowerFn(serverView(t, cp.plan, t.server.inherited.concat([cp.orig.id])), fsx, info2)
+                    if (fc is given) fns = fns.concat([{ sym: cp.copy, params: fc.params, body: fc.body, pure: fc.pure, err: fc.err, waits: fc.waits, host: fc.host }])
+                }
             }
         }
         const dbs: Db[] = t.server.dbs

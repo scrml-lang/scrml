@@ -260,9 +260,10 @@ export class Cell {
 //     trailing write emits with the held value." `last` starts at 0, so the
 //     first write ever is a leading emit.
 // The compiler refuses every composition whose rule this does not build
-// (analyze timingPass: a server-origin writer, `persist=`, a reset, an engine's
-// `<onIdle>`) — so no write here is server-origin, and no reset reaches a
-// pending timer. Reads see the committed value (§6.13.4). The timer is owned by
+// (analyze timingPass: a server-origin writer, `persist=`, a reset) — so no
+// write here is server-origin, and no reset reaches a pending timer. The one
+// write that bypasses the wrapper is an engine's `<onIdle>` watchdog fire
+// (`idleFire`, below). Reads see the committed value (§6.13.4). The timer is owned by
 // `scope`.
 // S479 — an ENGINE cell (a `rule=` graph field) passes its edge table (`table`).
 // §6.13.5: "A `debounced=` / `throttled=` engine cell transitions at commit … `rule=`
@@ -316,6 +317,30 @@ function admitFromTimer(c, t, v) {
     reportLater(err);
     return false;
   }
+}
+
+/**
+ * S479 — an `<onIdle>` watchdog fire on a timed engine cell (§51.0.R; ruling user-voice-scrml.md
+ * S479 "⭐ RULED — three open S479 questions" item 2): "The watchdog firing applies immediately.
+ * It's already a timed transition, and delaying it again would stack the window on top of
+ * `after=`. It cancels any write still waiting, since that write was requested against a state
+ * that just changed." So the fire is judged against `rule=` NOW (a refused fire throws — the
+ * caller reports it — and, never having happened, cancels nothing), and a fire that changes the
+ * cell drops the held write and its pending timer before it writes past the wrapper
+ * (`Cell.write`, never `set`). A fire that changes nothing (the engine already holds `to=`, a
+ * §51.0.F.1 no-op) is no transition, so a held write stays. The fire is not an emit of the
+ * timing rule: a throttle's window (`last`) is left as it was.
+ */
+function idleFire(c, table, to) {
+  checkEdge(c, table, to);
+  const t = c.timing;
+  const cur = c.peek();
+  if (!(cur === to || JSON.stringify(cur) === JSON.stringify(to))) {
+    if (t.timer !== null) clearTimeout(t.timer);
+    t.timer = null;
+    t.held = undefined;
+  }
+  asOp(c, "transition", to, () => c.write(to));
 }
 
 function timedWrite(c, v) {
@@ -1697,6 +1722,8 @@ export function transition(target, table, to) {
 //      watchdog stays disarmed until the next transition.
 // A watchdog-induced write is a write like any other: it notifies, so it
 // re-arms the watchdog (its own transition) as rule 2 says. Owned by `scope`.
+// S479 — on a `debounced=` / `throttled=` engine the fire bypasses the timing
+// rule and cancels a held write (`idleFire`; §51.0.R, ruling S479 item 2).
 // ---------------------------------------------------------------------------
 export function idleWatch(scope, c, table, ms, to) {
   requireScope(scope, "an idle watchdog");
@@ -1711,7 +1738,7 @@ export function idleWatch(scope, c, table, ms, to) {
       this.timer = null;
       if (this.disposed) return;
       try {
-        batch(() => transition(c, table, to));
+        batch(() => (c.timing !== null ? idleFire(c, table, to) : transition(c, table, to)));
       } catch (err) {
         reportLater(err);
       }

@@ -1,0 +1,29 @@
+// §19.9.10 "Not affected" + §13.4 — a client-placed helper `pick` handles a `!` server function with a `!{}` whose arms name the callee's own variant AND the client call's `.Transport`. The pending cell `v` calls `pick` (so it stays client-placed, §12.2 Trigger 5); the server function `srv` calls it too, where it runs in place: the call is server→server, its failure set is the callee's own, and `.Gone` still reaches its arm there.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    type LookError:enum = {
+        Gone
+    }
+    function look(n: int)! LookError {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { fail .Gone; } };
+        if (n < 0) fail .Gone;
+        return u.id + n;
+    }
+    function pick(n: int) -> int {
+        const r = look(n) !{
+            .Gone :> -1,
+            .Transport(t) :> -2
+        };
+        return r * 10;
+    }
+    function srv(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return pick(n) + pick(-1) + u.id;
+    }
+    <v:(not to int)=(pick(2))/>
+    <w:(not to int)=(srv(3) !{ _ :> not })/>
+    <main>
+        <p id="v" if=@v>${@v}</p>
+        <p id="w" if=@w>${@w}</p>
+    </main>
+</program>
