@@ -7,34 +7,34 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1909 of 1909 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1919 of 1919 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 714 | 37.4% |
+| PASS | 724 | 37.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 1 | 0.1% |
+| FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.4% |
-| UNSUPPORTED | 557 | 29.2% |
+| NOT-TWINNED | 638 | 33.2% |
+| UNSUPPORTED | 557 | 29.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 715; of those, 714 hold (99.9%). Runtime half executed on the bootstrap for 231 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 724; of those, 724 hold (100.0%). Runtime half executed on the bootstrap for 232 case(s).
 
-- **Vacuous** passes: 18 of 714 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **696**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
+- **Vacuous** passes: 17 of 724 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **707**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **883** — PASS 468 · FAIL 1 · UNSUPPORTED 414. Twin holds 468 (non-vacuous 453). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **889** — PASS 475 · UNSUPPORTED 414. Twin holds 475 (non-vacuous 461). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 5 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -49,8 +49,8 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 17 — spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
+- 14 — excluded by dialect.s66
 - 13 — const-cell: initializer extent could not be verified against impl#1's AST
-- 13 — excluded by dialect.s66
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 11 — rhs-decl: non-literal initializer needs a type (CTX — O35)
@@ -129,7 +129,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
-| lifecycle | 68 | 34 | · | · | · | 22 | 12 | · | · |
+| lifecycle | 69 | 35 | · | · | · | 22 | 12 | · | · |
 | linear | 15 | 6 | · | · | · | · | 9 | · | · |
 | loop | 8 | 3 | · | · | · | 3 | 2 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
@@ -141,7 +141,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | 1 | · | · | · | 1 | 64 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 25 | · | · | · | 10 | 10 | · | · |
+| module | 51 | 30 | · | · | · | 11 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -158,20 +158,18 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | schema | 13 | 8 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
-| server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
+| server-fn | 29 | 15 | · | · | · | 7 | 7 | · | · |
 | sql | 21 | 7 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
-| tool | 11 | 11 | · | · | · | · | · | · | · |
-| type-state-codes | 32 | 10 | · | 1 | · | 6 | 15 | · | · |
+| tool | 12 | 12 | · | · | · | · | · | · | · |
+| type-state-codes | 32 | 11 | · | · | · | 6 | 15 | · | · |
 
-### FAIL (1)
+### FAIL (0)
 
-- `type-state-codes/e-type-004-struct-field-access-pos` (twin · codes; not in the bootstrap: E-TYPE-004)
-  - missing E-TYPE-004
-  - severity: E-TYPE-004 did not fire (expected error)
+none
 
 ### CRASH (0)
 
@@ -181,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (714)
+### PASS / CODES-ONLY (724)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -562,6 +560,7 @@ none
 - `lifecycle/request-deps-explicit-listed-refire-rt` — PASS · TWIN
 - `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — PASS · TWIN
 - `lifecycle/request-refetch-inline-multi-stmt-rt` — PASS · TWIN
+- `lifecycle/reset-invalid-target-plain-let-pos` — PASS · TWIN
 - `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN
 - `lifecycle/when-effect-deprecated-neg` — PASS · TWIN
@@ -690,8 +689,13 @@ none
 - `module/e-import-006-reexport-missing-file-reject` — PASS · TWIN
 - `module/e-import-006-reexport-star-missing-file-reject` — PASS · TWIN
 - `module/e-import-008-plain-import-clean` — PASS · TWIN
+- `module/e-scope-001-init-later-binding-via-call-neg` — PASS · TWIN
+- `module/e-scope-001-init-later-binding-via-call-pos` — PASS · TWIN
 - `module/e-scope-010-filescope-distinct-clean` — PASS · TWIN
 - `module/e-scope-010-filescope-duplicate-reject` — PASS · TWIN
+- `module/file-scope-let-foreign-write-alias-pos` — PASS · TWIN
+- `module/file-scope-let-foreign-write-named-pos` — PASS · TWIN
+- `module/file-scope-let-foreign-write-neg` — PASS · TWIN
 - `own-value-type/base-type-neg` — PASS
 - `own-value-type/base-type-pos` — PASS
 - `own-value-type/boundary-export-neg` — PASS
@@ -865,6 +869,8 @@ none
 - `server-fn/e-route-004-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-004-pos` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/e-route-005-pos` — PASS · TWIN
+- `server-fn/file-scope-init-server-callee-untyped-pos` — PASS
+- `server-fn/file-scope-let-server-write-pos` — PASS
 - `server-fn/session-value-in-tool-neg` — PASS (also emitted, unasserted: E-PRINT-NON-PRIMITIVE)
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
@@ -876,6 +882,7 @@ none
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
+- `tool/file-scope-let-write-exempt` — PASS
 - `tool/tool-exit-harness-stdout-pos` — PASS
 - `tool/tool-fn-main-neg` — PASS
 - `tool/tool-foreign-crossing-shadow-neg` — PASS
@@ -889,7 +896,8 @@ none
 - `tool/tool-serve-on-web-app-neg` — PASS
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN
 - `type-state-codes/e-struct-function-field-pos` — PASS · TWIN
-- `type-state-codes/e-type-004-struct-field-access-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-type-004-struct-field-access-neg` — PASS · TWIN
+- `type-state-codes/e-type-004-struct-field-access-pos` — PASS · TWIN
 - `type-state-codes/e-type-041-not-assign-mismatch-neg` — PASS · TWIN
 - `type-state-codes/e-type-041-not-assign-mismatch-pos` — PASS · TWIN
 - `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN
@@ -1458,7 +1466,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: `map literal [k: v]` (§59) is not in the bootstrap yet; it is refused here by name rather than misread — maps (§59, O44) are not in the bootstrap
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `twice` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 
-### NOT-TWINNED (637)
+### NOT-TWINNED (638)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1891,6 +1899,7 @@ none
 - `module/e-use-002-use-before-markup-clean` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
 - `module/e-use-005-use-bad-prefix-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
 - `module/e-use-005-use-good-prefix-clean` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/file-scope-let-foreign-write-namespace-pos` — excluded (dialect.s66): S479 (s479-file-scope-follow): the twin generator verifies its rewrite against impl#1, and impl#1 reads this file's namespace-import write differently once restructured (+E-UNQUOTED-DISPLAY-TEXT; impl#1 itself report
 - `outlet/outside-shell` — not mechanical: program-wrap: impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL) — not restructured, no `${}` unwrapped
 - `page/keep-alive-accepted` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `parse-syntax/e-syntax-064-at-dot-inside-each-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
