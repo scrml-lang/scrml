@@ -1,0 +1,269 @@
+// shared-graph-walks-s480.test.js — s480-boot-shared-graph-walks (review:#1991 F1–F3): a struct type
+// graph WITH SHARING — `D0 { f0: D1, f1: D1 }`, `D1 { f0: D2, f1: D2 }`, … — compiles in time (and to an
+// output) linear in the graph, not in its number of paths.
+//
+// F1 (g-boot-tape-grant-walk-exponential-s480) — §66.12.6 rule 4 ("A whole-struct write that changes a
+// tape field is a `replace` of that field … checked against the FIELD's grants") and rule 1 (S472, "a
+// `replace` of every tape its elements hold, recursively"). analyze.scrml structTapeWrites / innerTapeHits
+// and the Core twin check.scrml structTapeKept carried only a PATH `seen` set, so `@b = v` on the graph
+// above walked every path: n = 14 levels 0.6 s / 16 384 E-WRITE-NOT-GRANTED for ONE write, n = 16 9.6 s /
+// 65 536, n = 17 past 80 s. Each walk now also keeps `done` — the named types already expanded with no
+// value to compare — and reports each offending tape FIELD once, at the first path that reaches it.
+//
+// F2 (g-boot-host-desc-exponential-s480) — §21.3.3 rule 13 ("A binding's result … SHALL be decoded
+// against its declared type"). print.scrml hostDescJs printed the decode descriptor as a TREE: 16 fields
+// per struct, depth 4 was a 6.3 MB client.js, depth 5 101 MB, depth 6 out of memory. A struct the
+// descriptor names from two or more places is now printed once (`const hostty$K`) and named; the runtime
+// decode only reads the descriptor, so it decodes exactly as before.
+//
+// F3 — §21.3.3 rule 15 ("A struct field SHALL NOT be of a type that contains a declared `:host` type").
+// hostTypeDataDiags walked the whole reachable graph once PER FIELD: 200 mutually reachable structs 1.2 s,
+// 400 8.5 s. It (and the server / cell checks) now read one per-type answer (analyze.scrml hostyIds).
+//
+// Red on base: the count / size / time assertions of every "linear" test (base reports 2^n diagnostics,
+// prints a 6 MB descriptor, and takes seconds where these bounds are milliseconds).
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { mods } from "./server-artifact-harness.js";
+import { frontEnd } from "./harness.js";
+import "../slice-m1/load-program.js"; // happy-dom
+import { compileFile, compileSource } from "../../../scripts/scrml-boot.ts";
+
+const ENTRY = "app.scrml";
+const run = (src) => frontEnd(mods(), [{ path: ENTRY, src }], ENTRY);
+const errs = (r) => r.diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info");
+const tapeFields = (r) => errs(r).filter((d) => d.code === "E-WRITE-NOT-GRANTED").map((d) => (d.message.match(/the tape (?:field )?`([^`]+)`/) ?? [])[1]);
+
+// `n` levels of `w`-wide sharing, a tape at the bottom with `grants`; `@b = v` writes it whole
+const tapeGraph = (n, w, grants) => {
+  const L = [];
+  for (let i = 0; i < n; i++) L.push(`    type D${i}:struct = { ${Array.from({ length: w }, (_, j) => `f${j}: D${i + 1}`).join(", ")} }`);
+  L.push(`    type D${n}:struct = { kids: int[${grants}] }`);
+  return `<program>\n\${\n${L.join("\n")}\n}\n    let <b:D0 | not=(not)/>\n    function go(v: D0) {\n        @b = v;\n    }\n<p>\${@b is given}</p>\n</program>\n`;
+};
+const timed = (f) => { const t0 = performance.now(); const v = f(); return [v, performance.now() - t0]; };
+
+beforeAll(() => { mods(); }, { timeout: 300000 });
+
+describe("F1 — a whole-struct write over a shared struct graph (§66.12.6 rules 1 and 4)", () => {
+  test("ungranted tape 14 levels down a 2-wide shared graph: ONE E-WRITE-NOT-GRANTED, at the first path (base: 16 384)", () => {
+    const r = run(tapeGraph(14, 2, "free, append"));
+    expect(tapeFields(r)).toEqual(["@b" + ".f0".repeat(14) + ".kids"]);
+  }, 60_000);
+
+  test("40 levels: still one diagnostic, in well under a second (base: 2^40 paths)", () => {
+    const [r, ms] = timed(() => run(tapeGraph(40, 2, "free, append")));
+    expect(tapeFields(r)).toEqual(["@b" + ".f0".repeat(40) + ".kids"]);
+    expect(ms).toBeLessThan(5_000);
+  }, 60_000);
+
+  test("granted (`replace`) 24 levels down a 2-wide graph: clean, analyze AND Core check (check.scrml structTapeKept) fast", () => {
+    const [r, ms] = timed(() => run(tapeGraph(24, 2, "free, append, replace")));
+    expect(errs(r)).toEqual([]);
+    const [c, cms] = timed(() => mods().check.checkCore(r.core));
+    expect(c).toEqual([]);
+    // base: ~1.5 s each at 20 levels, x4 per two more — ~24 s each at 24
+    expect(ms).toBeLessThan(5_000);
+    expect(cms).toBeLessThan(5_000);
+  }, 120_000);
+
+  const P = (types, cell, fn) => `<program>\n\${\n${types}\n}\n    ${cell}\n    ${fn}\n<p>x</p>\n</program>\n`;
+
+  test("a graph WITHOUT sharing: every offending field reported, as before (direct, nested, element-held)", () => {
+    const r = run(P(
+      "    type A:struct = { xs: int[free, append], b: B, c: C }\n    type B:struct = { ys: string[free], zs: int[free, replace] }\n    type C:struct = { rows: R[free, replace] }\n    type R:struct = { k: int[free, append] }",
+      "let <a:A | not=(not)/>", "function go(v: A) {\n        @a = v;\n    }"));
+    expect(tapeFields(r)).toEqual(["@a.xs", "@a.b.ys", "@a.c.rows[…].k"]);
+    expect(errs(r)[2].message).toContain("replaces the tapes inside `@a`");
+  });
+
+  test("a recursive struct: the tape field itself, once (the path `seen` still stops the cycle)", () => {
+    const r = run(P("    type T:struct = { kids: T[free, append], n: int }", "let <t:T | not=(not)/>", "function go(v: T) {\n        @t = v;\n    }"));
+    expect(tapeFields(r)).toEqual(["@t.kids"]);
+  });
+
+  test("a struct shared by a field and by a tape's elements: reported once as a field, once as an element-held tape", () => {
+    const r = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, list: B[free, replace], again: B }",
+      "let <r:R | not=(not)/>", "function go(v: R) {\n        @r = v;\n    }"));
+    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.list[…].xs"]);
+  });
+
+  test("an object literal is still judged field by field (a literal is never skipped as `done`)", () => {
+    const r = run(P("    type B:struct = { xs: int[free, append] }\n    type R:struct = { a: B, b: B, c: B }",
+      "let <r:R | not=(not)/>", "function go(v: B) {\n        @r = { a: v, b: { xs: [] }, c: @r.c };\n    }"));
+    expect(tapeFields(r)).toEqual(["@r.a.xs", "@r.b.xs"]);
+  });
+
+  test("`reset(@b)` over a shared graph: refused naming the first path, fast (resetTapeProblem)", () => {
+    const L = [];
+    for (let i = 0; i < 30; i++) L.push(`    type D${i}:struct = { f0: D${i + 1}, f1: D${i + 1} }`);
+    L.push("    type D30:struct = { kids: int[free, append] }");
+    const [r, ms] = timed(() => run(`<program>\n\${\n${L.join("\n")}\n}\n    let <b:D0 | not=(not)/>\n    function go() {\n        reset(@b);\n    }\n<p>x</p>\n</program>\n`));
+    const e = errs(r);
+    expect(e.length).toBeGreaterThan(0);
+    expect(e.map((d) => d.message).join("\n")).toContain("@b" + ".f0".repeat(30) + ".kids");
+    expect(ms).toBeLessThan(5_000);
+  }, 60_000);
+});
+
+describe("F3 — rule 15 over many mutually reachable structs (hostTypeDataDiags)", () => {
+  const H = "<host>\n  mq(q: string) -> MediaQueryList = window.matchMedia(q)\n</host>\n";
+  // n structs, each with 3 fields `S_k[] | not` reaching others; all mutually reachable
+  const ring = (n, leaf) => {
+    const L = [];
+    for (let i = 0; i < n; i++) L.push(`    type S${i}:struct = { ${[0, 1, 2].map((j) => `f${j}: S${(i + 1 + j) % n}[] | not`).join(", ")} }`);
+    if (leaf) L[n - 1] = `    type S${n - 1}:struct = { f0: S0[] | not, m: MediaQueryList | not }`;
+    return `${leaf ? H : ""}<program>\n\${\n${L.join("\n")}\n}\n<p>x</p>\n</program>\n`;
+  };
+
+  test("400 mutually reachable structs, no handle: clean, fast (base: 8.5 s)", () => {
+    const [r, ms] = timed(() => run(ring(400, false)));
+    expect(errs(r)).toEqual([]);
+    expect(ms).toBeLessThan(4_000);
+  }, 60_000);
+
+  test("the same with one handle field: every struct's fields that reach it are refused, and only those", () => {
+    const r = run(ring(40, true));
+    const named = errs(r).filter((d) => d.code === "E-HOST-HANDLE-NOT-DATA").map((d) => d.message.match(/struct `([^`]+)` has the field `([^`]+)`/).slice(1).join("."));
+    // S0..S38 each have three fields reaching S39 (whose `m` is the handle); S39: `f0` (reaches itself through S0) and `m`
+    const want = [];
+    for (let i = 0; i < 39; i++) for (const j of [0, 1, 2]) want.push(`S${i}.f${j}`);
+    want.push("S39.f0", "S39.m");
+    expect(named.sort()).toEqual(want.sort());
+  });
+
+  test("a struct that reaches no handle is not refused; one that reaches it through an enum payload is", () => {
+    const r = run(`${H}<program>\n\${\n    type E:enum = { A(m: MediaQueryList), B }\n    type Ok:struct = { n: int[] | not }\n    type Bad:struct = { e: E[] }\n}\n<p>x</p>\n</program>\n`);
+    const named = errs(r).filter((d) => d.code === "E-HOST-HANDLE-NOT-DATA").map((d) => d.message.match(/struct `([^`]+)`/)[1]);
+    expect(named).toEqual(["Bad"]);
+  });
+});
+
+// the survey's fixes (each walked a graph with sharing once per PATH)
+describe("survey — other walks over a graph with sharing", () => {
+  const R = (n, f) => Array.from({ length: n }, (_, i) => f(i)).join("\n");
+  const structs = (n, leaf) => `    type D${n}:struct = { ${leaf} }\n${R(n, (i) => `    type D${i}:struct = { a: D${i + 1}, b: D${i + 1}, c: D${i + 1}, d: D${i + 1} }`)}`;
+  const chan = (n, leaf) => `<program>\n\${\n${structs(n, leaf)}\n}\n<channel name="room">\n    let <s:D0 | not=(not)/>\n</channel>\n<p>x</p>\n</program>\n`;
+
+  test("a `<channel>` cell of a 4-wide struct graph 20 deep: synced, fast (analyze.scrml chInnerContract; base: 2.8 s at 12, x16 per level)", () => {
+    const [r, ms] = timed(() => run(chan(20, "x: int")));
+    expect(errs(r)).toEqual([]);
+    expect(ms).toBeLessThan(5_000);
+  }, 60_000);
+
+  test("the same graph with an ungranted tape at the bottom: still refused by name (verdict unchanged)", () => {
+    const r = run(chan(8, "xs: int[free, append]"));
+    expect(errs(r).map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain("holds a tape whose type grants no `replace`");
+  }, 60_000);
+
+  const calls = (n, leafBody) => `<program>\n\${\n    function f${n}() -> int { ${leafBody} }\n${R(n, (i) => `    function f${i}() -> int { return f${i + 1}() + f${i + 1}(); }`)}\n    function log(x: int) { }\n}\n    let <c:int=0/>\n    <effect deps=[@c]>\${ log(f0()); }</>\n<p>\${@c}</p>\n</program>\n`;
+
+  test("an Effect calling a write-free 40-level doubling call DAG: Core C11 clean, fast (check.scrml blockWriteWitness; base: 1.1 s at 20, x2 per level)", () => {
+    const r = run(calls(40, "return 1;"));
+    expect(errs(r)).toEqual([]);
+    const [c, ms] = timed(() => mods().check.checkCore(r.core));
+    expect(c).toEqual([]);
+    expect(ms).toBeLessThan(5_000);
+  }, 60_000);
+
+  const derived = (n, cyc) => `<program>\n${R(n, (i) => `    <a${i}:int=(@a${i + 1} + @b${i + 1})/>\n    <b${i}:int=(@a${i + 1} + @b${i + 1})/>`)}\n    ${cyc ? `<a${n}:int=(@a0 + 1)/>` : `let <a${n}:int=1/>`}\n    let <b${n}:int=1/>\n<p>\${@a0}</p>\n</program>\n`;
+
+  test("a 2-lane derived DAG 40 deep: no cycle, fast (analyze.scrml derivedPath; base: 8.2 s at 24, x2 per level)", () => {
+    const [r, ms] = timed(() => run(derived(40, false)));
+    expect(errs(r)).toEqual([]);
+    expect(ms).toBeLessThan(5_000);
+  }, 60_000);
+
+  test("the same DAG closed into a cycle at its bottom: E-DERIVED-CIRCULAR-DEP still found", () => {
+    const r = run(derived(12, true));
+    expect(errs(r).map((d) => d.code)).toContain("E-DERIVED-CIRCULAR-DEP");
+  }, 60_000);
+});
+
+describe("F2 — a `<host src=>` result over a shared struct graph: the descriptor is printed once per struct (§21.3.3 rule 13)", () => {
+  const BASE = join(homedir(), ".cache", "scrml-agent-tmp", "shared-graph-walks-s480");
+  let tmp;
+  let seq = 0;
+  beforeAll(() => { mkdirSync(BASE, { recursive: true }); tmp = mkdtempSync(join(BASE, "t-")); });
+  afterAll(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
+  const project = (files) => {
+    const d = join(tmp, "p" + seq++);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "scrml.toml"), "");
+    for (const [p, t] of Object.entries(files)) writeFileSync(join(d, p), t);
+    return d;
+  };
+  const graph = (w, depth, leaf = "x: int") => {
+    const L = [];
+    for (let i = 0; i < depth; i++) L.push(`    type D${i}:struct = { ${Array.from({ length: w }, (_, j) => `f${j}: D${i + 1}`).join(", ")} }`);
+    L.push(`    type D${depth}:struct = { ${leaf} }`);
+    return L.join("\n");
+  };
+  // glue: a w-wide value `depth` deep whose leaves count 0, 1, 2, … in field order; `bad` puts a string at leaf `bad`
+  const glue = (w, depth, bad = -1) => `let n = 0;\nfunction mk(d) {\n  if (d === ${depth}) { const v = n++; return { x: v === ${bad} ? "s" : v }; }\n  const o = {};\n  for (let j = 0; j < ${w}; j++) o["f" + j] = mk(d + 1);\n  return o;\n}\nexport function dg() { n = 0; return mk(0); }\n`;
+  const app = (w, depth, body, logic = "") => `<host src="./glue.js">\n  dg() -> D0\n</host>\n<program>\n\${\n${graph(w, depth)}\n${logic}\n}\n${body}\n</program>\n`;
+  // a function reading the decoded value at `path` (a member access on a call result is not in the bootstrap)
+  const reader = (name, path) => `    function ${name}() -> int {\n        const v: D0 = dg();\n        return v.${path}.x;\n    }`;
+
+  async function runPage(d) {
+    const out = join(d, "dist");
+    const r = await compileFile(join(d, ENTRY), { outDir: out });
+    expect(r.diagnostics.filter((x) => x.severity === "error").map((x) => `${x.code}: ${x.message}`)).toEqual([]);
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    document.head.innerHTML = /<head>([\s\S]*)<\/head>/.exec(html)[1].replace(/<script[^>]*><\/script>/g, "");
+    document.body.innerHTML = "";
+    await import(join(out, "program.client.js"));
+    return { out, r, js: readFileSync(join(out, "program.client.js"), "utf8") };
+  }
+
+  test("16 fields per struct, depth 4: a small client.js (base: 6.3 MB)", async () => {
+    const d = project({ "glue.js": glue(16, 4), [ENTRY]: app(16, 4, "<p>x</p>") });
+    const r = await compileSource(join(d, ENTRY));
+    expect(r.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+    expect(r.client.js.length).toBeLessThan(64_000);
+  }, 120_000);
+
+  test("depth 8: linear growth — each struct printed once (base: out of memory past depth 5)", async () => {
+    const d = project({ "glue.js": glue(16, 8), [ENTRY]: app(16, 8, "<p>x</p>") });
+    const t0 = performance.now();
+    const p = await compileSource(join(d, ENTRY));
+    const ms = performance.now() - t0;
+    expect(p.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+    expect(p.client.js.length).toBeLessThan(64_000);
+    // D1..D8 are each named from 16 places: printed once each (D0, the result, is printed where it stands)
+    for (let k = 0; k < 8; k++) expect(p.client.js.split(`const hostty$${k} = `).length).toBe(2);
+    expect(p.client.js).not.toContain("const hostty$8 = ");
+    expect(ms).toBeLessThan(20_000);
+  }, 120_000);
+
+  test("run: a 3-wide value 4 deep decodes field by field (the leaf at f2.f1.f0.f1 is leaf 2*27+1*9+0*3+1 = 64)", async () => {
+    const d = project({ "glue.js": glue(3, 4), [ENTRY]: app(3, 4, '<p id="o">${r1()}/${r2()}/${r3()}</p>', [reader("r1", "f2.f1.f0.f1"), reader("r2", "f0.f0.f0.f0"), reader("r3", "f2.f2.f2.f2")].join("\n")) });
+    const { js } = await runPage(d);
+    expect(js).toContain("const hostty$0 = ");
+    expect(document.getElementById("o").textContent).toBe("64/0/80");
+  }, 120_000);
+
+  test("run: a mismatch deep in the value traps E-HOST-VALUE-MISMATCH-RT naming the same path as before", async () => {
+    const d = project({ "glue.js": glue(3, 3, 22), [ENTRY]: app(3, 3, '<p id="o">${r1()}</p>', reader("r1", "f0.f0.f0")) });
+    let e = null;
+    try { await runPage(d); } catch (x) { e = x; }
+    expect(e && e.code).toBe("E-HOST-VALUE-MISMATCH-RT");
+    // leaf 22 = f2.f1.f1 (2*9 + 1*3 + 1)
+    expect(e.message).toContain("its result's field `f2`'s field `f1`'s field `f1`'s field `x` is \"s\" where its declared type is int");
+  }, 120_000);
+
+  test("a descriptor WITHOUT sharing is printed inline, byte for byte as before", async () => {
+    const d = project({
+      "glue.js": "export function dg() { return null; }\n",
+      [ENTRY]: `<host src="./glue.js">\n  dg() -> A | not\n</host>\n<program>\n\${\n    type A:struct = { b: B, n: int[] }\n    type B:struct = { s: string, h: bool | not }\n}\n<p>x</p>\n</program>\n`,
+    });
+    const r = await compileSource(join(d, ENTRY));
+    expect(r.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+    expect(r.client.js).not.toContain("hostty$");
+    expect(r.client.js).toContain('rt.hostCall(() => hostsrc$0.dg(), { k: "maybe", inner: { k: "struct", name: "A", fields: [{ name: "b", ty: { k: "struct", name: "B", fields: [{ name: "s", ty: { k: "string" } }, { name: "h", ty: { k: "maybe", inner: { k: "bool" } } }] } }, { name: "n", ty: { k: "tape", elem: { k: "int" } } }] } }, "dg() — the `<host>` binding")');
+  }, 120_000);
+});

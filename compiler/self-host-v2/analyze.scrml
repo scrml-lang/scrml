@@ -6626,6 +6626,82 @@ ${
         return false
     }
 
+    // s480 (review:#1991 F3) — containsHost's answer for EVERY named type at once: the ids of the
+    // named types that contain a declared `:host` type at any depth (the handles themselves
+    // included). One pass over the type graph — an edge from each type to the named type each of
+    // its fields (struct fields, variant payloads) names through `| not` and `[]`, then the
+    // handles' reverse reach — so a pass that asks about every field (hostTypeDataDiags) costs
+    // O(types x edges), not one whole-graph walk per field (200 mutually reachable structs took
+    // 1.2 s, 400 took 8.5 s). containsHostIn reads it; the verdict is containsHost's.
+    fn hostyIds(ts: TypeInfo[]) -> int[] {
+        let efrom: int[] = []
+        let eto: int[] = []
+        let hosty: int[] = []
+        for (const ti of ts) {
+            const id: int = typeDefSym(ti.def).id
+            if (isHostDef(ti.def) && hosty.indexOf(id) < 0) hosty = hosty.concat([id])
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is given) {
+                for (const f of fs) {
+                    const r: int | not = hostRefId(f.ty)
+                    if (r is given) {
+                        efrom = efrom.concat([id])
+                        eto = eto.concat([r])
+                    }
+                }
+            }
+            for (const v of enumVariants(ti.def)) {
+                for (const f of v.fields) {
+                    const r: int | not = hostRefId(f.ty)
+                    if (r is given) {
+                        efrom = efrom.concat([id])
+                        eto = eto.concat([r])
+                    }
+                }
+            }
+        }
+        let head: int = 0
+        while (head < hosty.length) {
+            const j: int = hosty[head]
+            head = head + 1
+            let k: int = 0
+            while (k < eto.length) {
+                if (eto[k] == j && hosty.indexOf(efrom[k]) < 0) hosty = hosty.concat([efrom[k]])
+                k = k + 1
+            }
+        }
+        return hosty
+    }
+
+    // The id of the named type `t` names through `| not` and `[]` (an Appendix H interface id is negative), or `not`.
+    fn hostRefId(t0: Type) -> int | not {
+        let t: Type = t0
+        let steps: int = 0
+        while (steps < 64) {
+            const mi: Type | not = maybeInner(t)
+            const el: Type | not = seqElemOf(t)
+            const s: Sym | not = namedOf(t)
+            if (mi is given) {
+                t = mi
+            } else if (el is given) {
+                t = el
+            } else if (s is given) {
+                return s.id
+            } else {
+                return not
+            }
+            steps = steps + 1
+        }
+        return not
+    }
+
+    // containsHost(ts, t), read off hostyIds(ts).
+    fn containsHostIn(hosty: int[], t: Type) -> boolean {
+        const r: int | not = hostRefId(t)
+        if (r is not) return false
+        return hosty.indexOf(r) >= 0
+    }
+
     fn seqElemOf(t: Type) -> Type | not {
         return match t {
             .Seq(elem: e) :> e
@@ -7223,16 +7299,17 @@ ${
     // are refused by name — fail closed.
     fn hostTypeDataDiags(types: TypeInfo[], st0: AS) -> AS {
         let st: AS = st0
+        const hosty: int[] = hostyIds(types)
         for (const ti of types) {
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
             if (fs is given) {
                 for (const f of fs) {
-                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
+                    if (containsHostIn(hosty, f.ty)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
                 }
             }
             for (const v of enumVariants(ti.def)) {
                 for (const f of v.fields) {
-                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
+                    if (containsHostIn(hosty, f.ty)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
                 }
             }
         }
@@ -7244,6 +7321,7 @@ ${
     // parameter or result". Judged after placement, on each SERVER-placed function.
     fn hostServerDiags(g: Globals, servers: int[]) -> Diag[] {
         let out: Diag[] = []
+        const hosty: int[] = hostyIds(g.types)
         for (const fs of g.fns) {
             if (servers.indexOf(fs.info.sym.id) >= 0) {
                 const te: TypeEnv = teAt(g.te, fs.info.file)
@@ -7251,7 +7329,7 @@ ${
                     const at: AType | not = p.ty
                     if (at is given) {
                         const rt: RType = resolveTypeFn(te, at, emptyAS())
-                        if (!rt.unresolved && containsHost(g.types, rt.t)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
+                        if (!rt.unresolved && containsHostIn(hosty, rt.t)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
                         // s478 (s478-boot-fn-type) — §12.5: "A parameter whose type is NOT JSON-serializable
                         // — … (function, markup … ) — SHALL be a compile error (E-ROUTE-004: non-serializable
                         // parameter type to server function)"; §14.3: "a closure cannot be serialized"
@@ -7260,7 +7338,7 @@ ${
                 }
                 const r: Type | not = fs.info.ret
                 if (r is given) {
-                    if (containsHost(g.types, r)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
+                    if (containsHostIn(hosty, r)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
                     // s478-ruled-fn-types — §12.5.3 "A function-typed result is E-ROUTE-003 (S478)": "Return
                     // types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003 …). The
                     // non-serializable kinds are: a **function** …" (impl#1 reports E-ROUTE-003 for this
@@ -7280,9 +7358,10 @@ ${
     // A cell (a declaration's field) whose type contains a declared `:host` type.
     fn hostCellDiags(g: Globals, st0: AS) -> AS {
         let st: AS = st0
+        const hosty: int[] = hostyIds(g.types)
         for (const ds of g.decls) {
             for (const f of ds.info.fields) {
-                if (containsHost(g.types, f.ty)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
+                if (containsHostIn(hosty, f.ty)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
             }
         }
         return st
@@ -8431,17 +8510,30 @@ ${
 
     // A path from `at` back to `start` through cells numbered above `start`
     // (so each cycle is found once, at its first member); [] when none.
+    // s480 (review:#1991 survey) — `dead`: the cells already searched from and found NOT to lead
+    // back to `start` (threaded through the whole search, DPathWalk); one is not searched again.
+    // A derived DAG with sharing (`a_i = a_{i+1} + b_{i+1}`, `b_i = a_{i+1} + b_{i+1}`) was searched
+    // once per PATH from every cell — 24 levels took 8.2 s, doubling per level. The path found is
+    // the same one (a dead cell's every continuation was already tried).
+    type DPathWalk:struct = { path: int[], dead: int[] }
+
     fn derivedPath(es: DEdge[], start: int, at: int, seen: int[]) -> int[] {
+        return derivedPathW(es, start, at, seen, []).path
+    }
+
+    fn derivedPathW(es: DEdge[], start: int, at: int, seen: int[], dead0: int[]) -> DPathWalk {
+        let dead: int[] = dead0
         for (const e of es) {
             if (e.from == at) {
-                if (e.to == start) return seen.concat([at])
-                if (e.to > start && seen.indexOf(e.to) < 0 && e.to != at) {
-                    const p: int[] = derivedPath(es, start, e.to, seen.concat([at]))
-                    if (p.length > 0) return p
+                if (e.to == start) return { path: seen.concat([at]), dead: dead }
+                if (e.to > start && seen.indexOf(e.to) < 0 && e.to != at && dead.indexOf(e.to) < 0) {
+                    const p: DPathWalk = derivedPathW(es, start, e.to, seen.concat([at]), dead)
+                    if (p.path.length > 0) return p
+                    dead = p.dead
                 }
             }
         }
-        return []
+        return { path: [], dead: dead.concat([at]) }
     }
 
     // r2 F4 — does a body read the clock (`Date.now()`) ITSELF? The effect
@@ -16068,27 +16160,50 @@ ${
     // not a tape position — grants do not apply inside it (RULED S469, "Not a
     // tape position"), so a whole enum write replaces no tape. `seen` stops a
     // recursive struct.
+    //
+    // s480 (g-boot-tape-grant-walk-exponential-s480, review:#1991): the walk keeps a
+    // second set beside the PATH `seen` — `done`, the walk states (named type, inside
+    // an element or not) already expanded with NO value to compare (`v` is not an
+    // object literal: every field is replaced, so what is reached is a function of
+    // the type alone). A state met again is not re-expanded: on a struct graph with
+    // sharing (`D0 { f0: D1, f1: D1 }`, `D1 { … D2 … }`, …) the walk was every PATH —
+    // 2^depth expansions and as many diagnostics for one write — and is now linear in
+    // the type graph. Each offending tape FIELD is reported once, at the first path
+    // that reaches it (the order of first reach is the plain walk's); a graph without
+    // sharing never meets a state twice, so its hits are unchanged.
+    type TapeWalk:struct = { hits: TapeHit[], done: int[] }
+
     fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
+        return tapeWalkStruct(types, ty, v, key, label, seen, false, { hits: [], done: [] }).hits
+    }
+
+    fn tapeWalkStruct(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[], inner: boolean, w0: TapeWalk) -> TapeWalk {
         if (v is given) {
-            if (key != "" && placeKey(v) == key) return []
+            if (key != "" && placeKey(v) == key) return w0
         }
-        if (tapeGrants(ty) is given) return innerTapeHits(types, ty, label, seen)
+        if (tapeGrants(ty) is given) return tapeWalkInner(types, ty, label, seen, w0)
         const s: Sym | not = namedOf(unMaybe(ty))
-        if (s is not) return []
-        if (seen.indexOf(s.id) >= 0) return []
+        if (s is not) return w0
+        if (seen.indexOf(s.id) >= 0) return w0
         const ti: TypeInfo | not = typeInfoOf(types, s)
-        if (ti is not) return []
+        if (ti is not) return w0
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return []
+        if (fs is not) return w0
         let props: AProp[] = []
         if (v is given) props = propsOf(v)
+        let w: TapeWalk = w0
+        if (props.length == 0) {
+            let state: int = s.id * 2
+            if (inner) state = state + 1
+            if (w.done.indexOf(state) >= 0) return w0
+            w = { hits: w.hits, done: w.done.concat([state]) }
+        }
         // a spread of the place itself keeps the fields no LATER property names —
         // only when it is the last spread (`{ ...@b, ...other }`: `other` may override)
         let selfSpread = false
         for (const pr of props) {
             if (pr.spread) selfSpread = key != "" && placeKey(pr.value) == key
         }
-        let out: TapeHit[] = []
         for (const fd of fs) {
             const name: string = fd.sym.hint
             const sub: string = memberKey(key, name)
@@ -16104,14 +16219,14 @@ ${
             }
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
-                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: false }])
-                    out = out.concat(innerTapeHits(types, fd.ty, at, seen.concat([s.id])))
+                    w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner }]), done: w.done }
+                    w = tapeWalkInner(types, fd.ty, at, seen.concat([s.id]), w)
                 } else {
-                    out = out.concat(structTapeWrites(types, fd.ty, fv, sub, at, seen.concat([s.id])))
+                    w = tapeWalkStruct(types, fd.ty, fv, sub, at, seen.concat([s.id]), inner, w)
                 }
             }
         }
-        return out
+        return w
     }
 
     // s472-boot-map-grants (RULED S472 "five PA recs" item 1): every tape the
@@ -16121,20 +16236,21 @@ ${
     // does not keep its elements replaces each of them, so each needs its own
     // `replace` (§66.12.6 rule 1, "in each position that can hold one"). `seen`
     // stops a recursive struct; an enum element is not walked (RULED S469).
+    // s480: the element walk shares structTapeWrites' `done` set (tapeWalkInner).
     fn innerTapeHits(types: TypeInfo[], tape: Type, label: string, seen: int[]) -> TapeHit[] {
+        return tapeWalkInner(types, tape, label, seen, { hits: [], done: [] }).hits
+    }
+
+    fn tapeWalkInner(types: TypeInfo[], tape: Type, label: string, seen: int[], w0: TapeWalk) -> TapeWalk {
         const el: Type | not = seqElem(unMaybe(tape))
-        if (el is not) return []
+        if (el is not) return w0
         const at: string = label + "[…]"
         const tg: GrantSet | not = tapeGrants(el)
-        let out: TapeHit[] = []
         if (tg is given) {
-            out = out.concat([{ path: at, ty: el, grants: tg, inner: true }])
-            return out.concat(innerTapeHits(types, el, at, seen))
+            const w: TapeWalk = { hits: w0.hits.concat([{ path: at, ty: el, grants: tg, inner: true }]), done: w0.done }
+            return tapeWalkInner(types, el, at, seen, w)
         }
-        for (const h of structTapeWrites(types, el, not, "", at, seen)) {
-            out = out.concat([{ path: h.path, ty: h.ty, grants: h.grants, inner: true }])
-        }
-        return out
+        return tapeWalkStruct(types, el, not, "", at, seen, true, w0)
     }
 
     // s472-boot-map-grants — a write of a whole TAPE (`label = value`, the place
@@ -16967,36 +17083,50 @@ ${
 
     // A tape without `replace` inside type `t` (through `| not`, tape elements and struct
     // fields), else "". `top`: `t` is the cell's own type, whose grants fi.grants carries.
+    // s480 (review:#1991 survey) — `done`: the structs already walked and found clean (the
+    // verdict for a struct is a function of the struct alone — no path is in the message, and a
+    // problem ends the walk), so a struct graph with sharing (`D0 { a: D1, b: D1, c: D1, d: D1 }`,
+    // `D1 { … D2 … }`, …) is walked once per struct, not once per path: a channel cell of such a
+    // type, 4 wide and 12 deep, took 2.8 s and grew 16x per level.
+    type ChWalk:struct = { msg: string, done: int[] }
+
     fn chInnerContract(g: Globals, t: Type, seen: int[], top: boolean) -> string {
+        return chInnerWalk(g, t, seen, top, []).msg
+    }
+
+    fn chInnerWalk(g: Globals, t: Type, seen: int[], top: boolean, done: int[]) -> ChWalk {
         return match t {
-            .Seq(elem: e, grants: gs) :> chInnerSeq(g, e, gs, seen, top)
-            .Maybe(inner: i) :> chInnerContract(g, i, seen, top)
-            .Named(sym: s) :> chInnerStruct(g, s, seen)
-            .Int :> ""
-            .Num :> ""
-            .Str :> ""
-            .Bool :> ""
+            .Seq(elem: e, grants: gs) :> chInnerSeq(g, e, gs, seen, top, done)
+            .Maybe(inner: i) :> chInnerWalk(g, i, seen, top, done)
+            .Named(sym: s) :> chInnerStruct(g, s, seen, done)
+            .Int :> { msg: "", done: done }
+            .Num :> { msg: "", done: done }
+            .Str :> { msg: "", done: done }
+            .Bool :> { msg: "", done: done }
             // #1929: no cell holds a function value (analyze refuses it); fail closed regardless
-            .Fn :> "holds a function value (no wire form, §14.3)"
+            .Fn :> { msg: "holds a function value (no wire form, §14.3)", done: done }
         }
     }
 
-    fn chInnerSeq(g: Globals, e: Type, gs: SeqGrants, seen: int[], top: boolean) -> string {
-        if (!top && !gs.replace) return "holds a tape whose type grants no `replace` (§66.12.6 rule 4)"
-        return chInnerContract(g, e, seen, false)
+    fn chInnerSeq(g: Globals, e: Type, gs: SeqGrants, seen: int[], top: boolean, done: int[]) -> ChWalk {
+        if (!top && !gs.replace) return { msg: "holds a tape whose type grants no `replace` (§66.12.6 rule 4)", done: done }
+        return chInnerWalk(g, e, seen, false, done)
     }
 
-    fn chInnerStruct(g: Globals, s: Sym, seen: int[]) -> string {
-        if (seen.indexOf(s.id) >= 0) return ""
+    fn chInnerStruct(g: Globals, s: Sym, seen: int[], done0: int[]) -> ChWalk {
+        if (seen.indexOf(s.id) >= 0) return { msg: "", done: done0 }
+        if (done0.indexOf(s.id) >= 0) return { msg: "", done: done0 }
         const ti: TypeInfo | not = typeInfoOf(g.types, s)
-        if (ti is not) return ""
+        if (ti is not) return { msg: "", done: done0 }
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return ""
+        if (fs is not) return { msg: "", done: done0 }
+        let done: int[] = done0.concat([s.id])
         for (const fd of fs) {
-            const r: string = chInnerContract(g, fd.ty, seen.concat([s.id]), false)
-            if (r != "") return r
+            const r: ChWalk = chInnerWalk(g, fd.ty, seen.concat([s.id]), false, done)
+            if (r.msg != "") return r
+            done = r.done
         }
-        return ""
+        return { msg: "", done: done }
     }
 
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
