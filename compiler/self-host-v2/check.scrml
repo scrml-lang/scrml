@@ -3164,6 +3164,50 @@ ${
         }
     }
 
+    // S479 (s479-channel-relay-fold) — the write capabilities (their sym ids) the blocks `roots`
+    // write, directly or through a called function, transitively (closed over calls — every callee
+    // is walked once). print.scrml chFoldWhy: a body-top statement (§40.8) that writes a channel
+    // cell at mount changes the value the client starts the channel from (§38.4.2 "The relay's fold").
+    export fn writtenCaps(p: CoreProgram, roots: Block[]) -> int[] {
+        let caps: int[] = []
+        let seen: int[] = []
+        let work: Block[] = roots
+        let i: int = 0
+        while (i < work.length) {
+            for (const n of allNodes(Node.NBlock(work[i]))) {
+                const cap: Sym | not = nodeWriteCap(n)
+                if (cap is given) caps = caps.concat([cap.id])
+                const callee: Sym | not = nodeCallee(n)
+                if (callee is given && seen.indexOf(callee.id) < 0) {
+                    seen = seen.concat([callee.id])
+                    const f: Fn | not = findFn(p, callee)
+                    if (f is given) work = work.concat([f.body])
+                }
+            }
+            i = i + 1
+        }
+        return caps
+    }
+
+    fn nodeWriteCap(n: Node) -> Sym | not {
+        return match n {
+            .NStmt(s: s) :> writeCapOf(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
     fn fnWriteWitness(p: CoreProgram, callee: Sym, seen: int[]) -> string {
         if (seen.indexOf(callee.id) >= 0) return ""
         const f: Fn | not = findFn(p, callee)

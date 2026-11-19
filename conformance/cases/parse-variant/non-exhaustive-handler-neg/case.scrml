@@ -1,0 +1,21 @@
+${
+    import { parseVariant } from 'scrml:data';
+
+    type LoadResult:enum = {
+        Success(rows: int)
+        Empty
+        Failed(reason: string)
+    }
+
+    <parseError> = "none"
+
+    function decode() {
+        parseVariant('{"tag":"Empty"}', LoadResult) !{
+            ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
+            ::Malformed(reason)             :> { @parseError = "malformed"; return; }
+        };
+    }
+}
+<program>
+    <button id="decode" onclick=decode()>Decode</>
+</program>

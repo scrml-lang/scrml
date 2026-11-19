@@ -1,0 +1,26 @@
+{
+  "id": "reactive-w-timed-read-modify-write-pos",
+  "description": "§6.13.6 (S478; code name confirmed S479) — a write to a `debounced=` cell whose right-hand side reads the same cell is the lint W-TIMED-READ-MODIFY-WRITE (Warning): increments made inside one window are lost.",
+  "language-version": "1.0",
+  "spec": "§6.13.6",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 32 · ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 2 (code name confirmed)",
+  "rationale": "§6.13.6: \"A write to a `debounced=` / `throttled=` cell whose right-hand side reads the SAME cell … SHALL produce the lint **`W-TIMED-READ-MODIFY-WRITE`** (Warning) at the write.\"",
+  "expect": {
+    "codes": [
+      "W-TIMED-READ-MODIFY-WRITE"
+    ],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-ruled-codes-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:W-TIMED-READ-MODIFY-WRITE"
+        ]
+      }
+    }
+  }
+}

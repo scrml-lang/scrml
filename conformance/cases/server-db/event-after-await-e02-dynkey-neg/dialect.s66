@@ -1,0 +1,13 @@
+{
+  "expect": {
+    "codes": [
+      "E-EVENT-CONTROL-AFTER-AWAIT",
+      "E-LOGIC-EXECUTABLE-SINK"
+    ],
+    "severity": {
+      "E-EVENT-CONTROL-AFTER-AWAIT": "error",
+      "E-LOGIC-EXECUTABLE-SINK": "error"
+    }
+  },
+  "reason": "S479 (s479-case-fixes): the §66 twin is graded on every Error it emits (twin-extra-error), and `event[k]()` is also a call by a computed key on a value of no known scrml type. SPEC §5.2 (S473) \"Executable sinks in plain logic\" rule 2: \"Any other value — a host root (`document`, `window`, `globalThis`), a local initialized from one, a parameter whose type is unwritten or is not a scrml type (`e: Event`), anything whose type is not known — fails closed. On such a value these are refused: a write or call by a computed key (a non-literal key or a backtick-template key; …)\". The listener's `event` parameter has no written type, so E-LOGIC-EXECUTABLE-SINK legitimately co-fires with E-EVENT-CONTROL-AFTER-AWAIT. What the case pins — the event is poisoned after the first await — is unchanged."
+}

@@ -3,11 +3,11 @@ ${
     function useAdminToken(t: string) { return t; }
     function useToken(t: string) { return t; }
     let admin = true;
-    lin token = fetchToken()
+    lin token = fetchToken();
     if (admin) {
-        useAdminToken(token)
+        useAdminToken(token);
     } else {
-        useToken(token)
+        useToken(token);
     }
 }
 <p>x</>

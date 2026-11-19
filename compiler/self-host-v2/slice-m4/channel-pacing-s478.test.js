@@ -42,11 +42,18 @@ function build(s) {
   return { r, ...artifacts(r.core) };
 }
 
-async function served(s) {
+// S479 (s479-channel-relay-fold): every test client here connects from 127.0.0.1, and §38.4.3's
+// per-address bound (INTERIM) gives one address at most a tenth of a channel's places. A test of the
+// CHANNEL-WIDE cap stands each connection at its own address through the registered test seam.
+const ADDRESS_HOOK = Symbol.for("scrml.test.channelAddress");
+let addressN = 0;
+const distinctAddresses = () => ({ [ADDRESS_HOOK]: () => `10.0.${Math.floor(++addressN / 250)}.${addressN % 250}` });
+
+async function served(s, host = {}) {
   const { r, server, client } = build(s);
   const logs = [];
   const mod = await loadServer(server.js, r.core);
-  const srv = mod.createServer({ root: "/tmp", log: (x) => logs.push(x) });
+  const srv = mod.createServer({ root: "/tmp", log: (x) => logs.push(x), ...host });
   const bun = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req, sv) => srv.fetch(req, sv), websocket: srv.websocket });
   return { srv, bun, base: `127.0.0.1:${bun.port}`, logs, client };
 }
@@ -272,7 +279,7 @@ describe("B — a relay close is reported (MED-3a)", () => {
         cells: [{ key: "note", cell: note, table: { defs: [], root: { k: "str" } }, ops: ["replace"], edges: null }], open: null, close: null, error: null });
       const s = FakeSocket.last;
       s.readyState = 1; s.onopen();
-      s.onmessage({ data: '{"__type":"__replay","__complete":true,"__seq":0,"__frames":[]}' });   // #1941: live after the replay
+      s.onmessage({ data: '{"__type":"__replay","__complete":true,"__seq":0,"__base":null,"__frames":[]}' });   // #1941: live after the replay
       rt.batch(() => note.set("x".repeat(100)));
       rt.batch(() => note.set("€".repeat(90)));             // under 300 characters, over 300 bytes
       expect(s.sent.length).toBe(1);
@@ -301,7 +308,7 @@ describe("B — a relay close is reported (MED-3a)", () => {
 
 describe("C, D — the relay: the cap is reserved before the upgrade (LOW-4); the host cap is the bound + 1 (LOW-5)", () => {
   test("60 racing upgrades against max-subscribers=5: exactly 5 admitted, every other one answered 503 (none admitted then closed)", async () => {
-    const { bun, base, logs } = await served(src(" max-subscribers=5"));
+    const { bun, base, logs } = await served(src(" max-subscribers=5"), distinctAddresses());
     try {
       const results = await Promise.all(Array.from({ length: 60 }, () => new Promise((res) => {
         const ws = new WebSocket(`ws://${base}/_scrml_ws/chat`);
@@ -318,7 +325,7 @@ describe("C, D — the relay: the cap is reserved before the upgrade (LOW-4); th
   });
 
   test("the place is reserved AT the upgrade: an upgrade accepted before its `open` runs still counts (red on 92088f2f8: all three got 101)", async () => {
-    const { srv, bun, base } = await served(src(" max-subscribers=2"));
+    const { srv, bun, base } = await served(src(" max-subscribers=2"), distinctAddresses());
     try {
       const req = () => new Request(`http://${base}/_scrml_ws/chat`, { headers: { Upgrade: "websocket", Connection: "Upgrade" } });
       const host = { upgrade: () => true };                    // a host that accepts, `open` not yet run
@@ -329,7 +336,7 @@ describe("C, D — the relay: the cap is reserved before the upgrade (LOW-4); th
   });
 
   test("a failed upgrade frees its place", async () => {
-    const { srv, bun, base } = await served(src(" max-subscribers=1"));
+    const { srv, bun, base } = await served(src(" max-subscribers=1"), distinctAddresses());
     try {
       const req = () => new Request(`http://${base}/_scrml_ws/chat`, { headers: { Upgrade: "websocket", Connection: "Upgrade" } });
       expect((await srv.fetch(req(), { upgrade: () => false })).status).toBe(400);

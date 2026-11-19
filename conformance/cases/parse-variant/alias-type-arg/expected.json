@@ -1,0 +1,50 @@
+{
+  "id": "parse-variant-alias-type-arg",
+  "description": "§41.13 — the type argument is an alias of an enum through a two-alias chain (`type Response = Loaded`, `type Loaded = LoadResult`). It is accepted and is that enum: the call compiles clean and decodes '{\"tag\":\"Success\",\"rows\":7}' into LoadResult.Success(7).",
+  "language-version": "1.0",
+  "spec": "§41.13, §19.3.3",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 6 (§41.13 strict keys + E-TYPE-080; `parseVariant` accepts an enum alias)",
+  "rationale": "§41.13 An alias of an enum: \"A bare identifier naming a type alias whose right-hand side is a bare `:enum` type name — directly, or through a chain of such aliases (`type A = B`, `type B = E`) — is accepted in argument-2 position and is that enum\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-PARSEVARIANT-"
+    ],
+    "input": [
+      {
+        "click": "#decode"
+      }
+    ],
+    "state": {
+      "result": {
+        "variant": "Success",
+        "data": {
+          "rows": 7
+        }
+      },
+      "parseError": "none"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "Loaded 7 rows"
+      },
+      {
+        "selector": "#status",
+        "text": "Parse status: none"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-parsevariant-enum-alias-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-PARSEVARIANT-TYPE-NOT-ENUM=1",
+          "prefix:E-PARSEVARIANT-TYPE-NOT-ENUM (matches forbidden E-PARSEVARIANT-*)"
+        ],
+        "runtime": "sha256:6dd3768b7c6c17d2"
+      }
+    }
+  }
+}

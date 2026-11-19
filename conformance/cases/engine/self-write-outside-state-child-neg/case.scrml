@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Idle, Loading, Done }
+    function load() { @phase = .Loading; }
+    function finish() { @phase = .Done; }
+}
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Loading></>
+    <Loading rule=.Done></>
+    <Done rule=.Idle></>
+</>
+<program>
+<p id="s">${@phase}</>
+<button id="load" onclick=load()>Load</>
+<button id="finish" onclick=finish()>Finish</>
+</program>

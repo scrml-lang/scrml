@@ -6745,6 +6745,56 @@ function generateServerJsImpl(
     lines.push(`}`);
     lines.push("");
 
+    // §61.5 / §61.3 — the request-media-type check and the strict-keys check
+    // (ruling:user-voice-scrml.md-S478-open-Qs-items-35-and-39; impl#1 carve-out
+    // S479). Both refusals mirror the bootstrap's (`compiler/self-host-v2/
+    // slice-m1/runtime/server-runtime.js` `handleEndpoint`) status, kind and
+    // message, so the two implementations answer one refused request alike.
+    //
+    // §61.5: "A request whose `Content-Type` media type is not `application/json`
+    // (compared case-insensitively, RFC 9110 §8.3.1; parameters such as `charset`
+    // allowed) SHALL be refused with HTTP **415** and the compiler-owned envelope
+    // `{ error: { kind: "UnsupportedMediaType", message } }`, `Content-Type:
+    // application/json`, before the body is read; no arm runs."
+    lines.push(`// --- §61.5/§61.3: <endpoint> request refusals (media type, strict keys) ---`);
+    lines.push(`function _scrml_endpoint_refuse(_scrml_status, _scrml_kind, _scrml_message) {`);
+    lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: { kind: _scrml_kind, message: _scrml_message } }), {`);
+    lines.push(`    status: _scrml_status,`);
+    lines.push(`    headers: { "Content-Type": "application/json" },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push(`// The media type is the header up to its first ";" (parameters such as charset`);
+    lines.push(`// follow it), compared case-insensitively (RFC 9110 §8.3.1).`);
+    lines.push(`function _scrml_endpoint_is_json(_scrml_ct) {`);
+    lines.push(`  if (typeof _scrml_ct !== "string") return false;`);
+    lines.push(`  const _scrml_semi = _scrml_ct.indexOf(";");`);
+    lines.push(`  return (_scrml_semi < 0 ? _scrml_ct : _scrml_ct.slice(0, _scrml_semi)).trim().toLowerCase() === "application/json";`);
+    lines.push(`}`);
+    // §61.3: "The request body's keys SHALL be exactly `tag` and payload fields of
+    // the variant `tag` names. A key that is neither is a decode failure —
+    // `::InvalidPayload`, the 400 envelope of §61.5 — and no arm runs."
+    // Returns the refusal message, or null when the body has no foreign key (a
+    // body that is not a JSON object naming a known variant is left to the
+    // parseVariant decoder, which reports Malformed / MissingDiscriminator /
+    // UnknownVariant as before).
+    lines.push(`// §61.3 strict keys: a key that is neither "tag" nor a payload field of the`);
+    lines.push(`// variant "tag" names is refused (400 InvalidPayload); no arm runs.`);
+    lines.push(`function _scrml_endpoint_foreign_key(_scrml_text, _scrml_fields) {`);
+    lines.push(`  let _scrml_v;`);
+    lines.push(`  try { _scrml_v = _scrml_g.JSON.parse(_scrml_text); } catch (_scrml_e) { return null; }`);
+    lines.push(`  if (_scrml_v === null || typeof _scrml_v !== "object" || _scrml_g.Array.isArray(_scrml_v)) return null;`);
+    lines.push(`  if (typeof _scrml_v.tag !== "string" || !_scrml_g.Object.hasOwn(_scrml_fields, _scrml_v.tag)) return null;`);
+    lines.push(`  const _scrml_allowed = _scrml_fields[_scrml_v.tag];`);
+    lines.push(`  for (const _scrml_k of _scrml_g.Object.keys(_scrml_v)) {`);
+    lines.push(`    if (_scrml_k !== "tag" && !_scrml_allowed.includes(_scrml_k)) {`);
+    lines.push(`      const _scrml_name = _scrml_k.length > 64 ? _scrml_k.slice(0, 64) + "\\u2026" : _scrml_k;`);
+    lines.push(`      return "request payload field '" + _scrml_name + "' is not a field of variant '" + _scrml_v.tag + "'";`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  return null;`);
+    lines.push(`}`);
+    lines.push("");
+
     for (const _epDecl of _endpointDecls) {
       // The resolved `accepts=` EnumType the W3 typer annotated onto the decl
       // node (mirrors `<api>`'s `responseEnum`). A non-enum / unresolved
@@ -6777,7 +6827,24 @@ function generateServerJsImpl(
       const _epDecode = emitParseVariantDecodeIIFE(_epEnum, "_scrml_body");
 
       lines.push(`// --- §61 <endpoint> ${_epMethod} ${_epPath} (accepts=${_epEnum.name}) ---`);
+      // §61.3 strict keys — the payload field names each accepts= variant declares.
+      const _epFieldTable = _epEnum.variants
+        .map((v) => {
+          const _names: string[] =
+            (v.payload && typeof (v.payload as any).keys === "function")
+              ? Array.from((v.payload as Map<string, unknown>).keys())
+              : [];
+          return `${JSON.stringify(v.name)}: [${_names.map((n) => JSON.stringify(n)).join(", ")}]`;
+        })
+        .join(", ");
+
       lines.push(`async function ${_epHandler}(_scrml_req) {`);
+      lines.push(`  // §61.5 — a request that is not application/json is refused 415 before its`);
+      lines.push(`  // body is read; no arm runs (a CORS simple request — text/plain, a form,`);
+      lines.push(`  // multipart — can never reach an arm).`);
+      lines.push(`  if (!_scrml_endpoint_is_json(_scrml_req.headers.get("Content-Type"))) {`);
+      lines.push(`    return _scrml_endpoint_refuse(415, "UnsupportedMediaType", "the request Content-Type must be application/json");`);
+      lines.push(`  }`);
       // §61.3/§61.5 — read the body as RAW TEXT, not `.json()`. The decode IIFE
       // (§41.13) JSON-parses the string inside its own try/catch and routes a
       // parse throw to ::ParseError::Malformed → the compiler-owned 400 envelope.
@@ -6785,6 +6852,9 @@ function generateServerJsImpl(
       // body escaped as an uncaught SyntaxError (500) instead of the mandated 400
       // (g-endpoint-malformed-json-body-throws-instead-of-400).
       lines.push(`  const _scrml_body = await _scrml_req.text();`);
+      lines.push(`  // §61.3 — strict keys: only "tag" and the named variant's payload fields.`);
+      lines.push(`  const _scrml_foreign = _scrml_endpoint_foreign_key(_scrml_body, { ${_epFieldTable} });`);
+      lines.push(`  if (_scrml_foreign !== null) return _scrml_endpoint_refuse(400, "InvalidPayload", _scrml_foreign);`);
       lines.push(`  // §61.3 — decode the request body against accepts= (parseVariant §41.13).`);
       lines.push(`  const _scrml_decoded = ${_epDecode};`);
       lines.push(`  // §61.3 — a ::ParseError decode failure → the compiler-owned 400 envelope.`);

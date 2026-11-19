@@ -79,7 +79,7 @@ describe("C â€” the server half: the upgrade route on the program's own fetch (Â
     try {
       expect(server.js).toContain(`channels: [{ path: "/_scrml_ws/chat" }]`);
       expect(server.js).toContain(`rt.channel(channel$0)`);
-      expect(server.js).toContain(`{ key: "count", table: { defs: [], root: { k: "int" } }, ops: ["replace"] }`);
+      expect(server.js).toContain(`{ key: "count", table: { defs: [], root: { k: "int" } }, ops: ["replace"], edges: null, init: 0 }`);
       expect(client.js).toContain(`rt.channel(program$.scope, { name: "chat", reconnect: 2000, limits: { maxFrame: 65536, rate: 50, burst: 100 }, cells: [{ key: "count", cell: program$.fields[`);
       expect(client.js).toContain(`table: { defs: [], root: { k: "int" } }, ops: ["replace"], edges: null }`);
     } finally { bun.stop(true); }
@@ -100,8 +100,8 @@ describe("C â€” the server half: the upgrade route on the program's own fetch (Â
       expect(b.frames).toEqual([{ __type: "__sync", __seq: 1, __key: "count", __op: "replace", __val: 7, __own: false }, { __type: "__sync", __seq: 2, __key: "note", __op: "replace", __val: "hi", __own: false }]);
       expect(a.frames).toEqual([{ __type: "__sync", __seq: 1, __key: "count", __op: "replace", __val: 7, __own: true }, { __type: "__sync", __seq: 2, __key: "note", __op: "replace", __val: "hi", __own: true }]);
       // each connection's first message was the (empty) replay of the frame log
-      expect(a.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
-      expect(b.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __frames: [] }]);
+      expect(a.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }]);
+      expect(b.replays).toEqual([{ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] }]);
       a.ws.close();
       b.ws.close();
     } finally { bun.stop(true); }
@@ -304,7 +304,7 @@ describe("D â€” the client half (runtime.js `channel`, the call the client artif
     const s = await served(src);
     expect(s.client.js).toContain(`{ key: "xs", cell: program$.fields[`);
     const table = { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } };
-    expect(s.server.js).toContain(`{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } }, ops: ["replace"] }`);
+    expect(s.server.js).toContain(`{ key: "xs", table: { defs: [], root: { k: "seq", elem: { k: "str" }, bound: { k: "free" } } }, ops: ["replace"], edges: null, init: [] }`);
     const saved = globalThis.location;
     globalThis.location = { protocol: "http:", host: s.base };
     const mk = () => {
